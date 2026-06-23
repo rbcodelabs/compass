@@ -9,8 +9,10 @@ import { Separator } from "@/components/ui/separator"
 import { ResultItem } from "@/components/experiments/result-item"
 import { LogResultForm } from "@/components/experiments/log-result-form"
 import { ConcludePanel } from "@/components/experiments/conclude-panel"
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel"
 import { startExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
 import { ChevronLeftIcon } from "lucide-react"
+import type { CustomFieldDefinitionData, CustomFieldType, CustomFieldValue } from "@/lib/types"
 
 interface ExperimentDetailPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string; id: string }>
@@ -65,6 +67,31 @@ export default async function ExperimentDetailPage({
   if (!experiment) {
     notFound()
   }
+
+  // Custom fields for this experiment
+  const fieldDefs = await prisma.customFieldDefinition.findMany({
+    where: { workspaceId: workspace.id, objectType: "EXPERIMENT" },
+    orderBy: { order: "asc" },
+  })
+  const fieldValues = fieldDefs.length > 0
+    ? await prisma.customFieldValue.findMany({
+        where: { fieldId: { in: fieldDefs.map((f) => f.id) }, objectId: id },
+      })
+    : []
+  const valueByFieldId = new Map(fieldValues.map((v) => [v.fieldId, v.value]))
+  const customFields: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }> =
+    fieldDefs.map((f) => ({
+      id: f.id,
+      name: f.name,
+      fieldType: f.fieldType as CustomFieldType,
+      objectType: "EXPERIMENT" as const,
+      options: f.options as CustomFieldDefinitionData["options"],
+      required: f.required,
+      order: f.order,
+      currentValue: (valueByFieldId.get(f.id) ?? null) as CustomFieldValue,
+    }))
+
+  const experimentDetailPath = `/${orgSlug}/${workspaceSlug}/experiments/${id}`
 
   const statusLabel = STATUS_LABELS[experiment.status] ?? experiment.status
   const statusClass = STATUS_CLASS[experiment.status] ?? ""
@@ -196,6 +223,22 @@ export default async function ExperimentDetailPage({
           </section>
         )}
       </div>
+
+      {customFields.length > 0 && (
+        <>
+          <Separator />
+          <section>
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              Custom Fields
+            </h2>
+            <CustomFieldsPanel
+              fields={customFields}
+              objectId={id}
+              revalidatePathStr={experimentDetailPath}
+            />
+          </section>
+        </>
+      )}
 
       <Separator />
 

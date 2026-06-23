@@ -39,10 +39,13 @@ export function AddObjectiveForm({
 
   if (!open) {
     return (
-      <Button variant="outline" onClick={() => setOpen(true)}>
-        <PlusIcon />
-        Add Objective
-      </Button>
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 w-full rounded-lg border border-dashed border-border/60 py-2 px-3 text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors"
+      >
+        <PlusIcon className="w-3.5 h-3.5" />
+        Add objective
+      </button>
     );
   }
 

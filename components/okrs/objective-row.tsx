@@ -1,9 +1,10 @@
 "use client";
 
 import { useTransition } from "react";
-import type { ObjectiveStatus } from "@/lib/types";
+import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue } from "@/lib/types";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import {
   Select,
   SelectContent,
@@ -28,9 +29,11 @@ interface ObjectiveRowProps {
     status: ObjectiveStatus;
     owner: string | null;
     keyResults: KeyResult[];
+    customFields?: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }>;
   };
   orgSlug: string;
   workspaceSlug: string;
+  revalidatePathStr?: string;
 }
 
 const STATUS_BADGE: Record<
@@ -72,6 +75,7 @@ export function ObjectiveRow({
   objective,
   orgSlug,
   workspaceSlug,
+  revalidatePathStr,
 }: ObjectiveRowProps) {
   const [isPending, startTransition] = useTransition();
   const avgProgress = averageProgress(objective.keyResults);
@@ -153,6 +157,17 @@ export function ObjectiveRow({
               workspaceSlug={workspaceSlug}
             />
           ))}
+        </div>
+      )}
+
+      {/* Custom fields */}
+      {objective.customFields && objective.customFields.length > 0 && revalidatePathStr && (
+        <div className="pt-1">
+          <CustomFieldsPanel
+            fields={objective.customFields}
+            objectId={objective.id}
+            revalidatePathStr={revalidatePathStr}
+          />
         </div>
       )}
 

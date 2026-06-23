@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Target, Lightbulb, FlaskConical, Map } from "lucide-react"
+import { Target, Lightbulb, FlaskConical, Map, Settings } from "lucide-react"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
 
@@ -95,6 +95,30 @@ export function Sidebar({
             </Link>
           )
         })}
+      </nav>
+
+      <div className="mx-4 h-px bg-slate-700" />
+
+      {/* Settings */}
+      <nav className="px-2 py-2">
+        {(() => {
+          const href = `${base}/settings`
+          const isActive = pathname.startsWith(href)
+          return (
+            <Link
+              href={href}
+              className={cn(
+                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                isActive
+                  ? "bg-slate-700 text-white"
+                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+              )}
+            >
+              <Settings className="w-4 h-4 shrink-0" aria-hidden="true" />
+              Settings
+            </Link>
+          )
+        })()}
       </nav>
 
       <div className="mx-4 h-px bg-slate-700" />

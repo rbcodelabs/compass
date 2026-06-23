@@ -4,7 +4,13 @@ import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { ObjectiveRow } from "@/components/okrs/objective-row";
 import { AddObjectiveForm } from "@/components/okrs/add-objective-form";
-import type { CycleStatus, ObjectiveStatus } from "@/lib/types";
+import type {
+  CycleStatus,
+  ObjectiveStatus,
+  CustomFieldDefinitionData,
+  CustomFieldType,
+  CustomFieldValue,
+} from "@/lib/types";
 
 export const metadata = {
   title: "OKR Cycle",
@@ -41,7 +47,6 @@ export default async function CyclePage({ params }: CyclePageProps) {
   const { orgSlug, workspaceSlug, cycleId } = await params;
   const prisma = getPrisma();
 
-  // Verify the cycle belongs to the right workspace/org
   const workspace = await prisma.workspace.findFirst({
     where: {
       slug: workspaceSlug,
@@ -59,13 +64,11 @@ export default async function CyclePage({ params }: CyclePageProps) {
 
   const cycleStatus = cycle.status as CycleStatus;
 
-  // Fetch objectives for this cycle
   const objectives = await prisma.objective.findMany({
     where: { cycleId: cycle.id },
     orderBy: { createdAt: "asc" },
   });
 
-  // Fetch all key results for these objectives in one query
   const objectiveIds = objectives.map((o) => o.id);
   const keyResults =
     objectiveIds.length > 0
@@ -75,7 +78,6 @@ export default async function CyclePage({ params }: CyclePageProps) {
         })
       : [];
 
-  // Group key results by objectiveId
   const krByObjective = keyResults.reduce<Record<string, typeof keyResults>>(
     (acc, kr) => {
       (acc[kr.objectiveId] ??= []).push(kr);
@@ -84,31 +86,85 @@ export default async function CyclePage({ params }: CyclePageProps) {
     {}
   );
 
-  const objectivesWithKRs = objectives.map((obj) => ({
-    ...obj,
-    status: obj.status as ObjectiveStatus,
-    keyResults: krByObjective[obj.id] ?? [],
-  }));
+  // Custom fields for OBJECTIVE
+  const objFieldDefs = await prisma.customFieldDefinition.findMany({
+    where: { workspaceId: workspace.id, objectType: "OBJECTIVE" },
+    orderBy: { order: "asc" },
+  });
+
+  const objFieldValues =
+    objFieldDefs.length > 0 && objectiveIds.length > 0
+      ? await prisma.customFieldValue.findMany({
+          where: {
+            fieldId: { in: objFieldDefs.map((f) => f.id) },
+            objectId: { in: objectiveIds },
+          },
+        })
+      : [];
+
+  // Build a map: objectiveId → field values
+  const objValuesByObjectiveId = objFieldValues.reduce<
+    Map<string, Map<string, unknown>>
+  >((acc, v) => {
+    if (!acc.has(v.objectId)) acc.set(v.objectId, new Map());
+    acc.get(v.objectId)!.set(v.fieldId, v.value);
+    return acc;
+  }, new Map());
+
+  const objectivesWithData = objectives.map((obj) => {
+    const valMap = objValuesByObjectiveId.get(obj.id) ?? new Map();
+    const customFields: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }> =
+      objFieldDefs.map((f) => ({
+        id: f.id,
+        name: f.name,
+        fieldType: f.fieldType as CustomFieldType,
+        objectType: "OBJECTIVE" as const,
+        options: f.options as CustomFieldDefinitionData["options"],
+        required: f.required,
+        order: f.order,
+        currentValue: (valMap.get(f.id) ?? null) as CustomFieldValue,
+      }));
+
+    return {
+      ...obj,
+      status: obj.status as ObjectiveStatus,
+      keyResults: krByObjective[obj.id] ?? [],
+      customFields,
+    };
+  });
+
+  const cyclePath = `/${orgSlug}/${workspaceSlug}/okrs/${cycleId}`;
 
   return (
     <main className="flex flex-col flex-1 p-8 gap-6">
       {/* Cycle header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {cycle.title}
-            </h1>
-            <span
-              className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-medium ${CYCLE_STATUS_STYLES[cycleStatus]}`}
-            >
-              {CYCLE_STATUS_LABELS[cycleStatus]}
-            </span>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {formatDate(cycle.startDate)} – {formatDate(cycle.endDate)}
-          </p>
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {cycle.title}
+          </h1>
+          <span
+            className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-medium ${CYCLE_STATUS_STYLES[cycleStatus]}`}
+          >
+            {CYCLE_STATUS_LABELS[cycleStatus]}
+          </span>
         </div>
+        <p className="text-sm text-muted-foreground">
+          {formatDate(cycle.startDate)} – {formatDate(cycle.endDate)}
+        </p>
+      </div>
+
+      {/* Objectives list + inline add */}
+      <div className="flex flex-col gap-4">
+        {objectivesWithData.map((obj) => (
+          <ObjectiveRow
+            key={obj.id}
+            objective={obj}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            revalidatePathStr={cyclePath}
+          />
+        ))}
 
         <AddObjectiveForm
           cycleId={cycle.id}
@@ -116,27 +172,6 @@ export default async function CyclePage({ params }: CyclePageProps) {
           workspaceSlug={workspaceSlug}
         />
       </div>
-
-      {/* Objectives list */}
-      {objectivesWithKRs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center flex-1 gap-3 text-center py-16">
-          <p className="text-muted-foreground">No objectives yet.</p>
-          <p className="text-sm text-muted-foreground">
-            Add your first objective to start tracking key results.
-          </p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-4">
-          {objectivesWithKRs.map((obj) => (
-            <ObjectiveRow
-              key={obj.id}
-              objective={obj}
-              orgSlug={orgSlug}
-              workspaceSlug={workspaceSlug}
-            />
-          ))}
-        </div>
-      )}
     </main>
   );
 }

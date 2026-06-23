@@ -15,3 +15,44 @@ export type ExperimentStatus = "DESIGNING" | "RUNNING" | "COMPLETE" | "KILLED"
 export type Conclusion = "PROCEED" | "KILL" | "ITERATE"
 export type Horizon = "NOW" | "NEXT" | "LATER"
 export type ItemStatus = "ACTIVE" | "ARCHIVED"
+
+// Custom Fields
+export type CustomFieldObjectType =
+  | "OPPORTUNITY"
+  | "SOLUTION"
+  | "EXPERIMENT"
+  | "OBJECTIVE"
+  | "KEY_RESULT"
+  | "ROADMAP_ITEM"
+
+export type CustomFieldType =
+  | "TEXT"
+  | "NUMBER"
+  | "DATE"
+  | "SELECT"
+  | "MULTI_SELECT"
+  | "URL"
+  | "BOOLEAN"
+
+export interface SelectOption {
+  label: string
+  value: string
+  color?: string
+}
+
+export interface CustomFieldDefinitionData {
+  id: string
+  name: string
+  fieldType: CustomFieldType
+  objectType: CustomFieldObjectType
+  options: SelectOption[] | null
+  required: boolean
+  order: number
+}
+
+export type CustomFieldValue =
+  | string
+  | number
+  | boolean
+  | string[]
+  | null

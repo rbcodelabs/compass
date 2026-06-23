@@ -14,6 +14,10 @@ const MIGRATIONS = [
     name: "001_init",
     filePath: path.join(process.cwd(), "prisma/migrations/001_init/migration.sql"),
   },
+  {
+    name: "002_custom_fields",
+    filePath: path.join(process.cwd(), "prisma/migrations/002_custom_fields/migration.sql"),
+  },
 ];
 
 async function getPool(): Promise<Pool> {

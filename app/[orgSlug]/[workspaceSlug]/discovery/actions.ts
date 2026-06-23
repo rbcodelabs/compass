@@ -109,3 +109,16 @@ export async function updateAssumptionStatus(
   revalidatePath(revalidatePathStr);
   return assumption;
 }
+
+export async function linkOpportunityToKeyResult(
+  opportunityId: string,
+  keyResultId: string | null,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.opportunity.update({
+    where: { id: opportunityId },
+    data: { linkedKeyResultId: keyResultId },
+  });
+  revalidatePath(revalidatePathStr);
+}

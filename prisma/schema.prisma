@@ -103,11 +103,12 @@ model Workspace {
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @default(now()) @map("updated_at")
   organization   Organization      @relation(fields: [organizationId], references: [id])
-  members        WorkspaceMember[]
-  okrCycles      OKRCycle[]
-  opportunities  Opportunity[]
-  experiments    Experiment[]
-  roadmapItems   RoadmapItem[]
+  members           WorkspaceMember[]
+  okrCycles         OKRCycle[]
+  opportunities     Opportunity[]
+  experiments       Experiment[]
+  roadmapItems      RoadmapItem[]
+  customFieldDefs   CustomFieldDefinition[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -288,4 +289,41 @@ model RoadmapItem {
   keyResult    KeyResult? @relation(fields: [keyResultId], references: [id])
 
   @@map("roadmap_items")
+}
+
+// ─── Custom Fields ────────────────────────────────────────────────────────────
+
+model CustomFieldDefinition {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  /// One of: OPPORTUNITY | SOLUTION | EXPERIMENT | OBJECTIVE | KEY_RESULT | ROADMAP_ITEM
+  objectType  String   @map("object_type") @db.VarChar(50)
+  name        String   @db.VarChar(255)
+  /// One of: TEXT | NUMBER | DATE | SELECT | MULTI_SELECT | URL | BOOLEAN
+  fieldType   String   @map("field_type") @db.VarChar(50)
+  /// For SELECT / MULTI_SELECT: JSON array of { label: string; value: string; color?: string }
+  options     Json?
+  required    Boolean  @default(false)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace          @relation(fields: [workspaceId], references: [id])
+  values    CustomFieldValue[]
+
+  @@map("custom_field_definitions")
+}
+
+model CustomFieldValue {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fieldId   String   @map("field_id") @db.Uuid
+  objectId  String   @map("object_id") @db.Uuid
+  /// Flexible storage: string | number | boolean | string[] | null
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  field CustomFieldDefinition @relation(fields: [fieldId], references: [id])
+
+  @@unique([fieldId, objectId])
+  @@map("custom_field_values")
 }

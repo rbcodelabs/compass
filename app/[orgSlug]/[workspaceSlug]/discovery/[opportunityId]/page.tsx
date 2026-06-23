@@ -7,7 +7,15 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { SolutionCard } from "@/components/discovery/solution-card";
 import { AddSolutionForm } from "@/components/discovery/add-solution-form";
 import { OpportunityOverview } from "@/components/discovery/opportunity-overview";
-import type { OpportunityStatus, SolutionStatus, AssumptionStatus, RiskLevel } from "@/lib/types";
+import type {
+  OpportunityStatus,
+  SolutionStatus,
+  AssumptionStatus,
+  RiskLevel,
+  CustomFieldDefinitionData,
+  CustomFieldType,
+  CustomFieldValue,
+} from "@/lib/types";
 
 export async function generateMetadata({
   params,
@@ -37,6 +45,13 @@ export default async function OpportunityDetailPage({ params }: Props) {
 
   const { orgSlug, workspaceSlug, opportunityId } = await params;
   const prisma = getPrisma();
+
+  // Resolve workspace
+  const workspace = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+    select: { id: true },
+  });
+  if (!workspace) notFound();
 
   const opportunity = await prisma.opportunity.findFirst({
     where: {
@@ -69,6 +84,57 @@ export default async function OpportunityDetailPage({ params }: Props) {
   });
 
   if (!opportunity) notFound();
+
+  // Fetch available key results for this workspace (to power the KR link picker)
+  const allKRs = await prisma.keyResult.findMany({
+    where: {
+      objective: {
+        cycle: { workspaceId: workspace.id },
+      },
+    },
+    select: {
+      id: true,
+      title: true,
+      objective: { select: { title: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const availableKeyResults = allKRs.map((kr) => ({
+    id: kr.id,
+    title: kr.title,
+    objectiveTitle: kr.objective.title,
+  }));
+
+  // Fetch custom field definitions for OPPORTUNITY
+  const fieldDefs = await prisma.customFieldDefinition.findMany({
+    where: { workspaceId: workspace.id, objectType: "OPPORTUNITY" },
+    orderBy: { order: "asc" },
+  });
+
+  // Fetch values for this opportunity
+  const fieldValues = fieldDefs.length > 0
+    ? await prisma.customFieldValue.findMany({
+        where: {
+          fieldId: { in: fieldDefs.map((f) => f.id) },
+          objectId: opportunityId,
+        },
+      })
+    : [];
+
+  const valueByFieldId = new Map(fieldValues.map((v) => [v.fieldId, v.value]));
+
+  const customFields: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }> =
+    fieldDefs.map((f) => ({
+      id: f.id,
+      name: f.name,
+      fieldType: f.fieldType as CustomFieldType,
+      objectType: "OPPORTUNITY" as const,
+      options: f.options as CustomFieldDefinitionData["options"],
+      required: f.required,
+      order: f.order,
+      currentValue: (valueByFieldId.get(f.id) ?? null) as CustomFieldValue,
+    }));
 
   const boardPath = `/${orgSlug}/${workspaceSlug}/discovery`;
   const detailPath = `/${orgSlug}/${workspaceSlug}/discovery/${opportunityId}`;
@@ -133,6 +199,8 @@ export default async function OpportunityDetailPage({ params }: Props) {
           <OpportunityOverview
             opportunity={{ ...opportunity, status: opportunity.status as OpportunityStatus }}
             revalidatePathStr={detailPath}
+            availableKeyResults={availableKeyResults}
+            customFields={customFields}
           />
         </TabsContent>
       </Tabs>
