@@ -18,12 +18,14 @@ import type { OpportunityStatus } from "@/lib/types";
 
 type Props = {
   workspaceId: string;
+  /** When set, pre-fills status and hides the status selector (column-embedded mode). */
+  defaultStatus?: OpportunityStatus;
 };
 
-export function CreateOpportunityForm({ workspaceId }: Props) {
+export function CreateOpportunityForm({ workspaceId, defaultStatus }: Props) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [status, setStatus] = useState<OpportunityStatus>("EXPLORING");
+  const [status, setStatus] = useState<OpportunityStatus>(defaultStatus ?? "EXPLORING");
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -43,12 +45,20 @@ export function CreateOpportunityForm({ workspaceId }: Props) {
       });
       setOpen(false);
       formRef.current?.reset();
-      setStatus("EXPLORING");
+      setStatus(defaultStatus ?? "EXPLORING");
     });
   }
 
   if (!open) {
-    return (
+    return defaultStatus ? (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 w-full rounded-lg border border-dashed border-border/60 py-2 px-3 text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors"
+      >
+        <PlusIcon className="w-3.5 h-3.5" />
+        Add opportunity
+      </button>
+    ) : (
       <Button onClick={() => setOpen(true)}>
         <PlusIcon />
         New Opportunity
@@ -93,26 +103,28 @@ export function CreateOpportunityForm({ workspaceId }: Props) {
           disabled={isPending}
         />
       </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="opp-status">Initial Status</Label>
-        <Select
-          value={status}
-          onValueChange={(v: string | null) => {
-            if (v) setStatus(v as OpportunityStatus);
-          }}
-          disabled={isPending}
-        >
-          <SelectTrigger id="opp-status" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="EXPLORING">Exploring</SelectItem>
-            <SelectItem value="VALIDATING">Validating</SelectItem>
-            <SelectItem value="PRIORITIZED">Prioritized</SelectItem>
-            <SelectItem value="ACTIVE">Active</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {!defaultStatus && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="opp-status">Initial Status</Label>
+          <Select
+            value={status}
+            onValueChange={(v: string | null) => {
+              if (v) setStatus(v as OpportunityStatus);
+            }}
+            disabled={isPending}
+          >
+            <SelectTrigger id="opp-status" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="EXPLORING">Exploring</SelectItem>
+              <SelectItem value="VALIDATING">Validating</SelectItem>
+              <SelectItem value="PRIORITIZED">Prioritized</SelectItem>
+              <SelectItem value="ACTIVE">Active</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={isPending}>
@@ -126,7 +138,7 @@ export function CreateOpportunityForm({ workspaceId }: Props) {
           onClick={() => {
             setOpen(false);
             formRef.current?.reset();
-            setStatus("EXPLORING");
+            setStatus(defaultStatus ?? "EXPLORING");
           }}
         >
           Cancel

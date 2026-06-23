@@ -2,6 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { OpportunityCard, type OpportunityCardData } from "./opportunity-card";
+import { CreateOpportunityForm } from "./create-opportunity-form";
 import type { OpportunityStatus } from "@/lib/types";
 
 const COLUMNS: { status: OpportunityStatus; label: string }[] = [
@@ -15,12 +16,14 @@ type Props = {
   opportunitiesByStatus: Record<OpportunityStatus, OpportunityCardData[]>;
   orgSlug: string;
   workspaceSlug: string;
+  workspaceId: string;
 };
 
 export function OpportunityBoard({
   opportunitiesByStatus,
   orgSlug,
   workspaceSlug,
+  workspaceId,
 }: Props) {
   return (
     <div className="flex gap-4 overflow-x-auto pb-4">
@@ -35,21 +38,24 @@ export function OpportunityBoard({
               </Badge>
             </div>
             <div className="flex flex-col gap-2">
-              {cards.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border/60 py-8 text-center text-xs text-muted-foreground">
+              {cards.map((opp) => (
+                <OpportunityCard
+                  key={opp.id}
+                  opportunity={opp}
+                  orgSlug={orgSlug}
+                  workspaceSlug={workspaceSlug}
+                />
+              ))}
+              {cards.length === 0 && (
+                <div className="rounded-xl border border-dashed border-border/60 py-6 text-center text-xs text-muted-foreground">
                   No opportunities
                 </div>
-              ) : (
-                cards.map((opp) => (
-                  <OpportunityCard
-                    key={opp.id}
-                    opportunity={opp}
-                    orgSlug={orgSlug}
-                    workspaceSlug={workspaceSlug}
-                  />
-                ))
               )}
             </div>
+            <CreateOpportunityForm
+              workspaceId={workspaceId}
+              defaultStatus={status}
+            />
           </div>
         );
       })}

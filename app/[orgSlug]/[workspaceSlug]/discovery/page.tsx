@@ -2,7 +2,6 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { OpportunityBoard } from "@/components/discovery/opportunity-board";
-import { CreateOpportunityForm } from "@/components/discovery/create-opportunity-form";
 import type { OpportunityStatus } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 
@@ -80,20 +79,18 @@ export default async function DiscoveryPage({ params }: Props) {
 
   return (
     <main className="flex flex-col flex-1 p-6 gap-6 min-w-0">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Discovery</h1>
-          <p className="text-sm text-muted-foreground">
-            Opportunity Solution Tree for {workspace.name}
-          </p>
-        </div>
-        <CreateOpportunityForm workspaceId={workspace.id} />
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Discovery</h1>
+        <p className="text-sm text-muted-foreground">
+          Opportunity Solution Tree for {workspace.name}
+        </p>
       </div>
 
       <OpportunityBoard
         opportunitiesByStatus={opportunitiesByStatus}
         orgSlug={orgSlug}
         workspaceSlug={workspaceSlug}
+        workspaceId={workspace.id}
       />
 
       {archivedOpportunities.length > 0 && (
