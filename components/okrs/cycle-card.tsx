@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CycleStatus } from "@prisma/client";
+import type { CycleStatus } from "@/lib/types";
 import {
   Card,
   CardHeader,

@@ -5,7 +5,8 @@ import { getWorkspace } from "@/lib/workspace"
 import { Button } from "@/components/ui/button"
 import { ExperimentCard } from "@/components/experiments/experiment-card"
 import { CreateExperimentDialog } from "@/components/experiments/create-experiment-dialog"
-import type { Experiment, ExperimentStatus } from "@prisma/client"
+import type { Experiment } from "@prisma/client"
+import type { ExperimentStatus } from "@/lib/types"
 
 export const metadata = {
   title: "Experiments",

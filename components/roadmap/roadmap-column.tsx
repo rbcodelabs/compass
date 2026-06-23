@@ -6,7 +6,7 @@ import { PlusIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
-import type { Horizon } from "@prisma/client";
+import type { Horizon } from "@/lib/types";
 
 const HORIZON_CONFIG: Record<Horizon, { label: string; accentClass: string; emptyText: string }> = {
   NOW: {

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import getPrisma from "@/lib/db"
-import { ExperimentStatus, AssumptionStatus } from "@prisma/client"
+import type { ExperimentStatus, AssumptionStatus } from "@/lib/types"
 
 export async function createExperiment(
   workspaceId: string,

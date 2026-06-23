@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import { addRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
-import type { Horizon } from "@prisma/client";
+import type { Horizon } from "@/lib/types";
 
 type Props = {
   workspaceId: string;
@@ -88,7 +88,7 @@ export function AddItemDialog({
         id: item.id,
         title: item.title,
         description: item.description ?? null,
-        horizon: item.horizon,
+        horizon: item.horizon as Horizon,
         sortOrder: item.sortOrder,
         solutionId: item.solutionId ?? null,
         keyResultId: item.keyResultId ?? null,

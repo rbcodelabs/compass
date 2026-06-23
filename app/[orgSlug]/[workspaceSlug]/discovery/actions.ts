@@ -2,12 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
-import {
+import type {
   OpportunityStatus,
   SolutionStatus,
   AssumptionStatus,
   RiskLevel,
-} from "@prisma/client";
+} from "@/lib/types";
 
 export type { OpportunityStatus, SolutionStatus, AssumptionStatus, RiskLevel };
 

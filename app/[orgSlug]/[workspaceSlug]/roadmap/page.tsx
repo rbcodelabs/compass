@@ -3,6 +3,8 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
+import type { Horizon } from "@/lib/types";
+import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 
 export const metadata = {
   title: "Roadmap",
@@ -54,7 +56,7 @@ export default async function RoadmapPage({ params }: RoadmapPageProps) {
       </div>
 
       <RoadmapBoard
-        initialItems={items}
+        initialItems={items.map((item) => ({ ...item, horizon: item.horizon as Horizon })) as RoadmapCardData[]}
         workspaceId={workspace.id}
         orgSlug={orgSlug}
         workspaceSlug={workspaceSlug}

@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { updateOpportunityStatus } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
-import type { OpportunityStatus } from "@prisma/client";
+import type { OpportunityStatus } from "@/lib/types";
 
 const STATUS_ORDER: OpportunityStatus[] = [
   "EXPLORING",

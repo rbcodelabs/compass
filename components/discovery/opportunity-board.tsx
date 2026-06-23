@@ -2,7 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { OpportunityCard, type OpportunityCardData } from "./opportunity-card";
-import type { OpportunityStatus } from "@prisma/client";
+import type { OpportunityStatus } from "@/lib/types";
 
 const COLUMNS: { status: OpportunityStatus; label: string }[] = [
   { status: "EXPLORING", label: "Exploring" },

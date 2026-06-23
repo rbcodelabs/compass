@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createOpportunity } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
-import type { OpportunityStatus } from "@prisma/client";
+import type { OpportunityStatus } from "@/lib/types";
 
 type Props = {
   workspaceId: string;

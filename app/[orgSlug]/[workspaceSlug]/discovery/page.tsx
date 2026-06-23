@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { OpportunityBoard } from "@/components/discovery/opportunity-board";
 import { CreateOpportunityDialog } from "@/components/discovery/create-opportunity-dialog";
-import type { OpportunityStatus } from "@prisma/client";
+import type { OpportunityStatus } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 
 export const metadata = {
@@ -70,7 +70,9 @@ export default async function DiscoveryPage({ params }: Props) {
 
   const opportunitiesByStatus = ACTIVE_STATUSES.reduce(
     (acc, status) => {
-      acc[status] = opportunities.filter((o) => o.status === status);
+      acc[status] = opportunities
+        .filter((o) => o.status === status)
+        .map((o) => ({ ...o, status: o.status as OpportunityStatus }));
       return acc;
     },
     {} as Record<OpportunityStatus, OpportunityCardData[]>
@@ -96,7 +98,7 @@ export default async function DiscoveryPage({ params }: Props) {
 
       {archivedOpportunities.length > 0 && (
         <ArchivedSection
-          opportunities={archivedOpportunities}
+          opportunities={archivedOpportunities.map((o) => ({ ...o, status: o.status as OpportunityStatus }))}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
         />
