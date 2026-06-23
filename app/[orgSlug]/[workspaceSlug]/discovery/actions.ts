@@ -1,0 +1,111 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import getPrisma from "@/lib/db";
+import {
+  OpportunityStatus,
+  SolutionStatus,
+  AssumptionStatus,
+  RiskLevel,
+} from "@prisma/client";
+
+export type { OpportunityStatus, SolutionStatus, AssumptionStatus, RiskLevel };
+
+export async function createOpportunity(
+  workspaceId: string,
+  data: {
+    title: string;
+    description?: string;
+    customerSegment?: string;
+    status?: OpportunityStatus;
+  }
+) {
+  const prisma = await getPrisma();
+  const opportunity = await prisma.opportunity.create({
+    data: {
+      workspaceId,
+      title: data.title,
+      description: data.description,
+      customerSegment: data.customerSegment,
+      status: data.status ?? "EXPLORING",
+    },
+  });
+  revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "page");
+  return opportunity;
+}
+
+export async function updateOpportunityStatus(
+  opportunityId: string,
+  status: OpportunityStatus,
+  revalidatePathStr: string
+) {
+  const prisma = await getPrisma();
+  const opportunity = await prisma.opportunity.update({
+    where: { id: opportunityId },
+    data: { status },
+  });
+  revalidatePath(revalidatePathStr);
+  return opportunity;
+}
+
+export async function addSolution(
+  opportunityId: string,
+  data: { title: string; description?: string },
+  revalidatePathStr: string
+) {
+  const prisma = await getPrisma();
+  const solution = await prisma.solution.create({
+    data: {
+      opportunityId,
+      title: data.title,
+      description: data.description,
+    },
+  });
+  revalidatePath(revalidatePathStr);
+  return solution;
+}
+
+export async function updateSolutionStatus(
+  solutionId: string,
+  status: SolutionStatus,
+  revalidatePathStr: string
+) {
+  const prisma = await getPrisma();
+  const solution = await prisma.solution.update({
+    where: { id: solutionId },
+    data: { status },
+  });
+  revalidatePath(revalidatePathStr);
+  return solution;
+}
+
+export async function addAssumption(
+  solutionId: string,
+  data: { title: string; riskLevel: RiskLevel },
+  revalidatePathStr: string
+) {
+  const prisma = await getPrisma();
+  const assumption = await prisma.assumption.create({
+    data: {
+      solutionId,
+      title: data.title,
+      riskLevel: data.riskLevel,
+    },
+  });
+  revalidatePath(revalidatePathStr);
+  return assumption;
+}
+
+export async function updateAssumptionStatus(
+  assumptionId: string,
+  status: AssumptionStatus,
+  revalidatePathStr: string
+) {
+  const prisma = await getPrisma();
+  const assumption = await prisma.assumption.update({
+    where: { id: assumptionId },
+    data: { status },
+  });
+  revalidatePath(revalidatePathStr);
+  return assumption;
+}
