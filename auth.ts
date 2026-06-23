@@ -1,8 +1,8 @@
 import NextAuth from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
-import Resend from "next-auth/providers/resend";
 import type { Adapter } from "next-auth/adapters";
 import getPrisma from "@/lib/db";
+import { authConfig } from "@/auth.config";
 
 // Lazy adapter: defers PrismaClient initialization to the first auth operation.
 // getPrisma() caches the client globally (see lib/db.ts), so the async hit is
@@ -70,27 +70,10 @@ const lazyAdapter: Adapter = new Proxy({} as Adapter, {
   },
 });
 
+// Merge the Edge-compatible authConfig with the Node.js-only adapter.
+// auth.ts is only imported in server components and API routes (Node.js runtime).
+// middleware.ts uses authConfig directly (Edge runtime — no adapter).
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
   adapter: lazyAdapter,
-
-  // Auth.js reads AUTH_RESEND_KEY from the environment automatically.
-  // Set AUTH_EMAIL_FROM to customise the sender address.
-  providers: [
-    Resend({
-      from: process.env.AUTH_EMAIL_FROM ?? "Compass <noreply@compass.app>",
-    }),
-  ],
-
-  pages: {
-    signIn: "/login",
-    verifyRequest: "/login?check-email=1",
-  },
-
-  callbacks: {
-    session({ session, user }) {
-      // Expose user.id in the session token so server components can read it.
-      if (user) session.user.id = user.id;
-      return session;
-    },
-  },
 });
