@@ -18,6 +18,10 @@ const MIGRATIONS = [
     name: "002_custom_fields",
     filePath: path.join(process.cwd(), "prisma/migrations/002_custom_fields/migration.sql"),
   },
+  {
+    name: "003_fix_custom_field_tables",
+    filePath: path.join(process.cwd(), "prisma/migrations/003_fix_custom_field_tables/migration.sql"),
+  },
 ];
 
 async function getPool(): Promise<Pool> {
@@ -132,12 +136,19 @@ export async function POST(req: NextRequest) {
 
       const rawSql = readFileSync(migration.filePath, "utf-8");
 
-      // Split on statement boundaries — each statement should already be
-      // wrapped in BEGIN/COMMIT by aurora-dsql-prisma. We run them one by one.
-      const statements = rawSql
+      // Strip all SQL line comments (-- ...) before splitting, so a leading
+      // comment on a CREATE statement can't cause the whole statement to be
+      // silently dropped by the startsWith("--") filter.
+      const strippedSql = rawSql
+        .split("\n")
+        .map((line) => line.replace(/--.*$/, "").trimEnd())
+        .join("\n");
+
+      // Split on statement boundaries and run them one by one.
+      const statements = strippedSql
         .split(/;\s*\n/)
         .map((s) => s.trim())
-        .filter((s) => s.length > 0 && !s.startsWith("--"))
+        .filter((s) => s.length > 0)
         .map((s) => (s.endsWith(";") ? s : `${s};`));
 
       // Prefix unqualified DDL with schema search_path

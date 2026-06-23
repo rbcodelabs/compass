@@ -1,4 +1,4 @@
-CREATE TABLE "custom_field_definitions" (
+CREATE TABLE IF NOT EXISTS "custom_field_definitions" (
     "id"           UUID          NOT NULL DEFAULT gen_random_uuid(),
     "workspace_id" UUID          NOT NULL,
     "object_type"  VARCHAR(50)   NOT NULL,
@@ -15,7 +15,7 @@ CREATE TABLE "custom_field_definitions" (
 CREATE INDEX ASYNC "custom_field_definitions_workspace_id_object_type_idx"
   ON "custom_field_definitions" ("workspace_id", "object_type");
 
-CREATE TABLE "custom_field_values" (
+CREATE TABLE IF NOT EXISTS "custom_field_values" (
     "id"         UUID          NOT NULL DEFAULT gen_random_uuid(),
     "field_id"   UUID          NOT NULL,
     "object_id"  UUID          NOT NULL,
