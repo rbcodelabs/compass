@@ -1,13 +1,17 @@
 // MCP_API_KEY — set this environment variable in your Vercel project settings
 // and in .env.local for local development. All MCP requests require:
 //   Authorization: Bearer <MCP_API_KEY>
+//
+// basePath: "/api" → streamableHttpEndpoint resolves to "/api/mcp",
+// which matches this Next.js route's path.
+// disableSse: true — only the modern Streamable HTTP transport is exposed.
 
 import { createMcpHandler } from "mcp-handler"
 import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 
-const handler = createMcpHandler(
+const _handler = createMcpHandler(
   (server) => {
     // ----------------------------------------------------------------
     // get_workspace_summary — overview counts for a workspace
@@ -555,9 +559,28 @@ const handler = createMcpHandler(
   },
   {},
   {
-    basePath: "/api/mcp",
+    basePath: "/api",
+    disableSse: true,
     maxDuration: 60,
   }
 )
 
-export { handler as GET, handler as POST }
+// Wrap the raw handler with Bearer-token auth so unauthenticated
+// requests are rejected before any MCP processing happens.
+async function withMcpAuth(req: Request): Promise<Response> {
+  if (!validateMcpAuth(req)) {
+    return new Response("Unauthorized", {
+      status: 401,
+      headers: { "WWW-Authenticate": "Bearer" },
+    })
+  }
+  return _handler(req)
+}
+
+export async function GET(req: Request) {
+  return withMcpAuth(req)
+}
+
+export async function POST(req: Request) {
+  return withMcpAuth(req)
+}
