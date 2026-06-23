@@ -19,7 +19,7 @@ import {
   updateSolutionStatus,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { AssumptionItem, type AssumptionItemData } from "./assumption-item";
-import type { SolutionStatus, RiskLevel } from "@prisma/client";
+import type { SolutionStatus, RiskLevel } from "@/lib/types";
 
 const STATUS_BADGE_CLASSES: Record<SolutionStatus, string> = {
   IDEA: "bg-secondary text-secondary-foreground",

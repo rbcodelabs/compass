@@ -81,17 +81,11 @@ model Organization {
   @@map("organizations")
 }
 
-enum OrgRole {
-  OWNER
-  ADMIN
-  MEMBER
-}
-
 model OrganizationMember {
   id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   userId         String       @map("user_id") @db.Uuid
-  role           OrgRole      @default(MEMBER)
+  role           String       @default("MEMBER") @db.VarChar(50)
   createdAt      DateTime     @default(now()) @map("created_at")
   organization   Organization @relation(fields: [organizationId], references: [id])
   user           User         @relation(fields: [userId], references: [id])
@@ -101,14 +95,14 @@ model OrganizationMember {
 }
 
 model Workspace {
-  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId String          @map("organization_id") @db.Uuid
-  slug           String          @db.VarChar(255)
-  name           String          @db.VarChar(255)
-  description    String?         @db.Text
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @default(now()) @map("updated_at")
-  organization   Organization    @relation(fields: [organizationId], references: [id])
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String            @map("organization_id") @db.Uuid
+  slug           String            @db.VarChar(255)
+  name           String            @db.VarChar(255)
+  description    String?           @db.Text
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @default(now()) @map("updated_at")
+  organization   Organization      @relation(fields: [organizationId], references: [id])
   members        WorkspaceMember[]
   okrCycles      OKRCycle[]
   opportunities  Opportunity[]
@@ -119,19 +113,14 @@ model Workspace {
   @@map("workspaces")
 }
 
-enum WorkspaceRole {
-  ADMIN
-  MEMBER
-}
-
 model WorkspaceMember {
-  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId String        @map("workspace_id") @db.Uuid
-  userId      String        @map("user_id") @db.Uuid
-  role        WorkspaceRole @default(MEMBER)
-  createdAt   DateTime      @default(now()) @map("created_at")
-  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
-  user        User          @relation(fields: [userId], references: [id])
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  role        String    @default("MEMBER") @db.VarChar(50)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
 
   @@unique([workspaceId, userId])
   @@map("workspace_members")
@@ -139,19 +128,13 @@ model WorkspaceMember {
 
 // ─── OKRs ─────────────────────────────────────────────────────────────────────
 
-enum CycleStatus {
-  DRAFT
-  ACTIVE
-  CLOSED
-}
-
 model OKRCycle {
   id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId String      @map("workspace_id") @db.Uuid
   title       String      @db.VarChar(255)
   startDate   DateTime    @map("start_date")
   endDate     DateTime    @map("end_date")
-  status      CycleStatus @default(DRAFT)
+  status      String      @default("DRAFT") @db.VarChar(50)
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @default(now()) @map("updated_at")
   workspace   Workspace   @relation(fields: [workspaceId], references: [id])
@@ -160,23 +143,16 @@ model OKRCycle {
   @@map("okr_cycles")
 }
 
-enum ObjectiveStatus {
-  ON_TRACK
-  AT_RISK
-  OFF_TRACK
-  COMPLETE
-}
-
 model Objective {
-  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  cycleId     String          @map("cycle_id") @db.Uuid
-  title       String          @db.VarChar(255)
-  description String?         @db.Text
-  owner       String?         @db.VarChar(255)
-  status      ObjectiveStatus @default(ON_TRACK)
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @default(now()) @map("updated_at")
-  cycle       OKRCycle        @relation(fields: [cycleId], references: [id])
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cycleId     String      @map("cycle_id") @db.Uuid
+  title       String      @db.VarChar(255)
+  description String?     @db.Text
+  owner       String?     @db.VarChar(255)
+  status      String      @default("ON_TRACK") @db.VarChar(50)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @default(now()) @map("updated_at")
+  cycle       OKRCycle    @relation(fields: [cycleId], references: [id])
   keyResults  KeyResult[]
 
   @@map("objectives")
@@ -212,76 +188,47 @@ model CheckIn {
 
 // ─── Discovery / OST ──────────────────────────────────────────────────────────
 
-enum OpportunityStatus {
-  EXPLORING
-  VALIDATING
-  PRIORITIZED
-  ACTIVE
-  ARCHIVED
-}
-
 model Opportunity {
-  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId       String            @map("workspace_id") @db.Uuid
-  title             String            @db.VarChar(255)
-  description       String?           @db.Text
-  customerSegment   String?           @map("customer_segment") @db.VarChar(255)
-  status            OpportunityStatus @default(EXPLORING)
-  linkedKeyResultId String?           @map("linked_key_result_id") @db.Uuid
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @default(now()) @map("updated_at")
-  workspace         Workspace         @relation(fields: [workspaceId], references: [id])
-  linkedKeyResult   KeyResult?        @relation(fields: [linkedKeyResultId], references: [id])
+  id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String      @map("workspace_id") @db.Uuid
+  title             String      @db.VarChar(255)
+  description       String?     @db.Text
+  customerSegment   String?     @map("customer_segment") @db.VarChar(255)
+  status            String      @default("EXPLORING") @db.VarChar(50)
+  linkedKeyResultId String?     @map("linked_key_result_id") @db.Uuid
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @default(now()) @map("updated_at")
+  workspace         Workspace   @relation(fields: [workspaceId], references: [id])
+  linkedKeyResult   KeyResult?  @relation(fields: [linkedKeyResultId], references: [id])
   solutions         Solution[]
 
   @@map("opportunities")
 }
 
-enum SolutionStatus {
-  IDEA
-  VALIDATED
-  IN_DELIVERY
-  SHIPPED
-  KILLED
-}
-
 model Solution {
-  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  opportunityId String         @map("opportunity_id") @db.Uuid
-  title         String         @db.VarChar(255)
-  description   String?        @db.Text
-  status        SolutionStatus @default(IDEA)
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @default(now()) @map("updated_at")
-  opportunity   Opportunity    @relation(fields: [opportunityId], references: [id])
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  opportunityId String      @map("opportunity_id") @db.Uuid
+  title         String      @db.VarChar(255)
+  description   String?     @db.Text
+  status        String      @default("IDEA") @db.VarChar(50)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @default(now()) @map("updated_at")
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id])
   assumptions   Assumption[]
   roadmapItems  RoadmapItem[]
 
   @@map("solutions")
 }
 
-enum RiskLevel {
-  HIGH
-  MEDIUM
-  LOW
-}
-
-enum AssumptionStatus {
-  UNTESTED
-  TESTING
-  VALIDATED
-  INVALIDATED
-}
-
 model Assumption {
-  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  solutionId  String           @map("solution_id") @db.Uuid
-  title       String           @db.VarChar(255)
-  riskLevel   RiskLevel        @map("risk_level") @default(MEDIUM)
-  status      AssumptionStatus @default(UNTESTED)
-  createdAt   DateTime         @default(now()) @map("created_at")
-  updatedAt   DateTime         @default(now()) @map("updated_at")
-  solution    Solution         @relation(fields: [solutionId], references: [id])
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  solutionId  String      @map("solution_id") @db.Uuid
+  title       String      @db.VarChar(255)
+  riskLevel   String      @map("risk_level") @default("MEDIUM") @db.VarChar(50)
+  status      String      @default("UNTESTED") @db.VarChar(50)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @default(now()) @map("updated_at")
+  solution    Solution    @relation(fields: [solutionId], references: [id])
   experiments Experiment[]
 
   @@map("assumptions")
@@ -289,35 +236,22 @@ model Assumption {
 
 // ─── Experiments ──────────────────────────────────────────────────────────────
 
-enum ExperimentStatus {
-  DESIGNING
-  RUNNING
-  COMPLETE
-  KILLED
-}
-
-enum ExperimentConclusion {
-  PROCEED
-  KILL
-  ITERATE
-}
-
 model Experiment {
-  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId   String                @map("workspace_id") @db.Uuid
-  assumptionId  String?               @map("assumption_id") @db.Uuid
-  title         String                @db.VarChar(255)
-  hypothesis    String                @db.Text
-  method        String                @db.Text
-  killCondition String                @map("kill_condition") @db.Text
-  status        ExperimentStatus      @default(DESIGNING)
-  startDate     DateTime?             @map("start_date")
-  endDate       DateTime?             @map("end_date")
-  conclusion    ExperimentConclusion?
-  createdAt     DateTime              @default(now()) @map("created_at")
-  updatedAt     DateTime              @default(now()) @map("updated_at")
-  workspace     Workspace             @relation(fields: [workspaceId], references: [id])
-  assumption    Assumption?           @relation(fields: [assumptionId], references: [id])
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String     @map("workspace_id") @db.Uuid
+  assumptionId  String?    @map("assumption_id") @db.Uuid
+  title         String     @db.VarChar(255)
+  hypothesis    String     @db.Text
+  method        String     @db.Text
+  killCondition String     @map("kill_condition") @db.Text
+  status        String     @default("DESIGNING") @db.VarChar(50)
+  startDate     DateTime?  @map("start_date")
+  endDate       DateTime?  @map("end_date")
+  conclusion    String?    @db.VarChar(50)
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @default(now()) @map("updated_at")
+  workspace     Workspace  @relation(fields: [workspaceId], references: [id])
+  assumption    Assumption? @relation(fields: [assumptionId], references: [id])
   results       ExperimentResult[]
 
   @@map("experiments")
@@ -337,32 +271,21 @@ model ExperimentResult {
 
 // ─── Roadmap ──────────────────────────────────────────────────────────────────
 
-enum Horizon {
-  NOW
-  NEXT
-  LATER
-}
-
-enum RoadmapItemStatus {
-  ACTIVE
-  ARCHIVED
-}
-
 model RoadmapItem {
-  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId  String            @map("workspace_id") @db.Uuid
-  title        String            @db.VarChar(255)
-  description  String?           @db.Text
-  horizon      Horizon           @default(NOW)
-  status       RoadmapItemStatus @default(ACTIVE)
-  sortOrder    Int               @default(0) @map("sort_order")
-  solutionId   String?           @map("solution_id") @db.Uuid
-  keyResultId  String?           @map("key_result_id") @db.Uuid
-  createdAt    DateTime          @default(now()) @map("created_at")
-  updatedAt    DateTime          @default(now()) @map("updated_at")
-  workspace    Workspace         @relation(fields: [workspaceId], references: [id])
-  solution     Solution?         @relation(fields: [solutionId], references: [id])
-  keyResult    KeyResult?        @relation(fields: [keyResultId], references: [id])
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId  String    @map("workspace_id") @db.Uuid
+  title        String    @db.VarChar(255)
+  description  String?   @db.Text
+  horizon      String    @default("NOW") @db.VarChar(50)
+  status       String    @default("ACTIVE") @db.VarChar(50)
+  sortOrder    Int       @default(0) @map("sort_order")
+  solutionId   String?   @map("solution_id") @db.Uuid
+  keyResultId  String?   @map("key_result_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @map("updated_at")
+  workspace    Workspace @relation(fields: [workspaceId], references: [id])
+  solution     Solution? @relation(fields: [solutionId], references: [id])
+  keyResult    KeyResult? @relation(fields: [keyResultId], references: [id])
 
   @@map("roadmap_items")
 }

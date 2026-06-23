@@ -7,6 +7,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { SolutionCard } from "@/components/discovery/solution-card";
 import { AddSolutionForm } from "@/components/discovery/add-solution-form";
 import { OpportunityOverview } from "@/components/discovery/opportunity-overview";
+import type { OpportunityStatus, SolutionStatus, AssumptionStatus, RiskLevel } from "@/lib/types";
 
 export async function generateMetadata({
   params,
@@ -110,7 +111,15 @@ export default async function OpportunityDetailPage({ params }: Props) {
           {opportunity.solutions.map((solution) => (
             <SolutionCard
               key={solution.id}
-              solution={solution}
+              solution={{
+                ...solution,
+                status: solution.status as SolutionStatus,
+                assumptions: solution.assumptions.map((a) => ({
+                  ...a,
+                  riskLevel: a.riskLevel as RiskLevel,
+                  status: a.status as AssumptionStatus,
+                })),
+              }}
               revalidatePathStr={detailPath}
             />
           ))}
@@ -122,7 +131,7 @@ export default async function OpportunityDetailPage({ params }: Props) {
 
         <TabsContent value="overview" className="pt-4">
           <OpportunityOverview
-            opportunity={opportunity}
+            opportunity={{ ...opportunity, status: opportunity.status as OpportunityStatus }}
             revalidatePathStr={detailPath}
           />
         </TabsContent>

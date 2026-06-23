@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { CycleCard } from "@/components/okrs/cycle-card";
 import { CreateCycleDialog } from "@/components/okrs/create-cycle-dialog";
+import type { CycleStatus } from "@/lib/types";
 
 export const metadata = {
   title: "OKRs",
@@ -66,7 +67,7 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
           {cycles.map((cycle) => (
             <CycleCard
               key={cycle.id}
-              cycle={cycle}
+              cycle={{ ...cycle, status: cycle.status as CycleStatus }}
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
             />

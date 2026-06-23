@@ -23,7 +23,7 @@ import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
 import { AddItemDialog } from "./add-item-dialog";
 import { Button } from "@/components/ui/button";
 import { PlusIcon } from "lucide-react";
-import type { Horizon } from "@prisma/client";
+import type { Horizon } from "@/lib/types";
 
 type ColumnMap = Record<Horizon, RoadmapCardData[]>;
 

@@ -4,7 +4,7 @@ import { useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { updateAssumptionStatus } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
-import type { AssumptionStatus, RiskLevel } from "@prisma/client";
+import type { AssumptionStatus, RiskLevel } from "@/lib/types";
 
 const RISK_CLASSES: Record<RiskLevel, string> = {
   HIGH: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",

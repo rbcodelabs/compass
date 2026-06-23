@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { archiveItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
-import type { Horizon } from "@prisma/client";
+import type { Horizon } from "@/lib/types";
 
 export type RoadmapCardData = {
   id: string;

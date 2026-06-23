@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
-import type { Horizon } from "@prisma/client";
+import type { Horizon } from "@/lib/types";
 
 // ─── Add Roadmap Item ─────────────────────────────────────────────────────────
 

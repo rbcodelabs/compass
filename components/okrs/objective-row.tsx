@@ -1,7 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
-import { ObjectiveStatus } from "@prisma/client";
+import type { ObjectiveStatus } from "@/lib/types";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
 import { AddKeyResultDialog } from "@/components/okrs/add-key-result-dialog";
 import {

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { ObjectiveRow } from "@/components/okrs/objective-row";
 import { AddObjectiveDialog } from "@/components/okrs/add-objective-dialog";
-import { CycleStatus } from "@prisma/client";
+import type { CycleStatus, ObjectiveStatus } from "@/lib/types";
 
 export const metadata = {
   title: "OKR Cycle",
@@ -57,6 +57,8 @@ export default async function CyclePage({ params }: CyclePageProps) {
 
   if (!cycle) notFound();
 
+  const cycleStatus = cycle.status as CycleStatus;
+
   // Fetch objectives for this cycle
   const objectives = await prisma.objective.findMany({
     where: { cycleId: cycle.id },
@@ -84,6 +86,7 @@ export default async function CyclePage({ params }: CyclePageProps) {
 
   const objectivesWithKRs = objectives.map((obj) => ({
     ...obj,
+    status: obj.status as ObjectiveStatus,
     keyResults: krByObjective[obj.id] ?? [],
   }));
 
@@ -97,9 +100,9 @@ export default async function CyclePage({ params }: CyclePageProps) {
               {cycle.title}
             </h1>
             <span
-              className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-medium ${CYCLE_STATUS_STYLES[cycle.status]}`}
+              className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-medium ${CYCLE_STATUS_STYLES[cycleStatus]}`}
             >
-              {CYCLE_STATUS_LABELS[cycle.status]}
+              {CYCLE_STATUS_LABELS[cycleStatus]}
             </span>
           </div>
           <p className="text-sm text-muted-foreground">
