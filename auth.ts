@@ -1,6 +1,6 @@
 import NextAuth from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
-import Google from "next-auth/providers/google";
+import Resend from "next-auth/providers/resend";
 import type { Adapter } from "next-auth/adapters";
 import getPrisma from "@/lib/db";
 
@@ -73,11 +73,17 @@ const lazyAdapter: Adapter = new Proxy({} as Adapter, {
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: lazyAdapter,
 
-  // Auth.js reads AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET from the environment.
-  providers: [Google],
+  // Auth.js reads AUTH_RESEND_KEY from the environment automatically.
+  // Set AUTH_EMAIL_FROM to customise the sender address.
+  providers: [
+    Resend({
+      from: process.env.AUTH_EMAIL_FROM ?? "Compass <noreply@compass.app>",
+    }),
+  ],
 
   pages: {
     signIn: "/login",
+    verifyRequest: "/login?check-email=1",
   },
 
   callbacks: {
