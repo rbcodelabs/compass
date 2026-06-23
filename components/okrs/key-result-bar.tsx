@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckInDialog } from "@/components/okrs/check-in-dialog";
+import { CheckInForm } from "@/components/okrs/check-in-form";
 
 interface KeyResultBarProps {
   keyResult: {
@@ -31,7 +31,7 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug }: KeyResultBar
           <span className="text-xs text-muted-foreground">
             {keyResult.current}{unit} / {keyResult.target}{unit}
           </span>
-          <CheckInDialog
+          <CheckInForm
             keyResultId={keyResult.id}
             keyResultTitle={keyResult.title}
             currentValue={keyResult.current}

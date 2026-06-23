@@ -20,9 +20,6 @@ import {
 import { moveItem, updateSortOrder } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { RoadmapColumn } from "./roadmap-column";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
-import { AddItemDialog } from "./add-item-dialog";
-import { Button } from "@/components/ui/button";
-import { PlusIcon } from "lucide-react";
 import type { Horizon } from "@/lib/types";
 
 type ColumnMap = Record<Horizon, RoadmapCardData[]>;
@@ -66,10 +63,6 @@ export function RoadmapBoard({
   const [dragSourceHorizon, setDragSourceHorizon] = useState<Horizon | null>(null);
 
   const [, startTransition] = useTransition();
-
-  // Controlled add-item dialog state: which horizon, and whether open.
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [addDialogHorizon, setAddDialogHorizon] = useState<Horizon>("NOW");
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -200,11 +193,6 @@ export function RoadmapBoard({
     });
   }, []);
 
-  function handleColumnAdd(horizon: Horizon) {
-    setAddDialogHorizon(horizon);
-    setAddDialogOpen(true);
-  }
-
   function handleItemAdded(item: RoadmapCardData) {
     setColumns((prev) => ({
       ...prev,
@@ -213,58 +201,39 @@ export function RoadmapBoard({
   }
 
   return (
-    <>
-      {/* Board-level "Add Item" button — default horizon NOW. */}
-      <div className="flex justify-end shrink-0">
-        <Button onClick={() => { setAddDialogHorizon("NOW"); setAddDialogOpen(true); }}>
-          <PlusIcon />
-          Add Item
-        </Button>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="flex gap-4 overflow-x-auto pb-6 items-start">
+        {HORIZONS.map((horizon) => (
+          <RoadmapColumn
+            key={horizon}
+            horizon={horizon}
+            items={columns[horizon]}
+            workspaceId={workspaceId}
+            revalidatePathStr={revalidatePathStr}
+            onItemAdded={handleItemAdded}
+            onArchive={handleArchive}
+          />
+        ))}
       </div>
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
-      >
-        <div className="flex gap-4 overflow-x-auto pb-6 items-start">
-          {HORIZONS.map((horizon) => (
-            <RoadmapColumn
-              key={horizon}
-              horizon={horizon}
-              items={columns[horizon]}
+      {/* DragOverlay renders the card being dragged at its cursor position */}
+      <DragOverlay>
+        {activeItem ? (
+          <div className="rotate-1 scale-105">
+            <RoadmapCard
+              item={activeItem}
               revalidatePathStr={revalidatePathStr}
-              onAdd={handleColumnAdd}
-              onArchive={handleArchive}
+              onArchive={() => {}}
             />
-          ))}
-        </div>
-
-        {/* DragOverlay renders the card being dragged at its cursor position */}
-        <DragOverlay>
-          {activeItem ? (
-            <div className="rotate-1 scale-105">
-              <RoadmapCard
-                item={activeItem}
-                revalidatePathStr={revalidatePathStr}
-                onArchive={() => {}}
-              />
-            </div>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
-
-      {/* Controlled dialog: opened when the user clicks "+" in a column header. */}
-      <AddItemDialog
-        workspaceId={workspaceId}
-        defaultHorizon={addDialogHorizon}
-        revalidatePathStr={revalidatePathStr}
-        onAdd={handleItemAdded}
-        open={addDialogOpen}
-        onOpenChange={setAddDialogOpen}
-      />
-    </>
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }

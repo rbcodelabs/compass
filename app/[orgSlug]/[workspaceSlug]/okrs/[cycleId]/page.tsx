@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { ObjectiveRow } from "@/components/okrs/objective-row";
-import { AddObjectiveDialog } from "@/components/okrs/add-objective-dialog";
+import { AddObjectiveForm } from "@/components/okrs/add-objective-form";
 import type { CycleStatus, ObjectiveStatus } from "@/lib/types";
 
 export const metadata = {
@@ -110,7 +110,7 @@ export default async function CyclePage({ params }: CyclePageProps) {
           </p>
         </div>
 
-        <AddObjectiveDialog
+        <AddObjectiveForm
           cycleId={cycle.id}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}

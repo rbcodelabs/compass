@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { OpportunityBoard } from "@/components/discovery/opportunity-board";
-import { CreateOpportunityDialog } from "@/components/discovery/create-opportunity-dialog";
+import { CreateOpportunityForm } from "@/components/discovery/create-opportunity-form";
 import type { OpportunityStatus } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 
@@ -87,7 +87,7 @@ export default async function DiscoveryPage({ params }: Props) {
             Opportunity Solution Tree for {workspace.name}
           </p>
         </div>
-        <CreateOpportunityDialog workspaceId={workspace.id} />
+        <CreateOpportunityForm workspaceId={workspace.id} />
       </div>
 
       <OpportunityBoard

@@ -2,10 +2,9 @@
 
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { PlusIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
+import { AddItemForm } from "./add-item-form";
 import type { Horizon } from "@/lib/types";
 
 const HORIZON_CONFIG: Record<Horizon, { label: string; accentClass: string; emptyText: string }> = {
@@ -29,16 +28,18 @@ const HORIZON_CONFIG: Record<Horizon, { label: string; accentClass: string; empt
 type Props = {
   horizon: Horizon;
   items: RoadmapCardData[];
+  workspaceId: string;
   revalidatePathStr: string;
-  onAdd: (horizon: Horizon) => void;
+  onItemAdded: (item: RoadmapCardData) => void;
   onArchive: (itemId: string) => void;
 };
 
 export function RoadmapColumn({
   horizon,
   items,
+  workspaceId,
   revalidatePathStr,
-  onAdd,
+  onItemAdded,
   onArchive,
 }: Props) {
   const { label, accentClass, emptyText } = HORIZON_CONFIG[horizon];
@@ -56,15 +57,6 @@ export function RoadmapColumn({
         <Badge variant="secondary" className="text-xs tabular-nums">
           {items.length}
         </Badge>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="ml-auto text-muted-foreground hover:text-foreground"
-          onClick={() => onAdd(horizon)}
-          aria-label={`Add item to ${label}`}
-        >
-          <PlusIcon className="size-3.5" />
-        </Button>
       </div>
 
       {/* Drop zone / card list */}
@@ -99,6 +91,14 @@ export function RoadmapColumn({
           )}
         </SortableContext>
       </div>
+
+      {/* Inline add form at column bottom */}
+      <AddItemForm
+        workspaceId={workspaceId}
+        horizon={horizon}
+        revalidatePathStr={revalidatePathStr}
+        onAdd={onItemAdded}
+      />
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import type { ObjectiveStatus } from "@/lib/types";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
-import { AddKeyResultDialog } from "@/components/okrs/add-key-result-dialog";
+import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
 import {
   Select,
   SelectContent,
@@ -158,7 +158,7 @@ export function ObjectiveRow({
 
       {/* Add key result */}
       <div>
-        <AddKeyResultDialog
+        <AddKeyResultForm
           objectiveId={objective.id}
           objectiveTitle={objective.title}
           orgSlug={orgSlug}

@@ -7,8 +7,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { ResultItem } from "@/components/experiments/result-item"
-import { LogResultDialog } from "@/components/experiments/log-result-dialog"
-import { ConcludeDialog } from "@/components/experiments/conclude-dialog"
+import { LogResultForm } from "@/components/experiments/log-result-form"
+import { ConcludePanel } from "@/components/experiments/conclude-panel"
 import { startExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
 import { ChevronLeftIcon } from "lucide-react"
 
@@ -224,10 +224,7 @@ export default async function ExperimentDetailPage({
               </form>
             )}
             {isActive && (
-              <LogResultDialog
-                experimentId={experiment.id}
-                trigger={<Button size="sm">Log Result</Button>}
-              />
+              <LogResultForm experimentId={experiment.id} />
             )}
           </div>
         </div>
@@ -245,17 +242,12 @@ export default async function ExperimentDetailPage({
           </div>
         )}
 
-        {/* Conclude button — only when experiment is active */}
+        {/* Conclude panel — only when experiment is active */}
         {isActive && (
           <div className="pt-2">
-            <ConcludeDialog
+            <ConcludePanel
               experimentId={experiment.id}
               killCondition={experiment.killCondition}
-              trigger={
-                <Button variant="outline" className="w-full">
-                  Conclude Experiment
-                </Button>
-              }
             />
           </div>
         )}

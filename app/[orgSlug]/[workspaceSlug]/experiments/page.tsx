@@ -2,9 +2,8 @@ import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { getWorkspace } from "@/lib/workspace"
-import { Button } from "@/components/ui/button"
 import { ExperimentCard } from "@/components/experiments/experiment-card"
-import { CreateExperimentDialog } from "@/components/experiments/create-experiment-dialog"
+import { CreateExperimentForm } from "@/components/experiments/create-experiment-form"
 import type { Experiment } from "@prisma/client"
 import type { ExperimentStatus } from "@/lib/types"
 
@@ -63,10 +62,7 @@ export default async function ExperimentsPage({
             Design, run, and conclude experiments to validate assumptions.
           </p>
         </div>
-        <CreateExperimentDialog
-          workspaceId={workspace.id}
-          trigger={<Button>New Experiment</Button>}
-        />
+        <CreateExperimentForm workspaceId={workspace.id} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">

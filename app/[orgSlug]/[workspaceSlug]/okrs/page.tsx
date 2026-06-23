@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { CycleCard } from "@/components/okrs/cycle-card";
-import { CreateCycleDialog } from "@/components/okrs/create-cycle-dialog";
+import { CreateCycleForm } from "@/components/okrs/create-cycle-form";
 import type { CycleStatus } from "@/lib/types";
 
 export const metadata = {
@@ -48,7 +48,7 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
             Track objectives and key results across cycles.
           </p>
         </div>
-        <CreateCycleDialog
+        <CreateCycleForm
           workspaceId={workspace.id}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
