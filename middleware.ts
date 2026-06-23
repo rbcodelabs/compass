@@ -12,7 +12,10 @@ export default auth((req) => {
   const isPublic =
     pathname === "/" ||
     pathname.startsWith("/login") ||
-    pathname.startsWith("/api/auth")
+    pathname.startsWith("/api/auth") ||
+    // MCP route uses Bearer token auth — let it through so the route
+    // handler can validate the API key and return 401 (not 302) on failure.
+    pathname.startsWith("/api/mcp")
 
   if (!isLoggedIn && !isPublic) {
     return Response.redirect(new URL("/login", req.nextUrl))
