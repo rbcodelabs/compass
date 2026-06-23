@@ -10,7 +10,15 @@ declare global {
   var __prisma: PrismaClient | undefined;
 }
 
-async function createPrismaClient(): Promise<PrismaClient> {
+/**
+ * Creates a PrismaClient synchronously.
+ *
+ * All async work (OIDC token exchange, actual DB connection) happens lazily
+ * when the first query runs — the Pool's `password` callback is invoked only
+ * at connection time, not at construction time. So this function is safe to
+ * call at module-load time (e.g. when wiring up the Auth.js adapter).
+ */
+export function createPrismaClient(): PrismaClient {
   const host = process.env.PGHOST;
 
   if (!host) {
@@ -35,6 +43,7 @@ async function createPrismaClient(): Promise<PrismaClient> {
     host,
     user: process.env.PGUSER ?? "admin",
     database: process.env.PGDATABASE ?? "postgres",
+    // password is a callback — invoked lazily at connection time, not now
     password: () => signer.getDbConnectAdminAuthToken(),
     port: 5432,
     ssl: true,
@@ -43,22 +52,18 @@ async function createPrismaClient(): Promise<PrismaClient> {
 
   attachDatabasePool(pool);
 
-  // Pass schema as second arg — PrismaPg surfaces it via getConnectionInfo().schemaName,
-  // which Prisma uses to issue SET search_path before each query.
-  // Note: options: --search_path does NOT work on Aurora DSQL.
   const adapter = new PrismaPg(pool, { schema });
   return new PrismaClient({ adapter });
 }
 
-let prismaPromise: Promise<PrismaClient>;
+let _prisma: PrismaClient | undefined;
 
-export default function getPrisma(): Promise<PrismaClient> {
-  if (global.__prisma) return Promise.resolve(global.__prisma);
-  if (!prismaPromise) {
-    prismaPromise = createPrismaClient().then((client) => {
-      if (process.env.NODE_ENV !== "production") global.__prisma = client;
-      return client;
-    });
+/** Returns the singleton PrismaClient, creating it on first call. */
+export default function getPrisma(): PrismaClient {
+  if (global.__prisma) return global.__prisma;
+  if (!_prisma) {
+    _prisma = createPrismaClient();
+    if (process.env.NODE_ENV !== "production") global.__prisma = _prisma;
   }
-  return prismaPromise;
+  return _prisma;
 }

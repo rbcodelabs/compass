@@ -29,7 +29,7 @@ export async function createCycle(
     throw new Error(parsed.error.issues[0].message);
   }
 
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   const cycle = await prisma.oKRCycle.create({
     data: {
@@ -67,7 +67,7 @@ export async function createObjective(
     throw new Error(parsed.error.issues[0].message);
   }
 
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   await prisma.objective.create({
     data: {
@@ -105,7 +105,7 @@ export async function addKeyResult(
     throw new Error(parsed.error.issues[0].message);
   }
 
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   await prisma.keyResult.create({
     data: {
@@ -141,7 +141,7 @@ export async function logCheckIn(
     throw new Error(parsed.error.issues[0].message);
   }
 
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   // Create check-in record and update the KR's current value in one transaction.
   await prisma.$transaction([
@@ -184,7 +184,7 @@ export async function updateObjectiveStatus(
     throw new Error("Invalid status value");
   }
 
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   await prisma.objective.update({
     where: { id: objectiveId },

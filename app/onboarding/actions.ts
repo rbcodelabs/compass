@@ -46,7 +46,7 @@ export async function createOrganizationAndWorkspace(
   const { orgName, orgSlug, workspaceName } = parsed.data
   const userId = session.user.id
 
-  const prisma = await getPrisma()
+  const prisma = getPrisma()
 
   // Check slug uniqueness
   const existing = await prisma.organization.findFirst({

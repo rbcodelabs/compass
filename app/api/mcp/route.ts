@@ -28,7 +28,7 @@ const _handler = createMcpHandler(
         },
       },
       async ({ workspaceId }) => {
-        const prisma = await getPrisma()
+        const prisma = getPrisma()
 
         const [workspace, okrCycleCount, opportunityCount, experimentCount, roadmapItemCount, activeExperiments, activeOKRCycle] =
           await Promise.all([
@@ -88,7 +88,7 @@ const _handler = createMcpHandler(
         },
       },
       async ({ workspaceId, cycleId, title, description, owner }) => {
-        const prisma = await getPrisma()
+        const prisma = getPrisma()
 
         // Verify cycle belongs to the workspace
         const cycle = await prisma.oKRCycle.findFirst({
@@ -147,7 +147,7 @@ const _handler = createMcpHandler(
         },
       },
       async ({ objectiveId, title, target, unit }) => {
-        const prisma = await getPrisma()
+        const prisma = getPrisma()
 
         const objective = await prisma.objective.findUnique({
           where: { id: objectiveId },
@@ -200,7 +200,7 @@ const _handler = createMcpHandler(
         },
       },
       async ({ keyResultId, value, note }) => {
-        const prisma = await getPrisma()
+        const prisma = getPrisma()
 
         const existing = await prisma.keyResult.findUnique({
           where: { id: keyResultId },
@@ -262,7 +262,7 @@ const _handler = createMcpHandler(
         },
       },
       async ({ workspaceId, title, description, customerSegment, status }) => {
-        const prisma = await getPrisma()
+        const prisma = getPrisma()
 
         const workspace = await prisma.workspace.findUnique({
           where: { id: workspaceId },
@@ -315,7 +315,7 @@ const _handler = createMcpHandler(
         },
       },
       async ({ opportunityId, title, description }) => {
-        const prisma = await getPrisma()
+        const prisma = getPrisma()
 
         const opportunity = await prisma.opportunity.findUnique({
           where: { id: opportunityId },
@@ -376,7 +376,7 @@ const _handler = createMcpHandler(
         },
       },
       async ({ workspaceId, title, hypothesis, method, killCondition, assumptionId }) => {
-        const prisma = await getPrisma()
+        const prisma = getPrisma()
 
         const workspace = await prisma.workspace.findUnique({
           where: { id: workspaceId },
@@ -442,7 +442,7 @@ const _handler = createMcpHandler(
         },
       },
       async ({ experimentId, note, metric, value }) => {
-        const prisma = await getPrisma()
+        const prisma = getPrisma()
 
         const experiment = await prisma.experiment.findUnique({
           where: { id: experimentId },
@@ -498,7 +498,7 @@ const _handler = createMcpHandler(
         },
       },
       async ({ workspaceId, title, horizon, description, solutionId, keyResultId }) => {
-        const prisma = await getPrisma()
+        const prisma = getPrisma()
 
         const workspace = await prisma.workspace.findUnique({
           where: { id: workspaceId },

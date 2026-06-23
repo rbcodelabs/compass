@@ -17,7 +17,7 @@ export async function addRoadmapItem(
   },
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   // Place new item at the end of its column by finding the current max sortOrder.
   const lastItem = await prisma.roadmapItem.findFirst({
@@ -52,7 +52,7 @@ export async function moveItem(
   workspaceId: string,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   // Place the moved item at the end of the destination column.
   const lastItem = await prisma.roadmapItem.findFirst({
@@ -77,7 +77,7 @@ export async function archiveItem(
   itemId: string,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   await prisma.roadmapItem.update({
     where: { id: itemId },
@@ -94,7 +94,7 @@ export async function updateSortOrder(
   sortOrder: number,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   await prisma.roadmapItem.update({
     where: { id: itemId },

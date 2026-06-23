@@ -20,7 +20,7 @@ export async function createOpportunity(
     status?: OpportunityStatus;
   }
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const opportunity = await prisma.opportunity.create({
     data: {
       workspaceId,
@@ -39,7 +39,7 @@ export async function updateOpportunityStatus(
   status: OpportunityStatus,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const opportunity = await prisma.opportunity.update({
     where: { id: opportunityId },
     data: { status },
@@ -53,7 +53,7 @@ export async function addSolution(
   data: { title: string; description?: string },
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const solution = await prisma.solution.create({
     data: {
       opportunityId,
@@ -70,7 +70,7 @@ export async function updateSolutionStatus(
   status: SolutionStatus,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const solution = await prisma.solution.update({
     where: { id: solutionId },
     data: { status },
@@ -84,7 +84,7 @@ export async function addAssumption(
   data: { title: string; riskLevel: RiskLevel },
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const assumption = await prisma.assumption.create({
     data: {
       solutionId,
@@ -101,7 +101,7 @@ export async function updateAssumptionStatus(
   status: AssumptionStatus,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const assumption = await prisma.assumption.update({
     where: { id: assumptionId },
     data: { status },

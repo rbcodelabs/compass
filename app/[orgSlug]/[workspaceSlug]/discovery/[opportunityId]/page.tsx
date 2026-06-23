@@ -15,7 +15,7 @@ export async function generateMetadata({
   params: Promise<{ orgSlug: string; workspaceSlug: string; opportunityId: string }>;
 }) {
   const { opportunityId } = await params;
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const opp = await prisma.opportunity.findUnique({
     where: { id: opportunityId },
     select: { title: true },
@@ -36,7 +36,7 @@ export default async function OpportunityDetailPage({ params }: Props) {
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug, opportunityId } = await params;
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   const opportunity = await prisma.opportunity.findFirst({
     where: {

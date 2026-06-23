@@ -14,7 +14,7 @@ export async function createExperiment(
     assumptionId?: string
   }
 ) {
-  const prisma = await getPrisma()
+  const prisma = getPrisma()
 
   const experiment = await prisma.experiment.create({
     data: {
@@ -33,7 +33,7 @@ export async function createExperiment(
 }
 
 export async function startExperiment(experimentId: string) {
-  const prisma = await getPrisma()
+  const prisma = getPrisma()
 
   const experiment = await prisma.experiment.update({
     where: { id: experimentId },
@@ -55,7 +55,7 @@ export async function logResult(
     value?: number
   }
 ) {
-  const prisma = await getPrisma()
+  const prisma = getPrisma()
 
   const result = await prisma.experimentResult.create({
     data: {
@@ -74,7 +74,7 @@ export async function concludeExperiment(
   experimentId: string,
   conclusion: "PROCEED" | "KILL" | "ITERATE"
 ) {
-  const prisma = await getPrisma()
+  const prisma = getPrisma()
 
   const newStatus: ExperimentStatus =
     conclusion === "KILL" ? "KILLED" : "COMPLETE"

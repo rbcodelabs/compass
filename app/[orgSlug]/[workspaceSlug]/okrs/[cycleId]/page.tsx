@@ -39,7 +39,7 @@ export default async function CyclePage({ params }: CyclePageProps) {
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug, cycleId } = await params;
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   // Verify the cycle belongs to the right workspace/org
   const workspace = await prisma.workspace.findFirst({

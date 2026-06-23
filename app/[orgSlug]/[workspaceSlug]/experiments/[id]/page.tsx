@@ -53,7 +53,7 @@ export default async function ExperimentDetailPage({
     redirect("/dashboard")
   }
 
-  const prisma = await getPrisma()
+  const prisma = getPrisma()
   const experiment = await prisma.experiment.findFirst({
     where: { id, workspaceId: workspace.id },
     include: {

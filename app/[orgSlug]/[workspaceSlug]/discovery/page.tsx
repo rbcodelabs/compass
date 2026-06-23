@@ -26,7 +26,7 @@ export default async function DiscoveryPage({ params }: Props) {
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
     where: {

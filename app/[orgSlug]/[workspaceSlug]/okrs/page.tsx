@@ -19,7 +19,7 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   // Resolve workspace by slug + org slug
   const workspace = await prisma.workspace.findFirst({
