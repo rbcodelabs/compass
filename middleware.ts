@@ -1,4 +1,9 @@
-import { auth } from "@/auth"
+import NextAuth from "next-auth";
+import { authConfig } from "@/auth.config";
+
+// Use the Edge-compatible config (no Prisma adapter) so middleware can run
+// in the Vercel Edge runtime without Node.js-only module restrictions.
+const { auth } = NextAuth(authConfig);
 
 export default auth((req) => {
   const isLoggedIn = !!req.auth
