@@ -71,7 +71,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               action={async (formData: FormData) => {
                 "use server"
                 const email = formData.get("email") as string
-                await signIn("resend", { email, redirectTo: "/dashboard" })
+                // redirect: false lets us control the post-submission redirect.
+                // Without it, Auth.js redirects through /api/auth/verify-request
+                // which strips the ?check-email=1 query param from our custom page.
+                await signIn("resend", { email, redirect: false })
+                redirect("/login?check-email=1")
               }}
               className="space-y-4"
             >
