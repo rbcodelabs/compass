@@ -1,0 +1,368 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider     = "postgresql"
+  relationMode = "prisma"
+}
+
+// ─── Auth.js / NextAuth models ───────────────────────────────────────────────
+// DSQL constraints applied:
+//  - UUID PKs via gen_random_uuid()
+//  - No @updatedAt (DSQL does not support trigger-based auto-update)
+//  - relationMode = "prisma" already set — no FK constraints generated
+
+model User {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String?   @db.VarChar(255)
+  email         String    @unique @db.VarChar(255)
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  organizationMembers OrganizationMember[]
+  workspaceMembers    WorkspaceMember[]
+
+  @@map("users")
+}
+
+model Account {
+  userId            String   @map("user_id") @db.Uuid
+  user              User     @relation(fields: [userId], references: [id])
+  type              String   @db.VarChar(50)
+  provider          String   @db.VarChar(100)
+  providerAccountId String   @map("provider_account_id") @db.VarChar(255)
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?  @db.VarChar(50)
+  scope             String?
+  id_token          String?
+  session_state     String?  @db.VarChar(255)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@id([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionToken String   @unique @map("session_token") @db.VarChar(512)
+  userId       String   @map("user_id") @db.Uuid
+  user         User     @relation(fields: [userId], references: [id])
+  expires      DateTime
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String   @db.VarChar(255)
+  token      String   @db.VarChar(512)
+  expires    DateTime
+
+  @@id([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ─── Multi-tenancy ────────────────────────────────────────────────────────────
+
+model Organization {
+  id         String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug       String               @unique @db.VarChar(255)
+  name       String               @db.VarChar(255)
+  createdAt  DateTime             @default(now()) @map("created_at")
+  workspaces Workspace[]
+  members    OrganizationMember[]
+
+  @@map("organizations")
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model OrganizationMember {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  role           OrgRole      @default(MEMBER)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@unique([organizationId, userId])
+  @@map("organization_members")
+}
+
+model Workspace {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  slug           String          @db.VarChar(255)
+  name           String          @db.VarChar(255)
+  description    String?         @db.Text
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @default(now()) @map("updated_at")
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  members        WorkspaceMember[]
+  okrCycles      OKRCycle[]
+  opportunities  Opportunity[]
+  experiments    Experiment[]
+  roadmapItems   RoadmapItem[]
+
+  @@unique([organizationId, slug])
+  @@map("workspaces")
+}
+
+enum WorkspaceRole {
+  ADMIN
+  MEMBER
+}
+
+model WorkspaceMember {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String        @map("workspace_id") @db.Uuid
+  userId      String        @map("user_id") @db.Uuid
+  role        WorkspaceRole @default(MEMBER)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
+  user        User          @relation(fields: [userId], references: [id])
+
+  @@unique([workspaceId, userId])
+  @@map("workspace_members")
+}
+
+// ─── OKRs ─────────────────────────────────────────────────────────────────────
+
+enum CycleStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
+model OKRCycle {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String      @map("workspace_id") @db.Uuid
+  title       String      @db.VarChar(255)
+  startDate   DateTime    @map("start_date")
+  endDate     DateTime    @map("end_date")
+  status      CycleStatus @default(DRAFT)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @default(now()) @map("updated_at")
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id])
+  objectives  Objective[]
+
+  @@map("okr_cycles")
+}
+
+enum ObjectiveStatus {
+  ON_TRACK
+  AT_RISK
+  OFF_TRACK
+  COMPLETE
+}
+
+model Objective {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cycleId     String          @map("cycle_id") @db.Uuid
+  title       String          @db.VarChar(255)
+  description String?         @db.Text
+  owner       String?         @db.VarChar(255)
+  status      ObjectiveStatus @default(ON_TRACK)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @default(now()) @map("updated_at")
+  cycle       OKRCycle        @relation(fields: [cycleId], references: [id])
+  keyResults  KeyResult[]
+
+  @@map("objectives")
+}
+
+model KeyResult {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  objectiveId String      @map("objective_id") @db.Uuid
+  title       String      @db.VarChar(255)
+  target      Float
+  current     Float       @default(0)
+  unit        String?     @db.VarChar(50)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @default(now()) @map("updated_at")
+  objective   Objective   @relation(fields: [objectiveId], references: [id])
+  checkIns    CheckIn[]
+  roadmapItems RoadmapItem[]
+  opportunities Opportunity[]
+
+  @@map("key_results")
+}
+
+model CheckIn {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  keyResultId String    @map("key_result_id") @db.Uuid
+  value       Float
+  note        String?   @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+  keyResult   KeyResult @relation(fields: [keyResultId], references: [id])
+
+  @@map("check_ins")
+}
+
+// ─── Discovery / OST ──────────────────────────────────────────────────────────
+
+enum OpportunityStatus {
+  EXPLORING
+  VALIDATING
+  PRIORITIZED
+  ACTIVE
+  ARCHIVED
+}
+
+model Opportunity {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String            @map("workspace_id") @db.Uuid
+  title             String            @db.VarChar(255)
+  description       String?           @db.Text
+  customerSegment   String?           @map("customer_segment") @db.VarChar(255)
+  status            OpportunityStatus @default(EXPLORING)
+  linkedKeyResultId String?           @map("linked_key_result_id") @db.Uuid
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @default(now()) @map("updated_at")
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id])
+  linkedKeyResult   KeyResult?        @relation(fields: [linkedKeyResultId], references: [id])
+  solutions         Solution[]
+
+  @@map("opportunities")
+}
+
+enum SolutionStatus {
+  IDEA
+  VALIDATED
+  IN_DELIVERY
+  SHIPPED
+  KILLED
+}
+
+model Solution {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  opportunityId String         @map("opportunity_id") @db.Uuid
+  title         String         @db.VarChar(255)
+  description   String?        @db.Text
+  status        SolutionStatus @default(IDEA)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @default(now()) @map("updated_at")
+  opportunity   Opportunity    @relation(fields: [opportunityId], references: [id])
+  assumptions   Assumption[]
+  roadmapItems  RoadmapItem[]
+
+  @@map("solutions")
+}
+
+enum RiskLevel {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum AssumptionStatus {
+  UNTESTED
+  TESTING
+  VALIDATED
+  INVALIDATED
+}
+
+model Assumption {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  solutionId  String           @map("solution_id") @db.Uuid
+  title       String           @db.VarChar(255)
+  riskLevel   RiskLevel        @map("risk_level") @default(MEDIUM)
+  status      AssumptionStatus @default(UNTESTED)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @default(now()) @map("updated_at")
+  solution    Solution         @relation(fields: [solutionId], references: [id])
+  experiments Experiment[]
+
+  @@map("assumptions")
+}
+
+// ─── Experiments ──────────────────────────────────────────────────────────────
+
+enum ExperimentStatus {
+  DESIGNING
+  RUNNING
+  COMPLETE
+  KILLED
+}
+
+enum ExperimentConclusion {
+  PROCEED
+  KILL
+  ITERATE
+}
+
+model Experiment {
+  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String                @map("workspace_id") @db.Uuid
+  assumptionId  String?               @map("assumption_id") @db.Uuid
+  title         String                @db.VarChar(255)
+  hypothesis    String                @db.Text
+  method        String                @db.Text
+  killCondition String                @map("kill_condition") @db.Text
+  status        ExperimentStatus      @default(DESIGNING)
+  startDate     DateTime?             @map("start_date")
+  endDate       DateTime?             @map("end_date")
+  conclusion    ExperimentConclusion?
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @default(now()) @map("updated_at")
+  workspace     Workspace             @relation(fields: [workspaceId], references: [id])
+  assumption    Assumption?           @relation(fields: [assumptionId], references: [id])
+  results       ExperimentResult[]
+
+  @@map("experiments")
+}
+
+model ExperimentResult {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  experimentId String     @map("experiment_id") @db.Uuid
+  note         String     @db.Text
+  metric       String?    @db.VarChar(255)
+  value        Float?
+  createdAt    DateTime   @default(now()) @map("created_at")
+  experiment   Experiment @relation(fields: [experimentId], references: [id])
+
+  @@map("experiment_results")
+}
+
+// ─── Roadmap ──────────────────────────────────────────────────────────────────
+
+enum Horizon {
+  NOW
+  NEXT
+  LATER
+}
+
+enum RoadmapItemStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model RoadmapItem {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId  String            @map("workspace_id") @db.Uuid
+  title        String            @db.VarChar(255)
+  description  String?           @db.Text
+  horizon      Horizon           @default(NOW)
+  status       RoadmapItemStatus @default(ACTIVE)
+  sortOrder    Int               @default(0) @map("sort_order")
+  solutionId   String?           @map("solution_id") @db.Uuid
+  keyResultId  String?           @map("key_result_id") @db.Uuid
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @default(now()) @map("updated_at")
+  workspace    Workspace         @relation(fields: [workspaceId], references: [id])
+  solution     Solution?         @relation(fields: [solutionId], references: [id])
+  keyResult    KeyResult?        @relation(fields: [keyResultId], references: [id])
+
+  @@map("roadmap_items")
+}
