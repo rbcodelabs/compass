@@ -15,7 +15,9 @@ export default auth((req) => {
     pathname.startsWith("/api/auth") ||
     // MCP route uses Bearer token auth — let it through so the route
     // handler can validate the API key and return 401 (not 302) on failure.
-    pathname.startsWith("/api/mcp")
+    pathname.startsWith("/api/mcp") ||
+    // Migration route uses x-migration-secret header auth
+    pathname.startsWith("/api/admin/migrate")
 
   if (!isLoggedIn && !isPublic) {
     return Response.redirect(new URL("/login", req.nextUrl))
