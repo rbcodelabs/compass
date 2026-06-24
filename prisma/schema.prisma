@@ -96,14 +96,16 @@ model OrganizationMember {
 }
 
 model Workspace {
-  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId String            @map("organization_id") @db.Uuid
-  slug           String            @db.VarChar(255)
-  name           String            @db.VarChar(255)
-  description    String?           @db.Text
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @default(now()) @map("updated_at")
-  organization   Organization      @relation(fields: [organizationId], references: [id])
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String            @map("organization_id") @db.Uuid
+  slug            String            @db.VarChar(255)
+  name            String            @db.VarChar(255)
+  description     String?           @db.Text
+  feedbackEnabled Boolean?          @default(false) @map("feedback_enabled")
+  roadmapPublic   Boolean?          @default(false) @map("roadmap_public")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @default(now()) @map("updated_at")
+  organization    Organization      @relation(fields: [organizationId], references: [id])
   members           WorkspaceMember[]
   okrCycles         OKRCycle[]
   opportunities     Opportunity[]
@@ -111,6 +113,7 @@ model Workspace {
   roadmapItems      RoadmapItem[]
   customFieldDefs   CustomFieldDefinition[]
   squads            Squad[]
+  feedback          FeedbackItem[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -215,6 +218,7 @@ model Opportunity {
   linkedKeyResult   KeyResult?   @relation(fields: [linkedKeyResultId], references: [id])
   solutions         Solution[]
   roadmapItems      RoadmapItem[]
+  feedback          FeedbackItem[]
 
   @@map("opportunities")
 }
@@ -312,6 +316,7 @@ model RoadmapItem {
   keyResult     KeyResult?  @relation(fields: [keyResultId], references: [id])
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
   experiment    Experiment?  @relation(fields: [experimentId], references: [id])
+  votes         RoadmapVote[]
 
   @@map("roadmap_items")
 }
@@ -385,4 +390,49 @@ model ApiKey {
 
   @@index([keyPrefix])
   @@map("api_keys")
+}
+
+// ─── Feedback ─────────────────────────────────────────────────────────────────
+
+model FeedbackItem {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  opportunityId  String?   @map("opportunity_id") @db.Uuid
+  title          String    @db.VarChar(255)
+  description    String?   @db.Text
+  submitterName  String?   @map("submitter_name") @db.VarChar(255)
+  submitterEmail String?   @map("submitter_email") @db.VarChar(255)
+  status         String    @default("OPEN") @db.VarChar(50)
+  voteCount      Int       @default(0) @map("vote_count")
+  tags           Json?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @map("updated_at")
+  workspace      Workspace   @relation(fields: [workspaceId], references: [id])
+  opportunity    Opportunity? @relation(fields: [opportunityId], references: [id])
+  votes          FeedbackVote[]
+
+  @@map("feedback")
+}
+
+model FeedbackVote {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  feedbackId   String       @map("feedback_id") @db.Uuid
+  voterEmail   String       @map("voter_email") @db.VarChar(255)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  feedbackItem FeedbackItem @relation(fields: [feedbackId], references: [id])
+
+  @@unique([feedbackId, voterEmail])
+  @@map("feedback_votes")
+}
+
+model RoadmapVote {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roadmapItemId String      @map("roadmap_item_id") @db.Uuid
+  voterEmail    String      @map("voter_email") @db.VarChar(255)
+  voterName     String?     @map("voter_name") @db.VarChar(255)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  roadmapItem   RoadmapItem @relation(fields: [roadmapItemId], references: [id])
+
+  @@unique([roadmapItemId, voterEmail])
+  @@map("roadmap_votes")
 }

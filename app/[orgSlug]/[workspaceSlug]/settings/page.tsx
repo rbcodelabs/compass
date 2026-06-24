@@ -4,6 +4,7 @@ import getPrisma from "@/lib/db";
 import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-panel";
 import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
+import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
 import type { ApiKeyRow } from "@/components/settings/manage-api-keys-panel";
 import type { CustomFieldDefinitionData, CustomFieldObjectType, CustomFieldType, SquadData } from "@/lib/types";
 
@@ -22,7 +23,7 @@ export default async function SettingsPage({ params }: Props) {
 
   const workspace = await prisma.workspace.findFirst({
     where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-    select: { id: true, name: true },
+    select: { id: true, name: true, feedbackEnabled: true, roadmapPublic: true },
   });
 
   if (!workspace) redirect("/dashboard");
@@ -122,6 +123,24 @@ export default async function SettingsPage({ params }: Props) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           initialKeys={apiKeys}
+        />
+      </section>
+
+      <div className="border-t border-border" />
+
+      <section className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-base font-semibold">Portal</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Control which parts of this workspace are publicly accessible without login.
+          </p>
+        </div>
+
+        <PortalSettingsPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          feedbackEnabled={workspace.feedbackEnabled ?? false}
+          roadmapPublic={workspace.roadmapPublic ?? false}
         />
       </section>
     </main>

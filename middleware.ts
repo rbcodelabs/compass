@@ -17,7 +17,10 @@ export default auth((req) => {
     // handler can validate the API key and return 401 (not 302) on failure.
     pathname.startsWith("/api/mcp") ||
     // Migration route uses x-migration-secret header auth
-    pathname.startsWith("/api/admin/migrate")
+    pathname.startsWith("/api/admin/migrate") ||
+    // Public portal routes — no auth, workspace settings control access
+    pathname.startsWith("/portal/") ||
+    pathname.startsWith("/api/portal/")
 
   if (!isLoggedIn && !isPublic) {
     return Response.redirect(new URL("/login", req.nextUrl))

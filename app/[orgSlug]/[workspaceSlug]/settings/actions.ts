@@ -284,3 +284,23 @@ export async function revokeApiKey(
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }
+
+// ─── Portal Settings ──────────────────────────────────────────────────────────
+
+export async function updatePortalSettings(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: { feedbackEnabled?: boolean; roadmapPublic?: boolean }
+) {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: {
+      ...(input.feedbackEnabled !== undefined && { feedbackEnabled: input.feedbackEnabled }),
+      ...(input.roadmapPublic !== undefined && { roadmapPublic: input.roadmapPublic }),
+    },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
