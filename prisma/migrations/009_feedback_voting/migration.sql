@@ -27,8 +27,8 @@ CREATE TABLE feedback (
   updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_feedback_workspace_id ON feedback (workspace_id);
-CREATE INDEX idx_feedback_status       ON feedback (status);
+CREATE INDEX ASYNC idx_feedback_workspace_id ON feedback (workspace_id);
+CREATE INDEX ASYNC idx_feedback_status       ON feedback (status);
 
 -- ── feedback_votes ────────────────────────────────────────────────────────────
 CREATE TABLE feedback_votes (
@@ -39,7 +39,7 @@ CREATE TABLE feedback_votes (
   UNIQUE (feedback_id, voter_email)
 );
 
-CREATE INDEX idx_feedback_votes_feedback_id ON feedback_votes (feedback_id);
+CREATE INDEX ASYNC idx_feedback_votes_feedback_id ON feedback_votes (feedback_id);
 
 -- ── roadmap_votes ─────────────────────────────────────────────────────────────
 CREATE TABLE roadmap_votes (
@@ -51,4 +51,4 @@ CREATE TABLE roadmap_votes (
   UNIQUE (roadmap_item_id, voter_email)
 );
 
-CREATE INDEX idx_roadmap_votes_roadmap_item_id ON roadmap_votes (roadmap_item_id);
+CREATE INDEX ASYNC idx_roadmap_votes_roadmap_item_id ON roadmap_votes (roadmap_item_id);
