@@ -7,14 +7,15 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { SolutionsList } from "@/components/discovery/solutions-list";
 import { AddSolutionForm } from "@/components/discovery/add-solution-form";
 import { OpportunityHeader } from "@/components/discovery/opportunity-header";
-import { OpportunityExperimentsTab } from "@/components/discovery/opportunity-experiments-tab";
+import { OSTTreeView } from "@/components/discovery/ost-tree-view";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
-import type { ExperimentRef } from "@/components/discovery/opportunity-experiments-tab";
 import type {
   OpportunityStatus,
   SolutionStatus,
   AssumptionStatus,
   RiskLevel,
+  ExperimentStatus,
+  Conclusion,
   CustomFieldDefinitionData,
   CustomFieldType,
   CustomFieldValue,
@@ -162,17 +163,6 @@ export default async function OpportunityDetailPage({ params }: Props) {
       currentValue: (valueByFieldId.get(f.id) ?? null) as CustomFieldValue,
     }));
 
-  // Flatten all experiments across solutions/assumptions
-  const allExperiments: ExperimentRef[] = opportunity.solutions.flatMap((sol) =>
-    sol.assumptions.flatMap((assumption) =>
-      assumption.experiments.map((exp) => ({
-        ...exp,
-        assumptionTitle: assumption.title,
-      }))
-    )
-  );
-  const experimentCount = allExperiments.length;
-
   const boardPath = `/${orgSlug}/${workspaceSlug}/discovery`;
   const detailPath = `/${orgSlug}/${workspaceSlug}/discovery/${opportunityId}`;
 
@@ -214,9 +204,7 @@ export default async function OpportunityDetailPage({ params }: Props) {
             <TabsTrigger value="solutions">
               Solutions ({opportunity.solutions.length})
             </TabsTrigger>
-            <TabsTrigger value="experiments">
-              Experiments ({experimentCount})
-            </TabsTrigger>
+            <TabsTrigger value="tree">OST Tree</TabsTrigger>
             {hasCustomFields && (
               <TabsTrigger value="details">Details</TabsTrigger>
             )}
@@ -252,9 +240,32 @@ export default async function OpportunityDetailPage({ params }: Props) {
             />
           </TabsContent>
 
-          <TabsContent value="experiments" className="pt-4">
-            <OpportunityExperimentsTab
-              experiments={allExperiments}
+          <TabsContent value="tree" className="pt-4">
+            <OSTTreeView
+              opportunity={{
+                id: opportunity.id,
+                title: opportunity.title,
+                status: opportunity.status as OpportunityStatus,
+                linkedKeyResult: opportunity.linkedKeyResult,
+                solutions: opportunity.solutions.map((sol) => ({
+                  id: sol.id,
+                  title: sol.title,
+                  status: sol.status as SolutionStatus,
+                  assumptions: sol.assumptions.map((a) => ({
+                    id: a.id,
+                    title: a.title,
+                    riskLevel: a.riskLevel as RiskLevel,
+                    status: a.status as AssumptionStatus,
+                    experiments: a.experiments.map((exp) => ({
+                      id: exp.id,
+                      title: exp.title,
+                      status: exp.status as ExperimentStatus,
+                      conclusion: (exp.conclusion ?? null) as Conclusion | null,
+                      hypothesis: exp.hypothesis,
+                    })),
+                  })),
+                })),
+              }}
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
             />
