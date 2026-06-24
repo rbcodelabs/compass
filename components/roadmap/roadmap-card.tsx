@@ -5,9 +5,10 @@ import { useTransition } from "react";
 import Link from "next/link";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical } from "lucide-react";
+import { GripVertical, Lightbulb, FlaskConical, Layers, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { archiveItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { usePanelContext } from "@/components/panels/panel-context";
 
@@ -124,71 +125,113 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, works
             )}
 
             {hasLinks && (
-              <div className="flex flex-wrap gap-1">
-                {/* Opportunity → slide-over panel */}
-                {item.opportunity && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openPanel("opportunity", item.opportunity!.id);
-                    }}
-                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 hover:bg-violet-200 transition-colors cursor-pointer"
-                  >
-                    ↑ {item.opportunity.title}
-                  </button>
-                )}
+              <TooltipProvider delay={400}>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/40 pt-2 mt-0.5">
+                  {/* Opportunity */}
+                  {item.opportunity && (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openPanel("opportunity", item.opportunity!.id);
+                            }}
+                            className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-violet-600 transition-colors min-w-0"
+                          />
+                        }
+                      >
+                        <Lightbulb className="size-3 shrink-0" />
+                        <span className="truncate max-w-[120px]">{item.opportunity.title}</span>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{item.opportunity.title}</TooltipContent>
+                    </Tooltip>
+                  )}
 
-                {/* Solution → opportunity panel (solutions live on opp page) */}
-                {item.solution && item.opportunityId && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openPanel("opportunity", item.opportunityId!);
-                    }}
-                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors cursor-pointer"
-                  >
-                    {item.solution.title}
-                  </button>
-                )}
-                {item.solution && !item.opportunityId && (
-                  <Link
-                    href={`${base}/discovery`}
-                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {item.solution.title}
-                  </Link>
-                )}
+                  {/* Solution */}
+                  {item.solution && item.opportunityId && (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openPanel("opportunity", item.opportunityId!);
+                            }}
+                            className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-blue-600 transition-colors min-w-0"
+                          />
+                        }
+                      >
+                        <Layers className="size-3 shrink-0" />
+                        <span className="truncate max-w-[120px]">{item.solution.title}</span>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{item.solution.title}</TooltipContent>
+                    </Tooltip>
+                  )}
+                  {item.solution && !item.opportunityId && (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Link
+                            href={`${base}/discovery`}
+                            className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-blue-600 transition-colors min-w-0"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        }
+                      >
+                        <Layers className="size-3 shrink-0" />
+                        <span className="truncate max-w-[120px]">{item.solution.title}</span>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{item.solution.title}</TooltipContent>
+                    </Tooltip>
+                  )}
 
-                {/* Experiment → slide-over panel */}
-                {item.experiment && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openPanel("experiment", item.experiment!.id);
-                    }}
-                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors cursor-pointer"
-                  >
-                    🧪 {item.experiment.title}
-                  </button>
-                )}
+                  {/* Experiment */}
+                  {item.experiment && (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openPanel("experiment", item.experiment!.id);
+                            }}
+                            className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-amber-600 transition-colors min-w-0"
+                          />
+                        }
+                      >
+                        <FlaskConical className="size-3 shrink-0" />
+                        <span className="truncate max-w-[120px]">{item.experiment.title}</span>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{item.experiment.title}</TooltipContent>
+                    </Tooltip>
+                  )}
 
-                {/* KR → OKR cycle page (full nav, no panel yet) */}
-                {item.keyResult && krProgress !== null && (
-                  <Link
-                    href={item.keyResult.cycleId
-                      ? `${base}/okrs/${item.keyResult.cycleId}`
-                      : `${base}/okrs`}
-                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border border-border bg-white text-muted-foreground hover:bg-slate-50 transition-colors"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    KR: {krProgress}%
-                  </Link>
-                )}
-              </div>
+                  {/* KR */}
+                  {item.keyResult && krProgress !== null && (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Link
+                            href={item.keyResult.cycleId
+                              ? `${base}/okrs/${item.keyResult.cycleId}`
+                              : `${base}/okrs`}
+                            className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-indigo-600 transition-colors"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        }
+                      >
+                        <TrendingUp className="size-3 shrink-0" />
+                        <span className="tabular-nums">{krProgress}%</span>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{item.keyResult.title}</TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
+              </TooltipProvider>
             )}
           </CardContent>
         )}
