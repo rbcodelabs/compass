@@ -156,6 +156,16 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
     };
   });
 
+  // Flat list of all KRs in this cycle, carrying their objective title for display.
+  const allKRsInCycle = objectivesWithData.flatMap((obj) =>
+    obj.keyResults.map((kr) => ({
+      id: kr.id,
+      title: kr.title,
+      objectiveTitle: obj.title,
+      objectiveId: obj.id,
+    }))
+  );
+
   const cyclePath = `/${orgSlug}/${workspaceSlug}/okrs/${cycleId}`;
 
   return (
@@ -190,6 +200,13 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
             revalidatePathStr={cyclePath}
+            availableKRs={allKRsInCycle.filter(
+              (kr) => kr.objectiveId !== obj.id
+            )}
+            parentKeyResultId={
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (obj as any).parentKeyResultId ?? null
+            }
           />
         ))}
 

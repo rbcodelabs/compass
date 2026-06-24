@@ -14,6 +14,7 @@ export async function addRoadmapItem(
     horizon: Horizon;
     solutionId?: string;
     keyResultId?: string;
+    opportunityId?: string;
   },
   revalidatePathStr: string
 ) {
@@ -37,6 +38,7 @@ export async function addRoadmapItem(
       sortOrder,
       solutionId: data.solutionId,
       keyResultId: data.keyResultId,
+      opportunityId: data.opportunityId,
     },
   });
 
@@ -85,6 +87,46 @@ export async function archiveItem(
   });
 
   revalidatePath(revalidatePathStr);
+}
+
+// ─── Promote Solution to Roadmap ──────────────────────────────────────────────
+
+export async function promoteToRoadmap(
+  solutionId: string,
+  workspaceId: string,
+  horizon: Horizon,
+  squadId: string | null,
+  opportunityId: string | null
+) {
+  const prisma = getPrisma();
+
+  const solution = await prisma.solution.findUnique({
+    where: { id: solutionId },
+    select: { title: true },
+  });
+  if (!solution) throw new Error("Solution not found");
+
+  const lastItem = await prisma.roadmapItem.findFirst({
+    where: { workspaceId, horizon, status: "ACTIVE" },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
+
+  const item = await prisma.roadmapItem.create({
+    data: {
+      workspaceId,
+      title: solution.title,
+      horizon,
+      sortOrder,
+      solutionId,
+      squadId: squadId ?? null,
+      opportunityId: opportunityId ?? null,
+    },
+  });
+
+  revalidatePath(`/[orgSlug]/[workspaceSlug]/roadmap`, "page");
+  return item;
 }
 
 // ─── Update Sort Order ────────────────────────────────────────────────────────

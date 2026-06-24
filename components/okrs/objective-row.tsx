@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useTransition, useState } from "react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
@@ -12,7 +12,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { updateObjectiveStatus } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
+import {
+  updateObjectiveStatus,
+  setObjectiveParentKR,
+} from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 
 interface KeyResult {
   id: string;
@@ -35,6 +38,8 @@ interface ObjectiveRowProps {
   orgSlug: string;
   workspaceSlug: string;
   revalidatePathStr?: string;
+  availableKRs?: { id: string; title: string; objectiveTitle: string }[];
+  parentKeyResultId?: string | null;
 }
 
 const STATUS_BADGE: Record<
@@ -77,8 +82,14 @@ export function ObjectiveRow({
   orgSlug,
   workspaceSlug,
   revalidatePathStr,
+  availableKRs,
+  parentKeyResultId,
 }: ObjectiveRowProps) {
   const [isPending, startTransition] = useTransition();
+  const [isParentKRPending, startParentKRTransition] = useTransition();
+  const [localParentKRId, setLocalParentKRId] = useState<string | null>(
+    parentKeyResultId ?? null
+  );
   const avgProgress = averageProgress(objective.keyResults);
   const badge = STATUS_BADGE[objective.status];
 
@@ -91,6 +102,14 @@ export function ObjectiveRow({
         orgSlug,
         workspaceSlug
       );
+    });
+  }
+
+  function handleParentKRChange(value: string | null) {
+    const newId = !value || value === "__none__" ? null : value;
+    setLocalParentKRId(newId);
+    startParentKRTransition(async () => {
+      await setObjectiveParentKR(objective.id, newId, orgSlug, workspaceSlug);
     });
   }
 
@@ -181,6 +200,33 @@ export function ObjectiveRow({
             objectId={objective.id}
             revalidatePathStr={revalidatePathStr}
           />
+        </div>
+      )}
+
+      {/* Supports KR picker */}
+      {availableKRs && availableKRs.length > 0 && (
+        <div className="flex items-center gap-2 pt-1">
+          <span className="text-xs text-muted-foreground shrink-0">Supports:</span>
+          <Select
+            value={localParentKRId ?? "__none__"}
+            onValueChange={handleParentKRChange}
+            disabled={isParentKRPending}
+          >
+            <SelectTrigger size="sm" className="flex-1 max-w-xs text-xs">
+              <SelectValue placeholder="Link to a company KR…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— None —</SelectItem>
+              {availableKRs.map((kr) => (
+                <SelectItem key={kr.id} value={kr.id}>
+                  <span className="text-muted-foreground text-xs mr-1">
+                    {kr.objectiveTitle} /
+                  </span>
+                  {kr.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       )}
 

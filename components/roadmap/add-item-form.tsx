@@ -6,20 +6,45 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { addRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import type { Horizon } from "@/lib/types";
+
+type AvailableKR = { id: string; title: string; objectiveTitle: string };
+type AvailableSolution = { id: string; title: string; opportunityTitle: string };
+type AvailableOpportunity = { id: string; title: string };
 
 type Props = {
   workspaceId: string;
   horizon: Horizon;
   revalidatePathStr: string;
   onAdd?: (item: RoadmapCardData) => void;
+  availableKRs?: AvailableKR[];
+  availableSolutions?: AvailableSolution[];
+  availableOpportunities?: AvailableOpportunity[];
 };
 
-export function AddItemForm({ workspaceId, horizon, revalidatePathStr, onAdd }: Props) {
+export function AddItemForm({
+  workspaceId,
+  horizon,
+  revalidatePathStr,
+  onAdd,
+  availableKRs,
+  availableSolutions,
+  availableOpportunities,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [selectedKRId, setSelectedKRId] = useState<string | null>(null);
+  const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(null);
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -36,6 +61,9 @@ export function AddItemForm({ workspaceId, horizon, revalidatePathStr, onAdd }: 
           title,
           description: (data.get("description") as string).trim() || undefined,
           horizon,
+          keyResultId: selectedKRId ?? undefined,
+          solutionId: selectedSolutionId ?? undefined,
+          opportunityId: selectedOpportunityId ?? undefined,
         },
         revalidatePathStr
       );
@@ -47,10 +75,17 @@ export function AddItemForm({ workspaceId, horizon, revalidatePathStr, onAdd }: 
         sortOrder: item.sortOrder,
         solutionId: item.solutionId ?? null,
         keyResultId: item.keyResultId ?? null,
+        opportunityId: item.opportunityId ?? null,
         solution: null,
         keyResult: null,
+        opportunity: selectedOpportunityId
+          ? (availableOpportunities?.find((o) => o.id === selectedOpportunityId) ?? null)
+          : null,
       });
       setOpen(false);
+      setSelectedKRId(null);
+      setSelectedSolutionId(null);
+      setSelectedOpportunityId(null);
       formRef.current?.reset();
     });
   }
@@ -96,6 +131,78 @@ export function AddItemForm({ workspaceId, horizon, revalidatePathStr, onAdd }: 
           rows={2}
         />
       </div>
+
+      {availableOpportunities && availableOpportunities.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`item-opportunity-${horizon}`}>Opportunity (optional)</Label>
+          <Select
+            value={selectedOpportunityId ?? "__none__"}
+            onValueChange={(v) => setSelectedOpportunityId(v === "__none__" ? null : v)}
+            disabled={isPending}
+          >
+            <SelectTrigger id={`item-opportunity-${horizon}`} size="sm">
+              <SelectValue placeholder="Link to an opportunity…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— None —</SelectItem>
+              {availableOpportunities.map((opp) => (
+                <SelectItem key={opp.id} value={opp.id}>
+                  {opp.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {availableKRs && availableKRs.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`item-kr-${horizon}`}>Key Result (optional)</Label>
+          <Select
+            value={selectedKRId ?? "__none__"}
+            onValueChange={(v) => setSelectedKRId(v === "__none__" ? null : v)}
+            disabled={isPending}
+          >
+            <SelectTrigger id={`item-kr-${horizon}`} size="sm">
+              <SelectValue placeholder="Link to a key result…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— None —</SelectItem>
+              {availableKRs.map((kr) => (
+                <SelectItem key={kr.id} value={kr.id}>
+                  <span className="text-muted-foreground text-xs mr-1">{kr.objectiveTitle} /</span>
+                  {kr.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {availableSolutions && availableSolutions.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`item-solution-${horizon}`}>Solution (optional)</Label>
+          <Select
+            value={selectedSolutionId ?? "__none__"}
+            onValueChange={(v) => setSelectedSolutionId(v === "__none__" ? null : v)}
+            disabled={isPending}
+          >
+            <SelectTrigger id={`item-solution-${horizon}`} size="sm">
+              <SelectValue placeholder="Link to a solution…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— None —</SelectItem>
+              {availableSolutions.map((sol) => (
+                <SelectItem key={sol.id} value={sol.id}>
+                  <span className="text-muted-foreground text-xs mr-1">{sol.opportunityTitle} /</span>
+                  {sol.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={isPending}>
           {isPending ? "Adding..." : "Add Item"}
@@ -107,6 +214,9 @@ export function AddItemForm({ workspaceId, horizon, revalidatePathStr, onAdd }: 
           disabled={isPending}
           onClick={() => {
             setOpen(false);
+            setSelectedKRId(null);
+            setSelectedSolutionId(null);
+            setSelectedOpportunityId(null);
             formRef.current?.reset();
           }}
         >

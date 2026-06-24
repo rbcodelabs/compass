@@ -166,6 +166,23 @@ export async function logCheckIn(
   revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
 }
 
+// ─── Set Objective Parent KR ──────────────────────────────────────────────────
+
+export async function setObjectiveParentKR(
+  objectiveId: string,
+  keyResultId: string | null,
+  orgSlug: string,
+  workspaceSlug: string
+) {
+  const prisma = getPrisma();
+  await prisma.objective.update({
+    where: { id: objectiveId },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: { parentKeyResultId: keyResultId } as any,
+  });
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
+}
+
 // ─── Update Objective Status ──────────────────────────────────────────────────
 
 const ObjectiveStatusSchema = z.enum([

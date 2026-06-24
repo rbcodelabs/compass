@@ -34,7 +34,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
 
   if (!workspace) notFound();
 
-  const [rawSquads, items] = await Promise.all([
+  const [rawSquads, items, rawKRs, rawSolutions, rawOpportunities] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { createdAt: "asc" },
@@ -53,7 +53,33 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
         keyResult: {
           select: { id: true, title: true, current: true, target: true, unit: true },
         },
+        opportunity: {
+          select: { id: true, title: true },
+        },
       },
+    }),
+    prisma.keyResult.findMany({
+      where: { objective: { cycle: { workspaceId: workspace.id } } },
+      select: {
+        id: true,
+        title: true,
+        objective: { select: { title: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.solution.findMany({
+      where: { opportunity: { workspaceId: workspace.id } },
+      select: {
+        id: true,
+        title: true,
+        opportunity: { select: { title: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.opportunity.findMany({
+      where: { workspaceId: workspace.id, status: { not: "ARCHIVED" } },
+      select: { id: true, title: true },
+      orderBy: { createdAt: "asc" },
     }),
   ]);
 
@@ -61,6 +87,32 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     id: s.id,
     name: s.name,
     color: s.color,
+  }));
+
+  const availableKRs = rawKRs.map((kr) => ({
+    id: kr.id,
+    title: kr.title,
+    objectiveTitle: kr.objective.title,
+  }));
+
+  const availableSolutions = rawSolutions.map((sol) => ({
+    id: sol.id,
+    title: sol.title,
+    opportunityTitle: sol.opportunity.title,
+  }));
+
+  const cardItems: RoadmapCardData[] = items.map((item) => ({
+    id: item.id,
+    title: item.title,
+    description: item.description ?? null,
+    horizon: item.horizon as Horizon,
+    sortOrder: item.sortOrder,
+    solutionId: item.solutionId ?? null,
+    keyResultId: item.keyResultId ?? null,
+    opportunityId: item.opportunityId ?? null,
+    solution: item.solution ?? null,
+    keyResult: item.keyResult ?? null,
+    opportunity: item.opportunity ? { id: item.opportunity.id, title: item.opportunity.title } : null,
   }));
 
   return (
@@ -77,10 +129,13 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       </Suspense>
 
       <RoadmapBoard
-        initialItems={items.map((item) => ({ ...item, horizon: item.horizon as Horizon })) as RoadmapCardData[]}
+        initialItems={cardItems}
         workspaceId={workspace.id}
         orgSlug={orgSlug}
         workspaceSlug={workspaceSlug}
+        availableKRs={availableKRs}
+        availableSolutions={availableSolutions}
+        availableOpportunities={rawOpportunities}
       />
     </div>
   );

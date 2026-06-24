@@ -25,6 +25,10 @@ const HORIZON_CONFIG: Record<Horizon, { label: string; accentClass: string; empt
   },
 };
 
+type AvailableKR = { id: string; title: string; objectiveTitle: string };
+type AvailableSolution = { id: string; title: string; opportunityTitle: string };
+type AvailableOpportunity = { id: string; title: string };
+
 type Props = {
   horizon: Horizon;
   items: RoadmapCardData[];
@@ -32,6 +36,9 @@ type Props = {
   revalidatePathStr: string;
   onItemAdded: (item: RoadmapCardData) => void;
   onArchive: (itemId: string) => void;
+  availableKRs?: AvailableKR[];
+  availableSolutions?: AvailableSolution[];
+  availableOpportunities?: AvailableOpportunity[];
 };
 
 export function RoadmapColumn({
@@ -41,6 +48,9 @@ export function RoadmapColumn({
   revalidatePathStr,
   onItemAdded,
   onArchive,
+  availableKRs,
+  availableSolutions,
+  availableOpportunities,
 }: Props) {
   const { label, accentClass, emptyText } = HORIZON_CONFIG[horizon];
   const itemIds = items.map((i) => i.id);
@@ -98,6 +108,9 @@ export function RoadmapColumn({
         horizon={horizon}
         revalidatePathStr={revalidatePathStr}
         onAdd={onItemAdded}
+        availableKRs={availableKRs}
+        availableSolutions={availableSolutions}
+        availableOpportunities={availableOpportunities}
       />
     </div>
   );

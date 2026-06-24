@@ -19,8 +19,10 @@ export type RoadmapCardData = {
   sortOrder: number;
   solutionId: string | null;
   keyResultId: string | null;
+  opportunityId: string | null;
   solution: { id: string; title: string } | null;
   keyResult: { id: string; title: string; current: number; target: number; unit: string | null } | null;
+  opportunity: { id: string; title: string } | null;
 };
 
 type Props = {
@@ -98,7 +100,7 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive }: Props) {
           </Button>
         </CardHeader>
 
-        {(item.description || item.solution || item.keyResult) && (
+        {(item.description || item.solution || item.keyResult || item.opportunity) && (
           <CardContent className="flex flex-col gap-2 pt-0">
             {item.description && (
               <p className="text-xs text-muted-foreground line-clamp-2">
@@ -106,8 +108,13 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive }: Props) {
               </p>
             )}
 
-            {(item.solution || item.keyResult) && (
+            {(item.solution || item.keyResult || item.opportunity) && (
               <div className="flex flex-wrap gap-1">
+                {item.opportunity && (
+                  <Badge variant="secondary" className="text-xs bg-violet-100 text-violet-700">
+                    ↑ {item.opportunity.title}
+                  </Badge>
+                )}
                 {item.solution && (
                   <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                     {item.solution.title}

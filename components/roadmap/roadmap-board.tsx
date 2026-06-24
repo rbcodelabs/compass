@@ -26,11 +26,18 @@ type ColumnMap = Record<Horizon, RoadmapCardData[]>;
 
 const HORIZONS: Horizon[] = ["NOW", "NEXT", "LATER"];
 
+type AvailableKR = { id: string; title: string; objectiveTitle: string };
+type AvailableSolution = { id: string; title: string; opportunityTitle: string };
+type AvailableOpportunity = { id: string; title: string };
+
 type Props = {
   initialItems: RoadmapCardData[];
   workspaceId: string;
   orgSlug: string;
   workspaceSlug: string;
+  availableKRs?: AvailableKR[];
+  availableSolutions?: AvailableSolution[];
+  availableOpportunities?: AvailableOpportunity[];
 };
 
 function buildColumnMap(items: RoadmapCardData[]): ColumnMap {
@@ -54,6 +61,9 @@ export function RoadmapBoard({
   workspaceId,
   orgSlug,
   workspaceSlug,
+  availableKRs,
+  availableSolutions,
+  availableOpportunities,
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/roadmap`;
 
@@ -218,6 +228,9 @@ export function RoadmapBoard({
             revalidatePathStr={revalidatePathStr}
             onItemAdded={handleItemAdded}
             onArchive={handleArchive}
+            availableKRs={availableKRs}
+            availableSolutions={availableSolutions}
+            availableOpportunities={availableOpportunities}
           />
         ))}
       </div>

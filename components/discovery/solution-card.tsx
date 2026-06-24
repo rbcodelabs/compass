@@ -18,8 +18,9 @@ import {
   addAssumption,
   updateSolutionStatus,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
+import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { AssumptionItem, type AssumptionItemData } from "./assumption-item";
-import type { SolutionStatus, RiskLevel } from "@/lib/types";
+import type { SolutionStatus, RiskLevel, Horizon } from "@/lib/types";
 
 const STATUS_BADGE_CLASSES: Record<SolutionStatus, string> = {
   IDEA: "bg-secondary text-secondary-foreground",
@@ -48,14 +49,30 @@ export type SolutionCardData = {
 type Props = {
   solution: SolutionCardData;
   revalidatePathStr: string;
+  workspaceId: string;
+  opportunityId: string;
+  squadId: string | null;
 };
 
-export function SolutionCard({ solution, revalidatePathStr }: Props) {
+export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportunityId, squadId }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [addingAssumption, setAddingAssumption] = useState(false);
+  const [promotingToRoadmap, setPromotingToRoadmap] = useState(false);
+  const [horizon, setHorizon] = useState<Horizon>("NOW");
   const [isPending, startTransition] = useTransition();
   const [assumptionRisk, setAssumptionRisk] = useState<RiskLevel>("MEDIUM");
   const assumptionInputRef = useRef<HTMLInputElement>(null);
+
+  const canPromote =
+    solution.status === "VALIDATED" || solution.status === "IN_DELIVERY";
+
+  function handlePromote(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    startTransition(async () => {
+      await promoteToRoadmap(solution.id, workspaceId, horizon, squadId, opportunityId);
+      setPromotingToRoadmap(false);
+    });
+  }
 
   function handleStatusChange(value: string | null) {
     if (!value) return;
@@ -211,6 +228,51 @@ export function SolutionCard({ solution, revalidatePathStr }: Props) {
               <PlusIcon />
               Add Assumption
             </Button>
+          )}
+
+          {canPromote && (
+            promotingToRoadmap ? (
+              <form
+                onSubmit={handlePromote}
+                className="flex items-center gap-2 mt-2 pt-2 border-t border-border"
+              >
+                <Select
+                  value={horizon}
+                  onValueChange={(v: string | null) => { if (v) setHorizon(v as Horizon); }}
+                  disabled={isPending}
+                >
+                  <SelectTrigger size="sm" className="w-24">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NOW">Now</SelectItem>
+                    <SelectItem value="NEXT">Next</SelectItem>
+                    <SelectItem value="LATER">Later</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button type="submit" size="sm" disabled={isPending}>
+                  {isPending ? "Adding..." : "→ Roadmap"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => setPromotingToRoadmap(false)}
+                >
+                  Cancel
+                </Button>
+              </form>
+            ) : (
+              <Button
+                variant="ghost"
+                size="xs"
+                className="mt-2 text-muted-foreground"
+                onClick={() => setPromotingToRoadmap(true)}
+              >
+                → Promote to Roadmap
+              </Button>
+            )
           )}
         </CardContent>
       )}

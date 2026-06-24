@@ -7,6 +7,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { SolutionCard } from "@/components/discovery/solution-card";
 import { AddSolutionForm } from "@/components/discovery/add-solution-form";
 import { OpportunityOverview } from "@/components/discovery/opportunity-overview";
+import { OpportunityExperimentsTab } from "@/components/discovery/opportunity-experiments-tab";
+import type { ExperimentRef } from "@/components/discovery/opportunity-experiments-tab";
 import type {
   OpportunityStatus,
   SolutionStatus,
@@ -77,7 +79,18 @@ export default async function OpportunityDetailPage({ params }: Props) {
             assumptions: {
               orderBy: { createdAt: "asc" },
               include: {
-                experiments: { select: { id: true } },
+                experiments: {
+                  select: {
+                    id: true,
+                    title: true,
+                    status: true,
+                    conclusion: true,
+                    hypothesis: true,
+                    startDate: true,
+                    endDate: true,
+                  },
+                  orderBy: { createdAt: "desc" },
+                },
               },
             },
           },
@@ -149,6 +162,17 @@ export default async function OpportunityDetailPage({ params }: Props) {
       currentValue: (valueByFieldId.get(f.id) ?? null) as CustomFieldValue,
     }));
 
+  // Flatten all experiments across solutions/assumptions, attaching assumptionTitle.
+  const allExperiments: ExperimentRef[] = opportunity.solutions.flatMap((sol) =>
+    sol.assumptions.flatMap((assumption) =>
+      assumption.experiments.map((exp) => ({
+        ...exp,
+        assumptionTitle: assumption.title,
+      }))
+    )
+  );
+  const experimentCount = allExperiments.length;
+
   const boardPath = `/${orgSlug}/${workspaceSlug}/discovery`;
   const detailPath = `/${orgSlug}/${workspaceSlug}/discovery/${opportunityId}`;
 
@@ -178,6 +202,9 @@ export default async function OpportunityDetailPage({ params }: Props) {
           <TabsTrigger value="solutions">
             Solutions ({opportunity.solutions.length})
           </TabsTrigger>
+          <TabsTrigger value="experiments">
+            Experiments ({experimentCount})
+          </TabsTrigger>
           <TabsTrigger value="overview">Overview</TabsTrigger>
         </TabsList>
 
@@ -200,11 +227,22 @@ export default async function OpportunityDetailPage({ params }: Props) {
                 })),
               }}
               revalidatePathStr={detailPath}
+              workspaceId={workspace.id}
+              opportunityId={opportunityId}
+              squadId={opportunity.squadId}
             />
           ))}
           <AddSolutionForm
             opportunityId={opportunityId}
             revalidatePathStr={detailPath}
+          />
+        </TabsContent>
+
+        <TabsContent value="experiments" className="pt-4">
+          <OpportunityExperimentsTab
+            experiments={allExperiments}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
           />
         </TabsContent>
 
