@@ -15,7 +15,9 @@ import {
 import {
   updateObjectiveStatus,
   setObjectiveParentKR,
+  deleteObjective,
 } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
+import { CardMenu } from "@/components/ui/card-menu";
 
 interface KeyResult {
   id: string;
@@ -113,8 +115,16 @@ export function ObjectiveRow({
     });
   }
 
+  const okrsPath = `/${orgSlug}/${workspaceSlug}/okrs`;
+
+  function handleDelete() {
+    startTransition(async () => {
+      await deleteObjective(objective.id, okrsPath);
+    });
+  }
+
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 group">
       {/* Objective header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
@@ -163,6 +173,16 @@ export function ObjectiveRow({
               ))}
             </SelectContent>
           </Select>
+          <CardMenu
+            items={[
+              {
+                label: "Delete Objective",
+                onClick: () => handleDelete(),
+                separator: true,
+                destructive: true,
+              },
+            ]}
+          />
         </div>
       </div>
 

@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useTransition } from "react";
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { updateOpportunityStatus } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
+import { CardMenu } from "@/components/ui/card-menu";
+import {
+  updateOpportunityStatus,
+  archiveOpportunity,
+} from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import type { OpportunityStatus } from "@/lib/types";
 
 const STATUS_ORDER: OpportunityStatus[] = [
@@ -15,6 +17,14 @@ const STATUS_ORDER: OpportunityStatus[] = [
   "PRIORITIZED",
   "ACTIVE",
 ];
+
+const STATUS_LABELS: Record<OpportunityStatus, string> = {
+  EXPLORING: "Exploring",
+  VALIDATING: "Validating",
+  PRIORITIZED: "Prioritized",
+  ACTIVE: "Active",
+  ARCHIVED: "Archived",
+};
 
 export type OpportunityCardData = {
   id: string;
@@ -33,27 +43,26 @@ type Props = {
 
 export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) {
   const [isPending, startTransition] = useTransition();
-  const currentIndex = STATUS_ORDER.indexOf(opportunity.status);
-  const canMoveLeft = currentIndex > 0;
-  const canMoveRight = currentIndex < STATUS_ORDER.length - 1;
 
   const detailPath = `/${orgSlug}/${workspaceSlug}/discovery/${opportunity.id}`;
   const boardPath = `/${orgSlug}/${workspaceSlug}/discovery`;
 
-  function moveStatus(direction: "left" | "right") {
-    const nextStatus =
-      direction === "left"
-        ? STATUS_ORDER[currentIndex - 1]
-        : STATUS_ORDER[currentIndex + 1];
+  function moveStatus(status: OpportunityStatus) {
     startTransition(async () => {
-      await updateOpportunityStatus(opportunity.id, nextStatus, boardPath);
+      await updateOpportunityStatus(opportunity.id, status, boardPath);
+    });
+  }
+
+  function handleArchive() {
+    startTransition(async () => {
+      await archiveOpportunity(opportunity.id, boardPath);
     });
   }
 
   return (
     <Card
       size="sm"
-      className="w-full shrink-0 opacity-100 transition-all duration-150 bg-white shadow-sm hover:shadow-md data-[pending]:opacity-60 cursor-pointer"
+      className="w-full shrink-0 opacity-100 transition-all duration-150 bg-white shadow-sm hover:shadow-md data-[pending]:opacity-60 cursor-pointer group"
       data-pending={isPending ? true : undefined}
     >
       <CardHeader>
@@ -73,6 +82,21 @@ export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) 
               {opportunity.title}
             </Link>
           </CardTitle>
+          <CardMenu
+            items={[
+              ...STATUS_ORDER.filter((s) => s !== opportunity.status).map((s) => ({
+                label: `Move to ${STATUS_LABELS[s]}`,
+                onClick: () => moveStatus(s),
+                disabled: isPending,
+              })),
+              {
+                label: "Archive",
+                onClick: () => handleArchive(),
+                separator: true,
+                destructive: true,
+              },
+            ]}
+          />
         </div>
         {opportunity.customerSegment && (
           <p className="text-xs text-muted-foreground truncate">
@@ -81,34 +105,10 @@ export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) 
         )}
       </CardHeader>
       <CardContent>
-        <div className="flex items-center justify-between">
-          <Badge variant="secondary">
-            {opportunity._count.solutions}{" "}
-            {opportunity._count.solutions === 1 ? "solution" : "solutions"}
-          </Badge>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              disabled={!canMoveLeft || isPending}
-              onClick={() => moveStatus("left")}
-              title="Move left"
-            >
-              <ChevronLeftIcon />
-              <span className="sr-only">Move left</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              disabled={!canMoveRight || isPending}
-              onClick={() => moveStatus("right")}
-              title="Move right"
-            >
-              <ChevronRightIcon />
-              <span className="sr-only">Move right</span>
-            </Button>
-          </div>
-        </div>
+        <Badge variant="secondary">
+          {opportunity._count.solutions}{" "}
+          {opportunity._count.solutions === 1 ? "solution" : "solutions"}
+        </Badge>
       </CardContent>
     </Card>
   );

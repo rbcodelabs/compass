@@ -4,11 +4,12 @@ import * as React from "react";
 import { useTransition } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, X } from "lucide-react";
+import { GripVertical } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { CardMenu } from "@/components/ui/card-menu";
 import { archiveItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+
 import type { Horizon } from "@/lib/types";
 
 export type RoadmapCardData = {
@@ -64,7 +65,7 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive }: Props) {
   }
 
   return (
-    <div ref={setNodeRef} style={style} className="touch-none">
+    <div ref={setNodeRef} style={style} className="touch-none group">
       <Card
         size="sm"
         className="w-full bg-white shadow-sm transition-all duration-150 data-[dragging=true]:shadow-xl data-[dragging=true]:ring-2 data-[dragging=true]:ring-indigo-200"
@@ -87,17 +88,15 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive }: Props) {
             {item.title}
           </CardTitle>
 
-          {/* Archive button */}
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="shrink-0 text-muted-foreground/50 hover:text-destructive"
-            onClick={handleArchive}
-            disabled={isArchiving}
-            aria-label="Archive item"
-          >
-            <X className="size-3" />
-          </Button>
+          <CardMenu
+            items={[
+              {
+                label: "Archive",
+                onClick: () => handleArchive(),
+                destructive: true,
+              },
+            ]}
+          />
         </CardHeader>
 
         {(item.description || item.solution || item.keyResult || item.opportunity) && (

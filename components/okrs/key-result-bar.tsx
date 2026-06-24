@@ -1,6 +1,9 @@
 "use client";
 
+import { useTransition } from "react";
 import { CheckInForm } from "@/components/okrs/check-in-form";
+import { CardMenu } from "@/components/ui/card-menu";
+import { deleteKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 
 interface KeyResultBarProps {
   keyResult: {
@@ -20,11 +23,19 @@ function clampProgress(current: number, target: number): number {
 }
 
 export function KeyResultBar({ keyResult, orgSlug, workspaceSlug }: KeyResultBarProps) {
+  const [, startTransition] = useTransition();
   const progress = clampProgress(keyResult.current, keyResult.target);
   const unit = keyResult.unit ? ` ${keyResult.unit}` : "";
+  const okrsPath = `/${orgSlug}/${workspaceSlug}/okrs`;
+
+  function handleDelete() {
+    startTransition(async () => {
+      await deleteKeyResult(keyResult.id, okrsPath);
+    });
+  }
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5 group">
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm text-foreground">{keyResult.title}</span>
         <div className="flex items-center gap-2 shrink-0">
@@ -37,6 +48,15 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug }: KeyResultBar
             currentValue={keyResult.current}
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
+          />
+          <CardMenu
+            items={[
+              {
+                label: "Delete KR",
+                onClick: () => handleDelete(),
+                destructive: true,
+              },
+            ]}
           />
         </div>
       </div>

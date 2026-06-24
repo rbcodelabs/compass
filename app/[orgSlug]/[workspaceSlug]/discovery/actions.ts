@@ -124,3 +124,36 @@ export async function linkOpportunityToKeyResult(
   });
   revalidatePath(revalidatePathStr);
 }
+
+export async function archiveOpportunity(
+  opportunityId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.opportunity.update({
+    where: { id: opportunityId },
+    data: { status: "ARCHIVED" },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+export async function archiveSolution(
+  solutionId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.solution.update({
+    where: { id: solutionId },
+    data: { status: "KILLED" },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+export async function deleteAssumption(
+  assumptionId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.assumption.delete({ where: { id: assumptionId } });
+  revalidatePath(revalidatePathStr);
+}

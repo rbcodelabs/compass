@@ -120,6 +120,7 @@ export default async function ExperimentsPage({
                       key={exp.id}
                       experiment={exp}
                       href={`/${orgSlug}/${workspaceSlug}/experiments/${exp.id}`}
+                      revalidatePathStr={`/${orgSlug}/${workspaceSlug}/experiments`}
                     />
                   ))
                 )}

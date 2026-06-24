@@ -3,7 +3,11 @@
 import { useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { updateAssumptionStatus } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
+import { CardMenu } from "@/components/ui/card-menu";
+import {
+  updateAssumptionStatus,
+  deleteAssumption,
+} from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import type { AssumptionStatus, RiskLevel } from "@/lib/types";
 
 const RISK_CLASSES: Record<RiskLevel, string> = {
@@ -57,9 +61,15 @@ export function AssumptionItem({ assumption, revalidatePathStr }: Props) {
     });
   }
 
+  function handleDelete() {
+    startTransition(async () => {
+      await deleteAssumption(assumption.id, revalidatePathStr);
+    });
+  }
+
   return (
     <div
-      className="flex items-start gap-2 py-1.5 opacity-100 transition-opacity data-[pending]:opacity-50"
+      className="flex items-start gap-2 py-1.5 opacity-100 transition-opacity data-[pending]:opacity-50 group"
       data-pending={isPending ? true : undefined}
     >
       <span className="flex-1 text-sm leading-snug">{assumption.title}</span>
@@ -79,6 +89,15 @@ export function AssumptionItem({ assumption, revalidatePathStr }: Props) {
         >
           {STATUS_LABELS[assumption.status]}
         </Button>
+        <CardMenu
+          items={[
+            {
+              label: "Delete",
+              onClick: () => handleDelete(),
+              destructive: true,
+            },
+          ]}
+        />
       </div>
     </div>
   );

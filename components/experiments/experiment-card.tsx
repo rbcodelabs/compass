@@ -1,6 +1,11 @@
+"use client"
+
+import { useTransition } from "react"
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { CardMenu } from "@/components/ui/card-menu"
+import { archiveExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
 import type { Experiment } from "@prisma/client"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -23,35 +28,56 @@ const STATUS_CLASS: Record<string, string> = {
 interface ExperimentCardProps {
   experiment: Experiment
   href: string
+  revalidatePathStr: string
 }
 
-export function ExperimentCard({ experiment, href }: ExperimentCardProps) {
+export function ExperimentCard({ experiment, href, revalidatePathStr }: ExperimentCardProps) {
+  const [, startTransition] = useTransition()
   const statusLabel = STATUS_LABELS[experiment.status] ?? experiment.status
   const statusClass = STATUS_CLASS[experiment.status] ?? ""
 
+  function handleArchive() {
+    startTransition(async () => {
+      await archiveExperiment(experiment.id, revalidatePathStr)
+    })
+  }
+
   return (
-    <Link href={href} className="block group">
-      <Card className="bg-white shadow-sm transition-all duration-150 group-hover:shadow-md">
-        <CardHeader>
-          <div className="flex items-start justify-between gap-2">
-            <CardTitle className="line-clamp-2 text-sm font-medium">
-              {experiment.title}
-            </CardTitle>
-            <Badge className={statusClass}>{statusLabel}</Badge>
-          </div>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          <p className="text-sm text-muted-foreground line-clamp-2">
-            {experiment.hypothesis}
-          </p>
-          {experiment.killCondition && (
-            <p className="text-xs text-amber-600 dark:text-amber-400 flex gap-1 items-start">
-              <span aria-hidden="true">&#9888;</span>
-              <span className="line-clamp-1">{experiment.killCondition}</span>
+    <div className="relative group">
+      <Link href={href} className="block">
+        <Card className="bg-white shadow-sm transition-all duration-150 group-hover:shadow-md">
+          <CardHeader>
+            <div className="flex items-start justify-between gap-2">
+              <CardTitle className="line-clamp-2 text-sm font-medium">
+                {experiment.title}
+              </CardTitle>
+              <Badge className={statusClass}>{statusLabel}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground line-clamp-2">
+              {experiment.hypothesis}
             </p>
-          )}
-        </CardContent>
-      </Card>
-    </Link>
+            {experiment.killCondition && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 flex gap-1 items-start">
+                <span aria-hidden="true">&#9888;</span>
+                <span className="line-clamp-1">{experiment.killCondition}</span>
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </Link>
+      <div className="absolute top-2 right-2">
+        <CardMenu
+          items={[
+            {
+              label: "Archive",
+              onClick: () => handleArchive(),
+              destructive: true,
+            },
+          ]}
+        />
+      </div>
+    </div>
   )
 }

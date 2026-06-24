@@ -213,3 +213,25 @@ export async function updateObjectiveStatus(
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
 }
+
+// ─── Delete Objective ─────────────────────────────────────────────────────────
+
+export async function deleteObjective(
+  objectiveId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.objective.delete({ where: { id: objectiveId } });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Delete Key Result ────────────────────────────────────────────────────────
+
+export async function deleteKeyResult(
+  keyResultId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.keyResult.delete({ where: { id: keyResultId } });
+  revalidatePath(revalidatePathStr);
+}

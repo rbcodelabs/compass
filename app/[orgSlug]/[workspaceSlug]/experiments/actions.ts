@@ -108,3 +108,15 @@ export async function concludeExperiment(
   revalidatePath(`/[orgSlug]/[workspaceSlug]/experiments`)
   return experiment
 }
+
+export async function archiveExperiment(
+  experimentId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma()
+  await prisma.experiment.update({
+    where: { id: experimentId },
+    data: { status: "KILLED" },
+  })
+  revalidatePath(revalidatePathStr)
+}

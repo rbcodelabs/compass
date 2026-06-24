@@ -17,7 +17,9 @@ import {
 import {
   addAssumption,
   updateSolutionStatus,
+  archiveSolution,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
+import { CardMenu } from "@/components/ui/card-menu";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { AssumptionItem, type AssumptionItemData } from "./assumption-item";
 import type { SolutionStatus, RiskLevel, Horizon } from "@/lib/types";
@@ -104,8 +106,14 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
     });
   }
 
+  function handleKill() {
+    startTransition(async () => {
+      await archiveSolution(solution.id, revalidatePathStr);
+    });
+  }
+
   return (
-    <Card size="sm">
+    <Card size="sm" className="group">
       <CardHeader>
         <div className="flex items-start gap-2">
           <button
@@ -149,6 +157,15 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
               ))}
             </SelectContent>
           </Select>
+          <CardMenu
+            items={[
+              {
+                label: "Kill / Archive",
+                onClick: () => handleKill(),
+                destructive: true,
+              },
+            ]}
+          />
         </div>
       </CardHeader>
 
