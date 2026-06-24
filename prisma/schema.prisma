@@ -25,6 +25,7 @@ model User {
 
   organizationMembers OrganizationMember[]
   workspaceMembers    WorkspaceMember[]
+  apiKeys             ApiKey[]
 
   @@map("users")
 }
@@ -358,4 +359,21 @@ model CustomFieldValue {
 
   @@unique([fieldId, objectId])
   @@map("custom_field_values")
+}
+
+// ─── API Keys ─────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  name       String    @db.VarChar(255)
+  keyHash    String    @unique @map("key_hash") @db.VarChar(64)
+  keyPrefix  String    @map("key_prefix") @db.VarChar(8)
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  user       User      @relation(fields: [userId], references: [id])
+
+  @@index([keyPrefix])
+  @@map("api_keys")
 }

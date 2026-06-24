@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
+import { randomBytes, createHash } from "crypto";
 import type {
   CustomFieldType,
   CustomFieldObjectType,
@@ -221,4 +222,65 @@ export async function upsertFieldValue(
   }
 
   revalidatePath(revalidatePathStr);
+}
+
+// ─── API Keys ─────────────────────────────────────────────────────────────────
+
+export async function createApiKey(
+  orgSlug: string,
+  workspaceSlug: string,
+  name: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const prisma = getPrisma();
+  // Verify workspace membership
+  const workspace = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+    select: { id: true },
+  });
+  if (!workspace) throw new Error("Workspace not found");
+
+  // Generate key: cmp_<32 random hex>
+  const randomHex = randomBytes(16).toString("hex"); // 32 hex chars
+  const rawKey = `cmp_${randomHex}`;
+  const keyPrefix = randomHex.slice(0, 8);
+  const keyHash = createHash("sha256").update(rawKey).digest("hex");
+
+  await prisma.apiKey.create({
+    data: {
+      userId: session.user.id,
+      name,
+      keyHash,
+      keyPrefix,
+    },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  // Return the raw key — shown ONCE to the user, never stored
+  return { rawKey };
+}
+
+export async function revokeApiKey(
+  orgSlug: string,
+  workspaceSlug: string,
+  keyId: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const prisma = getPrisma();
+  // Only allow revoking own keys
+  const apiKey = await prisma.apiKey.findFirst({
+    where: { id: keyId, userId: session.user.id },
+  });
+  if (!apiKey) throw new Error("Not found");
+
+  await prisma.apiKey.update({
+    where: { id: keyId },
+    data: { revokedAt: new Date() },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }

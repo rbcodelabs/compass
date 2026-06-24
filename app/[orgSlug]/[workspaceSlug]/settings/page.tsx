@@ -3,6 +3,8 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-panel";
 import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
+import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
+import type { ApiKeyRow } from "@/components/settings/manage-api-keys-panel";
 import type { CustomFieldDefinitionData, CustomFieldObjectType, CustomFieldType, SquadData } from "@/lib/types";
 
 export const metadata = { title: "Workspace Settings" };
@@ -25,7 +27,7 @@ export default async function SettingsPage({ params }: Props) {
 
   if (!workspace) redirect("/dashboard");
 
-  const [rawFields, rawSquads] = await Promise.all([
+  const [rawFields, rawSquads, rawApiKeys] = await Promise.all([
     prisma.customFieldDefinition.findMany({
       where: { workspaceId: workspace.id },
       orderBy: [{ objectType: "asc" }, { order: "asc" }],
@@ -34,6 +36,12 @@ export default async function SettingsPage({ params }: Props) {
       where: { workspaceId: workspace.id },
       orderBy: { createdAt: "asc" },
     }),
+    session.user?.id
+      ? prisma.apiKey.findMany({
+          where: { userId: session.user.id },
+          orderBy: { createdAt: "desc" },
+        })
+      : Promise.resolve([]),
   ]);
 
   const fields: CustomFieldDefinitionData[] = rawFields.map((f) => ({
@@ -50,6 +58,15 @@ export default async function SettingsPage({ params }: Props) {
     id: s.id,
     name: s.name,
     color: s.color,
+  }));
+
+  const apiKeys: ApiKeyRow[] = rawApiKeys.map((k) => ({
+    id: k.id,
+    name: k.name,
+    keyPrefix: k.keyPrefix,
+    createdAt: k.createdAt,
+    lastUsedAt: k.lastUsedAt,
+    revokedAt: k.revokedAt,
   }));
 
   return (
@@ -88,6 +105,23 @@ export default async function SettingsPage({ params }: Props) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           initialFields={fields}
+        />
+      </section>
+
+      <div className="border-t border-border" />
+
+      <section className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-base font-semibold">API Keys</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Generate personal API keys for MCP / programmatic access. Each key is tied to your account and can be revoked independently.
+          </p>
+        </div>
+
+        <ManageApiKeysPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          initialKeys={apiKeys}
         />
       </section>
     </main>

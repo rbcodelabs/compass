@@ -810,7 +810,8 @@ const _handler = createMcpHandler(
 )
 
 async function withMcpAuth(req: Request): Promise<Response> {
-  if (!validateMcpAuth(req)) {
+  const auth = await validateMcpAuth(req)
+  if (!auth.valid) {
     return new Response("Unauthorized", { status: 401, headers: { "WWW-Authenticate": "Bearer" } })
   }
   return _handler(req)
