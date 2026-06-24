@@ -22,7 +22,9 @@ export default auth((req) => {
     pathname.startsWith("/portal/") ||
     pathname.startsWith("/api/portal/") ||
     // Docs API routes use session auth internally — let them handle 401 themselves
-    pathname.startsWith("/api/docs/")
+    pathname.startsWith("/api/docs/") ||
+    // Product docs — public, no auth required
+    pathname.startsWith("/help")
 
   if (!isLoggedIn && !isPublic) {
     return Response.redirect(new URL("/login", req.nextUrl))
