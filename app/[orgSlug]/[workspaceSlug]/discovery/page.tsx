@@ -108,10 +108,10 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   );
 
   return (
-    <main className="flex flex-col flex-1 p-6 gap-6 min-w-0">
+    <main className="flex flex-col flex-1 p-8 gap-6 min-w-0">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Discovery</h1>
-        <p className="text-sm text-muted-foreground">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Discovery</h1>
+        <p className="text-sm text-slate-500 mt-1">
           Opportunity Solution Tree for {workspace.name}
         </p>
       </div>

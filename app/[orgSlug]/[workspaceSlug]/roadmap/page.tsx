@@ -66,8 +66,8 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   return (
     <div className="flex flex-col flex-1 p-8 gap-6 min-h-0">
       <div className="shrink-0">
-        <h1 className="text-2xl font-semibold tracking-tight">Roadmap</h1>
-        <p className="text-muted-foreground text-sm mt-1">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Roadmap</h1>
+        <p className="text-slate-500 text-sm mt-1">
           Drag items between horizons to update your plan.
         </p>
       </div>

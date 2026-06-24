@@ -57,15 +57,13 @@ export function AddItemForm({ workspaceId, horizon, revalidatePathStr, onAdd }: 
 
   if (!open) {
     return (
-      <Button
-        variant="ghost"
-        size="sm"
-        className="w-full text-muted-foreground hover:text-foreground"
+      <button
         onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 w-full rounded-lg px-2.5 py-2 text-xs font-medium text-slate-400 hover:text-indigo-600 hover:bg-white/70 transition-all duration-150"
       >
-        <PlusIcon className="size-3.5" />
+        <PlusIcon className="w-3.5 h-3.5" />
         Add item
-      </Button>
+      </button>
     );
   }
 

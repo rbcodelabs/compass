@@ -45,7 +45,7 @@ export function CycleCard({ cycle, orgSlug, workspaceSlug }: CycleCardProps) {
       href={`/${orgSlug}/${workspaceSlug}/okrs/${cycle.id}`}
       className="block group"
     >
-      <Card className="transition-shadow group-hover:shadow-md">
+      <Card className="bg-white shadow-sm transition-all duration-150 group-hover:shadow-md group-hover:-translate-y-0.5">
         <CardHeader>
           <div className="flex items-start justify-between gap-2">
             <CardTitle>{cycle.title}</CardTitle>

@@ -8,6 +8,16 @@ export const authConfig: NextAuthConfig = {
   providers: [
     Resend({
       from: process.env.AUTH_EMAIL_FROM ?? "Compass <noreply@compass.app>",
+      // In local dev, log the magic link to the console instead of emailing it.
+      ...(process.env.NODE_ENV === "development"
+        ? {
+            sendVerificationRequest({ url }) {
+              console.log("\n🔗 MAGIC LINK (dev mode — check terminal):");
+              console.log(url);
+              console.log();
+            },
+          }
+        : {}),
     }),
   ],
   pages: {

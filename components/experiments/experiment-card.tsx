@@ -31,7 +31,7 @@ export function ExperimentCard({ experiment, href }: ExperimentCardProps) {
 
   return (
     <Link href={href} className="block group">
-      <Card className="transition-shadow group-hover:shadow-md">
+      <Card className="bg-white shadow-sm transition-all duration-150 group-hover:shadow-md">
         <CardHeader>
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="line-clamp-2 text-sm font-medium">

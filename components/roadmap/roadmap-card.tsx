@@ -65,7 +65,7 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive }: Props) {
     <div ref={setNodeRef} style={style} className="touch-none">
       <Card
         size="sm"
-        className="w-full transition-shadow data-[dragging=true]:shadow-lg data-[dragging=true]:ring-2 data-[dragging=true]:ring-foreground/20"
+        className="w-full bg-white shadow-sm transition-all duration-150 data-[dragging=true]:shadow-xl data-[dragging=true]:ring-2 data-[dragging=true]:ring-indigo-200"
         data-dragging={isDragging ? true : undefined}
       >
         <CardHeader className="flex-row items-start gap-2 pr-2">

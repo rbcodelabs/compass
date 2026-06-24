@@ -6,6 +6,7 @@ import { getWorkspace } from "@/lib/workspace"
 import { ExperimentCard } from "@/components/experiments/experiment-card"
 import { CreateExperimentForm } from "@/components/experiments/create-experiment-form"
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar"
+import { FlaskConical } from "lucide-react"
 import type { Experiment } from "@prisma/client"
 import type { ExperimentStatus, SquadData } from "@/lib/types"
 
@@ -18,11 +19,11 @@ interface ExperimentsPageProps {
   searchParams: Promise<{ squad?: string }>
 }
 
-const COLUMNS: { status: ExperimentStatus; label: string }[] = [
-  { status: "DESIGNING", label: "Designing" },
-  { status: "RUNNING", label: "Running" },
-  { status: "COMPLETE", label: "Complete" },
-  { status: "KILLED", label: "Killed" },
+const COLUMNS: { status: ExperimentStatus; label: string; color: string }[] = [
+  { status: "DESIGNING", label: "Designing", color: "bg-slate-400" },
+  { status: "RUNNING", label: "Running", color: "bg-blue-500" },
+  { status: "COMPLETE", label: "Complete", color: "bg-emerald-500" },
+  { status: "KILLED", label: "Killed", color: "bg-red-400" },
 ]
 
 export default async function ExperimentsPage({
@@ -76,10 +77,10 @@ export default async function ExperimentsPage({
 
   return (
     <main className="flex flex-col flex-1 p-8 gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Experiments</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Experiments</h1>
+          <p className="text-sm text-slate-500 mt-1">
             Design, run, and conclude experiments to validate assumptions.
           </p>
         </div>
@@ -91,23 +92,28 @@ export default async function ExperimentsPage({
       </Suspense>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
-        {COLUMNS.map(({ status, label }) => {
+        {COLUMNS.map(({ status, label, color }) => {
           const cards = byStatus[status] ?? []
           return (
-            <div key={status} className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-                  {label}
-                </h2>
-                <span className="text-xs text-muted-foreground bg-muted rounded-full px-2 py-0.5">
+            <div key={status} className="flex flex-col gap-2">
+              {/* Column header */}
+              <div className="flex items-center gap-2 px-1 mb-1">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${color}`} aria-hidden="true" />
+                <span className="text-sm font-semibold text-slate-700">{label}</span>
+                <span className="ml-auto text-xs font-medium text-slate-400 bg-slate-200/60 rounded-full px-2 py-0.5 tabular-nums">
                   {cards.length}
                 </span>
               </div>
-              <div className="flex flex-col gap-2">
+
+              {/* Card well */}
+              <div className="flex flex-col gap-2 rounded-xl bg-slate-100/80 p-2.5 min-h-[180px]">
                 {cards.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4 text-center">
-                    No experiments
-                  </p>
+                  <div className="flex flex-col items-center justify-center gap-2 flex-1 min-h-[120px] rounded-lg border border-dashed border-slate-300/70 py-6">
+                    <div className="w-8 h-8 rounded-full bg-slate-200/70 flex items-center justify-center">
+                      <FlaskConical className="w-4 h-4 text-slate-400" />
+                    </div>
+                    <p className="text-xs text-slate-400">No experiments yet</p>
+                  </div>
                 ) : (
                   cards.map((exp) => (
                     <ExperimentCard

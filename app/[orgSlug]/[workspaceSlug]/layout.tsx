@@ -33,7 +33,7 @@ export default async function WorkspaceLayout({
         userName={session.user.name ?? session.user.email ?? ""}
         userImage={session.user.image ?? undefined}
       />
-      <main className="flex-1 overflow-y-auto bg-white">
+      <main className="flex-1 overflow-y-auto bg-slate-50">
         {children}
       </main>
     </div>

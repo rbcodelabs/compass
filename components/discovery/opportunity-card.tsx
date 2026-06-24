@@ -53,7 +53,7 @@ export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) 
   return (
     <Card
       size="sm"
-      className="w-[280px] shrink-0 opacity-100 transition-opacity data-[pending]:opacity-60"
+      className="w-full shrink-0 opacity-100 transition-all duration-150 bg-white shadow-sm hover:shadow-md data-[pending]:opacity-60 cursor-pointer"
       data-pending={isPending ? true : undefined}
     >
       <CardHeader>

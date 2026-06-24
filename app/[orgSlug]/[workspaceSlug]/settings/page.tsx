@@ -53,10 +53,10 @@ export default async function SettingsPage({ params }: Props) {
   }));
 
   return (
-    <main className="flex flex-col flex-1 p-6 gap-8 max-w-3xl">
+    <main className="flex flex-col flex-1 p-8 gap-8 max-w-3xl">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground">{workspace.name}</p>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Settings</h1>
+        <p className="text-sm text-slate-500 mt-1">{workspace.name}</p>
       </div>
 
       <section className="flex flex-col gap-4">

@@ -1,26 +1,90 @@
 @import "tailwindcss";
 
+/* ── Design tokens ─────────────────────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Backgrounds */
+  --background: oklch(0.984 0.003 264.5);        /* slate-50 */
+  --foreground: oklch(0.129 0.042 264.1);         /* slate-900 */
+
+  /* Cards / surfaces */
+  --card:             oklch(1 0 0);               /* white */
+  --card-foreground:  oklch(0.129 0.042 264.1);
+
+  /* Popovers */
+  --popover:            oklch(1 0 0);
+  --popover-foreground: oklch(0.129 0.042 264.1);
+
+  /* Primary — Indigo-600 */
+  --primary:            oklch(0.511 0.254 276.9);
+  --primary-foreground: oklch(1 0 0);
+
+  /* Secondary — Slate-100 */
+  --secondary:            oklch(0.961 0.011 264.7);
+  --secondary-foreground: oklch(0.194 0.035 264.2);
+
+  /* Muted — Slate-100 */
+  --muted:            oklch(0.961 0.011 264.7);
+  --muted-foreground: oklch(0.547 0.015 264.4);   /* slate-500 */
+
+  /* Accent */
+  --accent:            oklch(0.961 0.011 264.7);
+  --accent-foreground: oklch(0.194 0.035 264.2);
+
+  /* Destructive */
+  --destructive:            oklch(0.577 0.245 27.3);
+  --destructive-foreground: oklch(1 0 0);
+
+  /* Borders & inputs */
+  --border: oklch(0.906 0.009 264.5);   /* slate-200 */
+  --input:  oklch(0.906 0.009 264.5);
+  --ring:   oklch(0.511 0.254 276.9);   /* indigo-600 */
+
+  /* Radius scale */
+  --radius: 0.625rem;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  /* Fonts */
+  --font-sans: var(--font-jakarta);
   --font-mono: var(--font-geist-mono);
+
+  /* Colors */
+  --color-background:         var(--background);
+  --color-foreground:         var(--foreground);
+  --color-card:               var(--card);
+  --color-card-foreground:    var(--card-foreground);
+  --color-popover:            var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary:            var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary:            var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted:            var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent:            var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive:            var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input:  var(--input);
+  --color-ring:   var(--ring);
+
+  /* Radius */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* ── Base styles ──────────────────────────────────────────────────────── */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-jakarta), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*, *::before, *::after {
+  border-color: var(--border);
 }

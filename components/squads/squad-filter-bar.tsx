@@ -26,14 +26,14 @@ export function SquadFilterBar({ squads }: Props) {
   }
 
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-xs text-muted-foreground font-medium mr-1">Squad:</span>
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="text-xs text-slate-400 font-medium mr-1">Filter by squad:</span>
       <button
         onClick={() => setFilter(null)}
-        className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors border ${
+        className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
           !activeSquadId
-            ? "bg-foreground text-background border-foreground"
-            : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
+            ? "bg-slate-800 text-white shadow-sm"
+            : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
         }`}
       >
         All
@@ -42,20 +42,20 @@ export function SquadFilterBar({ squads }: Props) {
         <button
           key={squad.id}
           onClick={() => setFilter(squad.id === activeSquadId ? null : squad.id)}
-          className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors border ${
+          className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
             activeSquadId === squad.id
-              ? "border-transparent text-white"
-              : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
+              ? "text-white shadow-sm"
+              : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
           }`}
           style={
             activeSquadId === squad.id
-              ? { backgroundColor: squad.color, borderColor: squad.color }
+              ? { backgroundColor: squad.color }
               : {}
           }
         >
           <span
-            className="w-2 h-2 rounded-full shrink-0"
-            style={{ backgroundColor: squad.color }}
+            className="w-1.5 h-1.5 rounded-full shrink-0"
+            style={{ backgroundColor: activeSquadId === squad.id ? "rgba(255,255,255,0.7)" : squad.color }}
           />
           {squad.name}
         </button>
