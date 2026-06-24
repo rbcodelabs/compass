@@ -6,8 +6,9 @@ import getPrisma from "@/lib/db";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { SolutionsList } from "@/components/discovery/solutions-list";
 import { AddSolutionForm } from "@/components/discovery/add-solution-form";
-import { OpportunityOverview } from "@/components/discovery/opportunity-overview";
+import { OpportunityHeader } from "@/components/discovery/opportunity-header";
 import { OpportunityExperimentsTab } from "@/components/discovery/opportunity-experiments-tab";
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import type { ExperimentRef } from "@/components/discovery/opportunity-experiments-tab";
 import type {
   OpportunityStatus,
@@ -111,7 +112,7 @@ export default async function OpportunityDetailPage({ params }: Props) {
     color: s.color,
   }));
 
-  // Fetch available key results for this workspace (to power the KR link picker)
+  // Fetch available key results for this workspace
   const allKRs = await prisma.keyResult.findMany({
     where: {
       objective: {
@@ -138,7 +139,6 @@ export default async function OpportunityDetailPage({ params }: Props) {
     orderBy: { order: "asc" },
   });
 
-  // Fetch values for this opportunity
   const fieldValues = fieldDefs.length > 0
     ? await prisma.customFieldValue.findMany({
         where: {
@@ -162,7 +162,7 @@ export default async function OpportunityDetailPage({ params }: Props) {
       currentValue: (valueByFieldId.get(f.id) ?? null) as CustomFieldValue,
     }));
 
-  // Flatten all experiments across solutions/assumptions, attaching assumptionTitle.
+  // Flatten all experiments across solutions/assumptions
   const allExperiments: ExperimentRef[] = opportunity.solutions.flatMap((sol) =>
     sol.assumptions.flatMap((assumption) =>
       assumption.experiments.map((exp) => ({
@@ -176,87 +176,103 @@ export default async function OpportunityDetailPage({ params }: Props) {
   const boardPath = `/${orgSlug}/${workspaceSlug}/discovery`;
   const detailPath = `/${orgSlug}/${workspaceSlug}/discovery/${opportunityId}`;
 
+  const hasCustomFields = customFields.length > 0;
+
   return (
-    <main className="flex flex-col flex-1 p-6 gap-6 min-w-0 max-w-4xl">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Link
-          href={boardPath}
-          className="flex items-center gap-1 hover:text-foreground transition-colors"
-        >
-          <ChevronLeftIcon className="size-4" />
-          Discovery
-        </Link>
-      </div>
+    <div className="min-h-full p-8">
+      <div className="max-w-4xl mx-auto flex flex-col gap-6">
+        {/* Back nav */}
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Link
+            href={boardPath}
+            className="flex items-center gap-1 hover:text-foreground transition-colors"
+          >
+            <ChevronLeftIcon className="size-4" />
+            Discovery
+          </Link>
+        </div>
 
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">{opportunity.title}</h1>
-        {opportunity.customerSegment && (
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {opportunity.customerSegment}
-          </p>
-        )}
-      </div>
+        {/* Header — status, title, description, KR, squad */}
+        <OpportunityHeader
+          opportunity={{
+            id: opportunity.id,
+            title: opportunity.title,
+            description: opportunity.description,
+            customerSegment: opportunity.customerSegment,
+            status: opportunity.status as OpportunityStatus,
+            squadId: opportunity.squadId,
+            linkedKeyResult: opportunity.linkedKeyResult,
+          }}
+          availableKeyResults={availableKeyResults}
+          squads={squads}
+          revalidatePathStr={detailPath}
+        />
 
-      <Tabs defaultValue="solutions">
-        <TabsList>
-          <TabsTrigger value="solutions">
-            Solutions ({opportunity.solutions.length})
-          </TabsTrigger>
-          <TabsTrigger value="experiments">
-            Experiments ({experimentCount})
-          </TabsTrigger>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-        </TabsList>
+        {/* Tabs */}
+        <Tabs defaultValue="solutions">
+          <TabsList>
+            <TabsTrigger value="solutions">
+              Solutions ({opportunity.solutions.length})
+            </TabsTrigger>
+            <TabsTrigger value="experiments">
+              Experiments ({experimentCount})
+            </TabsTrigger>
+            {hasCustomFields && (
+              <TabsTrigger value="details">Details</TabsTrigger>
+            )}
+          </TabsList>
 
-        <TabsContent value="solutions" className="flex flex-col gap-3 pt-4">
-          {opportunity.solutions.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              No solutions yet. Add one below.
-            </p>
+          <TabsContent value="solutions" className="flex flex-col gap-3 pt-4">
+            {opportunity.solutions.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                No solutions yet. Add one below.
+              </p>
+            )}
+            <SolutionsList
+              key={opportunity.solutions.map((s) => s.id).join(",")}
+              solutions={opportunity.solutions.map((solution) => ({
+                ...solution,
+                sortOrder: solution.sortOrder,
+                status: solution.status as SolutionStatus,
+                assumptions: solution.assumptions.map((a) => ({
+                  ...a,
+                  sortOrder: a.sortOrder,
+                  riskLevel: a.riskLevel as RiskLevel,
+                  status: a.status as AssumptionStatus,
+                })),
+              }))}
+              revalidatePathStr={detailPath}
+              workspaceId={workspace.id}
+              opportunityId={opportunityId}
+              squadId={opportunity.squadId}
+            />
+            <AddSolutionForm
+              opportunityId={opportunityId}
+              revalidatePathStr={detailPath}
+            />
+          </TabsContent>
+
+          <TabsContent value="experiments" className="pt-4">
+            <OpportunityExperimentsTab
+              experiments={allExperiments}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+            />
+          </TabsContent>
+
+          {hasCustomFields && (
+            <TabsContent value="details" className="pt-4">
+              <div className="max-w-xl">
+                <CustomFieldsPanel
+                  fields={customFields}
+                  objectId={opportunityId}
+                  revalidatePathStr={detailPath}
+                />
+              </div>
+            </TabsContent>
           )}
-          <SolutionsList
-            key={opportunity.solutions.map((s) => s.id).join(",")}
-            solutions={opportunity.solutions.map((solution) => ({
-              ...solution,
-              sortOrder: solution.sortOrder,
-              status: solution.status as SolutionStatus,
-              assumptions: solution.assumptions.map((a) => ({
-                ...a,
-                sortOrder: a.sortOrder,
-                riskLevel: a.riskLevel as RiskLevel,
-                status: a.status as AssumptionStatus,
-              })),
-            }))}
-            revalidatePathStr={detailPath}
-            workspaceId={workspace.id}
-            opportunityId={opportunityId}
-            squadId={opportunity.squadId}
-          />
-          <AddSolutionForm
-            opportunityId={opportunityId}
-            revalidatePathStr={detailPath}
-          />
-        </TabsContent>
-
-        <TabsContent value="experiments" className="pt-4">
-          <OpportunityExperimentsTab
-            experiments={allExperiments}
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-          />
-        </TabsContent>
-
-        <TabsContent value="overview" className="pt-4">
-          <OpportunityOverview
-            opportunity={{ ...opportunity, status: opportunity.status as OpportunityStatus }}
-            revalidatePathStr={detailPath}
-            availableKeyResults={availableKeyResults}
-            customFields={customFields}
-            squads={squads}
-            currentSquadId={opportunity.squadId}
-          />
-        </TabsContent>
-      </Tabs>
-    </main>
+        </Tabs>
+      </div>
+    </div>
   );
 }
