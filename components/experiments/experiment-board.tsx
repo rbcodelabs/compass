@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useCallback } from "react";
+import { useState, useTransition } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -20,38 +20,35 @@ import {
   arrayMove,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { Lightbulb } from "lucide-react";
-import { OpportunityCard, type OpportunityCardData } from "./opportunity-card";
-import { CreateOpportunityForm } from "./create-opportunity-form";
+import { FlaskConical } from "lucide-react";
+import { ExperimentCard, type ExperimentCardData } from "./experiment-card";
 import {
-  moveOpportunity,
-  reorderOpportunity,
-} from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
-import type { OpportunityStatus, SquadData } from "@/lib/types";
+  moveExperiment,
+  reorderExperiment,
+} from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions";
+import type { ExperimentStatus } from "@/lib/types";
 
-const COLUMNS: { status: OpportunityStatus; label: string; color: string }[] = [
-  { status: "EXPLORING", label: "Exploring", color: "bg-violet-500" },
-  { status: "VALIDATING", label: "Validating", color: "bg-amber-500" },
-  { status: "PRIORITIZED", label: "Prioritized", color: "bg-blue-500" },
-  { status: "ACTIVE", label: "Active", color: "bg-emerald-500" },
+const COLUMNS: { status: ExperimentStatus; label: string; color: string }[] = [
+  { status: "DESIGNING", label: "Designing", color: "bg-slate-400" },
+  { status: "RUNNING", label: "Running", color: "bg-blue-500" },
+  { status: "COMPLETE", label: "Complete", color: "bg-emerald-500" },
+  { status: "KILLED", label: "Killed", color: "bg-red-400" },
 ];
 
-const ALL_STATUSES: OpportunityStatus[] = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"];
+const ALL_STATUSES: ExperimentStatus[] = ["DESIGNING", "RUNNING", "COMPLETE", "KILLED"];
 
-type ColumnMap = Record<OpportunityStatus, OpportunityCardData[]>;
+type ColumnMap = Record<ExperimentStatus, ExperimentCardData[]>;
 
-function buildColumnMap(
-  opportunitiesByStatus: Record<OpportunityStatus, OpportunityCardData[]>
-): ColumnMap {
+function buildColumnMap(experiments: ExperimentCardData[]): ColumnMap {
   return ALL_STATUSES.reduce((acc, status) => {
-    acc[status] = (opportunitiesByStatus[status] ?? []).sort(
-      (a, b) => a.sortOrder - b.sortOrder
-    );
+    acc[status] = experiments
+      .filter((e) => e.status === status)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
     return acc;
   }, {} as ColumnMap);
 }
 
-function findStatus(columns: ColumnMap, itemId: string): OpportunityStatus | null {
+function findStatus(columns: ColumnMap, itemId: string): ExperimentStatus | null {
   for (const status of ALL_STATUSES) {
     if (columns[status].some((i) => i.id === itemId)) return status;
   }
@@ -60,24 +57,22 @@ function findStatus(columns: ColumnMap, itemId: string): OpportunityStatus | nul
 
 // ─── Column drop target ───────────────────────────────────────────────────────
 
-function DiscoveryColumn({
+function ExperimentColumn({
   status,
   label,
   color,
   items,
   orgSlug,
   workspaceSlug,
-  workspaceId,
-  squads,
+  revalidatePathStr,
 }: {
-  status: OpportunityStatus;
+  status: ExperimentStatus;
   label: string;
   color: string;
-  items: OpportunityCardData[];
+  items: ExperimentCardData[];
   orgSlug: string;
   workspaceSlug: string;
-  workspaceId: string;
-  squads: SquadData[];
+  revalidatePathStr: string;
 }) {
   const itemIds = items.map((i) => i.id);
   const { setNodeRef, isOver } = useDroppable({
@@ -86,7 +81,7 @@ function DiscoveryColumn({
   });
 
   return (
-    <div className="flex flex-col gap-2 min-w-[280px] w-[280px]">
+    <div className="flex flex-col gap-2 min-w-[280px] flex-1">
       {/* Column header */}
       <div className="flex items-center gap-2 px-1 mb-1">
         <span className={`w-2 h-2 rounded-full shrink-0 ${color}`} aria-hidden="true" />
@@ -115,29 +110,22 @@ function DiscoveryColumn({
               ].join(" ")}
             >
               <div className="w-8 h-8 rounded-full bg-slate-200/70 flex items-center justify-center">
-                <Lightbulb className="w-4 h-4 text-slate-400" />
+                <FlaskConical className="w-4 h-4 text-slate-400" />
               </div>
-              <p className="text-xs text-slate-400">No opportunities yet</p>
+              <p className="text-xs text-slate-400">No experiments yet</p>
             </div>
           ) : (
-            items.map((opp) => (
-              <OpportunityCard
-                key={opp.id}
-                opportunity={opp}
-                orgSlug={orgSlug}
-                workspaceSlug={workspaceSlug}
+            items.map((exp) => (
+              <ExperimentCard
+                key={exp.id}
+                experiment={exp}
+                href={`/${orgSlug}/${workspaceSlug}/experiments/${exp.id}`}
+                revalidatePathStr={revalidatePathStr}
               />
             ))
           )}
         </SortableContext>
       </div>
-
-      {/* Add button */}
-      <CreateOpportunityForm
-        workspaceId={workspaceId}
-        defaultStatus={status}
-        squads={squads}
-      />
     </div>
   );
 }
@@ -145,27 +133,25 @@ function DiscoveryColumn({
 // ─── Board ────────────────────────────────────────────────────────────────────
 
 type Props = {
-  opportunitiesByStatus: Record<OpportunityStatus, OpportunityCardData[]>;
+  experiments: ExperimentCardData[];
   orgSlug: string;
   workspaceSlug: string;
   workspaceId: string;
-  squads?: SquadData[];
 };
 
-export function OpportunityBoard({
-  opportunitiesByStatus,
+export function ExperimentBoard({
+  experiments,
   orgSlug,
   workspaceSlug,
   workspaceId,
-  squads = [],
 }: Props) {
-  const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/discovery`;
+  const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/experiments`;
 
   const [columns, setColumns] = useState<ColumnMap>(() =>
-    buildColumnMap(opportunitiesByStatus)
+    buildColumnMap(experiments)
   );
-  const [activeItem, setActiveItem] = useState<OpportunityCardData | null>(null);
-  const [dragSourceStatus, setDragSourceStatus] = useState<OpportunityStatus | null>(null);
+  const [activeItem, setActiveItem] = useState<ExperimentCardData | null>(null);
+  const [dragSourceStatus, setDragSourceStatus] = useState<ExperimentStatus | null>(null);
 
   const [, startTransition] = useTransition();
 
@@ -196,9 +182,9 @@ export function OpportunityBoard({
     const sourceStatus = findStatus(columns, activeId);
     if (!sourceStatus) return;
 
-    let destStatus: OpportunityStatus;
+    let destStatus: ExperimentStatus;
     if (overId.startsWith("column-")) {
-      destStatus = overId.replace("column-", "") as OpportunityStatus;
+      destStatus = overId.replace("column-", "") as ExperimentStatus;
     } else {
       destStatus = findStatus(columns, overId) ?? sourceStatus;
     }
@@ -253,12 +239,10 @@ export function OpportunityBoard({
     }
 
     if (dragSourceStatus && dragSourceStatus !== currentStatus) {
-      // Cross-column move — persist
       startTransition(async () => {
-        await moveOpportunity(activeId, currentStatus, workspaceId, revalidatePathStr);
+        await moveExperiment(activeId, currentStatus, workspaceId, revalidatePathStr);
       });
     } else if (!overId.startsWith("column-") && overId !== activeId) {
-      // Same-column reorder
       const columnItems = columns[currentStatus];
       const oldIndex = columnItems.findIndex((i) => i.id === activeId);
       const newIndex = columnItems.findIndex((i) => i.id === overId);
@@ -271,23 +255,13 @@ export function OpportunityBoard({
         setColumns((prev) => ({ ...prev, [currentStatus]: reordered }));
 
         startTransition(async () => {
-          await reorderOpportunity(activeId, newIndex, revalidatePathStr);
+          await reorderExperiment(activeId, newIndex, revalidatePathStr);
         });
       }
     }
 
     setDragSourceStatus(null);
   }
-
-  const handleArchive = useCallback((itemId: string) => {
-    setColumns((prev) => {
-      const next = { ...prev } as ColumnMap;
-      for (const status of ALL_STATUSES) {
-        next[status] = prev[status].filter((i) => i.id !== itemId);
-      }
-      return next;
-    });
-  }, []);
 
   return (
     <DndContext
@@ -297,9 +271,9 @@ export function OpportunityBoard({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex gap-4 overflow-x-auto pb-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
         {COLUMNS.map(({ status, label, color }) => (
-          <DiscoveryColumn
+          <ExperimentColumn
             key={status}
             status={status}
             label={label}
@@ -307,8 +281,7 @@ export function OpportunityBoard({
             items={columns[status]}
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
-            workspaceId={workspaceId}
-            squads={squads}
+            revalidatePathStr={revalidatePathStr}
           />
         ))}
       </div>
@@ -316,10 +289,10 @@ export function OpportunityBoard({
       <DragOverlay>
         {activeItem ? (
           <div className="rotate-1 scale-105">
-            <OpportunityCard
-              opportunity={activeItem}
-              orgSlug={orgSlug}
-              workspaceSlug={workspaceSlug}
+            <ExperimentCard
+              experiment={activeItem}
+              href={`/${orgSlug}/${workspaceSlug}/experiments/${activeItem.id}`}
+              revalidatePathStr={revalidatePathStr}
             />
           </div>
         ) : null}

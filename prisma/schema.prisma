@@ -155,6 +155,7 @@ model Objective {
   description       String?    @db.Text
   owner             String?    @db.VarChar(255)
   status            String     @default("ON_TRACK") @db.VarChar(50)
+  sortOrder         Int        @default(0) @map("sort_order")
   createdAt         DateTime   @default(now()) @map("created_at")
   updatedAt         DateTime   @default(now()) @map("updated_at")
   cycle             OKRCycle   @relation(fields: [cycleId], references: [id])
@@ -172,6 +173,7 @@ model KeyResult {
   target               Float
   current              Float       @default(0)
   unit                 String?     @db.VarChar(50)
+  sortOrder            Int         @default(0) @map("sort_order")
   createdAt            DateTime    @default(now()) @map("created_at")
   updatedAt            DateTime    @default(now()) @map("updated_at")
   objective            Objective   @relation(fields: [objectiveId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -204,6 +206,7 @@ model Opportunity {
   description       String?     @db.Text
   customerSegment   String?     @map("customer_segment") @db.VarChar(255)
   status            String      @default("EXPLORING") @db.VarChar(50)
+  sortOrder         Int         @default(0) @map("sort_order")
   linkedKeyResultId String?     @map("linked_key_result_id") @db.Uuid
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @default(now()) @map("updated_at")
@@ -222,6 +225,7 @@ model Solution {
   title         String      @db.VarChar(255)
   description   String?     @db.Text
   status        String      @default("IDEA") @db.VarChar(50)
+  sortOrder     Int         @default(0) @map("sort_order")
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @default(now()) @map("updated_at")
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id])
@@ -237,6 +241,7 @@ model Assumption {
   title       String      @db.VarChar(255)
   riskLevel   String      @map("risk_level") @default("MEDIUM") @db.VarChar(50)
   status      String      @default("UNTESTED") @db.VarChar(50)
+  sortOrder   Int         @default(0) @map("sort_order")
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @default(now()) @map("updated_at")
   solution    Solution    @relation(fields: [solutionId], references: [id])
@@ -257,6 +262,7 @@ model Experiment {
   method        String     @db.Text
   killCondition String     @map("kill_condition") @db.Text
   status        String     @default("DESIGNING") @db.VarChar(50)
+  sortOrder     Int        @default(0) @map("sort_order")
   startDate     DateTime?  @map("start_date")
   endDate       DateTime?  @map("end_date")
   conclusion    String?    @db.VarChar(50)

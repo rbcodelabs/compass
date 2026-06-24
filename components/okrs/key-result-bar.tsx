@@ -1,6 +1,10 @@
 "use client";
 
+import * as React from "react";
 import { useTransition } from "react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 import { CheckInForm } from "@/components/okrs/check-in-form";
 import { CardMenu } from "@/components/ui/card-menu";
 import { deleteKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
@@ -28,6 +32,22 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug }: KeyResultBar
   const unit = keyResult.unit ? ` ${keyResult.unit}` : "";
   const okrsPath = `/${orgSlug}/${workspaceSlug}/okrs`;
 
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: keyResult.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
   function handleDelete() {
     startTransition(async () => {
       await deleteKeyResult(keyResult.id, okrsPath);
@@ -35,9 +55,21 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug }: KeyResultBar
   }
 
   return (
-    <div className="flex flex-col gap-1.5 group">
+    <div ref={setNodeRef} style={style} className="flex flex-col gap-1.5 group touch-none">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm text-foreground">{keyResult.title}</span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {/* Drag handle */}
+          <button
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            className="shrink-0 cursor-grab touch-none text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing focus-visible:outline-none rounded"
+            aria-label="Drag to reorder"
+          >
+            <GripVertical className="size-3.5" />
+          </button>
+          <span className="text-sm text-foreground truncate">{keyResult.title}</span>
+        </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-muted-foreground">
             {keyResult.current}{unit} / {keyResult.target}{unit}

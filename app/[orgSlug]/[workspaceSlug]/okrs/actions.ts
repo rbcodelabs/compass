@@ -235,3 +235,33 @@ export async function deleteKeyResult(
   await prisma.keyResult.delete({ where: { id: keyResultId } });
   revalidatePath(revalidatePathStr);
 }
+
+// ─── Reorder Objective ────────────────────────────────────────────────────────
+
+export async function reorderObjective(
+  objectiveId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.objective.update({
+    where: { id: objectiveId },
+    data: { sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Reorder Key Result ───────────────────────────────────────────────────────
+
+export async function reorderKeyResult(
+  keyResultId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.keyResult.update({
+    where: { id: keyResultId },
+    data: { sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
+}

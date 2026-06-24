@@ -120,3 +120,42 @@ export async function archiveExperiment(
   })
   revalidatePath(revalidatePathStr)
 }
+
+// ─── Move Experiment (cross-column status change) ─────────────────────────────
+
+export async function moveExperiment(
+  experimentId: string,
+  status: ExperimentStatus,
+  workspaceId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma()
+
+  const lastItem = await prisma.experiment.findFirst({
+    where: { workspaceId, status, NOT: { id: experimentId } },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  })
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0
+
+  await prisma.experiment.update({
+    where: { id: experimentId },
+    data: { status, sortOrder },
+  })
+  revalidatePath(revalidatePathStr)
+}
+
+// ─── Reorder Experiment (same-column sort) ────────────────────────────────────
+
+export async function reorderExperiment(
+  experimentId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma()
+  await prisma.experiment.update({
+    where: { id: experimentId },
+    data: { sortOrder },
+  })
+  revalidatePath(revalidatePathStr)
+}

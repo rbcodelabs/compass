@@ -34,6 +34,10 @@ const MIGRATIONS = [
     name: "006_api_keys",
     filePath: path.join(process.cwd(), "prisma/migrations/006_api_keys/migration.sql"),
   },
+  {
+    name: "007_sort_order",
+    filePath: path.join(process.cwd(), "prisma/migrations/007_sort_order/migration.sql"),
+  },
 ];
 
 async function getPool(): Promise<Pool> {

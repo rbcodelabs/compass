@@ -4,7 +4,7 @@ import { ChevronLeftIcon } from "lucide-react";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { SolutionCard } from "@/components/discovery/solution-card";
+import { SolutionsList } from "@/components/discovery/solutions-list";
 import { AddSolutionForm } from "@/components/discovery/add-solution-form";
 import { OpportunityOverview } from "@/components/discovery/opportunity-overview";
 import { OpportunityExperimentsTab } from "@/components/discovery/opportunity-experiments-tab";
@@ -74,10 +74,10 @@ export default async function OpportunityDetailPage({ params }: Props) {
           },
         },
         solutions: {
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           include: {
             assumptions: {
-              orderBy: { createdAt: "asc" },
+              orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
               include: {
                 experiments: {
                   select: {
@@ -214,24 +214,24 @@ export default async function OpportunityDetailPage({ params }: Props) {
               No solutions yet. Add one below.
             </p>
           )}
-          {opportunity.solutions.map((solution) => (
-            <SolutionCard
-              key={solution.id}
-              solution={{
-                ...solution,
-                status: solution.status as SolutionStatus,
-                assumptions: solution.assumptions.map((a) => ({
-                  ...a,
-                  riskLevel: a.riskLevel as RiskLevel,
-                  status: a.status as AssumptionStatus,
-                })),
-              }}
-              revalidatePathStr={detailPath}
-              workspaceId={workspace.id}
-              opportunityId={opportunityId}
-              squadId={opportunity.squadId}
-            />
-          ))}
+          <SolutionsList
+            key={opportunity.solutions.map((s) => s.id).join(",")}
+            solutions={opportunity.solutions.map((solution) => ({
+              ...solution,
+              sortOrder: solution.sortOrder,
+              status: solution.status as SolutionStatus,
+              assumptions: solution.assumptions.map((a) => ({
+                ...a,
+                sortOrder: a.sortOrder,
+                riskLevel: a.riskLevel as RiskLevel,
+                status: a.status as AssumptionStatus,
+              })),
+            }))}
+            revalidatePathStr={detailPath}
+            workspaceId={workspace.id}
+            opportunityId={opportunityId}
+            squadId={opportunity.squadId}
+          />
           <AddSolutionForm
             opportunityId={opportunityId}
             revalidatePathStr={detailPath}

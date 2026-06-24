@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
-import { ObjectiveRow } from "@/components/okrs/objective-row";
+import { ObjectivesList } from "@/components/okrs/objectives-list";
 import { AddObjectiveForm } from "@/components/okrs/add-objective-form";
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
 import type {
@@ -79,7 +79,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
         cycleId: cycle.id,
         ...(squadFilter ? { squadId: squadFilter } : {}),
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     }),
   ]);
 
@@ -96,7 +96,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
     objectiveIds.length > 0
       ? await prisma.keyResult.findMany({
           where: { objectiveId: { in: objectiveIds } },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         })
       : [];
 
@@ -193,22 +193,19 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
 
       {/* Objectives list + inline add */}
       <div className="flex flex-col gap-4">
-        {objectivesWithData.map((obj) => (
-          <ObjectiveRow
-            key={obj.id}
-            objective={obj}
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-            revalidatePathStr={cyclePath}
-            availableKRs={allKRsInCycle.filter(
-              (kr) => kr.objectiveId !== obj.id
-            )}
-            parentKeyResultId={
+        <ObjectivesList
+          key={objectivesWithData.map((o) => o.id).join(",")}
+          objectives={objectivesWithData.map((obj) => ({
+            ...obj,
+            parentKeyResultId:
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (obj as any).parentKeyResultId ?? null
-            }
-          />
-        ))}
+              (obj as any).parentKeyResultId ?? null,
+          }))}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          cyclePath={cyclePath}
+          availableKRs={allKRsInCycle}
+        />
 
         <AddObjectiveForm
           cycleId={cycle.id}

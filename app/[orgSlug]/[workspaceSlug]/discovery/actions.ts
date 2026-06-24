@@ -157,3 +157,73 @@ export async function deleteAssumption(
   await prisma.assumption.delete({ where: { id: assumptionId } });
   revalidatePath(revalidatePathStr);
 }
+
+// ─── Move Opportunity (cross-column status change) ────────────────────────────
+
+export async function moveOpportunity(
+  opportunityId: string,
+  status: OpportunityStatus,
+  workspaceId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+
+  // Place moved item at end of destination column.
+  const lastItem = await prisma.opportunity.findFirst({
+    where: { workspaceId, status, NOT: { id: opportunityId } },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
+
+  await prisma.opportunity.update({
+    where: { id: opportunityId },
+    data: { status, sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Reorder Opportunity (same-column sort) ───────────────────────────────────
+
+export async function reorderOpportunity(
+  opportunityId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.opportunity.update({
+    where: { id: opportunityId },
+    data: { sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Reorder Solution ─────────────────────────────────────────────────────────
+
+export async function reorderSolution(
+  solutionId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.solution.update({
+    where: { id: solutionId },
+    data: { sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Reorder Assumption ───────────────────────────────────────────────────────
+
+export async function reorderAssumption(
+  assumptionId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.assumption.update({
+    where: { id: assumptionId },
+    data: { sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
+}

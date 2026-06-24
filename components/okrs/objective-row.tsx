@@ -1,6 +1,10 @@
 "use client";
 
+import * as React from "react";
 import { useTransition, useState } from "react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
@@ -95,6 +99,22 @@ export function ObjectiveRow({
   const avgProgress = averageProgress(objective.keyResults);
   const badge = STATUS_BADGE[objective.status];
 
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: objective.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
   function handleStatusChange(value: string | null) {
     if (!value) return;
     startTransition(async () => {
@@ -124,26 +144,38 @@ export function ObjectiveRow({
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 group">
+    <div ref={setNodeRef} style={style} className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 group touch-none">
       {/* Objective header */}
       <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            {objective.squad && (
-              <span
-                className="w-2.5 h-2.5 rounded-full shrink-0"
-                style={{ backgroundColor: objective.squad.color }}
-                title={objective.squad.name}
-              />
+        <div className="flex items-start gap-2">
+          {/* Drag handle */}
+          <button
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            className="mt-0.5 shrink-0 cursor-grab touch-none text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+            aria-label="Drag to reorder"
+          >
+            <GripVertical className="size-4" />
+          </button>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              {objective.squad && (
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{ backgroundColor: objective.squad.color }}
+                  title={objective.squad.name}
+                />
+              )}
+              <h3 className="font-medium text-base">{objective.title}</h3>
+            </div>
+            {objective.owner && (
+              <p className="text-xs text-muted-foreground">{objective.owner}</p>
             )}
-            <h3 className="font-medium text-base">{objective.title}</h3>
+            {objective.squad && (
+              <p className="text-xs text-muted-foreground">{objective.squad.name}</p>
+            )}
           </div>
-          {objective.owner && (
-            <p className="text-xs text-muted-foreground">{objective.owner}</p>
-          )}
-          {objective.squad && (
-            <p className="text-xs text-muted-foreground">{objective.squad.name}</p>
-          )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">

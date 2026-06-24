@@ -52,12 +52,13 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         status: { in: ACTIVE_STATUSES },
         ...(squadFilter ? { squadId: squadFilter } : {}),
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       select: {
         id: true,
         title: true,
         customerSegment: true,
         status: true,
+        sortOrder: true,
         squadId: true,
         _count: { select: { solutions: true } },
       },
@@ -74,6 +75,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         title: true,
         customerSegment: true,
         status: true,
+        sortOrder: true,
         squadId: true,
         _count: { select: { solutions: true } },
       },
@@ -94,6 +96,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       title: o.title,
       customerSegment: o.customerSegment,
       status: o.status as OpportunityStatus,
+      sortOrder: o.sortOrder,
       _count: o._count,
       squad: o.squadId ? (squadMap.get(o.squadId) ?? null) : null,
     };
@@ -121,6 +124,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       </Suspense>
 
       <OpportunityBoard
+        key={opportunities.map((o) => o.id).join(",")}
         opportunitiesByStatus={opportunitiesByStatus}
         orgSlug={orgSlug}
         workspaceSlug={workspaceSlug}

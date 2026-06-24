@@ -1,6 +1,10 @@
 "use client";
 
+import * as React from "react";
 import { useTransition } from "react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CardMenu } from "@/components/ui/card-menu";
@@ -42,6 +46,7 @@ export type AssumptionItemData = {
   title: string;
   riskLevel: RiskLevel;
   status: AssumptionStatus;
+  sortOrder: number;
   experiments: { id: string }[];
 };
 
@@ -54,6 +59,22 @@ export function AssumptionItem({ assumption, revalidatePathStr }: Props) {
   const [isPending, startTransition] = useTransition();
   const currentIndex = STATUS_CYCLE.indexOf(assumption.status);
   const nextStatus = STATUS_CYCLE[(currentIndex + 1) % STATUS_CYCLE.length];
+
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: assumption.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
 
   function advanceStatus() {
     startTransition(async () => {
@@ -69,9 +90,22 @@ export function AssumptionItem({ assumption, revalidatePathStr }: Props) {
 
   return (
     <div
-      className="flex items-start gap-2 py-1.5 opacity-100 transition-opacity data-[pending]:opacity-50 group"
+      ref={setNodeRef}
+      style={style}
+      className="flex items-start gap-2 py-1.5 opacity-100 transition-opacity data-[pending]:opacity-50 group touch-none"
       data-pending={isPending ? true : undefined}
     >
+      {/* Drag handle */}
+      <button
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
+        className="mt-0.5 shrink-0 cursor-grab touch-none text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing focus-visible:outline-none rounded"
+        aria-label="Drag to reorder"
+      >
+        <GripVertical className="size-3.5" />
+      </button>
+
       <span className="flex-1 text-sm leading-snug">{assumption.title}</span>
       <div className="flex items-center gap-1.5 shrink-0">
         <span
