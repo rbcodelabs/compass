@@ -29,6 +29,7 @@ const HORIZONS: Horizon[] = ["NOW", "NEXT", "LATER"];
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
 type AvailableSolution = { id: string; title: string; opportunityTitle: string };
 type AvailableOpportunity = { id: string; title: string };
+type AvailableExperiment = { id: string; title: string; status: string };
 
 type Props = {
   initialItems: RoadmapCardData[];
@@ -38,6 +39,7 @@ type Props = {
   availableKRs?: AvailableKR[];
   availableSolutions?: AvailableSolution[];
   availableOpportunities?: AvailableOpportunity[];
+  availableExperiments?: AvailableExperiment[];
 };
 
 function buildColumnMap(items: RoadmapCardData[]): ColumnMap {
@@ -64,6 +66,7 @@ export function RoadmapBoard({
   availableKRs,
   availableSolutions,
   availableOpportunities,
+  availableExperiments,
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/roadmap`;
 
@@ -76,7 +79,6 @@ export function RoadmapBoard({
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      // Require 8px movement before drag starts — prevents accidental drags on clicks.
       activationConstraint: { distance: 8 },
     }),
     useSensor(KeyboardSensor, {
@@ -106,7 +108,6 @@ export function RoadmapBoard({
     const sourceHorizon = findHorizon(columns, activeId);
     if (!sourceHorizon) return;
 
-    // Resolve destination horizon.
     let destHorizon: Horizon;
     if (overId.startsWith("column-")) {
       destHorizon = overId.replace("column-", "") as Horizon;
@@ -116,13 +117,11 @@ export function RoadmapBoard({
 
     if (sourceHorizon === destHorizon) return;
 
-    // Optimistically move the item into the destination column while dragging.
     setColumns((prev) => {
       const item = prev[sourceHorizon].find((i) => i.id === activeId);
       if (!item) return prev;
       const updatedItem = { ...item, horizon: destHorizon };
 
-      // Insert before the hovered card, or at the end if hovering the column.
       let destItems = prev[destHorizon].filter((i) => i.id !== activeId);
       if (!overId.startsWith("column-")) {
         const overIndex = destItems.findIndex((i) => i.id === overId);
@@ -159,7 +158,6 @@ export function RoadmapBoard({
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    // After dragOver has already moved the item optimistically, find its current horizon.
     const currentHorizon = findHorizon(columns, activeId);
     if (!currentHorizon) {
       setDragSourceHorizon(null);
@@ -167,12 +165,10 @@ export function RoadmapBoard({
     }
 
     if (dragSourceHorizon && dragSourceHorizon !== currentHorizon) {
-      // Cross-column move — persist to server.
       startTransition(async () => {
         await moveItem(activeId, currentHorizon, workspaceId, revalidatePathStr);
       });
     } else if (!overId.startsWith("column-") && overId !== activeId) {
-      // Same-column reorder — finalise the order and persist.
       const columnItems = columns[currentHorizon];
       const oldIndex = columnItems.findIndex((i) => i.id === activeId);
       const newIndex = columnItems.findIndex((i) => i.id === overId);
@@ -225,12 +221,15 @@ export function RoadmapBoard({
             horizon={horizon}
             items={columns[horizon]}
             workspaceId={workspaceId}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
             revalidatePathStr={revalidatePathStr}
             onItemAdded={handleItemAdded}
             onArchive={handleArchive}
             availableKRs={availableKRs}
             availableSolutions={availableSolutions}
             availableOpportunities={availableOpportunities}
+            availableExperiments={availableExperiments}
           />
         ))}
       </div>
@@ -243,6 +242,8 @@ export function RoadmapBoard({
               item={activeItem}
               revalidatePathStr={revalidatePathStr}
               onArchive={() => {}}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
             />
           </div>
         ) : null}

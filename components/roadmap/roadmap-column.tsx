@@ -2,7 +2,6 @@
 
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { Badge } from "@/components/ui/badge";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
 import { AddItemForm } from "./add-item-form";
 import type { Horizon } from "@/lib/types";
@@ -28,34 +27,40 @@ const HORIZON_CONFIG: Record<Horizon, { label: string; accentClass: string; empt
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
 type AvailableSolution = { id: string; title: string; opportunityTitle: string };
 type AvailableOpportunity = { id: string; title: string };
+type AvailableExperiment = { id: string; title: string; status: string };
 
 type Props = {
   horizon: Horizon;
   items: RoadmapCardData[];
   workspaceId: string;
+  orgSlug: string;
+  workspaceSlug: string;
   revalidatePathStr: string;
   onItemAdded: (item: RoadmapCardData) => void;
   onArchive: (itemId: string) => void;
   availableKRs?: AvailableKR[];
   availableSolutions?: AvailableSolution[];
   availableOpportunities?: AvailableOpportunity[];
+  availableExperiments?: AvailableExperiment[];
 };
 
 export function RoadmapColumn({
   horizon,
   items,
   workspaceId,
+  orgSlug,
+  workspaceSlug,
   revalidatePathStr,
   onItemAdded,
   onArchive,
   availableKRs,
   availableSolutions,
   availableOpportunities,
+  availableExperiments,
 }: Props) {
   const { label, accentClass, emptyText } = HORIZON_CONFIG[horizon];
   const itemIds = items.map((i) => i.id);
 
-  // Make the column itself a drop target so cards can be dropped into empty columns.
   const { setNodeRef, isOver } = useDroppable({ id: `column-${horizon}`, data: { horizon } });
 
   return (
@@ -96,6 +101,8 @@ export function RoadmapColumn({
                 item={item}
                 revalidatePathStr={revalidatePathStr}
                 onArchive={onArchive}
+                orgSlug={orgSlug}
+                workspaceSlug={workspaceSlug}
               />
             ))
           )}
@@ -111,6 +118,7 @@ export function RoadmapColumn({
         availableKRs={availableKRs}
         availableSolutions={availableSolutions}
         availableOpportunities={availableOpportunities}
+        availableExperiments={availableExperiments}
       />
     </div>
   );

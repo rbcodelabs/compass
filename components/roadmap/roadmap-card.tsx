@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import { useTransition } from "react";
+import Link from "next/link";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import { archiveItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 
@@ -21,18 +21,29 @@ export type RoadmapCardData = {
   solutionId: string | null;
   keyResultId: string | null;
   opportunityId: string | null;
+  experimentId: string | null;
   solution: { id: string; title: string } | null;
-  keyResult: { id: string; title: string; current: number; target: number; unit: string | null } | null;
+  keyResult: {
+    id: string;
+    title: string;
+    current: number;
+    target: number;
+    unit: string | null;
+    cycleId: string | null;
+  } | null;
   opportunity: { id: string; title: string } | null;
+  experiment: { id: string; title: string } | null;
 };
 
 type Props = {
   item: RoadmapCardData;
   revalidatePathStr: string;
   onArchive: (itemId: string) => void;
+  orgSlug: string;
+  workspaceSlug: string;
 };
 
-export function RoadmapCard({ item, revalidatePathStr, onArchive }: Props) {
+export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, workspaceSlug }: Props) {
   const [isArchiving, startArchiveTransition] = useTransition();
 
   const {
@@ -57,12 +68,15 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive }: Props) {
       : null;
 
   function handleArchive() {
-    // Optimistic update: remove from UI immediately
     onArchive(item.id);
     startArchiveTransition(async () => {
       await archiveItem(item.id, revalidatePathStr);
     });
   }
+
+  const base = `/${orgSlug}/${workspaceSlug}`;
+
+  const hasLinks = item.solution || item.keyResult || item.opportunity || item.experiment;
 
   return (
     <div ref={setNodeRef} style={style} className="touch-none group">
@@ -99,7 +113,7 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive }: Props) {
           />
         </CardHeader>
 
-        {(item.description || item.solution || item.keyResult || item.opportunity) && (
+        {(item.description || hasLinks) && (
           <CardContent className="flex flex-col gap-2 pt-0">
             {item.description && (
               <p className="text-xs text-muted-foreground line-clamp-2">
@@ -107,22 +121,54 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive }: Props) {
               </p>
             )}
 
-            {(item.solution || item.keyResult || item.opportunity) && (
+            {hasLinks && (
               <div className="flex flex-wrap gap-1">
+                {/* Opportunity → Discovery detail */}
                 {item.opportunity && (
-                  <Badge variant="secondary" className="text-xs bg-violet-100 text-violet-700">
+                  <Link
+                    href={`${base}/discovery/${item.opportunity.id}`}
+                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 hover:bg-violet-200 transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     ↑ {item.opportunity.title}
-                  </Badge>
+                  </Link>
                 )}
+
+                {/* Solution → Discovery opportunity detail (solutions live on opp page) */}
                 {item.solution && (
-                  <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                  <Link
+                    href={item.opportunityId
+                      ? `${base}/discovery/${item.opportunityId}`
+                      : `${base}/discovery`}
+                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     {item.solution.title}
-                  </Badge>
+                  </Link>
                 )}
-                {krProgress !== null && (
-                  <Badge variant="outline" className="text-xs">
+
+                {/* Experiment → Experiment detail */}
+                {item.experiment && (
+                  <Link
+                    href={`${base}/experiments/${item.experiment.id}`}
+                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    🧪 {item.experiment.title}
+                  </Link>
+                )}
+
+                {/* KR → OKR cycle page */}
+                {item.keyResult && krProgress !== null && (
+                  <Link
+                    href={item.keyResult.cycleId
+                      ? `${base}/okrs/${item.keyResult.cycleId}`
+                      : `${base}/okrs`}
+                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border border-border bg-white text-muted-foreground hover:bg-slate-50 transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     KR: {krProgress}%
-                  </Badge>
+                  </Link>
                 )}
               </div>
             )}

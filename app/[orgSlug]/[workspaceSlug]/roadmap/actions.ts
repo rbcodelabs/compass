@@ -15,6 +15,7 @@ export async function addRoadmapItem(
     solutionId?: string;
     keyResultId?: string;
     opportunityId?: string;
+    experimentId?: string;
   },
   revalidatePathStr: string
 ) {
@@ -39,6 +40,7 @@ export async function addRoadmapItem(
       solutionId: data.solutionId,
       keyResultId: data.keyResultId,
       opportunityId: data.opportunityId,
+      experimentId: data.experimentId,
     },
   });
 

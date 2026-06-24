@@ -272,6 +272,7 @@ model Experiment {
   squad         Squad?     @relation(fields: [squadId], references: [id])
   assumption    Assumption? @relation(fields: [assumptionId], references: [id])
   results       ExperimentResult[]
+  roadmapItems  RoadmapItem[]
 
   @@map("experiments")
 }
@@ -302,6 +303,7 @@ model RoadmapItem {
   solutionId    String?     @map("solution_id") @db.Uuid
   keyResultId   String?     @map("key_result_id") @db.Uuid
   opportunityId String?     @map("opportunity_id") @db.Uuid
+  experimentId  String?     @map("experiment_id") @db.Uuid
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @default(now()) @map("updated_at")
   workspace     Workspace   @relation(fields: [workspaceId], references: [id])
@@ -309,6 +311,7 @@ model RoadmapItem {
   solution      Solution?   @relation(fields: [solutionId], references: [id])
   keyResult     KeyResult?  @relation(fields: [keyResultId], references: [id])
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  experiment    Experiment?  @relation(fields: [experimentId], references: [id])
 
   @@map("roadmap_items")
 }

@@ -20,6 +20,7 @@ import type { Horizon } from "@/lib/types";
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
 type AvailableSolution = { id: string; title: string; opportunityTitle: string };
 type AvailableOpportunity = { id: string; title: string };
+type AvailableExperiment = { id: string; title: string; status: string };
 
 type Props = {
   workspaceId: string;
@@ -29,6 +30,7 @@ type Props = {
   availableKRs?: AvailableKR[];
   availableSolutions?: AvailableSolution[];
   availableOpportunities?: AvailableOpportunity[];
+  availableExperiments?: AvailableExperiment[];
 };
 
 export function AddItemForm({
@@ -39,13 +41,23 @@ export function AddItemForm({
   availableKRs,
   availableSolutions,
   availableOpportunities,
+  availableExperiments,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [selectedKRId, setSelectedKRId] = useState<string | null>(null);
   const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(null);
   const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(null);
+  const [selectedExperimentId, setSelectedExperimentId] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+
+  function reset() {
+    setSelectedKRId(null);
+    setSelectedSolutionId(null);
+    setSelectedOpportunityId(null);
+    setSelectedExperimentId(null);
+    formRef.current?.reset();
+  }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -64,9 +76,13 @@ export function AddItemForm({
           keyResultId: selectedKRId ?? undefined,
           solutionId: selectedSolutionId ?? undefined,
           opportunityId: selectedOpportunityId ?? undefined,
+          experimentId: selectedExperimentId ?? undefined,
         },
         revalidatePathStr
       );
+      const linkedExperiment = selectedExperimentId
+        ? (availableExperiments?.find((e) => e.id === selectedExperimentId) ?? null)
+        : null;
       onAdd?.({
         id: item.id,
         title: item.title,
@@ -76,17 +92,18 @@ export function AddItemForm({
         solutionId: item.solutionId ?? null,
         keyResultId: item.keyResultId ?? null,
         opportunityId: item.opportunityId ?? null,
+        experimentId: item.experimentId ?? null,
         solution: null,
         keyResult: null,
         opportunity: selectedOpportunityId
           ? (availableOpportunities?.find((o) => o.id === selectedOpportunityId) ?? null)
           : null,
+        experiment: linkedExperiment
+          ? { id: linkedExperiment.id, title: linkedExperiment.title }
+          : null,
       });
       setOpen(false);
-      setSelectedKRId(null);
-      setSelectedSolutionId(null);
-      setSelectedOpportunityId(null);
-      formRef.current?.reset();
+      reset();
     });
   }
 
@@ -155,6 +172,30 @@ export function AddItemForm({
         </div>
       )}
 
+      {availableExperiments && availableExperiments.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`item-experiment-${horizon}`}>Experiment (optional)</Label>
+          <Select
+            value={selectedExperimentId ?? "__none__"}
+            onValueChange={(v) => setSelectedExperimentId(v === "__none__" ? null : v)}
+            disabled={isPending}
+          >
+            <SelectTrigger id={`item-experiment-${horizon}`} size="sm">
+              <SelectValue placeholder="Link to an experiment…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— None —</SelectItem>
+              {availableExperiments.map((exp) => (
+                <SelectItem key={exp.id} value={exp.id}>
+                  <span className="text-muted-foreground text-xs mr-1">{exp.status} ·</span>
+                  {exp.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       {availableKRs && availableKRs.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`item-kr-${horizon}`}>Key Result (optional)</Label>
@@ -214,10 +255,7 @@ export function AddItemForm({
           disabled={isPending}
           onClick={() => {
             setOpen(false);
-            setSelectedKRId(null);
-            setSelectedSolutionId(null);
-            setSelectedOpportunityId(null);
-            formRef.current?.reset();
+            reset();
           }}
         >
           Cancel
