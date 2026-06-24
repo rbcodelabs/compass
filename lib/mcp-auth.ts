@@ -1,8 +1,45 @@
-// MCP_API_KEY must be set in your environment / Vercel project settings.
-// Any request to the MCP route must carry:  Authorization: Bearer <MCP_API_KEY>
-export function validateMcpAuth(request: Request): boolean {
+import { createHash } from "crypto"
+import getPrisma from "@/lib/db"
+
+// Validates an MCP Bearer token.
+// 1. Falls back to MCP_API_KEY env var (service-account key).
+// 2. Otherwise looks up a per-user ApiKey by prefix+hash, checking it's not revoked.
+// Returns the userId if a per-user key matched (null for service key), or false if invalid.
+export async function validateMcpAuth(
+  request: Request
+): Promise<{ valid: true; userId: string | null } | { valid: false }> {
   const authHeader = request.headers.get("authorization")
-  if (!authHeader?.startsWith("Bearer ")) return false
+  if (!authHeader?.startsWith("Bearer ")) return { valid: false }
   const token = authHeader.slice(7)
-  return token === process.env.MCP_API_KEY
+
+  // Service-account fallback
+  if (process.env.MCP_API_KEY && token === process.env.MCP_API_KEY) {
+    return { valid: true, userId: null }
+  }
+
+  // Per-user key: format is cmp_<32 hex chars>
+  if (!token.startsWith("cmp_") || token.length !== 36) return { valid: false }
+  const randomPart = token.slice(4) // 32 hex chars
+  const keyPrefix = randomPart.slice(0, 8)
+  const keyHash = createHash("sha256").update(token).digest("hex")
+
+  const prisma = getPrisma()
+  const apiKey = await prisma.apiKey.findFirst({
+    where: {
+      keyPrefix,
+      keyHash,
+      revokedAt: null,
+    },
+    select: { id: true, userId: true },
+  })
+
+  if (!apiKey) return { valid: false }
+
+  // Update lastUsedAt asynchronously (don't await — don't block the request)
+  prisma.apiKey.update({
+    where: { id: apiKey.id },
+    data: { lastUsedAt: new Date() },
+  }).catch(() => {})
+
+  return { valid: true, userId: apiKey.userId }
 }

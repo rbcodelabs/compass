@@ -1,0 +1,47 @@
+---
+title: "Docs"
+description: "Create rich internal documentation with inline screenshots"
+icon: "BookOpen"
+order: 6
+section: "Core Features"
+---
+
+# Docs
+
+The Docs section provides a hierarchical rich-text editor for internal team documentation. Use it for PRDs, research notes, experiment write-ups, onboarding guides, or anything else your team writes together.
+
+![Docs editor](/screenshots/docs/docs-editor.png)
+
+> 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
+
+## Page Hierarchy
+
+Documents are organised as a tree. Each page can have child pages nested beneath it. The left sidebar in the Docs section shows your full tree. Click any page title to open it, or click the **+** icon next to a parent page to create a child page.
+
+Pages can be dragged to reorder them within their level of the hierarchy.
+
+## The Editor
+
+Docs uses a Tiptap-powered rich-text editor. Supported formatting includes:
+
+- **Headings** — H1, H2, H3 via the toolbar or by typing `#`, `##`, `###` at the start of a line
+- **Lists** — Bulleted (`-` or `*`) and numbered (`1.`)
+- **Bold / Italic / Underline** — Via toolbar buttons or `Cmd+B`, `Cmd+I`, `Cmd+U`
+- **Code blocks** — Inline code with backticks, fenced code blocks with triple backticks
+- **Links** — Select text and click the link button to add a URL
+- **Horizontal rules** — Type `---` on a blank line
+- **Blockquotes** — Start a line with `>`
+
+## Inserting Screenshots
+
+Click the **image icon** in the toolbar to upload a screenshot. You can also paste an image from the clipboard directly into the editor — Compass will upload it automatically and embed it inline.
+
+Images are stored in Vercel Blob storage and served via a CDN. They are always private — only workspace members can view them.
+
+## Auto-save
+
+The editor auto-saves your changes every few seconds. There is no manual save button. The last saved timestamp appears at the top of the editor. You can safely close the tab and return — your work is preserved.
+
+## Page Titles
+
+Click the title area at the top of the editor to rename a page. Titles are saved immediately on blur.

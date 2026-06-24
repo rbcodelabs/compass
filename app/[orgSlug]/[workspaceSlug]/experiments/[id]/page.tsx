@@ -7,10 +7,13 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { ResultItem } from "@/components/experiments/result-item"
-import { LogResultDialog } from "@/components/experiments/log-result-dialog"
-import { ConcludeDialog } from "@/components/experiments/conclude-dialog"
+import { LogResultForm } from "@/components/experiments/log-result-form"
+import { ConcludePanel } from "@/components/experiments/conclude-panel"
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel"
+import { SquadPicker } from "@/components/squads/squad-picker"
 import { startExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
 import { ChevronLeftIcon } from "lucide-react"
+import type { CustomFieldDefinitionData, CustomFieldType, CustomFieldValue, SquadData } from "@/lib/types"
 
 interface ExperimentDetailPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string; id: string }>
@@ -53,18 +56,55 @@ export default async function ExperimentDetailPage({
     redirect("/dashboard")
   }
 
-  const prisma = await getPrisma()
-  const experiment = await prisma.experiment.findFirst({
-    where: { id, workspaceId: workspace.id },
-    include: {
-      results: { orderBy: { createdAt: "asc" } },
-      assumption: true,
-    },
-  })
+  const prisma = getPrisma()
+  const [experiment, rawSquads] = await Promise.all([
+    prisma.experiment.findFirst({
+      where: { id, workspaceId: workspace.id },
+      include: {
+        results: { orderBy: { createdAt: "asc" } },
+        assumption: true,
+      },
+    }),
+    prisma.squad.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: { createdAt: "asc" },
+    }),
+  ])
 
   if (!experiment) {
     notFound()
   }
+
+  const squads: SquadData[] = rawSquads.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+  }))
+
+  // Custom fields for this experiment
+  const fieldDefs = await prisma.customFieldDefinition.findMany({
+    where: { workspaceId: workspace.id, objectType: "EXPERIMENT" },
+    orderBy: { order: "asc" },
+  })
+  const fieldValues = fieldDefs.length > 0
+    ? await prisma.customFieldValue.findMany({
+        where: { fieldId: { in: fieldDefs.map((f) => f.id) }, objectId: id },
+      })
+    : []
+  const valueByFieldId = new Map(fieldValues.map((v) => [v.fieldId, v.value]))
+  const customFields: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }> =
+    fieldDefs.map((f) => ({
+      id: f.id,
+      name: f.name,
+      fieldType: f.fieldType as CustomFieldType,
+      objectType: "EXPERIMENT" as const,
+      options: f.options as CustomFieldDefinitionData["options"],
+      required: f.required,
+      order: f.order,
+      currentValue: (valueByFieldId.get(f.id) ?? null) as CustomFieldValue,
+    }))
+
+  const experimentDetailPath = `/${orgSlug}/${workspaceSlug}/experiments/${id}`
 
   const statusLabel = STATUS_LABELS[experiment.status] ?? experiment.status
   const statusClass = STATUS_CLASS[experiment.status] ?? ""
@@ -157,6 +197,16 @@ export default async function ExperimentDetailPage({
             </span>
           </div>
         )}
+
+        {squads.length > 0 && (
+          <SquadPicker
+            objectType="experiment"
+            objectId={id}
+            currentSquadId={experiment.squadId}
+            squads={squads}
+            revalidatePathStr={experimentDetailPath}
+          />
+        )}
       </div>
 
       <Separator />
@@ -197,6 +247,22 @@ export default async function ExperimentDetailPage({
         )}
       </div>
 
+      {customFields.length > 0 && (
+        <>
+          <Separator />
+          <section>
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              Custom Fields
+            </h2>
+            <CustomFieldsPanel
+              fields={customFields}
+              objectId={id}
+              revalidatePathStr={experimentDetailPath}
+            />
+          </section>
+        </>
+      )}
+
       <Separator />
 
       {/* Results section */}
@@ -224,10 +290,7 @@ export default async function ExperimentDetailPage({
               </form>
             )}
             {isActive && (
-              <LogResultDialog
-                experimentId={experiment.id}
-                trigger={<Button size="sm">Log Result</Button>}
-              />
+              <LogResultForm experimentId={experiment.id} />
             )}
           </div>
         </div>
@@ -245,17 +308,12 @@ export default async function ExperimentDetailPage({
           </div>
         )}
 
-        {/* Conclude button — only when experiment is active */}
+        {/* Conclude panel — only when experiment is active */}
         {isActive && (
           <div className="pt-2">
-            <ConcludeDialog
+            <ConcludePanel
               experimentId={experiment.id}
               killCondition={experiment.killCondition}
-              trigger={
-                <Button variant="outline" className="w-full">
-                  Conclude Experiment
-                </Button>
-              }
             />
           </div>
         )}

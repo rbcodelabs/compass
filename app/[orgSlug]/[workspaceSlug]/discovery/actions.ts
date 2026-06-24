@@ -9,7 +9,7 @@ import type {
   RiskLevel,
 } from "@/lib/types";
 
-export type { OpportunityStatus, SolutionStatus, AssumptionStatus, RiskLevel };
+// Types live in @/lib/types — import from there directly.
 
 export async function createOpportunity(
   workspaceId: string,
@@ -18,9 +18,10 @@ export async function createOpportunity(
     description?: string;
     customerSegment?: string;
     status?: OpportunityStatus;
+    squadId?: string | null;
   }
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const opportunity = await prisma.opportunity.create({
     data: {
       workspaceId,
@@ -28,6 +29,7 @@ export async function createOpportunity(
       description: data.description,
       customerSegment: data.customerSegment,
       status: data.status ?? "EXPLORING",
+      squadId: data.squadId ?? null,
     },
   });
   revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "page");
@@ -39,7 +41,7 @@ export async function updateOpportunityStatus(
   status: OpportunityStatus,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const opportunity = await prisma.opportunity.update({
     where: { id: opportunityId },
     data: { status },
@@ -53,7 +55,7 @@ export async function addSolution(
   data: { title: string; description?: string },
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const solution = await prisma.solution.create({
     data: {
       opportunityId,
@@ -70,7 +72,7 @@ export async function updateSolutionStatus(
   status: SolutionStatus,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const solution = await prisma.solution.update({
     where: { id: solutionId },
     data: { status },
@@ -84,7 +86,7 @@ export async function addAssumption(
   data: { title: string; riskLevel: RiskLevel },
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const assumption = await prisma.assumption.create({
     data: {
       solutionId,
@@ -101,11 +103,127 @@ export async function updateAssumptionStatus(
   status: AssumptionStatus,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
   const assumption = await prisma.assumption.update({
     where: { id: assumptionId },
     data: { status },
   });
   revalidatePath(revalidatePathStr);
   return assumption;
+}
+
+export async function linkOpportunityToKeyResult(
+  opportunityId: string,
+  keyResultId: string | null,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.opportunity.update({
+    where: { id: opportunityId },
+    data: { linkedKeyResultId: keyResultId },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+export async function archiveOpportunity(
+  opportunityId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.opportunity.update({
+    where: { id: opportunityId },
+    data: { status: "ARCHIVED" },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+export async function archiveSolution(
+  solutionId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.solution.update({
+    where: { id: solutionId },
+    data: { status: "KILLED" },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+export async function deleteAssumption(
+  assumptionId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.assumption.delete({ where: { id: assumptionId } });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Move Opportunity (cross-column status change) ────────────────────────────
+
+export async function moveOpportunity(
+  opportunityId: string,
+  status: OpportunityStatus,
+  workspaceId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+
+  // Place moved item at end of destination column.
+  const lastItem = await prisma.opportunity.findFirst({
+    where: { workspaceId, status, NOT: { id: opportunityId } },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
+
+  await prisma.opportunity.update({
+    where: { id: opportunityId },
+    data: { status, sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Reorder Opportunity (same-column sort) ───────────────────────────────────
+
+export async function reorderOpportunity(
+  opportunityId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.opportunity.update({
+    where: { id: opportunityId },
+    data: { sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Reorder Solution ─────────────────────────────────────────────────────────
+
+export async function reorderSolution(
+  solutionId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.solution.update({
+    where: { id: solutionId },
+    data: { sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Reorder Assumption ───────────────────────────────────────────────────────
+
+export async function reorderAssumption(
+  assumptionId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.assumption.update({
+    where: { id: assumptionId },
+    data: { sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
 }

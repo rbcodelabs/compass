@@ -25,6 +25,7 @@ model User {
 
   organizationMembers OrganizationMember[]
   workspaceMembers    WorkspaceMember[]
+  apiKeys             ApiKey[]
 
   @@map("users")
 }
@@ -95,19 +96,25 @@ model OrganizationMember {
 }
 
 model Workspace {
-  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId String            @map("organization_id") @db.Uuid
-  slug           String            @db.VarChar(255)
-  name           String            @db.VarChar(255)
-  description    String?           @db.Text
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @default(now()) @map("updated_at")
-  organization   Organization      @relation(fields: [organizationId], references: [id])
-  members        WorkspaceMember[]
-  okrCycles      OKRCycle[]
-  opportunities  Opportunity[]
-  experiments    Experiment[]
-  roadmapItems   RoadmapItem[]
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String            @map("organization_id") @db.Uuid
+  slug            String            @db.VarChar(255)
+  name            String            @db.VarChar(255)
+  description     String?           @db.Text
+  feedbackEnabled Boolean?          @default(false) @map("feedback_enabled")
+  roadmapPublic   Boolean?          @default(false) @map("roadmap_public")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @default(now()) @map("updated_at")
+  organization    Organization      @relation(fields: [organizationId], references: [id])
+  members           WorkspaceMember[]
+  okrCycles         OKRCycle[]
+  opportunities     Opportunity[]
+  experiments       Experiment[]
+  roadmapItems      RoadmapItem[]
+  customFieldDefs   CustomFieldDefinition[]
+  squads            Squad[]
+  feedback          FeedbackItem[]
+  docs              Doc[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -144,33 +151,40 @@ model OKRCycle {
 }
 
 model Objective {
-  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  cycleId     String      @map("cycle_id") @db.Uuid
-  title       String      @db.VarChar(255)
-  description String?     @db.Text
-  owner       String?     @db.VarChar(255)
-  status      String      @default("ON_TRACK") @db.VarChar(50)
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @default(now()) @map("updated_at")
-  cycle       OKRCycle    @relation(fields: [cycleId], references: [id])
-  keyResults  KeyResult[]
+  id                String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cycleId           String     @map("cycle_id") @db.Uuid
+  squadId           String?    @map("squad_id") @db.Uuid
+  parentKeyResultId String?    @map("parent_key_result_id") @db.Uuid
+  title             String     @db.VarChar(255)
+  description       String?    @db.Text
+  owner             String?    @db.VarChar(255)
+  status            String     @default("ON_TRACK") @db.VarChar(50)
+  sortOrder         Int        @default(0) @map("sort_order")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @default(now()) @map("updated_at")
+  cycle             OKRCycle   @relation(fields: [cycleId], references: [id])
+  squad             Squad?     @relation(fields: [squadId], references: [id])
+  parentKeyResult   KeyResult? @relation("SquadKRSupport", fields: [parentKeyResultId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  keyResults        KeyResult[]
 
   @@map("objectives")
 }
 
 model KeyResult {
-  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  objectiveId String      @map("objective_id") @db.Uuid
-  title       String      @db.VarChar(255)
-  target      Float
-  current     Float       @default(0)
-  unit        String?     @db.VarChar(50)
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @default(now()) @map("updated_at")
-  objective   Objective   @relation(fields: [objectiveId], references: [id])
-  checkIns    CheckIn[]
-  roadmapItems RoadmapItem[]
-  opportunities Opportunity[]
+  id                   String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  objectiveId          String      @map("objective_id") @db.Uuid
+  title                String      @db.VarChar(255)
+  target               Float
+  current              Float       @default(0)
+  unit                 String?     @db.VarChar(50)
+  sortOrder            Int         @default(0) @map("sort_order")
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @default(now()) @map("updated_at")
+  objective            Objective   @relation(fields: [objectiveId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  checkIns             CheckIn[]
+  roadmapItems         RoadmapItem[]
+  opportunities        Opportunity[]
+  supportingObjectives Objective[] @relation("SquadKRSupport")
 
   @@map("key_results")
 }
@@ -191,16 +205,21 @@ model CheckIn {
 model Opportunity {
   id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId       String      @map("workspace_id") @db.Uuid
+  squadId           String?     @map("squad_id") @db.Uuid
   title             String      @db.VarChar(255)
   description       String?     @db.Text
   customerSegment   String?     @map("customer_segment") @db.VarChar(255)
   status            String      @default("EXPLORING") @db.VarChar(50)
+  sortOrder         Int         @default(0) @map("sort_order")
   linkedKeyResultId String?     @map("linked_key_result_id") @db.Uuid
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @default(now()) @map("updated_at")
-  workspace         Workspace   @relation(fields: [workspaceId], references: [id])
-  linkedKeyResult   KeyResult?  @relation(fields: [linkedKeyResultId], references: [id])
+  workspace         Workspace    @relation(fields: [workspaceId], references: [id])
+  squad             Squad?       @relation(fields: [squadId], references: [id])
+  linkedKeyResult   KeyResult?   @relation(fields: [linkedKeyResultId], references: [id])
   solutions         Solution[]
+  roadmapItems      RoadmapItem[]
+  feedback          FeedbackItem[]
 
   @@map("opportunities")
 }
@@ -211,6 +230,7 @@ model Solution {
   title         String      @db.VarChar(255)
   description   String?     @db.Text
   status        String      @default("IDEA") @db.VarChar(50)
+  sortOrder     Int         @default(0) @map("sort_order")
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @default(now()) @map("updated_at")
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id])
@@ -226,6 +246,7 @@ model Assumption {
   title       String      @db.VarChar(255)
   riskLevel   String      @map("risk_level") @default("MEDIUM") @db.VarChar(50)
   status      String      @default("UNTESTED") @db.VarChar(50)
+  sortOrder   Int         @default(0) @map("sort_order")
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @default(now()) @map("updated_at")
   solution    Solution    @relation(fields: [solutionId], references: [id])
@@ -239,20 +260,24 @@ model Assumption {
 model Experiment {
   id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId   String     @map("workspace_id") @db.Uuid
+  squadId       String?    @map("squad_id") @db.Uuid
   assumptionId  String?    @map("assumption_id") @db.Uuid
   title         String     @db.VarChar(255)
   hypothesis    String     @db.Text
   method        String     @db.Text
   killCondition String     @map("kill_condition") @db.Text
   status        String     @default("DESIGNING") @db.VarChar(50)
+  sortOrder     Int        @default(0) @map("sort_order")
   startDate     DateTime?  @map("start_date")
   endDate       DateTime?  @map("end_date")
   conclusion    String?    @db.VarChar(50)
   createdAt     DateTime   @default(now()) @map("created_at")
   updatedAt     DateTime   @default(now()) @map("updated_at")
   workspace     Workspace  @relation(fields: [workspaceId], references: [id])
+  squad         Squad?     @relation(fields: [squadId], references: [id])
   assumption    Assumption? @relation(fields: [assumptionId], references: [id])
   results       ExperimentResult[]
+  roadmapItems  RoadmapItem[]
 
   @@map("experiments")
 }
@@ -272,20 +297,162 @@ model ExperimentResult {
 // ─── Roadmap ──────────────────────────────────────────────────────────────────
 
 model RoadmapItem {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId  String    @map("workspace_id") @db.Uuid
-  title        String    @db.VarChar(255)
-  description  String?   @db.Text
-  horizon      String    @default("NOW") @db.VarChar(50)
-  status       String    @default("ACTIVE") @db.VarChar(50)
-  sortOrder    Int       @default(0) @map("sort_order")
-  solutionId   String?   @map("solution_id") @db.Uuid
-  keyResultId  String?   @map("key_result_id") @db.Uuid
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @default(now()) @map("updated_at")
-  workspace    Workspace @relation(fields: [workspaceId], references: [id])
-  solution     Solution? @relation(fields: [solutionId], references: [id])
-  keyResult    KeyResult? @relation(fields: [keyResultId], references: [id])
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String      @map("workspace_id") @db.Uuid
+  squadId       String?     @map("squad_id") @db.Uuid
+  title         String      @db.VarChar(255)
+  description   String?     @db.Text
+  horizon       String      @default("NOW") @db.VarChar(50)
+  status        String      @default("ACTIVE") @db.VarChar(50)
+  sortOrder     Int         @default(0) @map("sort_order")
+  solutionId    String?     @map("solution_id") @db.Uuid
+  keyResultId   String?     @map("key_result_id") @db.Uuid
+  opportunityId String?     @map("opportunity_id") @db.Uuid
+  experimentId  String?     @map("experiment_id") @db.Uuid
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @default(now()) @map("updated_at")
+  workspace     Workspace   @relation(fields: [workspaceId], references: [id])
+  squad         Squad?      @relation(fields: [squadId], references: [id])
+  solution      Solution?   @relation(fields: [solutionId], references: [id])
+  keyResult     KeyResult?  @relation(fields: [keyResultId], references: [id])
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  experiment    Experiment?  @relation(fields: [experimentId], references: [id])
+  votes         RoadmapVote[]
 
   @@map("roadmap_items")
+}
+
+// ─── Squads ───────────────────────────────────────────────────────────────────
+
+model Squad {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String        @map("workspace_id") @db.Uuid
+  name        String        @db.VarChar(255)
+  color       String        @default("#6366f1") @db.VarChar(50)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
+  objectives   Objective[]
+  opportunities Opportunity[]
+  experiments  Experiment[]
+  roadmapItems RoadmapItem[]
+
+  @@map("squads")
+}
+
+// ─── Custom Fields ────────────────────────────────────────────────────────────
+
+model CustomFieldDefinition {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  /// One of: OPPORTUNITY | SOLUTION | EXPERIMENT | OBJECTIVE | KEY_RESULT | ROADMAP_ITEM
+  objectType  String   @map("object_type") @db.VarChar(50)
+  name        String   @db.VarChar(255)
+  /// One of: TEXT | NUMBER | DATE | SELECT | MULTI_SELECT | URL | BOOLEAN
+  fieldType   String   @map("field_type") @db.VarChar(50)
+  /// For SELECT / MULTI_SELECT: JSON array of { label: string; value: string; color?: string }
+  options     Json?
+  required    Boolean  @default(false)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace          @relation(fields: [workspaceId], references: [id])
+  values    CustomFieldValue[]
+
+  @@map("custom_field_definitions")
+}
+
+model CustomFieldValue {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fieldId   String   @map("field_id") @db.Uuid
+  objectId  String   @map("object_id") @db.Uuid
+  /// Flexible storage: string | number | boolean | string[] | null
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  field CustomFieldDefinition @relation(fields: [fieldId], references: [id])
+
+  @@unique([fieldId, objectId])
+  @@map("custom_field_values")
+}
+
+// ─── API Keys ─────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  name       String    @db.VarChar(255)
+  keyHash    String    @unique @map("key_hash") @db.VarChar(64)
+  keyPrefix  String    @map("key_prefix") @db.VarChar(8)
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  user       User      @relation(fields: [userId], references: [id])
+
+  @@index([keyPrefix])
+  @@map("api_keys")
+}
+
+// ─── Feedback ─────────────────────────────────────────────────────────────────
+
+model FeedbackItem {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  opportunityId  String?   @map("opportunity_id") @db.Uuid
+  title          String    @db.VarChar(255)
+  description    String?   @db.Text
+  submitterName  String?   @map("submitter_name") @db.VarChar(255)
+  submitterEmail String?   @map("submitter_email") @db.VarChar(255)
+  status         String    @default("OPEN") @db.VarChar(50)
+  voteCount      Int       @default(0) @map("vote_count")
+  tags           Json?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @map("updated_at")
+  workspace      Workspace   @relation(fields: [workspaceId], references: [id])
+  opportunity    Opportunity? @relation(fields: [opportunityId], references: [id])
+  votes          FeedbackVote[]
+
+  @@map("feedback")
+}
+
+model FeedbackVote {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  feedbackId   String       @map("feedback_id") @db.Uuid
+  voterEmail   String       @map("voter_email") @db.VarChar(255)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  feedbackItem FeedbackItem @relation(fields: [feedbackId], references: [id])
+
+  @@unique([feedbackId, voterEmail])
+  @@map("feedback_votes")
+}
+
+// ─── Docs ─────────────────────────────────────────────────────────────────────
+
+model Doc {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  parentId    String?   @map("parent_id") @db.Uuid
+  title       String    @db.VarChar(255)
+  content     String?   @db.Text
+  icon        String?   @db.VarChar(50)
+  sortOrder   Int       @default(0) @map("sort_order")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @default(now()) @map("updated_at")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  parent      Doc?      @relation("DocParent", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  children    Doc[]     @relation("DocParent")
+
+  @@map("docs")
+}
+
+model RoadmapVote {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roadmapItemId String      @map("roadmap_item_id") @db.Uuid
+  voterEmail    String      @map("voter_email") @db.VarChar(255)
+  voterName     String?     @map("voter_name") @db.VarChar(255)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  roadmapItem   RoadmapItem @relation(fields: [roadmapItemId], references: [id])
+
+  @@unique([roadmapItemId, voterEmail])
+  @@map("roadmap_votes")
 }

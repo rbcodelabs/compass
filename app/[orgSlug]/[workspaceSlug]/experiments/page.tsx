@@ -1,12 +1,13 @@
+import { Suspense } from "react"
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { getWorkspace } from "@/lib/workspace"
-import { Button } from "@/components/ui/button"
-import { ExperimentCard } from "@/components/experiments/experiment-card"
-import { CreateExperimentDialog } from "@/components/experiments/create-experiment-dialog"
-import type { Experiment } from "@prisma/client"
-import type { ExperimentStatus } from "@/lib/types"
+import { ExperimentBoard } from "@/components/experiments/experiment-board"
+import { CreateExperimentForm } from "@/components/experiments/create-experiment-form"
+import { SquadFilterBar } from "@/components/squads/squad-filter-bar"
+import type { ExperimentStatus, SquadData } from "@/lib/types"
+import type { ExperimentCardData } from "@/components/experiments/experiment-card"
 
 export const metadata = {
   title: "Experiments",
@@ -14,19 +15,15 @@ export const metadata = {
 
 interface ExperimentsPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>
+  searchParams: Promise<{ squad?: string }>
 }
-
-const COLUMNS: { status: ExperimentStatus; label: string }[] = [
-  { status: "DESIGNING", label: "Designing" },
-  { status: "RUNNING", label: "Running" },
-  { status: "COMPLETE", label: "Complete" },
-  { status: "KILLED", label: "Killed" },
-]
 
 export default async function ExperimentsPage({
   params,
+  searchParams,
 }: ExperimentsPageProps) {
   const { orgSlug, workspaceSlug } = await params
+  const { squad: squadFilter } = await searchParams
 
   const session = await auth()
   const userId = session?.user?.id
@@ -39,68 +36,65 @@ export default async function ExperimentsPage({
     redirect("/dashboard")
   }
 
-  const prisma = await getPrisma()
-  const experiments = await prisma.experiment.findMany({
-    where: { workspaceId: workspace.id },
-    orderBy: { createdAt: "desc" },
-  })
+  const prisma = getPrisma()
 
-  const byStatus = experiments.reduce<Record<string, Experiment[]>>(
-    (acc, exp) => {
-      if (!acc[exp.status]) acc[exp.status] = []
-      acc[exp.status].push(exp)
-      return acc
-    },
-    {}
-  )
+  const [rawSquads, rawExperiments] = await Promise.all([
+    prisma.squad.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.experiment.findMany({
+      where: {
+        workspaceId: workspace.id,
+        ...(squadFilter ? { squadId: squadFilter } : {}),
+      },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        title: true,
+        hypothesis: true,
+        killCondition: true,
+        status: true,
+        sortOrder: true,
+        conclusion: true,
+      },
+    }),
+  ])
+
+  const squads: SquadData[] = rawSquads.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+  }))
+
+  const experiments: ExperimentCardData[] = rawExperiments.map((e) => ({
+    ...e,
+    status: e.status as ExperimentStatus,
+  }))
 
   return (
     <main className="flex flex-col flex-1 p-8 gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Experiments</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Experiments</h1>
+          <p className="text-sm text-slate-500 mt-1">
             Design, run, and conclude experiments to validate assumptions.
           </p>
         </div>
-        <CreateExperimentDialog
-          workspaceId={workspace.id}
-          trigger={<Button>New Experiment</Button>}
-        />
+        <CreateExperimentForm workspaceId={workspace.id} squads={squads} />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
-        {COLUMNS.map(({ status, label }) => {
-          const cards = byStatus[status] ?? []
-          return (
-            <div key={status} className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-                  {label}
-                </h2>
-                <span className="text-xs text-muted-foreground bg-muted rounded-full px-2 py-0.5">
-                  {cards.length}
-                </span>
-              </div>
-              <div className="flex flex-col gap-2">
-                {cards.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4 text-center">
-                    No experiments
-                  </p>
-                ) : (
-                  cards.map((exp) => (
-                    <ExperimentCard
-                      key={exp.id}
-                      experiment={exp}
-                      href={`/${orgSlug}/${workspaceSlug}/experiments/${exp.id}`}
-                    />
-                  ))
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
+      <Suspense>
+        <SquadFilterBar squads={squads} />
+      </Suspense>
+
+      <ExperimentBoard
+        key={experiments.map((e) => e.id).join(",")}
+        experiments={experiments}
+        orgSlug={orgSlug}
+        workspaceSlug={workspaceSlug}
+        workspaceId={workspace.id}
+      />
     </main>
   )
 }

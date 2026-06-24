@@ -29,7 +29,7 @@ export async function createCycle(
     throw new Error(parsed.error.issues[0].message);
   }
 
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   const cycle = await prisma.oKRCycle.create({
     data: {
@@ -49,6 +49,7 @@ const CreateObjectiveSchema = z.object({
   title: z.string().min(1, "Title is required"),
   description: z.string().optional(),
   owner: z.string().optional(),
+  squadId: z.string().uuid().optional(),
 });
 
 export async function createObjective(
@@ -61,13 +62,14 @@ export async function createObjective(
     title: formData.get("title"),
     description: formData.get("description") || undefined,
     owner: formData.get("owner") || undefined,
+    squadId: formData.get("squadId") || undefined,
   });
 
   if (!parsed.success) {
     throw new Error(parsed.error.issues[0].message);
   }
 
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   await prisma.objective.create({
     data: {
@@ -75,6 +77,7 @@ export async function createObjective(
       title: parsed.data.title,
       description: parsed.data.description,
       owner: parsed.data.owner,
+      squadId: parsed.data.squadId ?? null,
     },
   });
 
@@ -105,7 +108,7 @@ export async function addKeyResult(
     throw new Error(parsed.error.issues[0].message);
   }
 
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   await prisma.keyResult.create({
     data: {
@@ -141,7 +144,7 @@ export async function logCheckIn(
     throw new Error(parsed.error.issues[0].message);
   }
 
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   // Create check-in record and update the KR's current value in one transaction.
   await prisma.$transaction([
@@ -160,6 +163,23 @@ export async function logCheckIn(
 
   // Revalidate both the cycle detail page (where check-in is triggered) and the
   // cycles index (where cycle cards show aggregate progress).
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
+}
+
+// ─── Set Objective Parent KR ──────────────────────────────────────────────────
+
+export async function setObjectiveParentKR(
+  objectiveId: string,
+  keyResultId: string | null,
+  orgSlug: string,
+  workspaceSlug: string
+) {
+  const prisma = getPrisma();
+  await prisma.objective.update({
+    where: { id: objectiveId },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: { parentKeyResultId: keyResultId } as any,
+  });
   revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
 }
 
@@ -184,7 +204,7 @@ export async function updateObjectiveStatus(
     throw new Error("Invalid status value");
   }
 
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   await prisma.objective.update({
     where: { id: objectiveId },
@@ -192,4 +212,56 @@ export async function updateObjectiveStatus(
   });
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
+}
+
+// ─── Delete Objective ─────────────────────────────────────────────────────────
+
+export async function deleteObjective(
+  objectiveId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.objective.delete({ where: { id: objectiveId } });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Delete Key Result ────────────────────────────────────────────────────────
+
+export async function deleteKeyResult(
+  keyResultId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.keyResult.delete({ where: { id: keyResultId } });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Reorder Objective ────────────────────────────────────────────────────────
+
+export async function reorderObjective(
+  objectiveId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.objective.update({
+    where: { id: objectiveId },
+    data: { sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Reorder Key Result ───────────────────────────────────────────────────────
+
+export async function reorderKeyResult(
+  keyResultId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.keyResult.update({
+    where: { id: keyResultId },
+    data: { sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
 }

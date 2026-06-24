@@ -14,10 +14,12 @@ export async function addRoadmapItem(
     horizon: Horizon;
     solutionId?: string;
     keyResultId?: string;
+    opportunityId?: string;
+    experimentId?: string;
   },
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   // Place new item at the end of its column by finding the current max sortOrder.
   const lastItem = await prisma.roadmapItem.findFirst({
@@ -37,6 +39,8 @@ export async function addRoadmapItem(
       sortOrder,
       solutionId: data.solutionId,
       keyResultId: data.keyResultId,
+      opportunityId: data.opportunityId,
+      experimentId: data.experimentId,
     },
   });
 
@@ -52,7 +56,7 @@ export async function moveItem(
   workspaceId: string,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   // Place the moved item at the end of the destination column.
   const lastItem = await prisma.roadmapItem.findFirst({
@@ -77,7 +81,7 @@ export async function archiveItem(
   itemId: string,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   await prisma.roadmapItem.update({
     where: { id: itemId },
@@ -87,6 +91,46 @@ export async function archiveItem(
   revalidatePath(revalidatePathStr);
 }
 
+// ─── Promote Solution to Roadmap ──────────────────────────────────────────────
+
+export async function promoteToRoadmap(
+  solutionId: string,
+  workspaceId: string,
+  horizon: Horizon,
+  squadId: string | null,
+  opportunityId: string | null
+) {
+  const prisma = getPrisma();
+
+  const solution = await prisma.solution.findUnique({
+    where: { id: solutionId },
+    select: { title: true },
+  });
+  if (!solution) throw new Error("Solution not found");
+
+  const lastItem = await prisma.roadmapItem.findFirst({
+    where: { workspaceId, horizon, status: "ACTIVE" },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
+
+  const item = await prisma.roadmapItem.create({
+    data: {
+      workspaceId,
+      title: solution.title,
+      horizon,
+      sortOrder,
+      solutionId,
+      squadId: squadId ?? null,
+      opportunityId: opportunityId ?? null,
+    },
+  });
+
+  revalidatePath(`/[orgSlug]/[workspaceSlug]/roadmap`, "page");
+  return item;
+}
+
 // ─── Update Sort Order ────────────────────────────────────────────────────────
 
 export async function updateSortOrder(
@@ -94,7 +138,7 @@ export async function updateSortOrder(
   sortOrder: number,
   revalidatePathStr: string
 ) {
-  const prisma = await getPrisma();
+  const prisma = getPrisma();
 
   await prisma.roadmapItem.update({
     where: { id: itemId },

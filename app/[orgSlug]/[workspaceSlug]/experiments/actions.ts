@@ -12,9 +12,10 @@ export async function createExperiment(
     method: string
     killCondition: string
     assumptionId?: string
+    squadId?: string | null
   }
 ) {
-  const prisma = await getPrisma()
+  const prisma = getPrisma()
 
   const experiment = await prisma.experiment.create({
     data: {
@@ -24,6 +25,7 @@ export async function createExperiment(
       method: data.method,
       killCondition: data.killCondition,
       assumptionId: data.assumptionId ?? null,
+      squadId: data.squadId ?? null,
       status: "DESIGNING",
     },
   })
@@ -33,7 +35,7 @@ export async function createExperiment(
 }
 
 export async function startExperiment(experimentId: string) {
-  const prisma = await getPrisma()
+  const prisma = getPrisma()
 
   const experiment = await prisma.experiment.update({
     where: { id: experimentId },
@@ -55,7 +57,7 @@ export async function logResult(
     value?: number
   }
 ) {
-  const prisma = await getPrisma()
+  const prisma = getPrisma()
 
   const result = await prisma.experimentResult.create({
     data: {
@@ -74,7 +76,7 @@ export async function concludeExperiment(
   experimentId: string,
   conclusion: "PROCEED" | "KILL" | "ITERATE"
 ) {
-  const prisma = await getPrisma()
+  const prisma = getPrisma()
 
   const newStatus: ExperimentStatus =
     conclusion === "KILL" ? "KILLED" : "COMPLETE"
@@ -105,4 +107,55 @@ export async function concludeExperiment(
 
   revalidatePath(`/[orgSlug]/[workspaceSlug]/experiments`)
   return experiment
+}
+
+export async function archiveExperiment(
+  experimentId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma()
+  await prisma.experiment.update({
+    where: { id: experimentId },
+    data: { status: "KILLED" },
+  })
+  revalidatePath(revalidatePathStr)
+}
+
+// ─── Move Experiment (cross-column status change) ─────────────────────────────
+
+export async function moveExperiment(
+  experimentId: string,
+  status: ExperimentStatus,
+  workspaceId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma()
+
+  const lastItem = await prisma.experiment.findFirst({
+    where: { workspaceId, status, NOT: { id: experimentId } },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  })
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0
+
+  await prisma.experiment.update({
+    where: { id: experimentId },
+    data: { status, sortOrder },
+  })
+  revalidatePath(revalidatePathStr)
+}
+
+// ─── Reorder Experiment (same-column sort) ────────────────────────────────────
+
+export async function reorderExperiment(
+  experimentId: string,
+  sortOrder: number,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma()
+  await prisma.experiment.update({
+    where: { id: experimentId },
+    data: { sortOrder },
+  })
+  revalidatePath(revalidatePathStr)
 }

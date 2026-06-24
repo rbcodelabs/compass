@@ -1,6 +1,13 @@
 "use client";
 
-import { CheckInDialog } from "@/components/okrs/check-in-dialog";
+import * as React from "react";
+import { useTransition } from "react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
+import { CheckInForm } from "@/components/okrs/check-in-form";
+import { CardMenu } from "@/components/ui/card-menu";
+import { deleteKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 
 interface KeyResultBarProps {
   keyResult: {
@@ -20,23 +27,68 @@ function clampProgress(current: number, target: number): number {
 }
 
 export function KeyResultBar({ keyResult, orgSlug, workspaceSlug }: KeyResultBarProps) {
+  const [, startTransition] = useTransition();
   const progress = clampProgress(keyResult.current, keyResult.target);
   const unit = keyResult.unit ? ` ${keyResult.unit}` : "";
+  const okrsPath = `/${orgSlug}/${workspaceSlug}/okrs`;
+
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: keyResult.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  function handleDelete() {
+    startTransition(async () => {
+      await deleteKeyResult(keyResult.id, okrsPath);
+    });
+  }
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div ref={setNodeRef} style={style} className="flex flex-col gap-1.5 group touch-none">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm text-foreground">{keyResult.title}</span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {/* Drag handle */}
+          <button
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            className="shrink-0 cursor-grab touch-none text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing focus-visible:outline-none rounded"
+            aria-label="Drag to reorder"
+          >
+            <GripVertical className="size-3.5" />
+          </button>
+          <span className="text-sm text-foreground truncate">{keyResult.title}</span>
+        </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-muted-foreground">
             {keyResult.current}{unit} / {keyResult.target}{unit}
           </span>
-          <CheckInDialog
+          <CheckInForm
             keyResultId={keyResult.id}
             keyResultTitle={keyResult.title}
             currentValue={keyResult.current}
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
+          />
+          <CardMenu
+            items={[
+              {
+                label: "Delete KR",
+                onClick: () => handleDelete(),
+                destructive: true,
+              },
+            ]}
           />
         </div>
       </div>

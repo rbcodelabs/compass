@@ -1,79 +1,13 @@
 import NextAuth from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
-import type { Adapter } from "next-auth/adapters";
 import getPrisma from "@/lib/db";
 import { authConfig } from "@/auth.config";
 
-// Lazy adapter: defers PrismaClient initialization to the first auth operation.
-// getPrisma() caches the client globally (see lib/db.ts), so the async hit is
-// only taken once per server lifetime.
-let _adapter: Adapter | null = null;
-
-async function resolveAdapter(): Promise<Adapter> {
-  if (!_adapter) {
-    const prisma = await getPrisma();
-    _adapter = PrismaAdapter(prisma) as Adapter;
-  }
-  return _adapter;
-}
-
-// All methods exposed by @auth/prisma-adapter. Drives the Proxy's ownKeys trap
-// so Object.keys(adapter) returns them — required because @auth/core's
-// adapterErrorHandler does Object.keys(adapter).reduce(...) to wrap each method.
-// Without ownKeys the target is {} so Object.keys returns [] and every method
-// gets silently dropped, producing "getUserByEmail is not a function" at runtime.
-const ADAPTER_METHODS = [
-  "createUser",
-  "getUser",
-  "getUserByEmail",
-  "getUserByAccount",
-  "updateUser",
-  "deleteUser",
-  "linkAccount",
-  "unlinkAccount",
-  "getSessionAndUser",
-  "createSession",
-  "updateSession",
-  "deleteSession",
-  "createVerificationToken",
-  "useVerificationToken",
-  "getAccount",
-] as const;
-
-// Proxy adapter that transparently awaits the PrismaClient before each call.
-// Traps needed:
-//   has                    — `"method" in adapter` checks at config-assertion time
-//   ownKeys + getOwnPropertyDescriptor — Object.keys() in adapterErrorHandler
-//   get                    — actual method dispatch, deferred until first call
-const lazyAdapter: Adapter = new Proxy({} as Adapter, {
-  has(_target, _prop: PropertyKey) {
-    return true;
-  },
-  ownKeys(_target) {
-    return [...ADAPTER_METHODS];
-  },
-  getOwnPropertyDescriptor(_target, prop) {
-    if ((ADAPTER_METHODS as readonly string[]).includes(prop as string)) {
-      return { configurable: true, enumerable: true, writable: true };
-    }
-    return undefined;
-  },
-  get(_target, prop: PropertyKey) {
-    return async (...args: unknown[]) => {
-      const adapter = await resolveAdapter();
-      const method = (adapter as Record<PropertyKey, unknown>)[prop];
-      if (typeof method === "function") {
-        return (method as (...a: unknown[]) => unknown).apply(adapter, args);
-      }
-      return method;
-    };
-  },
-});
-
-// Merge the Edge-compatible authConfig with the Node.js-only adapter.
-// auth.ts is only imported in server components and API routes (Node.js runtime).
-// middleware.ts uses authConfig directly (Edge runtime — no adapter).
+// getPrisma() is now synchronous — the OIDC token exchange and DB connection
+// happen lazily when the first query runs, so it's safe to call at module load.
+// PrismaAdapter receives a real client, not a proxy, so Auth.js adapter
+// validation passes correctly.
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
-  adapter: lazyAdapter,
+  adapter: PrismaAdapter(getPrisma()),
 });

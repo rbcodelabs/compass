@@ -1,0 +1,12 @@
+ALTER TABLE "opportunities" ADD COLUMN IF NOT EXISTS "sort_order" INTEGER;
+ALTER TABLE "solutions"     ADD COLUMN IF NOT EXISTS "sort_order" INTEGER;
+ALTER TABLE "assumptions"   ADD COLUMN IF NOT EXISTS "sort_order" INTEGER;
+ALTER TABLE "experiments"   ADD COLUMN IF NOT EXISTS "sort_order" INTEGER;
+ALTER TABLE "objectives"    ADD COLUMN IF NOT EXISTS "sort_order" INTEGER;
+ALTER TABLE "key_results"   ADD COLUMN IF NOT EXISTS "sort_order" INTEGER;
+UPDATE "opportunities" SET "sort_order" = 0 WHERE "sort_order" IS NULL;
+UPDATE "solutions"     SET "sort_order" = 0 WHERE "sort_order" IS NULL;
+UPDATE "assumptions"   SET "sort_order" = 0 WHERE "sort_order" IS NULL;
+UPDATE "experiments"   SET "sort_order" = 0 WHERE "sort_order" IS NULL;
+UPDATE "objectives"    SET "sort_order" = 0 WHERE "sort_order" IS NULL;
+UPDATE "key_results"   SET "sort_order" = 0 WHERE "sort_order" IS NULL;

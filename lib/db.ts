@@ -1,25 +1,44 @@
 import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { DsqlSigner } from "@aws-sdk/dsql-signer";
-import { awsCredentialsProvider } from "@vercel/functions/oidc";
-import { attachDatabasePool } from "@vercel/functions";
 import { getActiveSchema } from "./schema";
 
 declare global {
   var __prisma: PrismaClient | undefined;
 }
 
-async function createPrismaClient(): Promise<PrismaClient> {
-  const host = process.env.PGHOST;
+/**
+ * Creates a PrismaClient.
+ *
+ * Local dev: if DATABASE_URL is set, connects via plain pg (no DSQL/OIDC).
+ * Vercel (preview/prod): uses Aurora DSQL with OIDC token exchange.
+ */
+export function createPrismaClient(): PrismaClient {
+  const schema = getActiveSchema();
 
+  // ── Local dev path ────────────────────────────────────────────────────────
+  if (process.env.DATABASE_URL) {
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    const adapter = new PrismaPg(pool, { schema });
+    return new PrismaClient({ adapter });
+  }
+
+  // ── Vercel / Aurora DSQL path ─────────────────────────────────────────────
+  const host = process.env.PGHOST;
   if (!host) {
     throw new Error(
-      "PGHOST is not set. The Aurora DSQL integration must be configured in your Vercel project."
+      "Neither DATABASE_URL nor PGHOST is set. " +
+        "For local dev set DATABASE_URL; for Vercel set PGHOST + AWS credentials."
     );
   }
 
-  const schema = getActiveSchema();
+  // Lazy-import Vercel/AWS deps so they never break local builds
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { DsqlSigner } = require("@aws-sdk/dsql-signer");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { awsCredentialsProvider } = require("@vercel/functions/oidc");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { attachDatabasePool } = require("@vercel/functions");
 
   const signer = new DsqlSigner({
     credentials: awsCredentialsProvider({
@@ -43,22 +62,18 @@ async function createPrismaClient(): Promise<PrismaClient> {
 
   attachDatabasePool(pool);
 
-  // Pass schema as second arg — PrismaPg surfaces it via getConnectionInfo().schemaName,
-  // which Prisma uses to issue SET search_path before each query.
-  // Note: options: --search_path does NOT work on Aurora DSQL.
   const adapter = new PrismaPg(pool, { schema });
   return new PrismaClient({ adapter });
 }
 
-let prismaPromise: Promise<PrismaClient>;
+let _prisma: PrismaClient | undefined;
 
-export default function getPrisma(): Promise<PrismaClient> {
-  if (global.__prisma) return Promise.resolve(global.__prisma);
-  if (!prismaPromise) {
-    prismaPromise = createPrismaClient().then((client) => {
-      if (process.env.NODE_ENV !== "production") global.__prisma = client;
-      return client;
-    });
+/** Returns the singleton PrismaClient, creating it on first call. */
+export default function getPrisma(): PrismaClient {
+  if (global.__prisma) return global.__prisma;
+  if (!_prisma) {
+    _prisma = createPrismaClient();
+    if (process.env.NODE_ENV !== "production") global.__prisma = _prisma;
   }
-  return prismaPromise;
+  return _prisma;
 }

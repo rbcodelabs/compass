@@ -10,8 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { updateOpportunityStatus } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
-import type { OpportunityStatus } from "@/lib/types";
+import { updateOpportunityStatus, linkOpportunityToKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
+import { SquadPicker } from "@/components/squads/squad-picker";
+import type { OpportunityStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   EXPLORING: "Exploring",
@@ -35,12 +37,29 @@ type OpportunityOverviewData = {
   } | null;
 };
 
+type AvailableKR = {
+  id: string;
+  title: string;
+  objectiveTitle: string;
+};
+
 type Props = {
   opportunity: OpportunityOverviewData;
   revalidatePathStr: string;
+  availableKeyResults?: AvailableKR[];
+  customFields?: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }>;
+  squads?: SquadData[];
+  currentSquadId?: string | null;
 };
 
-export function OpportunityOverview({ opportunity, revalidatePathStr }: Props) {
+export function OpportunityOverview({
+  opportunity,
+  revalidatePathStr,
+  availableKeyResults = [],
+  customFields = [],
+  squads = [],
+  currentSquadId = null,
+}: Props) {
   const [isPending, startTransition] = useTransition();
 
   function handleStatusChange(value: string | null) {
@@ -49,6 +68,16 @@ export function OpportunityOverview({ opportunity, revalidatePathStr }: Props) {
       await updateOpportunityStatus(
         opportunity.id,
         value as OpportunityStatus,
+        revalidatePathStr
+      );
+    });
+  }
+
+  function handleKRLink(value: string | null) {
+    startTransition(async () => {
+      await linkOpportunityToKeyResult(
+        opportunity.id,
+        value === "__none__" ? null : value,
         revalidatePathStr
       );
     });
@@ -75,6 +104,18 @@ export function OpportunityOverview({ opportunity, revalidatePathStr }: Props) {
         </Select>
       </Field>
 
+      {squads.length > 0 && (
+        <Field label="Squad">
+          <SquadPicker
+            objectType="opportunity"
+            objectId={opportunity.id}
+            currentSquadId={currentSquadId}
+            squads={squads}
+            revalidatePathStr={revalidatePathStr}
+          />
+        </Field>
+      )}
+
       <Separator />
 
       <Field label="Description">
@@ -93,17 +134,47 @@ export function OpportunityOverview({ opportunity, revalidatePathStr }: Props) {
         )}
       </Field>
 
-      {opportunity.linkedKeyResult && (
+      {/* Key Result link */}
+      {availableKeyResults.length > 0 && (
         <Field label="Linked Key Result">
-          <div className="flex flex-col gap-0.5">
-            <p className="text-xs text-muted-foreground">
-              {opportunity.linkedKeyResult.objective.title}
+          <Select
+            value={opportunity.linkedKeyResult?.id ?? "__none__"}
+            onValueChange={handleKRLink}
+            disabled={isPending}
+          >
+            <SelectTrigger size="sm" className="w-64">
+              <SelectValue placeholder="Link to a key result…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— None —</SelectItem>
+              {availableKeyResults.map((kr) => (
+                <SelectItem key={kr.id} value={kr.id}>
+                  <span className="text-muted-foreground text-xs mr-1">{kr.objectiveTitle} /</span>
+                  {kr.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {opportunity.linkedKeyResult && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {opportunity.linkedKeyResult.objective.title} / {opportunity.linkedKeyResult.title}
             </p>
-            <p className="text-sm font-medium">
-              {opportunity.linkedKeyResult.title}
-            </p>
-          </div>
+          )}
         </Field>
+      )}
+
+      {/* Custom fields */}
+      {customFields.length > 0 && (
+        <>
+          <Separator />
+          <Field label="Custom Fields">
+            <CustomFieldsPanel
+              fields={customFields}
+              objectId={opportunity.id}
+              revalidatePathStr={revalidatePathStr}
+            />
+          </Field>
+        </>
       )}
 
       <Field label="Created">

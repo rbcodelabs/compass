@@ -14,7 +14,7 @@ export default async function DashboardPage() {
     redirect("/login")
   }
 
-  const prisma = await getPrisma()
+  const prisma = getPrisma()
 
   const memberships = await prisma.workspaceMember.findMany({
     where: { userId: session.user.id },

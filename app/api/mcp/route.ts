@@ -1,10 +1,7 @@
-// MCP_API_KEY — set this environment variable in your Vercel project settings
-// and in .env.local for local development. All MCP requests require:
-//   Authorization: Bearer <MCP_API_KEY>
+// MCP_API_KEY — set in Vercel project settings and .env.local.
+// All MCP requests require:  Authorization: Bearer <MCP_API_KEY>
 //
-// basePath: "/api" → streamableHttpEndpoint resolves to "/api/mcp",
-// which matches this Next.js route's path.
-// disableSse: true — only the modern Streamable HTTP transport is exposed.
+// Endpoint: POST /api/mcp  (Streamable HTTP transport)
 
 import { createMcpHandler } from "mcp-handler"
 import { z } from "zod"
@@ -13,267 +10,410 @@ import { validateMcpAuth } from "@/lib/mcp-auth"
 
 const _handler = createMcpHandler(
   (server) => {
-    // ----------------------------------------------------------------
-    // get_workspace_summary — overview counts for a workspace
-    // ----------------------------------------------------------------
+
+    // ════════════════════════════════════════════════════════════════
+    // WORKSPACE
+    // ════════════════════════════════════════════════════════════════
+
     server.registerTool(
       "get_workspace_summary",
       {
         title: "Get Workspace Summary",
         description:
           "Returns high-level counts and status for a workspace: name, OKR cycles, " +
-          "opportunities, experiments, roadmap items, active experiments, and the active OKR cycle.",
+          "opportunities, experiments, roadmap items, active experiments, active OKR cycle, and squads.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
         },
       },
       async ({ workspaceId }) => {
-        const prisma = await getPrisma()
-
-        const [workspace, okrCycleCount, opportunityCount, experimentCount, roadmapItemCount, activeExperiments, activeOKRCycle] =
+        const prisma = getPrisma()
+        const [workspace, okrCycleCount, opportunityCount, experimentCount, roadmapItemCount, activeExperiments, activeOKRCycle, squads] =
           await Promise.all([
             prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } }),
             prisma.oKRCycle.count({ where: { workspaceId } }),
-            prisma.opportunity.count({ where: { workspaceId } }),
+            prisma.opportunity.count({ where: { workspaceId, NOT: { status: "ARCHIVED" } } }),
             prisma.experiment.count({ where: { workspaceId } }),
-            prisma.roadmapItem.count({ where: { workspaceId } }),
+            prisma.roadmapItem.count({ where: { workspaceId, status: "ACTIVE" } }),
             prisma.experiment.count({ where: { workspaceId, status: "RUNNING" } }),
             prisma.oKRCycle.findFirst({
               where: { workspaceId, status: "ACTIVE" },
-              select: { id: true, title: true, startDate: true, endDate: true, status: true },
+              select: { id: true, title: true, startDate: true, endDate: true },
             }),
+            prisma.squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
           ])
 
         if (!workspace) {
-          return {
-            content: [{ type: "text" as const, text: `No workspace found with id "${workspaceId}".` }],
-          }
+          return { content: [{ type: "text" as const, text: `No workspace found with id "${workspaceId}".` }] }
         }
 
         const cycleText = activeOKRCycle
-          ? `${activeOKRCycle.title} (${activeOKRCycle.startDate.toLocaleDateString()} – ${activeOKRCycle.endDate.toLocaleDateString()})`
+          ? `${activeOKRCycle.title} (${activeOKRCycle.startDate.toLocaleDateString()} – ${activeOKRCycle.endDate.toLocaleDateString()}) — ID: ${activeOKRCycle.id}`
           : "None"
+        const squadText = squads.length ? squads.map(s => `${s.name} (${s.id})`).join(", ") : "None"
 
         return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `**Workspace:** ${workspace.name}\n\n` +
-                `**OKR Cycles:** ${okrCycleCount}\n` +
-                `**Opportunities:** ${opportunityCount}\n` +
-                `**Experiments:** ${experimentCount} (${activeExperiments} running)\n` +
-                `**Roadmap Items:** ${roadmapItemCount}\n` +
-                `**Active OKR Cycle:** ${cycleText}`,
-            },
-          ],
+          content: [{
+            type: "text" as const,
+            text:
+              `**Workspace:** ${workspace.name}\n\n` +
+              `**Active OKR Cycle:** ${cycleText}\n` +
+              `**Opportunities (active):** ${opportunityCount}\n` +
+              `**Experiments:** ${experimentCount} (${activeExperiments} running)\n` +
+              `**Roadmap Items (active):** ${roadmapItemCount}\n` +
+              `**OKR Cycles total:** ${okrCycleCount}\n` +
+              `**Squads:** ${squadText}`,
+          }],
         }
       }
     )
 
-    // ----------------------------------------------------------------
-    // create_objective — add an objective to an OKR cycle
-    // ----------------------------------------------------------------
+    // ════════════════════════════════════════════════════════════════
+    // OKRs
+    // ════════════════════════════════════════════════════════════════
+
+    server.registerTool(
+      "list_okr_cycles",
+      {
+        title: "List OKR Cycles",
+        description: "Lists all OKR cycles for a workspace with their IDs, titles, dates, and status.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+        },
+      },
+      async ({ workspaceId }) => {
+        const prisma = getPrisma()
+        const cycles = await prisma.oKRCycle.findMany({
+          where: { workspaceId },
+          orderBy: { startDate: "desc" },
+          select: { id: true, title: true, status: true, startDate: true, endDate: true, _count: { select: { objectives: true } } },
+        })
+        if (!cycles.length) {
+          return { content: [{ type: "text" as const, text: "No OKR cycles found for this workspace." }] }
+        }
+        const lines = cycles.map(c =>
+          `• **${c.title}** [${c.status}] ${c.startDate.toLocaleDateString()} – ${c.endDate.toLocaleDateString()} — ${c._count.objectives} objectives — ID: ${c.id}`
+        )
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+      }
+    )
+
+    server.registerTool(
+      "create_okr_cycle",
+      {
+        title: "Create OKR Cycle",
+        description: "Creates a new OKR cycle for a workspace. Status defaults to DRAFT; set status to ACTIVE to make it the live cycle.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          title: z.string().min(1).describe("Cycle title, e.g. 'Q3 2026'"),
+          startDate: z.string().describe("ISO date string for cycle start, e.g. '2026-07-01'"),
+          endDate: z.string().describe("ISO date string for cycle end, e.g. '2026-09-30'"),
+          status: z.enum(["DRAFT", "ACTIVE", "COMPLETED"]).optional().describe("Cycle status (default: ACTIVE)"),
+        },
+      },
+      async ({ workspaceId, title, startDate, endDate, status }) => {
+        const prisma = getPrisma()
+        const cycle = await prisma.oKRCycle.create({
+          data: {
+            workspaceId,
+            title,
+            startDate: new Date(startDate),
+            endDate: new Date(endDate),
+            status: status ?? "ACTIVE",
+          },
+        })
+        return {
+          content: [{
+            type: "text" as const,
+            text: `OKR cycle created: **${cycle.title}** [${cycle.status}]\n${cycle.startDate.toLocaleDateString()} – ${cycle.endDate.toLocaleDateString()}\nCycle ID: ${cycle.id}`,
+          }],
+        }
+      }
+    )
+
+    server.registerTool(
+      "get_okr_cycle",
+      {
+        title: "Get OKR Cycle",
+        description: "Returns a full OKR cycle with all objectives and their key results including current progress.",
+        inputSchema: {
+          cycleId: z.string().uuid().describe("UUID of the OKR cycle"),
+        },
+      },
+      async ({ cycleId }) => {
+        const prisma = getPrisma()
+        const cycle = await prisma.oKRCycle.findUnique({
+          where: { id: cycleId },
+          include: {
+            objectives: {
+              orderBy: { createdAt: "asc" },
+              include: {
+                keyResults: { orderBy: { createdAt: "asc" } },
+                squad: { select: { name: true } },
+              },
+            },
+          },
+        })
+        if (!cycle) {
+          return { content: [{ type: "text" as const, text: `OKR cycle "${cycleId}" not found.` }] }
+        }
+
+        const lines: string[] = [
+          `**${cycle.title}** (${cycle.status})`,
+          `${cycle.startDate.toLocaleDateString()} – ${cycle.endDate.toLocaleDateString()}`,
+          `Cycle ID: ${cycle.id}`,
+          "",
+        ]
+        for (const obj of cycle.objectives) {
+          const avg = obj.keyResults.length
+            ? Math.round(obj.keyResults.reduce((s, kr) => s + (kr.target > 0 ? Math.min(100, (kr.current / kr.target) * 100) : 0), 0) / obj.keyResults.length)
+            : 0
+          lines.push(`## ${obj.title} [${obj.status}] ${obj.squad ? `(${obj.squad.name})` : ""}  — ${avg}%`)
+          lines.push(`Objective ID: ${obj.id}`)
+          if (obj.parentKeyResultId) lines.push(`Supports KR: ${obj.parentKeyResultId}`)
+          for (const kr of obj.keyResults) {
+            const pct = kr.target > 0 ? ((kr.current / kr.target) * 100).toFixed(0) : "—"
+            lines.push(`  • ${kr.title}: ${kr.current}/${kr.target}${kr.unit ? " " + kr.unit : ""} (${pct}%) — KR ID: ${kr.id}`)
+          }
+          lines.push("")
+        }
+
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+      }
+    )
+
     server.registerTool(
       "create_objective",
       {
         title: "Create Objective",
-        description: "Creates a new Objective inside an OKR cycle. Returns the created objective.",
+        description: "Creates a new Objective inside an OKR cycle. Optionally assign a squad or link to a parent KR (for squad objectives that support a company KR).",
         inputSchema: {
-          workspaceId: z.string().uuid().describe("UUID of the workspace (used to verify cycle ownership)"),
-          cycleId: z.string().uuid().describe("UUID of the OKR cycle to attach this objective to"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          cycleId: z.string().uuid().describe("UUID of the OKR cycle"),
           title: z.string().min(1).describe("Short title for the objective"),
-          description: z.string().optional().describe("Longer description of the objective"),
-          owner: z.string().optional().describe("Name or email of the person accountable for this objective"),
+          description: z.string().optional().describe("Longer description"),
+          owner: z.string().optional().describe("Name or email of the accountable owner"),
+          squadId: z.string().uuid().optional().describe("UUID of the squad this objective belongs to"),
+          parentKeyResultId: z.string().uuid().optional().describe("UUID of a company-level KR this squad objective is supporting"),
         },
       },
-      async ({ workspaceId, cycleId, title, description, owner }) => {
-        const prisma = await getPrisma()
-
-        // Verify cycle belongs to the workspace
-        const cycle = await prisma.oKRCycle.findFirst({
-          where: { id: cycleId, workspaceId },
-          select: { id: true, title: true },
-        })
+      async ({ workspaceId, cycleId, title, description, owner, squadId, parentKeyResultId }) => {
+        const prisma = getPrisma()
+        const cycle = await prisma.oKRCycle.findFirst({ where: { id: cycleId, workspaceId }, select: { id: true, title: true } })
         if (!cycle) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `OKR cycle "${cycleId}" not found in workspace "${workspaceId}".`,
-              },
-            ],
-          }
+          return { content: [{ type: "text" as const, text: `OKR cycle "${cycleId}" not found in workspace.` }] }
         }
-
         const objective = await prisma.objective.create({
-          data: {
-            cycleId,
-            title: title.trim(),
-            description: description?.trim(),
-            owner: owner?.trim(),
-          },
+          data: { cycleId, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
         })
-
         return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `**Objective created** in cycle "${cycle.title}"\n\n` +
-                `**ID:** ${objective.id}\n` +
-                `**Title:** ${objective.title}\n` +
-                `**Owner:** ${objective.owner ?? "—"}\n` +
-                `**Status:** ${objective.status}`,
-            },
-          ],
+          content: [{
+            type: "text" as const,
+            text: `**Objective created** in cycle "${cycle.title}"\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
+          }],
         }
       }
     )
 
-    // ----------------------------------------------------------------
-    // add_key_result — attach a key result to an objective
-    // ----------------------------------------------------------------
     server.registerTool(
       "add_key_result",
       {
         title: "Add Key Result",
-        description: "Adds a Key Result to an existing Objective. Returns the created key result.",
+        description: "Adds a Key Result to an existing Objective.",
         inputSchema: {
           objectiveId: z.string().uuid().describe("UUID of the parent objective"),
-          title: z.string().min(1).describe("Title describing what will be measured"),
-          target: z.number().describe("Numeric target value (e.g. 100 for 100%)"),
-          unit: z.string().optional().describe("Unit label, e.g. '%', 'users', 'NPS points'"),
+          title: z.string().min(1).describe("What will be measured"),
+          target: z.number().describe("Numeric target value"),
+          unit: z.string().optional().describe("Unit label, e.g. '%', 'users', 'NPS'"),
         },
       },
       async ({ objectiveId, title, target, unit }) => {
-        const prisma = await getPrisma()
-
-        const objective = await prisma.objective.findUnique({
-          where: { id: objectiveId },
-          select: { id: true, title: true },
-        })
+        const prisma = getPrisma()
+        const objective = await prisma.objective.findUnique({ where: { id: objectiveId }, select: { id: true, title: true } })
         if (!objective) {
-          return {
-            content: [{ type: "text" as const, text: `Objective "${objectiveId}" not found.` }],
-          }
+          return { content: [{ type: "text" as const, text: `Objective "${objectiveId}" not found.` }] }
         }
-
         const keyResult = await prisma.keyResult.create({
-          data: {
-            objectiveId,
-            title: title.trim(),
-            target,
-            unit: unit?.trim(),
-          },
+          data: { objectiveId, title: title.trim(), target, unit: unit?.trim() },
         })
-
         return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `**Key Result created** on objective "${objective.title}"\n\n` +
-                `**ID:** ${keyResult.id}\n` +
-                `**Title:** ${keyResult.title}\n` +
-                `**Target:** ${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""}\n` +
-                `**Current:** ${keyResult.current}`,
-            },
-          ],
+          content: [{
+            type: "text" as const,
+            text: `**Key Result created** on "${objective.title}"\nID: ${keyResult.id}\nTitle: ${keyResult.title}\nTarget: ${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""}\nCurrent: 0`,
+          }],
         }
       }
     )
 
-    // ----------------------------------------------------------------
-    // log_checkin — record progress against a key result
-    // ----------------------------------------------------------------
     server.registerTool(
       "log_checkin",
       {
         title: "Log Check-In",
-        description:
-          "Records a progress check-in for a Key Result and updates its current value. Returns the updated Key Result.",
+        description: "Records a progress check-in for a Key Result and updates its current value.",
         inputSchema: {
-          keyResultId: z.string().uuid().describe("UUID of the key result to update"),
-          value: z.number().describe("New current value to record"),
-          note: z.string().optional().describe("Optional context note about this check-in"),
+          keyResultId: z.string().uuid().describe("UUID of the key result"),
+          value: z.number().describe("New current value"),
+          note: z.string().optional().describe("Context note about this check-in"),
         },
       },
       async ({ keyResultId, value, note }) => {
-        const prisma = await getPrisma()
-
-        const existing = await prisma.keyResult.findUnique({
-          where: { id: keyResultId },
-          select: { id: true, title: true },
-        })
+        const prisma = getPrisma()
+        const existing = await prisma.keyResult.findUnique({ where: { id: keyResultId }, select: { id: true, title: true, target: true, unit: true } })
         if (!existing) {
-          return {
-            content: [{ type: "text" as const, text: `Key Result "${keyResultId}" not found.` }],
-          }
+          return { content: [{ type: "text" as const, text: `Key Result "${keyResultId}" not found.` }] }
         }
-
-        // Create check-in and update current value in parallel
-        const [, keyResult] = await Promise.all([
-          prisma.checkIn.create({
-            data: { keyResultId, value, note: note?.trim() },
-          }),
-          prisma.keyResult.update({
-            where: { id: keyResultId },
-            data: { current: value },
-          }),
+        await Promise.all([
+          prisma.checkIn.create({ data: { keyResultId, value, note: note?.trim() } }),
+          prisma.keyResult.update({ where: { id: keyResultId }, data: { current: value } }),
         ])
-
-        const pct = keyResult.target > 0 ? ((keyResult.current / keyResult.target) * 100).toFixed(1) : "N/A"
-
+        const pct = existing.target > 0 ? ((value / existing.target) * 100).toFixed(1) : "N/A"
         return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `**Check-in logged** for "${keyResult.title}"\n\n` +
-                `**Current:** ${keyResult.current}${keyResult.unit ? " " + keyResult.unit : ""} / ` +
-                `${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""} (${pct}%)` +
-                (note ? `\n**Note:** ${note}` : ""),
-            },
-          ],
+          content: [{
+            type: "text" as const,
+            text: `**Check-in logged** for "${existing.title}"\nCurrent: ${value}${existing.unit ? " " + existing.unit : ""} / ${existing.target} (${pct}%)` + (note ? `\nNote: ${note}` : ""),
+          }],
         }
       }
     )
 
-    // ----------------------------------------------------------------
-    // create_opportunity — add an opportunity to the workspace
-    // ----------------------------------------------------------------
+    server.registerTool(
+      "set_objective_parent_kr",
+      {
+        title: "Set Objective Parent KR",
+        description: "Links a squad objective to a company-level Key Result it is supporting. Pass null keyResultId to clear the link.",
+        inputSchema: {
+          objectiveId: z.string().uuid().describe("UUID of the objective"),
+          keyResultId: z.string().uuid().nullable().describe("UUID of the company KR to support, or null to clear"),
+        },
+      },
+      async ({ objectiveId, keyResultId }) => {
+        const prisma = getPrisma()
+        await prisma.objective.update({ where: { id: objectiveId }, data: { parentKeyResultId: keyResultId } })
+        return {
+          content: [{
+            type: "text" as const,
+            text: keyResultId
+              ? `Objective ${objectiveId} now supports KR ${keyResultId}.`
+              : `Cleared parent KR from objective ${objectiveId}.`,
+          }],
+        }
+      }
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // DISCOVERY — Opportunities, Solutions, Assumptions
+    // ════════════════════════════════════════════════════════════════
+
+    server.registerTool(
+      "list_opportunities",
+      {
+        title: "List Opportunities",
+        description: "Lists opportunities in a workspace, with optional filters by status and squad.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by status"),
+          squadId: z.string().uuid().optional().describe("Filter by squad"),
+        },
+      },
+      async ({ workspaceId, status, squadId }) => {
+        const prisma = getPrisma()
+        const opportunities = await prisma.opportunity.findMany({
+          where: { workspaceId, ...(status ? { status } : {}), ...(squadId ? { squadId } : {}) },
+          include: {
+            linkedKeyResult: { select: { title: true, objective: { select: { title: true } } } },
+            squad: { select: { name: true } },
+            _count: { select: { solutions: true } },
+          },
+          orderBy: { createdAt: "desc" },
+        })
+        if (!opportunities.length) {
+          return { content: [{ type: "text" as const, text: "No opportunities found." }] }
+        }
+        const lines = opportunities.map(o =>
+          `• **${o.title}** [${o.status}]${o.squad ? ` (${o.squad.name})` : ""} — ${o._count.solutions} solutions` +
+          (o.linkedKeyResult ? ` — KR: ${o.linkedKeyResult.objective.title} / ${o.linkedKeyResult.title}` : "") +
+          `\n  ID: ${o.id}`
+        )
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+      }
+    )
+
+    server.registerTool(
+      "get_opportunity",
+      {
+        title: "Get Opportunity",
+        description: "Returns full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions.",
+        inputSchema: {
+          opportunityId: z.string().uuid().describe("UUID of the opportunity"),
+        },
+      },
+      async ({ opportunityId }) => {
+        const prisma = getPrisma()
+        const opp = await prisma.opportunity.findUnique({
+          where: { id: opportunityId },
+          include: {
+            linkedKeyResult: { select: { id: true, title: true, objective: { select: { title: true } } } },
+            squad: { select: { name: true } },
+            solutions: {
+              orderBy: { createdAt: "asc" },
+              include: {
+                assumptions: {
+                  orderBy: { createdAt: "asc" },
+                  include: { experiments: { select: { id: true, title: true, status: true, conclusion: true }, orderBy: { createdAt: "desc" } } },
+                },
+              },
+            },
+          },
+        })
+        if (!opp) {
+          return { content: [{ type: "text" as const, text: `Opportunity "${opportunityId}" not found.` }] }
+        }
+
+        const lines: string[] = [
+          `# ${opp.title} [${opp.status}]`,
+          `ID: ${opp.id}`,
+          opp.squad ? `Squad: ${opp.squad.name}` : "",
+          opp.linkedKeyResult ? `Linked KR: ${opp.linkedKeyResult.objective.title} / ${opp.linkedKeyResult.title} (${opp.linkedKeyResult.id})` : "",
+          opp.description ? `\n${opp.description}` : "",
+          "",
+        ].filter(Boolean)
+
+        for (const sol of opp.solutions) {
+          lines.push(`## Solution: ${sol.title} [${sol.status}]  — ID: ${sol.id}`)
+          for (const a of sol.assumptions) {
+            lines.push(`  Assumption [${a.status}/${a.riskLevel}]: ${a.title}  — ID: ${a.id}`)
+            for (const e of a.experiments) {
+              lines.push(`    Experiment [${e.status}${e.conclusion ? "/" + e.conclusion : ""}]: ${e.title}  — ID: ${e.id}`)
+            }
+          }
+          lines.push("")
+        }
+
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+      }
+    )
+
     server.registerTool(
       "create_opportunity",
       {
         title: "Create Opportunity",
-        description:
-          "Creates a new customer or product Opportunity in the workspace. Returns the created opportunity.",
+        description: "Creates a new customer or product Opportunity. Optionally link to a Key Result and assign to a squad.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Short title for the opportunity"),
-          description: z.string().optional().describe("What problem or need this opportunity represents"),
-          customerSegment: z.string().optional().describe("The customer segment this opportunity affects"),
-          status: z
-            .enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"])
-            .optional()
-            .default("EXPLORING")
-            .describe("Initial status (defaults to EXPLORING)"),
+          description: z.string().optional().describe("What problem or need this represents"),
+          customerSegment: z.string().optional().describe("The customer segment affected"),
+          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"]).optional().default("EXPLORING"),
+          keyResultId: z.string().uuid().optional().describe("UUID of a Key Result this opportunity is driving"),
+          squadId: z.string().uuid().optional().describe("UUID of the owning squad"),
         },
       },
-      async ({ workspaceId, title, description, customerSegment, status }) => {
-        const prisma = await getPrisma()
-
-        const workspace = await prisma.workspace.findUnique({
-          where: { id: workspaceId },
-          select: { name: true },
-        })
+      async ({ workspaceId, title, description, customerSegment, status, keyResultId, squadId }) => {
+        const prisma = getPrisma()
+        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
         if (!workspace) {
-          return {
-            content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }],
-          }
+          return { content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }] }
         }
-
         const opportunity = await prisma.opportunity.create({
           data: {
             workspaceId,
@@ -281,33 +421,78 @@ const _handler = createMcpHandler(
             description: description?.trim(),
             customerSegment: customerSegment?.trim(),
             status: status ?? "EXPLORING",
+            linkedKeyResultId: keyResultId ?? null,
+            squadId: squadId ?? null,
           },
         })
-
         return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `**Opportunity created** in "${workspace.name}"\n\n` +
-                `**ID:** ${opportunity.id}\n` +
-                `**Title:** ${opportunity.title}\n` +
-                `**Segment:** ${opportunity.customerSegment ?? "—"}\n` +
-                `**Status:** ${opportunity.status}`,
-            },
-          ],
+          content: [{
+            type: "text" as const,
+            text: `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
+          }],
         }
       }
     )
 
-    // ----------------------------------------------------------------
-    // add_solution — attach a solution to an opportunity
-    // ----------------------------------------------------------------
+    server.registerTool(
+      "update_opportunity_status",
+      {
+        title: "Update Opportunity Status",
+        description: "Moves an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED.",
+        inputSchema: {
+          opportunityId: z.string().uuid().describe("UUID of the opportunity"),
+          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).describe("New status"),
+        },
+      },
+      async ({ opportunityId, status }) => {
+        const prisma = getPrisma()
+        const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { title: true, status: true } })
+        if (!opp) {
+          return { content: [{ type: "text" as const, text: `Opportunity "${opportunityId}" not found.` }] }
+        }
+        await prisma.opportunity.update({ where: { id: opportunityId }, data: { status } })
+        return {
+          content: [{
+            type: "text" as const,
+            text: `**"${opp.title}"** moved from ${opp.status} → ${status}`,
+          }],
+        }
+      }
+    )
+
+    server.registerTool(
+      "link_opportunity_to_kr",
+      {
+        title: "Link Opportunity to Key Result",
+        description: "Associates an opportunity with a Key Result to show which metric it is expected to move. Pass null keyResultId to clear.",
+        inputSchema: {
+          opportunityId: z.string().uuid().describe("UUID of the opportunity"),
+          keyResultId: z.string().uuid().nullable().describe("UUID of the Key Result, or null to clear"),
+        },
+      },
+      async ({ opportunityId, keyResultId }) => {
+        const prisma = getPrisma()
+        const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { title: true } })
+        if (!opp) {
+          return { content: [{ type: "text" as const, text: `Opportunity "${opportunityId}" not found.` }] }
+        }
+        await prisma.opportunity.update({ where: { id: opportunityId }, data: { linkedKeyResultId: keyResultId } })
+        return {
+          content: [{
+            type: "text" as const,
+            text: keyResultId
+              ? `Linked opportunity "${opp.title}" to KR ${keyResultId}.`
+              : `Cleared KR link from opportunity "${opp.title}".`,
+          }],
+        }
+      }
+    )
+
     server.registerTool(
       "add_solution",
       {
         title: "Add Solution",
-        description: "Adds a proposed Solution to an Opportunity. Returns the created solution.",
+        description: "Adds a proposed Solution to an Opportunity.",
         inputSchema: {
           opportunityId: z.string().uuid().describe("UUID of the parent opportunity"),
           title: z.string().min(1).describe("Title of the proposed solution"),
@@ -315,247 +500,365 @@ const _handler = createMcpHandler(
         },
       },
       async ({ opportunityId, title, description }) => {
-        const prisma = await getPrisma()
-
-        const opportunity = await prisma.opportunity.findUnique({
-          where: { id: opportunityId },
-          select: { id: true, title: true },
-        })
-        if (!opportunity) {
-          return {
-            content: [{ type: "text" as const, text: `Opportunity "${opportunityId}" not found.` }],
-          }
+        const prisma = getPrisma()
+        const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { id: true, title: true } })
+        if (!opp) {
+          return { content: [{ type: "text" as const, text: `Opportunity "${opportunityId}" not found.` }] }
         }
-
-        const solution = await prisma.solution.create({
-          data: {
-            opportunityId,
-            title: title.trim(),
-            description: description?.trim(),
-          },
-        })
-
+        const solution = await prisma.solution.create({ data: { opportunityId, title: title.trim(), description: description?.trim() } })
         return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `**Solution created** for opportunity "${opportunity.title}"\n\n` +
-                `**ID:** ${solution.id}\n` +
-                `**Title:** ${solution.title}\n` +
-                `**Status:** ${solution.status}`,
-            },
-          ],
+          content: [{
+            type: "text" as const,
+            text: `**Solution created** for "${opp.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
+          }],
         }
       }
     )
 
-    // ----------------------------------------------------------------
-    // create_experiment — design a new experiment
-    // ----------------------------------------------------------------
+    server.registerTool(
+      "add_assumption",
+      {
+        title: "Add Assumption",
+        description: "Adds a testable Assumption to a Solution. Assumptions have a risk level (HIGH/MEDIUM/LOW) and start UNTESTED.",
+        inputSchema: {
+          solutionId: z.string().uuid().describe("UUID of the parent solution"),
+          title: z.string().min(1).describe("The assumption to be tested"),
+          riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).default("MEDIUM").describe("How risky this assumption is if wrong"),
+        },
+      },
+      async ({ solutionId, title, riskLevel }) => {
+        const prisma = getPrisma()
+        const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true } })
+        if (!solution) {
+          return { content: [{ type: "text" as const, text: `Solution "${solutionId}" not found.` }] }
+        }
+        const assumption = await prisma.assumption.create({ data: { solutionId, title: title.trim(), riskLevel, status: "UNTESTED" } })
+        return {
+          content: [{
+            type: "text" as const,
+            text: `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
+          }],
+        }
+      }
+    )
+
+    server.registerTool(
+      "promote_to_roadmap",
+      {
+        title: "Promote Solution to Roadmap",
+        description: "Promotes a validated Solution directly to the roadmap, creating a Roadmap Item with the solution's title and linking back to the originating opportunity.",
+        inputSchema: {
+          solutionId: z.string().uuid().describe("UUID of the solution to promote"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          horizon: z.enum(["NOW", "NEXT", "LATER"]).describe("Which roadmap horizon to place this in"),
+        },
+      },
+      async ({ solutionId, workspaceId, horizon }) => {
+        const prisma = getPrisma()
+        const solution = await prisma.solution.findUnique({
+          where: { id: solutionId },
+          include: { opportunity: { select: { id: true, title: true, squadId: true } } },
+        })
+        if (!solution) {
+          return { content: [{ type: "text" as const, text: `Solution "${solutionId}" not found.` }] }
+        }
+        const lastItem = await prisma.roadmapItem.findFirst({
+          where: { workspaceId, horizon, status: "ACTIVE" },
+          orderBy: { sortOrder: "desc" },
+          select: { sortOrder: true },
+        })
+        const item = await prisma.roadmapItem.create({
+          data: {
+            workspaceId,
+            title: solution.title,
+            horizon,
+            sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
+            solutionId,
+            opportunityId: solution.opportunity.id,
+            squadId: solution.opportunity.squadId ?? null,
+          },
+        })
+        return {
+          content: [{
+            type: "text" as const,
+            text: `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}\nLinked Solution: ${solutionId}\nLinked Opportunity: ${solution.opportunity.title}`,
+          }],
+        }
+      }
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // EXPERIMENTS
+    // ════════════════════════════════════════════════════════════════
+
+    server.registerTool(
+      "list_experiments",
+      {
+        title: "List Experiments",
+        description: "Lists experiments in a workspace with optional status and squad filters.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          status: z.enum(["DESIGNING", "RUNNING", "COMPLETE", "KILLED"]).optional().describe("Filter by status"),
+          squadId: z.string().uuid().optional().describe("Filter by squad"),
+        },
+      },
+      async ({ workspaceId, status, squadId }) => {
+        const prisma = getPrisma()
+        const experiments = await prisma.experiment.findMany({
+          where: { workspaceId, ...(status ? { status } : {}), ...(squadId ? { squadId } : {}) },
+          include: {
+            squad: { select: { name: true } },
+            assumption: { select: { title: true } },
+          },
+          orderBy: { createdAt: "desc" },
+        })
+        if (!experiments.length) {
+          return { content: [{ type: "text" as const, text: "No experiments found." }] }
+        }
+        const lines = experiments.map(e =>
+          `• **${e.title}** [${e.status}${e.conclusion ? "/" + e.conclusion : ""}]${e.squad ? ` (${e.squad.name})` : ""}` +
+          (e.assumption ? ` — testing: ${e.assumption.title}` : "") +
+          `\n  ID: ${e.id}`
+        )
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+      }
+    )
+
     server.registerTool(
       "create_experiment",
       {
         title: "Create Experiment",
-        description:
-          "Creates a new Experiment in DESIGNING status. Optionally links it to an Assumption. Returns the created experiment.",
+        description: "Creates a new Experiment in DESIGNING status. Link it to an Assumption to close the discovery loop.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Short name for the experiment"),
-          hypothesis: z.string().min(1).describe("What you believe to be true and are testing"),
-          method: z.string().min(1).describe("How you will run the experiment"),
-          killCondition: z
-            .string()
-            .min(1)
-            .describe("The condition or threshold that means the hypothesis is false"),
-          assumptionId: z
-            .string()
-            .uuid()
-            .optional()
-            .describe("UUID of the Assumption this experiment is testing (optional)"),
+          hypothesis: z.string().min(1).describe("What you believe to be true"),
+          method: z.string().min(1).describe("How you will test it"),
+          killCondition: z.string().min(1).describe("The condition that means the hypothesis is false"),
+          assumptionId: z.string().uuid().optional().describe("UUID of the Assumption this experiment tests"),
+          squadId: z.string().uuid().optional().describe("UUID of the squad running this experiment"),
         },
       },
-      async ({ workspaceId, title, hypothesis, method, killCondition, assumptionId }) => {
-        const prisma = await getPrisma()
-
-        const workspace = await prisma.workspace.findUnique({
-          where: { id: workspaceId },
-          select: { name: true },
-        })
+      async ({ workspaceId, title, hypothesis, method, killCondition, assumptionId, squadId }) => {
+        const prisma = getPrisma()
+        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
         if (!workspace) {
-          return {
-            content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }],
-          }
+          return { content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }] }
         }
-
         if (assumptionId) {
-          const assumption = await prisma.assumption.findUnique({ where: { id: assumptionId } })
-          if (!assumption) {
-            return {
-              content: [{ type: "text" as const, text: `Assumption "${assumptionId}" not found.` }],
-            }
-          }
+          const a = await prisma.assumption.findUnique({ where: { id: assumptionId } })
+          if (!a) return { content: [{ type: "text" as const, text: `Assumption "${assumptionId}" not found.` }] }
         }
-
         const experiment = await prisma.experiment.create({
-          data: {
-            workspaceId,
-            title: title.trim(),
-            hypothesis: hypothesis.trim(),
-            method: method.trim(),
-            killCondition: killCondition.trim(),
-            assumptionId: assumptionId ?? null,
-            status: "DESIGNING",
-          },
+          data: { workspaceId, title: title.trim(), hypothesis: hypothesis.trim(), method: method.trim(), killCondition: killCondition.trim(), assumptionId: assumptionId ?? null, squadId: squadId ?? null, status: "DESIGNING" },
         })
-
         return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `**Experiment created** in "${workspace.name}"\n\n` +
-                `**ID:** ${experiment.id}\n` +
-                `**Title:** ${experiment.title}\n` +
-                `**Status:** ${experiment.status}\n` +
-                `**Hypothesis:** ${experiment.hypothesis}\n` +
-                `**Kill Condition:** ${experiment.killCondition}`,
-            },
-          ],
+          content: [{
+            type: "text" as const,
+            text: `**Experiment created**\nID: ${experiment.id}\nTitle: ${experiment.title}\nStatus: DESIGNING\nKill Condition: ${experiment.killCondition}`,
+          }],
         }
       }
     )
 
-    // ----------------------------------------------------------------
-    // log_experiment_result — record a result observation
-    // ----------------------------------------------------------------
     server.registerTool(
       "log_experiment_result",
       {
         title: "Log Experiment Result",
-        description: "Records an observation or data point for a running experiment. Returns the created result.",
+        description: "Records an observation or data point for a running experiment.",
         inputSchema: {
           experimentId: z.string().uuid().describe("UUID of the experiment"),
           note: z.string().min(1).describe("Description of what was observed"),
-          metric: z.string().optional().describe("Name of the metric being recorded (e.g. 'conversion rate')"),
+          metric: z.string().optional().describe("Name of the metric (e.g. 'conversion rate')"),
           value: z.number().optional().describe("Numeric value for the metric"),
         },
       },
       async ({ experimentId, note, metric, value }) => {
-        const prisma = await getPrisma()
-
-        const experiment = await prisma.experiment.findUnique({
-          where: { id: experimentId },
-          select: { id: true, title: true },
-        })
+        const prisma = getPrisma()
+        const experiment = await prisma.experiment.findUnique({ where: { id: experimentId }, select: { id: true, title: true } })
         if (!experiment) {
-          return {
-            content: [{ type: "text" as const, text: `Experiment "${experimentId}" not found.` }],
-          }
+          return { content: [{ type: "text" as const, text: `Experiment "${experimentId}" not found.` }] }
         }
-
         const result = await prisma.experimentResult.create({
-          data: {
-            experimentId,
-            note: note.trim(),
-            metric: metric?.trim(),
-            value: value ?? null,
-          },
+          data: { experimentId, note: note.trim(), metric: metric?.trim(), value: value ?? null },
         })
-
         return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `**Result logged** for experiment "${experiment.title}"\n\n` +
-                `**ID:** ${result.id}\n` +
-                `**Note:** ${result.note}` +
-                (result.metric ? `\n**Metric:** ${result.metric}` : "") +
-                (result.value != null ? ` = ${result.value}` : ""),
-            },
-          ],
+          content: [{
+            type: "text" as const,
+            text: `**Result logged** for "${experiment.title}"\nID: ${result.id}\nNote: ${result.note}` +
+              (result.metric ? `\nMetric: ${result.metric}${result.value != null ? " = " + result.value : ""}` : ""),
+          }],
         }
       }
     )
 
-    // ----------------------------------------------------------------
-    // add_to_roadmap — place an item on the roadmap
-    // ----------------------------------------------------------------
+    server.registerTool(
+      "conclude_experiment",
+      {
+        title: "Conclude Experiment",
+        description: "Concludes an experiment with PROCEED (hypothesis validated), KILL (invalidated), or ITERATE (inconclusive). Automatically updates the linked Assumption status: PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED.",
+        inputSchema: {
+          experimentId: z.string().uuid().describe("UUID of the experiment"),
+          conclusion: z.enum(["PROCEED", "KILL", "ITERATE"]).describe("The outcome of the experiment"),
+        },
+      },
+      async ({ experimentId, conclusion }) => {
+        const prisma = getPrisma()
+        const experiment = await prisma.experiment.findUnique({
+          where: { id: experimentId },
+          select: { id: true, title: true, status: true, assumptionId: true },
+        })
+        if (!experiment) {
+          return { content: [{ type: "text" as const, text: `Experiment "${experimentId}" not found.` }] }
+        }
+        if (experiment.status === "KILLED" || experiment.status === "COMPLETE") {
+          return { content: [{ type: "text" as const, text: `Experiment "${experiment.title}" is already concluded (${experiment.status}).` }] }
+        }
+
+        const newStatus = conclusion === "KILL" ? "KILLED" : "COMPLETE"
+        await prisma.experiment.update({
+          where: { id: experimentId },
+          data: { status: newStatus, conclusion, endDate: new Date() },
+        })
+
+        let assumptionUpdate = ""
+        if (experiment.assumptionId) {
+          const assumptionStatus = conclusion === "PROCEED" ? "VALIDATED" : conclusion === "KILL" ? "INVALIDATED" : "UNTESTED"
+          await prisma.assumption.update({ where: { id: experiment.assumptionId }, data: { status: assumptionStatus } })
+          assumptionUpdate = `\nLinked assumption updated → ${assumptionStatus}`
+        }
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: `**"${experiment.title}"** concluded as **${conclusion}**\nStatus: ${newStatus}${assumptionUpdate}`,
+          }],
+        }
+      }
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // ROADMAP
+    // ════════════════════════════════════════════════════════════════
+
     server.registerTool(
       "add_to_roadmap",
       {
         title: "Add to Roadmap",
-        description:
-          "Creates a Roadmap Item in the NOW, NEXT, or LATER horizon. Optionally links to a Solution or Key Result. Returns the created item.",
+        description: "Creates a Roadmap Item in the NOW, NEXT, or LATER horizon. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Title of the roadmap item"),
           horizon: z.enum(["NOW", "NEXT", "LATER"]).describe("Which horizon to place this item in"),
-          description: z.string().optional().describe("Additional context for the roadmap item"),
-          solutionId: z.string().uuid().optional().describe("UUID of a Solution to link (optional)"),
-          keyResultId: z.string().uuid().optional().describe("UUID of a Key Result to link (optional)"),
+          description: z.string().optional(),
+          solutionId: z.string().uuid().optional().describe("UUID of the Solution driving this item"),
+          keyResultId: z.string().uuid().optional().describe("UUID of the Key Result this item is driving"),
+          opportunityId: z.string().uuid().optional().describe("UUID of the Opportunity this item addresses"),
+          squadId: z.string().uuid().optional().describe("UUID of the owning squad"),
         },
       },
-      async ({ workspaceId, title, horizon, description, solutionId, keyResultId }) => {
-        const prisma = await getPrisma()
-
-        const workspace = await prisma.workspace.findUnique({
-          where: { id: workspaceId },
-          select: { name: true },
-        })
+      async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId }) => {
+        const prisma = getPrisma()
+        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
         if (!workspace) {
-          return {
-            content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }],
-          }
+          return { content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }] }
         }
-
-        if (solutionId) {
-          const solution = await prisma.solution.findUnique({ where: { id: solutionId } })
-          if (!solution) {
-            return {
-              content: [{ type: "text" as const, text: `Solution "${solutionId}" not found.` }],
-            }
-          }
-        }
-
-        if (keyResultId) {
-          const kr = await prisma.keyResult.findUnique({ where: { id: keyResultId } })
-          if (!kr) {
-            return {
-              content: [{ type: "text" as const, text: `Key Result "${keyResultId}" not found.` }],
-            }
-          }
-        }
-
+        const lastItem = await prisma.roadmapItem.findFirst({
+          where: { workspaceId, horizon, status: "ACTIVE" },
+          orderBy: { sortOrder: "desc" },
+          select: { sortOrder: true },
+        })
         const item = await prisma.roadmapItem.create({
           data: {
             workspaceId,
             title: title.trim(),
             horizon,
             description: description?.trim(),
+            sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
             solutionId: solutionId ?? null,
             keyResultId: keyResultId ?? null,
+            opportunityId: opportunityId ?? null,
+            squadId: squadId ?? null,
           },
         })
-
         return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `**Roadmap item created** in "${workspace.name}"\n\n` +
-                `**ID:** ${item.id}\n` +
-                `**Title:** ${item.title}\n` +
-                `**Horizon:** ${item.horizon}\n` +
-                `**Status:** ${item.status}` +
-                (solutionId ? `\n**Linked Solution:** ${solutionId}` : "") +
-                (keyResultId ? `\n**Linked Key Result:** ${keyResultId}` : ""),
-            },
-          ],
+          content: [{
+            type: "text" as const,
+            text: `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
+              (solutionId ? `\nLinked Solution: ${solutionId}` : "") +
+              (keyResultId ? `\nLinked KR: ${keyResultId}` : "") +
+              (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : ""),
+          }],
         }
       }
     )
+
+    // ════════════════════════════════════════════════════════════════
+    // SQUADS
+    // ════════════════════════════════════════════════════════════════
+
+    server.registerTool(
+      "list_squads",
+      {
+        title: "List Squads",
+        description: "Lists all squads in a workspace with their IDs and colors.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+        },
+      },
+      async ({ workspaceId }) => {
+        const prisma = getPrisma()
+        const squads = await prisma.squad.findMany({
+          where: { workspaceId },
+          orderBy: { createdAt: "asc" },
+        })
+        if (!squads.length) {
+          return { content: [{ type: "text" as const, text: "No squads in this workspace." }] }
+        }
+        const lines = squads.map(s => `• **${s.name}** (${s.color}) — ID: ${s.id}`)
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+      }
+    )
+
+    server.registerTool(
+      "assign_squad",
+      {
+        title: "Assign Squad",
+        description: "Assigns a Squad to any object: opportunity, experiment, roadmap_item, or objective. Pass null squadId to clear.",
+        inputSchema: {
+          objectType: z.enum(["opportunity", "experiment", "roadmap_item", "objective"]).describe("Type of object to assign the squad to"),
+          objectId: z.string().uuid().describe("UUID of the object"),
+          squadId: z.string().uuid().nullable().describe("UUID of the squad, or null to clear"),
+        },
+      },
+      async ({ objectType, objectId, squadId }) => {
+        const prisma = getPrisma()
+        const data = { squadId }
+        switch (objectType) {
+          case "opportunity":
+            await prisma.opportunity.update({ where: { id: objectId }, data })
+            break
+          case "experiment":
+            await prisma.experiment.update({ where: { id: objectId }, data })
+            break
+          case "roadmap_item":
+            await prisma.roadmapItem.update({ where: { id: objectId }, data })
+            break
+          case "objective":
+            await prisma.objective.update({ where: { id: objectId }, data })
+            break
+        }
+        return {
+          content: [{
+            type: "text" as const,
+            text: squadId
+              ? `Squad ${squadId} assigned to ${objectType} ${objectId}.`
+              : `Squad cleared from ${objectType} ${objectId}.`,
+          }],
+        }
+      }
+    )
+
   },
   {},
   {
@@ -565,22 +868,13 @@ const _handler = createMcpHandler(
   }
 )
 
-// Wrap the raw handler with Bearer-token auth so unauthenticated
-// requests are rejected before any MCP processing happens.
 async function withMcpAuth(req: Request): Promise<Response> {
-  if (!validateMcpAuth(req)) {
-    return new Response("Unauthorized", {
-      status: 401,
-      headers: { "WWW-Authenticate": "Bearer" },
-    })
+  const auth = await validateMcpAuth(req)
+  if (!auth.valid) {
+    return new Response("Unauthorized", { status: 401, headers: { "WWW-Authenticate": "Bearer" } })
   }
   return _handler(req)
 }
 
-export async function GET(req: Request) {
-  return withMcpAuth(req)
-}
-
-export async function POST(req: Request) {
-  return withMcpAuth(req)
-}
+export async function GET(req: Request) { return withMcpAuth(req) }
+export async function POST(req: Request) { return withMcpAuth(req) }
