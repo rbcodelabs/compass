@@ -9,7 +9,7 @@ import type {
   RiskLevel,
 } from "@/lib/types";
 
-export type { OpportunityStatus, SolutionStatus, AssumptionStatus, RiskLevel };
+// Types live in @/lib/types — import from there directly.
 
 export async function createOpportunity(
   workspaceId: string,
