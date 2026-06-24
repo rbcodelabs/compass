@@ -73,6 +73,65 @@ const _handler = createMcpHandler(
     // ════════════════════════════════════════════════════════════════
 
     server.registerTool(
+      "list_okr_cycles",
+      {
+        title: "List OKR Cycles",
+        description: "Lists all OKR cycles for a workspace with their IDs, titles, dates, and status.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+        },
+      },
+      async ({ workspaceId }) => {
+        const prisma = getPrisma()
+        const cycles = await prisma.oKRCycle.findMany({
+          where: { workspaceId },
+          orderBy: { startDate: "desc" },
+          select: { id: true, title: true, status: true, startDate: true, endDate: true, _count: { select: { objectives: true } } },
+        })
+        if (!cycles.length) {
+          return { content: [{ type: "text" as const, text: "No OKR cycles found for this workspace." }] }
+        }
+        const lines = cycles.map(c =>
+          `• **${c.title}** [${c.status}] ${c.startDate.toLocaleDateString()} – ${c.endDate.toLocaleDateString()} — ${c._count.objectives} objectives — ID: ${c.id}`
+        )
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+      }
+    )
+
+    server.registerTool(
+      "create_okr_cycle",
+      {
+        title: "Create OKR Cycle",
+        description: "Creates a new OKR cycle for a workspace. Status defaults to DRAFT; set status to ACTIVE to make it the live cycle.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          title: z.string().min(1).describe("Cycle title, e.g. 'Q3 2026'"),
+          startDate: z.string().describe("ISO date string for cycle start, e.g. '2026-07-01'"),
+          endDate: z.string().describe("ISO date string for cycle end, e.g. '2026-09-30'"),
+          status: z.enum(["DRAFT", "ACTIVE", "COMPLETED"]).optional().describe("Cycle status (default: ACTIVE)"),
+        },
+      },
+      async ({ workspaceId, title, startDate, endDate, status }) => {
+        const prisma = getPrisma()
+        const cycle = await prisma.oKRCycle.create({
+          data: {
+            workspaceId,
+            title,
+            startDate: new Date(startDate),
+            endDate: new Date(endDate),
+            status: status ?? "ACTIVE",
+          },
+        })
+        return {
+          content: [{
+            type: "text" as const,
+            text: `OKR cycle created: **${cycle.title}** [${cycle.status}]\n${cycle.startDate.toLocaleDateString()} – ${cycle.endDate.toLocaleDateString()}\nCycle ID: ${cycle.id}`,
+          }],
+        }
+      }
+    )
+
+    server.registerTool(
       "get_okr_cycle",
       {
         title: "Get OKR Cycle",
