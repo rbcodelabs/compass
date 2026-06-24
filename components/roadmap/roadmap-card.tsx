@@ -9,6 +9,7 @@ import { GripVertical } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { archiveItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import { usePanelContext } from "@/components/panels/panel-context";
 
 import type { Horizon } from "@/lib/types";
 
@@ -45,6 +46,7 @@ type Props = {
 
 export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, workspaceSlug }: Props) {
   const [isArchiving, startArchiveTransition] = useTransition();
+  const { openPanel } = usePanelContext();
 
   const {
     attributes,
@@ -123,23 +125,36 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, works
 
             {hasLinks && (
               <div className="flex flex-wrap gap-1">
-                {/* Opportunity → Discovery detail */}
+                {/* Opportunity → slide-over panel */}
                 {item.opportunity && (
-                  <Link
-                    href={`${base}/discovery/${item.opportunity.id}`}
-                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 hover:bg-violet-200 transition-colors"
-                    onClick={(e) => e.stopPropagation()}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openPanel("opportunity", item.opportunity!.id);
+                    }}
+                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 hover:bg-violet-200 transition-colors cursor-pointer"
                   >
                     ↑ {item.opportunity.title}
-                  </Link>
+                  </button>
                 )}
 
-                {/* Solution → Discovery opportunity detail (solutions live on opp page) */}
-                {item.solution && (
+                {/* Solution → opportunity panel (solutions live on opp page) */}
+                {item.solution && item.opportunityId && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openPanel("opportunity", item.opportunityId!);
+                    }}
+                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors cursor-pointer"
+                  >
+                    {item.solution.title}
+                  </button>
+                )}
+                {item.solution && !item.opportunityId && (
                   <Link
-                    href={item.opportunityId
-                      ? `${base}/discovery/${item.opportunityId}`
-                      : `${base}/discovery`}
+                    href={`${base}/discovery`}
                     className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -147,18 +162,21 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, works
                   </Link>
                 )}
 
-                {/* Experiment → Experiment detail */}
+                {/* Experiment → slide-over panel */}
                 {item.experiment && (
-                  <Link
-                    href={`${base}/experiments/${item.experiment.id}`}
-                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"
-                    onClick={(e) => e.stopPropagation()}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openPanel("experiment", item.experiment!.id);
+                    }}
+                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors cursor-pointer"
                   >
                     🧪 {item.experiment.title}
-                  </Link>
+                  </button>
                 )}
 
-                {/* KR → OKR cycle page */}
+                {/* KR → OKR cycle page (full nav, no panel yet) */}
                 {item.keyResult && krProgress !== null && (
                   <Link
                     href={item.keyResult.cycleId
