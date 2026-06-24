@@ -20,7 +20,9 @@ export default auth((req) => {
     pathname.startsWith("/api/admin/migrate") ||
     // Public portal routes — no auth, workspace settings control access
     pathname.startsWith("/portal/") ||
-    pathname.startsWith("/api/portal/")
+    pathname.startsWith("/api/portal/") ||
+    // Docs API routes use session auth internally — let them handle 401 themselves
+    pathname.startsWith("/api/docs/")
 
   if (!isLoggedIn && !isPublic) {
     return Response.redirect(new URL("/login", req.nextUrl))

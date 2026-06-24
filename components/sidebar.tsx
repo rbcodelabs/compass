@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Target, Lightbulb, FlaskConical, Map, MessageSquare, Settings, ChevronDown } from "lucide-react"
+import { Target, Lightbulb, FlaskConical, Map, MessageSquare, BookOpen, Settings, ChevronDown } from "lucide-react"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
 
@@ -20,6 +20,7 @@ const navItems = [
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
   { label: "Feedback", path: "feedback", Icon: MessageSquare },
+  { label: "Docs", path: "docs", Icon: BookOpen },
 ]
 
 function getInitials(name: string): string {

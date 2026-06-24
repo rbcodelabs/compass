@@ -88,3 +88,26 @@ body {
 *, *::before, *::after {
   border-color: var(--border);
 }
+
+/* ── Tiptap / ProseMirror editor prose styles ────────────────────────── */
+.ProseMirror {
+  outline: none;
+}
+.ProseMirror h1 { @apply text-2xl font-bold mt-6 mb-2; }
+.ProseMirror h2 { @apply text-xl font-bold mt-5 mb-2; }
+.ProseMirror h3 { @apply text-lg font-semibold mt-4 mb-1; }
+.ProseMirror p { @apply mb-2 leading-relaxed; }
+.ProseMirror ul { @apply list-disc pl-5 mb-2; }
+.ProseMirror ol { @apply list-decimal pl-5 mb-2; }
+.ProseMirror li { @apply mb-0.5; }
+.ProseMirror blockquote { @apply border-l-4 border-border pl-4 italic text-muted-foreground; }
+.ProseMirror code { @apply font-mono text-sm bg-muted rounded px-1; }
+.ProseMirror pre { @apply bg-muted rounded-md p-4 mb-3 overflow-x-auto; }
+.ProseMirror pre code { @apply bg-transparent p-0; }
+.ProseMirror img { @apply max-w-full rounded-lg shadow-sm my-3; }
+.ProseMirror a { @apply text-blue-600 underline hover:text-blue-800; }
+.ProseMirror hr { @apply border-border my-4; }
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  @apply text-muted-foreground/60 float-left pointer-events-none;
+}
