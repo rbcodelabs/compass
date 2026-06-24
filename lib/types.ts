@@ -56,3 +56,10 @@ export type CustomFieldValue =
   | boolean
   | string[]
   | null
+
+// Squads
+export interface SquadData {
+  id: string
+  name: string
+  color: string
+}

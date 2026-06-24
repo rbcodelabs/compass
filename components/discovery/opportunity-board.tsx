@@ -3,7 +3,7 @@
 import { Badge } from "@/components/ui/badge";
 import { OpportunityCard, type OpportunityCardData } from "./opportunity-card";
 import { CreateOpportunityForm } from "./create-opportunity-form";
-import type { OpportunityStatus } from "@/lib/types";
+import type { OpportunityStatus, SquadData } from "@/lib/types";
 
 const COLUMNS: { status: OpportunityStatus; label: string }[] = [
   { status: "EXPLORING", label: "Exploring" },
@@ -17,6 +17,7 @@ type Props = {
   orgSlug: string;
   workspaceSlug: string;
   workspaceId: string;
+  squads?: SquadData[];
 };
 
 export function OpportunityBoard({
@@ -24,6 +25,7 @@ export function OpportunityBoard({
   orgSlug,
   workspaceSlug,
   workspaceId,
+  squads = [],
 }: Props) {
   return (
     <div className="flex gap-4 overflow-x-auto pb-4">
@@ -55,6 +57,7 @@ export function OpportunityBoard({
             <CreateOpportunityForm
               workspaceId={workspaceId}
               defaultStatus={status}
+              squads={squads}
             />
           </div>
         );

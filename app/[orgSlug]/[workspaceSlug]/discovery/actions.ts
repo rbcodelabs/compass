@@ -18,6 +18,7 @@ export async function createOpportunity(
     description?: string;
     customerSegment?: string;
     status?: OpportunityStatus;
+    squadId?: string | null;
   }
 ) {
   const prisma = getPrisma();
@@ -28,6 +29,7 @@ export async function createOpportunity(
       description: data.description,
       customerSegment: data.customerSegment,
       status: data.status ?? "EXPLORING",
+      squadId: data.squadId ?? null,
     },
   });
   revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "page");

@@ -1,9 +1,11 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
-import type { Horizon } from "@/lib/types";
+import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
+import type { Horizon, SquadData } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 
 export const metadata = {
@@ -12,13 +14,15 @@ export const metadata = {
 
 interface RoadmapPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
+  searchParams: Promise<{ squad?: string }>;
 }
 
-export default async function RoadmapPage({ params }: RoadmapPageProps) {
+export default async function RoadmapPage({ params, searchParams }: RoadmapPageProps) {
   const session = await auth();
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
+  const { squad: squadFilter } = await searchParams;
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
@@ -30,21 +34,34 @@ export default async function RoadmapPage({ params }: RoadmapPageProps) {
 
   if (!workspace) notFound();
 
-  const items = await prisma.roadmapItem.findMany({
-    where: {
-      workspaceId: workspace.id,
-      status: "ACTIVE",
-    },
-    orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }],
-    include: {
-      solution: {
-        select: { id: true, title: true },
+  const [rawSquads, items] = await Promise.all([
+    prisma.squad.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.roadmapItem.findMany({
+      where: {
+        workspaceId: workspace.id,
+        status: "ACTIVE",
+        ...(squadFilter ? { squadId: squadFilter } : {}),
       },
-      keyResult: {
-        select: { id: true, title: true, current: true, target: true, unit: true },
+      orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }],
+      include: {
+        solution: {
+          select: { id: true, title: true },
+        },
+        keyResult: {
+          select: { id: true, title: true, current: true, target: true, unit: true },
+        },
       },
-    },
-  });
+    }),
+  ]);
+
+  const squads: SquadData[] = rawSquads.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+  }));
 
   return (
     <div className="flex flex-col flex-1 p-8 gap-6 min-h-0">
@@ -54,6 +71,10 @@ export default async function RoadmapPage({ params }: RoadmapPageProps) {
           Drag items between horizons to update your plan.
         </p>
       </div>
+
+      <Suspense>
+        <SquadFilterBar squads={squads} />
+      </Suspense>
 
       <RoadmapBoard
         initialItems={items.map((item) => ({ ...item, horizon: item.horizon as Horizon })) as RoadmapCardData[]}

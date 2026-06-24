@@ -1,15 +1,18 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { ObjectiveRow } from "@/components/okrs/objective-row";
 import { AddObjectiveForm } from "@/components/okrs/add-objective-form";
+import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
 import type {
   CycleStatus,
   ObjectiveStatus,
   CustomFieldDefinitionData,
   CustomFieldType,
   CustomFieldValue,
+  SquadData,
 } from "@/lib/types";
 
 export const metadata = {
@@ -18,6 +21,7 @@ export const metadata = {
 
 interface CyclePageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string; cycleId: string }>;
+  searchParams: Promise<{ squad?: string }>;
 }
 
 const CYCLE_STATUS_STYLES: Record<CycleStatus, string> = {
@@ -40,11 +44,12 @@ function formatDate(d: Date): string {
   });
 }
 
-export default async function CyclePage({ params }: CyclePageProps) {
+export default async function CyclePage({ params, searchParams }: CyclePageProps) {
   const session = await auth();
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug, cycleId } = await params;
+  const { squad: squadFilter } = await searchParams;
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
@@ -64,10 +69,27 @@ export default async function CyclePage({ params }: CyclePageProps) {
 
   const cycleStatus = cycle.status as CycleStatus;
 
-  const objectives = await prisma.objective.findMany({
-    where: { cycleId: cycle.id },
-    orderBy: { createdAt: "asc" },
-  });
+  const [rawSquads, objectives] = await Promise.all([
+    prisma.squad.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.objective.findMany({
+      where: {
+        cycleId: cycle.id,
+        ...(squadFilter ? { squadId: squadFilter } : {}),
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
+
+  const squads: SquadData[] = rawSquads.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+  }));
+
+  const squadMap = new Map(squads.map((s) => [s.id, s]));
 
   const objectiveIds = objectives.map((o) => o.id);
   const keyResults =
@@ -130,6 +152,7 @@ export default async function CyclePage({ params }: CyclePageProps) {
       status: obj.status as ObjectiveStatus,
       keyResults: krByObjective[obj.id] ?? [],
       customFields,
+      squad: obj.squadId ? (squadMap.get(obj.squadId) ?? null) : null,
     };
   });
 
@@ -154,6 +177,10 @@ export default async function CyclePage({ params }: CyclePageProps) {
         </p>
       </div>
 
+      <Suspense>
+        <SquadFilterBar squads={squads} />
+      </Suspense>
+
       {/* Objectives list + inline add */}
       <div className="flex flex-col gap-4">
         {objectivesWithData.map((obj) => (
@@ -170,6 +197,7 @@ export default async function CyclePage({ params }: CyclePageProps) {
           cycleId={cycle.id}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
+          squads={squads}
         />
       </div>
     </main>

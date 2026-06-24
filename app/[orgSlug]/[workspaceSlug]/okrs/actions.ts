@@ -49,6 +49,7 @@ const CreateObjectiveSchema = z.object({
   title: z.string().min(1, "Title is required"),
   description: z.string().optional(),
   owner: z.string().optional(),
+  squadId: z.string().uuid().optional(),
 });
 
 export async function createObjective(
@@ -61,6 +62,7 @@ export async function createObjective(
     title: formData.get("title"),
     description: formData.get("description") || undefined,
     owner: formData.get("owner") || undefined,
+    squadId: formData.get("squadId") || undefined,
   });
 
   if (!parsed.success) {
@@ -75,6 +77,7 @@ export async function createObjective(
       title: parsed.data.title,
       description: parsed.data.description,
       owner: parsed.data.owner,
+      squadId: parsed.data.squadId ?? null,
     },
   });
 

@@ -1,11 +1,13 @@
+import { Suspense } from "react"
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { getWorkspace } from "@/lib/workspace"
 import { ExperimentCard } from "@/components/experiments/experiment-card"
 import { CreateExperimentForm } from "@/components/experiments/create-experiment-form"
+import { SquadFilterBar } from "@/components/squads/squad-filter-bar"
 import type { Experiment } from "@prisma/client"
-import type { ExperimentStatus } from "@/lib/types"
+import type { ExperimentStatus, SquadData } from "@/lib/types"
 
 export const metadata = {
   title: "Experiments",
@@ -13,6 +15,7 @@ export const metadata = {
 
 interface ExperimentsPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>
+  searchParams: Promise<{ squad?: string }>
 }
 
 const COLUMNS: { status: ExperimentStatus; label: string }[] = [
@@ -24,8 +27,10 @@ const COLUMNS: { status: ExperimentStatus; label: string }[] = [
 
 export default async function ExperimentsPage({
   params,
+  searchParams,
 }: ExperimentsPageProps) {
   const { orgSlug, workspaceSlug } = await params
+  const { squad: squadFilter } = await searchParams
 
   const session = await auth()
   const userId = session?.user?.id
@@ -39,10 +44,26 @@ export default async function ExperimentsPage({
   }
 
   const prisma = getPrisma()
-  const experiments = await prisma.experiment.findMany({
-    where: { workspaceId: workspace.id },
-    orderBy: { createdAt: "desc" },
-  })
+
+  const [rawSquads, experiments] = await Promise.all([
+    prisma.squad.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.experiment.findMany({
+      where: {
+        workspaceId: workspace.id,
+        ...(squadFilter ? { squadId: squadFilter } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+  ])
+
+  const squads: SquadData[] = rawSquads.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+  }))
 
   const byStatus = experiments.reduce<Record<string, Experiment[]>>(
     (acc, exp) => {
@@ -62,8 +83,12 @@ export default async function ExperimentsPage({
             Design, run, and conclude experiments to validate assumptions.
           </p>
         </div>
-        <CreateExperimentForm workspaceId={workspace.id} />
+        <CreateExperimentForm workspaceId={workspace.id} squads={squads} />
       </div>
+
+      <Suspense>
+        <SquadFilterBar squads={squads} />
+      </Suspense>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
         {COLUMNS.map(({ status, label }) => {

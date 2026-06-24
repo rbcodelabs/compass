@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/select";
 import { updateOpportunityStatus, linkOpportunityToKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
-import type { OpportunityStatus, CustomFieldDefinitionData, CustomFieldValue } from "@/lib/types";
+import { SquadPicker } from "@/components/squads/squad-picker";
+import type { OpportunityStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   EXPLORING: "Exploring",
@@ -47,6 +48,8 @@ type Props = {
   revalidatePathStr: string;
   availableKeyResults?: AvailableKR[];
   customFields?: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }>;
+  squads?: SquadData[];
+  currentSquadId?: string | null;
 };
 
 export function OpportunityOverview({
@@ -54,6 +57,8 @@ export function OpportunityOverview({
   revalidatePathStr,
   availableKeyResults = [],
   customFields = [],
+  squads = [],
+  currentSquadId = null,
 }: Props) {
   const [isPending, startTransition] = useTransition();
 
@@ -98,6 +103,18 @@ export function OpportunityOverview({
           </SelectContent>
         </Select>
       </Field>
+
+      {squads.length > 0 && (
+        <Field label="Squad">
+          <SquadPicker
+            objectType="opportunity"
+            objectId={opportunity.id}
+            currentSquadId={currentSquadId}
+            squads={squads}
+            revalidatePathStr={revalidatePathStr}
+          />
+        </Field>
+      )}
 
       <Separator />
 

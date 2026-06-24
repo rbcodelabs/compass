@@ -109,6 +109,7 @@ model Workspace {
   experiments       Experiment[]
   roadmapItems      RoadmapItem[]
   customFieldDefs   CustomFieldDefinition[]
+  squads            Squad[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -147,6 +148,7 @@ model OKRCycle {
 model Objective {
   id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   cycleId     String      @map("cycle_id") @db.Uuid
+  squadId     String?     @map("squad_id") @db.Uuid
   title       String      @db.VarChar(255)
   description String?     @db.Text
   owner       String?     @db.VarChar(255)
@@ -154,6 +156,7 @@ model Objective {
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @default(now()) @map("updated_at")
   cycle       OKRCycle    @relation(fields: [cycleId], references: [id])
+  squad       Squad?      @relation(fields: [squadId], references: [id])
   keyResults  KeyResult[]
 
   @@map("objectives")
@@ -192,6 +195,7 @@ model CheckIn {
 model Opportunity {
   id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId       String      @map("workspace_id") @db.Uuid
+  squadId           String?     @map("squad_id") @db.Uuid
   title             String      @db.VarChar(255)
   description       String?     @db.Text
   customerSegment   String?     @map("customer_segment") @db.VarChar(255)
@@ -200,6 +204,7 @@ model Opportunity {
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @default(now()) @map("updated_at")
   workspace         Workspace   @relation(fields: [workspaceId], references: [id])
+  squad             Squad?      @relation(fields: [squadId], references: [id])
   linkedKeyResult   KeyResult?  @relation(fields: [linkedKeyResultId], references: [id])
   solutions         Solution[]
 
@@ -240,6 +245,7 @@ model Assumption {
 model Experiment {
   id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId   String     @map("workspace_id") @db.Uuid
+  squadId       String?    @map("squad_id") @db.Uuid
   assumptionId  String?    @map("assumption_id") @db.Uuid
   title         String     @db.VarChar(255)
   hypothesis    String     @db.Text
@@ -252,6 +258,7 @@ model Experiment {
   createdAt     DateTime   @default(now()) @map("created_at")
   updatedAt     DateTime   @default(now()) @map("updated_at")
   workspace     Workspace  @relation(fields: [workspaceId], references: [id])
+  squad         Squad?     @relation(fields: [squadId], references: [id])
   assumption    Assumption? @relation(fields: [assumptionId], references: [id])
   results       ExperimentResult[]
 
@@ -275,6 +282,7 @@ model ExperimentResult {
 model RoadmapItem {
   id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId  String    @map("workspace_id") @db.Uuid
+  squadId      String?   @map("squad_id") @db.Uuid
   title        String    @db.VarChar(255)
   description  String?   @db.Text
   horizon      String    @default("NOW") @db.VarChar(50)
@@ -285,10 +293,28 @@ model RoadmapItem {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @default(now()) @map("updated_at")
   workspace    Workspace @relation(fields: [workspaceId], references: [id])
+  squad        Squad?    @relation(fields: [squadId], references: [id])
   solution     Solution? @relation(fields: [solutionId], references: [id])
   keyResult    KeyResult? @relation(fields: [keyResultId], references: [id])
 
   @@map("roadmap_items")
+}
+
+// ─── Squads ───────────────────────────────────────────────────────────────────
+
+model Squad {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String        @map("workspace_id") @db.Uuid
+  name        String        @db.VarChar(255)
+  color       String        @default("#6366f1") @db.VarChar(50)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
+  objectives   Objective[]
+  opportunities Opportunity[]
+  experiments  Experiment[]
+  roadmapItems RoadmapItem[]
+
+  @@map("squads")
 }
 
 // ─── Custom Fields ────────────────────────────────────────────────────────────

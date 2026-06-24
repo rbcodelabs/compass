@@ -15,6 +15,7 @@ import type {
   CustomFieldDefinitionData,
   CustomFieldType,
   CustomFieldValue,
+  SquadData,
 } from "@/lib/types";
 
 export async function generateMetadata({
@@ -53,37 +54,49 @@ export default async function OpportunityDetailPage({ params }: Props) {
   });
   if (!workspace) notFound();
 
-  const opportunity = await prisma.opportunity.findFirst({
-    where: {
-      id: opportunityId,
-      workspace: {
-        slug: workspaceSlug,
-        organization: { slug: orgSlug },
-      },
-    },
-    include: {
-      linkedKeyResult: {
-        select: {
-          id: true,
-          title: true,
-          objective: { select: { title: true } },
+  const [opportunity, rawSquads] = await Promise.all([
+    prisma.opportunity.findFirst({
+      where: {
+        id: opportunityId,
+        workspace: {
+          slug: workspaceSlug,
+          organization: { slug: orgSlug },
         },
       },
-      solutions: {
-        orderBy: { createdAt: "asc" },
-        include: {
-          assumptions: {
-            orderBy: { createdAt: "asc" },
-            include: {
-              experiments: { select: { id: true } },
+      include: {
+        linkedKeyResult: {
+          select: {
+            id: true,
+            title: true,
+            objective: { select: { title: true } },
+          },
+        },
+        solutions: {
+          orderBy: { createdAt: "asc" },
+          include: {
+            assumptions: {
+              orderBy: { createdAt: "asc" },
+              include: {
+                experiments: { select: { id: true } },
+              },
             },
           },
         },
       },
-    },
-  });
+    }),
+    prisma.squad.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
 
   if (!opportunity) notFound();
+
+  const squads: SquadData[] = rawSquads.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+  }));
 
   // Fetch available key results for this workspace (to power the KR link picker)
   const allKRs = await prisma.keyResult.findMany({
@@ -201,6 +214,8 @@ export default async function OpportunityDetailPage({ params }: Props) {
             revalidatePathStr={detailPath}
             availableKeyResults={availableKeyResults}
             customFields={customFields}
+            squads={squads}
+            currentSquadId={opportunity.squadId}
           />
         </TabsContent>
       </Tabs>

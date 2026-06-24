@@ -12,6 +12,7 @@ export async function createExperiment(
     method: string
     killCondition: string
     assumptionId?: string
+    squadId?: string | null
   }
 ) {
   const prisma = getPrisma()
@@ -24,6 +25,7 @@ export async function createExperiment(
       method: data.method,
       killCondition: data.killCondition,
       assumptionId: data.assumptionId ?? null,
+      squadId: data.squadId ?? null,
       status: "DESIGNING",
     },
   })

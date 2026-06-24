@@ -6,15 +6,25 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { createExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
+import type { SquadData } from "@/lib/types"
 
 interface CreateExperimentFormProps {
   workspaceId: string
+  squads?: SquadData[]
 }
 
-export function CreateExperimentForm({ workspaceId }: CreateExperimentFormProps) {
+export function CreateExperimentForm({ workspaceId, squads = [] }: CreateExperimentFormProps) {
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
+  const [squadId, setSquadId] = useState<string | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
 
   function handleSubmit(formData: FormData) {
@@ -31,8 +41,10 @@ export function CreateExperimentForm({ workspaceId }: CreateExperimentFormProps)
         hypothesis,
         method,
         killCondition,
+        squadId,
       })
       setOpen(false)
+      setSquadId(null)
       formRef.current?.reset()
     })
   }
@@ -117,6 +129,35 @@ export function CreateExperimentForm({ workspaceId }: CreateExperimentFormProps)
         </p>
       </div>
 
+      {squads.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="exp-squad">Squad (optional)</Label>
+          <Select
+            value={squadId ?? "__none__"}
+            onValueChange={(v) => setSquadId(v === "__none__" ? null : v)}
+            disabled={isPending}
+          >
+            <SelectTrigger id="exp-squad">
+              <SelectValue placeholder="No squad" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">No squad</SelectItem>
+              {squads.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0 inline-block"
+                      style={{ backgroundColor: s.color }}
+                    />
+                    {s.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={isPending}>
           {isPending ? "Creating..." : "Create Experiment"}
@@ -128,6 +169,7 @@ export function CreateExperimentForm({ workspaceId }: CreateExperimentFormProps)
           disabled={isPending}
           onClick={() => {
             setOpen(false)
+            setSquadId(null)
             formRef.current?.reset()
           }}
         >

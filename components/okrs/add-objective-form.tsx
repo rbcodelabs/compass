@@ -6,30 +6,43 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { createObjective } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
+import type { SquadData } from "@/lib/types";
 
 interface AddObjectiveFormProps {
   cycleId: string;
   orgSlug: string;
   workspaceSlug: string;
+  squads?: SquadData[];
 }
 
 export function AddObjectiveForm({
   cycleId,
   orgSlug,
   workspaceSlug,
+  squads = [],
 }: AddObjectiveFormProps) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [squadId, setSquadId] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(formData: FormData) {
     setError(null);
+    if (squadId) formData.set("squadId", squadId);
     startTransition(async () => {
       try {
         await createObjective(cycleId, orgSlug, workspaceSlug, formData);
         setOpen(false);
+        setSquadId(null);
         formRef.current?.reset();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");
@@ -90,6 +103,35 @@ export function AddObjectiveForm({
         />
       </div>
 
+      {squads.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="obj-squad">Squad (optional)</Label>
+          <Select
+            value={squadId ?? "__none__"}
+            onValueChange={(v) => setSquadId(v === "__none__" ? null : v)}
+            disabled={isPending}
+          >
+            <SelectTrigger id="obj-squad">
+              <SelectValue placeholder="No squad" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">No squad</SelectItem>
+              {squads.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0 inline-block"
+                      style={{ backgroundColor: s.color }}
+                    />
+                    {s.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="flex items-center gap-2">
@@ -104,6 +146,7 @@ export function AddObjectiveForm({
           onClick={() => {
             setOpen(false);
             setError(null);
+            setSquadId(null);
             formRef.current?.reset();
           }}
         >

@@ -1,7 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
-import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue } from "@/lib/types";
+import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
@@ -30,6 +30,7 @@ interface ObjectiveRowProps {
     owner: string | null;
     keyResults: KeyResult[];
     customFields?: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }>;
+    squad?: SquadData | null;
   };
   orgSlug: string;
   workspaceSlug: string;
@@ -98,9 +99,21 @@ export function ObjectiveRow({
       {/* Objective header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h3 className="font-medium text-base">{objective.title}</h3>
+          <div className="flex items-center gap-2">
+            {objective.squad && (
+              <span
+                className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ backgroundColor: objective.squad.color }}
+                title={objective.squad.name}
+              />
+            )}
+            <h3 className="font-medium text-base">{objective.title}</h3>
+          </div>
           {objective.owner && (
             <p className="text-xs text-muted-foreground">{objective.owner}</p>
+          )}
+          {objective.squad && (
+            <p className="text-xs text-muted-foreground">{objective.squad.name}</p>
           )}
         </div>
 

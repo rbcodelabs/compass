@@ -11,6 +11,89 @@ import type {
   CustomFieldValue,
 } from "@/lib/types";
 
+// ─── Squads ───────────────────────────────────────────────────────────────────
+
+export async function createSquad(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: { name: string; color: string }
+) {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  await prisma.squad.create({
+    data: {
+      workspaceId,
+      name: input.name,
+      color: input.color,
+    },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
+
+export async function updateSquad(
+  orgSlug: string,
+  workspaceSlug: string,
+  squadId: string,
+  input: { name?: string; color?: string }
+) {
+  await resolveWorkspace(orgSlug, workspaceSlug);
+  const prisma = getPrisma();
+
+  await prisma.squad.update({
+    where: { id: squadId },
+    data: {
+      ...(input.name !== undefined && { name: input.name }),
+      ...(input.color !== undefined && { color: input.color }),
+    },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
+
+export async function deleteSquad(
+  orgSlug: string,
+  workspaceSlug: string,
+  squadId: string
+) {
+  await resolveWorkspace(orgSlug, workspaceSlug);
+  const prisma = getPrisma();
+
+  // Null out squad references (no FK cascade in DSQL)
+  await prisma.objective.updateMany({ where: { squadId }, data: { squadId: null } });
+  await prisma.opportunity.updateMany({ where: { squadId }, data: { squadId: null } });
+  await prisma.experiment.updateMany({ where: { squadId }, data: { squadId: null } });
+  await prisma.roadmapItem.updateMany({ where: { squadId }, data: { squadId: null } });
+
+  await prisma.squad.delete({ where: { id: squadId } });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
+
+export async function assignSquad(
+  objectType: "objective" | "opportunity" | "experiment" | "roadmapItem",
+  objectId: string,
+  squadId: string | null,
+  revalidatePathStr: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const prisma = getPrisma();
+
+  if (objectType === "objective") {
+    await prisma.objective.update({ where: { id: objectId }, data: { squadId } });
+  } else if (objectType === "opportunity") {
+    await prisma.opportunity.update({ where: { id: objectId }, data: { squadId } });
+  } else if (objectType === "experiment") {
+    await prisma.experiment.update({ where: { id: objectId }, data: { squadId } });
+  } else if (objectType === "roadmapItem") {
+    await prisma.roadmapItem.update({ where: { id: objectId }, data: { squadId } });
+  }
+
+  revalidatePath(revalidatePathStr);
+}
+
 // ─── Helper: resolve workspace and assert membership ─────────────────────────
 
 async function resolveWorkspace(orgSlug: string, workspaceSlug: string) {

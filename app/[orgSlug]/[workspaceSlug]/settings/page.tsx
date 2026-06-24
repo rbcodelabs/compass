@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-panel";
-import type { CustomFieldDefinitionData, CustomFieldObjectType, CustomFieldType } from "@/lib/types";
+import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
+import type { CustomFieldDefinitionData, CustomFieldObjectType, CustomFieldType, SquadData } from "@/lib/types";
 
 export const metadata = { title: "Workspace Settings" };
 
@@ -24,10 +25,16 @@ export default async function SettingsPage({ params }: Props) {
 
   if (!workspace) redirect("/dashboard");
 
-  const rawFields = await prisma.customFieldDefinition.findMany({
-    where: { workspaceId: workspace.id },
-    orderBy: [{ objectType: "asc" }, { order: "asc" }],
-  });
+  const [rawFields, rawSquads] = await Promise.all([
+    prisma.customFieldDefinition.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: [{ objectType: "asc" }, { order: "asc" }],
+    }),
+    prisma.squad.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
 
   const fields: CustomFieldDefinitionData[] = rawFields.map((f) => ({
     id: f.id,
@@ -39,12 +46,35 @@ export default async function SettingsPage({ params }: Props) {
     order: f.order,
   }));
 
+  const squads: SquadData[] = rawSquads.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+  }));
+
   return (
-    <main className="flex flex-col flex-1 p-6 gap-6 max-w-3xl">
+    <main className="flex flex-col flex-1 p-6 gap-8 max-w-3xl">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
         <p className="text-sm text-muted-foreground">{workspace.name}</p>
       </div>
+
+      <section className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-base font-semibold">Squads</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Teams within this workspace. Squads can be assigned to objectives, opportunities, experiments, and roadmap items.
+          </p>
+        </div>
+
+        <ManageSquadsPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          initialSquads={squads}
+        />
+      </section>
+
+      <div className="border-t border-border" />
 
       <section className="flex flex-col gap-4">
         <div>

@@ -10,9 +10,10 @@ import { ResultItem } from "@/components/experiments/result-item"
 import { LogResultForm } from "@/components/experiments/log-result-form"
 import { ConcludePanel } from "@/components/experiments/conclude-panel"
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel"
+import { SquadPicker } from "@/components/squads/squad-picker"
 import { startExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
 import { ChevronLeftIcon } from "lucide-react"
-import type { CustomFieldDefinitionData, CustomFieldType, CustomFieldValue } from "@/lib/types"
+import type { CustomFieldDefinitionData, CustomFieldType, CustomFieldValue, SquadData } from "@/lib/types"
 
 interface ExperimentDetailPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string; id: string }>
@@ -56,17 +57,29 @@ export default async function ExperimentDetailPage({
   }
 
   const prisma = getPrisma()
-  const experiment = await prisma.experiment.findFirst({
-    where: { id, workspaceId: workspace.id },
-    include: {
-      results: { orderBy: { createdAt: "asc" } },
-      assumption: true,
-    },
-  })
+  const [experiment, rawSquads] = await Promise.all([
+    prisma.experiment.findFirst({
+      where: { id, workspaceId: workspace.id },
+      include: {
+        results: { orderBy: { createdAt: "asc" } },
+        assumption: true,
+      },
+    }),
+    prisma.squad.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: { createdAt: "asc" },
+    }),
+  ])
 
   if (!experiment) {
     notFound()
   }
+
+  const squads: SquadData[] = rawSquads.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+  }))
 
   // Custom fields for this experiment
   const fieldDefs = await prisma.customFieldDefinition.findMany({
@@ -183,6 +196,16 @@ export default async function ExperimentDetailPage({
               {experiment.assumption.title}
             </span>
           </div>
+        )}
+
+        {squads.length > 0 && (
+          <SquadPicker
+            objectType="experiment"
+            objectId={id}
+            currentSquadId={experiment.squadId}
+            squads={squads}
+            revalidatePathStr={experimentDetailPath}
+          />
         )}
       </div>
 

@@ -22,6 +22,7 @@ export type OpportunityCardData = {
   customerSegment: string | null;
   status: OpportunityStatus;
   _count: { solutions: number };
+  squad?: { id: string; name: string; color: string } | null;
 };
 
 type Props = {
@@ -56,14 +57,23 @@ export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) 
       data-pending={isPending ? true : undefined}
     >
       <CardHeader>
-        <CardTitle>
-          <Link
-            href={detailPath}
-            className="hover:underline underline-offset-2 line-clamp-2"
-          >
-            {opportunity.title}
-          </Link>
-        </CardTitle>
+        <div className="flex items-start gap-2">
+          {opportunity.squad && (
+            <span
+              className="mt-0.5 w-2.5 h-2.5 rounded-full shrink-0"
+              style={{ backgroundColor: opportunity.squad.color }}
+              title={opportunity.squad.name}
+            />
+          )}
+          <CardTitle className="flex-1">
+            <Link
+              href={detailPath}
+              className="hover:underline underline-offset-2 line-clamp-2"
+            >
+              {opportunity.title}
+            </Link>
+          </CardTitle>
+        </div>
         {opportunity.customerSegment && (
           <p className="text-xs text-muted-foreground truncate">
             {opportunity.customerSegment}

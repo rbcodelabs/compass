@@ -14,18 +14,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createOpportunity } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
-import type { OpportunityStatus } from "@/lib/types";
+import type { OpportunityStatus, SquadData } from "@/lib/types";
 
 type Props = {
   workspaceId: string;
   /** When set, pre-fills status and hides the status selector (column-embedded mode). */
   defaultStatus?: OpportunityStatus;
+  squads?: SquadData[];
 };
 
-export function CreateOpportunityForm({ workspaceId, defaultStatus }: Props) {
+export function CreateOpportunityForm({ workspaceId, defaultStatus, squads = [] }: Props) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [status, setStatus] = useState<OpportunityStatus>(defaultStatus ?? "EXPLORING");
+  const [squadId, setSquadId] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -42,10 +44,12 @@ export function CreateOpportunityForm({ workspaceId, defaultStatus }: Props) {
         customerSegment:
           (data.get("customerSegment") as string).trim() || undefined,
         status,
+        squadId,
       });
       setOpen(false);
       formRef.current?.reset();
       setStatus(defaultStatus ?? "EXPLORING");
+      setSquadId(null);
     });
   }
 
@@ -103,6 +107,34 @@ export function CreateOpportunityForm({ workspaceId, defaultStatus }: Props) {
           disabled={isPending}
         />
       </div>
+      {squads.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="opp-squad">Squad (optional)</Label>
+          <Select
+            value={squadId ?? "__none__"}
+            onValueChange={(v) => setSquadId(v === "__none__" ? null : v)}
+            disabled={isPending}
+          >
+            <SelectTrigger id="opp-squad">
+              <SelectValue placeholder="No squad" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">No squad</SelectItem>
+              {squads.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0 inline-block"
+                      style={{ backgroundColor: s.color }}
+                    />
+                    {s.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       {!defaultStatus && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="opp-status">Initial Status</Label>
@@ -139,6 +171,7 @@ export function CreateOpportunityForm({ workspaceId, defaultStatus }: Props) {
             setOpen(false);
             formRef.current?.reset();
             setStatus(defaultStatus ?? "EXPLORING");
+            setSquadId(null);
           }}
         >
           Cancel
