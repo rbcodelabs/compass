@@ -43,7 +43,7 @@ export function Sidebar({
   const base = `/${orgSlug}/${workspaceSlug}`
 
   return (
-    <aside className="w-[220px] shrink-0 flex flex-col h-full bg-slate-950 text-slate-100 border-r border-slate-800/50">
+    <aside className="hidden md:flex w-[220px] shrink-0 flex-col h-full bg-slate-950 text-slate-100 border-r border-slate-800/50">
       {/* Logo + app name */}
       <div className="flex items-center gap-2.5 px-4 pt-5 pb-4">
         <div className="w-7 h-7 rounded-lg bg-indigo-500 flex items-center justify-center shrink-0 shadow-sm">

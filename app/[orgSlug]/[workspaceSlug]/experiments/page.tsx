@@ -73,10 +73,10 @@ export default async function ExperimentsPage({
   }))
 
   return (
-    <main className="flex flex-col flex-1 p-8 gap-6">
-      <div className="flex items-start justify-between gap-4">
+    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Experiments</h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Experiments</h1>
           <p className="text-sm text-slate-500 mt-1">
             Design, run, and conclude experiments to validate assumptions.
           </p>
@@ -88,13 +88,15 @@ export default async function ExperimentsPage({
         <SquadFilterBar squads={squads} />
       </Suspense>
 
-      <ExperimentBoard
-        key={experiments.map((e) => e.id).join(",")}
-        experiments={experiments}
-        orgSlug={orgSlug}
-        workspaceSlug={workspaceSlug}
-        workspaceId={workspace.id}
-      />
+      <div className="overflow-x-auto min-w-0">
+        <ExperimentBoard
+          key={experiments.map((e) => e.id).join(",")}
+          experiments={experiments}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          workspaceId={workspace.id}
+        />
+      </div>
     </main>
   )
 }

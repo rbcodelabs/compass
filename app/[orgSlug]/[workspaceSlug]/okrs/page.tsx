@@ -41,10 +41,10 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
   });
 
   return (
-    <main className="flex flex-col flex-1 p-8 gap-8">
-      <div className="flex items-start justify-between gap-4">
+    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">OKRs</h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">OKRs</h1>
           <p className="text-slate-500 text-sm mt-1">
             Track objectives and key results across cycles.
           </p>

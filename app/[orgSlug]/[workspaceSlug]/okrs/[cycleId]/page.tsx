@@ -169,11 +169,11 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
   const cyclePath = `/${orgSlug}/${workspaceSlug}/okrs/${cycleId}`;
 
   return (
-    <main className="flex flex-col flex-1 p-8 gap-6">
+    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
       {/* Cycle header */}
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">
             {cycle.title}
           </h1>
           <span

@@ -2,6 +2,8 @@ import { auth } from "@/auth"
 import { redirect, notFound } from "next/navigation"
 import { getWorkspace } from "@/lib/workspace"
 import { Sidebar } from "@/components/sidebar"
+import { BottomNav } from "@/components/bottom-nav"
+import { MobileHeader } from "@/components/mobile-header"
 import { PanelProvider } from "@/components/panels/panel-context"
 import { PanelShell } from "@/components/panels/panel-shell"
 
@@ -28,7 +30,16 @@ export default async function WorkspaceLayout({
 
   return (
     <PanelProvider orgSlug={orgSlug} workspaceSlug={workspaceSlug}>
-      <div className="flex h-screen overflow-hidden">
+      {/* Mobile header — shown on small screens only (hidden on md+) */}
+      <MobileHeader
+        orgSlug={orgSlug}
+        workspaceSlug={workspaceSlug}
+        workspaceName={workspace.name}
+      />
+
+      {/* On mobile: subtract the 56px header height so the content area fills the rest */}
+      <div className="flex h-[calc(100dvh-3.5rem)] md:h-screen overflow-hidden">
+        {/* Desktop sidebar — hidden on mobile via sidebar.tsx */}
         <Sidebar
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
@@ -36,10 +47,16 @@ export default async function WorkspaceLayout({
           userName={session.user.name ?? session.user.email ?? ""}
           userImage={session.user.image ?? undefined}
         />
-        <main className="flex-1 overflow-y-auto bg-slate-50">
+
+        {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}
+        <main className="flex-1 overflow-y-auto bg-slate-50 pb-16 md:pb-0">
           {children}
         </main>
       </div>
+
+      {/* Mobile bottom nav — shown on small screens only */}
+      <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
+
       <PanelShell />
     </PanelProvider>
   )
