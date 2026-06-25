@@ -44,42 +44,45 @@ export function MobileHeader({ orgSlug, workspaceSlug, workspaceName }: MobileHe
       </div>
 
       {/* Right actions */}
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex items-center gap-0.5 shrink-0">
         <Link
           href={`${base}/docs`}
           className={cn(
-            "flex items-center justify-center w-9 h-9 rounded-lg transition-colors",
+            "flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 transition-colors",
             pathname.startsWith(`${base}/docs`)
               ? "bg-indigo-600/20 text-indigo-400"
               : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
           )}
           aria-label="Docs"
         >
-          <BookOpen className="w-4 h-4" aria-hidden="true" />
+          <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
+          <span className="text-[10px] font-medium leading-none">Docs</span>
         </Link>
         <Link
           href={`${base}/settings`}
           className={cn(
-            "flex items-center justify-center w-9 h-9 rounded-lg transition-colors",
+            "flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 transition-colors",
             pathname.startsWith(`${base}/settings`)
               ? "bg-indigo-600/20 text-indigo-400"
               : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
           )}
           aria-label="Settings"
         >
-          <Settings className="w-4 h-4" aria-hidden="true" />
+          <Settings className="w-3.5 h-3.5" aria-hidden="true" />
+          <span className="text-[10px] font-medium leading-none">Settings</span>
         </Link>
         <Link
           href="/help"
           className={cn(
-            "flex items-center justify-center w-9 h-9 rounded-lg transition-colors",
+            "flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 transition-colors",
             pathname.startsWith("/help")
               ? "bg-indigo-600/20 text-indigo-400"
               : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
           )}
           aria-label="Help"
         >
-          <HelpCircle className="w-4 h-4" aria-hidden="true" />
+          <HelpCircle className="w-3.5 h-3.5" aria-hidden="true" />
+          <span className="text-[10px] font-medium leading-none">Help</span>
         </Link>
       </div>
     </header>
