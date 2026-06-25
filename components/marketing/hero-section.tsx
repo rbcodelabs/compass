@@ -52,7 +52,7 @@ export function HeroSection() {
           </p>
           <div className="flex items-center gap-5 pt-2">
             <Link
-              href="/login"
+              href="/dashboard"
               className="inline-block bg-indigo-600 hover:bg-indigo-500 transition-colors text-white font-semibold rounded-lg px-6 py-3 text-base"
             >
               Start for free →
