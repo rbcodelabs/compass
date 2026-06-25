@@ -108,20 +108,22 @@ export async function POST(req: NextRequest) {
       log.push(`Added user ${userEmail} as owner`);
     }
 
-    // Create API key
+    // Create API key (api_keys schema: id, user_id, name, key_hash, key_prefix, last_used_at, revoked_at, created_at)
     const { createHash, randomBytes } = await import("crypto");
     const apiKey = randomBytes(32).toString("hex");
     const keyHash = createHash("sha256").update(apiKey).digest("hex");
+    const keyPrefix = apiKey.slice(0, 8);
+    const keyName = apiKeyLabel ?? "MCP access";
     const existingKey = await client.query(
-      `SELECT id FROM "${schema}".api_keys WHERE user_id = $1 AND workspace_id = $2`,
-      [userId, wsId]
+      `SELECT id FROM "${schema}".api_keys WHERE user_id = $1 AND name = $2`,
+      [userId, keyName]
     );
     if (!existingKey.rows[0]) {
       await client.query(
-        `INSERT INTO "${schema}".api_keys (user_id, workspace_id, key_hash, label) VALUES ($1, $2, $3, $4)`,
-        [userId, wsId, keyHash, apiKeyLabel ?? "MCP access"]
+        `INSERT INTO "${schema}".api_keys (user_id, name, key_hash, key_prefix) VALUES ($1, $2, $3, $4)`,
+        [userId, keyName, keyHash, keyPrefix]
       );
-      log.push(`API key created`);
+      log.push(`API key created (prefix: ${keyPrefix})`);
       return NextResponse.json({ log, orgId, workspaceId: wsId, apiKey, url: `/${orgSlug}/${workspaceSlug}/okrs` });
     }
 
