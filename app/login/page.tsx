@@ -24,6 +24,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   const params = await searchParams
   const checkEmail = params["check-email"] === "1"
+  const isDev = process.env.NODE_ENV === "development"
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 bg-gradient-to-br from-slate-50 via-white to-indigo-50/30">
@@ -104,6 +105,43 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 Send magic link
               </Button>
             </form>
+
+            {/* Dev-only instant login — never shown in production */}
+            {isDev && (
+              <>
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t border-dashed border-amber-200" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-white px-2 text-amber-500 font-medium tracking-wide">dev only</span>
+                  </div>
+                </div>
+                <form
+                  action={async () => {
+                    "use server"
+                    // Trigger the magic-link flow for a fixed dev account.
+                    // auth.ts (Node.js only) stores the callback URL in globalThis
+                    // so we can redirect straight to it — no email client needed.
+                    await signIn("resend", { email: "dev@localhost.dev", redirect: false })
+                    const url = globalThis.__devMagicLinkUrl
+                    if (url) {
+                      redirect(url)
+                    } else {
+                      redirect("/login?check-email=1")
+                    }
+                  }}
+                >
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    className="w-full h-11 border-amber-300 text-amber-700 hover:bg-amber-50 font-semibold"
+                  >
+                    ⚡ Dev Login
+                  </Button>
+                </form>
+              </>
+            )}
           </div>
         )}
       </div>
