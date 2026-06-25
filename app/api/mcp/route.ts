@@ -68,6 +68,69 @@ const _handler = createMcpHandler(
       }
     )
 
+    // ----------------------------------------------------------------
+    // list_workspaces — entry-point for agents discovering workspace IDs
+    // ----------------------------------------------------------------
+    server.registerTool(
+      "list_workspaces",
+      {
+        title: "List Workspaces",
+        description:
+          "Lists all workspaces in an organization by org slug. " +
+          "Use this as the FIRST CALL when you don't yet know a workspace ID. " +
+          "Returns workspace IDs, names, slugs, and brief stats.",
+        inputSchema: {
+          orgSlug: z.string().min(1).describe("The organization slug (e.g. 'rbcodelabs')"),
+        },
+      },
+      async ({ orgSlug }) => {
+        const prisma = getPrisma()
+        const org = await prisma.organization.findUnique({
+          where: { slug: orgSlug },
+          select: {
+            id: true,
+            name: true,
+            workspaces: {
+              select: {
+                id: true,
+                slug: true,
+                name: true,
+                description: true,
+                _count: {
+                  select: {
+                    opportunities: true,
+                    experiments: true,
+                    roadmapItems: true,
+                    okrCycles: true,
+                  },
+                },
+              },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        })
+        if (!org) {
+          return { content: [{ type: "text" as const, text: `No organization found with slug "${orgSlug}".` }] }
+        }
+        if (!org.workspaces.length) {
+          return { content: [{ type: "text" as const, text: `Organization "${org.name}" has no workspaces yet.` }] }
+        }
+        const lines = org.workspaces.map(w =>
+          `• **${w.name}** (/${orgSlug}/${w.slug})\n` +
+          `  ID: ${w.id}\n` +
+          (w.description ? `  ${w.description}\n` : "") +
+          `  ${w._count.opportunities} opportunities · ${w._count.experiments} experiments · ` +
+          `${w._count.roadmapItems} roadmap items · ${w._count.okrCycles} OKR cycles`
+        )
+        return {
+          content: [{
+            type: "text" as const,
+            text: `**${org.name}** — ${org.workspaces.length} workspace(s)\n\n` + lines.join("\n\n"),
+          }],
+        }
+      }
+    )
+
     // ════════════════════════════════════════════════════════════════
     // OKRs
     // ════════════════════════════════════════════════════════════════
@@ -625,6 +688,57 @@ const _handler = createMcpHandler(
     )
 
     server.registerTool(
+      "get_experiment",
+      {
+        title: "Get Experiment",
+        description:
+          "Returns full details for a single experiment: hypothesis, method, kill condition, " +
+          "linked assumption, all logged results, and conclusion.",
+        inputSchema: {
+          experimentId: z.string().uuid().describe("UUID of the experiment"),
+        },
+      },
+      async ({ experimentId }) => {
+        const prisma = getPrisma()
+        const experiment = await prisma.experiment.findUnique({
+          where: { id: experimentId },
+          include: {
+            assumption: { select: { id: true, title: true, status: true } },
+            squad: { select: { name: true } },
+            results: { orderBy: { createdAt: "asc" } },
+          },
+        })
+        if (!experiment) {
+          return { content: [{ type: "text" as const, text: `Experiment "${experimentId}" not found.` }] }
+        }
+        const resultsText = experiment.results.length
+          ? experiment.results.map((r, i) =>
+              `  ${i + 1}. ${r.note}` +
+              (r.metric ? ` [${r.metric}${r.value != null ? " = " + r.value : ""}]` : "")
+            ).join("\n")
+          : "  No results logged yet."
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              `**${experiment.title}**\n` +
+              `Status: ${experiment.status}${experiment.conclusion ? " / " + experiment.conclusion : ""}\n` +
+              (experiment.squad ? `Squad: ${experiment.squad.name}\n` : "") +
+              (experiment.startDate ? `Started: ${experiment.startDate.toLocaleDateString()}\n` : "") +
+              (experiment.endDate ? `Ended: ${experiment.endDate.toLocaleDateString()}\n` : "") +
+              `\n**Hypothesis:** ${experiment.hypothesis}\n` +
+              `**Method:** ${experiment.method}\n` +
+              `**Kill Condition:** ${experiment.killCondition}\n` +
+              (experiment.assumption
+                ? `\n**Linked Assumption:** ${experiment.assumption.title} [${experiment.assumption.status}]\n  ID: ${experiment.assumption.id}\n`
+                : "\n") +
+              `\n**Results (${experiment.results.length}):**\n${resultsText}`,
+          }],
+        }
+      }
+    )
+
+    server.registerTool(
       "create_experiment",
       {
         title: "Create Experiment",
@@ -742,6 +856,101 @@ const _handler = createMcpHandler(
     // ════════════════════════════════════════════════════════════════
 
     server.registerTool(
+      "list_roadmap_items",
+      {
+        title: "List Roadmap Items",
+        description:
+          "Lists all active roadmap items for a workspace grouped by horizon (NOW / NEXT / LATER). " +
+          "Includes linked opportunity and solution titles, squad, and IDs.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          horizon: z.enum(["NOW", "NEXT", "LATER"]).optional().describe("Filter to a specific horizon (omit for all)"),
+          squadId: z.string().uuid().optional().describe("Filter by squad"),
+        },
+      },
+      async ({ workspaceId, horizon, squadId }) => {
+        const prisma = getPrisma()
+        const items = await prisma.roadmapItem.findMany({
+          where: {
+            workspaceId,
+            status: "ACTIVE",
+            ...(horizon ? { horizon } : {}),
+            ...(squadId ? { squadId } : {}),
+          },
+          include: {
+            opportunity: { select: { title: true } },
+            solution: { select: { title: true } },
+            squad: { select: { name: true } },
+            experiment: { select: { title: true } },
+          },
+          orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }],
+        })
+        if (!items.length) {
+          return { content: [{ type: "text" as const, text: "No active roadmap items found." }] }
+        }
+        const groups: Record<string, typeof items> = { NOW: [], NEXT: [], LATER: [] }
+        for (const item of items) {
+          groups[item.horizon] ??= []
+          groups[item.horizon].push(item)
+        }
+        const sections = (["NOW", "NEXT", "LATER"] as const)
+          .filter(h => groups[h]?.length)
+          .map(h => {
+            const lines = groups[h].map(item =>
+              `  • **${item.title}**\n    ID: ${item.id}` +
+              (item.opportunity ? `\n    Opportunity: ${item.opportunity.title}` : "") +
+              (item.solution ? `\n    Solution: ${item.solution.title}` : "") +
+              (item.experiment ? `\n    Experiment: ${item.experiment.title}` : "") +
+              (item.squad ? `\n    Squad: ${item.squad.name}` : "")
+            )
+            return `**${h}**\n${lines.join("\n")}`
+          })
+        return { content: [{ type: "text" as const, text: sections.join("\n\n") }] }
+      }
+    )
+
+    server.registerTool(
+      "update_roadmap_item",
+      {
+        title: "Update Roadmap Item",
+        description:
+          "Updates an existing roadmap item's horizon, status, title, or description. " +
+          "Use horizon to move items between NOW / NEXT / LATER. Use status ARCHIVED to remove from view.",
+        inputSchema: {
+          itemId: z.string().uuid().describe("UUID of the roadmap item"),
+          horizon: z.enum(["NOW", "NEXT", "LATER"]).optional().describe("Move to a new horizon"),
+          status: z.enum(["ACTIVE", "ARCHIVED"]).optional().describe("Set to ARCHIVED to hide from roadmap"),
+          title: z.string().min(1).optional().describe("New title for the item"),
+          description: z.string().optional().describe("New description"),
+        },
+      },
+      async ({ itemId, horizon, status, title, description }) => {
+        const prisma = getPrisma()
+        const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, title: true, horizon: true, status: true } })
+        if (!item) {
+          return { content: [{ type: "text" as const, text: `Roadmap item "${itemId}" not found.` }] }
+        }
+        const updated = await prisma.roadmapItem.update({
+          where: { id: itemId },
+          data: {
+            ...(horizon ? { horizon } : {}),
+            ...(status ? { status } : {}),
+            ...(title ? { title: title.trim() } : {}),
+            ...(description !== undefined ? { description: description.trim() } : {}),
+          },
+        })
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
+              `Horizon: ${updated.horizon}\nStatus: ${updated.status}`,
+          }],
+        }
+      }
+    )
+
+    server.registerTool(
       "add_to_roadmap",
       {
         title: "Add to Roadmap",
@@ -856,6 +1065,45 @@ const _handler = createMcpHandler(
               : `Squad cleared from ${objectType} ${objectId}.`,
           }],
         }
+      }
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // FEEDBACK
+    // ════════════════════════════════════════════════════════════════
+
+    server.registerTool(
+      "list_feedback",
+      {
+        title: "List Feedback",
+        description:
+          "Lists customer feedback items for a workspace. Useful for discovering insights to turn into opportunities. " +
+          "Returns feedback with vote counts, linked opportunities, and status.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          status: z.enum(["OPEN", "UNDER_REVIEW", "PLANNED", "CLOSED"]).optional().describe("Filter by status (omit for all)"),
+          limit: z.number().int().min(1).max(100).optional().default(50).describe("Max items to return (default 50)"),
+        },
+      },
+      async ({ workspaceId, status, limit }) => {
+        const prisma = getPrisma()
+        const items = await prisma.feedbackItem.findMany({
+          where: { workspaceId, ...(status ? { status } : {}) },
+          include: { opportunity: { select: { title: true } } },
+          orderBy: [{ voteCount: "desc" }, { createdAt: "desc" }],
+          take: limit ?? 50,
+        })
+        if (!items.length) {
+          return { content: [{ type: "text" as const, text: "No feedback found." }] }
+        }
+        const lines = items.map(f =>
+          `• **${f.title}** [${f.status}] 👍 ${f.voteCount}\n` +
+          `  ID: ${f.id}\n` +
+          (f.description ? `  ${f.description.slice(0, 100)}${f.description.length > 100 ? "…" : ""}\n` : "") +
+          (f.opportunity ? `  → Linked opportunity: ${f.opportunity.title}\n` : "") +
+          (f.submitterName ? `  Submitted by: ${f.submitterName}` : "")
+        )
+        return { content: [{ type: "text" as const, text: lines.join("\n\n") }] }
       }
     )
 
