@@ -16,8 +16,8 @@ export default auth((req) => {
     // MCP route uses Bearer token auth — let it through so the route
     // handler can validate the API key and return 401 (not 302) on failure.
     pathname.startsWith("/api/mcp") ||
-    // Migration route uses x-migration-secret header auth
-    pathname.startsWith("/api/admin/migrate") ||
+    // All admin routes use x-migration-secret header auth
+    pathname.startsWith("/api/admin/") ||
     // Public portal routes — no auth, workspace settings control access
     pathname.startsWith("/portal/") ||
     pathname.startsWith("/api/portal/") ||
