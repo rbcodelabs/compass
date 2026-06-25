@@ -115,7 +115,7 @@ export default async function ExperimentDetailPage({
   const backHref = `/${orgSlug}/${workspaceSlug}/experiments`
 
   return (
-    <main className="flex flex-col flex-1 p-8 gap-6 max-w-3xl mx-auto w-full">
+    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 max-w-3xl mx-auto w-full">
       {/* Back navigation */}
       <Link
         href={backHref}
@@ -147,8 +147,8 @@ export default async function ExperimentDetailPage({
 
       {/* Header */}
       <div className="flex flex-col gap-4">
-        <div className="flex items-start justify-between gap-4">
-          <h1 className="text-2xl font-semibold tracking-tight">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">
             {experiment.title}
           </h1>
           <div className="flex items-center gap-2 shrink-0">

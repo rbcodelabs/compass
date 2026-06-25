@@ -74,7 +74,8 @@ export default async function DocsLayout({
 
   return (
     <div className="flex h-full overflow-hidden">
-      <div className="w-60 shrink-0 border-r border-slate-200 overflow-y-auto bg-white p-2">
+      {/* Doc tree sidebar — hidden on mobile, visible on md+ */}
+      <div className="hidden md:flex w-60 shrink-0 flex-col border-r border-slate-200 overflow-y-auto bg-white p-2">
         <DocTreeSidebar
           docs={tree}
           orgSlug={orgSlug}
@@ -82,7 +83,7 @@ export default async function DocsLayout({
           workspaceId={workspace.id}
         />
       </div>
-      <div className="flex-1 overflow-y-auto">{children}</div>
+      <div className="flex-1 overflow-y-auto min-w-0">{children}</div>
     </div>
   );
 }

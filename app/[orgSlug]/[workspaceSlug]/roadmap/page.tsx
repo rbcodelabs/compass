@@ -148,9 +148,9 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   }));
 
   return (
-    <div className="flex flex-col flex-1 p-8 gap-6 min-h-0">
+    <div className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-h-0">
       <div className="shrink-0">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Roadmap</h1>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Roadmap</h1>
         <p className="text-slate-500 text-sm mt-1">
           Drag items between horizons to update your plan.
         </p>
@@ -160,16 +160,18 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
         <SquadFilterBar squads={squads} />
       </Suspense>
 
-      <RoadmapBoard
-        initialItems={cardItems}
-        workspaceId={workspace.id}
-        orgSlug={orgSlug}
-        workspaceSlug={workspaceSlug}
-        availableKRs={availableKRs}
-        availableSolutions={availableSolutions}
-        availableOpportunities={rawOpportunities}
-        availableExperiments={availableExperiments}
-      />
+      <div className="overflow-x-auto min-w-0">
+        <RoadmapBoard
+          initialItems={cardItems}
+          workspaceId={workspace.id}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          availableKRs={availableKRs}
+          availableSolutions={availableSolutions}
+          availableOpportunities={rawOpportunities}
+          availableExperiments={availableExperiments}
+        />
+      </div>
     </div>
   );
 }

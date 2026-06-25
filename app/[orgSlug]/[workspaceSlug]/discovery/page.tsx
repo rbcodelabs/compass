@@ -111,9 +111,9 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   );
 
   return (
-    <main className="flex flex-col flex-1 p-8 gap-6 min-w-0">
+    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-w-0">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Discovery</h1>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Discovery</h1>
         <p className="text-sm text-slate-500 mt-1">
           Opportunity Solution Tree for {workspace.name}
         </p>
@@ -123,14 +123,16 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         <SquadFilterBar squads={squads} />
       </Suspense>
 
-      <OpportunityBoard
-        key={opportunities.map((o) => o.id).join(",")}
-        opportunitiesByStatus={opportunitiesByStatus}
-        orgSlug={orgSlug}
-        workspaceSlug={workspaceSlug}
-        workspaceId={workspace.id}
-        squads={squads}
-      />
+      <div className="overflow-x-auto min-w-0">
+        <OpportunityBoard
+          key={opportunities.map((o) => o.id).join(",")}
+          opportunitiesByStatus={opportunitiesByStatus}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          workspaceId={workspace.id}
+          squads={squads}
+        />
+      </div>
 
       {archivedOpportunities.length > 0 && (
         <ArchivedSection

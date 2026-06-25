@@ -169,7 +169,7 @@ export default async function OpportunityDetailPage({ params }: Props) {
   const hasCustomFields = customFields.length > 0;
 
   return (
-    <div className="min-h-full p-8">
+    <div className="min-h-full p-4 sm:p-6 md:p-8">
       <div className="max-w-4xl mx-auto flex flex-col gap-6">
         {/* Back nav */}
         <div className="flex items-center gap-2 text-sm text-muted-foreground">

@@ -47,9 +47,9 @@ export default async function FeedbackPage({ params }: Props) {
   ]);
 
   return (
-    <main className="flex flex-col flex-1 p-8 gap-6">
+    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Feedback</h1>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Feedback</h1>
         <p className="text-sm text-slate-500 mt-1">
           Customer submissions for {workspace.name}
         </p>

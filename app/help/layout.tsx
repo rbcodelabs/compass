@@ -41,9 +41,9 @@ export default function HelpLayout({ children }: { children: React.ReactNode }) 
         </div>
       </header>
 
-      <div className="flex-1 max-w-6xl mx-auto w-full flex gap-0 px-6 py-8">
-        {/* Sidebar */}
-        <aside className="w-[220px] shrink-0 pr-8">
+      <div className="flex-1 max-w-6xl mx-auto w-full flex gap-0 px-4 sm:px-6 py-6 sm:py-8">
+        {/* Sidebar — hidden on mobile, visible on md+ */}
+        <aside className="hidden md:block w-[220px] shrink-0 pr-8">
           <nav aria-label="Documentation navigation">
             {Object.entries(sections).map(([section, sectionDocs]) => (
               <div key={section} className="mb-6">
