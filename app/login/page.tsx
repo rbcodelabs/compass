@@ -15,7 +15,10 @@ interface LoginPageProps {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const session = await auth()
-  if (session) {
+  // Only redirect if the session is fully resolved (user.id present).
+  // A session object without user.id means the DB lookup failed (e.g. wrong
+  // schema in preview env) — fall through and show the login form instead.
+  if (session?.user?.id) {
     redirect("/dashboard")
   }
 
