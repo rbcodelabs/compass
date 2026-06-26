@@ -361,6 +361,7 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
                       <SelectItem value="NOW">Now</SelectItem>
                       <SelectItem value="NEXT">Next</SelectItem>
                       <SelectItem value="LATER">Later</SelectItem>
+                      <SelectItem value="SHIPPED">Shipped</SelectItem>
                     </SelectContent>
                   </Select>
                   <Button type="submit" size="sm" disabled={isPending}>

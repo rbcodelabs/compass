@@ -24,7 +24,7 @@ import type { Horizon } from "@/lib/types";
 
 type ColumnMap = Record<Horizon, RoadmapCardData[]>;
 
-const HORIZONS: Horizon[] = ["NOW", "NEXT", "LATER"];
+const HORIZONS: Horizon[] = ["NOW", "NEXT", "LATER", "SHIPPED"];
 
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
 type AvailableSolution = { id: string; title: string; opportunityTitle: string };
@@ -47,6 +47,7 @@ function buildColumnMap(items: RoadmapCardData[]): ColumnMap {
     NOW: items.filter((i) => i.horizon === "NOW").sort((a, b) => a.sortOrder - b.sortOrder),
     NEXT: items.filter((i) => i.horizon === "NEXT").sort((a, b) => a.sortOrder - b.sortOrder),
     LATER: items.filter((i) => i.horizon === "LATER").sort((a, b) => a.sortOrder - b.sortOrder),
+    SHIPPED: items.filter((i) => i.horizon === "SHIPPED").sort((a, b) => a.sortOrder - b.sortOrder),
   };
 }
 
