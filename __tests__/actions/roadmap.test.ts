@@ -105,6 +105,13 @@ describe("moveItem", () => {
     const data = mockRoadmapItem.update.mock.calls[0][0].data;
     expect(data.sortOrder).toBe(8);
   });
+
+  it("moves an item to the SHIPPED horizon", async () => {
+    mockRoadmapItem.findFirst.mockResolvedValue(null);
+    await moveItem("item-1", "SHIPPED", "ws-1", "/path");
+    const data = mockRoadmapItem.update.mock.calls[0][0].data;
+    expect(data.horizon).toBe("SHIPPED");
+  });
 });
 
 // ─── archiveItem ──────────────────────────────────────────────────────────────

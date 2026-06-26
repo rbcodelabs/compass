@@ -13,18 +13,20 @@ type RoadmapItemWithVotes = {
   _count: { votes: number };
 };
 
-const HORIZONS = ["NOW", "NEXT", "LATER"] as const;
+const HORIZONS = ["NOW", "NEXT", "LATER", "SHIPPED"] as const;
 
 const HORIZON_LABELS: Record<string, string> = {
   NOW: "Now",
   NEXT: "Next",
   LATER: "Later",
+  SHIPPED: "Shipped",
 };
 
 const HORIZON_DESCRIPTIONS: Record<string, string> = {
   NOW: "In progress or shipping soon",
   NEXT: "Planned for the next cycle",
   LATER: "On the horizon",
+  SHIPPED: "Completed and live",
 };
 
 export default async function PortalRoadmapPage({ params }: Props) {

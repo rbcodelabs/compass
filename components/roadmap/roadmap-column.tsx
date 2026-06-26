@@ -22,6 +22,11 @@ const HORIZON_CONFIG: Record<Horizon, { label: string; accentClass: string; empt
     accentClass: "bg-slate-400",
     emptyText: "Ideas and things on the horizon.",
   },
+  SHIPPED: {
+    label: "Shipped",
+    accentClass: "bg-purple-500",
+    emptyText: "Nothing shipped yet",
+  },
 };
 
 type AvailableKR = { id: string; title: string; objectiveTitle: string };

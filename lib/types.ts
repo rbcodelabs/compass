@@ -13,7 +13,7 @@ export type AssumptionStatus = "UNTESTED" | "TESTING" | "VALIDATED" | "INVALIDAT
 export type RiskLevel = "HIGH" | "MEDIUM" | "LOW"
 export type ExperimentStatus = "DESIGNING" | "RUNNING" | "COMPLETE" | "KILLED"
 export type Conclusion = "PROCEED" | "KILL" | "ITERATE"
-export type Horizon = "NOW" | "NEXT" | "LATER"
+export type Horizon = "NOW" | "NEXT" | "LATER" | "SHIPPED"
 export type ItemStatus = "ACTIVE" | "ARCHIVED"
 
 // Custom Fields

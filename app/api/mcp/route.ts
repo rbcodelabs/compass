@@ -693,7 +693,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           solutionId: z.string().uuid().describe("UUID of the solution to promote"),
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          horizon: z.enum(["NOW", "NEXT", "LATER"]).describe("Which roadmap horizon to place this in"),
+          horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]).describe("Which roadmap horizon to place this in"),
         },
       },
       async ({ solutionId, workspaceId, horizon }) => {
@@ -944,7 +944,7 @@ const _handler = createMcpHandler(
           "Includes linked opportunity and solution titles, squad, and IDs.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          horizon: z.enum(["NOW", "NEXT", "LATER"]).optional().describe("Filter to a specific horizon (omit for all)"),
+          horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]).optional().describe("Filter to a specific horizon (omit for all)"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
         },
       },
@@ -973,7 +973,7 @@ const _handler = createMcpHandler(
           groups[item.horizon] ??= []
           groups[item.horizon].push(item)
         }
-        const sections = (["NOW", "NEXT", "LATER"] as const)
+        const sections = (["NOW", "NEXT", "LATER", "SHIPPED"] as const)
           .filter(h => groups[h]?.length)
           .map(h => {
             const lines = groups[h].map(item =>
@@ -998,7 +998,7 @@ const _handler = createMcpHandler(
           "Use horizon to move items between NOW / NEXT / LATER. Use status ARCHIVED to remove from view.",
         inputSchema: {
           itemId: z.string().uuid().describe("UUID of the roadmap item"),
-          horizon: z.enum(["NOW", "NEXT", "LATER"]).optional().describe("Move to a new horizon"),
+          horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]).optional().describe("Move to a new horizon"),
           status: z.enum(["ACTIVE", "ARCHIVED"]).optional().describe("Set to ARCHIVED to hide from roadmap"),
           title: z.string().min(1).optional().describe("New title for the item"),
           description: z.string().optional().describe("New description"),
@@ -1038,7 +1038,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Title of the roadmap item"),
-          horizon: z.enum(["NOW", "NEXT", "LATER"]).describe("Which horizon to place this item in"),
+          horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]).describe("Which horizon to place this item in"),
           description: z.string().optional(),
           solutionId: z.string().uuid().optional().describe("UUID of the Solution driving this item"),
           keyResultId: z.string().uuid().optional().describe("UUID of the Key Result this item is driving"),
