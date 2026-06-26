@@ -6,7 +6,8 @@
 |---|---|
 | Type-check | `pnpm tsc --noEmit` |
 | Unit tests | `pnpm test` |
-| E2E tests | `pnpm test:e2e` |
+| E2E screenshots | `pnpm test:e2e` |
+| E2E functional | `pnpm test:e2e:functional` |
 | Build | `pnpm build` |
 
 ## Branch Naming
@@ -43,15 +44,28 @@ Run before opening a PR to catch type errors and build failures that `tsc` alone
 
 ### 4. E2E Tests
 
-```bash
-# In one terminal:
-pnpm dev
+There are two separate Playwright suites:
 
-# In another:
+**Screenshots** (CI-safe, no local server required):
+```bash
 pnpm test:e2e
 ```
+Visits pages on the Vercel preview URL and saves PNGs to `public/screenshots/docs/`. No assertions — its only job is keeping docs screenshots current. Run (or manually update the screenshot) whenever a UI page visibly changes.
 
-Playwright tests are in `e2e/`. Run them locally if your change touches navigation, auth, or page-level rendering. They require the dev server running on the default port.
+**Functional** (requires local Podman Postgres + dev server):
+```bash
+# Auto-starts dev server on port 3002, seeds e2e-test-org, runs assertions, teardown:
+pnpm test:e2e:functional
+
+# Keep DB state for post-failure inspection:
+E2E_SKIP_TEARDOWN=1 pnpm test:e2e:functional
+```
+Covers OKRs, Discovery→Roadmap, Experiments, and Portal flows with real DB mutations. Run when a PR touches any of these journeys. Requires `.env.local` in the worktree and local Podman Postgres running.
+
+**Suites live in:**
+- `e2e/screenshots.spec.ts` — docs screenshots
+- `e2e/functional/specs/` — functional journeys (OKRs, Discovery, Experiments, Portal)
+- `e2e/functional/global-setup.ts` / `global-teardown.ts` — DB seed + cleanup
 
 ## Visual Verification
 
