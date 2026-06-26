@@ -19,7 +19,7 @@ interface SidebarProps {
   workspaceName: string
   userName: string
   userImage?: string
-  workspaces: { id: string; name: string; slug: string }[]
+  workspaces: { id: string; name: string; slug: string; orgSlug: string }[]
 }
 
 const navItems = [
@@ -55,7 +55,9 @@ export function Sidebar({
   // Strip the /{orgSlug}/{workspaceSlug} prefix to get the current section (e.g. "/okrs")
   const currentSection = pathname.startsWith(base) ? pathname.slice(base.length) : ""
 
-  const otherWorkspaces = workspaces.filter((ws) => ws.slug !== workspaceSlug)
+  const otherWorkspaces = workspaces.filter(
+    (ws) => !(ws.slug === workspaceSlug && ws.orgSlug === orgSlug)
+  )
 
   return (
     <aside className="hidden md:flex w-[220px] shrink-0 flex-col h-full bg-slate-950 text-slate-100 border-r border-slate-800/50">
@@ -97,10 +99,10 @@ export function Sidebar({
               <DropdownMenuItem
                 key={ws.id}
                 className="flex items-center gap-2 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
-                onClick={() => router.push(`/${orgSlug}/${ws.slug}${currentSection}`)}
+                onClick={() => router.push(`/${ws.orgSlug}/${ws.slug}${currentSection}`)}
               >
                 <div className="w-4 h-4 flex items-center justify-center shrink-0">
-                  {ws.slug === workspaceSlug && (
+                  {ws.slug === workspaceSlug && ws.orgSlug === orgSlug && (
                     <Check className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
                   )}
                 </div>

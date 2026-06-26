@@ -1,6 +1,6 @@
 import { auth } from "@/auth"
 import { redirect, notFound } from "next/navigation"
-import { getWorkspace, getOrgWorkspaces } from "@/lib/workspace"
+import { getWorkspace, getUserWorkspaces } from "@/lib/workspace"
 import { Sidebar } from "@/components/sidebar"
 import { BottomNav } from "@/components/bottom-nav"
 import { MobileHeader } from "@/components/mobile-header"
@@ -28,7 +28,7 @@ export default async function WorkspaceLayout({
     notFound()
   }
 
-  const workspaces = await getOrgWorkspaces(orgSlug, session.user.id)
+  const workspaces = await getUserWorkspaces(session.user.id)
 
   return (
     <PanelProvider orgSlug={orgSlug} workspaceSlug={workspaceSlug}>

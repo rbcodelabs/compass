@@ -39,3 +39,24 @@ export async function getOrgWorkspaces(
   })
   return workspaces
 }
+
+export async function getUserWorkspaces(
+  userId: string
+): Promise<Array<{ id: string; name: string; slug: string; orgSlug: string }>> {
+  const prisma = await getPrisma()
+  const memberships = await prisma.workspaceMember.findMany({
+    where: { userId },
+    include: {
+      workspace: {
+        include: { organization: true },
+      },
+    },
+    orderBy: { workspace: { name: "asc" } },
+  })
+  return memberships.map(({ workspace }) => ({
+    id: workspace.id,
+    name: workspace.name,
+    slug: workspace.slug,
+    orgSlug: workspace.organization.slug,
+  }))
+}
