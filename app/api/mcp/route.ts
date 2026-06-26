@@ -7,6 +7,11 @@ import { createMcpHandler } from "mcp-handler"
 import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { validateMcpAuth } from "@/lib/mcp-auth"
+import {
+  getFeedbackItem,
+  updateFeedbackStatus,
+  linkFeedbackToOpportunity,
+} from "@/lib/feedback-tool-handlers"
 
 const _handler = createMcpHandler(
   (server) => {
@@ -1161,6 +1166,49 @@ const _handler = createMcpHandler(
         )
         return { content: [{ type: "text" as const, text: lines.join("\n\n") }] }
       }
+    )
+
+    server.registerTool(
+      "get_feedback_item",
+      {
+        title: "Get Feedback Item",
+        description:
+          "Returns full details for a single feedback item including all fields and linked opportunity details if present.",
+        inputSchema: {
+          feedbackId: z.string().uuid().describe("UUID of the feedback item"),
+        },
+      },
+      getFeedbackItem
+    )
+
+    server.registerTool(
+      "update_feedback_status",
+      {
+        title: "Update Feedback Status",
+        description:
+          "Updates the status of a feedback item. Optionally include a note explaining the reason for the status change.",
+        inputSchema: {
+          feedbackId: z.string().uuid().describe("UUID of the feedback item"),
+          status: z.enum(["OPEN", "UNDER_REVIEW", "PLANNED", "CLOSED"]).describe("New status for the feedback item"),
+          note: z.string().optional().describe("Optional reason for the status change"),
+        },
+      },
+      updateFeedbackStatus
+    )
+
+    server.registerTool(
+      "link_feedback_to_opportunity",
+      {
+        title: "Link Feedback to Opportunity",
+        description:
+          "Links a feedback item to an existing opportunity. Both must belong to the same workspace. " +
+          "Use this to connect customer signals to product opportunities in the OST.",
+        inputSchema: {
+          feedbackId: z.string().uuid().describe("UUID of the feedback item"),
+          opportunityId: z.string().uuid().describe("UUID of the opportunity to link to"),
+        },
+      },
+      linkFeedbackToOpportunity
     )
 
   },

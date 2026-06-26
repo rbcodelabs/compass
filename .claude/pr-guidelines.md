@@ -1,5 +1,14 @@
 # PR Guidelines — Compass
 
+## Quick-Reference Commands
+
+| Task | Command |
+|---|---|
+| Type-check | `pnpm tsc --noEmit` |
+| Unit tests | `pnpm test` |
+| E2E tests | `pnpm test:e2e` |
+| Build | `pnpm build` |
+
 ## Branch Naming
 
 - `fix/<slug>` for bug fixes
@@ -14,7 +23,7 @@
 pnpm test
 ```
 
-Runs Vitest in non-watch mode. All 181 tests must pass. Tests live alongside source files — do not skip or mark as pending to make the suite pass.
+Runs Vitest in non-watch mode. All tests must pass. Tests live alongside source files — do not skip or mark as pending to make the suite pass. New tools and routes must have unit tests in `__tests__/`.
 
 ### 2. TypeScript
 
@@ -24,7 +33,15 @@ pnpm tsc --noEmit
 
 Must produce no errors. `any` casts require a comment explaining why.
 
-### 3. E2E Tests
+### 3. Build
+
+```bash
+pnpm build
+```
+
+Run before opening a PR to catch type errors and build failures that `tsc` alone might miss.
+
+### 4. E2E Tests
 
 ```bash
 # In one terminal:
@@ -40,8 +57,8 @@ Playwright tests are in `e2e/`. Run them locally if your change touches navigati
 
 Any PR that touches UI components must be checked at both breakpoints:
 
-- **Desktop sidebar** (`md+` breakpoint, 768px+): sidebar visible, workspace dropdown, nav links, user area.
-- **Mobile** (below `md`): bottom nav and mobile header visible, sidebar hidden.
+- **Desktop** (`md+` breakpoint, 768px+ / 1280×800): sidebar visible, workspace dropdown, nav links, user area.
+- **Mobile** (below `md` / 390×844 iPhone 14): bottom nav and mobile header visible, sidebar hidden.
 
 Use browser DevTools device emulation or resize to verify. Screenshot both breakpoints for UI-only changes.
 
@@ -61,12 +78,21 @@ If `prisma/schema.prisma` changed, run against the dev DSQL cluster:
 prisma db push
 ```
 
-Do **not** use `prisma migrate dev` or `prisma migrate deploy` — Aurora DSQL uses `db push`. Confirm the push succeeded before opening the PR.
+- Do **not** use `prisma migrate dev` or `prisma migrate deploy` — Aurora DSQL uses `db push`.
+- Never use `@default(autoincrement())` or `CREATE TYPE` in schema changes.
+- Confirm the push succeeded before opening the PR.
+
+## MCP Tools
+
+Every new MCP tool must have unit tests in `__tests__/`. Handlers should be extracted into `lib/` for testability (e.g., `lib/feedback-tool-handlers.ts`).
 
 ## Code Patterns
 
 - **Data fetching**: use async server components. Call `getPrisma()` from `lib/db.ts` — never import `PrismaClient` directly.
 - **Client components**: add `"use client"` only when the component needs browser APIs, event handlers, or React hooks. Data fetching belongs in the server layer.
-- **Scripts**: TypeScript/Node.js only. Node v22.6+ runs `.ts` files natively with a `#!/usr/bin/env node` shebang — no compilation step.
-- **No Python scripts.**
+- **Scripts**: TypeScript/Node.js only. Node v22.6+ runs `.ts` files natively with a `#!/usr/bin/env node` shebang — no compilation step. No Python scripts.
 - **Styling**: Tailwind utility classes. Dark sidebar uses `slate-950`/`slate-900` backgrounds; light main content uses `slate-50`. Follow existing patterns in `components/`.
+
+## Tracking
+
+No Linear integration — track work in Compass itself.
