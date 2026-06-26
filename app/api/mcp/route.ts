@@ -178,6 +178,25 @@ const _handler = createMcpHandler(
             description: description?.trim(),
           },
         })
+
+        // Add all org members as workspace members so the workspace is
+        // immediately accessible in the UI. Without this, getWorkspace()
+        // filters by membership and returns null → 404.
+        const orgMembers = await prisma.organizationMember.findMany({
+          where: { organizationId: org.id },
+          select: { userId: true, role: true },
+        })
+        if (orgMembers.length > 0) {
+          await prisma.workspaceMember.createMany({
+            data: orgMembers.map((m) => ({
+              workspaceId: workspace.id,
+              userId: m.userId,
+              role: m.role,
+            })),
+            skipDuplicates: true,
+          })
+        }
+
         return {
           content: [{
             type: "text" as const,
