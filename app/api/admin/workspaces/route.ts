@@ -43,7 +43,9 @@ export async function POST(req: NextRequest) {
 
   const schema = getActiveSchema();
   const body = await req.json();
-  const { orgSlug, orgName, workspaceSlug, workspaceName, userEmail, apiKeyLabel } = body;
+  const { orgSlug, orgName, workspaceSlug, workspaceName, userEmail, apiKeyLabel, feedbackEnabled = false, roadmapPublic = false } = body;
+  const feedbackEnabledBool: boolean = Boolean(feedbackEnabled);
+  const roadmapPublicBool: boolean = Boolean(roadmapPublic);
 
   if (!orgSlug || !orgName || !workspaceSlug || !workspaceName || !userEmail) {
     return NextResponse.json({ error: "Missing required fields: orgSlug, orgName, workspaceSlug, workspaceName, userEmail" }, { status: 400 });
@@ -86,12 +88,16 @@ export async function POST(req: NextRequest) {
     let wsId: string;
     if (!wsRes.rows[0]) {
       wsRes = await client.query(
-        `INSERT INTO "${schema}".workspaces (organization_id, name, slug) VALUES ($1, $2, $3) RETURNING id`,
-        [orgId, workspaceName, workspaceSlug]
+        `INSERT INTO "${schema}".workspaces (organization_id, name, slug, feedback_enabled, roadmap_public) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [orgId, workspaceName, workspaceSlug, feedbackEnabledBool, roadmapPublicBool]
       );
       log.push(`Created workspace: ${workspaceName} (${workspaceSlug})`);
     } else {
-      log.push(`Workspace already exists: ${workspaceName}`);
+      await client.query(
+        `UPDATE "${schema}".workspaces SET feedback_enabled = $1, roadmap_public = $2 WHERE id = $3`,
+        [feedbackEnabledBool, roadmapPublicBool, wsRes.rows[0].id]
+      );
+      log.push(`Updated workspace flags: ${workspaceName} (feedbackEnabled=${feedbackEnabledBool}, roadmapPublic=${roadmapPublicBool})`);
     }
     wsId = wsRes.rows[0].id;
 
