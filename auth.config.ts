@@ -1,25 +1,12 @@
 import type { NextAuthConfig } from "next-auth";
-import Resend from "next-auth/providers/resend";
 
-// Edge-compatible auth config — no adapter, no Node.js-only modules.
-// Used by middleware for JWT session checking.
-// auth.ts imports this and adds the Prisma adapter for server components.
+// Edge-compatible auth config — NO providers listed here.
+// Middleware runs in the Edge runtime and only needs to check whether a JWT
+// session cookie is present. Email/magic-link providers (like Resend) require
+// a database adapter to store tokens, which cannot run in Edge runtime.
+// auth.ts (Node.js only) spreads this config and adds providers + PrismaAdapter.
 export const authConfig: NextAuthConfig = {
-  providers: [
-    Resend({
-      from: process.env.AUTH_EMAIL_FROM ?? "Compass <noreply@compass.app>",
-      // In local dev, log the magic link to the console instead of emailing it.
-      ...(process.env.NODE_ENV === "development"
-        ? {
-            sendVerificationRequest({ url }) {
-              console.log("\n🔗 MAGIC LINK (dev mode — check terminal):");
-              console.log(url);
-              console.log();
-            },
-          }
-        : {}),
-    }),
-  ],
+  providers: [],
   pages: {
     signIn: "/login",
     verifyRequest: "/login?check-email=1",

@@ -120,16 +120,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 <form
                   action={async () => {
                     "use server"
-                    // Trigger the magic-link flow for a fixed dev account.
-                    // auth.ts (Node.js only) stores the callback URL in globalThis
-                    // so we can redirect straight to it — no email client needed.
-                    await signIn("resend", { email: "dev@localhost.dev", redirect: false })
-                    const url = globalThis.__devMagicLinkUrl
-                    if (url) {
-                      redirect(url)
-                    } else {
-                      redirect("/login?check-email=1")
-                    }
+                    // Use the dev-credentials provider — no token, no email, instant session.
+                    await signIn("dev-credentials", {
+                      email: "dev@localhost.dev",
+                      redirectTo: "/dashboard",
+                    })
                   }}
                 >
                   <Button
