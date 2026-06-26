@@ -3,8 +3,11 @@
 // fixed. Finds every workspace in an org whose members set is empty and adds
 // all org members to it.
 //
+// If the org itself has no members (also created via MCP before the fix),
+// pass userEmail to seed the calling user as org OWNER + workspace ADMIN.
+//
 // POST /api/admin/repair-workspace-memberships
-// Body: { secret: string, orgSlug: string }
+// Body: { secret: string, orgSlug: string, userEmail?: string }
 //
 // Protected by REPAIR_SECRET env var — set it in Vercel before calling.
 
@@ -22,7 +25,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const { orgSlug } = body
+  const { orgSlug, userEmail } = body
   if (!orgSlug || typeof orgSlug !== "string") {
     return NextResponse.json({ error: "orgSlug is required" }, { status: 400 })
   }
@@ -38,12 +41,32 @@ export async function POST(req: NextRequest) {
   }
 
   // Get all org members
-  const orgMembers = await prisma.organizationMember.findMany({
+  let orgMembers = await prisma.organizationMember.findMany({
     where: { organizationId: org.id },
     select: { userId: true, role: true },
   })
+
+  // If org has no members (created via MCP before the bug fix), seed from userEmail
   if (orgMembers.length === 0) {
-    return NextResponse.json({ message: "No org members found — nothing to repair" })
+    if (!userEmail || typeof userEmail !== "string") {
+      return NextResponse.json({
+        error:
+          "This org has no members. Pass userEmail to seed the org owner, then memberships will be repaired.",
+      }, { status: 400 })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: userEmail },
+      select: { id: true },
+    })
+    if (!user) {
+      return NextResponse.json({ error: `No user found with email "${userEmail}"` }, { status: 404 })
+    }
+
+    await prisma.organizationMember.create({
+      data: { organizationId: org.id, userId: user.id, role: "OWNER" },
+    })
+    orgMembers = [{ userId: user.id, role: "OWNER" }]
   }
 
   // Find workspaces in this org that have no members
@@ -56,7 +79,7 @@ export async function POST(req: NextRequest) {
   })
 
   if (workspaces.length === 0) {
-    return NextResponse.json({ message: "All workspaces already have members — nothing to repair" })
+    return NextResponse.json({ message: "Org membership seeded. All workspaces already have members." })
   }
 
   const results = []
@@ -65,7 +88,7 @@ export async function POST(req: NextRequest) {
       data: orgMembers.map((m) => ({
         workspaceId: ws.id,
         userId: m.userId,
-        role: m.role,
+        role: m.role === "OWNER" ? "ADMIN" : m.role,
       })),
       skipDuplicates: true,
     })
