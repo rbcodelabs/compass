@@ -1,0 +1,126 @@
+/**
+ * Unit tests for the create_workspace MCP tool.
+ *
+ * Strategy: mock @/lib/db so no real database is needed, then invoke the
+ * tool handler by registering a fake McpServer that captures the callback
+ * passed to server.registerTool.  We call the callback directly with
+ * controlled inputs and assert on the returned text.
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest"
+
+// ── Prisma mock ─────────────────────────────────────────────────────────────
+
+const mockPrisma = {
+  organization: {
+    findUnique: vi.fn(),
+  },
+  workspace: {
+    findFirst: vi.fn(),
+    create: vi.fn(),
+  },
+}
+
+vi.mock("@/lib/db", () => ({
+  default: () => mockPrisma,
+}))
+
+// ── Fake McpServer that captures the last-registered tool callback ───────────
+
+type ToolCallback = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>
+
+const registeredTools: Record<string, ToolCallback> = {}
+
+vi.mock("mcp-handler", () => ({
+  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: unknown, cb: ToolCallback) => void }) => void) => {
+    // Run setup eagerly so all tools register into our capture object
+    setup({
+      registerTool(name, _meta, cb) {
+        registeredTools[name] = cb
+      },
+    })
+    // Return a stub handler — we never call it in these tests
+    return () => new Response("ok")
+  },
+}))
+
+// ── Also mock mcp-auth so the module can be imported ────────────────────────
+
+vi.mock("@/lib/mcp-auth", () => ({
+  validateMcpAuth: vi.fn().mockResolvedValue({ valid: true }),
+}))
+
+// ── Import the route module so the side-effect runs and registers tools ──────
+// This import must come AFTER all vi.mock() calls.
+await import("@/app/api/mcp/route")
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function getHandler(name: string): ToolCallback {
+  const h = registeredTools[name]
+  if (!h) throw new Error(`Tool "${name}" was not registered`)
+  return h
+}
+
+function textOf(result: { content: Array<{ type: string; text: string }> }): string {
+  return result.content[0].text
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+describe("create_workspace MCP tool", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("happy path: creates workspace and returns id, name, slug, and URL path", async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({ id: "org-uuid-1", name: "RB Code Labs" })
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    mockPrisma.workspace.create.mockResolvedValue({
+      id: "ws-uuid-1",
+      name: "My Product",
+      slug: "my-product",
+    })
+
+    const handler = getHandler("create_workspace")
+    const result = await handler({ orgSlug: "rbcodelabs", name: "My Product", slug: "my-product" })
+    const text = textOf(result)
+
+    expect(text).toContain("Workspace created")
+    expect(text).toContain("ws-uuid-1")
+    expect(text).toContain("My Product")
+    expect(text).toContain("my-product")
+    expect(text).toContain("/rbcodelabs/my-product")
+
+    // Verify the workspace was created with correct data
+    expect(mockPrisma.workspace.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        organizationId: "org-uuid-1",
+        name: "My Product",
+        slug: "my-product",
+      }),
+    })
+  })
+
+  it("returns an error when the org slug is not found", async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue(null)
+
+    const handler = getHandler("create_workspace")
+    const result = await handler({ orgSlug: "nonexistent", name: "Foo", slug: "foo" })
+    const text = textOf(result)
+
+    expect(text).toContain('No organization found with slug "nonexistent"')
+    expect(mockPrisma.workspace.create).not.toHaveBeenCalled()
+  })
+
+  it("returns an error when a workspace with the same slug already exists", async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({ id: "org-uuid-1", name: "RB Code Labs" })
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "existing-ws" })
+
+    const handler = getHandler("create_workspace")
+    const result = await handler({ orgSlug: "rbcodelabs", name: "Duplicate", slug: "my-product" })
+    const text = textOf(result)
+
+    expect(text).toContain('slug "my-product" already exists')
+    expect(mockPrisma.workspace.create).not.toHaveBeenCalled()
+  })
+})
