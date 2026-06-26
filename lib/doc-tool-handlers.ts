@@ -4,6 +4,25 @@
  */
 
 import getPrisma from "@/lib/db"
+import { remark } from "remark"
+import remarkRehype from "remark-rehype"
+import rehypeStringify from "rehype-stringify"
+
+/**
+ * Convert a markdown string to the HTML format that the TipTap editor stores and renders.
+ * Falls back to the raw string if conversion fails.
+ */
+async function markdownToHtml(markdown: string): Promise<string> {
+  try {
+    const result = await remark()
+      .use(remarkRehype)
+      .use(rehypeStringify)
+      .process(markdown)
+    return String(result)
+  } catch {
+    return markdown
+  }
+}
 
 // ── list_docs ────────────────────────────────────────────────────────────────
 
@@ -199,7 +218,7 @@ export async function createDoc({
       workspaceId,
       parentId: parentId ?? null,
       title: title.trim(),
-      content: content?.trim() ?? null,
+      content: content ? await markdownToHtml(content) : null,
       icon: icon?.trim() ?? null,
       sortOrder: lastSibling ? lastSibling.sortOrder + 1 : 0,
     },
@@ -249,7 +268,7 @@ export async function updateDoc({
     where: { id: docId },
     data: {
       ...(title !== undefined ? { title: title.trim() } : {}),
-      ...(content !== undefined ? { content: content.trim() } : {}),
+      ...(content !== undefined ? { content: await markdownToHtml(content) } : {}),
       ...(icon !== undefined ? { icon: icon.trim() } : {}),
       updatedAt: new Date(),
     },
