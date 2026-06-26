@@ -1,0 +1,407 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const mockSquad = {
+  create: vi.fn(),
+  update: vi.fn(),
+  delete: vi.fn(),
+};
+const mockWorkspace = {
+  findFirst: vi.fn(),
+  update: vi.fn(),
+};
+const mockObjective = { updateMany: vi.fn() };
+const mockOpportunity = { updateMany: vi.fn() };
+const mockExperiment = { updateMany: vi.fn() };
+const mockRoadmapItem = { updateMany: vi.fn() };
+const mockCustomFieldDefinition = {
+  count: vi.fn(),
+  create: vi.fn(),
+  delete: vi.fn(),
+  update: vi.fn(),
+};
+const mockCustomFieldValue = {
+  deleteMany: vi.fn(),
+  upsert: vi.fn(),
+};
+const mockApiKey = {
+  create: vi.fn(),
+  findFirst: vi.fn(),
+  update: vi.fn(),
+};
+
+const mockPrisma = {
+  squad: mockSquad,
+  workspace: mockWorkspace,
+  objective: mockObjective,
+  opportunity: mockOpportunity,
+  experiment: mockExperiment,
+  roadmapItem: mockRoadmapItem,
+  customFieldDefinition: mockCustomFieldDefinition,
+  customFieldValue: mockCustomFieldValue,
+  apiKey: mockApiKey,
+};
+
+vi.mock("@/lib/db", () => ({
+  default: vi.fn(() => mockPrisma),
+}));
+
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+
+vi.mock("@/auth", () => ({
+  auth: vi.fn(),
+}));
+
+import { auth } from "@/auth";
+import {
+  createSquad,
+  updateSquad,
+  deleteSquad,
+  assignSquad,
+  createFieldDefinition,
+  deleteFieldDefinition,
+  updateFieldDefinition,
+  upsertFieldValue,
+  createApiKey,
+  revokeApiKey,
+  updatePortalSettings,
+} from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
+
+const mockAuth = vi.mocked(auth);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Default: authenticated
+  mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T> ? T : never);
+  // resolveWorkspace always finds the workspace
+  mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" });
+  mockWorkspace.update.mockResolvedValue({ id: "ws-1" });
+  mockSquad.create.mockResolvedValue({ id: "squad-1" });
+  mockSquad.update.mockResolvedValue({ id: "squad-1" });
+  mockSquad.delete.mockResolvedValue({ id: "squad-1" });
+  mockObjective.updateMany.mockResolvedValue({ count: 0 });
+  mockOpportunity.updateMany.mockResolvedValue({ count: 0 });
+  mockExperiment.updateMany.mockResolvedValue({ count: 0 });
+  mockRoadmapItem.updateMany.mockResolvedValue({ count: 0 });
+  mockCustomFieldDefinition.count.mockResolvedValue(0);
+  mockCustomFieldDefinition.create.mockResolvedValue({ id: "field-1" });
+  mockCustomFieldDefinition.delete.mockResolvedValue({ id: "field-1" });
+  mockCustomFieldDefinition.update.mockResolvedValue({ id: "field-1" });
+  mockCustomFieldValue.deleteMany.mockResolvedValue({ count: 0 });
+  mockCustomFieldValue.upsert.mockResolvedValue({ id: "val-1" });
+  mockApiKey.create.mockResolvedValue({ id: "key-1" });
+  mockApiKey.findFirst.mockResolvedValue({ id: "key-1", keyHash: "hash", keyPrefix: "pref" });
+  mockApiKey.update.mockResolvedValue({ id: "key-1" });
+});
+
+// ─── createSquad ─────────────────────────────────────────────────────────────
+
+describe("createSquad", () => {
+  it("creates a squad with name and color", async () => {
+    await createSquad("org", "ws", { name: "Alpha", color: "#ff0000" });
+    expect(mockSquad.create).toHaveBeenCalledWith({
+      data: { workspaceId: "ws-1", name: "Alpha", color: "#ff0000" },
+    });
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      createSquad("org", "ws", { name: "Alpha", color: "#ff0000" })
+    ).rejects.toThrow("Unauthorized");
+    expect(mockSquad.create).not.toHaveBeenCalled();
+  });
+
+  it("throws Workspace not found when workspace does not exist", async () => {
+    mockWorkspace.findFirst.mockResolvedValue(null);
+    await expect(
+      createSquad("org", "ws", { name: "Alpha", color: "#ff0000" })
+    ).rejects.toThrow("Workspace not found");
+  });
+});
+
+// ─── updateSquad ─────────────────────────────────────────────────────────────
+
+describe("updateSquad", () => {
+  it("updates squad name", async () => {
+    await updateSquad("org", "ws", "squad-1", { name: "Beta" });
+    expect(mockSquad.update).toHaveBeenCalledWith({
+      where: { id: "squad-1" },
+      data: { name: "Beta" },
+    });
+  });
+
+  it("updates squad color only when name is not provided", async () => {
+    await updateSquad("org", "ws", "squad-1", { color: "#00ff00" });
+    const data = mockSquad.update.mock.calls[0][0].data;
+    expect(data.color).toBe("#00ff00");
+    expect(data.name).toBeUndefined();
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      updateSquad("org", "ws", "squad-1", { name: "Beta" })
+    ).rejects.toThrow("Unauthorized");
+  });
+});
+
+// ─── deleteSquad ─────────────────────────────────────────────────────────────
+
+describe("deleteSquad", () => {
+  it("nulls out squad references before deleting", async () => {
+    await deleteSquad("org", "ws", "squad-1");
+
+    // All four related models should have been updated
+    expect(mockObjective.updateMany).toHaveBeenCalledWith({
+      where: { squadId: "squad-1" },
+      data: { squadId: null },
+    });
+    expect(mockOpportunity.updateMany).toHaveBeenCalledWith({
+      where: { squadId: "squad-1" },
+      data: { squadId: null },
+    });
+    expect(mockExperiment.updateMany).toHaveBeenCalledWith({
+      where: { squadId: "squad-1" },
+      data: { squadId: null },
+    });
+    expect(mockRoadmapItem.updateMany).toHaveBeenCalledWith({
+      where: { squadId: "squad-1" },
+      data: { squadId: null },
+    });
+
+    expect(mockSquad.delete).toHaveBeenCalledWith({ where: { id: "squad-1" } });
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(deleteSquad("org", "ws", "squad-1")).rejects.toThrow("Unauthorized");
+    expect(mockSquad.delete).not.toHaveBeenCalled();
+  });
+});
+
+// ─── assignSquad ─────────────────────────────────────────────────────────────
+
+describe("assignSquad", () => {
+  it("assigns squad to an objective", async () => {
+    mockObjective.update = vi.fn().mockResolvedValue({ id: "obj-1" });
+    mockPrisma.objective.update = mockObjective.update;
+    await assignSquad("objective", "obj-1", "squad-1", "/path");
+    expect(mockObjective.update).toHaveBeenCalledWith({
+      where: { id: "obj-1" },
+      data: { squadId: "squad-1" },
+    });
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      assignSquad("objective", "obj-1", "squad-1", "/path")
+    ).rejects.toThrow("Unauthorized");
+  });
+});
+
+// ─── createFieldDefinition ────────────────────────────────────────────────────
+
+describe("createFieldDefinition", () => {
+  it("creates a field with correct order (next after existing fields)", async () => {
+    mockCustomFieldDefinition.count.mockResolvedValue(3);
+    await createFieldDefinition("org", "ws", {
+      objectType: "OPPORTUNITY",
+      name: "Priority",
+      fieldType: "SELECT",
+    });
+    const data = mockCustomFieldDefinition.create.mock.calls[0][0].data;
+    expect(data.order).toBe(3); // count=3 means next index is 3
+    expect(data.name).toBe("Priority");
+    expect(data.fieldType).toBe("SELECT");
+    expect(data.required).toBe(false);
+  });
+
+  it("passes options as InputJsonValue when provided", async () => {
+    await createFieldDefinition("org", "ws", {
+      objectType: "OPPORTUNITY",
+      name: "Stage",
+      fieldType: "SELECT",
+      options: [{ label: "Active", value: "active" }],
+    });
+    const data = mockCustomFieldDefinition.create.mock.calls[0][0].data;
+    expect(data.options).toEqual([{ label: "Active", value: "active" }]);
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      createFieldDefinition("org", "ws", {
+        objectType: "OPPORTUNITY",
+        name: "Priority",
+        fieldType: "TEXT",
+      })
+    ).rejects.toThrow("Unauthorized");
+  });
+});
+
+// ─── deleteFieldDefinition ────────────────────────────────────────────────────
+
+describe("deleteFieldDefinition", () => {
+  it("deletes values first then deletes the field definition", async () => {
+    await deleteFieldDefinition("org", "ws", "field-1");
+    expect(mockCustomFieldValue.deleteMany).toHaveBeenCalledWith({
+      where: { fieldId: "field-1" },
+    });
+    expect(mockCustomFieldDefinition.delete).toHaveBeenCalledWith({
+      where: { id: "field-1" },
+    });
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      deleteFieldDefinition("org", "ws", "field-1")
+    ).rejects.toThrow("Unauthorized");
+    expect(mockCustomFieldDefinition.delete).not.toHaveBeenCalled();
+  });
+});
+
+// ─── upsertFieldValue ─────────────────────────────────────────────────────────
+
+describe("upsertFieldValue", () => {
+  it("deletes when value is null", async () => {
+    await upsertFieldValue("obj-1", "field-1", null, "/path");
+    expect(mockCustomFieldValue.deleteMany).toHaveBeenCalledWith({
+      where: { fieldId: "field-1", objectId: "obj-1" },
+    });
+    expect(mockCustomFieldValue.upsert).not.toHaveBeenCalled();
+  });
+
+  it("deletes when value is empty string", async () => {
+    await upsertFieldValue("obj-1", "field-1", "", "/path");
+    expect(mockCustomFieldValue.deleteMany).toHaveBeenCalled();
+    expect(mockCustomFieldValue.upsert).not.toHaveBeenCalled();
+  });
+
+  it("deletes when value is empty array", async () => {
+    await upsertFieldValue("obj-1", "field-1", [], "/path");
+    expect(mockCustomFieldValue.deleteMany).toHaveBeenCalled();
+    expect(mockCustomFieldValue.upsert).not.toHaveBeenCalled();
+  });
+
+  it("upserts when value is a non-empty string", async () => {
+    await upsertFieldValue("obj-1", "field-1", "High Priority", "/path");
+    expect(mockCustomFieldValue.upsert).toHaveBeenCalled();
+    expect(mockCustomFieldValue.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("upserts when value is a number", async () => {
+    await upsertFieldValue("obj-1", "field-1", 42, "/path");
+    expect(mockCustomFieldValue.upsert).toHaveBeenCalled();
+  });
+
+  it("upserts when value is a boolean", async () => {
+    await upsertFieldValue("obj-1", "field-1", true, "/path");
+    expect(mockCustomFieldValue.upsert).toHaveBeenCalled();
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      upsertFieldValue("obj-1", "field-1", "value", "/path")
+    ).rejects.toThrow("Unauthorized");
+  });
+});
+
+// ─── createApiKey ─────────────────────────────────────────────────────────────
+
+describe("createApiKey", () => {
+  it("returns a rawKey starting with cmp_", async () => {
+    const result = await createApiKey("org", "ws", "My Key");
+    expect(result.rawKey).toMatch(/^cmp_[0-9a-f]{32}$/);
+  });
+
+  it("creates the API key with name and hash in DB", async () => {
+    await createApiKey("org", "ws", "My Key");
+    const data = mockApiKey.create.mock.calls[0][0].data;
+    expect(data.name).toBe("My Key");
+    expect(data.keyHash).toBeDefined();
+    expect(data.keyPrefix).toBeDefined();
+    // keyHash should be a sha256 hex string (64 chars)
+    expect(data.keyHash.length).toBe(64);
+    // keyPrefix should be the first 8 chars of the random hex (after cmp_)
+    expect(data.keyPrefix.length).toBe(8);
+  });
+
+  it("generates unique keys on each call", async () => {
+    const result1 = await createApiKey("org", "ws", "Key 1");
+    const result2 = await createApiKey("org", "ws", "Key 2");
+    expect(result1.rawKey).not.toBe(result2.rawKey);
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(createApiKey("org", "ws", "Key")).rejects.toThrow("Unauthorized");
+    expect(mockApiKey.create).not.toHaveBeenCalled();
+  });
+
+  it("throws Workspace not found when workspace lookup fails", async () => {
+    mockWorkspace.findFirst.mockResolvedValue(null);
+    await expect(createApiKey("org", "ws", "Key")).rejects.toThrow("Workspace not found");
+  });
+});
+
+// ─── revokeApiKey ─────────────────────────────────────────────────────────────
+
+describe("revokeApiKey", () => {
+  it("sets revokedAt timestamp on the key", async () => {
+    await revokeApiKey("org", "ws", "key-1");
+    const data = mockApiKey.update.mock.calls[0][0].data;
+    expect(data.revokedAt).toBeInstanceOf(Date);
+  });
+
+  it("throws Not found when key does not belong to user", async () => {
+    mockApiKey.findFirst.mockResolvedValue(null);
+    await expect(revokeApiKey("org", "ws", "key-999")).rejects.toThrow("Not found");
+    expect(mockApiKey.update).not.toHaveBeenCalled();
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(revokeApiKey("org", "ws", "key-1")).rejects.toThrow("Unauthorized");
+    expect(mockApiKey.update).not.toHaveBeenCalled();
+  });
+});
+
+// ─── updatePortalSettings ─────────────────────────────────────────────────────
+
+describe("updatePortalSettings", () => {
+  it("enables feedback", async () => {
+    await updatePortalSettings("org", "ws", { feedbackEnabled: true });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.feedbackEnabled).toBe(true);
+  });
+
+  it("disables feedback", async () => {
+    await updatePortalSettings("org", "ws", { feedbackEnabled: false });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.feedbackEnabled).toBe(false);
+  });
+
+  it("makes roadmap public", async () => {
+    await updatePortalSettings("org", "ws", { roadmapPublic: true });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.roadmapPublic).toBe(true);
+  });
+
+  it("skips undefined fields (does not overwrite with undefined)", async () => {
+    // Only feedbackEnabled is provided — roadmapPublic should not appear
+    await updatePortalSettings("org", "ws", { feedbackEnabled: true });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.roadmapPublic).toBeUndefined();
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      updatePortalSettings("org", "ws", { feedbackEnabled: true })
+    ).rejects.toThrow("Unauthorized");
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+});
