@@ -8,6 +8,7 @@
  * Set E2E_SKIP_TEARDOWN=1 to skip cleanup after a test failure,
  * so you can inspect the DB state and re-run individual tests.
  */
+import path from "path";
 import pg from "pg";
 import { E2E_ORG_SLUG } from "./fixtures/seed-e2e";
 
@@ -16,6 +17,12 @@ const S = process.env.PGSCHEMA
   : "compass_dev";
 
 export default async function globalTeardown() {
+  try {
+    process.loadEnvFile(path.resolve(process.cwd(), ".env.local"));
+  } catch {
+    // .env.local may not exist in CI
+  }
+
   if (process.env.E2E_SKIP_TEARDOWN) {
     console.log("[e2e teardown] Skipped (E2E_SKIP_TEARDOWN is set)");
     return;
@@ -153,10 +160,8 @@ export default async function globalTeardown() {
         `DELETE FROM "${S}".custom_field_definitions WHERE workspace_id = $1`,
         [wsId]
       );
-      await pool.query(
-        `DELETE FROM "${S}".api_keys WHERE workspace_id = $1`,
-        [wsId]
-      );
+      // NOTE: api_keys are user-scoped (no workspace_id column) — seeder
+      // doesn't create any, so nothing to clean here.
       await pool.query(
         `DELETE FROM "${S}".workspace_members WHERE workspace_id = $1`,
         [wsId]

@@ -49,16 +49,33 @@ test.describe("Discovery → Roadmap", () => {
       await expect(page.getByText(solTitle)).toBeVisible({ timeout: 10_000 });
 
       // ── 5. Change solution status to IN_DELIVERY ───────────────────────────
-      // The solution card has a status Select showing "Idea" (default).
-      // Click it to open and pick "In Delivery".
-      await page.getByText("Idea").click();
+      // Click the Radix Select trigger (role="combobox") that currently shows
+      // "Idea". Filter by text to avoid matching the Opportunity status
+      // combobox which shows "Exploring".
+      await page.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
       await page.getByRole("option", { name: "In Delivery" }).click();
 
-      // Wait for the server action to complete; the badge should update
-      await expect(page.getByText("In Delivery")).toBeVisible({ timeout: 10_000 });
+      // Wait for the Select to close (dropdown collapses after option picked)
+      // which signals onValueChange fired.  Then wait for the combobox to be
+      // re-enabled (isPending → false, meaning the server action completed).
+      await expect(
+        page.locator('[role="combobox"]').filter({ hasText: /Idea|In Delivery/ })
+      ).not.toBeDisabled({ timeout: 15_000 });
+
+      // Force a hard reload so the server-rendered component reflects the new
+      // status (same reason as the OKR reload: revalidatePath in dev mode is
+      // unreliable for in-place updates).  After reload, expanded resets to
+      // false, so we re-expand below.
+      await page.reload();
+      await page.waitForLoadState("domcontentloaded");
+
+      // Confirm the status update landed
+      await expect(
+        page.locator('[role="combobox"]').filter({ hasText: "In Delivery" })
+      ).toBeVisible({ timeout: 10_000 });
 
       // ── 6. Expand the solution card ────────────────────────────────────────
-      // The expand toggle button has aria-label="Expand"
+      // After reload, expanded = false (client state reset).  Click "Expand".
       await page.getByRole("button", { name: "Expand" }).click();
 
       // ── 7. Promote to roadmap ─────────────────────────────────────────────
@@ -75,7 +92,9 @@ test.describe("Discovery → Roadmap", () => {
 
       // The solution should appear as a roadmap card.
       // The NOW column is the first column (visible without scrolling at 1440px).
-      await expect(page.getByText(solTitle)).toBeVisible({ timeout: 10_000 });
+      // Use .first() because the roadmap card shows the solution title in both
+      // the card heading AND in a tooltip trigger span (linked-solution badge).
+      await expect(page.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
     }
   );
 });

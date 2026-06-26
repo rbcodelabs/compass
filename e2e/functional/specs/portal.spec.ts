@@ -18,23 +18,27 @@ test.describe("Portal — public roadmap", () => {
       await page.waitForLoadState("networkidle");
 
       // ── 2. Enable the public roadmap toggle ───────────────────────────────
-      // The toggle is a checkbox or switch with text "Public roadmap"
-      const toggle = page.getByRole("switch", { name: /public roadmap/i }).or(
-        page.getByLabel(/public roadmap/i)
-      );
+      // The toggle button has role="switch" + aria-checked, but NO aria-label.
+      // Its accessible name is empty: the visible label ("Public roadmap") is a
+      // sibling <span>, not a <label> element, so getByRole("switch", {name})
+      // matches nothing. Use a structural locator instead: the first
+      // [role="switch"] on the settings page is always the roadmap toggle
+      // (it renders above the feedback toggle in the portal-settings-panel).
+      const toggle = page.locator('[role="switch"]').first();
 
-      const isChecked = await toggle.isChecked().catch(() => false);
+      const ariaChecked = await toggle.getAttribute("aria-checked");
+      const isChecked = ariaChecked === "true";
+
       if (!isChecked) {
         await toggle.click();
-        // Wait for the server action to complete
-        await page.waitForTimeout(1_000);
+        // Wait for the server action + route revalidation to complete.
+        // After the server action the component receives fresh props via
+        // the router refresh which triggers a networkidle settle.
+        await page.waitForLoadState("networkidle");
       }
 
       // ── 3. Verify portal link appears (settings confirms it's enabled) ─────
-      // After enabling, the settings page typically shows a link to the portal
       const portalUrl = `/portal/${orgSlug}/${workspaceSlug}/roadmap`;
-      // Either a link to the portal URL appears, or we just navigate directly
-      // The important verification is that the portal page loads publicly
 
       // ── 4. Open portal roadmap in a NEW (unauthenticated) browser context ──
       const anonContext = await browser.newContext({ storageState: undefined });
@@ -57,10 +61,10 @@ test.describe("Portal — public roadmap", () => {
       await anonContext.close();
 
       // ── 5. Cleanup: disable the toggle again ──────────────────────────────
-      const stillChecked = await toggle.isChecked().catch(() => false);
-      if (stillChecked) {
+      const ariaCheckedAfter = await toggle.getAttribute("aria-checked");
+      if (ariaCheckedAfter === "true") {
         await toggle.click();
-        await page.waitForTimeout(500);
+        await page.waitForLoadState("networkidle");
       }
     }
   );

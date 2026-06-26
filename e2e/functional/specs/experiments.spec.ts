@@ -37,8 +37,10 @@ test.describe("Experiments", () => {
 
       // Confirm we're on the detail page
       await expect(page.getByRole("heading", { name: expTitle })).toBeVisible();
-      // Status badge should show "Designing"
-      await expect(page.getByText("Designing")).toBeVisible();
+      // Status badge should show "Designing".
+      // Use .first() to avoid strict-mode collision with Next.js dev-mode
+      // hydration error overlay which also contains the word "Designing".
+      await expect(page.getByText("Designing").first()).toBeVisible();
 
       // ── 4. Start the experiment ───────────────────────────────────────────
       await page.getByRole("button", { name: "Start Experiment" }).click();

@@ -8,6 +8,11 @@ import { defineConfig, devices } from "@playwright/test";
 const functional = !!process.env.E2E_FUNCTIONAL;
 
 export default defineConfig({
+  // 90-second per-test timeout for functional specs — server actions + router
+  // revalidation in Next.js dev mode can be slow.  Screenshots tests are
+  // page-load-only and finish in a few seconds so this is fine for both.
+  timeout: 90_000,
+
   ...(functional && {
     globalSetup: "./e2e/functional/global-setup.ts",
     globalTeardown: "./e2e/functional/global-teardown.ts",
