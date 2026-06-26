@@ -12,6 +12,12 @@ import {
   updateFeedbackStatus,
   linkFeedbackToOpportunity,
 } from "@/lib/feedback-tool-handlers"
+import {
+  listDocs,
+  getDoc,
+  createDoc,
+  updateDoc,
+} from "@/lib/doc-tool-handlers"
 
 const _handler = createMcpHandler(
   (server) => {
@@ -1228,6 +1234,79 @@ const _handler = createMcpHandler(
         },
       },
       linkFeedbackToOpportunity
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // DOCS
+    // ════════════════════════════════════════════════════════════════
+
+    server.registerTool(
+      "list_docs",
+      {
+        title: "List Docs",
+        description:
+          "Lists all docs in a workspace as an indented tree. " +
+          "Returns each doc's ID, title, icon, and child count. " +
+          "Use this to discover doc IDs before calling get_doc or update_doc.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+        },
+      },
+      listDocs
+    )
+
+    server.registerTool(
+      "get_doc",
+      {
+        title: "Get Doc",
+        description:
+          "Returns the full content of a single doc, including its parent, " +
+          "children list, and the complete markdown body.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the doc"),
+        },
+      },
+      getDoc
+    )
+
+    server.registerTool(
+      "create_doc",
+      {
+        title: "Create Doc",
+        description:
+          "Creates a new doc in a workspace. Optionally nest it under a parent doc. " +
+          "Content should be markdown. Returns the new doc ID and the docs URL.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          title: z.string().min(1).describe("Doc title"),
+          content: z.string().optional().describe("Doc body in markdown"),
+          parentId: z
+            .string()
+            .uuid()
+            .nullable()
+            .optional()
+            .describe("UUID of a parent doc to nest this under (omit for root)"),
+          icon: z.string().optional().describe("Emoji or icon string, e.g. '📋'"),
+        },
+      },
+      createDoc
+    )
+
+    server.registerTool(
+      "update_doc",
+      {
+        title: "Update Doc",
+        description:
+          "Updates an existing doc's title, content, and/or icon. " +
+          "Only the fields you provide are changed.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the doc to update"),
+          title: z.string().min(1).optional().describe("New title"),
+          content: z.string().optional().describe("New markdown content (replaces existing)"),
+          icon: z.string().optional().describe("New emoji or icon string"),
+        },
+      },
+      updateDoc
     )
 
   },
