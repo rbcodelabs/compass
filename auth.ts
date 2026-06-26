@@ -1,39 +1,80 @@
 import NextAuth from "next-auth";
 import Resend from "next-auth/providers/resend";
+import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import getPrisma from "@/lib/db";
 import { authConfig } from "@/auth.config";
 
-// Dev-only: capture the last magic-link URL in a Node.js global so the
-// instant-login server action can redirect straight to it (no email needed).
-declare global {
-  // eslint-disable-next-line no-var
-  var __devMagicLinkUrl: string | undefined;
-}
+/**
+ * Auth.js setup — two distinct configurations:
+ *
+ * DEVELOPMENT (NODE_ENV=development):
+ *   • Only a Credentials provider ("dev-credentials") — no email, no token flow.
+ *   • JWT session strategy (Credentials requires JWT; no adapter needed).
+ *   • The proxy.ts imports `auth` from here; because Credentials is the only
+ *     provider, auth.js won't complain about MissingAdapter.
+ *
+ * PRODUCTION (Vercel preview / prod):
+ *   • Resend (magic-link email) + PrismaAdapter (database sessions).
+ *   • Credentials provider is absent — never ships in production.
+ */
 
-// getPrisma() is now synchronous — the OIDC token exchange and DB connection
-// happen lazily when the first query runs, so it's safe to call at module load.
-// PrismaAdapter receives a real client, not a proxy, so Auth.js adapter
-// validation passes correctly.
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  ...authConfig,
-  // In development, override providers so we can stash the callback URL in
-  // globalThis — lets the instant-login button skip the email step entirely.
-  // auth.config.ts keeps its own console.log for edge/middleware usage.
-  providers:
-    process.env.NODE_ENV === "development"
-      ? [
-          Resend({
-            from:
-              process.env.AUTH_EMAIL_FROM ?? "Compass <noreply@compass.app>",
-            sendVerificationRequest({ url }) {
-              console.log("\n🔗 MAGIC LINK (dev mode — check terminal):");
-              console.log(url);
-              console.log();
-              globalThis.__devMagicLinkUrl = url;
-            },
-          }),
-        ]
-      : authConfig.providers,
-  adapter: PrismaAdapter(getPrisma()),
-});
+const isDev = process.env.NODE_ENV === "development";
+
+export const { handlers, auth, signIn, signOut } = isDev
+  ? // ── Dev mode: instant login via Credentials ──────────────────────────────
+    NextAuth({
+      ...authConfig,
+      providers: [
+        Credentials({
+          id: "dev-credentials",
+          name: "Dev Login",
+          credentials: {
+            email: { label: "Email", type: "text" },
+          },
+          async authorize(credentials) {
+            const prisma = getPrisma();
+            const email =
+              (credentials?.email as string | undefined) ?? "dev@localhost.dev";
+            // Upsert the dev user so the id is stable across restarts.
+            const user = await prisma.user.upsert({
+              where: { email },
+              update: {},
+              create: {
+                email,
+                name: "Dev User",
+                emailVerified: new Date(),
+              },
+            });
+            return { id: user.id, email: user.email, name: user.name };
+          },
+        }),
+      ],
+      session: { strategy: "jwt" },
+      // No adapter — JWT sessions don't need one.
+      callbacks: {
+        ...authConfig.callbacks,
+        // Embed user.id in JWT so session.user.id works everywhere.
+        async jwt({ token, user }) {
+          if (user) token.id = user.id;
+          return token;
+        },
+        async session({ session, token }) {
+          if (token?.id && session.user) {
+            session.user.id = token.id as string;
+          }
+          return session;
+        },
+      },
+    })
+  : // ── Production: Resend magic-link + PrismaAdapter ────────────────────────
+    NextAuth({
+      ...authConfig,
+      providers: [
+        Resend({
+          from:
+            process.env.AUTH_EMAIL_FROM ?? "Compass <noreply@compass.app>",
+        }),
+      ],
+      adapter: PrismaAdapter(getPrisma()),
+    });
