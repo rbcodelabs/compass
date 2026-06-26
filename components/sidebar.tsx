@@ -1,9 +1,16 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { Target, Lightbulb, FlaskConical, Map, MessageSquare, BookOpen, Settings, ChevronDown, HelpCircle } from "lucide-react"
+import { usePathname, useRouter } from "next/navigation"
+import { Target, Lightbulb, FlaskConical, Map, MessageSquare, BookOpen, Settings, ChevronDown, HelpCircle, Check } from "lucide-react"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 
 interface SidebarProps {
@@ -12,6 +19,7 @@ interface SidebarProps {
   workspaceName: string
   userName: string
   userImage?: string
+  workspaces: { id: string; name: string; slug: string }[]
 }
 
 const navItems = [
@@ -38,9 +46,16 @@ export function Sidebar({
   workspaceName,
   userName,
   userImage,
+  workspaces,
 }: SidebarProps) {
   const pathname = usePathname()
+  const router = useRouter()
   const base = `/${orgSlug}/${workspaceSlug}`
+
+  // Strip the /{orgSlug}/{workspaceSlug} prefix to get the current section (e.g. "/okrs")
+  const currentSection = pathname.startsWith(base) ? pathname.slice(base.length) : ""
+
+  const otherWorkspaces = workspaces.filter((ws) => ws.slug !== workspaceSlug)
 
   return (
     <aside className="hidden md:flex w-[220px] shrink-0 flex-col h-full bg-slate-950 text-slate-100 border-r border-slate-800/50">
@@ -67,15 +82,44 @@ export function Sidebar({
 
       {/* Workspace selector */}
       <div className="px-3 pb-4">
-        <button className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-slate-800/60 transition-colors group">
-          <div className="w-5 h-5 rounded-md bg-indigo-600/30 border border-indigo-500/30 flex items-center justify-center shrink-0">
-            <span className="text-[10px] font-bold text-indigo-300 leading-none">
-              {workspaceName[0]?.toUpperCase() ?? "W"}
-            </span>
-          </div>
-          <span className="text-xs font-medium text-slate-300 truncate flex-1">{workspaceName}</span>
-          <ChevronDown className="w-3 h-3 text-slate-500 shrink-0 group-hover:text-slate-400 transition-colors" />
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-slate-800/60 transition-colors group">
+            <div className="w-5 h-5 rounded-md bg-indigo-600/30 border border-indigo-500/30 flex items-center justify-center shrink-0">
+              <span className="text-[10px] font-bold text-indigo-300 leading-none">
+                {workspaceName[0]?.toUpperCase() ?? "W"}
+              </span>
+            </div>
+            <span className="text-xs font-medium text-slate-300 truncate flex-1">{workspaceName}</span>
+            <ChevronDown className="w-3 h-3 text-slate-500 shrink-0 group-hover:text-slate-400 transition-colors" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="bg-slate-900 text-slate-200 ring-slate-700">
+            {workspaces.map((ws) => (
+              <DropdownMenuItem
+                key={ws.id}
+                className="flex items-center gap-2 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
+                onClick={() => router.push(`/${orgSlug}/${ws.slug}${currentSection}`)}
+              >
+                <div className="w-4 h-4 flex items-center justify-center shrink-0">
+                  {ws.slug === workspaceSlug && (
+                    <Check className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
+                  )}
+                </div>
+                <span className="truncate">{ws.name}</span>
+              </DropdownMenuItem>
+            ))}
+            {otherWorkspaces.length === 0 && (
+              <>
+                <DropdownMenuSeparator className="bg-slate-700" />
+                <DropdownMenuItem
+                  disabled
+                  className="text-slate-500 focus:bg-transparent focus:text-slate-500 cursor-default"
+                >
+                  No other workspaces
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <div className="mx-3 h-px bg-slate-800/70" />

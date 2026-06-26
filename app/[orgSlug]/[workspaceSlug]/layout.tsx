@@ -1,6 +1,6 @@
 import { auth } from "@/auth"
 import { redirect, notFound } from "next/navigation"
-import { getWorkspace } from "@/lib/workspace"
+import { getWorkspace, getOrgWorkspaces } from "@/lib/workspace"
 import { Sidebar } from "@/components/sidebar"
 import { BottomNav } from "@/components/bottom-nav"
 import { MobileHeader } from "@/components/mobile-header"
@@ -28,6 +28,8 @@ export default async function WorkspaceLayout({
     notFound()
   }
 
+  const workspaces = await getOrgWorkspaces(orgSlug, session.user.id)
+
   return (
     <PanelProvider orgSlug={orgSlug} workspaceSlug={workspaceSlug}>
       {/* Mobile header — shown on small screens only (hidden on md+) */}
@@ -46,6 +48,7 @@ export default async function WorkspaceLayout({
           workspaceName={workspace.name}
           userName={session.user.name ?? session.user.email ?? ""}
           userImage={session.user.image ?? undefined}
+          workspaces={workspaces}
         />
 
         {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}
