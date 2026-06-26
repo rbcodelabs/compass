@@ -131,6 +131,62 @@ const _handler = createMcpHandler(
       }
     )
 
+    // ----------------------------------------------------------------
+    // create_workspace — creates a new workspace inside an organization
+    // ----------------------------------------------------------------
+    server.registerTool(
+      "create_workspace",
+      {
+        title: "Create Workspace",
+        description: "Creates a new workspace inside an organization. Returns the workspace ID, name, and URL slug.",
+        inputSchema: {
+          orgSlug: z.string().min(1).describe("The organization slug (e.g. 'rbcodelabs')"),
+          name: z.string().min(1).describe("Human-readable workspace name"),
+          slug: z
+            .string()
+            .regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens only")
+            .describe("URL slug for the workspace (lowercase, alphanumeric + hyphens)"),
+          description: z.string().optional().describe("Short description of the workspace"),
+        },
+      },
+      async ({ orgSlug, name, slug, description }) => {
+        const prisma = getPrisma()
+        const org = await prisma.organization.findUnique({
+          where: { slug: orgSlug },
+          select: { id: true, name: true },
+        })
+        if (!org) {
+          return { content: [{ type: "text" as const, text: `No organization found with slug "${orgSlug}".` }] }
+        }
+        const existing = await prisma.workspace.findFirst({
+          where: { organizationId: org.id, slug },
+          select: { id: true },
+        })
+        if (existing) {
+          return { content: [{ type: "text" as const, text: `A workspace with slug "${slug}" already exists in organization "${org.name}".` }] }
+        }
+        const workspace = await prisma.workspace.create({
+          data: {
+            organizationId: org.id,
+            name: name.trim(),
+            slug,
+            description: description?.trim(),
+          },
+        })
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              `**Workspace created**\n` +
+              `ID: ${workspace.id}\n` +
+              `Name: ${workspace.name}\n` +
+              `Slug: ${workspace.slug}\n` +
+              `URL: /${orgSlug}/${workspace.slug}`,
+          }],
+        }
+      }
+    )
+
     // ════════════════════════════════════════════════════════════════
     // OKRs
     // ════════════════════════════════════════════════════════════════
