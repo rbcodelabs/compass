@@ -43,6 +43,7 @@ export function RoadmapVoteSection({ item, orgSlug, workspaceSlug }: Props) {
   const [hasVoted, setHasVoted] = useState(false);
   const [voteCount, setVoteCount] = useState(item._count.votes);
   const [showForm, setShowForm] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [voterName, setVoterName] = useState("");
   const [voterEmail, setVoterEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -88,7 +89,11 @@ export function RoadmapVoteSection({ item, orgSlug, workspaceSlug }: Props) {
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3.5 flex flex-col gap-2">
+    <div
+      className="rounded-xl border border-slate-200 bg-white p-3.5 flex flex-col gap-2"
+      onMouseEnter={() => setIsExpanded(true)}
+      onMouseLeave={() => setIsExpanded(false)}
+    >
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-medium text-slate-800 leading-snug flex-1">{item.title}</p>
         {hasVoted ? (
@@ -109,7 +114,7 @@ export function RoadmapVoteSection({ item, orgSlug, workspaceSlug }: Props) {
       </div>
 
       {item.description && (
-        <p className="text-xs text-slate-500 leading-relaxed line-clamp-2">{item.description}</p>
+        <p className={`text-xs text-slate-500 leading-relaxed transition-all duration-200 ${!isExpanded ? "line-clamp-2" : ""}`}>{item.description}</p>
       )}
 
       {!hasVoted && showForm && (
