@@ -23,3 +23,19 @@ export async function getWorkspace(
 
   return workspace
 }
+
+export async function getOrgWorkspaces(
+  orgSlug: string,
+  userId: string
+): Promise<Array<{ id: string; name: string; slug: string }>> {
+  const prisma = await getPrisma()
+  const workspaces = await prisma.workspace.findMany({
+    where: {
+      organization: { slug: orgSlug },
+      members: { some: { userId } },
+    },
+    select: { id: true, name: true, slug: true },
+    orderBy: { name: "asc" },
+  })
+  return workspaces
+}
