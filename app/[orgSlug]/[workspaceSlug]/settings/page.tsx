@@ -5,6 +5,7 @@ import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-pane
 import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
+import { DeleteWorkspaceDialog } from "@/components/settings/delete-workspace-dialog";
 import type { ApiKeyRow } from "@/components/settings/manage-api-keys-panel";
 import type { CustomFieldDefinitionData, CustomFieldObjectType, CustomFieldType, SquadData } from "@/lib/types";
 
@@ -141,6 +142,23 @@ export default async function SettingsPage({ params }: Props) {
           workspaceSlug={workspaceSlug}
           feedbackEnabled={workspace.feedbackEnabled ?? false}
           roadmapPublic={workspace.roadmapPublic ?? false}
+        />
+      </section>
+
+      <div className="border-t border-border" />
+
+      <section className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-base font-semibold text-red-600">Danger Zone</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Permanently delete this workspace and all its data. This cannot be undone.
+          </p>
+        </div>
+
+        <DeleteWorkspaceDialog
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          workspaceName={workspace.name}
         />
       </section>
     </main>

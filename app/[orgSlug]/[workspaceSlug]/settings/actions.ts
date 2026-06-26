@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
@@ -93,6 +94,72 @@ export async function assignSquad(
   }
 
   revalidatePath(revalidatePathStr);
+}
+
+// ─── Workspace Deletion ───────────────────────────────────────────────────────
+
+export async function deleteWorkspace(orgSlug: string, workspaceSlug: string) {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  // Delete in FK-safe order (relationMode=prisma — no DB-level cascade)
+
+  // OKR chain: CheckIns → KeyResults → Objectives → OKRCycles
+  // Note: the relation field on Objective pointing to OKRCycle is named `cycle`
+  await prisma.checkIn.deleteMany({
+    where: { keyResult: { objective: { cycle: { workspaceId } } } },
+  });
+  await prisma.keyResult.deleteMany({
+    where: { objective: { cycle: { workspaceId } } },
+  });
+  await prisma.objective.deleteMany({
+    where: { cycle: { workspaceId } },
+  });
+  await prisma.oKRCycle.deleteMany({ where: { workspaceId } });
+
+  // Discovery chain: Assumptions → Solutions → Opportunities
+  await prisma.assumption.deleteMany({
+    where: { solution: { opportunity: { workspaceId } } },
+  });
+  await prisma.solution.deleteMany({
+    where: { opportunity: { workspaceId } },
+  });
+
+  // Experiment results (via Experiments of this workspace)
+  await prisma.experimentResult.deleteMany({
+    where: { experiment: { workspaceId } },
+  });
+
+  // Opportunities and Experiments (direct workspace children)
+  await prisma.opportunity.deleteMany({ where: { workspaceId } });
+  await prisma.experiment.deleteMany({ where: { workspaceId } });
+
+  // Roadmap: RoadmapVotes → RoadmapItems
+  await prisma.roadmapVote.deleteMany({
+    where: { roadmapItem: { workspaceId } },
+  });
+  await prisma.roadmapItem.deleteMany({ where: { workspaceId } });
+
+  // Custom fields: CustomFieldValues → CustomFieldDefinitions
+  await prisma.customFieldValue.deleteMany({
+    where: { field: { workspaceId } },
+  });
+  await prisma.customFieldDefinition.deleteMany({ where: { workspaceId } });
+
+  // Feedback: FeedbackVotes → FeedbackItems
+  await prisma.feedbackVote.deleteMany({
+    where: { feedbackItem: { workspaceId } },
+  });
+  await prisma.feedbackItem.deleteMany({ where: { workspaceId } });
+
+  // Squads, Docs, WorkspaceMembers
+  await prisma.squad.deleteMany({ where: { workspaceId } });
+  await prisma.doc.deleteMany({ where: { workspaceId } });
+  await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
+
+  // Finally, delete the workspace itself
+  await prisma.workspace.delete({ where: { id: workspaceId } });
+
+  redirect("/dashboard");
 }
 
 // ─── Helper: resolve workspace and assert membership ─────────────────────────
