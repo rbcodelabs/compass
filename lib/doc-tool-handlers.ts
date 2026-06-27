@@ -5,6 +5,17 @@
 
 import getPrisma from "@/lib/db"
 
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Strip YAML frontmatter (--- ... ---) from the top of a markdown string.
+ * Vault files (Obsidian, etc.) commonly include frontmatter that TipTap
+ * has no knowledge of, so it renders as raw text instead of being ignored.
+ */
+function stripFrontmatter(content: string): string {
+  return content.replace(/^---[\s\S]*?---\n?/, "").trimStart()
+}
+
 // ── list_docs ────────────────────────────────────────────────────────────────
 
 export async function listDocs({ workspaceId }: { workspaceId: string }) {
@@ -199,7 +210,7 @@ export async function createDoc({
       workspaceId,
       parentId: parentId ?? null,
       title: title.trim(),
-      content: content?.trim() ?? null,
+      content: content != null ? stripFrontmatter(content) : null,
       icon: icon?.trim() ?? null,
       sortOrder: lastSibling ? lastSibling.sortOrder + 1 : 0,
     },
@@ -249,7 +260,7 @@ export async function updateDoc({
     where: { id: docId },
     data: {
       ...(title !== undefined ? { title: title.trim() } : {}),
-      ...(content !== undefined ? { content: content.trim() } : {}),
+      ...(content !== undefined ? { content: stripFrontmatter(content) } : {}),
       ...(icon !== undefined ? { icon: icon.trim() } : {}),
       updatedAt: new Date(),
     },
