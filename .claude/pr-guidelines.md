@@ -84,6 +84,28 @@ Vercel creates a preview deployment automatically for each PR branch. Before req
 2. Smoke-test the primary user flows in the preview (login, workspace nav, at least one data view).
 3. Note the preview URL in the PR description.
 
+### Production deployment (after merge to main)
+
+**Claude handles this — the user does not run these steps manually.**
+
+After a PR merges to main and Vercel deploys to production:
+
+1. **Wait for the production deploy** — poll `gh run list --branch main --limit 3` or check the Vercel dashboard. Production URL: `https://compass.rbcodelabs.com`.
+
+2. **Run any one-time data migrations** listed in the PR description. Example:
+   ```bash
+   node --experimental-strip-types scripts/<migration-name>.ts
+   ```
+   Check the PR body for a "Migration required" section. If none is listed, skip this step.
+
+3. **Smoke-test production** using `agent-browser`:
+   - Log in at `https://compass.rbcodelabs.com/login`
+   - Exercise the primary flows touched by the PR (e.g. if docs changed, open a doc and verify formatting)
+   - Verify no 500s or console errors on the affected pages
+   - Take a screenshot as evidence
+
+4. **Report back** with: deploy URL, migration result (if applicable), and smoke-test outcome. If anything is broken, open a fix PR immediately.
+
 ## Database Migrations
 
 If `prisma/schema.prisma` changed, run against the dev DSQL cluster:
