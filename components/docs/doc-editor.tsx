@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { updateDoc } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+import { DocProperties, type DocMetadata } from "@/components/docs/doc-properties";
 
 interface DocEditorProps {
   doc: {
@@ -27,6 +28,8 @@ interface DocEditorProps {
     title: string;
     content: string | null;
     icon: string | null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    metadata: any;
   };
   revalidatePathStr: string;
 }
@@ -184,7 +187,14 @@ export function DocEditor({ doc, revalidatePathStr }: DocEditorProps) {
           onChange={(e) => setTitle(e.target.value)}
           onBlur={handleSaveTitle}
           placeholder="Untitled"
-          className="w-full text-3xl font-bold text-slate-900 bg-transparent border-none outline-none placeholder:text-slate-300 mb-4"
+          className="w-full text-3xl font-bold text-slate-900 bg-transparent border-none outline-none placeholder:text-slate-300 mb-3"
+        />
+
+        {/* Properties */}
+        <DocProperties
+          docId={doc.id}
+          initialMetadata={(doc.metadata as DocMetadata | null) ?? null}
+          revalidatePathStr={revalidatePathStr}
         />
       </div>
 

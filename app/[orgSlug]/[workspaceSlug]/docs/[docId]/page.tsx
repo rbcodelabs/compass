@@ -41,7 +41,7 @@ export default async function DocPage({ params }: Props) {
 
   const doc = await prisma.doc.findFirst({
     where: { id: docId, workspaceId: workspace.id },
-    select: { id: true, title: true, content: true, icon: true },
+    select: { id: true, title: true, content: true, icon: true, metadata: true },
   });
 
   if (!doc) notFound();
