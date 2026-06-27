@@ -6,6 +6,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
+import { Markdown, type MarkdownStorage } from "tiptap-markdown";
 import {
   Bold,
   Italic,
@@ -63,10 +64,12 @@ export function DocEditor({ doc, revalidatePathStr }: DocEditorProps) {
       Image.configure({ inline: false }),
       Link.configure({ openOnClick: false }),
       Placeholder.configure({ placeholder: "Start writing…" }),
+      Markdown.configure({ html: false, transformCopiedText: true }),
     ],
     content: doc.content ?? "",
     onUpdate: ({ editor }) => {
-      debouncedSaveContent(editor.getHTML());
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      debouncedSaveContent((editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown());
     },
     editorProps: {
       handleDrop: () => false,
