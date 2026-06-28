@@ -434,6 +434,7 @@ model Doc {
   parentId    String?   @map("parent_id") @db.Uuid
   title       String    @db.VarChar(255)
   content     String?   @db.Text
+  metadata    Json?     @map("metadata") @db.Json
   icon        String?   @db.VarChar(50)
   sortOrder   Int       @default(0) @map("sort_order")
   createdAt   DateTime  @default(now()) @map("created_at")

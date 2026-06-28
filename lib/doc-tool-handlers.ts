@@ -1,19 +1,50 @@
 /**
  * Handler functions for Docs MCP tools.
  * Extracted into this module so they can be unit-tested without the MCP server layer.
+ *
+ * Frontmatter handling:
+ *   When content is passed to createDoc / updateDoc, gray-matter parses any YAML
+ *   frontmatter block (--- … ---) from the top. The parsed key-value pairs are
+ *   stored in the `metadata` JSON column; the markdown body goes in `content`.
+ *   On getDoc, the two are re-serialized back to a frontmatter string so MCP
+ *   agents always see the full document as they'd expect.
  */
 
 import getPrisma from "@/lib/db"
+import matter from "gray-matter"
+import { Prisma } from "@prisma/client"
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
+type DocMetadata = Record<string, unknown>
+
+/** Cast our plain object to the Prisma InputJsonValue type required for Json fields. */
+function toJsonInput(data: DocMetadata): Prisma.InputJsonValue {
+  return data as unknown as Prisma.InputJsonValue
+}
+
 /**
- * Strip YAML frontmatter (--- ... ---) from the top of a markdown string.
- * Vault files (Obsidian, etc.) commonly include frontmatter that TipTap
- * has no knowledge of, so it renders as raw text instead of being ignored.
+ * Parse content that may include YAML frontmatter.
+ * Returns { body, metadata } where body is the clean markdown text
+ * and metadata is the parsed frontmatter key-value pairs (or null if none).
  */
-function stripFrontmatter(content: string): string {
-  return content.replace(/^---[\s\S]*?---\n?/, "").trimStart()
+function parseContent(raw: string): { body: string; metadata: DocMetadata | null } {
+  const parsed = matter(raw)
+  const body = parsed.content.trimStart()
+  const metadata =
+    parsed.data && Object.keys(parsed.data).length > 0
+      ? (parsed.data as DocMetadata)
+      : null
+  return { body, metadata }
+}
+
+/**
+ * Re-serialize metadata + body back to a frontmatter markdown string.
+ * Used in getDoc so MCP agents receive the full document they'd expect.
+ */
+function serializeWithFrontmatter(body: string | null, metadata: DocMetadata | null): string {
+  if (!metadata || Object.keys(metadata).length === 0) return body ?? ""
+  return matter.stringify(body ?? "", metadata)
 }
 
 // ── list_docs ────────────────────────────────────────────────────────────────
@@ -36,7 +67,6 @@ export async function listDocs({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  // Fetch all docs for the workspace so we can build the tree client-side.
   const allDocs = await prisma.doc.findMany({
     where: { workspaceId },
     orderBy: [{ parentId: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
@@ -62,7 +92,6 @@ export async function listDocs({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  // Build indented tree output
   const childrenMap = new Map<string | null, typeof allDocs>()
   for (const doc of allDocs) {
     const key = doc.parentId ?? null
@@ -117,6 +146,10 @@ export async function getDoc({ docId }: { docId: string }) {
     }
   }
 
+  // Re-serialize metadata + body so agents see the full frontmatter document
+  const metadata = doc.metadata as DocMetadata | null
+  const fullContent = serializeWithFrontmatter(doc.content, metadata)
+
   const lines: string[] = [
     `# ${doc.icon ? doc.icon + " " : ""}${doc.title}`,
     `ID: ${doc.id}`,
@@ -127,8 +160,8 @@ export async function getDoc({ docId }: { docId: string }) {
     "",
   ]
 
-  if (doc.content) {
-    lines.push("## Content", "", doc.content, "")
+  if (fullContent) {
+    lines.push("## Content", "", fullContent, "")
   } else {
     lines.push("*(no content yet)*", "")
   }
@@ -198,19 +231,22 @@ export async function createDoc({
     }
   }
 
-  // Place at end of sibling list
   const lastSibling = await prisma.doc.findFirst({
     where: { workspaceId, parentId: parentId ?? null },
     orderBy: { sortOrder: "desc" },
     select: { sortOrder: true },
   })
 
+  const { body, metadata } =
+    content != null ? parseContent(content) : { body: null, metadata: null }
+
   const doc = await prisma.doc.create({
     data: {
       workspaceId,
       parentId: parentId ?? null,
       title: title.trim(),
-      content: content != null ? stripFrontmatter(content) : null,
+      content: body ?? null,
+      metadata: metadata != null ? toJsonInput(metadata) : undefined,
       icon: icon?.trim() ?? null,
       sortOrder: lastSibling ? lastSibling.sortOrder + 1 : 0,
     },
@@ -225,6 +261,7 @@ export async function createDoc({
           `ID: ${doc.id}\n` +
           `Title: ${doc.title}\n` +
           (parentId ? `Parent: ${parentId}\n` : "Location: root\n") +
+          (metadata ? `Properties: ${Object.keys(metadata).join(", ")}\n` : "") +
           `URL: /${workspace.organization.slug}/${workspace.slug}/docs`,
       },
     ],
@@ -256,14 +293,20 @@ export async function updateDoc({
     }
   }
 
+  const { body, metadata } =
+    content !== undefined ? parseContent(content) : { body: undefined, metadata: undefined }
+
+  // Build update payload imperatively to satisfy Prisma's union type constraints
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updateData: Record<string, any> = { updatedAt: new Date() }
+  if (title !== undefined) updateData.title = title.trim()
+  if (body !== undefined) updateData.content = body
+  if (metadata !== undefined) updateData.metadata = metadata != null ? toJsonInput(metadata) : null
+  if (icon !== undefined) updateData.icon = icon.trim()
+
   const updated = await prisma.doc.update({
     where: { id: docId },
-    data: {
-      ...(title !== undefined ? { title: title.trim() } : {}),
-      ...(content !== undefined ? { content: stripFrontmatter(content) } : {}),
-      ...(icon !== undefined ? { icon: icon.trim() } : {}),
-      updatedAt: new Date(),
-    },
+    data: updateData,
   })
 
   return {
@@ -276,6 +319,45 @@ export async function updateDoc({
           `Title: ${updated.title}\n` +
           (updated.icon ? `Icon: ${updated.icon}\n` : "") +
           `Updated: ${updated.updatedAt.toISOString()}`,
+      },
+    ],
+  }
+}
+
+// ── update_doc_metadata ───────────────────────────────────────────────────────
+
+export async function updateDocMetadata({
+  docId,
+  metadata,
+}: {
+  docId: string
+  metadata: DocMetadata
+}) {
+  const prisma = getPrisma()
+
+  const existing = await prisma.doc.findUnique({
+    where: { id: docId },
+    select: { title: true },
+  })
+  if (!existing) {
+    return {
+      content: [{ type: "text" as const, text: `Doc "${docId}" not found.` }],
+    }
+  }
+
+  const updated = await prisma.doc.update({
+    where: { id: docId },
+    data: { metadata: toJsonInput(metadata), updatedAt: new Date() },
+  })
+
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          `**Doc metadata updated**\n` +
+          `ID: ${updated.id}\n` +
+          `Properties: ${Object.keys(metadata).join(", ")}`,
       },
     ],
   }

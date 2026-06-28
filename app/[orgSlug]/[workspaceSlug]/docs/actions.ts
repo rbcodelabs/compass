@@ -33,6 +33,22 @@ export async function updateDoc(
   revalidatePath(revalidatePathStr);
 }
 
+export async function updateDocMetadata(
+  docId: string,
+  metadata: Record<string, unknown>,
+  revalidatePathStr: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const prisma = getPrisma();
+  await prisma.doc.update({
+    where: { id: docId },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: { metadata: metadata as any, updatedAt: new Date() },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
 export async function deleteDoc(docId: string, revalidatePathStr: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
