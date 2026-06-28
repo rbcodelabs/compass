@@ -4,20 +4,44 @@ const mockSquad = {
   create: vi.fn(),
   update: vi.fn(),
   delete: vi.fn(),
+  deleteMany: vi.fn(),
 };
 const mockWorkspace = {
   findFirst: vi.fn(),
+  findMany: vi.fn(),
+  update: vi.fn(),
+  delete: vi.fn(),
+};
+const mockObjective = {
+  updateMany: vi.fn(),
+  findMany: vi.fn(),
+  deleteMany: vi.fn(),
   update: vi.fn(),
 };
-const mockObjective = { updateMany: vi.fn() };
-const mockOpportunity = { updateMany: vi.fn() };
-const mockExperiment = { updateMany: vi.fn() };
-const mockRoadmapItem = { updateMany: vi.fn() };
+const mockOpportunity = {
+  updateMany: vi.fn(),
+  findMany: vi.fn(),
+  deleteMany: vi.fn(),
+  update: vi.fn(),
+};
+const mockExperiment = {
+  updateMany: vi.fn(),
+  findMany: vi.fn(),
+  deleteMany: vi.fn(),
+  update: vi.fn(),
+};
+const mockRoadmapItem = {
+  updateMany: vi.fn(),
+  findMany: vi.fn(),
+  deleteMany: vi.fn(),
+};
 const mockCustomFieldDefinition = {
   count: vi.fn(),
   create: vi.fn(),
   delete: vi.fn(),
   update: vi.fn(),
+  findMany: vi.fn(),
+  deleteMany: vi.fn(),
 };
 const mockCustomFieldValue = {
   deleteMany: vi.fn(),
@@ -28,6 +52,34 @@ const mockApiKey = {
   findFirst: vi.fn(),
   update: vi.fn(),
 };
+const mockOrganization = {
+  findUnique: vi.fn(),
+  delete: vi.fn(),
+};
+const mockOrganizationMember = { deleteMany: vi.fn() };
+const mockOKRCycle = {
+  findMany: vi.fn(),
+  deleteMany: vi.fn(),
+};
+const mockKeyResult = {
+  findMany: vi.fn(),
+  deleteMany: vi.fn(),
+};
+const mockCheckIn = { deleteMany: vi.fn() };
+const mockExperimentResult = { deleteMany: vi.fn() };
+const mockFeedbackItem = {
+  findMany: vi.fn(),
+  deleteMany: vi.fn(),
+};
+const mockFeedbackVote = { deleteMany: vi.fn() };
+const mockRoadmapVote = { deleteMany: vi.fn() };
+const mockSolution = {
+  findMany: vi.fn(),
+  deleteMany: vi.fn(),
+};
+const mockAssumption = { deleteMany: vi.fn() };
+const mockWorkspaceMember = { deleteMany: vi.fn() };
+const mockDoc = { deleteMany: vi.fn() };
 
 const mockPrisma = {
   squad: mockSquad,
@@ -39,6 +91,19 @@ const mockPrisma = {
   customFieldDefinition: mockCustomFieldDefinition,
   customFieldValue: mockCustomFieldValue,
   apiKey: mockApiKey,
+  organization: mockOrganization,
+  organizationMember: mockOrganizationMember,
+  oKRCycle: mockOKRCycle,
+  keyResult: mockKeyResult,
+  checkIn: mockCheckIn,
+  experimentResult: mockExperimentResult,
+  feedbackItem: mockFeedbackItem,
+  feedbackVote: mockFeedbackVote,
+  roadmapVote: mockRoadmapVote,
+  solution: mockSolution,
+  assumption: mockAssumption,
+  workspaceMember: mockWorkspaceMember,
+  doc: mockDoc,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -64,6 +129,7 @@ import {
   createApiKey,
   revokeApiKey,
   updatePortalSettings,
+  deleteWorkspace,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
 
 const mockAuth = vi.mocked(auth);
@@ -91,6 +157,47 @@ beforeEach(() => {
   mockApiKey.create.mockResolvedValue({ id: "key-1" });
   mockApiKey.findFirst.mockResolvedValue({ id: "key-1", keyHash: "hash", keyPrefix: "pref" });
   mockApiKey.update.mockResolvedValue({ id: "key-1" });
+
+  // deleteWorkspace defaults
+  mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
+  mockWorkspace.delete.mockResolvedValue({ id: "ws-1" });
+  // After deletion: one remaining workspace in the org
+  mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
+  mockOrganization.findUnique.mockResolvedValue({ slug: "my-org" });
+  mockOrganization.delete.mockResolvedValue({ id: "org-1" });
+  mockOrganizationMember.deleteMany.mockResolvedValue({ count: 0 });
+  // OKR chain: no cycles by default
+  mockOKRCycle.findMany.mockResolvedValue([]);
+  mockOKRCycle.deleteMany.mockResolvedValue({ count: 0 });
+  mockKeyResult.findMany.mockResolvedValue([]);
+  mockKeyResult.deleteMany.mockResolvedValue({ count: 0 });
+  mockCheckIn.deleteMany.mockResolvedValue({ count: 0 });
+  // Experiments
+  mockExperiment.findMany.mockResolvedValue([]);
+  mockExperiment.deleteMany.mockResolvedValue({ count: 0 });
+  mockExperiment.updateMany.mockResolvedValue({ count: 0 });
+  mockExperimentResult.deleteMany.mockResolvedValue({ count: 0 });
+  // Roadmap
+  mockRoadmapItem.findMany.mockResolvedValue([]);
+  mockRoadmapItem.deleteMany.mockResolvedValue({ count: 0 });
+  mockRoadmapVote.deleteMany.mockResolvedValue({ count: 0 });
+  // Feedback
+  mockFeedbackItem.findMany.mockResolvedValue([]);
+  mockFeedbackItem.deleteMany.mockResolvedValue({ count: 0 });
+  mockFeedbackVote.deleteMany.mockResolvedValue({ count: 0 });
+  // Opportunity / Solution / Assumption
+  mockOpportunity.findMany.mockResolvedValue([]);
+  mockOpportunity.deleteMany.mockResolvedValue({ count: 0 });
+  mockSolution.findMany.mockResolvedValue([]);
+  mockSolution.deleteMany.mockResolvedValue({ count: 0 });
+  mockAssumption.deleteMany.mockResolvedValue({ count: 0 });
+  // Custom fields
+  mockCustomFieldDefinition.findMany.mockResolvedValue([]);
+  mockCustomFieldDefinition.deleteMany.mockResolvedValue({ count: 0 });
+  // Members / Squads / Docs
+  mockWorkspaceMember.deleteMany.mockResolvedValue({ count: 0 });
+  mockSquad.deleteMany.mockResolvedValue({ count: 0 });
+  mockDoc.deleteMany.mockResolvedValue({ count: 0 });
 });
 
 // ─── createSquad ─────────────────────────────────────────────────────────────
@@ -403,5 +510,122 @@ describe("updatePortalSettings", () => {
       updatePortalSettings("org", "ws", { feedbackEnabled: true })
     ).rejects.toThrow("Unauthorized");
     expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+});
+
+// ─── deleteWorkspace ──────────────────────────────────────────────────────────
+
+describe("deleteWorkspace", () => {
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(deleteWorkspace("org", "ws")).rejects.toThrow("Unauthorized");
+    expect(mockWorkspace.delete).not.toHaveBeenCalled();
+  });
+
+  it("throws Workspace not found when workspace does not exist", async () => {
+    // Override the first findFirst call (used by deleteWorkspace directly, not resolveWorkspace)
+    mockWorkspace.findFirst.mockResolvedValue(null);
+    await expect(deleteWorkspace("org", "ws")).rejects.toThrow("Workspace not found");
+    expect(mockWorkspace.delete).not.toHaveBeenCalled();
+  });
+
+  it("deletes the workspace and all related data when authenticated", async () => {
+    // Set up workspace with data to delete
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
+
+    // Roadmap items exist
+    mockRoadmapItem.findMany.mockResolvedValue([{ id: "ri-1" }]);
+    // Feedback items exist
+    mockFeedbackItem.findMany.mockResolvedValue([{ id: "fi-1" }]);
+    // Custom fields exist
+    mockCustomFieldDefinition.findMany.mockResolvedValue([{ id: "cf-1" }]);
+    // Opportunities with solutions and assumptions
+    mockOpportunity.findMany.mockResolvedValue([{ id: "opp-1" }]);
+    mockSolution.findMany.mockResolvedValue([{ id: "sol-1" }]);
+    // Experiments exist
+    mockExperiment.findMany.mockResolvedValue([{ id: "exp-1" }]);
+    // OKR chain
+    mockOKRCycle.findMany.mockResolvedValue([{ id: "cycle-1" }]);
+    mockObjective.findMany.mockResolvedValue([{ id: "obj-1" }]);
+    mockKeyResult.findMany.mockResolvedValue([{ id: "kr-1" }]);
+
+    // One remaining workspace after deletion
+    mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
+
+    const result = await deleteWorkspace("org", "ws");
+
+    // Workspace deleted
+    expect(mockWorkspace.delete).toHaveBeenCalledWith({ where: { id: "ws-1" } });
+
+    // Roadmap votes deleted before roadmap items
+    expect(mockRoadmapVote.deleteMany).toHaveBeenCalledWith({
+      where: { roadmapItemId: { in: ["ri-1"] } },
+    });
+    expect(mockRoadmapItem.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+
+    // Feedback votes deleted before feedback items
+    expect(mockFeedbackVote.deleteMany).toHaveBeenCalledWith({
+      where: { feedbackId: { in: ["fi-1"] } },
+    });
+    expect(mockFeedbackItem.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+
+    // Custom field values deleted before definitions
+    expect(mockCustomFieldValue.deleteMany).toHaveBeenCalledWith({
+      where: { fieldId: { in: ["cf-1"] } },
+    });
+    expect(mockCustomFieldDefinition.deleteMany).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-1" },
+    });
+
+    // Assumptions and solutions deleted before opportunities
+    expect(mockAssumption.deleteMany).toHaveBeenCalledWith({
+      where: { solutionId: { in: ["sol-1"] } },
+    });
+    expect(mockSolution.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["sol-1"] } },
+    });
+    expect(mockOpportunity.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+
+    // Experiment results deleted before experiments
+    expect(mockExperimentResult.deleteMany).toHaveBeenCalledWith({
+      where: { experimentId: { in: ["exp-1"] } },
+    });
+    expect(mockExperiment.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+
+    // Check-ins deleted before key results, objectives deleted before cycles
+    expect(mockCheckIn.deleteMany).toHaveBeenCalledWith({
+      where: { keyResultId: { in: ["kr-1"] } },
+    });
+    expect(mockKeyResult.deleteMany).toHaveBeenCalledWith({
+      where: { objectiveId: { in: ["obj-1"] } },
+    });
+    expect(mockOKRCycle.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+
+    // Returns a redirect to the remaining workspace
+    expect(result.redirectTo).toBe("/my-org/other-ws");
+  });
+
+  it("deletes the org when no workspaces remain after deletion", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
+    // No remaining workspaces after deletion
+    mockWorkspace.findMany.mockResolvedValue([]);
+
+    const result = await deleteWorkspace("org", "ws");
+
+    expect(mockOrganizationMember.deleteMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1" },
+    });
+    expect(mockOrganization.delete).toHaveBeenCalledWith({ where: { id: "org-1" } });
+    expect(result.redirectTo).toBe("/");
+  });
+
+  it("does not delete the org when other workspaces remain", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
+    mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
+
+    await deleteWorkspace("org", "ws");
+
+    expect(mockOrganization.delete).not.toHaveBeenCalled();
+    expect(mockOrganizationMember.deleteMany).not.toHaveBeenCalled();
   });
 });
