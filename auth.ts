@@ -1,5 +1,6 @@
 import NextAuth from "next-auth";
 import Resend from "next-auth/providers/resend";
+import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import getPrisma from "@/lib/db";
@@ -15,7 +16,7 @@ import { authConfig } from "@/auth.config";
  *     provider, auth.js won't complain about MissingAdapter.
  *
  * PRODUCTION (Vercel preview / prod):
- *   • Resend (magic-link email) + PrismaAdapter (database sessions).
+ *   • Resend (magic-link email) + Google (OAuth) + PrismaAdapter (database sessions).
  *   • Credentials provider is absent — never ships in production.
  */
 
@@ -74,6 +75,13 @@ export const { handlers, auth, signIn, signOut } = isDev
         Resend({
           from:
             process.env.AUTH_EMAIL_FROM ?? "Compass <noreply@compass.app>",
+        }),
+        Google({
+          clientId: process.env.AUTH_GOOGLE_ID,
+          clientSecret: process.env.AUTH_GOOGLE_SECRET,
+          // Same email via Resend magic-link should just link, not throw
+          // OAuthAccountNotLinked — safe because Google verifies email ownership.
+          allowDangerousEmailAccountLinking: true,
         }),
       ],
       adapter: PrismaAdapter(getPrisma()),
