@@ -62,6 +62,8 @@ E2E_SKIP_TEARDOWN=1 pnpm test:e2e:functional
 ```
 Covers OKRs, Discovery→Roadmap, Experiments, and Portal flows with real DB mutations. Run when a PR touches any of these journeys. Requires `.env.local` in the worktree and local Podman Postgres running.
 
+**New journeys require new specs.** A PR that introduces a new user-facing flow (new section, new entity lifecycle, new portal surface) must add a functional spec in `e2e/functional/specs/` covering that journey — running the existing suite green is not sufficient.
+
 **Suites live in:**
 - `e2e/screenshots.spec.ts` — docs screenshots
 - `e2e/functional/specs/` — functional journeys (OKRs, Discovery, Experiments, Portal)
@@ -118,9 +120,36 @@ prisma db push
 - Never use `@default(autoincrement())` or `CREATE TYPE` in schema changes.
 - Confirm the push succeeded before opening the PR.
 
+### DSQL Gotchas (all of these have bitten before)
+
+- **No `@updatedAt` triggers.** DSQL cannot auto-update timestamps. Every `update` call must set `updatedAt: new Date()` explicitly.
+- **No cascade deletes.** `relationMode = "prisma"` means the DB enforces nothing. Deleting a parent requires explicitly nulling or deleting child references in application code (see squad deletion for the established pattern).
+- **Indexes are async.** New indexes on non-empty tables use `CREATE INDEX ASYNC` semantics — do not assume an index exists immediately after `db push`.
+
+### Data Migration Scripts
+
+Any schema change that reshapes **existing data** (renaming, splitting, or re-linking rows — not just adding a nullable column) requires a migration script:
+
+- Written in TypeScript under `scripts/`, runnable via `node --experimental-strip-types scripts/<name>.ts`.
+- **Idempotent** — safe to run twice without duplicating or corrupting data.
+- **Tested against the dev schema** with real data before the PR is opened; note the observed result in the PR body.
+- The PR description must include a **"Migration required"** section naming the script, when to run it (post-deploy), and a one-line rollback note (what to do if it goes wrong).
+
 ## MCP Tools
 
 Every new MCP tool must have unit tests in `__tests__/`. Handlers should be extracted into `lib/` for testability (e.g., `lib/feedback-tool-handlers.ts`).
+
+- **Read/write symmetry.** Shipping a `create_*` tool without matching `list_*`/`get_*` and an update path is a known failure mode (it happened with workspaces, roadmap items, and feedback — three separate dogfood reports). Every new entity exposed over MCP gets the full set: create, list, get, update.
+- **Consistent response format.** Every mutation response includes the entity ID on its own line, formatted exactly `ID: <uuid>` (plain, no bold). Agents parse these responses; formatting drift breaks them.
+- **Docs.** Every new or changed tool must be reflected in `docs/content/09-mcp-api.md` in the same PR.
+
+## Docs Review
+
+User-facing docs live in `docs/content/` (rendered at `/help/[slug]`).
+
+- Any PR that changes user-facing behavior must update the related doc page(s).
+- Entirely new features get a new doc page.
+- New MCP tools: update `docs/content/09-mcp-api.md` (see above) **and** flag in the PR description that the Compass SKILL.md tool catalog (`~/.claude/skills/compass/SKILL.md`) needs a matching update — stale skill docs have caused real agent failures before.
 
 ## Code Patterns
 
