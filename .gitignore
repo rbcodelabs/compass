@@ -23,9 +23,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
+# env files — ignore ALL of them except the committed example
+# (.env.production etc. contain live secrets pulled via `vercel env pull`)
 .env
-.env*.local
+.env.*
+!.env.example
 
 # vercel
 .vercel
