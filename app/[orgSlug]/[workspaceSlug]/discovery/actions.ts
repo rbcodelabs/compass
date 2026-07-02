@@ -7,6 +7,8 @@ import type {
   SolutionStatus,
   AssumptionStatus,
   RiskLevel,
+  EvidenceSourceType,
+  EvidenceConfidence,
 } from "@/lib/types";
 
 // Types live in @/lib/types — import from there directly.
@@ -226,4 +228,87 @@ export async function reorderAssumption(
     data: { sortOrder },
   });
   revalidatePath(revalidatePathStr);
+}
+
+// ─── Evidence ──────────────────────────────────────────────────────────────
+// Evidence is polymorphic: it attaches to exactly one of opportunityId,
+// solutionId, or assumptionId. Aurora DSQL has no CHECK constraints, so that
+// invariant is enforced here in application code.
+
+type EvidenceTarget = {
+  opportunityId?: string | null;
+  solutionId?: string | null;
+  assumptionId?: string | null;
+};
+
+function assertExactlyOneTarget({
+  opportunityId,
+  solutionId,
+  assumptionId,
+}: EvidenceTarget) {
+  const count = [opportunityId, solutionId, assumptionId].filter(Boolean).length;
+  if (count !== 1) {
+    throw new Error(
+      `Exactly one of opportunityId, solutionId, or assumptionId must be provided (got ${count}).`
+    );
+  }
+}
+
+export async function addEvidence(
+  data: {
+    workspaceId: string;
+    sourceType: EvidenceSourceType;
+    excerpt: string;
+    confidence?: EvidenceConfidence;
+    sourceUrl?: string;
+    opportunityId?: string;
+    solutionId?: string;
+    assumptionId?: string;
+  },
+  revalidatePathStr: string
+) {
+  assertExactlyOneTarget(data);
+  const prisma = getPrisma();
+  const evidence = await prisma.evidence.create({
+    data: {
+      workspaceId: data.workspaceId,
+      sourceType: data.sourceType,
+      excerpt: data.excerpt,
+      confidence: data.confidence ?? "medium",
+      sourceUrl: data.sourceUrl,
+      opportunityId: data.opportunityId,
+      solutionId: data.solutionId,
+      assumptionId: data.assumptionId,
+    },
+  });
+  revalidatePath(revalidatePathStr);
+  return evidence;
+}
+
+export async function deleteEvidence(
+  evidenceId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+  await prisma.evidence.delete({ where: { id: evidenceId } });
+  revalidatePath(revalidatePathStr);
+}
+
+export async function linkEvidence(
+  evidenceId: string,
+  target: EvidenceTarget,
+  revalidatePathStr: string
+) {
+  assertExactlyOneTarget(target);
+  const prisma = getPrisma();
+  const evidence = await prisma.evidence.update({
+    where: { id: evidenceId },
+    data: {
+      opportunityId: target.opportunityId ?? null,
+      solutionId: target.solutionId ?? null,
+      assumptionId: target.assumptionId ?? null,
+    },
+  });
+  revalidatePath(revalidatePathStr);
+  return evidence;
 }

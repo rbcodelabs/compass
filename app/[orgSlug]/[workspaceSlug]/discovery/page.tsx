@@ -41,7 +41,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
 
   if (!workspace) notFound();
 
-  const [rawSquads, opportunities, archivedOpportunities] = await Promise.all([
+  const [rawSquads, opportunities, archivedOpportunities, evidenceSourceCounts] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { createdAt: "asc" },
@@ -60,7 +60,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         status: true,
         sortOrder: true,
         squadId: true,
-        _count: { select: { solutions: true } },
+        _count: { select: { solutions: true, evidence: true } },
       },
     }),
     prisma.opportunity.findMany({
@@ -77,10 +77,24 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         status: true,
         sortOrder: true,
         squadId: true,
-        _count: { select: { solutions: true } },
+        _count: { select: { solutions: true, evidence: true } },
       },
     }),
+    // Distinct source-type count per opportunity, used for the "from N sources" badge.
+    prisma.evidence.groupBy({
+      by: ["opportunityId", "sourceType"],
+      where: { workspaceId: workspace.id, opportunityId: { not: null } },
+    }),
   ]);
+
+  const sourceCountByOpportunity = new Map<string, number>();
+  for (const row of evidenceSourceCounts) {
+    if (!row.opportunityId) continue;
+    sourceCountByOpportunity.set(
+      row.opportunityId,
+      (sourceCountByOpportunity.get(row.opportunityId) ?? 0) + 1
+    );
+  }
 
   const squads: SquadData[] = rawSquads.map((s) => ({
     id: s.id,
@@ -98,6 +112,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       status: o.status as OpportunityStatus,
       sortOrder: o.sortOrder,
       _count: o._count,
+      evidenceSourceCount: sourceCountByOpportunity.get(o.id) ?? 0,
       squad: o.squadId ? (squadMap.get(o.squadId) ?? null) : null,
     };
   }

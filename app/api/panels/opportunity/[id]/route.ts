@@ -31,6 +31,9 @@ export async function GET(
         select: { id: true, title: true, status: true },
         orderBy: { createdAt: "asc" },
       },
+      evidence: {
+        orderBy: { createdAt: "desc" },
+      },
     },
   });
 

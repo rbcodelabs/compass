@@ -8,6 +8,7 @@ import { GripVertical } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CardMenu } from "@/components/ui/card-menu";
+import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import {
   updateAssumptionStatus,
   deleteAssumption,
@@ -48,14 +49,16 @@ export type AssumptionItemData = {
   status: AssumptionStatus;
   sortOrder: number;
   experiments: { id: string }[];
+  _count?: { evidence: number };
 };
 
 type Props = {
   assumption: AssumptionItemData;
   revalidatePathStr: string;
+  workspaceId: string;
 };
 
-export function AssumptionItem({ assumption, revalidatePathStr }: Props) {
+export function AssumptionItem({ assumption, revalidatePathStr, workspaceId }: Props) {
   const [isPending, startTransition] = useTransition();
   const currentIndex = STATUS_CYCLE.indexOf(assumption.status);
   const nextStatus = STATUS_CYCLE[(currentIndex + 1) % STATUS_CYCLE.length];
@@ -108,6 +111,11 @@ export function AssumptionItem({ assumption, revalidatePathStr }: Props) {
 
       <span className="flex-1 text-sm leading-snug">{assumption.title}</span>
       <div className="flex items-center gap-1.5 shrink-0">
+        {!!assumption._count?.evidence && (
+          <span className="inline-flex h-5 items-center rounded-4xl px-2 text-xs font-medium bg-secondary text-secondary-foreground">
+            {assumption._count.evidence} {assumption._count.evidence === 1 ? "signal" : "signals"}
+          </span>
+        )}
         <span
           className={`inline-flex h-5 items-center rounded-4xl px-2 text-xs font-medium ${RISK_CLASSES[assumption.riskLevel]}`}
         >
@@ -123,6 +131,13 @@ export function AssumptionItem({ assumption, revalidatePathStr }: Props) {
         >
           {STATUS_LABELS[assumption.status]}
         </Button>
+        <AddEvidenceDialog
+          workspaceId={workspaceId}
+          nodeType="assumption"
+          nodeId={assumption.id}
+          revalidatePathStr={revalidatePathStr}
+          compact
+        />
         <CardMenu
           items={[
             {

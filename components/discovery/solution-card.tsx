@@ -23,6 +23,7 @@ import {
 } from "@dnd-kit/sortable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { EvidenceBadge } from "@/components/discovery/evidence-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -42,6 +43,7 @@ import {
 import { CardMenu } from "@/components/ui/card-menu";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { AssumptionItem, type AssumptionItemData } from "./assumption-item";
+import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import type { SolutionStatus, RiskLevel, Horizon } from "@/lib/types";
 
 const STATUS_BADGE_CLASSES: Record<SolutionStatus, string> = {
@@ -67,6 +69,7 @@ export type SolutionCardData = {
   status: SolutionStatus;
   sortOrder: number;
   assumptions: AssumptionItemData[];
+  _count?: { evidence: number };
 };
 
 type Props = {
@@ -187,7 +190,7 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
     <div ref={setNodeRef} style={style} className="touch-none group">
       <Card size="sm">
         <CardHeader>
-          <div className="flex items-start gap-2">
+          <div className="flex items-start gap-2 flex-wrap">
             {/* Drag handle */}
             <button
               ref={setActivatorNodeRef}
@@ -214,7 +217,7 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
               )}
             </button>
 
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-[8rem]">
               <CardTitle className="leading-snug">{solution.title}</CardTitle>
               {solution.description && (
                 <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
@@ -222,26 +225,29 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
                 </p>
               )}
             </div>
-            <Select
-              value={solution.status}
-              onValueChange={handleStatusChange}
-              disabled={isPending}
-            >
-              <SelectTrigger size="sm" className="w-auto shrink-0">
-                <span
-                  className={`inline-flex h-4 items-center rounded px-1.5 text-xs font-medium ${STATUS_BADGE_CLASSES[solution.status]}`}
-                >
-                  {STATUS_LABELS[solution.status]}
-                </span>
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(STATUS_LABELS) as SolutionStatus[]).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {STATUS_LABELS[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <Select
+                value={solution.status}
+                onValueChange={handleStatusChange}
+                disabled={isPending}
+              >
+                <SelectTrigger size="sm" className="w-auto shrink-0">
+                  <span
+                    className={`inline-flex h-4 items-center rounded px-1.5 text-xs font-medium ${STATUS_BADGE_CLASSES[solution.status]}`}
+                  >
+                    {STATUS_LABELS[solution.status]}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(STATUS_LABELS) as SolutionStatus[]).map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {STATUS_LABELS[s]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <EvidenceBadge count={solution._count?.evidence ?? 0} className="shrink-0" />
+            </div>
             <CardMenu
               items={[
                 {
@@ -280,6 +286,7 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
                       key={a.id}
                       assumption={a}
                       revalidatePathStr={revalidatePathStr}
+                      workspaceId={workspaceId}
                     />
                   ))}
                 </SortableContext>
@@ -342,6 +349,15 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
                 Add Assumption
               </Button>
             )}
+
+            <div className="mt-2">
+              <AddEvidenceDialog
+                workspaceId={workspaceId}
+                nodeType="solution"
+                nodeId={solution.id}
+                revalidatePathStr={revalidatePathStr}
+              />
+            </div>
 
             {canPromote && (
               promotingToRoadmap ? (

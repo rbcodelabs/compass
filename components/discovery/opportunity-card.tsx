@@ -8,6 +8,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { EvidenceBadge } from "@/components/discovery/evidence-badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import {
   updateOpportunityStatus,
@@ -36,7 +37,8 @@ export type OpportunityCardData = {
   customerSegment: string | null;
   status: OpportunityStatus;
   sortOrder: number;
-  _count: { solutions: number };
+  _count: { solutions: number; evidence: number };
+  evidenceSourceCount?: number;
   squad?: { id: string; name: string; color: string } | null;
 };
 
@@ -139,10 +141,16 @@ export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) 
           )}
         </CardHeader>
         <CardContent>
-          <Badge variant="secondary">
-            {opportunity._count.solutions}{" "}
-            {opportunity._count.solutions === 1 ? "solution" : "solutions"}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="secondary">
+              {opportunity._count.solutions}{" "}
+              {opportunity._count.solutions === 1 ? "solution" : "solutions"}
+            </Badge>
+            <EvidenceBadge
+              count={opportunity._count.evidence}
+              sourceCount={opportunity.evidenceSourceCount}
+            />
+          </div>
         </CardContent>
       </Card>
     </div>

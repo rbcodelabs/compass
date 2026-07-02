@@ -15,6 +15,11 @@ import {
   promoteFeedbackToRoadmap,
 } from "@/lib/feedback-tool-handlers"
 import {
+  addEvidence,
+  linkEvidence,
+  listEvidence,
+} from "@/lib/evidence-tool-handlers"
+import {
   listDocs,
   getDoc,
   createDoc,
@@ -1296,6 +1301,66 @@ const _handler = createMcpHandler(
         },
       },
       promoteFeedbackToRoadmap
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // EVIDENCE
+    // ════════════════════════════════════════════════════════════════
+
+    server.registerTool(
+      "add_evidence",
+      {
+        title: "Add Evidence",
+        description:
+          "Attaches a new piece of evidence (customer signal) to an opportunity, solution, or assumption. " +
+          "Exactly one of opportunityId, solutionId, or assumptionId must be provided. " +
+          "Use this to record why the team believes an OST node is real — an interview quote, a support ticket, " +
+          "an experiment result, analytics data, or feedback.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          sourceType: z.enum(["interview", "feedback", "support_ticket", "experiment_result", "analytics"])
+            .describe("Where this evidence came from"),
+          excerpt: z.string().describe("The evidence text — a quote, summary, or data point"),
+          confidence: z.enum(["high", "medium", "low"]).optional().describe("Confidence level (default medium)"),
+          sourceUrl: z.string().url().optional().describe("Optional link to the source (ticket, recording, doc)"),
+          opportunityId: z.string().uuid().optional().describe("UUID of the opportunity to attach to"),
+          solutionId: z.string().uuid().optional().describe("UUID of the solution to attach to"),
+          assumptionId: z.string().uuid().optional().describe("UUID of the assumption to attach to"),
+        },
+      },
+      addEvidence
+    )
+
+    server.registerTool(
+      "link_evidence",
+      {
+        title: "Link Evidence",
+        description:
+          "Re-parents an existing evidence row to a different OST node. " +
+          "Exactly one of opportunityId, solutionId, or assumptionId must be provided; the other two are cleared.",
+        inputSchema: {
+          evidenceId: z.string().uuid().describe("UUID of the evidence to re-link"),
+          opportunityId: z.string().uuid().optional().describe("UUID of the opportunity to attach to"),
+          solutionId: z.string().uuid().optional().describe("UUID of the solution to attach to"),
+          assumptionId: z.string().uuid().optional().describe("UUID of the assumption to attach to"),
+        },
+      },
+      linkEvidence
+    )
+
+    server.registerTool(
+      "list_evidence",
+      {
+        title: "List Evidence",
+        description:
+          "Lists all evidence attached to a given opportunity, solution, or assumption. " +
+          "Returns each item's source type, confidence, excerpt, source URL, and creation date.",
+        inputSchema: {
+          nodeId: z.string().uuid().describe("UUID of the opportunity, solution, or assumption"),
+          nodeType: z.enum(["opportunity", "solution", "assumption"]).describe("Type of the node identified by nodeId"),
+        },
+      },
+      listEvidence
     )
 
     // ════════════════════════════════════════════════════════════════

@@ -13,6 +13,8 @@ import {
 import { updateOpportunityStatus, linkOpportunityToKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { SquadPicker } from "@/components/squads/squad-picker";
+import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evidence-list";
+import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import type { OpportunityStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
@@ -50,6 +52,8 @@ type Props = {
   customFields?: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }>;
   squads?: SquadData[];
   currentSquadId?: string | null;
+  workspaceId?: string;
+  evidence?: EvidenceListItem[];
 };
 
 export function OpportunityOverview({
@@ -59,6 +63,8 @@ export function OpportunityOverview({
   customFields = [],
   squads = [],
   currentSquadId = null,
+  workspaceId,
+  evidence,
 }: Props) {
   const [isPending, startTransition] = useTransition();
 
@@ -173,6 +179,24 @@ export function OpportunityOverview({
               objectId={opportunity.id}
               revalidatePathStr={revalidatePathStr}
             />
+          </Field>
+        </>
+      )}
+
+      {/* Evidence */}
+      {workspaceId && evidence && (
+        <>
+          <Separator />
+          <Field label={`Evidence${evidence.length > 0 ? ` (${evidence.length})` : ""}`}>
+            <div className="flex flex-col gap-2">
+              <AddEvidenceDialog
+                workspaceId={workspaceId}
+                nodeType="opportunity"
+                nodeId={opportunity.id}
+                revalidatePathStr={revalidatePathStr}
+              />
+              <EvidenceList evidence={evidence} revalidatePathStr={revalidatePathStr} />
+            </div>
           </Field>
         </>
       )}
