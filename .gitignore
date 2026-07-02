@@ -29,6 +29,9 @@ yarn-error.log*
 .env.*
 !.env.example
 
+# local MCP config — contains a live bearer token; commit a .mcp.json.example instead
+.mcp.json
+
 # vercel
 .vercel
 
