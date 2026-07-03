@@ -28,6 +28,8 @@ Compass organises product work into five connected layers:
 
 Every section in Compass is designed to reinforce the others. When you promote an opportunity to ACTIVE status on the Discovery board, it surfaces as a candidate for your roadmap. When an experiment concludes with PROCEED, the validated solution can be linked to a roadmap item. OKR check-ins pull in linked roadmap progress automatically.
 
+Any opportunity, solution, or assumption can also carry linked **Evidence** — interview quotes, feedback, support tickets, experiment results, or analytics — so a claim on the tree is never just an opinion. See the Evidence section under Discovery for details.
+
 The **OST Tree view** in Discovery lets you see the full tree at a glance: outcome at the top, opportunities branching below, solutions hanging off each opportunity, and assumptions attached to each solution.
 
 ## Supporting Features
