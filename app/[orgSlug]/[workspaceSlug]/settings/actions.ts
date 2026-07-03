@@ -10,6 +10,7 @@ import type {
   CustomFieldObjectType,
   SelectOption,
   CustomFieldValue,
+  WorkspaceRole,
 } from "@/lib/types";
 
 // ─── Squads ───────────────────────────────────────────────────────────────────
@@ -102,16 +103,130 @@ async function resolveWorkspace(orgSlug: string, workspaceSlug: string) {
   if (!session?.user?.id) throw new Error("Unauthorized");
 
   const prisma = getPrisma();
+  // Scope the lookup to workspaces the caller is actually a member of — a
+  // non-member hitting a valid org/workspace slug pair must not be able to
+  // read or mutate settings just because the workspace exists. Matches the
+  // membership-scoping pattern used by getWorkspace() in lib/workspace.ts.
   const workspace = await prisma.workspace.findFirst({
     where: {
       slug: workspaceSlug,
       organization: { slug: orgSlug },
+      members: { some: { userId: session.user.id } },
     },
-    select: { id: true },
+    select: { id: true, organizationId: true },
   });
 
   if (!workspace) throw new Error("Workspace not found");
-  return { prisma, workspaceId: workspace.id };
+  return { prisma, workspaceId: workspace.id, organizationId: workspace.organizationId };
+}
+
+// ─── Workspace Members ─────────────────────────────────────────────────────────
+
+export async function addWorkspaceMember(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: { email: string; role: WorkspaceRole }
+) {
+  const email = input.email.trim().toLowerCase();
+  if (!email || !email.includes("@")) {
+    throw new Error("A valid email address is required");
+  }
+
+  const { prisma, workspaceId, organizationId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  // Bare upsert — invited users may not have signed in before. Mirrors the
+  // dev-auth upsert pattern in auth.ts; no name/emailVerified needed here,
+  // they'll be filled in when the invitee actually signs in.
+  const user = await prisma.user.upsert({
+    where: { email },
+    update: {},
+    create: { email },
+  });
+
+  const existingOrgMember = await prisma.organizationMember.findFirst({
+    where: { organizationId, userId: user.id },
+  });
+  if (!existingOrgMember) {
+    await prisma.organizationMember.create({
+      data: { organizationId, userId: user.id, role: "MEMBER" },
+    });
+  }
+
+  const existingWorkspaceMember = await prisma.workspaceMember.findFirst({
+    where: { workspaceId, userId: user.id },
+  });
+  if (existingWorkspaceMember) {
+    throw new Error("User is already a member of this workspace");
+  }
+
+  await prisma.workspaceMember.create({
+    data: { workspaceId, userId: user.id, role: input.role },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
+
+export async function updateWorkspaceMemberRole(
+  orgSlug: string,
+  workspaceSlug: string,
+  memberId: string,
+  role: WorkspaceRole
+) {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  // Scope to this workspace so a memberId from another workspace can't be touched.
+  const member = await prisma.workspaceMember.findFirst({
+    where: { id: memberId, workspaceId },
+  });
+  if (!member) throw new Error("Member not found");
+
+  if (member.role === "ADMIN" && role !== "ADMIN") {
+    const adminCount = await prisma.workspaceMember.count({
+      where: { workspaceId, role: "ADMIN" },
+    });
+    if (adminCount <= 1) {
+      throw new Error("Cannot demote the last remaining admin — promote another member first");
+    }
+  }
+
+  await prisma.workspaceMember.update({
+    where: { id: memberId },
+    data: { role },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
+
+export async function removeWorkspaceMember(
+  orgSlug: string,
+  workspaceSlug: string,
+  memberId: string
+) {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  // Scope to this workspace so a memberId from another workspace can't be touched.
+  const member = await prisma.workspaceMember.findFirst({
+    where: { id: memberId, workspaceId },
+  });
+  if (!member) throw new Error("Member not found");
+
+  const totalCount = await prisma.workspaceMember.count({ where: { workspaceId } });
+  if (totalCount <= 1) {
+    throw new Error("Cannot remove the last member of a workspace");
+  }
+
+  if (member.role === "ADMIN") {
+    const adminCount = await prisma.workspaceMember.count({
+      where: { workspaceId, role: "ADMIN" },
+    });
+    if (adminCount <= 1) {
+      throw new Error("Cannot remove the last remaining admin — promote another member first");
+    }
+  }
+
+  await prisma.workspaceMember.delete({ where: { id: memberId } });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }
 
 // ─── Field Definitions ────────────────────────────────────────────────────────
