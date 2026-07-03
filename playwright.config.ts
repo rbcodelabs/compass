@@ -44,17 +44,25 @@ export default defineConfig({
       dependencies: ["functional-setup"],
     },
 
-    // ── Docs screenshots (existing, unchanged) ──────────────────────────────
-    // Runs against the Vercel preview URL — no local server needed.
+    // ── Docs screenshots ─────────────────────────────────────────────────────
+    // No local server needed — this hits an already-deployed URL. Defaults to
+    // production, which holds the curated demo org (rb-code-labs/helios) that
+    // e2e/screenshots.spec.ts's hardcoded page list expects; a fresh local
+    // dev DB or a random preview deployment won't have that workspace.
+    //
+    // The previous default pointed at a long-merged feature branch's preview
+    // deployment, which no longer resolves — `pnpm test:e2e` would hang for
+    // ~20 minutes and then fail with no useful output. Override via
+    // DOCS_BASE_URL to point at a preview deployment instead (the bypass
+    // secret below is registered at the project level, so it works across
+    // every branch's preview, not just the one it was first added for).
     {
       name: "screenshots",
       testMatch: "e2e/screenshots.spec.ts",
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1440, height: 900 },
-        baseURL:
-          process.env.DOCS_BASE_URL ||
-          "https://compass-git-feat-compass-mvp-rbcodelabs-team.vercel.app",
+        baseURL: process.env.DOCS_BASE_URL || "https://compass.rbcodelabs.com",
         extraHTTPHeaders: {
           "x-vercel-protection-bypass": "bRUAfVUcOw3PVvAza4eaZFXPRttko2zW",
         },
