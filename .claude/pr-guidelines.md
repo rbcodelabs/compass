@@ -46,11 +46,27 @@ Run before opening a PR to catch type errors and build failures that `tsc` alone
 
 There are two separate Playwright suites:
 
-**Screenshots** (CI-safe, no local server required):
+**Screenshots**:
 ```bash
 pnpm test:e2e
 ```
-Visits pages on the Vercel preview URL and saves PNGs to `public/screenshots/docs/`. No assertions — its only job is keeping docs screenshots current. Run (or manually update the screenshot) whenever a UI page visibly changes.
+Saves PNGs to `public/screenshots/docs/`. No assertions — its only job is keeping docs screenshots current. Run (or manually update the screenshot) whenever a UI page visibly changes. Pages are hardcoded to the `rbcodelabs/compass` org/workspace in `e2e/screenshots.spec.ts` — keep that slug pair in sync if the demo workspace is ever renamed again (it drifted once already: `rb-code-labs/helios` → `rbcodelabs/compass`, breaking this suite silently for a long time).
+
+Defaults `DOCS_BASE_URL` to production (`compass.rbcodelabs.com`), so running it with no overrides doesn't need a local server. But most pages require auth and there's no way to pass real production credentials from an agent session — for actually regenerating screenshots (e.g. after a settings UI change), run against local dev with seeded demo data instead:
+
+```bash
+# 1. Start a local dev server against local Postgres (.env.local already points there)
+# 2. Seed realistic demo content for rbcodelabs/compass (idempotent):
+DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass node seed-screenshots.ts
+# 3. Capture a real session as rick@rbcodelabs.com (the UI's Dev Login button
+#    hardcodes dev@localhost.dev, so this hits the NextAuth endpoint directly):
+BASE_URL=http://localhost:<port> LOGIN_EMAIL=rick@rbcodelabs.com \
+  OUT_FILE=/tmp/dev-session.json node e2e/capture-dev-session.ts
+# 4. Run against local with that session:
+DOCS_BASE_URL=http://localhost:<port> DOCS_SESSION_FILE=/tmp/dev-session.json pnpm test:e2e
+```
+
+Review every regenerated screenshot before committing — an unauthenticated or mis-seeded run silently captures a login-redirect page or empty/broken content instead of failing loudly.
 
 **Functional** (requires local Podman Postgres + dev server):
 ```bash
