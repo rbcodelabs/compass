@@ -5,17 +5,25 @@ import fs from "fs";
 const OUT = path.join(process.cwd(), "public/screenshots/docs");
 fs.mkdirSync(OUT, { recursive: true });
 
-// Pages to capture — each with a filename and URL path
+// Pages to capture — each with a filename and URL path.
+//
+// The demo org/workspace was renamed rb-code-labs/helios → rbcodelabs/compass
+// in production (see setup-compass-workspace.ts) a while back; these paths
+// had gone stale and pointed at a slug pair that no longer exists anywhere.
+// rbcodelabs/compass is the equivalent seeded locally by
+// seed-screenshots.ts (run that first, and pass DOCS_SESSION_FILE for a
+// session authenticated as rick@rbcodelabs.com, to populate real content
+// before running this against a local dev server).
 const PAGES = [
   { file: "login.png",           url: "/login" },
   { file: "dashboard.png",       url: "/dashboard" },
-  { file: "okrs.png",            url: "/rb-code-labs/helios/okrs" },
-  { file: "discovery-board.png", url: "/rb-code-labs/helios/discovery" },
-  { file: "roadmap.png",         url: "/rb-code-labs/helios/roadmap" },
-  { file: "experiments.png",     url: "/rb-code-labs/helios/experiments" },
-  { file: "feedback.png",        url: "/rb-code-labs/helios/feedback" },
-  { file: "docs-editor.png",     url: "/rb-code-labs/helios/docs" },
-  { file: "settings.png",        url: "/rb-code-labs/helios/settings" },
+  { file: "okrs.png",            url: "/rbcodelabs/compass/okrs" },
+  { file: "discovery-board.png", url: "/rbcodelabs/compass/discovery" },
+  { file: "roadmap.png",         url: "/rbcodelabs/compass/roadmap" },
+  { file: "experiments.png",     url: "/rbcodelabs/compass/experiments" },
+  { file: "feedback.png",        url: "/rbcodelabs/compass/feedback" },
+  { file: "docs-editor.png",     url: "/rbcodelabs/compass/docs" },
+  { file: "settings.png",        url: "/rbcodelabs/compass/settings" },
 ];
 
 test.describe("docs screenshots", () => {

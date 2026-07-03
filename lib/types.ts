@@ -63,3 +63,12 @@ export interface SquadData {
   name: string
   color: string
 }
+
+// Workspace Members
+export interface MemberData {
+  id: string
+  userId: string
+  email: string
+  name: string | null
+  role: WorkspaceRole
+}

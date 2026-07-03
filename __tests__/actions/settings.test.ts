@@ -56,7 +56,8 @@ const mockOrganization = {
   findUnique: vi.fn(),
   delete: vi.fn(),
 };
-const mockOrganizationMember = { deleteMany: vi.fn() };
+const mockOrganizationMember = { deleteMany: vi.fn(), findFirst: vi.fn(), create: vi.fn() };
+const mockUser = { upsert: vi.fn() };
 const mockOKRCycle = {
   findMany: vi.fn(),
   deleteMany: vi.fn(),
@@ -78,7 +79,14 @@ const mockSolution = {
   deleteMany: vi.fn(),
 };
 const mockAssumption = { deleteMany: vi.fn() };
-const mockWorkspaceMember = { deleteMany: vi.fn() };
+const mockWorkspaceMember = {
+  deleteMany: vi.fn(),
+  findFirst: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  delete: vi.fn(),
+  count: vi.fn(),
+};
 const mockDoc = { deleteMany: vi.fn() };
 
 const mockPrisma = {
@@ -93,6 +101,7 @@ const mockPrisma = {
   apiKey: mockApiKey,
   organization: mockOrganization,
   organizationMember: mockOrganizationMember,
+  user: mockUser,
   oKRCycle: mockOKRCycle,
   keyResult: mockKeyResult,
   checkIn: mockCheckIn,
@@ -130,6 +139,9 @@ import {
   revokeApiKey,
   updatePortalSettings,
   deleteWorkspace,
+  addWorkspaceMember,
+  updateWorkspaceMemberRole,
+  removeWorkspaceMember,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
 
 const mockAuth = vi.mocked(auth);
@@ -198,6 +210,16 @@ beforeEach(() => {
   mockWorkspaceMember.deleteMany.mockResolvedValue({ count: 0 });
   mockSquad.deleteMany.mockResolvedValue({ count: 0 });
   mockDoc.deleteMany.mockResolvedValue({ count: 0 });
+
+  // Workspace member management defaults
+  mockUser.upsert.mockResolvedValue({ id: "user-2", email: "new@example.com" });
+  mockOrganizationMember.findFirst.mockResolvedValue(null);
+  mockOrganizationMember.create.mockResolvedValue({ id: "org-member-1" });
+  mockWorkspaceMember.findFirst.mockResolvedValue(null);
+  mockWorkspaceMember.create.mockResolvedValue({ id: "ws-member-1" });
+  mockWorkspaceMember.update.mockResolvedValue({ id: "ws-member-1" });
+  mockWorkspaceMember.delete.mockResolvedValue({ id: "ws-member-1" });
+  mockWorkspaceMember.count.mockResolvedValue(2);
 });
 
 // ─── createSquad ─────────────────────────────────────────────────────────────
@@ -223,6 +245,22 @@ describe("createSquad", () => {
     await expect(
       createSquad("org", "ws", { name: "Alpha", color: "#ff0000" })
     ).rejects.toThrow("Workspace not found");
+  });
+
+  it("throws Workspace not found when caller is not a member (resolveWorkspace scoping)", async () => {
+    // resolveWorkspace scopes the lookup to `members: { some: { userId } } }` —
+    // a non-member hitting a valid org/workspace slug pair must not pass.
+    mockWorkspace.findFirst.mockResolvedValue(null);
+    await expect(
+      createSquad("org", "ws", { name: "Alpha", color: "#ff0000" })
+    ).rejects.toThrow("Workspace not found");
+    expect(mockWorkspace.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          members: { some: { userId: "user-1" } },
+        }),
+      })
+    );
   });
 });
 
@@ -627,5 +665,190 @@ describe("deleteWorkspace", () => {
 
     expect(mockOrganization.delete).not.toHaveBeenCalled();
     expect(mockOrganizationMember.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+// ─── addWorkspaceMember ────────────────────────────────────────────────────────
+
+describe("addWorkspaceMember", () => {
+  it("upserts the user by email, creates an org member, and creates a workspace member", async () => {
+    mockUser.upsert.mockResolvedValue({ id: "user-2", email: "new@example.com" });
+
+    await addWorkspaceMember("org", "ws", { email: "New@Example.com  ", role: "MEMBER" });
+
+    expect(mockUser.upsert).toHaveBeenCalledWith({
+      where: { email: "new@example.com" },
+      update: {},
+      create: { email: "new@example.com" },
+    });
+    expect(mockOrganizationMember.create).toHaveBeenCalledWith({
+      data: { organizationId: "org-1", userId: "user-2", role: "MEMBER" },
+    });
+    expect(mockWorkspaceMember.create).toHaveBeenCalledWith({
+      data: { workspaceId: "ws-1", userId: "user-2", role: "MEMBER" },
+    });
+  });
+
+  it("does not create a duplicate org member when the user is already in the org", async () => {
+    mockOrganizationMember.findFirst.mockResolvedValue({ id: "org-member-existing" });
+
+    await addWorkspaceMember("org", "ws", { email: "existing@example.com", role: "ADMIN" });
+
+    expect(mockOrganizationMember.create).not.toHaveBeenCalled();
+    expect(mockWorkspaceMember.create).toHaveBeenCalledWith({
+      data: { workspaceId: "ws-1", userId: "user-2", role: "ADMIN" },
+    });
+  });
+
+  it("throws when the user is already a workspace member", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-existing" });
+
+    await expect(
+      addWorkspaceMember("org", "ws", { email: "existing@example.com", role: "MEMBER" })
+    ).rejects.toThrow("User is already a member of this workspace");
+    expect(mockWorkspaceMember.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid email", async () => {
+    await expect(
+      addWorkspaceMember("org", "ws", { email: "not-an-email", role: "MEMBER" })
+    ).rejects.toThrow("A valid email address is required");
+    expect(mockUser.upsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty email", async () => {
+    await expect(
+      addWorkspaceMember("org", "ws", { email: "   ", role: "MEMBER" })
+    ).rejects.toThrow("A valid email address is required");
+    expect(mockUser.upsert).not.toHaveBeenCalled();
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      addWorkspaceMember("org", "ws", { email: "new@example.com", role: "MEMBER" })
+    ).rejects.toThrow("Unauthorized");
+    expect(mockUser.upsert).not.toHaveBeenCalled();
+  });
+});
+
+// ─── updateWorkspaceMemberRole ─────────────────────────────────────────────────
+
+describe("updateWorkspaceMemberRole", () => {
+  it("updates the member's role", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "MEMBER" });
+
+    await updateWorkspaceMemberRole("org", "ws", "ws-member-1", "ADMIN");
+
+    expect(mockWorkspaceMember.update).toHaveBeenCalledWith({
+      where: { id: "ws-member-1" },
+      data: { role: "ADMIN" },
+    });
+  });
+
+  it("throws Member not found when the member does not belong to this workspace", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue(null);
+
+    await expect(
+      updateWorkspaceMemberRole("org", "ws", "ws-member-other", "ADMIN")
+    ).rejects.toThrow("Member not found");
+    expect(mockWorkspaceMember.update).not.toHaveBeenCalled();
+  });
+
+  it("blocks demoting the last remaining admin", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "ADMIN" });
+    mockWorkspaceMember.count.mockResolvedValue(1);
+
+    await expect(
+      updateWorkspaceMemberRole("org", "ws", "ws-member-1", "MEMBER")
+    ).rejects.toThrow("Cannot demote the last remaining admin");
+    expect(mockWorkspaceMember.update).not.toHaveBeenCalled();
+  });
+
+  it("allows demoting an admin when another admin remains", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "ADMIN" });
+    mockWorkspaceMember.count.mockResolvedValue(2);
+
+    await updateWorkspaceMemberRole("org", "ws", "ws-member-1", "MEMBER");
+
+    expect(mockWorkspaceMember.update).toHaveBeenCalledWith({
+      where: { id: "ws-member-1" },
+      data: { role: "MEMBER" },
+    });
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      updateWorkspaceMemberRole("org", "ws", "ws-member-1", "ADMIN")
+    ).rejects.toThrow("Unauthorized");
+  });
+});
+
+// ─── removeWorkspaceMember ──────────────────────────────────────────────────────
+
+describe("removeWorkspaceMember", () => {
+  // count() is called twice in the ADMIN path (total, then admin-scoped) and
+  // once in the non-admin path (total only). Keying the mock off the `where`
+  // clause — rather than call order via mockResolvedValueOnce — keeps these
+  // tests independent of one another regardless of execution order.
+  function mockCounts(total: number, admins: number) {
+    mockWorkspaceMember.count.mockImplementation(({ where }: { where: { role?: string } }) =>
+      Promise.resolve(where.role === "ADMIN" ? admins : total)
+    );
+  }
+
+  it("removes the member", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "MEMBER" });
+    mockCounts(2, 1);
+
+    await removeWorkspaceMember("org", "ws", "ws-member-1");
+
+    expect(mockWorkspaceMember.delete).toHaveBeenCalledWith({ where: { id: "ws-member-1" } });
+  });
+
+  it("throws Member not found when the member does not belong to this workspace", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue(null);
+
+    await expect(removeWorkspaceMember("org", "ws", "ws-member-other")).rejects.toThrow(
+      "Member not found"
+    );
+    expect(mockWorkspaceMember.delete).not.toHaveBeenCalled();
+  });
+
+  it("blocks removing the last member of a workspace", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "MEMBER" });
+    mockCounts(1, 0);
+
+    await expect(removeWorkspaceMember("org", "ws", "ws-member-1")).rejects.toThrow(
+      "Cannot remove the last member of a workspace"
+    );
+    expect(mockWorkspaceMember.delete).not.toHaveBeenCalled();
+  });
+
+  it("blocks removing the last remaining admin", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "ADMIN" });
+    mockCounts(2, 1);
+
+    await expect(removeWorkspaceMember("org", "ws", "ws-member-1")).rejects.toThrow(
+      "Cannot remove the last remaining admin"
+    );
+    expect(mockWorkspaceMember.delete).not.toHaveBeenCalled();
+  });
+
+  it("allows removing an admin when another admin remains", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "ADMIN" });
+    mockCounts(3, 2);
+
+    await removeWorkspaceMember("org", "ws", "ws-member-1");
+
+    expect(mockWorkspaceMember.delete).toHaveBeenCalledWith({ where: { id: "ws-member-1" } });
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(removeWorkspaceMember("org", "ws", "ws-member-1")).rejects.toThrow(
+      "Unauthorized"
+    );
   });
 });

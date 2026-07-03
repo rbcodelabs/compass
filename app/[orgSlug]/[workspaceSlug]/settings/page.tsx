@@ -3,11 +3,18 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-panel";
 import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
+import { ManageMembersPanel } from "@/components/settings/manage-members-panel";
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
 import { DeleteWorkspacePanel } from "@/components/settings/delete-workspace-panel";
 import type { ApiKeyRow } from "@/components/settings/manage-api-keys-panel";
-import type { CustomFieldDefinitionData, CustomFieldObjectType, CustomFieldType, SquadData } from "@/lib/types";
+import type {
+  CustomFieldDefinitionData,
+  CustomFieldObjectType,
+  CustomFieldType,
+  SquadData,
+  MemberData,
+} from "@/lib/types";
 
 export const metadata = { title: "Workspace Settings" };
 
@@ -29,7 +36,7 @@ export default async function SettingsPage({ params }: Props) {
 
   if (!workspace) redirect("/dashboard");
 
-  const [rawFields, rawSquads, rawApiKeys] = await Promise.all([
+  const [rawFields, rawSquads, rawApiKeys, rawMembers] = await Promise.all([
     prisma.customFieldDefinition.findMany({
       where: { workspaceId: workspace.id },
       orderBy: [{ objectType: "asc" }, { order: "asc" }],
@@ -44,6 +51,11 @@ export default async function SettingsPage({ params }: Props) {
           orderBy: { createdAt: "desc" },
         })
       : Promise.resolve([]),
+    prisma.workspaceMember.findMany({
+      where: { workspaceId: workspace.id },
+      include: { user: true },
+      orderBy: { createdAt: "asc" },
+    }),
   ]);
 
   const fields: CustomFieldDefinitionData[] = rawFields.map((f) => ({
@@ -71,6 +83,17 @@ export default async function SettingsPage({ params }: Props) {
     revokedAt: k.revokedAt,
   }));
 
+  const members: MemberData[] = rawMembers.map((m) => ({
+    id: m.id,
+    userId: m.userId,
+    email: m.user.email,
+    name: m.user.name,
+    role: m.role as MemberData["role"],
+  }));
+
+  const currentUserMembershipId =
+    rawMembers.find((m) => m.userId === session.user?.id)?.id ?? null;
+
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8 max-w-3xl">
       <div>
@@ -90,6 +113,24 @@ export default async function SettingsPage({ params }: Props) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           initialSquads={squads}
+        />
+      </section>
+
+      <div className="border-t border-border" />
+
+      <section className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-base font-semibold">Members</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            People with access to this workspace. Admins can manage settings, squads, and members; members have standard access.
+          </p>
+        </div>
+
+        <ManageMembersPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          initialMembers={members}
+          currentUserMembershipId={currentUserMembershipId}
         />
       </section>
 

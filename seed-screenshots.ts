@@ -32,7 +32,7 @@ async function main() {
   if (!org) { console.error("Org not found"); process.exit(1); }
   console.log("Org:", org.slug, org.id);
 
-  const ws = await one(`SELECT id, slug FROM "${S}".workspaces WHERE slug = $1 AND organization_id = $2`, ["compass-product", org.id]);
+  const ws = await one(`SELECT id, slug FROM "${S}".workspaces WHERE slug = $1 AND organization_id = $2`, ["compass", org.id]);
   if (!ws) { console.error("Workspace not found"); process.exit(1); }
   console.log("Workspace:", ws.slug, ws.id);
 
