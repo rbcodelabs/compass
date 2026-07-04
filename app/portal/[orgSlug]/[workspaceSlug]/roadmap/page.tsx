@@ -1,4 +1,5 @@
 import getPrisma from "@/lib/db";
+import { getPortalSession } from "@/lib/portal-auth";
 import { RoadmapVoteSection } from "@/components/portal/roadmap-vote-section";
 
 type Props = {
@@ -33,10 +34,13 @@ export default async function PortalRoadmapPage({ params }: Props) {
   const { orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
 
-  const workspace = await prisma.workspace.findFirst({
-    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-    select: { id: true, name: true, roadmapPublic: true },
-  });
+  const [workspace, portalSession] = await Promise.all([
+    prisma.workspace.findFirst({
+      where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+      select: { id: true, name: true, roadmapPublic: true, portalAuthRequired: true },
+    }),
+    getPortalSession(),
+  ]);
 
   if (!workspace || !workspace.roadmapPublic) {
     return (
@@ -100,6 +104,8 @@ export default async function PortalRoadmapPage({ params }: Props) {
                     item={item}
                     orgSlug={orgSlug}
                     workspaceSlug={workspaceSlug}
+                    portalAuthRequired={workspace.portalAuthRequired ?? false}
+                    portalAccountEmail={portalSession?.email ?? null}
                   />
                 ))
               )}

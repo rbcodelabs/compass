@@ -1,4 +1,5 @@
 import getPrisma from "@/lib/db";
+import { getPortalSession } from "@/lib/portal-auth";
 import { FeedbackPortalSection } from "@/components/portal/feedback-portal-section";
 
 type Props = {
@@ -9,10 +10,13 @@ export default async function PortalFeedbackPage({ params }: Props) {
   const { orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
 
-  const workspace = await prisma.workspace.findFirst({
-    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-    select: { id: true, name: true, feedbackEnabled: true },
-  });
+  const [workspace, portalSession] = await Promise.all([
+    prisma.workspace.findFirst({
+      where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+      select: { id: true, name: true, feedbackEnabled: true, portalAuthRequired: true },
+    }),
+    getPortalSession(),
+  ]);
 
   if (!workspace || !workspace.feedbackEnabled) {
     return (
@@ -46,6 +50,8 @@ export default async function PortalFeedbackPage({ params }: Props) {
     <FeedbackPortalSection
       orgSlug={orgSlug}
       workspaceSlug={workspaceSlug}
+      portalAuthRequired={workspace.portalAuthRequired ?? false}
+      portalAccountEmail={portalSession?.email ?? null}
       initialItems={items.map((i) => ({
         id: i.id,
         title: i.title,

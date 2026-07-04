@@ -24,7 +24,13 @@ export default async function SettingsPage({ params }: Props) {
 
   const workspace = await prisma.workspace.findFirst({
     where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-    select: { id: true, name: true, feedbackEnabled: true, roadmapPublic: true },
+    select: {
+      id: true,
+      name: true,
+      feedbackEnabled: true,
+      roadmapPublic: true,
+      portalAuthRequired: true,
+    },
   });
 
   if (!workspace) redirect("/dashboard");
@@ -142,6 +148,7 @@ export default async function SettingsPage({ params }: Props) {
           workspaceSlug={workspaceSlug}
           feedbackEnabled={workspace.feedbackEnabled ?? false}
           roadmapPublic={workspace.roadmapPublic ?? false}
+          portalAuthRequired={workspace.portalAuthRequired ?? false}
         />
       </section>
 

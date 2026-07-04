@@ -18,6 +18,12 @@ import { authConfig } from "@/auth.config";
  * PRODUCTION (Vercel preview / prod):
  *   • Resend (magic-link email) + Google (OAuth) + PrismaAdapter (database sessions).
  *   • Credentials provider is absent — never ships in production.
+ *
+ * Portal sessions and Auth.js sessions are intentionally non-interoperable.
+ * Do not attempt to unify them. Portal accounts (public feedback/roadmap
+ * visitors) live entirely in lib/portal-auth.ts — different cookie name,
+ * different token format (opaque + DB-hashed, not JWT), different tables,
+ * different code path end to end. See ADR: Claude/compass-portal-auth-adr-2026-07-03.md.
  */
 
 const isDev = process.env.NODE_ENV === "development";

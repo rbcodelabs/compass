@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { ThumbsUp } from "lucide-react";
+import { PortalSignInGate } from "@/components/portal/portal-sign-in-gate";
 
 type RoadmapItem = {
   id: string;
@@ -15,6 +16,8 @@ interface Props {
   item: RoadmapItem;
   orgSlug: string;
   workspaceSlug: string;
+  portalAuthRequired: boolean;
+  portalAccountEmail: string | null;
 }
 
 const VOTE_FORM_STORAGE_KEY = (orgSlug: string, workspaceSlug: string) =>
@@ -39,7 +42,14 @@ function recordVote(orgSlug: string, workspaceSlug: string, itemId: string) {
   );
 }
 
-export function RoadmapVoteSection({ item, orgSlug, workspaceSlug }: Props) {
+export function RoadmapVoteSection({
+  item,
+  orgSlug,
+  workspaceSlug,
+  portalAuthRequired,
+  portalAccountEmail,
+}: Props) {
+  const requiresSignIn = portalAuthRequired && !portalAccountEmail;
   const [hasVoted, setHasVoted] = useState(false);
   const [voteCount, setVoteCount] = useState(item._count.votes);
   const [showForm, setShowForm] = useState(false);
@@ -118,40 +128,52 @@ export function RoadmapVoteSection({ item, orgSlug, workspaceSlug }: Props) {
       )}
 
       {!hasVoted && showForm && (
-        <form onSubmit={handleVote} className="flex flex-col gap-2 pt-1 border-t border-slate-100">
-          <input
-            type="text"
-            placeholder="Your name (optional)"
-            value={voterName}
-            onChange={(e) => setVoterName(e.target.value)}
-            className="text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-          />
-          <input
-            type="email"
-            placeholder="Your email (required)"
-            value={voterEmail}
-            onChange={(e) => setVoterEmail(e.target.value)}
-            required
-            className="text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-          />
-          {error && <p className="text-xs text-red-500">{error}</p>}
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex-1 text-xs rounded-lg bg-indigo-600 text-white px-3 py-1.5 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-            >
-              {isSubmitting ? "Voting..." : "Vote"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="text-xs rounded-lg border border-slate-200 px-3 py-1.5 hover:bg-slate-50 transition-colors"
-            >
-              Cancel
-            </button>
+        requiresSignIn ? (
+          <div className="pt-1 border-t border-slate-100">
+            <PortalSignInGate actionLabel="vote" />
           </div>
-        </form>
+        ) : (
+          <form onSubmit={handleVote} className="flex flex-col gap-2 pt-1 border-t border-slate-100">
+            <input
+              type="text"
+              placeholder="Your name (optional)"
+              value={voterName}
+              onChange={(e) => setVoterName(e.target.value)}
+              className="text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            />
+            {portalAuthRequired ? (
+              <p className="text-xs text-slate-400 px-0.5">
+                Voting as <span className="font-medium text-slate-600">{portalAccountEmail}</span>
+              </p>
+            ) : (
+              <input
+                type="email"
+                placeholder="Your email (required)"
+                value={voterEmail}
+                onChange={(e) => setVoterEmail(e.target.value)}
+                required
+                className="text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              />
+            )}
+            {error && <p className="text-xs text-red-500">{error}</p>}
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="flex-1 text-xs rounded-lg bg-indigo-600 text-white px-3 py-1.5 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              >
+                {isSubmitting ? "Voting..." : "Vote"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="text-xs rounded-lg border border-slate-200 px-3 py-1.5 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )
       )}
     </div>
   );

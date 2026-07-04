@@ -96,14 +96,15 @@ model OrganizationMember {
 }
 
 model Workspace {
-  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId  String            @map("organization_id") @db.Uuid
-  slug            String            @db.VarChar(255)
-  name            String            @db.VarChar(255)
-  description     String?           @db.Text
-  feedbackEnabled Boolean?          @default(false) @map("feedback_enabled")
-  roadmapPublic   Boolean?          @default(false) @map("roadmap_public")
-  createdAt       DateTime          @default(now()) @map("created_at")
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String            @map("organization_id") @db.Uuid
+  slug               String            @db.VarChar(255)
+  name               String            @db.VarChar(255)
+  description        String?           @db.Text
+  feedbackEnabled    Boolean?          @default(false) @map("feedback_enabled")
+  roadmapPublic      Boolean?          @default(false) @map("roadmap_public")
+  portalAuthRequired Boolean?          @default(false) @map("portal_auth_required")
+  createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @default(now()) @map("updated_at")
   organization    Organization      @relation(fields: [organizationId], references: [id])
   members           WorkspaceMember[]
@@ -393,34 +394,85 @@ model ApiKey {
   @@map("api_keys")
 }
 
+// ─── Portal Auth (fully independent of User/Session/VerificationToken) ────────
+// See ADR: Claude/compass-portal-auth-adr-2026-07-03.md
+// Portal accounts/sessions are intentionally non-interoperable with Auth.js.
+// Do not add a FK to User. Do not reuse authjs.session-token.
+
+model PortalAccount {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String   @unique @db.VarChar(255)
+  name          String?  @db.VarChar(255)
+  emailVerified DateTime @map("email_verified")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  sessions      PortalSession[]
+  feedbackItems FeedbackItem[]
+  feedbackVotes FeedbackVote[]
+  roadmapVotes  RoadmapVote[]
+
+  @@map("portal_accounts")
+}
+
+model PortalSession {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portalAccountId String        @map("portal_account_id") @db.Uuid
+  tokenHash       String        @unique @map("token_hash") @db.VarChar(64)
+  expiresAt       DateTime      @map("expires_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  lastUsedAt      DateTime      @default(now()) @map("last_used_at")
+  portalAccount   PortalAccount @relation(fields: [portalAccountId], references: [id])
+
+  @@index([portalAccountId])
+  @@map("portal_sessions")
+}
+
+// Magic-link verification tokens for portal signup/login.
+// Deliberately a separate table from Auth.js's VerificationToken —
+// same reason as everything else in this ADR: no shared code path.
+model PortalVerificationToken {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email     String   @db.VarChar(255)
+  tokenHash String   @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([email])
+  @@map("portal_verification_tokens")
+}
+
 // ─── Feedback ─────────────────────────────────────────────────────────────────
 
 model FeedbackItem {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId    String    @map("workspace_id") @db.Uuid
-  opportunityId  String?   @map("opportunity_id") @db.Uuid
-  title          String    @db.VarChar(255)
-  description    String?   @db.Text
-  submitterName  String?   @map("submitter_name") @db.VarChar(255)
-  submitterEmail String?   @map("submitter_email") @db.VarChar(255)
-  status         String    @default("OPEN") @db.VarChar(50)
-  voteCount      Int       @default(0) @map("vote_count")
-  tags           Json?
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @default(now()) @map("updated_at")
-  workspace      Workspace   @relation(fields: [workspaceId], references: [id])
-  opportunity    Opportunity? @relation(fields: [opportunityId], references: [id])
-  votes          FeedbackVote[]
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  opportunityId   String?   @map("opportunity_id") @db.Uuid
+  title           String    @db.VarChar(255)
+  description     String?   @db.Text
+  submitterName   String?   @map("submitter_name") @db.VarChar(255)
+  submitterEmail  String?   @map("submitter_email") @db.VarChar(255)
+  portalAccountId String?   @map("portal_account_id") @db.Uuid
+  status          String    @default("OPEN") @db.VarChar(50)
+  voteCount       Int       @default(0) @map("vote_count")
+  tags            Json?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @map("updated_at")
+  workspace       Workspace   @relation(fields: [workspaceId], references: [id])
+  opportunity     Opportunity? @relation(fields: [opportunityId], references: [id])
+  portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id])
+  votes           FeedbackVote[]
 
   @@map("feedback")
 }
 
 model FeedbackVote {
-  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  feedbackId   String       @map("feedback_id") @db.Uuid
-  voterEmail   String       @map("voter_email") @db.VarChar(255)
-  createdAt    DateTime     @default(now()) @map("created_at")
-  feedbackItem FeedbackItem @relation(fields: [feedbackId], references: [id])
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  feedbackId      String       @map("feedback_id") @db.Uuid
+  voterEmail      String       @map("voter_email") @db.VarChar(255)
+  portalAccountId String?      @map("portal_account_id") @db.Uuid
+  createdAt       DateTime     @default(now()) @map("created_at")
+  feedbackItem    FeedbackItem @relation(fields: [feedbackId], references: [id])
+  portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id])
 
   @@unique([feedbackId, voterEmail])
   @@map("feedback_votes")
@@ -447,12 +499,14 @@ model Doc {
 }
 
 model RoadmapVote {
-  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  roadmapItemId String      @map("roadmap_item_id") @db.Uuid
-  voterEmail    String      @map("voter_email") @db.VarChar(255)
-  voterName     String?     @map("voter_name") @db.VarChar(255)
-  createdAt     DateTime    @default(now()) @map("created_at")
-  roadmapItem   RoadmapItem @relation(fields: [roadmapItemId], references: [id])
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roadmapItemId   String      @map("roadmap_item_id") @db.Uuid
+  voterEmail      String      @map("voter_email") @db.VarChar(255)
+  voterName       String?     @map("voter_name") @db.VarChar(255)
+  portalAccountId String?     @map("portal_account_id") @db.Uuid
+  createdAt       DateTime    @default(now()) @map("created_at")
+  roadmapItem     RoadmapItem @relation(fields: [roadmapItemId], references: [id])
+  portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id])
 
   @@unique([roadmapItemId, voterEmail])
   @@map("roadmap_votes")
