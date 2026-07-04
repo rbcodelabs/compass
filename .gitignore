@@ -45,3 +45,4 @@ prisma/generated/
 # playwright auth state (never commit session cookies)
 e2e/.auth/
 e2e/functional/.auth/
+test-results/
