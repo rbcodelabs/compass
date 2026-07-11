@@ -116,6 +116,12 @@ After a PR merges to main and Vercel deploys to production:
    ```
    Check the PR body for a "Migration required" section. If none is listed, skip this step.
 
+   **If `prisma/schema.prisma` or `prisma/migrations/` changed in this PR**, first confirm `MIGRATION_SECRET` actually works in the target environment — do not assume it does just because it exists:
+   ```bash
+   vercel curl /api/admin/migrate --deployment <prod-or-preview-url> -- --header "x-migration-secret: $SECRET"
+   ```
+   A `{"error":"Unauthorized"}` response (or a Prisma `TableDoesNotExist` error when hitting the new feature) means the secret is missing or stale **for that specific environment** — production and preview are independent, and having it set up for one tells you nothing about the other. This has bitten twice on the same PR (#35 shipped with an unusable `MIGRATION_SECRET` on both preview and production). Because it's a Vercel "sensitive" env var, it is **write-only** — if the value isn't already saved outside Vercel (e.g. 1Password), it cannot be recovered and must be rotated: generate a new one, `vercel env rm` / `vercel env add --sensitive` for that environment, save it to the password manager **immediately** (before testing — a dropped connection mid-test shouldn't mean losing it again), redeploy, then re-run the status check above.
+
 3. **Smoke-test production** using `agent-browser`:
    - Log in at `https://compass.rbcodelabs.com/login`
    - Exercise the primary flows touched by the PR (e.g. if docs changed, open a doc and verify formatting)
