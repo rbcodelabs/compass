@@ -9,6 +9,7 @@ interface Props {
   workspaceSlug: string;
   feedbackEnabled: boolean;
   roadmapPublic: boolean;
+  portalAuthRequired: boolean;
 }
 
 export function PortalSettingsPanel({
@@ -16,26 +17,35 @@ export function PortalSettingsPanel({
   workspaceSlug,
   feedbackEnabled: initialFeedback,
   roadmapPublic: initialRoadmap,
+  portalAuthRequired: initialPortalAuthRequired,
 }: Props) {
   const [feedbackEnabled, setFeedbackEnabled] = useState(initialFeedback);
   const [roadmapPublic, setRoadmapPublic] = useState(initialRoadmap);
+  const [portalAuthRequired, setPortalAuthRequired] = useState(initialPortalAuthRequired);
   const [isPending, startTransition] = useTransition();
 
   const base = typeof window !== "undefined" ? window.location.origin : "";
   const roadmapUrl = `/portal/${orgSlug}/${workspaceSlug}/roadmap`;
   const feedbackUrl = `/portal/${orgSlug}/${workspaceSlug}/feedback`;
 
-  function handleToggle(field: "feedbackEnabled" | "roadmapPublic", value: boolean) {
+  function handleToggle(
+    field: "feedbackEnabled" | "roadmapPublic" | "portalAuthRequired",
+    value: boolean
+  ) {
     if (field === "feedbackEnabled") setFeedbackEnabled(value);
-    else setRoadmapPublic(value);
+    else if (field === "roadmapPublic") setRoadmapPublic(value);
+    else setPortalAuthRequired(value);
 
     startTransition(async () => {
       await updatePortalSettings(orgSlug, workspaceSlug, {
         ...(field === "feedbackEnabled" ? { feedbackEnabled: value } : {}),
         ...(field === "roadmapPublic" ? { roadmapPublic: value } : {}),
+        ...(field === "portalAuthRequired" ? { portalAuthRequired: value } : {}),
       });
     });
   }
+
+  const portalIsPublic = feedbackEnabled || roadmapPublic;
 
   return (
     <div className="flex flex-col gap-5">
@@ -116,6 +126,36 @@ export function PortalSettingsPanel({
           />
         </button>
       </div>
+
+      {/* Require portal account toggle — only meaningful once the portal is public */}
+      {portalIsPublic && (
+        <div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3.5">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium">Require an account to submit/vote</span>
+            <span className="text-xs text-muted-foreground">
+              Visitors must verify their email with a magic link before submitting feedback or voting.
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={portalAuthRequired}
+            disabled={isPending}
+            onClick={() => handleToggle("portalAuthRequired", !portalAuthRequired)}
+            className={[
+              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+              portalAuthRequired ? "bg-indigo-600" : "bg-slate-200",
+            ].join(" ")}
+          >
+            <span
+              className={[
+                "pointer-events-none block h-4 w-4 rounded-full bg-white shadow-md ring-0 transition-transform",
+                portalAuthRequired ? "translate-x-4" : "translate-x-0",
+              ].join(" ")}
+            />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

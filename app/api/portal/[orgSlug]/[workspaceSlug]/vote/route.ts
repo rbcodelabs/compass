@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
+import { getPortalSession } from "@/lib/portal-auth";
 
 type Params = { orgSlug: string; workspaceSlug: string };
 
@@ -32,24 +33,44 @@ export async function POST(
     return NextResponse.json({ error: "itemId is required" }, { status: 422 });
   }
 
-  if (!voterEmail || typeof voterEmail !== "string" || !EMAIL_RE.test(voterEmail.trim())) {
-    return NextResponse.json({ error: "A valid email address is required to vote" }, { status: 422 });
-  }
-
-  const email = voterEmail.trim().toLowerCase();
-  const name =
-    typeof voterName === "string" && voterName.trim() ? voterName.trim() : null;
-
   const prisma = getPrisma();
 
   // Verify workspace exists
   const workspace = await prisma.workspace.findFirst({
     where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-    select: { id: true, feedbackEnabled: true, roadmapPublic: true },
+    select: { id: true, feedbackEnabled: true, roadmapPublic: true, portalAuthRequired: true },
   });
 
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  }
+
+  // Resolve identity: if this workspace requires a verified portal account,
+  // a valid session is mandatory and its email is authoritative — any
+  // client-supplied voterEmail is ignored so a signed-in visitor can't spoof
+  // a different address than the one they verified. voterName stays
+  // client-supplied either way (non-trust-bearing display field).
+  let portalAccountId: string | null = null;
+  let email: string;
+
+  const name =
+    typeof voterName === "string" && voterName.trim() ? voterName.trim() : null;
+
+  if (workspace.portalAuthRequired) {
+    const session = await getPortalSession();
+    if (!session) {
+      return NextResponse.json(
+        { error: "Sign in required to vote", code: "PORTAL_AUTH_REQUIRED" },
+        { status: 401 }
+      );
+    }
+    portalAccountId = session.portalAccountId;
+    email = session.email;
+  } else {
+    if (!voterEmail || typeof voterEmail !== "string" || !EMAIL_RE.test(voterEmail.trim())) {
+      return NextResponse.json({ error: "A valid email address is required to vote" }, { status: 422 });
+    }
+    email = voterEmail.trim().toLowerCase();
   }
 
   if (type === "feedback") {
@@ -75,7 +96,7 @@ export async function POST(
 
     if (!existing) {
       await prisma.feedbackVote.create({
-        data: { feedbackId: itemId, voterEmail: email },
+        data: { feedbackId: itemId, voterEmail: email, portalAccountId },
       });
 
       const updated = await prisma.feedbackItem.update({
@@ -114,6 +135,7 @@ export async function POST(
         roadmapItemId: itemId,
         voterEmail: email,
         voterName: name,
+        portalAccountId,
       },
     });
   }

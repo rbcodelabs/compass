@@ -604,7 +604,7 @@ export async function deleteWorkspace(
 export async function updatePortalSettings(
   orgSlug: string,
   workspaceSlug: string,
-  input: { feedbackEnabled?: boolean; roadmapPublic?: boolean }
+  input: { feedbackEnabled?: boolean; roadmapPublic?: boolean; portalAuthRequired?: boolean }
 ) {
   const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
 
@@ -613,6 +613,7 @@ export async function updatePortalSettings(
     data: {
       ...(input.feedbackEnabled !== undefined && { feedbackEnabled: input.feedbackEnabled }),
       ...(input.roadmapPublic !== undefined && { roadmapPublic: input.roadmapPublic }),
+      ...(input.portalAuthRequired !== undefined && { portalAuthRequired: input.portalAuthRequired }),
     },
   });
 

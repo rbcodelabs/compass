@@ -1,0 +1,136 @@
+/**
+ * Unit tests for app/api/portal/[orgSlug]/[workspaceSlug]/feedback/route.ts.
+ *
+ * Prisma and lib/portal-auth's getPortalSession are both mocked. The exported
+ * POST handler is called directly with a constructed NextRequest, following
+ * the same "mock @/lib/db" pattern used elsewhere in this repo, applied here
+ * to a route handler (no prior route-handler test precedent existed).
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
+
+const mockWorkspace = { findFirst: vi.fn() };
+const mockFeedbackItem = { create: vi.fn() };
+
+const mockPrisma = {
+  workspace: mockWorkspace,
+  feedbackItem: mockFeedbackItem,
+};
+
+vi.mock("@/lib/db", () => ({
+  default: () => mockPrisma,
+}));
+
+vi.mock("@/lib/portal-auth", () => ({
+  getPortalSession: vi.fn(),
+}));
+
+import { getPortalSession } from "@/lib/portal-auth";
+import { POST } from "@/app/api/portal/[orgSlug]/[workspaceSlug]/feedback/route";
+
+const mockGetPortalSession = vi.mocked(getPortalSession);
+
+function makeRequest(body: unknown) {
+  return new NextRequest("http://localhost/api/portal/acme/ws/feedback", {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+const params = Promise.resolve({ orgSlug: "acme", workspaceSlug: "ws" });
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockFeedbackItem.create.mockResolvedValue({
+    id: "fb-1",
+    title: "Test",
+    status: "OPEN",
+    voteCount: 0,
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+  });
+});
+
+describe("POST /api/portal/[orgSlug]/[workspaceSlug]/feedback", () => {
+  it("portalAuthRequired=false: unaffected regression — client submitterEmail passes through untouched, no session lookup", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      feedbackEnabled: true,
+      portalAuthRequired: false,
+    });
+
+    const res = await POST(
+      makeRequest({ title: "Idea", submitterEmail: "visitor@example.com" }),
+      { params }
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockGetPortalSession).not.toHaveBeenCalled();
+    expect(mockFeedbackItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        submitterEmail: "visitor@example.com",
+        portalAccountId: null,
+      }),
+      select: expect.any(Object),
+    });
+  });
+
+  it("portalAuthRequired=true + no session: 401 with PORTAL_AUTH_REQUIRED, no item created", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      feedbackEnabled: true,
+      portalAuthRequired: true,
+    });
+    mockGetPortalSession.mockResolvedValue(null);
+
+    const res = await POST(makeRequest({ title: "Idea" }), { params });
+    const data = await res.json();
+
+    expect(res.status).toBe(401);
+    expect(data.code).toBe("PORTAL_AUTH_REQUIRED");
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
+  });
+
+  it("portalAuthRequired=true + valid session: client-supplied submitterEmail is ignored, session email + portalAccountId used", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      feedbackEnabled: true,
+      portalAuthRequired: true,
+    });
+    mockGetPortalSession.mockResolvedValue({
+      portalAccountId: "account-1",
+      email: "verified@example.com",
+    });
+
+    const res = await POST(
+      makeRequest({ title: "Idea", submitterEmail: "spoofed@example.com" }),
+      { params }
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockFeedbackItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        submitterEmail: "verified@example.com",
+        portalAccountId: "account-1",
+      }),
+      select: expect.any(Object),
+    });
+  });
+
+  it("404s when the workspace doesn't exist", async () => {
+    mockWorkspace.findFirst.mockResolvedValue(null);
+    const res = await POST(makeRequest({ title: "Idea" }), { params });
+    expect(res.status).toBe(404);
+  });
+
+  it("403s when feedback is not enabled, before ever checking portal auth", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      feedbackEnabled: false,
+      portalAuthRequired: true,
+    });
+    const res = await POST(makeRequest({ title: "Idea" }), { params });
+    expect(res.status).toBe(403);
+    expect(mockGetPortalSession).not.toHaveBeenCalled();
+  });
+});

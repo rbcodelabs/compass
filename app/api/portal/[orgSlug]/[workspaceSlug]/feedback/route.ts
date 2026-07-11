@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
+import { getPortalSession } from "@/lib/portal-auth";
 
 type Params = { orgSlug: string; workspaceSlug: string };
 
@@ -34,7 +35,7 @@ export async function POST(
 
   const workspace = await prisma.workspace.findFirst({
     where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-    select: { id: true, feedbackEnabled: true },
+    select: { id: true, feedbackEnabled: true, portalAuthRequired: true },
   });
 
   if (!workspace) {
@@ -45,13 +46,34 @@ export async function POST(
     return NextResponse.json({ error: "Feedback is not enabled for this workspace" }, { status: 403 });
   }
 
+  // Resolve identity: if this workspace requires a verified portal account,
+  // a valid session is mandatory and its email is authoritative — any
+  // client-supplied submitterEmail is ignored so a signed-in visitor can't
+  // spoof a different address than the one they verified.
+  let portalAccountId: string | null = null;
+  let effectiveSubmitterEmail: string | null =
+    typeof submitterEmail === "string" && submitterEmail.trim() ? submitterEmail.trim() : null;
+
+  if (workspace.portalAuthRequired) {
+    const session = await getPortalSession();
+    if (!session) {
+      return NextResponse.json(
+        { error: "Sign in required to submit feedback", code: "PORTAL_AUTH_REQUIRED" },
+        { status: 401 }
+      );
+    }
+    portalAccountId = session.portalAccountId;
+    effectiveSubmitterEmail = session.email;
+  }
+
   const item = await prisma.feedbackItem.create({
     data: {
       workspaceId: workspace.id,
       title: title.trim(),
       description: typeof description === "string" && description.trim() ? description.trim() : null,
       submitterName: typeof submitterName === "string" && submitterName.trim() ? submitterName.trim() : null,
-      submitterEmail: typeof submitterEmail === "string" && submitterEmail.trim() ? submitterEmail.trim() : null,
+      submitterEmail: effectiveSubmitterEmail,
+      portalAccountId,
     },
     select: { id: true, title: true, status: true, voteCount: true, createdAt: true },
   });

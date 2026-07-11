@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { ThumbsUp, MessageSquare } from "lucide-react";
+import { PortalSignInGate } from "@/components/portal/portal-sign-in-gate";
 
 type FeedbackItemData = {
   id: string;
@@ -17,6 +18,8 @@ interface Props {
   orgSlug: string;
   workspaceSlug: string;
   initialItems: FeedbackItemData[];
+  portalAuthRequired: boolean;
+  portalAccountEmail: string | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -59,7 +62,14 @@ function recordVote(orgSlug: string, workspaceSlug: string, itemId: string) {
   );
 }
 
-export function FeedbackPortalSection({ orgSlug, workspaceSlug, initialItems }: Props) {
+export function FeedbackPortalSection({
+  orgSlug,
+  workspaceSlug,
+  initialItems,
+  portalAuthRequired,
+  portalAccountEmail,
+}: Props) {
+  const requiresSignIn = portalAuthRequired && !portalAccountEmail;
   const [items, setItems] = useState(initialItems);
   const [votedIds, setVotedIds] = useState<Set<string>>(new Set());
 
@@ -226,41 +236,61 @@ export function FeedbackPortalSection({ orgSlug, workspaceSlug, initialItems }: 
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-none"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <label htmlFor="fb-name" className="text-xs font-medium text-slate-600">
-                Your name
-              </label>
-              <input
-                id="fb-name"
-                type="text"
-                value={submitterName}
-                onChange={(e) => setSubmitterName(e.target.value)}
-                placeholder="Optional"
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
-              />
+          {portalAuthRequired ? (
+            requiresSignIn ? (
+              <PortalSignInGate actionLabel="submit feedback" />
+            ) : (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-slate-600">Your name</label>
+                <input
+                  type="text"
+                  value={submitterName}
+                  onChange={(e) => setSubmitterName(e.target.value)}
+                  placeholder="Optional"
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                />
+                <p className="text-xs text-slate-400 mt-1">
+                  Signed in as <span className="font-medium text-slate-600">{portalAccountEmail}</span>
+                </p>
+              </div>
+            )
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <label htmlFor="fb-name" className="text-xs font-medium text-slate-600">
+                  Your name
+                </label>
+                <input
+                  id="fb-name"
+                  type="text"
+                  value={submitterName}
+                  onChange={(e) => setSubmitterName(e.target.value)}
+                  placeholder="Optional"
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label htmlFor="fb-email" className="text-xs font-medium text-slate-600">
+                  Your email
+                </label>
+                <input
+                  id="fb-email"
+                  type="email"
+                  value={submitterEmail}
+                  onChange={(e) => setSubmitterEmail(e.target.value)}
+                  placeholder="Optional"
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                />
+              </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <label htmlFor="fb-email" className="text-xs font-medium text-slate-600">
-                Your email
-              </label>
-              <input
-                id="fb-email"
-                type="email"
-                value={submitterEmail}
-                onChange={(e) => setSubmitterEmail(e.target.value)}
-                placeholder="Optional"
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
-              />
-            </div>
-          </div>
+          )}
           {submitError && <p className="text-xs text-red-500">{submitError}</p>}
           {submitSuccess && (
             <p className="text-xs text-green-600">Thank you for your feedback!</p>
           )}
           <button
             type="submit"
-            disabled={isSubmitting || !title.trim()}
+            disabled={isSubmitting || !title.trim() || requiresSignIn}
             className="self-start rounded-lg bg-indigo-600 text-white text-sm px-4 py-2 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
           >
             {isSubmitting ? "Submitting..." : "Submit"}
@@ -338,43 +368,55 @@ export function FeedbackPortalSection({ orgSlug, workspaceSlug, initialItems }: 
 
                   {/* Inline vote form */}
                   {!voted && isVoteOpen && (
-                    <form
-                      onSubmit={(e) => handleVote(e, item.id)}
-                      className="mt-2 flex flex-col gap-2 pt-2 border-t border-slate-100"
-                    >
-                      <input
-                        type="text"
-                        placeholder="Your name (optional)"
-                        value={voteName}
-                        onChange={(e) => setVoteName(e.target.value)}
-                        className="text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                      />
-                      <input
-                        type="email"
-                        placeholder="Your email (required)"
-                        value={voteEmail}
-                        onChange={(e) => setVoteEmail(e.target.value)}
-                        required
-                        className="text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                      />
-                      {voteError && <p className="text-xs text-red-500">{voteError}</p>}
-                      <div className="flex gap-2">
-                        <button
-                          type="submit"
-                          disabled={isVoting}
-                          className="text-xs rounded-lg bg-indigo-600 text-white px-3 py-1.5 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                        >
-                          {isVoting ? "Voting..." : "Vote"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setVoteFormOpen(null)}
-                          className="text-xs rounded-lg border border-slate-200 px-3 py-1.5 hover:bg-slate-50 transition-colors"
-                        >
-                          Cancel
-                        </button>
+                    requiresSignIn ? (
+                      <div className="mt-2 pt-2 border-t border-slate-100">
+                        <PortalSignInGate actionLabel="vote" />
                       </div>
-                    </form>
+                    ) : (
+                      <form
+                        onSubmit={(e) => handleVote(e, item.id)}
+                        className="mt-2 flex flex-col gap-2 pt-2 border-t border-slate-100"
+                      >
+                        <input
+                          type="text"
+                          placeholder="Your name (optional)"
+                          value={voteName}
+                          onChange={(e) => setVoteName(e.target.value)}
+                          className="text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                        />
+                        {portalAuthRequired ? (
+                          <p className="text-xs text-slate-400 px-0.5">
+                            Voting as <span className="font-medium text-slate-600">{portalAccountEmail}</span>
+                          </p>
+                        ) : (
+                          <input
+                            type="email"
+                            placeholder="Your email (required)"
+                            value={voteEmail}
+                            onChange={(e) => setVoteEmail(e.target.value)}
+                            required
+                            className="text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                          />
+                        )}
+                        {voteError && <p className="text-xs text-red-500">{voteError}</p>}
+                        <div className="flex gap-2">
+                          <button
+                            type="submit"
+                            disabled={isVoting}
+                            className="text-xs rounded-lg bg-indigo-600 text-white px-3 py-1.5 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                          >
+                            {isVoting ? "Voting..." : "Vote"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVoteFormOpen(null)}
+                            className="text-xs rounded-lg border border-slate-200 px-3 py-1.5 hover:bg-slate-50 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    )
                   )}
                 </div>
               </div>

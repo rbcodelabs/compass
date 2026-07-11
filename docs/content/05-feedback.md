@@ -20,20 +20,27 @@ The feedback portal is off by default. To enable it, go to **Settings → Portal
 
 - **Public Feedback Portal** — Enables the public submission and voting page
 - **Public Roadmap** — Enables the public roadmap view showing your Now / Next / Later items
+- **Require an account to submit/vote** — Once feedback or roadmap is enabled, an optional third toggle appears that requires visitors to verify their email via a magic link before they can submit feedback or vote
 
 Once enabled, your portal URLs are:
 
 - **Feedback:** `/portal/[org]/[workspace]/feedback`
 - **Public Roadmap:** `/portal/[org]/[workspace]/roadmap`
 
-Share these links in your product, in onboarding emails, or in your documentation. No login is required for visitors to submit or vote.
+Share these links in your product, in onboarding emails, or in your documentation. By default, no login is required for visitors to submit or vote.
+
+## Requiring Portal Accounts (Optional)
+
+If you turn on **Require an account to submit/vote**, first-time visitors are asked to enter their email address and click **Send magic link**. Clicking the link they receive signs them in for that portal — their verified email becomes the identity attached to their feedback and votes, replacing the free-text email field. Once signed in, visitors see "Signed in as `<email>`" in the portal header with a **Sign out** option.
+
+Portal accounts are completely separate from your team's Compass logins — a portal account can never access your internal workspace, OKRs, discovery data, or settings, regardless of what email address is used. There is no path from a portal account to a team member account; if a portal user is later invited to your workspace as a real team member, that invite creates an unrelated login with no connection to their prior portal activity.
 
 ## How Visitors Submit Feedback
 
 Visitors to your feedback portal see a list of existing submissions sorted by vote count. They can:
 
 - **Submit new feedback** by clicking **Share Feedback** — they provide a title and optional description
-- **Vote on existing feedback** by clicking the upvote button on any submission. Each visitor can vote once per item (tracked by IP and session)
+- **Vote on existing feedback** by clicking the upvote button on any submission. Each visitor can vote once per item (tracked by IP and session, or by portal account if account requirement is enabled)
 
 Submissions automatically appear in your internal feedback triage view immediately.
 
