@@ -109,6 +109,14 @@ model Workspace {
   brandingFontPresetId String? @db.VarChar(50)  @map("branding_font_preset_id")
   brandingFontFamily   String? @db.VarChar(100) @map("branding_font_family")
   brandingLogoUrl      String? @db.Text         @map("branding_logo_url")
+  ssoEnabled         Boolean?          @default(false) @map("sso_enabled")
+  // Ciphertext of the raw SSO shared secret (reversible AES-256-GCM
+  // encryption via lib/crypto-secrets.ts, not a hash) — Compass must be
+  // able to decrypt it to verify inbound customer-signed JWTs. The
+  // plaintext is shown to the customer once, at generation time, and
+  // never stored or re-displayed. Known v1 limitation: regenerating
+  // overwrites the old secret outright — no rotation grace window.
+  ssoSecretEncrypted String?           @map("sso_secret_encrypted") @db.Text
   createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @default(now()) @map("updated_at")
   organization    Organization      @relation(fields: [organizationId], references: [id])
