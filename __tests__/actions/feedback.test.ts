@@ -22,6 +22,7 @@ import { auth } from "@/auth";
 import {
   updateFeedbackStatus,
   linkFeedbackToOpportunity,
+  updateFeedbackType,
 } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 
 const mockAuth = vi.mocked(auth);
@@ -104,5 +105,40 @@ describe("linkFeedbackToOpportunity", () => {
     await expect(
       linkFeedbackToOpportunity("fb-999", "opp-1", "/path")
     ).rejects.toThrow("DB error");
+  });
+});
+
+// ─── updateFeedbackType ───────────────────────────────────────────────────────
+
+describe("updateFeedbackType", () => {
+  it("updates the type field to BUG", async () => {
+    await updateFeedbackType("fb-1", "BUG", "/path");
+    expect(mockFeedbackItem.update).toHaveBeenCalledWith({
+      where: { id: "fb-1" },
+      data: { type: "BUG" },
+    });
+  });
+
+  it("updates the type field to IDEA", async () => {
+    await updateFeedbackType("fb-1", "IDEA", "/path");
+    expect(mockFeedbackItem.update).toHaveBeenCalledWith({
+      where: { id: "fb-1" },
+      data: { type: "IDEA" },
+    });
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      updateFeedbackType("fb-1", "BUG", "/path")
+    ).rejects.toThrow("Unauthorized");
+    expect(mockFeedbackItem.update).not.toHaveBeenCalled();
+  });
+
+  it("propagates DB errors", async () => {
+    mockFeedbackItem.update.mockRejectedValue(new Error("not found"));
+    await expect(
+      updateFeedbackType("fb-999", "BUG", "/path")
+    ).rejects.toThrow("not found");
   });
 });

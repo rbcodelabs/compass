@@ -66,6 +66,9 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
         experiment: {
           select: { id: true, title: true },
         },
+        feedback: {
+          select: { id: true, title: true, type: true },
+        },
       },
     }),
     prisma.keyResult.findMany({
@@ -132,6 +135,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     keyResultId: item.keyResultId ?? null,
     opportunityId: item.opportunityId ?? null,
     experimentId: item.experimentId ?? null,
+    feedbackId: item.feedbackId ?? null,
     solution: item.solution ?? null,
     keyResult: item.keyResult
       ? {
@@ -145,6 +149,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       : null,
     opportunity: item.opportunity ?? null,
     experiment: item.experiment ?? null,
+    feedback: item.feedback ?? null,
   }));
 
   return (

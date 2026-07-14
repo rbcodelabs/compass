@@ -21,7 +21,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { title, description, submitterName, submitterEmail } = body as Record<string, unknown>;
+  const { title, description, submitterName, submitterEmail, type } = body as Record<string, unknown>;
 
   if (!title || typeof title !== "string" || title.trim().length === 0) {
     return NextResponse.json({ error: "Title is required" }, { status: 422 });
@@ -30,6 +30,12 @@ export async function POST(
   if (title.trim().length > 255) {
     return NextResponse.json({ error: "Title must be 255 characters or fewer" }, { status: 422 });
   }
+
+  if (type !== undefined && type !== "BUG" && type !== "IDEA") {
+    return NextResponse.json({ error: "Type must be 'BUG' or 'IDEA'" }, { status: 422 });
+  }
+
+  const feedbackType = type === "BUG" ? "BUG" : "IDEA";
 
   const prisma = getPrisma();
 
@@ -71,11 +77,12 @@ export async function POST(
       workspaceId: workspace.id,
       title: title.trim(),
       description: typeof description === "string" && description.trim() ? description.trim() : null,
+      type: feedbackType,
       submitterName: typeof submitterName === "string" && submitterName.trim() ? submitterName.trim() : null,
       submitterEmail: effectiveSubmitterEmail,
       portalAccountId,
     },
-    select: { id: true, title: true, status: true, voteCount: true, createdAt: true },
+    select: { id: true, title: true, status: true, voteCount: true, type: true, createdAt: true },
   });
 
   return NextResponse.json({
@@ -83,6 +90,7 @@ export async function POST(
     title: item.title,
     status: item.status,
     voteCount: item.voteCount,
+    type: item.type,
     createdAt: item.createdAt.toISOString(),
   });
 }

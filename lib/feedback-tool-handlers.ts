@@ -15,8 +15,9 @@ export async function getFeedbackItem({ feedbackId }: { feedbackId: string }) {
     return { content: [{ type: "text" as const, text: `Feedback item "${feedbackId}" not found.` }] }
   }
   const lines = [
-    `## ${item.title}`,
+    `## [${item.type}] ${item.title}`,
     `**ID:** ${item.id}`,
+    `**Type:** ${item.type}`,
     `**Status:** ${item.status}`,
     `**Votes:** ${item.voteCount}`,
     `**Workspace ID:** ${item.workspaceId}`,
@@ -94,4 +95,76 @@ export async function linkFeedbackToOpportunity({
       text: `Linked feedback '${feedback.title}' to opportunity '${opportunity.title}'.`,
     }],
   }
+}
+
+export async function updateFeedbackType({
+  feedbackId,
+  type,
+}: {
+  feedbackId: string
+  type: "BUG" | "IDEA"
+}) {
+  const prisma = getPrisma()
+  const existing = await prisma.feedbackItem.findUnique({
+    where: { id: feedbackId },
+    select: { id: true, title: true, type: true },
+  })
+  if (!existing) {
+    return { content: [{ type: "text" as const, text: `Feedback item "${feedbackId}" not found.` }] }
+  }
+  const oldType = existing.type
+  await prisma.feedbackItem.update({
+    where: { id: feedbackId },
+    data: { type, updatedAt: new Date() },
+  })
+  const lines = [
+    `**Type updated** for "${existing.title}"`,
+    `${oldType} → ${type}`,
+    `ID: ${existing.id}`,
+  ]
+  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+}
+
+export async function promoteFeedbackToRoadmap({
+  feedbackId,
+  workspaceId,
+  horizon,
+}: {
+  feedbackId: string
+  workspaceId: string
+  horizon: "NOW" | "NEXT" | "LATER" | "SHIPPED"
+}) {
+  const prisma = getPrisma()
+  const feedback = await prisma.feedbackItem.findUnique({
+    where: { id: feedbackId },
+    select: { id: true, title: true, type: true },
+  })
+  if (!feedback) {
+    return { content: [{ type: "text" as const, text: `Feedback item "${feedbackId}" not found.` }] }
+  }
+
+  const lastItem = await prisma.roadmapItem.findFirst({
+    where: { workspaceId, horizon, status: "ACTIVE" },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  })
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0
+
+  const item = await prisma.roadmapItem.create({
+    data: {
+      workspaceId,
+      title: feedback.title,
+      horizon,
+      sortOrder,
+      feedbackId,
+    },
+  })
+
+  const lines = [
+    `**Promoted to roadmap (${horizon})**`,
+    `ID: ${item.id}`,
+    `Title: ${item.title}`,
+    `Linked Feedback: ${feedback.title} [${feedback.type}]`,
+  ]
+  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
 }

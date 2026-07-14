@@ -47,6 +47,7 @@ beforeEach(() => {
     title: "Test",
     status: "OPEN",
     voteCount: 0,
+    type: "IDEA",
     createdAt: new Date("2026-01-01T00:00:00Z"),
   });
 });
@@ -132,5 +133,60 @@ describe("POST /api/portal/[orgSlug]/[workspaceSlug]/feedback", () => {
     const res = await POST(makeRequest({ title: "Idea" }), { params });
     expect(res.status).toBe(403);
     expect(mockGetPortalSession).not.toHaveBeenCalled();
+  });
+
+  it("defaults type to IDEA when omitted", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      feedbackEnabled: true,
+      portalAuthRequired: false,
+    });
+
+    const res = await POST(makeRequest({ title: "Idea" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(mockFeedbackItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ type: "IDEA" }),
+      select: expect.any(Object),
+    });
+  });
+
+  it("accepts type: BUG and stores it", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      feedbackEnabled: true,
+      portalAuthRequired: false,
+    });
+    mockFeedbackItem.create.mockResolvedValue({
+      id: "fb-1",
+      title: "Test",
+      status: "OPEN",
+      voteCount: 0,
+      type: "BUG",
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    });
+
+    const res = await POST(makeRequest({ title: "Broken login", type: "BUG" }), { params });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.type).toBe("BUG");
+    expect(mockFeedbackItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ type: "BUG" }),
+      select: expect.any(Object),
+    });
+  });
+
+  it("422s when type is an invalid value", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      feedbackEnabled: true,
+      portalAuthRequired: false,
+    });
+
+    const res = await POST(makeRequest({ title: "Idea", type: "FEATURE" }), { params });
+
+    expect(res.status).toBe(422);
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
   });
 });

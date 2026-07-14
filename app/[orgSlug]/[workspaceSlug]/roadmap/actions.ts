@@ -131,6 +131,43 @@ export async function promoteToRoadmap(
   return item;
 }
 
+// ─── Promote Feedback (Bug) to Roadmap ────────────────────────────────────────
+
+export async function promoteFeedbackToRoadmap(
+  feedbackId: string,
+  workspaceId: string,
+  horizon: Horizon,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+
+  const feedback = await prisma.feedbackItem.findUnique({
+    where: { id: feedbackId },
+    select: { title: true },
+  });
+  if (!feedback) throw new Error("Feedback item not found");
+
+  const lastItem = await prisma.roadmapItem.findFirst({
+    where: { workspaceId, horizon, status: "ACTIVE" },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
+
+  const item = await prisma.roadmapItem.create({
+    data: {
+      workspaceId,
+      title: feedback.title,
+      horizon,
+      sortOrder,
+      feedbackId,
+    },
+  });
+
+  revalidatePath(revalidatePathStr);
+  return item;
+}
+
 // ─── Update Sort Order ────────────────────────────────────────────────────────
 
 export async function updateSortOrder(

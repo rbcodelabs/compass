@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ThumbsUp, MessageSquare } from "lucide-react";
+import { ThumbsUp, MessageSquare, Bug, Lightbulb } from "lucide-react";
 import { PortalSignInGate } from "@/components/portal/portal-sign-in-gate";
+import type { FeedbackType } from "@/lib/types";
 
 type FeedbackItemData = {
   id: string;
@@ -10,8 +11,19 @@ type FeedbackItemData = {
   description: string | null;
   status: string;
   voteCount: number;
+  type: FeedbackType;
   submitterName: string | null;
   createdAt: string;
+};
+
+const TYPE_LABELS: Record<FeedbackType, string> = {
+  BUG: "Bug",
+  IDEA: "Idea",
+};
+
+const TYPE_COLORS: Record<FeedbackType, string> = {
+  BUG: "bg-red-50 text-red-600",
+  IDEA: "bg-violet-50 text-violet-600",
 };
 
 interface Props {
@@ -74,6 +86,7 @@ export function FeedbackPortalSection({
   const [votedIds, setVotedIds] = useState<Set<string>>(new Set());
 
   // Title form state
+  const [type, setType] = useState<FeedbackType>("IDEA");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [submitterName, setSubmitterName] = useState("");
@@ -105,6 +118,7 @@ export function FeedbackPortalSection({
         body: JSON.stringify({
           title: title.trim(),
           description: description.trim() || undefined,
+          type,
           submitterName: submitterName.trim() || undefined,
           submitterEmail: submitterEmail.trim() || undefined,
         }),
@@ -121,6 +135,7 @@ export function FeedbackPortalSection({
         title: string;
         status: string;
         voteCount: number;
+        type: FeedbackType;
         createdAt: string;
       };
 
@@ -131,6 +146,7 @@ export function FeedbackPortalSection({
           description: description.trim() || null,
           status: newItem.status,
           voteCount: newItem.voteCount,
+          type: newItem.type,
           submitterName: submitterName.trim() || null,
           createdAt: newItem.createdAt,
         },
@@ -139,6 +155,7 @@ export function FeedbackPortalSection({
 
       setTitle("");
       setDescription("");
+      setType("IDEA");
       setSubmitterName("");
       setSubmitterEmail("");
       setSubmitSuccess(true);
@@ -208,6 +225,33 @@ export function FeedbackPortalSection({
       <div className="rounded-xl border border-slate-200 bg-white p-5">
         <h2 className="text-sm font-semibold text-slate-800 mb-4">Submit feedback</h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-600">Type</span>
+            <div className="inline-flex rounded-lg border border-slate-200 p-0.5 self-start">
+              <button
+                type="button"
+                onClick={() => setType("IDEA")}
+                className={[
+                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                  type === "IDEA" ? "bg-violet-50 text-violet-700" : "text-slate-500 hover:text-slate-700",
+                ].join(" ")}
+              >
+                <Lightbulb className="w-3.5 h-3.5" />
+                Idea
+              </button>
+              <button
+                type="button"
+                onClick={() => setType("BUG")}
+                className={[
+                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                  type === "BUG" ? "bg-red-50 text-red-700" : "text-slate-500 hover:text-slate-700",
+                ].join(" ")}
+              >
+                <Bug className="w-3.5 h-3.5" />
+                Bug
+              </button>
+            </div>
+          </div>
           <div className="flex flex-col gap-1">
             <label htmlFor="fb-title" className="text-xs font-medium text-slate-600">
               Title <span className="text-red-500">*</span>
@@ -302,7 +346,7 @@ export function FeedbackPortalSection({
       {items.length > 0 && (
         <div className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-slate-800">
-            {items.length} {items.length === 1 ? "idea" : "ideas"}
+            {items.length} {items.length === 1 ? "submission" : "submissions"}
           </h2>
           {items.map((item) => {
             const voted = votedIds.has(item.id);
@@ -341,6 +385,15 @@ export function FeedbackPortalSection({
                 <div className="flex flex-col gap-1 flex-1 min-w-0">
                   <div className="flex items-start gap-2 flex-wrap">
                     <p className="text-sm font-medium text-slate-800 flex-1">{item.title}</p>
+                    <span
+                      className={[
+                        "flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium shrink-0",
+                        TYPE_COLORS[item.type] ?? "bg-slate-100 text-slate-600",
+                      ].join(" ")}
+                    >
+                      {item.type === "BUG" ? <Bug className="w-3 h-3" /> : <Lightbulb className="w-3 h-3" />}
+                      {TYPE_LABELS[item.type] ?? item.type}
+                    </span>
                     <span
                       className={[
                         "text-xs px-2 py-0.5 rounded-full font-medium shrink-0",
