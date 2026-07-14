@@ -15,6 +15,7 @@ export type ExperimentStatus = "DESIGNING" | "RUNNING" | "COMPLETE" | "KILLED"
 export type Conclusion = "PROCEED" | "KILL" | "ITERATE"
 export type Horizon = "NOW" | "NEXT" | "LATER" | "SHIPPED"
 export type ItemStatus = "ACTIVE" | "ARCHIVED"
+export type FeedbackType = "BUG" | "IDEA"
 
 // Custom Fields
 export type CustomFieldObjectType =

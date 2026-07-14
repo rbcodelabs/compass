@@ -93,6 +93,7 @@ export function AddItemForm({
         keyResultId: item.keyResultId ?? null,
         opportunityId: item.opportunityId ?? null,
         experimentId: item.experimentId ?? null,
+        feedbackId: null,
         solution: null,
         keyResult: null,
         opportunity: selectedOpportunityId
@@ -101,6 +102,7 @@ export function AddItemForm({
         experiment: linkedExperiment
           ? { id: linkedExperiment.id, title: linkedExperiment.title }
           : null,
+        feedback: null,
       });
       setOpen(false);
       reset();

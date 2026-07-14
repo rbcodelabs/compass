@@ -21,9 +21,15 @@ const mockOpportunity = {
   findUnique: vi.fn(),
 }
 
+const mockRoadmapItem = {
+  findFirst: vi.fn(),
+  create: vi.fn(),
+}
+
 const mockPrisma = {
   feedbackItem: mockFeedbackItem,
   opportunity: mockOpportunity,
+  roadmapItem: mockRoadmapItem,
 }
 
 vi.mock("@/lib/db", () => ({
@@ -35,6 +41,8 @@ import {
   getFeedbackItem,
   updateFeedbackStatus,
   linkFeedbackToOpportunity,
+  updateFeedbackType,
+  promoteFeedbackToRoadmap,
 } from "@/lib/feedback-tool-handlers"
 
 // ---------------------------------------------------------------------------
@@ -49,6 +57,7 @@ const sampleItem = {
   opportunityId: null,
   title: "Dark mode support",
   description: "Users want a dark mode option.",
+  type: "IDEA",
   submitterName: "Alice",
   submitterEmail: "alice@example.com",
   status: "OPEN",
@@ -82,8 +91,9 @@ describe("getFeedbackItem", () => {
 
     expect(result.content).toHaveLength(1)
     const text = result.content[0].text
-    expect(text).toContain("## Dark mode support")
+    expect(text).toContain("## [IDEA] Dark mode support")
     expect(text).toContain(`**ID:** ${FEED_ID}`)
+    expect(text).toContain("**Type:** IDEA")
     expect(text).toContain("**Status:** OPEN")
     expect(text).toContain("**Votes:** 5")
     expect(text).toContain("**Submitter:** Alice")
@@ -213,5 +223,91 @@ describe("linkFeedbackToOpportunity", () => {
 
     expect(result.content[0].text).toContain(`"${OPP_ID}" not found`)
     expect(mockFeedbackItem.update).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// updateFeedbackType
+// ---------------------------------------------------------------------------
+
+describe("updateFeedbackType", () => {
+  it("returns old → new type and title on success, with an ID line", async () => {
+    mockFeedbackItem.findUnique.mockResolvedValueOnce({ id: FEED_ID, title: "Login button broken", type: "IDEA" })
+    mockFeedbackItem.update.mockResolvedValueOnce({})
+
+    const result = await updateFeedbackType({ feedbackId: FEED_ID, type: "BUG" })
+    const text = result.content[0].text
+
+    expect(text).toContain("Login button broken")
+    expect(text).toContain("IDEA → BUG")
+    expect(text).toContain(`ID: ${FEED_ID}`)
+    expect(mockFeedbackItem.update).toHaveBeenCalledWith({
+      where: { id: FEED_ID },
+      data: { type: "BUG", updatedAt: expect.any(Date) },
+    })
+  })
+
+  it("returns error text when item is not found", async () => {
+    mockFeedbackItem.findUnique.mockResolvedValueOnce(null)
+
+    const result = await updateFeedbackType({ feedbackId: FEED_ID, type: "BUG" })
+
+    expect(result.content[0].text).toContain(`"${FEED_ID}" not found`)
+    expect(mockFeedbackItem.update).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// promoteFeedbackToRoadmap
+// ---------------------------------------------------------------------------
+
+describe("promoteFeedbackToRoadmap", () => {
+  it("creates a roadmap item from the feedback title and returns an ID line", async () => {
+    mockFeedbackItem.findUnique.mockResolvedValueOnce({ id: FEED_ID, title: "Login button broken", type: "BUG" })
+    mockRoadmapItem.findFirst.mockResolvedValueOnce(null)
+    mockRoadmapItem.create.mockResolvedValueOnce({ id: "item-1", title: "Login button broken" })
+
+    const result = await promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NOW" })
+    const text = result.content[0].text
+
+    expect(text).toContain("Promoted to roadmap (NOW)")
+    expect(text).toContain("ID: item-1")
+    expect(text).toContain("Login button broken")
+    expect(mockRoadmapItem.create).toHaveBeenCalledWith({
+      data: {
+        workspaceId: WS_ID,
+        title: "Login button broken",
+        horizon: "NOW",
+        sortOrder: 0,
+        feedbackId: FEED_ID,
+      },
+    })
+  })
+
+  it("places item after the last item in the horizon", async () => {
+    mockFeedbackItem.findUnique.mockResolvedValueOnce({ id: FEED_ID, title: "Crash on save", type: "BUG" })
+    mockRoadmapItem.findFirst.mockResolvedValueOnce({ sortOrder: 4 })
+    mockRoadmapItem.create.mockResolvedValueOnce({ id: "item-2", title: "Crash on save" })
+
+    await promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NEXT" })
+
+    expect(mockRoadmapItem.create).toHaveBeenCalledWith({
+      data: {
+        workspaceId: WS_ID,
+        title: "Crash on save",
+        horizon: "NEXT",
+        sortOrder: 5,
+        feedbackId: FEED_ID,
+      },
+    })
+  })
+
+  it("returns error text when feedback item is not found", async () => {
+    mockFeedbackItem.findUnique.mockResolvedValueOnce(null)
+
+    const result = await promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NOW" })
+
+    expect(result.content[0].text).toContain(`"${FEED_ID}" not found`)
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled()
   })
 })

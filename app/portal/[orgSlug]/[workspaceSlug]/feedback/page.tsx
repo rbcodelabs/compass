@@ -1,6 +1,7 @@
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
 import { FeedbackPortalSection } from "@/components/portal/feedback-portal-section";
+import type { FeedbackType } from "@/lib/types";
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
@@ -41,6 +42,7 @@ export default async function PortalFeedbackPage({ params }: Props) {
       description: true,
       status: true,
       voteCount: true,
+      type: true,
       submitterName: true,
       createdAt: true,
     },
@@ -58,6 +60,7 @@ export default async function PortalFeedbackPage({ params }: Props) {
         description: i.description,
         status: i.status,
         voteCount: i.voteCount,
+        type: i.type as FeedbackType,
         submitterName: i.submitterName,
         createdAt: i.createdAt.toISOString(),
       }))}

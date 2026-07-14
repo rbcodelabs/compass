@@ -42,6 +42,12 @@ The MCP server exposes tools that agents can call:
 | `update_experiment` | Record results or update experiment status |
 | `list_okrs` | Fetch cycles, objectives, and key results |
 | `create_key_result_checkin` | Log a progress check-in for a Key Result |
+| `list_feedback` | Fetch customer feedback items for a workspace, with vote counts, type (BUG/IDEA), and status |
+| `get_feedback_item` | Fetch full details for a single feedback item, including its linked opportunity if present |
+| `update_feedback_status` | Update a feedback item's status (OPEN, UNDER_REVIEW, PLANNED, CLOSED), with an optional note |
+| `update_feedback_type` | Reclassify a feedback item as a BUG or an IDEA |
+| `link_feedback_to_opportunity` | Link a feedback item (typically an IDEA) to an existing opportunity, connecting it to the discovery flow |
+| `promote_feedback_to_roadmap` | Promote a feedback item (typically a BUG) directly to the roadmap, skipping discovery entirely |
 
 ## Example: Connecting Claude Desktop
 

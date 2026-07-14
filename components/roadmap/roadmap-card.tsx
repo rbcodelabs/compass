@@ -5,7 +5,7 @@ import { useTransition } from "react";
 import Link from "next/link";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Lightbulb, FlaskConical, Layers, TrendingUp } from "lucide-react";
+import { GripVertical, Lightbulb, FlaskConical, Layers, TrendingUp, Bug } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -24,6 +24,7 @@ export type RoadmapCardData = {
   keyResultId: string | null;
   opportunityId: string | null;
   experimentId: string | null;
+  feedbackId: string | null;
   solution: { id: string; title: string } | null;
   keyResult: {
     id: string;
@@ -35,6 +36,7 @@ export type RoadmapCardData = {
   } | null;
   opportunity: { id: string; title: string } | null;
   experiment: { id: string; title: string } | null;
+  feedback: { id: string; title: string; type: string } | null;
 };
 
 type Props = {
@@ -101,7 +103,13 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, works
           </button>
 
           {/* Title */}
-          <CardTitle className="flex-1 text-sm leading-snug">
+          <CardTitle className="flex-1 text-sm leading-snug flex items-center gap-1.5 flex-wrap">
+            {item.feedback?.type === "BUG" && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-red-50 text-red-600 px-1.5 py-0.5 text-[10px] font-medium shrink-0">
+                <Bug className="size-2.5" />
+                Bug
+              </span>
+            )}
             {item.title}
           </CardTitle>
 

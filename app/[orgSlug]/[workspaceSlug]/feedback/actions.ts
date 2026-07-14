@@ -41,3 +41,19 @@ export async function linkFeedbackToOpportunity(
 
   revalidatePath(revalidatePathStr);
 }
+
+export async function updateFeedbackType(
+  feedbackId: string,
+  type: string,
+  revalidatePathStr: string
+) {
+  await requireAuth();
+  const prisma = getPrisma();
+
+  await prisma.feedbackItem.update({
+    where: { id: feedbackId },
+    data: { type },
+  });
+
+  revalidatePath(revalidatePathStr);
+}

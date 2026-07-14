@@ -11,6 +11,8 @@ import {
   getFeedbackItem,
   updateFeedbackStatus,
   linkFeedbackToOpportunity,
+  updateFeedbackType,
+  promoteFeedbackToRoadmap,
 } from "@/lib/feedback-tool-handlers"
 import {
   listDocs,
@@ -1183,7 +1185,7 @@ const _handler = createMcpHandler(
           return { content: [{ type: "text" as const, text: "No feedback found." }] }
         }
         const lines = items.map(f =>
-          `• **${f.title}** [${f.status}] 👍 ${f.voteCount}\n` +
+          `• [${f.type}] **${f.title}** [${f.status}] 👍 ${f.voteCount}\n` +
           `  ID: ${f.id}\n` +
           (f.description ? `  ${f.description.slice(0, 100)}${f.description.length > 100 ? "…" : ""}\n` : "") +
           (f.opportunity ? `  → Linked opportunity: ${f.opportunity.title}\n` : "") +
@@ -1234,6 +1236,39 @@ const _handler = createMcpHandler(
         },
       },
       linkFeedbackToOpportunity
+    )
+
+    server.registerTool(
+      "update_feedback_type",
+      {
+        title: "Update Feedback Type",
+        description:
+          "Reclassifies a feedback item as a BUG or an IDEA. Bugs can be promoted directly to the " +
+          "roadmap via promote_feedback_to_roadmap; ideas follow the normal Opportunity → Solution " +
+          "discovery flow via link_feedback_to_opportunity.",
+        inputSchema: {
+          feedbackId: z.string().uuid().describe("UUID of the feedback item"),
+          type: z.enum(["BUG", "IDEA"]).describe("New type for the feedback item"),
+        },
+      },
+      updateFeedbackType
+    )
+
+    server.registerTool(
+      "promote_feedback_to_roadmap",
+      {
+        title: "Promote Feedback to Roadmap",
+        description:
+          "Promotes a feedback item (typically a BUG) directly to the roadmap, skipping the " +
+          "Opportunity → Solution → Assumption → Experiment discovery flow. Creates a Roadmap Item " +
+          "using the feedback's title and links back to the originating feedback.",
+        inputSchema: {
+          feedbackId: z.string().uuid().describe("UUID of the feedback item to promote"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]).describe("Which roadmap horizon to place this in"),
+        },
+      },
+      promoteFeedbackToRoadmap
     )
 
     // ════════════════════════════════════════════════════════════════

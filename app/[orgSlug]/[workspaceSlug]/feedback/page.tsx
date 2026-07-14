@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { InternalFeedbackBoard } from "@/components/feedback/internal-feedback-board";
+import type { FeedbackType } from "@/lib/types";
 
 export const metadata = { title: "Feedback" };
 
@@ -35,8 +36,14 @@ export default async function FeedbackPage({ params }: Props) {
         submitterEmail: true,
         status: true,
         voteCount: true,
+        type: true,
         opportunityId: true,
         createdAt: true,
+        roadmapItems: {
+          select: { id: true, title: true, horizon: true },
+          take: 1,
+          orderBy: { createdAt: "desc" },
+        },
       },
     }),
     prisma.opportunity.findMany({
@@ -58,6 +65,7 @@ export default async function FeedbackPage({ params }: Props) {
       <InternalFeedbackBoard
         orgSlug={orgSlug}
         workspaceSlug={workspaceSlug}
+        workspaceId={workspace.id}
         initialItems={feedbackItems.map((f) => ({
           id: f.id,
           title: f.title,
@@ -66,7 +74,11 @@ export default async function FeedbackPage({ params }: Props) {
           submitterEmail: f.submitterEmail,
           status: f.status,
           voteCount: f.voteCount,
+          type: f.type as FeedbackType,
           opportunityId: f.opportunityId,
+          roadmapItem: f.roadmapItems[0]
+            ? { id: f.roadmapItems[0].id, title: f.roadmapItems[0].title, horizon: f.roadmapItems[0].horizon }
+            : null,
           createdAt: f.createdAt.toISOString(),
         }))}
         opportunities={opportunities}

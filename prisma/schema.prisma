@@ -310,6 +310,7 @@ model RoadmapItem {
   keyResultId   String?     @map("key_result_id") @db.Uuid
   opportunityId String?     @map("opportunity_id") @db.Uuid
   experimentId  String?     @map("experiment_id") @db.Uuid
+  feedbackId    String?     @map("feedback_id") @db.Uuid
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @default(now()) @map("updated_at")
   workspace     Workspace   @relation(fields: [workspaceId], references: [id])
@@ -318,6 +319,7 @@ model RoadmapItem {
   keyResult     KeyResult?  @relation(fields: [keyResultId], references: [id])
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
   experiment    Experiment?  @relation(fields: [experimentId], references: [id])
+  feedback      FeedbackItem? @relation(fields: [feedbackId], references: [id])
   votes         RoadmapVote[]
 
   @@map("roadmap_items")
@@ -449,6 +451,7 @@ model FeedbackItem {
   opportunityId   String?   @map("opportunity_id") @db.Uuid
   title           String    @db.VarChar(255)
   description     String?   @db.Text
+  type            String    @default("IDEA") @db.VarChar(50)
   submitterName   String?   @map("submitter_name") @db.VarChar(255)
   submitterEmail  String?   @map("submitter_email") @db.VarChar(255)
   portalAccountId String?   @map("portal_account_id") @db.Uuid
@@ -461,6 +464,7 @@ model FeedbackItem {
   opportunity     Opportunity? @relation(fields: [opportunityId], references: [id])
   portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id])
   votes           FeedbackVote[]
+  roadmapItems    RoadmapItem[]
 
   @@map("feedback")
 }

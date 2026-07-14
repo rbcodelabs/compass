@@ -8,10 +8,14 @@ const mockRoadmapItem = {
 const mockSolution = {
   findUnique: vi.fn(),
 };
+const mockFeedbackItem = {
+  findUnique: vi.fn(),
+};
 
 const mockPrisma = {
   roadmapItem: mockRoadmapItem,
   solution: mockSolution,
+  feedbackItem: mockFeedbackItem,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -25,6 +29,7 @@ import {
   moveItem,
   archiveItem,
   promoteToRoadmap,
+  promoteFeedbackToRoadmap,
   updateSortOrder,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 
@@ -34,6 +39,7 @@ beforeEach(() => {
   mockRoadmapItem.update.mockResolvedValue({ id: "item-1" });
   mockRoadmapItem.findFirst.mockResolvedValue(null);
   mockSolution.findUnique.mockResolvedValue({ title: "My Solution" });
+  mockFeedbackItem.findUnique.mockResolvedValue({ title: "Login button is broken" });
 });
 
 // ─── addRoadmapItem ───────────────────────────────────────────────────────────
@@ -169,6 +175,56 @@ describe("promoteToRoadmap", () => {
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.squadId).toBe("squad-1");
     expect(data.opportunityId).toBe("opp-1");
+  });
+});
+
+// ─── promoteFeedbackToRoadmap ─────────────────────────────────────────────────
+
+describe("promoteFeedbackToRoadmap", () => {
+  it("creates a roadmap item using the feedback title", async () => {
+    mockFeedbackItem.findUnique.mockResolvedValue({ title: "Login button is broken" });
+    const result = await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path");
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.title).toBe("Login button is broken");
+    expect(data.feedbackId).toBe("fb-1");
+    expect(data.workspaceId).toBe("ws-1");
+    expect(data.horizon).toBe("NOW");
+    expect(result).toMatchObject({ id: "item-1" });
+  });
+
+  it("throws when feedback item is not found", async () => {
+    mockFeedbackItem.findUnique.mockResolvedValue(null);
+    await expect(
+      promoteFeedbackToRoadmap("fb-999", "ws-1", "NOW", "/path")
+    ).rejects.toThrow("Feedback item not found");
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled();
+  });
+
+  it("places item at sortOrder 0 when horizon is empty", async () => {
+    mockRoadmapItem.findFirst.mockResolvedValue(null);
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT", "/path");
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.sortOrder).toBe(0);
+  });
+
+  it("places item after last item in horizon", async () => {
+    mockRoadmapItem.findFirst.mockResolvedValue({ sortOrder: 3 });
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "LATER", "/path");
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.sortOrder).toBe(4);
+  });
+
+  it("calls revalidatePath with the passed-in path", async () => {
+    const { revalidatePath } = await import("next/cache");
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/custom/roadmap/path");
+    expect(revalidatePath).toHaveBeenCalledWith("/custom/roadmap/path");
+  });
+
+  it("propagates DB errors", async () => {
+    mockRoadmapItem.create.mockRejectedValue(new Error("DB error"));
+    await expect(
+      promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path")
+    ).rejects.toThrow("DB error");
   });
 });
 
