@@ -3,11 +3,13 @@
  *
  * Journey: Add a roadmap item with a start/end date via the inline add form →
  *          switch the Roadmap page to the Timeline view (?view=timeline) →
- *          confirm the dated item renders as a bar → switch back to Board →
- *          edit a previously-dateless existing item via the card's Edit
- *          action to give it dates → confirm the date range chip appears on
- *          the card and the item now shows up on the Timeline after a
- *          reload, confirming persistence.
+ *          confirm the dated item renders as a normal bar and a second,
+ *          dateless item renders as a dashed "(unscheduled)" placeholder bar
+ *          → switch back to Board → edit the dateless item via the card's
+ *          Edit action to give it dates → confirm the date range chip
+ *          appears on the card and the item now shows up as a normal
+ *          (non-placeholder) bar on the Timeline after a reload, confirming
+ *          persistence.
  *
  * This is the first user-facing journey for the Board/Timeline toggle and
  * roadmap item date fields, so it's a new spec rather than an extension of
@@ -61,8 +63,15 @@ test.describe("Roadmap Timeline", () => {
       // and our custom bar template, so scope to .first() to avoid a
       // strict-mode violation — either occurrence confirms the item rendered.
       await expect(page.getByText(datedTitle).first()).toBeVisible({ timeout: 10_000 });
-      // The dateless item should not appear as a bar on the timeline.
-      await expect(page.getByText(editedTitle)).not.toBeVisible();
+      // The dateless item still appears, as a dashed placeholder bar — scope
+      // to the bar's own tooltip `title` attribute (set only on placeholder
+      // bars in TaskBar) rather than a text/hasText match, since the Gantt
+      // library renders the task name in several of its own internal DOM
+      // nodes (grid column, virtualization buffers) that would also match
+      // and don't carry our "(unscheduled)" label.
+      const placeholderBarSelector = '[title="No dates set yet — drag or resize this bar to schedule it"]';
+      const placeholderBar = page.locator(placeholderBarSelector, { hasText: editedTitle });
+      await expect(placeholderBar).toBeVisible({ timeout: 10_000 });
 
       // ── 3. Back to Board, edit the dateless item to add dates ──────────────
       await page.getByRole("tab", { name: "Board" }).click();
@@ -85,12 +94,14 @@ test.describe("Roadmap Timeline", () => {
       const updatedCard = page.locator('[data-slot="card"]').filter({ hasText: editedTitle });
       await expect(updatedCard.getByText(/Aug/)).toBeVisible({ timeout: 10_000 });
 
-      // ── 4. Reload and confirm the newly-dated item now appears on Timeline ─
+      // ── 4. Reload and confirm the newly-dated item now shows as a normal
+      //      (non-placeholder) bar on the Timeline ─────────────────────────
       await page.goto(`${base}/roadmap?view=timeline`);
       await page.waitForLoadState("networkidle");
 
       await expect(page.getByText(datedTitle).first()).toBeVisible({ timeout: 10_000 });
       await expect(page.getByText(editedTitle).first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator(placeholderBarSelector, { hasText: editedTitle })).toHaveCount(0);
     }
   );
 });

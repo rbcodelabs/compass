@@ -49,6 +49,23 @@ function toUtcMidnight(date: Date): Date {
   return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
 }
 
+// Items without real dates still get a bar (dashed, see TaskBar below) so
+// they're visible and draggable on the Timeline instead of disappearing.
+// This placeholder span is never persisted on its own — only a drag/resize
+// through handleUpdateTask writes real dates. today() -> +14 days matches
+// ScheduleItemDialog's default for the same reason: a friendly, familiar
+// starting point.
+const PLACEHOLDER_SPAN_DAYS = 14;
+
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+}
+
 const HORIZON_COLORS: Record<Horizon, string> = {
   NOW: "#10b981", // emerald-500
   NEXT: "#3b82f6", // blue-500
@@ -66,32 +83,47 @@ type GanttTask = {
   end: Date;
   type: "task";
   horizon: Horizon;
+  hasDates: boolean;
 };
 
 type TaskTemplateProps = {
   data: GanttTask;
 };
 
+const BAR_BASE_STYLE: React.CSSProperties = {
+  height: "100%",
+  display: "flex",
+  alignItems: "center",
+  padding: "0 8px",
+  borderRadius: "4px",
+  fontSize: "12px",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
 function TaskBar({ data }: TaskTemplateProps) {
   const color = HORIZON_COLORS[data.horizon] ?? HORIZON_COLORS.NOW;
+
+  if (!data.hasDates) {
+    return (
+      <div
+        title="No dates set yet — drag or resize this bar to schedule it"
+        style={{
+          ...BAR_BASE_STYLE,
+          backgroundColor: "transparent",
+          border: `1.5px dashed ${color}`,
+          color,
+        }}
+      >
+        {data.text}
+        <span className="ml-1 shrink-0 opacity-70">(unscheduled)</span>
+      </div>
+    );
+  }
+
   return (
-    <div
-      style={{
-        backgroundColor: color,
-        color: "#fff",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        padding: "0 8px",
-        borderRadius: "4px",
-        fontSize: "12px",
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-      }}
-    >
-      {data.text}
-    </div>
+    <div style={{ ...BAR_BASE_STYLE, backgroundColor: color, color: "#fff" }}>{data.text}</div>
   );
 }
 
@@ -118,23 +150,31 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
     useSensor(KeyboardSensor)
   );
 
-  const datedItems = useMemo(
-    () => items.filter((item) => item.startDate && item.endDate),
+  // Stable per-mount so every undated item's placeholder bar lines up in the
+  // same spot rather than drifting a pixel apart across re-renders.
+  const [placeholderStart] = useState(startOfToday);
+  const placeholderEnd = useMemo(() => addDays(placeholderStart, PLACEHOLDER_SPAN_DAYS), [placeholderStart]);
+
+  const undatedCount = useMemo(
+    () => items.filter((item) => !item.startDate || !item.endDate).length,
     [items]
   );
-  const undatedCount = items.length - datedItems.length;
 
   const tasks: GanttTask[] = useMemo(
     () =>
-      datedItems.map((item) => ({
-        id: item.id,
-        text: item.title,
-        start: parseCalendarDate(item.startDate as string),
-        end: parseCalendarDate(item.endDate as string),
-        type: "task" as const,
-        horizon: item.horizon,
-      })),
-    [datedItems]
+      items.map((item) => {
+        const hasDates = Boolean(item.startDate && item.endDate);
+        return {
+          id: item.id,
+          text: item.title,
+          start: hasDates ? parseCalendarDate(item.startDate as string) : placeholderStart,
+          end: hasDates ? parseCalendarDate(item.endDate as string) : placeholderEnd,
+          type: "task" as const,
+          horizon: item.horizon,
+          hasDates,
+        };
+      }),
+    [items, placeholderStart, placeholderEnd]
   );
 
   async function handleUpdateTask(ev: { id: string; task: { start?: Date; end?: Date } }) {
@@ -148,9 +188,9 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
   }
 
   // Quick-add fallback (from the unscheduled panel's card menu, not a drag):
-  // creates the item with no dates, same as the Board's quick-add. It won't
-  // appear on this Timeline until dates are set via Edit, but will show up
-  // on the Board immediately.
+  // creates the item with no dates, same as the Board's quick-add. It shows
+  // up immediately here too, as a dashed placeholder bar — drag/resize it
+  // (or use Edit on the Board) to set real dates.
   function handleQuickAdd(item: UnscheduledItem, horizon: Horizon) {
     setUnscheduled((prev) => prev.filter((i) => i !== item));
     const promoted =
@@ -179,14 +219,14 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
       <div className="flex flex-col gap-3 min-w-0">
         {undatedCount > 0 && (
           <p className="text-xs text-muted-foreground">
-            {`${undatedCount} item${undatedCount === 1 ? "" : "s"} ${undatedCount === 1 ? "has" : "have"} no dates yet and aren't shown on the timeline.`}
+            {`${undatedCount} item${undatedCount === 1 ? "" : "s"} ${undatedCount === 1 ? "has" : "have"} no dates yet — shown below with a dashed outline. Drag or resize ${undatedCount === 1 ? "it" : "them"} to schedule.`}
           </p>
         )}
 
         <GanttDropZone>
           {tasks.length === 0 ? (
             <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-300/70 py-16 text-sm text-slate-400">
-              No items have dates yet. Add a start and end date, or drag an item from below onto this area to schedule it.
+              No items on the roadmap yet. Drag an item from below onto this area to schedule it.
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl ring-1 ring-border">
