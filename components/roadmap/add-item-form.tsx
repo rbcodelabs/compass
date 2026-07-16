@@ -66,6 +66,11 @@ export function AddItemForm({
     const title = (data.get("title") as string).trim();
     if (!title) return;
 
+    const startDateRaw = (data.get("startDate") as string) || "";
+    const endDateRaw = (data.get("endDate") as string) || "";
+    const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
+    const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
+
     startTransition(async () => {
       const item = await addRoadmapItem(
         workspaceId,
@@ -77,6 +82,8 @@ export function AddItemForm({
           solutionId: selectedSolutionId ?? undefined,
           opportunityId: selectedOpportunityId ?? undefined,
           experimentId: selectedExperimentId ?? undefined,
+          startDate,
+          endDate,
         },
         revalidatePathStr
       );
@@ -94,6 +101,8 @@ export function AddItemForm({
         opportunityId: item.opportunityId ?? null,
         experimentId: item.experimentId ?? null,
         feedbackId: null,
+        startDate: item.startDate ? item.startDate.toISOString() : null,
+        endDate: item.endDate ? item.endDate.toISOString() : null,
         solution: null,
         keyResult: null,
         opportunity: selectedOpportunityId
@@ -149,6 +158,27 @@ export function AddItemForm({
           disabled={isPending}
           rows={2}
         />
+      </div>
+
+      <div className="flex gap-3">
+        <div className="flex flex-col gap-1.5 flex-1">
+          <Label htmlFor={`item-start-date-${horizon}`}>Start date (optional)</Label>
+          <Input
+            id={`item-start-date-${horizon}`}
+            name="startDate"
+            type="date"
+            disabled={isPending}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5 flex-1">
+          <Label htmlFor={`item-end-date-${horizon}`}>End date (optional)</Label>
+          <Input
+            id={`item-end-date-${horizon}`}
+            name="endDate"
+            type="date"
+            disabled={isPending}
+          />
+        </div>
       </div>
 
       {availableOpportunities && availableOpportunities.length > 0 && (

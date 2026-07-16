@@ -207,6 +207,15 @@ export function RoadmapBoard({
     }));
   }
 
+  const handleUpdate = useCallback((updated: RoadmapCardData) => {
+    setColumns((prev) => ({
+      ...prev,
+      [updated.horizon]: prev[updated.horizon].map((i) =>
+        i.id === updated.id ? updated : i
+      ),
+    }));
+  }, []);
+
   return (
     <DndContext
       sensors={sensors}
@@ -227,6 +236,7 @@ export function RoadmapBoard({
             revalidatePathStr={revalidatePathStr}
             onItemAdded={handleItemAdded}
             onArchive={handleArchive}
+            onUpdate={handleUpdate}
             availableKRs={availableKRs}
             availableSolutions={availableSolutions}
             availableOpportunities={availableOpportunities}

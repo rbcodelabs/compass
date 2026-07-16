@@ -4,6 +4,8 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
+import { RoadmapGantt } from "@/components/roadmap/roadmap-gantt";
+import { RoadmapViewToggle } from "@/components/roadmap/roadmap-view-toggle";
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
 import type { Horizon, SquadData } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
@@ -14,7 +16,7 @@ export const metadata = {
 
 interface RoadmapPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string }>;
+  searchParams: Promise<{ squad?: string; view?: string }>;
 }
 
 export default async function RoadmapPage({ params, searchParams }: RoadmapPageProps) {
@@ -22,7 +24,8 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const { squad: squadFilter } = await searchParams;
+  const { squad: squadFilter, view: viewParam } = await searchParams;
+  const view = viewParam === "timeline" ? "timeline" : "board";
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
@@ -136,6 +139,8 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     opportunityId: item.opportunityId ?? null,
     experimentId: item.experimentId ?? null,
     feedbackId: item.feedbackId ?? null,
+    startDate: item.startDate ? item.startDate.toISOString() : null,
+    endDate: item.endDate ? item.endDate.toISOString() : null,
     solution: item.solution ?? null,
     keyResult: item.keyResult
       ? {
@@ -154,29 +159,43 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
 
   return (
     <div className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-h-0">
-      <div className="shrink-0">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Roadmap</h1>
-        <p className="text-slate-500 text-sm mt-1">
-          Drag items between horizons to update your plan.
-        </p>
+      <div className="shrink-0 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Roadmap</h1>
+          <p className="text-slate-500 text-sm mt-1">
+            {view === "timeline"
+              ? "See when items are planned to start and finish."
+              : "Drag items between horizons to update your plan."}
+          </p>
+        </div>
+        <Suspense>
+          <RoadmapViewToggle view={view} />
+        </Suspense>
       </div>
 
       <Suspense>
         <SquadFilterBar squads={squads} />
       </Suspense>
 
-      <div className="overflow-x-auto min-w-0">
-        <RoadmapBoard
-          initialItems={cardItems}
-          workspaceId={workspace.id}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          availableKRs={availableKRs}
-          availableSolutions={availableSolutions}
-          availableOpportunities={rawOpportunities}
-          availableExperiments={availableExperiments}
+      {view === "timeline" ? (
+        <RoadmapGantt
+          items={cardItems}
+          revalidatePathStr={`/${orgSlug}/${workspaceSlug}/roadmap`}
         />
-      </div>
+      ) : (
+        <div className="overflow-x-auto min-w-0">
+          <RoadmapBoard
+            initialItems={cardItems}
+            workspaceId={workspace.id}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            availableKRs={availableKRs}
+            availableSolutions={availableSolutions}
+            availableOpportunities={rawOpportunities}
+            availableExperiments={availableExperiments}
+          />
+        </div>
+      )}
     </div>
   );
 }

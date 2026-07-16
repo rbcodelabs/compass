@@ -1,16 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Lightbulb, FlaskConical, Layers, TrendingUp, Bug } from "lucide-react";
+import { GripVertical, Lightbulb, FlaskConical, Layers, TrendingUp, Bug, CalendarDays } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { archiveItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { EditItemDialog } from "./edit-item-dialog";
 
 import type { Horizon } from "@/lib/types";
 
@@ -25,6 +26,8 @@ export type RoadmapCardData = {
   opportunityId: string | null;
   experimentId: string | null;
   feedbackId: string | null;
+  startDate: string | null;
+  endDate: string | null;
   solution: { id: string; title: string } | null;
   keyResult: {
     id: string;
@@ -39,16 +42,34 @@ export type RoadmapCardData = {
   feedback: { id: string; title: string; type: string } | null;
 };
 
+// Compact "Mar 3 – Apr 10" style range formatter. Handles single-ended ranges too.
+//
+// timeZone: "UTC" is required here — start/end dates come from a plain
+// <input type="date"> (e.g. "2026-07-01"), which `new Date(...)` parses as
+// UTC midnight. Formatting in the viewer's local timezone would shift the
+// displayed date back a day for any negative UTC offset (e.g. US timezones),
+// so we format in UTC to match how the date was parsed.
+function formatDateRange(startIso: string | null, endIso: string | null): string {
+  const fmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const start = startIso ? fmt.format(new Date(startIso)) : null;
+  const end = endIso ? fmt.format(new Date(endIso)) : null;
+  if (start && end) return `${start} – ${end}`;
+  if (start) return `From ${start}`;
+  return `Until ${end}`;
+}
+
 type Props = {
   item: RoadmapCardData;
   revalidatePathStr: string;
   onArchive: (itemId: string) => void;
+  onUpdate?: (item: RoadmapCardData) => void;
   orgSlug: string;
   workspaceSlug: string;
 };
 
-export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, workspaceSlug }: Props) {
+export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgSlug, workspaceSlug }: Props) {
   const [isArchiving, startArchiveTransition] = useTransition();
+  const [editOpen, setEditOpen] = useState(false);
   const { openPanel } = usePanelContext();
 
   const {
@@ -82,6 +103,7 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, works
   const base = `/${orgSlug}/${workspaceSlug}`;
 
   const hasLinks = item.solution || item.keyResult || item.opportunity || item.experiment;
+  const hasDates = Boolean(item.startDate || item.endDate);
 
   return (
     <div ref={setNodeRef} style={style} className="touch-none group">
@@ -116,6 +138,10 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, works
           <CardMenu
             items={[
               {
+                label: "Edit",
+                onClick: () => setEditOpen(true),
+              },
+              {
                 label: "Archive",
                 onClick: () => handleArchive(),
                 destructive: true,
@@ -124,7 +150,7 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, works
           />
         </CardHeader>
 
-        {(item.description || hasLinks) && (
+        {(item.description || hasLinks || hasDates) && (
           <CardContent className="flex flex-col gap-2 pt-0">
             {item.description && (
               <p className="text-xs text-muted-foreground line-clamp-2">
@@ -132,9 +158,17 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, works
               </p>
             )}
 
-            {hasLinks && (
+            {(hasLinks || hasDates) && (
               <TooltipProvider delay={400}>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/40 pt-2 mt-0.5">
+                  {/* Dates */}
+                  {hasDates && (
+                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground/60 min-w-0">
+                      <CalendarDays className="size-3 shrink-0" />
+                      <span className="truncate">{formatDateRange(item.startDate, item.endDate)}</span>
+                    </span>
+                  )}
+
                   {/* Opportunity */}
                   {item.opportunity && (
                     <Tooltip>
@@ -244,6 +278,14 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, orgSlug, works
           </CardContent>
         )}
       </Card>
+
+      <EditItemDialog
+        item={item}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        revalidatePathStr={revalidatePathStr}
+        onSaved={(updated) => onUpdate?.(updated)}
+      />
     </div>
   );
 }
