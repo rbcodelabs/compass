@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import type { RoadmapCardData } from "./roadmap-card";
+import type { UnscheduledItem } from "./unscheduled-items-panel";
 
 // The Gantt library touches window/document at module scope, so it must be
 // excluded from SSR. `ssr: false` is only valid inside a Client Component,
@@ -21,9 +22,18 @@ const RoadmapGanttChart = dynamic(
 
 type Props = {
   items: RoadmapCardData[];
+  workspaceId: string;
+  unscheduledItems?: UnscheduledItem[];
   revalidatePathStr: string;
 };
 
-export function RoadmapGantt({ items, revalidatePathStr }: Props) {
-  return <RoadmapGanttChart items={items} revalidatePathStr={revalidatePathStr} />;
+export function RoadmapGantt({ items, workspaceId, unscheduledItems, revalidatePathStr }: Props) {
+  return (
+    <RoadmapGanttChart
+      items={items}
+      workspaceId={workspaceId}
+      unscheduledItems={unscheduledItems}
+      revalidatePathStr={revalidatePathStr}
+    />
+  );
 }

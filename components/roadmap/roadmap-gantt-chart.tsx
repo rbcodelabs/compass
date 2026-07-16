@@ -1,11 +1,30 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  DndContext,
+  useDroppable,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import { Gantt } from "@svar-ui/react-gantt";
 import "@svar-ui/react-gantt/all.css";
-import { updateRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import {
+  updateRoadmapItem,
+  promoteToRoadmap,
+  promoteFeedbackToRoadmap,
+} from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { RoadmapCardData } from "./roadmap-card";
+import {
+  UnscheduledItemsPanel,
+  parseUnscheduledDragId,
+  type UnscheduledItem,
+} from "./unscheduled-items-panel";
+import { ScheduleItemDialog } from "./schedule-item-dialog";
 import type { Horizon } from "@/lib/types";
 
 // The Gantt library reads Date components with local-timezone getters
@@ -76,13 +95,28 @@ function TaskBar({ data }: TaskTemplateProps) {
   );
 }
 
+// Single drop zone covering the whole chart area — the Gantt library has no
+// API for translating a drop's pixel position into a date, so dropping an
+// unscheduled item anywhere in this zone opens ScheduleItemDialog rather
+// than inferring dates from where the cursor landed.
+const GANTT_DROP_ZONE_ID = "gantt-drop-zone";
+
 type Props = {
   items: RoadmapCardData[];
+  workspaceId: string;
+  unscheduledItems?: UnscheduledItem[];
   revalidatePathStr: string;
 };
 
-export function RoadmapGanttChart({ items, revalidatePathStr }: Props) {
+export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revalidatePathStr }: Props) {
   const router = useRouter();
+  const [unscheduled, setUnscheduled] = useState<UnscheduledItem[]>(unscheduledItems ?? []);
+  const [scheduleTarget, setScheduleTarget] = useState<UnscheduledItem | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor)
+  );
 
   const datedItems = useMemo(
     () => items.filter((item) => item.startDate && item.endDate),
@@ -113,40 +147,96 @@ export function RoadmapGanttChart({ items, revalidatePathStr }: Props) {
     router.refresh();
   }
 
-  return (
-    <div className="flex flex-col gap-3 min-w-0">
-      {undatedCount > 0 && (
-        <p className="text-xs text-muted-foreground">
-          {`${undatedCount} item${undatedCount === 1 ? "" : "s"} ${undatedCount === 1 ? "has" : "have"} no dates yet and aren't shown on the timeline.`}
-        </p>
-      )}
+  // Quick-add fallback (from the unscheduled panel's card menu, not a drag):
+  // creates the item with no dates, same as the Board's quick-add. It won't
+  // appear on this Timeline until dates are set via Edit, but will show up
+  // on the Board immediately.
+  function handleQuickAdd(item: UnscheduledItem, horizon: Horizon) {
+    setUnscheduled((prev) => prev.filter((i) => i !== item));
+    const promoted =
+      item.kind === "solution"
+        ? promoteToRoadmap(item.id, workspaceId, horizon, item.squadId, item.opportunityId)
+        : promoteFeedbackToRoadmap(item.id, workspaceId, horizon, revalidatePathStr);
+    promoted.then(() => router.refresh());
+  }
 
-      {tasks.length === 0 ? (
-        <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-300/70 py-16 text-sm text-slate-400">
-          No items have dates yet. Add a start and end date to see them here.
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl ring-1 ring-border">
-          {/*
-            The library lays its grid columns + chart out as flex children
-            and lets the chart pane shrink — at narrow viewports (e.g.
-            mobile) the grid columns alone can exceed the available width,
-            squeezing the chart pane to 0 instead of overflowing. Forcing a
-            min-width on this inner wrapper makes the *whole* component
-            (grid + chart) overflow together, so the outer overflow-x-auto
-            above actually gets a horizontal scrollbar instead of a
-            silently-collapsed chart.
-          */}
-          <div style={{ minWidth: 720 }}>
-            <Gantt
-              tasks={tasks}
-              // @ts-expect-error taskTemplate typing from the library expects its own ITask shape
-              taskTemplate={(props) => <TaskBar {...props} />}
-              onUpdateTask={handleUpdateTask}
-            />
-          </div>
-        </div>
-      )}
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    const parsed = parseUnscheduledDragId(active.id as string);
+    if (!parsed || !over || over.id !== GANTT_DROP_ZONE_ID) return;
+
+    const item = unscheduled.find((i) => i.id === parsed.id && i.kind === parsed.kind);
+    if (item) setScheduleTarget(item);
+  }
+
+  function handleScheduled() {
+    setUnscheduled((prev) => prev.filter((i) => i !== scheduleTarget));
+    router.refresh();
+  }
+
+  return (
+    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+      <div className="flex flex-col gap-3 min-w-0">
+        {undatedCount > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {`${undatedCount} item${undatedCount === 1 ? "" : "s"} ${undatedCount === 1 ? "has" : "have"} no dates yet and aren't shown on the timeline.`}
+          </p>
+        )}
+
+        <GanttDropZone>
+          {tasks.length === 0 ? (
+            <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-300/70 py-16 text-sm text-slate-400">
+              No items have dates yet. Add a start and end date, or drag an item from below onto this area to schedule it.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl ring-1 ring-border">
+              {/*
+                The library lays its grid columns + chart out as flex children
+                and lets the chart pane shrink — at narrow viewports (e.g.
+                mobile) the grid columns alone can exceed the available width,
+                squeezing the chart pane to 0 instead of overflowing. Forcing a
+                min-width on this inner wrapper makes the *whole* component
+                (grid + chart) overflow together, so the outer overflow-x-auto
+                above actually gets a horizontal scrollbar instead of a
+                silently-collapsed chart.
+              */}
+              <div style={{ minWidth: 720 }}>
+                <Gantt
+                  tasks={tasks}
+                  // @ts-expect-error taskTemplate typing from the library expects its own ITask shape
+                  taskTemplate={(props) => <TaskBar {...props} />}
+                  onUpdateTask={handleUpdateTask}
+                />
+              </div>
+            </div>
+          )}
+        </GanttDropZone>
+
+        <UnscheduledItemsPanel items={unscheduled} onQuickAdd={handleQuickAdd} />
+      </div>
+
+      <ScheduleItemDialog
+        item={scheduleTarget}
+        workspaceId={workspaceId}
+        revalidatePathStr={revalidatePathStr}
+        onOpenChange={(open) => {
+          if (!open) setScheduleTarget(null);
+        }}
+        onScheduled={handleScheduled}
+      />
+    </DndContext>
+  );
+}
+
+function GanttDropZone({ children }: { children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: GANTT_DROP_ZONE_ID });
+  return (
+    <div
+      ref={setNodeRef}
+      id={GANTT_DROP_ZONE_ID}
+      className={`rounded-xl transition-shadow ${isOver ? "ring-2 ring-indigo-300" : ""}`}
+    >
+      {children}
     </div>
   );
 }

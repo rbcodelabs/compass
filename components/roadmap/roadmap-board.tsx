@@ -17,9 +17,20 @@ import {
   sortableKeyboardCoordinates,
   arrayMove,
 } from "@dnd-kit/sortable";
-import { moveItem, updateSortOrder } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import {
+  moveItem,
+  updateSortOrder,
+  promoteToRoadmap,
+  promoteFeedbackToRoadmap,
+} from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { RoadmapColumn } from "./roadmap-column";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
+import {
+  UnscheduledItemsPanel,
+  UnscheduledItemPreview,
+  parseUnscheduledDragId,
+  type UnscheduledItem,
+} from "./unscheduled-items-panel";
 import type { Horizon } from "@/lib/types";
 
 type ColumnMap = Record<Horizon, RoadmapCardData[]>;
@@ -40,7 +51,52 @@ type Props = {
   availableSolutions?: AvailableSolution[];
   availableOpportunities?: AvailableOpportunity[];
   availableExperiments?: AvailableExperiment[];
+  unscheduledItems?: UnscheduledItem[];
 };
+
+// Builds a RoadmapCardData for a newly-created item from a promote action's
+// return value (a raw RoadmapItem row) plus the UnscheduledItem it came
+// from — the promote actions don't re-fetch/join solution/opportunity data,
+// so the card's relation fields are filled in from what we already know
+// client-side rather than round-tripping for it.
+function cardDataFromPromotion(
+  created: {
+    id: string;
+    title: string;
+    description: string | null;
+    horizon: string;
+    sortOrder: number;
+    solutionId: string | null;
+    keyResultId: string | null;
+    opportunityId: string | null;
+    experimentId: string | null;
+    feedbackId: string | null;
+    startDate: Date | null;
+    endDate: Date | null;
+  },
+  source: UnscheduledItem
+): RoadmapCardData {
+  return {
+    id: created.id,
+    title: created.title,
+    description: created.description ?? null,
+    horizon: created.horizon as Horizon,
+    sortOrder: created.sortOrder,
+    solutionId: created.solutionId ?? null,
+    keyResultId: created.keyResultId ?? null,
+    opportunityId: created.opportunityId ?? null,
+    experimentId: created.experimentId ?? null,
+    feedbackId: created.feedbackId ?? null,
+    startDate: created.startDate ? created.startDate.toISOString() : null,
+    endDate: created.endDate ? created.endDate.toISOString() : null,
+    solution: source.kind === "solution" ? { id: source.id, title: source.title } : null,
+    keyResult: null,
+    opportunity:
+      source.kind === "solution" ? { id: source.opportunityId, title: source.opportunityTitle } : null,
+    experiment: null,
+    feedback: source.kind === "feedback" ? { id: source.id, title: source.title, type: "BUG" } : null,
+  };
+}
 
 function buildColumnMap(items: RoadmapCardData[]): ColumnMap {
   return {
@@ -68,11 +124,14 @@ export function RoadmapBoard({
   availableSolutions,
   availableOpportunities,
   availableExperiments,
+  unscheduledItems,
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/roadmap`;
 
   const [columns, setColumns] = useState<ColumnMap>(() => buildColumnMap(initialItems));
+  const [unscheduled, setUnscheduled] = useState<UnscheduledItem[]>(unscheduledItems ?? []);
   const [activeItem, setActiveItem] = useState<RoadmapCardData | null>(null);
+  const [activeUnscheduledItem, setActiveUnscheduledItem] = useState<UnscheduledItem | null>(null);
   // Track the horizon the drag started from so handleDragEnd can detect cross-column moves.
   const [dragSourceHorizon, setDragSourceHorizon] = useState<Horizon | null>(null);
 
@@ -87,8 +146,32 @@ export function RoadmapBoard({
     })
   );
 
+  // Shared by both the drag-and-drop path and the quick-add menu fallback.
+  async function scheduleUnscheduledItem(item: UnscheduledItem, horizon: Horizon) {
+    setUnscheduled((prev) => prev.filter((i) => i !== item));
+    const created =
+      item.kind === "solution"
+        ? await promoteToRoadmap(item.id, workspaceId, horizon, item.squadId, item.opportunityId)
+        : await promoteFeedbackToRoadmap(item.id, workspaceId, horizon, revalidatePathStr);
+    handleItemAdded(cardDataFromPromotion(created, item));
+  }
+
+  function handleQuickAdd(item: UnscheduledItem, horizon: Horizon) {
+    startTransition(() => {
+      scheduleUnscheduledItem(item, horizon);
+    });
+  }
+
   function handleDragStart(event: DragStartEvent) {
     const id = event.active.id as string;
+
+    const parsed = parseUnscheduledDragId(id);
+    if (parsed) {
+      const found = unscheduled.find((i) => i.id === parsed.id && i.kind === parsed.kind);
+      if (found) setActiveUnscheduledItem(found);
+      return;
+    }
+
     for (const horizon of HORIZONS) {
       const found = columns[horizon].find((i) => i.id === id);
       if (found) {
@@ -151,12 +234,32 @@ export function RoadmapBoard({
     const { active, over } = event;
     setActiveItem(null);
 
+    const activeId = active.id as string;
+    const parsed = parseUnscheduledDragId(activeId);
+    if (parsed) {
+      setActiveUnscheduledItem(null);
+      if (!over) return;
+
+      const overId = over.id as string;
+      const destHorizon = overId.startsWith("column-")
+        ? (overId.replace("column-", "") as Horizon)
+        : findHorizon(columns, overId);
+      if (!destHorizon) return; // dropped somewhere that isn't a horizon column/card
+
+      const item = unscheduled.find((i) => i.id === parsed.id && i.kind === parsed.kind);
+      if (!item) return;
+
+      startTransition(() => {
+        scheduleUnscheduledItem(item, destHorizon);
+      });
+      return;
+    }
+
     if (!over) {
       setDragSourceHorizon(null);
       return;
     }
 
-    const activeId = active.id as string;
     const overId = over.id as string;
 
     const currentHorizon = findHorizon(columns, activeId);
@@ -245,6 +348,8 @@ export function RoadmapBoard({
         ))}
       </div>
 
+      <UnscheduledItemsPanel items={unscheduled} onQuickAdd={handleQuickAdd} />
+
       {/* DragOverlay renders the card being dragged at its cursor position */}
       <DragOverlay>
         {activeItem ? (
@@ -257,6 +362,8 @@ export function RoadmapBoard({
               workspaceSlug={workspaceSlug}
             />
           </div>
+        ) : activeUnscheduledItem ? (
+          <UnscheduledItemPreview item={activeUnscheduledItem} />
         ) : null}
       </DragOverlay>
     </DndContext>

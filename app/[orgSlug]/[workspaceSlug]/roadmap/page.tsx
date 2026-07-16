@@ -9,6 +9,7 @@ import { RoadmapViewToggle } from "@/components/roadmap/roadmap-view-toggle";
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
 import type { Horizon, SquadData } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
+import type { UnscheduledItem } from "@/components/roadmap/unscheduled-items-panel";
 
 export const metadata = {
   title: "Roadmap",
@@ -37,7 +38,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
 
   if (!workspace) notFound();
 
-  const [rawSquads, items, rawKRs, rawSolutions, rawOpportunities, rawExperiments] = await Promise.all([
+  const [rawSquads, items, rawKRs, rawSolutions, rawOpportunities, rawExperiments, unscheduledSolutions, unscheduledBugs] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { createdAt: "asc" },
@@ -102,6 +103,35 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       select: { id: true, title: true, status: true },
       orderBy: { createdAt: "asc" },
     }),
+    // Validated/in-delivery Solutions with no ACTIVE RoadmapItem yet — the
+    // same "ready to promote" condition as the Discovery solution card's
+    // own Promote-to-Roadmap button, just surfaced on the roadmap itself.
+    prisma.solution.findMany({
+      where: {
+        opportunity: { workspaceId: workspace.id },
+        status: { in: ["VALIDATED", "IN_DELIVERY"] },
+        roadmapItems: { none: { status: "ACTIVE" } },
+      },
+      select: {
+        id: true,
+        title: true,
+        opportunityId: true,
+        opportunity: { select: { title: true, squadId: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    // Bug-type feedback with no ACTIVE RoadmapItem yet. Ideas are excluded —
+    // they're expected to go through Opportunity -> Solution discovery
+    // first, same distinction the Feedback board already makes.
+    prisma.feedbackItem.findMany({
+      where: {
+        workspaceId: workspace.id,
+        type: "BUG",
+        roadmapItems: { none: { status: "ACTIVE" } },
+      },
+      select: { id: true, title: true },
+      orderBy: { voteCount: "desc" },
+    }),
   ]);
 
   const squads: SquadData[] = rawSquads.map((s) => ({
@@ -157,6 +187,22 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     feedback: item.feedback ?? null,
   }));
 
+  const unscheduledItems: UnscheduledItem[] = [
+    ...unscheduledSolutions.map((sol) => ({
+      kind: "solution" as const,
+      id: sol.id,
+      title: sol.title,
+      opportunityId: sol.opportunityId,
+      opportunityTitle: sol.opportunity.title,
+      squadId: sol.opportunity.squadId ?? null,
+    })),
+    ...unscheduledBugs.map((fb) => ({
+      kind: "feedback" as const,
+      id: fb.id,
+      title: fb.title,
+    })),
+  ];
+
   return (
     <div className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-h-0">
       <div className="shrink-0 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
@@ -180,6 +226,8 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       {view === "timeline" ? (
         <RoadmapGantt
           items={cardItems}
+          workspaceId={workspace.id}
+          unscheduledItems={unscheduledItems}
           revalidatePathStr={`/${orgSlug}/${workspaceSlug}/roadmap`}
         />
       ) : (
@@ -193,6 +241,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
             availableSolutions={availableSolutions}
             availableOpportunities={rawOpportunities}
             availableExperiments={availableExperiments}
+            unscheduledItems={unscheduledItems}
           />
         </div>
       )}

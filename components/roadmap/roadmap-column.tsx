@@ -84,6 +84,7 @@ export function RoadmapColumn({
       {/* Drop zone / card list */}
       <div
         ref={setNodeRef}
+        id={`roadmap-column-${horizon}`}
         className={[
           "flex flex-col gap-2 min-h-[180px] rounded-xl p-2.5 transition-colors",
           isOver

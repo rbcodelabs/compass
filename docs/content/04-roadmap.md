@@ -42,6 +42,15 @@ Toggle between **Board** and **Timeline** at the top of the Roadmap page. Timeli
 
 Drag a bar to shift its dates, or resize it from either edge to change its start or end date — changes save immediately. The Timeline view is linkable: `?view=timeline` in the URL takes you straight there, and the squad filter carries over from the Board.
 
+## Not Yet on the Roadmap
+
+Below the board (and the Timeline), Compass surfaces a **Not yet on the roadmap** panel — validated or in-delivery Solutions from Discovery, and Bug-type Feedback items, that don't have a roadmap item yet. These are the same items that already have a "Promote to roadmap" action on the Discovery solution card or the Feedback board; this panel is a second entry point that lets you schedule them without leaving the roadmap.
+
+- **On the Board** — drag a card from the panel onto any horizon column to schedule it there, or use its **⋯** menu to add it directly to Now/Next/Later without dragging.
+- **On the Timeline** — drag a card onto the chart area to open a small dialog for setting its horizon and start/end dates, since the Gantt chart has no way to infer a date purely from where you drop something. The panel's quick-add menu still works here too — it schedules the item without dates, so it'll show up on the Board immediately but won't appear on the Timeline until it has dates.
+
+Ideas (as opposed to Bugs) aren't included in this panel — they're expected to go through Opportunity → Solution discovery first, same as everywhere else in Compass.
+
 ## Drag to Reorder
 
 Within each horizon, drag cards to reorder them. Order within a horizon communicates relative priority: items higher in the list are higher priority. This ordering is persisted and visible to all workspace members.
