@@ -190,6 +190,22 @@ describe("promoteToRoadmap", () => {
     expect(data.squadId).toBe("squad-1");
     expect(data.opportunityId).toBe("opp-1");
   });
+
+  it("passes through optional dates when scheduled directly onto the timeline", async () => {
+    const startDate = new Date("2026-07-01");
+    const endDate = new Date("2026-09-30");
+    await promoteToRoadmap("sol-1", "ws-1", "NOW", null, null, { startDate, endDate });
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.startDate).toBe(startDate);
+    expect(data.endDate).toBe(endDate);
+  });
+
+  it("creates without dates when not scheduled with a timeframe", async () => {
+    await promoteToRoadmap("sol-1", "ws-1", "NOW", null, null);
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.startDate).toBeUndefined();
+    expect(data.endDate).toBeUndefined();
+  });
 });
 
 // ─── promoteFeedbackToRoadmap ─────────────────────────────────────────────────
@@ -239,6 +255,22 @@ describe("promoteFeedbackToRoadmap", () => {
     await expect(
       promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path")
     ).rejects.toThrow("DB error");
+  });
+
+  it("passes through optional dates when scheduled directly onto the timeline", async () => {
+    const startDate = new Date("2026-08-01");
+    const endDate = new Date("2026-08-15");
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path", { startDate, endDate });
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.startDate).toBe(startDate);
+    expect(data.endDate).toBe(endDate);
+  });
+
+  it("creates without dates when not scheduled with a timeframe", async () => {
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path");
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.startDate).toBeUndefined();
+    expect(data.endDate).toBeUndefined();
   });
 });
 

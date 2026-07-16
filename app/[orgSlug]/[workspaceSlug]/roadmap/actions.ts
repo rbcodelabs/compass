@@ -138,7 +138,8 @@ export async function promoteToRoadmap(
   workspaceId: string,
   horizon: Horizon,
   squadId: string | null,
-  opportunityId: string | null
+  opportunityId: string | null,
+  dates?: { startDate?: Date; endDate?: Date }
 ) {
   const prisma = getPrisma();
 
@@ -164,6 +165,8 @@ export async function promoteToRoadmap(
       solutionId,
       squadId: squadId ?? null,
       opportunityId: opportunityId ?? null,
+      startDate: dates?.startDate,
+      endDate: dates?.endDate,
     },
   });
 
@@ -177,7 +180,8 @@ export async function promoteFeedbackToRoadmap(
   feedbackId: string,
   workspaceId: string,
   horizon: Horizon,
-  revalidatePathStr: string
+  revalidatePathStr: string,
+  dates?: { startDate?: Date; endDate?: Date }
 ) {
   const prisma = getPrisma();
 
@@ -201,6 +205,8 @@ export async function promoteFeedbackToRoadmap(
       horizon,
       sortOrder,
       feedbackId,
+      startDate: dates?.startDate,
+      endDate: dates?.endDate,
     },
   });
 
