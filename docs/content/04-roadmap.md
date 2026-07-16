@@ -8,7 +8,7 @@ section: "Core Features"
 
 # Roadmap
 
-The Roadmap is a three-horizon view of what your team is building. Unlike a Gantt chart or a backlog, Compass roadmaps are intentionally lightweight — they communicate direction and priority without pretending to predict dates beyond the near term.
+The Roadmap is a three-horizon view of what your team is building. It stays intentionally lightweight by default — communicating direction and priority without forcing you to predict dates beyond the near term — but when an item's timing is known, adding a start and end date surfaces it on the Timeline view alongside the rest of your plan.
 
 ![Roadmap](/screenshots/docs/roadmap.png)
 
@@ -32,8 +32,15 @@ Click **+ Add Item** in any horizon column. A roadmap item has:
 - **Linked Key Result** — The outcome it contributes to
 - **Linked Experiment** — The experiment that validated the approach
 - **Squad** — Team assignment
+- **Start date / End date** — Optional. Leave these blank for items whose timing isn't settled yet; fill them in once you know when the work will happen to have the item appear on the Timeline view.
 
-The linked metadata appears as small icon badges on each card, giving stakeholders a quick way to trace the evidence behind each item.
+The linked metadata appears as small icon badges on each card, giving stakeholders a quick way to trace the evidence behind each item. Use a card's **Edit** menu action at any time to add or change its title, description, or dates.
+
+## Timeline View
+
+Toggle between **Board** and **Timeline** at the top of the Roadmap page. Timeline renders every item that has both a start and end date as a bar on a Gantt-style chart, colored by horizon, so you can see what's planned to run concurrently and spot scheduling conflicts. Items without dates are left off the chart and called out with a count above it — add dates from the Board view or the Edit dialog to bring them onto the Timeline.
+
+Drag a bar to shift its dates, or resize it from either edge to change its start or end date — changes save immediately. The Timeline view is linkable: `?view=timeline` in the URL takes you straight there, and the squad filter carries over from the Board.
 
 ## Drag to Reorder
 

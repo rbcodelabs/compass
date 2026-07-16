@@ -306,6 +306,8 @@ model RoadmapItem {
   horizon       String      @default("NOW") @db.VarChar(50)
   status        String      @default("ACTIVE") @db.VarChar(50)
   sortOrder     Int         @default(0) @map("sort_order")
+  startDate     DateTime?   @map("start_date")
+  endDate       DateTime?   @map("end_date")
   solutionId    String?     @map("solution_id") @db.Uuid
   keyResultId   String?     @map("key_result_id") @db.Uuid
   opportunityId String?     @map("opportunity_id") @db.Uuid

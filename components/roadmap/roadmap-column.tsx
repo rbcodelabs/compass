@@ -43,6 +43,7 @@ type Props = {
   revalidatePathStr: string;
   onItemAdded: (item: RoadmapCardData) => void;
   onArchive: (itemId: string) => void;
+  onUpdate: (item: RoadmapCardData) => void;
   availableKRs?: AvailableKR[];
   availableSolutions?: AvailableSolution[];
   availableOpportunities?: AvailableOpportunity[];
@@ -58,6 +59,7 @@ export function RoadmapColumn({
   revalidatePathStr,
   onItemAdded,
   onArchive,
+  onUpdate,
   availableKRs,
   availableSolutions,
   availableOpportunities,
@@ -106,6 +108,7 @@ export function RoadmapColumn({
                 item={item}
                 revalidatePathStr={revalidatePathStr}
                 onArchive={onArchive}
+                onUpdate={onUpdate}
                 orgSlug={orgSlug}
                 workspaceSlug={workspaceSlug}
               />
