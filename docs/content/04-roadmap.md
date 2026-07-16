@@ -42,6 +42,8 @@ Toggle between **Board** and **Timeline** at the top of the Roadmap page. Timeli
 
 Drag a bar to shift its dates, or resize it from either edge to change its start or end date — changes save immediately. The Timeline view is linkable: `?view=timeline` in the URL takes you straight there, and the squad filter carries over from the Board.
 
+Use the **Day / Week / Month / Quarter / Year** tabs above the chart to zoom the timeline in or out. Day is the default (and shows the most detail); zooming out to Month, Quarter, or Year is useful for spotting overlaps and gaps across a longer planning horizon without scrolling.
+
 ## Not Yet on the Roadmap
 
 Below the board (and the Timeline), Compass surfaces a **Not yet on the roadmap** panel — validated or in-delivery Solutions from Discovery, and Bug-type Feedback items, that don't have a roadmap item yet. These are the same items that already have a "Promote to roadmap" action on the Discovery solution card or the Feedback board; this panel is a second entry point that lets you schedule them without leaving the roadmap.
