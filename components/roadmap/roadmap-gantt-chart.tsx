@@ -11,7 +11,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { Gantt } from "@svar-ui/react-gantt";
+import { Gantt, type IScaleConfig } from "@svar-ui/react-gantt";
 import "@svar-ui/react-gantt/all.css";
 import {
   updateRoadmapItem,
@@ -25,6 +25,7 @@ import {
   type UnscheduledItem,
 } from "./unscheduled-items-panel";
 import { ScheduleItemDialog } from "./schedule-item-dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Horizon } from "@/lib/types";
 
 // The Gantt library reads Date components with local-timezone getters
@@ -71,6 +72,57 @@ const HORIZON_COLORS: Record<Horizon, string> = {
   NEXT: "#3b82f6", // blue-500
   LATER: "#94a3b8", // slate-400
   SHIPPED: "#a855f7", // purple-500
+};
+
+// Named zoom levels, each swapping the Gantt's header scale + column width.
+// The library also ships a continuous wheel-zoom mode (the `zoom` prop), but
+// discrete labeled levels are more discoverable and match how the rest of
+// the app's view controls work (see RoadmapViewToggle's Board/Timeline
+// tabs). Every format is a function rather than the library's `%`-token
+// strings so the exact output is under our control and easy to verify.
+const ZOOM_LEVEL_ORDER = ["day", "week", "month", "quarter", "year"] as const;
+type ZoomLevel = (typeof ZOOM_LEVEL_ORDER)[number];
+
+const monthYearLabel = (d: Date) => d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+const ZOOM_LEVELS: Record<ZoomLevel, { label: string; cellWidth: number; scales: IScaleConfig[] }> = {
+  day: {
+    label: "Day",
+    cellWidth: 100, // matches the Gantt library's own default, so this level looks unchanged from before zoom levels existed
+    scales: [
+      { unit: "month", step: 1, format: monthYearLabel },
+      { unit: "day", step: 1, format: (d) => String(d.getDate()) },
+    ],
+  },
+  week: {
+    label: "Week",
+    cellWidth: 70,
+    scales: [
+      { unit: "month", step: 1, format: monthYearLabel },
+      { unit: "week", step: 1, format: (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) },
+    ],
+  },
+  month: {
+    label: "Month",
+    cellWidth: 90,
+    scales: [
+      { unit: "year", step: 1, format: (d) => String(d.getFullYear()) },
+      { unit: "month", step: 1, format: (d) => d.toLocaleDateString("en-US", { month: "short" }) },
+    ],
+  },
+  quarter: {
+    label: "Quarter",
+    cellWidth: 100,
+    scales: [
+      { unit: "year", step: 1, format: (d) => String(d.getFullYear()) },
+      { unit: "quarter", step: 1, format: (d) => `Q${Math.floor(d.getMonth() / 3) + 1}` },
+    ],
+  },
+  year: {
+    label: "Year",
+    cellWidth: 70,
+    scales: [{ unit: "year", step: 1, format: (d) => String(d.getFullYear()) }],
+  },
 };
 
 // Extra fields beyond the library's own ITask shape are carried via its
@@ -144,6 +196,8 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
   const router = useRouter();
   const [unscheduled, setUnscheduled] = useState<UnscheduledItem[]>(unscheduledItems ?? []);
   const [scheduleTarget, setScheduleTarget] = useState<UnscheduledItem | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<ZoomLevel>("day");
+  const zoom = ZOOM_LEVELS[zoomLevel];
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -217,11 +271,25 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       <div className="flex flex-col gap-3 min-w-0">
-        {undatedCount > 0 && (
-          <p className="text-xs text-muted-foreground">
-            {`${undatedCount} item${undatedCount === 1 ? "" : "s"} ${undatedCount === 1 ? "has" : "have"} no dates yet — shown below with a dashed outline. Drag or resize ${undatedCount === 1 ? "it" : "them"} to schedule.`}
-          </p>
-        )}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {undatedCount > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {`${undatedCount} item${undatedCount === 1 ? "" : "s"} ${undatedCount === 1 ? "has" : "have"} no dates yet — shown below with a dashed outline. Drag or resize ${undatedCount === 1 ? "it" : "them"} to schedule.`}
+            </p>
+          ) : (
+            <span />
+          )}
+
+          <Tabs value={zoomLevel} onValueChange={(value) => setZoomLevel(value as ZoomLevel)}>
+            <TabsList>
+              {ZOOM_LEVEL_ORDER.map((level) => (
+                <TabsTrigger key={level} value={level} className="text-xs px-2.5">
+                  {ZOOM_LEVELS[level].label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </div>
 
         <GanttDropZone>
           {tasks.length === 0 ? (
@@ -242,7 +310,19 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
               */}
               <div style={{ minWidth: 720 }}>
                 <Gantt
+                  // Remounted on zoom change (key={zoomLevel}) rather than left to
+                  // react to scales/cellWidth prop diffs: the library derives and
+                  // caches layout state from the scales it was initialized with,
+                  // and nothing in its docs/types guarantees that's safe to swap
+                  // live. A clean remount sidesteps that question entirely — the
+                  // only cost is losing horizontal scroll position across a zoom
+                  // change, which is a reasonable tradeoff since you're
+                  // re-orienting the view anyway. Manually verified switching
+                  // through all five levels and back renders correctly each time.
+                  key={zoomLevel}
                   tasks={tasks}
+                  scales={zoom.scales}
+                  cellWidth={zoom.cellWidth}
                   // @ts-expect-error taskTemplate typing from the library expects its own ITask shape
                   taskTemplate={(props) => <TaskBar {...props} />}
                   onUpdateTask={handleUpdateTask}

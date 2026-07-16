@@ -5,7 +5,9 @@
  *          switch the Roadmap page to the Timeline view (?view=timeline) →
  *          confirm the dated item renders as a normal bar and a second,
  *          dateless item renders as a dashed "(unscheduled)" placeholder bar
- *          → switch back to Board → edit the dateless item via the card's
+ *          → click through every zoom level (Year/Quarter/Month/Week/Day) and
+ *          confirm the header scale updates and both items stay visible →
+ *          switch back to Board → edit the dateless item via the card's
  *          Edit action to give it dates → confirm the date range chip
  *          appears on the card and the item now shows up as a normal
  *          (non-placeholder) bar on the Timeline after a reload, confirming
@@ -72,6 +74,29 @@ test.describe("Roadmap Timeline", () => {
       const placeholderBarSelector = '[title="No dates set yet — drag or resize this bar to schedule it"]';
       const placeholderBar = page.locator(placeholderBarSelector, { hasText: editedTitle });
       await expect(placeholderBar).toBeVisible({ timeout: 10_000 });
+
+      // ── 2b. Zoom level switcher: each level re-renders both items without
+      //        losing them, and the header scale reflects the chosen unit ────
+      await page.getByRole("tab", { name: "Year", exact: true }).click();
+      await expect(page.getByText("2026", { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText(datedTitle).first()).toBeVisible();
+      await expect(placeholderBar).toBeVisible();
+
+      await page.getByRole("tab", { name: "Quarter", exact: true }).click();
+      await expect(page.getByText(/^Q[1-4]$/).first()).toBeVisible({ timeout: 10_000 });
+
+      await page.getByRole("tab", { name: "Month", exact: true }).click();
+      // datedTitle spans Jul–Sep 2026, so all three month labels are present.
+      await expect(page.getByText("Jul", { exact: true })).toBeVisible({ timeout: 10_000 });
+
+      await page.getByRole("tab", { name: "Week", exact: true }).click();
+      await expect(page.getByText(datedTitle).first()).toBeVisible({ timeout: 10_000 });
+
+      // Back to Day (the default) so the rest of the journey proceeds against
+      // the same view the test started from.
+      await page.getByRole("tab", { name: "Day", exact: true }).click();
+      await expect(page.getByText(datedTitle).first()).toBeVisible({ timeout: 10_000 });
+      await expect(placeholderBar).toBeVisible();
 
       // ── 3. Back to Board, edit the dateless item to add dates ──────────────
       await page.getByRole("tab", { name: "Board" }).click();
