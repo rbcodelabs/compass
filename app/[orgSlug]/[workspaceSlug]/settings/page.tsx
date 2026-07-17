@@ -6,6 +6,7 @@ import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
 import { ManageMembersPanel } from "@/components/settings/manage-members-panel";
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
+import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { DeleteWorkspacePanel } from "@/components/settings/delete-workspace-panel";
 import type { ApiKeyRow } from "@/components/settings/manage-api-keys-panel";
 import type {
@@ -37,6 +38,11 @@ export default async function SettingsPage({ params }: Props) {
       feedbackEnabled: true,
       roadmapPublic: true,
       portalAuthRequired: true,
+      brandingPaletteId: true,
+      brandingPrimaryHex: true,
+      brandingFontPresetId: true,
+      brandingFontFamily: true,
+      brandingLogoUrl: true,
     },
   });
 
@@ -190,6 +196,28 @@ export default async function SettingsPage({ params }: Props) {
           feedbackEnabled={workspace.feedbackEnabled ?? false}
           roadmapPublic={workspace.roadmapPublic ?? false}
           portalAuthRequired={workspace.portalAuthRequired ?? false}
+        />
+      </section>
+
+      <div className="border-t border-border" />
+
+      <section className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-base font-semibold">Branding</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Customize the accent color, font, and logo shown across this workspace
+            and its public portal.
+          </p>
+        </div>
+
+        <WorkspaceBrandingPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          initialPaletteId={workspace.brandingPaletteId}
+          initialPrimaryHex={workspace.brandingPrimaryHex}
+          initialFontPresetId={workspace.brandingFontPresetId}
+          initialFontFamily={workspace.brandingFontFamily}
+          initialLogoUrl={workspace.brandingLogoUrl}
         />
       </section>
 

@@ -22,7 +22,7 @@ export function MobileHeader({ orgSlug, workspaceSlug, workspaceName }: MobileHe
     >
       {/* Logo + workspace name */}
       <div className="flex items-center gap-2.5 min-w-0">
-        <div className="w-7 h-7 rounded-lg bg-indigo-500 flex items-center justify-center shrink-0 shadow-sm">
+        <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0 shadow-sm">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 24 24"
@@ -50,7 +50,7 @@ export function MobileHeader({ orgSlug, workspaceSlug, workspaceName }: MobileHe
           className={cn(
             "flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 transition-colors",
             pathname.startsWith(`${base}/docs`)
-              ? "bg-indigo-600/20 text-indigo-400"
+              ? "bg-primary/20 text-primary"
               : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
           )}
           aria-label="Docs"
@@ -63,7 +63,7 @@ export function MobileHeader({ orgSlug, workspaceSlug, workspaceName }: MobileHe
           className={cn(
             "flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 transition-colors",
             pathname.startsWith(`${base}/settings`)
-              ? "bg-indigo-600/20 text-indigo-400"
+              ? "bg-primary/20 text-primary"
               : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
           )}
           aria-label="Settings"
@@ -76,7 +76,7 @@ export function MobileHeader({ orgSlug, workspaceSlug, workspaceName }: MobileHe
           className={cn(
             "flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 transition-colors",
             pathname.startsWith("/help")
-              ? "bg-indigo-600/20 text-indigo-400"
+              ? "bg-primary/20 text-primary"
               : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
           )}
           aria-label="Help"

@@ -63,7 +63,7 @@ export function Sidebar({
     <aside className="hidden md:flex w-[220px] shrink-0 flex-col h-full bg-slate-950 text-slate-100 border-r border-slate-800/50">
       {/* Logo + app name */}
       <div className="flex items-center gap-2.5 px-4 pt-5 pb-4">
-        <div className="w-7 h-7 rounded-lg bg-indigo-500 flex items-center justify-center shrink-0 shadow-sm">
+        <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0 shadow-sm">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 24 24"
@@ -86,8 +86,8 @@ export function Sidebar({
       <div className="px-3 pb-4">
         <DropdownMenu>
           <DropdownMenuTrigger className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-slate-800/60 transition-colors group">
-            <div className="w-5 h-5 rounded-md bg-indigo-600/30 border border-indigo-500/30 flex items-center justify-center shrink-0">
-              <span className="text-[10px] font-bold text-indigo-300 leading-none">
+            <div className="w-5 h-5 rounded-md bg-primary/30 border border-primary/30 flex items-center justify-center shrink-0">
+              <span className="text-[10px] font-bold text-primary leading-none">
                 {workspaceName[0]?.toUpperCase() ?? "W"}
               </span>
             </div>
@@ -103,7 +103,7 @@ export function Sidebar({
               >
                 <div className="w-4 h-4 flex items-center justify-center shrink-0">
                   {ws.slug === workspaceSlug && ws.orgSlug === orgSlug && (
-                    <Check className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
+                    <Check className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
                   )}
                 </div>
                 <span className="truncate">{ws.name}</span>
@@ -139,21 +139,21 @@ export function Sidebar({
               className={cn(
                 "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150",
                 isActive
-                  ? "bg-indigo-600/20 text-white"
+                  ? "bg-primary/20 text-white"
                   : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
               )}
             >
               {/* Active left accent bar */}
               {isActive && (
                 <span
-                  className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-indigo-400 rounded-full"
+                  className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-full"
                   aria-hidden="true"
                 />
               )}
               <Icon
                 className={cn(
                   "w-4 h-4 shrink-0 transition-colors",
-                  isActive ? "text-indigo-400" : "text-slate-500"
+                  isActive ? "text-primary" : "text-slate-500"
                 )}
                 aria-hidden="true"
               />
@@ -176,20 +176,20 @@ export function Sidebar({
               className={cn(
                 "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150",
                 isActive
-                  ? "bg-indigo-600/20 text-white"
+                  ? "bg-primary/20 text-white"
                   : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
               )}
             >
               {isActive && (
                 <span
-                  className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-indigo-400 rounded-full"
+                  className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-full"
                   aria-hidden="true"
                 />
               )}
               <Settings
                 className={cn(
                   "w-4 h-4 shrink-0 transition-colors",
-                  isActive ? "text-indigo-400" : "text-slate-500"
+                  isActive ? "text-primary" : "text-slate-500"
                 )}
                 aria-hidden="true"
               />
@@ -208,20 +208,20 @@ export function Sidebar({
           className={cn(
             "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150",
             pathname.startsWith("/help")
-              ? "bg-indigo-600/20 text-white"
+              ? "bg-primary/20 text-white"
               : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
           )}
         >
           {pathname.startsWith("/help") && (
             <span
-              className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-indigo-400 rounded-full"
+              className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-full"
               aria-hidden="true"
             />
           )}
           <HelpCircle
             className={cn(
               "w-4 h-4 shrink-0 transition-colors",
-              pathname.startsWith("/help") ? "text-indigo-400" : "text-slate-500"
+              pathname.startsWith("/help") ? "text-primary" : "text-slate-500"
             )}
             aria-hidden="true"
           />

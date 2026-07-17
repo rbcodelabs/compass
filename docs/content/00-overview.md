@@ -40,6 +40,7 @@ Beyond the core OST workflow, Compass includes:
 - **Docs** — A rich-text editor for internal documentation. Pages live in a hierarchical tree and support inline screenshots.
 - **Squads** — Organise objects by team for filtered views across every section.
 - **Custom Fields** — Extend any object type with your own fields (text, number, date, select, etc.).
+- **Branding** — Customize a workspace's accent color, font, and logo — applied consistently across the internal app and its public feedback/roadmap portal.
 - **MCP API** — Connect AI agents to Compass via the Model Context Protocol so they can read and write discovery data programmatically.
 
 ## Getting Started
