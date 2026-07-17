@@ -116,6 +116,7 @@ model Workspace {
   squads            Squad[]
   feedback          FeedbackItem[]
   docs              Doc[]
+  evidence          Evidence[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -233,6 +234,7 @@ model Opportunity {
   createdById       String?        @map("created_by_id") @db.Uuid
   updatedById       String?        @map("updated_by_id") @db.Uuid
   source            String         @default("UI") @map("source") @db.VarChar(20)
+  evidence          Evidence[]
 
   @@map("opportunities")
 }
@@ -252,6 +254,7 @@ model Solution {
   createdById   String?       @map("created_by_id") @db.Uuid
   updatedById   String?       @map("updated_by_id") @db.Uuid
   source        String        @default("UI") @map("source") @db.VarChar(20)
+  evidence      Evidence[]
 
   @@map("solutions")
 }
@@ -270,6 +273,7 @@ model Assumption {
   createdById String?      @map("created_by_id") @db.Uuid
   updatedById String?      @map("updated_by_id") @db.Uuid
   source      String       @default("UI") @map("source") @db.VarChar(20)
+  evidence    Evidence[]
 
   @@map("assumptions")
 }
@@ -541,6 +545,30 @@ model Doc {
   source      String    @default("UI") @map("source") @db.VarChar(20)
 
   @@map("docs")
+}
+
+// ─── Evidence ─────────────────────────────────────────────────────────────────
+
+model Evidence {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String       @map("workspace_id") @db.Uuid
+  /// One of: interview | feedback | support_ticket | experiment_result | analytics
+  sourceType    String       @map("source_type") @db.VarChar(50)
+  excerpt       String       @db.Text
+  sourceUrl     String?      @map("source_url") @db.VarChar(2048)
+  /// One of: high | medium | low
+  confidence    String       @default("medium") @db.VarChar(50)
+  opportunityId String?      @map("opportunity_id") @db.Uuid
+  solutionId    String?      @map("solution_id") @db.Uuid
+  assumptionId  String?      @map("assumption_id") @db.Uuid
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @default(now()) @map("updated_at")
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id])
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  solution      Solution?    @relation(fields: [solutionId], references: [id])
+  assumption    Assumption?  @relation(fields: [assumptionId], references: [id])
+
+  @@map("evidence")
 }
 
 model RoadmapVote {
