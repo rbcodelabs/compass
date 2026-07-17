@@ -136,11 +136,59 @@ type GanttTask = {
   type: "task";
   horizon: Horizon;
   hasDates: boolean;
+  parent?: string | number;
 };
 
-type TaskTemplateProps = {
-  data: GanttTask;
+// A synthetic row representing a group header (e.g. one per squad). Rendered
+// as a `type: "summary"` row with real items nested under it via `parent` —
+// tried nesting children with the library's own `data` array first (which
+// its ITask type advertises for exactly this), but that crashed at render
+// ("Cannot read properties of null (reading 'forEach')") in the installed
+// free/OSS build. Flat array + `parent` id is what actually works — verified
+// live before committing to this approach, since "task grouping" (the
+// `group`/`GroupConfig` prop) is explicitly a Pro-only feature per the
+// library's docs, and this doesn't use that prop at all.
+type GanttGroupRow = {
+  id: string;
+  text: string;
+  type: "summary";
+  start: Date;
+  end: Date;
+  open: true;
+  isGroup: true;
+  groupColor: string | null;
 };
+
+type GanttRow = GanttTask | GanttGroupRow;
+
+type TaskTemplateProps = {
+  data: GanttRow;
+};
+
+// "Group by" is deliberately structured as a lookup of groupers rather than
+// one hardcoded squad code path, so adding another dimension later (e.g.
+// Opportunity) is "add a GROUPERS entry" rather than a rewrite. Only squad
+// is wired up for now — it's the one dimension with existing filter-bar
+// support and unambiguous grouping semantics.
+const GROUP_BY_OPTIONS = ["none", "squad"] as const;
+type GroupBy = (typeof GROUP_BY_OPTIONS)[number];
+const GROUP_BY_LABELS: Record<GroupBy, string> = { none: "None", squad: "Squad" };
+
+const UNASSIGNED_GROUP_KEY = "__unassigned";
+
+type GroupInfo = { key: string; label: string; color: string | null };
+
+const GROUPERS: Record<Exclude<GroupBy, "none">, (item: RoadmapCardData) => GroupInfo> = {
+  squad: (item) =>
+    item.squad
+      ? { key: item.squad.id, label: item.squad.name, color: item.squad.color }
+      : { key: UNASSIGNED_GROUP_KEY, label: "No squad", color: null },
+};
+
+// Synthetic group-row ids are prefixed so handleUpdateTask can recognize and
+// ignore drag/resize events on them (their dates are a computed rollup of
+// their children's dates, not a real persisted value).
+const GROUP_ID_PREFIX = "group:";
 
 const BAR_BASE_STYLE: React.CSSProperties = {
   height: "100%",
@@ -154,7 +202,26 @@ const BAR_BASE_STYLE: React.CSSProperties = {
   textOverflow: "ellipsis",
 };
 
+const UNASSIGNED_GROUP_COLOR = "#94a3b8"; // slate-400, matches HORIZON_COLORS.LATER
+
 function TaskBar({ data }: TaskTemplateProps) {
+  if (data.type === "summary") {
+    const color = data.groupColor ?? UNASSIGNED_GROUP_COLOR;
+    return (
+      <div
+        style={{
+          ...BAR_BASE_STYLE,
+          backgroundColor: color,
+          color: "#fff",
+          fontWeight: 600,
+          opacity: 0.85,
+        }}
+      >
+        {data.text}
+      </div>
+    );
+  }
+
   const color = HORIZON_COLORS[data.horizon] ?? HORIZON_COLORS.NOW;
 
   if (!data.hasDates) {
@@ -198,6 +265,7 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
   const [scheduleTarget, setScheduleTarget] = useState<UnscheduledItem | null>(null);
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>("day");
   const zoom = ZOOM_LEVELS[zoomLevel];
+  const [groupBy, setGroupBy] = useState<GroupBy>("none");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -214,7 +282,7 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
     [items]
   );
 
-  const tasks: GanttTask[] = useMemo(
+  const baseTasks: GanttTask[] = useMemo(
     () =>
       items.map((item) => {
         const hasDates = Boolean(item.startDate && item.endDate);
@@ -231,7 +299,58 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
     [items, placeholderStart, placeholderEnd]
   );
 
+  // Grouped mode nests baseTasks under synthetic summary rows (one per
+  // group, plus an "Unassigned"/"No squad" catch-all) rather than mutating
+  // baseTasks itself, so ungrouped mode is untouched by this at all.
+  const tasks: GanttRow[] = useMemo(() => {
+    if (groupBy === "none") return baseTasks;
+
+    const grouper = GROUPERS[groupBy];
+    const order: string[] = [];
+    const groups = new Map<string, { info: GroupInfo; children: GanttTask[] }>();
+    items.forEach((item, i) => {
+      const info = grouper(item);
+      if (!groups.has(info.key)) {
+        order.push(info.key);
+        groups.set(info.key, { info, children: [] });
+      }
+      groups.get(info.key)!.children.push(baseTasks[i]);
+    });
+
+    // Alphabetical by label, with the "unassigned" bucket always last —
+    // it's a catch-all, not a real group, so it doesn't belong sorted
+    // alongside named ones.
+    order.sort((a, b) => {
+      if (a === UNASSIGNED_GROUP_KEY) return 1;
+      if (b === UNASSIGNED_GROUP_KEY) return -1;
+      return groups.get(a)!.info.label.localeCompare(groups.get(b)!.info.label);
+    });
+
+    const rows: GanttRow[] = [];
+    for (const key of order) {
+      const { info, children } = groups.get(key)!;
+      const groupId = `${GROUP_ID_PREFIX}${groupBy}:${key}`;
+      rows.push({
+        id: groupId,
+        text: `${info.label} (${children.length})`,
+        type: "summary",
+        start: new Date(Math.min(...children.map((c) => c.start.getTime()))),
+        end: new Date(Math.max(...children.map((c) => c.end.getTime()))),
+        open: true,
+        isGroup: true,
+        groupColor: info.color,
+      });
+      for (const child of children) rows.push({ ...child, parent: groupId });
+    }
+    return rows;
+  }, [baseTasks, items, groupBy]);
+
   async function handleUpdateTask(ev: { id: string; task: { start?: Date; end?: Date } }) {
+    // Group rows are a computed rollup of their children's dates, not a real
+    // roadmap item — the free tier doesn't expose a way to make a row
+    // non-draggable, so guard here instead of trying to persist a squad id
+    // as though it were a RoadmapItem id.
+    if (typeof ev.id === "string" && ev.id.startsWith(GROUP_ID_PREFIX)) return;
     if (!ev.task.start || !ev.task.end) return;
     await updateRoadmapItem(
       ev.id,
@@ -280,15 +399,30 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
             <span />
           )}
 
-          <Tabs value={zoomLevel} onValueChange={(value) => setZoomLevel(value as ZoomLevel)}>
-            <TabsList>
-              {ZOOM_LEVEL_ORDER.map((level) => (
-                <TabsTrigger key={level} value={level} className="text-xs px-2.5">
-                  {ZOOM_LEVELS[level].label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Group by</span>
+              <Tabs value={groupBy} onValueChange={(value) => setGroupBy(value as GroupBy)}>
+                <TabsList>
+                  {GROUP_BY_OPTIONS.map((option) => (
+                    <TabsTrigger key={option} value={option} className="text-xs px-2.5">
+                      {GROUP_BY_LABELS[option]}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            </div>
+
+            <Tabs value={zoomLevel} onValueChange={(value) => setZoomLevel(value as ZoomLevel)}>
+              <TabsList>
+                {ZOOM_LEVEL_ORDER.map((level) => (
+                  <TabsTrigger key={level} value={level} className="text-xs px-2.5">
+                    {ZOOM_LEVELS[level].label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          </div>
         </div>
 
         <GanttDropZone>
@@ -310,16 +444,16 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
               */}
               <div style={{ minWidth: 720 }}>
                 <Gantt
-                  // Remounted on zoom change (key={zoomLevel}) rather than left to
-                  // react to scales/cellWidth prop diffs: the library derives and
-                  // caches layout state from the scales it was initialized with,
-                  // and nothing in its docs/types guarantees that's safe to swap
-                  // live. A clean remount sidesteps that question entirely — the
-                  // only cost is losing horizontal scroll position across a zoom
-                  // change, which is a reasonable tradeoff since you're
-                  // re-orienting the view anyway. Manually verified switching
-                  // through all five levels and back renders correctly each time.
-                  key={zoomLevel}
+                  // Remounted on zoom/group change rather than left to react to
+                  // prop diffs: the library derives and caches layout state from
+                  // the scales/task-tree it was initialized with, and nothing in
+                  // its docs/types guarantees swapping either live is safe. A
+                  // clean remount sidesteps that question entirely — the only
+                  // cost is losing horizontal scroll position across a change,
+                  // a reasonable tradeoff since you're re-orienting the view
+                  // anyway. Manually verified switching through all five zoom
+                  // levels and both group-by states renders correctly each time.
+                  key={`${zoomLevel}:${groupBy}`}
                   tasks={tasks}
                   scales={zoom.scales}
                   cellWidth={zoom.cellWidth}

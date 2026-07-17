@@ -31,7 +31,7 @@ import {
   parseUnscheduledDragId,
   type UnscheduledItem,
 } from "./unscheduled-items-panel";
-import type { Horizon } from "@/lib/types";
+import type { Horizon, SquadData } from "@/lib/types";
 
 type ColumnMap = Record<Horizon, RoadmapCardData[]>;
 
@@ -52,6 +52,7 @@ type Props = {
   availableOpportunities?: AvailableOpportunity[];
   availableExperiments?: AvailableExperiment[];
   unscheduledItems?: UnscheduledItem[];
+  squads?: SquadData[];
 };
 
 // Builds a RoadmapCardData for a newly-created item from a promote action's
@@ -74,8 +75,19 @@ function cardDataFromPromotion(
     startDate: Date | null;
     endDate: Date | null;
   },
-  source: UnscheduledItem
+  source: UnscheduledItem,
+  squads: SquadData[]
 ): RoadmapCardData {
+  // Only solution-sourced items carry a squadId (inherited from the
+  // opportunity's squad, resolved server-side in page.tsx's unscheduledItems
+  // query) — feedback/bug items have no squad concept. Resolve the id against
+  // the already-fetched squads list rather than round-tripping for it, same
+  // as every other relation field on this optimistic card.
+  const squad =
+    source.kind === "solution" && source.squadId
+      ? (squads.find((s) => s.id === source.squadId) ?? null)
+      : null;
+
   return {
     id: created.id,
     title: created.title,
@@ -95,6 +107,7 @@ function cardDataFromPromotion(
       source.kind === "solution" ? { id: source.opportunityId, title: source.opportunityTitle } : null,
     experiment: null,
     feedback: source.kind === "feedback" ? { id: source.id, title: source.title, type: "BUG" } : null,
+    squad,
   };
 }
 
@@ -125,6 +138,7 @@ export function RoadmapBoard({
   availableOpportunities,
   availableExperiments,
   unscheduledItems,
+  squads,
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/roadmap`;
 
@@ -153,7 +167,7 @@ export function RoadmapBoard({
       item.kind === "solution"
         ? await promoteToRoadmap(item.id, workspaceId, horizon, item.squadId, item.opportunityId)
         : await promoteFeedbackToRoadmap(item.id, workspaceId, horizon, revalidatePathStr);
-    handleItemAdded(cardDataFromPromotion(created, item));
+    handleItemAdded(cardDataFromPromotion(created, item, squads ?? []));
   }
 
   function handleQuickAdd(item: UnscheduledItem, horizon: Horizon) {
