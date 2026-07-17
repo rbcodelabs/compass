@@ -112,6 +112,10 @@ export function AddItemForm({
           ? { id: linkedExperiment.id, title: linkedExperiment.title }
           : null,
         feedback: null,
+        // The add-item form has no squad picker (squad is set via
+        // promoteToRoadmap's squadId param, not this manual-add path) — new
+        // items always start unassigned here, same as before this field existed.
+        squad: null,
       });
       setOpen(false);
       reset();

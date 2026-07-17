@@ -73,6 +73,9 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
         feedback: {
           select: { id: true, title: true, type: true },
         },
+        squad: {
+          select: { id: true, name: true, color: true },
+        },
       },
     }),
     prisma.keyResult.findMany({
@@ -185,6 +188,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     opportunity: item.opportunity ?? null,
     experiment: item.experiment ?? null,
     feedback: item.feedback ?? null,
+    squad: item.squad ?? null,
   }));
 
   const unscheduledItems: UnscheduledItem[] = [
@@ -242,6 +246,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
             availableOpportunities={rawOpportunities}
             availableExperiments={availableExperiments}
             unscheduledItems={unscheduledItems}
+            squads={squads}
           />
         </div>
       )}

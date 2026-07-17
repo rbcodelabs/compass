@@ -40,6 +40,7 @@ export type RoadmapCardData = {
   opportunity: { id: string; title: string } | null;
   experiment: { id: string; title: string } | null;
   feedback: { id: string; title: string; type: string } | null;
+  squad: { id: string; name: string; color: string } | null;
 };
 
 // Compact "Mar 3 – Apr 10" style range formatter. Handles single-ended ranges too.

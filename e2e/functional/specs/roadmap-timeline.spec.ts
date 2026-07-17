@@ -7,7 +7,9 @@
  *          dateless item renders as a dashed "(unscheduled)" placeholder bar
  *          → click through every zoom level (Year/Quarter/Month/Week/Day) and
  *          confirm the header scale updates and both items stay visible →
- *          switch back to Board → edit the dateless item via the card's
+ *          switch Group by to Squad and confirm both items nest under a
+ *          "No squad" summary row, then back to None → switch back to
+ *          Board → edit the dateless item via the card's
  *          Edit action to give it dates → confirm the date range chip
  *          appears on the card and the item now shows up as a normal
  *          (non-placeholder) bar on the Timeline after a reload, confirming
@@ -97,6 +99,22 @@ test.describe("Roadmap Timeline", () => {
       await page.getByRole("tab", { name: "Day", exact: true }).click();
       await expect(page.getByText(datedTitle).first()).toBeVisible({ timeout: 10_000 });
       await expect(placeholderBar).toBeVisible();
+
+      // ── 2c. Group by squad: neither test item (nor anything else in this
+      //        seeded workspace) has a squad, so everything nests under one
+      //        "No squad" summary row — count isn't asserted exactly since
+      //        other seeded/pre-existing items may also land in it, just
+      //        that grouping activates and both test items are still there.
+      await page.getByRole("tab", { name: "Squad", exact: true }).click();
+      await expect(page.getByText(/^No squad \(\d+\)$/).first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText(datedTitle).first()).toBeVisible();
+      await expect(placeholderBar).toBeVisible();
+
+      // Back to ungrouped (the default) so the rest of the journey proceeds
+      // against the same view the test started from.
+      await page.getByRole("tab", { name: "None", exact: true }).click();
+      await expect(page.getByText(/^No squad \(\d+\)$/)).toHaveCount(0);
+      await expect(page.getByText(datedTitle).first()).toBeVisible({ timeout: 10_000 });
 
       // ── 3. Back to Board, edit the dateless item to add dates ──────────────
       await page.getByRole("tab", { name: "Board" }).click();

@@ -44,6 +44,8 @@ Drag a bar to shift its dates, or resize it from either edge to change its start
 
 Use the **Day / Week / Month / Quarter / Year** tabs above the chart to zoom the timeline in or out. Day is the default (and shows the most detail); zooming out to Month, Quarter, or Year is useful for spotting overlaps and gaps across a longer planning horizon without scrolling.
 
+Use **Group by** to cluster items into collapsible sections instead of one flat list. Currently supports grouping by **Squad** — items nest under a colored summary row per squad (matching that squad's color from Settings), with a **No squad** section for anything unassigned. Each summary row's date range spans its items and can be collapsed independently; it isn't itself draggable, since its dates are a computed range rather than something stored on a single roadmap item.
+
 ## Not Yet on the Roadmap
 
 Below the board (and the Timeline), Compass surfaces a **Not yet on the roadmap** panel — validated or in-delivery Solutions from Discovery, and Bug-type Feedback items, that don't have a roadmap item yet. These are the same items that already have a "Promote to roadmap" action on the Discovery solution card or the Feedback board; this panel is a second entry point that lets you schedule them without leaving the roadmap.
