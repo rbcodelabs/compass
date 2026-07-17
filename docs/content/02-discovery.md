@@ -51,6 +51,28 @@ Examples of good assumptions:
 - "An email reminder 7 days before expiry will reduce churn by 15%"
 - "Users prefer in-app notifications to email for billing alerts"
 
+## Evidence
+
+Every opportunity, solution, and assumption can carry linked **Evidence** — the concrete signals that back up why you believe it. This is what makes a claim on the tree traceable back to its source instead of just an opinion.
+
+Each piece of evidence has:
+
+- **Source type** — Interview, Feedback, Support Ticket, Experiment Result, or Analytics
+- **Excerpt** — The actual quote, ticket text, or data point
+- **Confidence** — High, Medium, or Low, reflecting how strongly this signal supports the claim
+- **Source URL** *(optional)* — A link back to the original interview recording, ticket, or dashboard
+
+### Adding evidence
+
+Click **+ Add Evidence** from any opportunity, solution, or assumption to attach a new signal. Evidence attaches to exactly one node — if it's more broadly relevant, you can re-parent it later.
+
+### Where evidence shows up
+
+- **Rollup badges** — Opportunity cards show a "Backed by N signals from M sources" badge; solution cards show "Backed by N signals." These count only evidence attached directly to that opportunity or solution — evidence attached to a solution or assumption doesn't roll up into its parent opportunity's badge.
+- **Evidence list** — Opportunity, solution, and assumption detail views show the full list of evidence attached directly to that node, each tagged with its source type and confidence.
+
+Because evidence doesn't roll up the tree, attach it to the specific node it actually supports — evidence for a particular solution belongs on that solution, not on the parent opportunity.
+
 ## The OST Tree View
 
 Switch from board view to **Tree view** using the toggle at the top right of the Discovery page. The Tree view renders your full Opportunity Solution Tree:

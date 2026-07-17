@@ -20,6 +20,7 @@ const PAGES = [
   { file: "okrs.png",            url: "/rbcodelabs/compass/okrs" },
   { file: "discovery-board.png", url: "/rbcodelabs/compass/discovery" },
   { file: "roadmap.png",         url: "/rbcodelabs/compass/roadmap" },
+  { file: "roadmap-timeline.png", url: "/rbcodelabs/compass/roadmap?view=timeline" },
   { file: "experiments.png",     url: "/rbcodelabs/compass/experiments" },
   { file: "feedback.png",        url: "/rbcodelabs/compass/feedback" },
   { file: "docs-editor.png",     url: "/rbcodelabs/compass/docs" },

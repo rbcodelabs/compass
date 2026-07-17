@@ -4,6 +4,68 @@ import { getPortalSession } from "@/lib/portal-auth";
 
 type Params = { orgSlug: string; workspaceSlug: string };
 
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<Params> }
+) {
+  const { orgSlug, workspaceSlug } = await params;
+
+  const limitParam = req.nextUrl.searchParams.get("limit");
+  const limit = limitParam !== null ? parseInt(limitParam, 10) : 50;
+
+  if (isNaN(limit) || limit < 1 || limit > 500) {
+    return NextResponse.json(
+      { error: "limit must be a number between 1 and 500" },
+      { status: 400 }
+    );
+  }
+
+  const prisma = getPrisma();
+
+  const workspace = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+    select: { id: true, feedbackEnabled: true },
+  });
+
+  if (!workspace) {
+    return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  }
+
+  if (!workspace.feedbackEnabled) {
+    return NextResponse.json(
+      { error: "Feedback is not enabled for this workspace" },
+      { status: 403 }
+    );
+  }
+
+  const items = await prisma.feedbackItem.findMany({
+    where: { workspaceId: workspace.id },
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      submitterName: true,
+      status: true,
+      voteCount: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+
+  return NextResponse.json({
+    items: items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      description: item.description,
+      submitterName: item.submitterName,
+      status: item.status,
+      voteCount: item.voteCount,
+      createdAt: item.createdAt.toISOString(),
+    })),
+  });
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<Params> }

@@ -16,6 +16,8 @@ export async function addRoadmapItem(
     keyResultId?: string;
     opportunityId?: string;
     experimentId?: string;
+    startDate?: Date;
+    endDate?: Date;
   },
   revalidatePathStr: string
 ) {
@@ -41,7 +43,45 @@ export async function addRoadmapItem(
       keyResultId: data.keyResultId,
       opportunityId: data.opportunityId,
       experimentId: data.experimentId,
+      startDate: data.startDate,
+      endDate: data.endDate,
     },
+  });
+
+  revalidatePath(revalidatePathStr);
+  return item;
+}
+
+// ─── Update Roadmap Item ──────────────────────────────────────────────────────
+
+export async function updateRoadmapItem(
+  itemId: string,
+  data: {
+    title?: string;
+    description?: string;
+    startDate?: Date | null;
+    endDate?: Date | null;
+  },
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+
+  const updateData: {
+    title?: string;
+    description?: string;
+    startDate?: Date | null;
+    endDate?: Date | null;
+    updatedAt: Date;
+  } = { updatedAt: new Date() };
+
+  if (data.title !== undefined) updateData.title = data.title;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.startDate !== undefined) updateData.startDate = data.startDate;
+  if (data.endDate !== undefined) updateData.endDate = data.endDate;
+
+  const item = await prisma.roadmapItem.update({
+    where: { id: itemId },
+    data: updateData,
   });
 
   revalidatePath(revalidatePathStr);
@@ -98,7 +138,8 @@ export async function promoteToRoadmap(
   workspaceId: string,
   horizon: Horizon,
   squadId: string | null,
-  opportunityId: string | null
+  opportunityId: string | null,
+  dates?: { startDate?: Date; endDate?: Date }
 ) {
   const prisma = getPrisma();
 
@@ -124,6 +165,8 @@ export async function promoteToRoadmap(
       solutionId,
       squadId: squadId ?? null,
       opportunityId: opportunityId ?? null,
+      startDate: dates?.startDate,
+      endDate: dates?.endDate,
     },
   });
 
@@ -137,7 +180,8 @@ export async function promoteFeedbackToRoadmap(
   feedbackId: string,
   workspaceId: string,
   horizon: Horizon,
-  revalidatePathStr: string
+  revalidatePathStr: string,
+  dates?: { startDate?: Date; endDate?: Date }
 ) {
   const prisma = getPrisma();
 
@@ -161,6 +205,8 @@ export async function promoteFeedbackToRoadmap(
       horizon,
       sortOrder,
       feedbackId,
+      startDate: dates?.startDate,
+      endDate: dates?.endDate,
     },
   });
 

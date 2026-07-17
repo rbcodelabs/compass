@@ -48,6 +48,12 @@ The MCP server exposes tools that agents can call:
 | `update_feedback_type` | Reclassify a feedback item as a BUG or an IDEA |
 | `link_feedback_to_opportunity` | Link a feedback item (typically an IDEA) to an existing opportunity, connecting it to the discovery flow |
 | `promote_feedback_to_roadmap` | Promote a feedback item (typically a BUG) directly to the roadmap, skipping discovery entirely |
+| `list_roadmap_items` | Fetch active roadmap items for a workspace, grouped by horizon, including start/end dates when set |
+| `add_to_roadmap` | Create a roadmap item in NOW/NEXT/LATER/SHIPPED, optionally with a start date and end date for the Timeline view |
+| `update_roadmap_item` | Update a roadmap item's horizon, status, title, description, or start/end dates |
+| `add_evidence` | Attach a piece of evidence (interview, feedback, support ticket, experiment result, or analytics) to an opportunity, solution, or assumption |
+| `link_evidence` | Re-parent existing evidence to a different opportunity, solution, or assumption |
+| `list_evidence` | Fetch all evidence attached to a given opportunity, solution, or assumption |
 
 ## Example: Connecting Claude Desktop
 

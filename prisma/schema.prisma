@@ -121,6 +121,7 @@ model Workspace {
   squads            Squad[]
   feedback          FeedbackItem[]
   docs              Doc[]
+  evidence          Evidence[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -157,40 +158,46 @@ model OKRCycle {
 }
 
 model Objective {
-  id                String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  cycleId           String     @map("cycle_id") @db.Uuid
-  squadId           String?    @map("squad_id") @db.Uuid
-  parentKeyResultId String?    @map("parent_key_result_id") @db.Uuid
-  title             String     @db.VarChar(255)
-  description       String?    @db.Text
-  owner             String?    @db.VarChar(255)
-  status            String     @default("ON_TRACK") @db.VarChar(50)
-  sortOrder         Int        @default(0) @map("sort_order")
-  createdAt         DateTime   @default(now()) @map("created_at")
-  updatedAt         DateTime   @default(now()) @map("updated_at")
-  cycle             OKRCycle   @relation(fields: [cycleId], references: [id])
-  squad             Squad?     @relation(fields: [squadId], references: [id])
-  parentKeyResult   KeyResult? @relation("SquadKRSupport", fields: [parentKeyResultId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cycleId           String      @map("cycle_id") @db.Uuid
+  squadId           String?     @map("squad_id") @db.Uuid
+  parentKeyResultId String?     @map("parent_key_result_id") @db.Uuid
+  title             String      @db.VarChar(255)
+  description       String?     @db.Text
+  owner             String?     @db.VarChar(255)
+  status            String      @default("ON_TRACK") @db.VarChar(50)
+  sortOrder         Int         @default(0) @map("sort_order")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @default(now()) @map("updated_at")
+  cycle             OKRCycle    @relation(fields: [cycleId], references: [id])
+  squad             Squad?      @relation(fields: [squadId], references: [id])
+  parentKeyResult   KeyResult?  @relation("SquadKRSupport", fields: [parentKeyResultId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   keyResults        KeyResult[]
+  createdById       String?     @map("created_by_id") @db.Uuid
+  updatedById       String?     @map("updated_by_id") @db.Uuid
+  source            String      @default("UI") @map("source") @db.VarChar(20)
 
   @@map("objectives")
 }
 
 model KeyResult {
-  id                   String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  objectiveId          String      @map("objective_id") @db.Uuid
-  title                String      @db.VarChar(255)
+  id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  objectiveId          String        @map("objective_id") @db.Uuid
+  title                String        @db.VarChar(255)
   target               Float
-  current              Float       @default(0)
-  unit                 String?     @db.VarChar(50)
-  sortOrder            Int         @default(0) @map("sort_order")
-  createdAt            DateTime    @default(now()) @map("created_at")
-  updatedAt            DateTime    @default(now()) @map("updated_at")
-  objective            Objective   @relation(fields: [objectiveId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  current              Float         @default(0)
+  unit                 String?       @db.VarChar(50)
+  sortOrder            Int           @default(0) @map("sort_order")
+  createdAt            DateTime      @default(now()) @map("created_at")
+  updatedAt            DateTime      @default(now()) @map("updated_at")
+  objective            Objective     @relation(fields: [objectiveId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   checkIns             CheckIn[]
   roadmapItems         RoadmapItem[]
   opportunities        Opportunity[]
-  supportingObjectives Objective[] @relation("SquadKRSupport")
+  supportingObjectives Objective[]   @relation("SquadKRSupport")
+  createdById          String?       @map("created_by_id") @db.Uuid
+  updatedById          String?       @map("updated_by_id") @db.Uuid
+  source               String        @default("UI") @map("source") @db.VarChar(20)
 
   @@map("key_results")
 }
@@ -202,6 +209,9 @@ model CheckIn {
   note        String?   @db.Text
   createdAt   DateTime  @default(now()) @map("created_at")
   keyResult   KeyResult @relation(fields: [keyResultId], references: [id])
+  createdById String?   @map("created_by_id") @db.Uuid
+  updatedById String?   @map("updated_by_id") @db.Uuid
+  source      String    @default("UI") @map("source") @db.VarChar(20)
 
   @@map("check_ins")
 }
@@ -209,54 +219,66 @@ model CheckIn {
 // ─── Discovery / OST ──────────────────────────────────────────────────────────
 
 model Opportunity {
-  id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId       String      @map("workspace_id") @db.Uuid
-  squadId           String?     @map("squad_id") @db.Uuid
-  title             String      @db.VarChar(255)
-  description       String?     @db.Text
-  customerSegment   String?     @map("customer_segment") @db.VarChar(255)
-  status            String      @default("EXPLORING") @db.VarChar(50)
-  sortOrder         Int         @default(0) @map("sort_order")
-  linkedKeyResultId String?     @map("linked_key_result_id") @db.Uuid
-  createdAt         DateTime    @default(now()) @map("created_at")
-  updatedAt         DateTime    @default(now()) @map("updated_at")
-  workspace         Workspace    @relation(fields: [workspaceId], references: [id])
-  squad             Squad?       @relation(fields: [squadId], references: [id])
-  linkedKeyResult   KeyResult?   @relation(fields: [linkedKeyResultId], references: [id])
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String         @map("workspace_id") @db.Uuid
+  squadId           String?        @map("squad_id") @db.Uuid
+  title             String         @db.VarChar(255)
+  description       String?        @db.Text
+  customerSegment   String?        @map("customer_segment") @db.VarChar(255)
+  status            String         @default("EXPLORING") @db.VarChar(50)
+  sortOrder         Int            @default(0) @map("sort_order")
+  linkedKeyResultId String?        @map("linked_key_result_id") @db.Uuid
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @default(now()) @map("updated_at")
+  workspace         Workspace      @relation(fields: [workspaceId], references: [id])
+  squad             Squad?         @relation(fields: [squadId], references: [id])
+  linkedKeyResult   KeyResult?     @relation(fields: [linkedKeyResultId], references: [id])
   solutions         Solution[]
   roadmapItems      RoadmapItem[]
   feedback          FeedbackItem[]
+  createdById       String?        @map("created_by_id") @db.Uuid
+  updatedById       String?        @map("updated_by_id") @db.Uuid
+  source            String         @default("UI") @map("source") @db.VarChar(20)
+  evidence          Evidence[]
 
   @@map("opportunities")
 }
 
 model Solution {
-  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  opportunityId String      @map("opportunity_id") @db.Uuid
-  title         String      @db.VarChar(255)
-  description   String?     @db.Text
-  status        String      @default("IDEA") @db.VarChar(50)
-  sortOrder     Int         @default(0) @map("sort_order")
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @default(now()) @map("updated_at")
-  opportunity   Opportunity @relation(fields: [opportunityId], references: [id])
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  opportunityId String        @map("opportunity_id") @db.Uuid
+  title         String        @db.VarChar(255)
+  description   String?       @db.Text
+  status        String        @default("IDEA") @db.VarChar(50)
+  sortOrder     Int           @default(0) @map("sort_order")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @default(now()) @map("updated_at")
+  opportunity   Opportunity   @relation(fields: [opportunityId], references: [id])
   assumptions   Assumption[]
   roadmapItems  RoadmapItem[]
+  createdById   String?       @map("created_by_id") @db.Uuid
+  updatedById   String?       @map("updated_by_id") @db.Uuid
+  source        String        @default("UI") @map("source") @db.VarChar(20)
+  evidence      Evidence[]
 
   @@map("solutions")
 }
 
 model Assumption {
-  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  solutionId  String      @map("solution_id") @db.Uuid
-  title       String      @db.VarChar(255)
-  riskLevel   String      @map("risk_level") @default("MEDIUM") @db.VarChar(50)
-  status      String      @default("UNTESTED") @db.VarChar(50)
-  sortOrder   Int         @default(0) @map("sort_order")
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @default(now()) @map("updated_at")
-  solution    Solution    @relation(fields: [solutionId], references: [id])
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  solutionId  String       @map("solution_id") @db.Uuid
+  title       String       @db.VarChar(255)
+  riskLevel   String       @default("MEDIUM") @map("risk_level") @db.VarChar(50)
+  status      String       @default("UNTESTED") @db.VarChar(50)
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @default(now()) @map("updated_at")
+  solution    Solution     @relation(fields: [solutionId], references: [id])
   experiments Experiment[]
+  createdById String?      @map("created_by_id") @db.Uuid
+  updatedById String?      @map("updated_by_id") @db.Uuid
+  source      String       @default("UI") @map("source") @db.VarChar(20)
+  evidence    Evidence[]
 
   @@map("assumptions")
 }
@@ -264,26 +286,29 @@ model Assumption {
 // ─── Experiments ──────────────────────────────────────────────────────────────
 
 model Experiment {
-  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId   String     @map("workspace_id") @db.Uuid
-  squadId       String?    @map("squad_id") @db.Uuid
-  assumptionId  String?    @map("assumption_id") @db.Uuid
-  title         String     @db.VarChar(255)
-  hypothesis    String     @db.Text
-  method        String     @db.Text
-  killCondition String     @map("kill_condition") @db.Text
-  status        String     @default("DESIGNING") @db.VarChar(50)
-  sortOrder     Int        @default(0) @map("sort_order")
-  startDate     DateTime?  @map("start_date")
-  endDate       DateTime?  @map("end_date")
-  conclusion    String?    @db.VarChar(50)
-  createdAt     DateTime   @default(now()) @map("created_at")
-  updatedAt     DateTime   @default(now()) @map("updated_at")
-  workspace     Workspace  @relation(fields: [workspaceId], references: [id])
-  squad         Squad?     @relation(fields: [squadId], references: [id])
-  assumption    Assumption? @relation(fields: [assumptionId], references: [id])
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String             @map("workspace_id") @db.Uuid
+  squadId       String?            @map("squad_id") @db.Uuid
+  assumptionId  String?            @map("assumption_id") @db.Uuid
+  title         String             @db.VarChar(255)
+  hypothesis    String             @db.Text
+  method        String             @db.Text
+  killCondition String             @map("kill_condition") @db.Text
+  status        String             @default("DESIGNING") @db.VarChar(50)
+  sortOrder     Int                @default(0) @map("sort_order")
+  startDate     DateTime?          @map("start_date")
+  endDate       DateTime?          @map("end_date")
+  conclusion    String?            @db.VarChar(50)
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @default(now()) @map("updated_at")
+  workspace     Workspace          @relation(fields: [workspaceId], references: [id])
+  squad         Squad?             @relation(fields: [squadId], references: [id])
+  assumption    Assumption?        @relation(fields: [assumptionId], references: [id])
   results       ExperimentResult[]
   roadmapItems  RoadmapItem[]
+  createdById   String?            @map("created_by_id") @db.Uuid
+  updatedById   String?            @map("updated_by_id") @db.Uuid
+  source        String             @default("UI") @map("source") @db.VarChar(20)
 
   @@map("experiments")
 }
@@ -296,6 +321,9 @@ model ExperimentResult {
   value        Float?
   createdAt    DateTime   @default(now()) @map("created_at")
   experiment   Experiment @relation(fields: [experimentId], references: [id])
+  createdById  String?    @map("created_by_id") @db.Uuid
+  updatedById  String?    @map("updated_by_id") @db.Uuid
+  source       String     @default("UI") @map("source") @db.VarChar(20)
 
   @@map("experiment_results")
 }
@@ -311,6 +339,8 @@ model RoadmapItem {
   horizon       String      @default("NOW") @db.VarChar(50)
   status        String      @default("ACTIVE") @db.VarChar(50)
   sortOrder     Int         @default(0) @map("sort_order")
+  startDate     DateTime?   @map("start_date")
+  endDate       DateTime?   @map("end_date")
   solutionId    String?     @map("solution_id") @db.Uuid
   keyResultId   String?     @map("key_result_id") @db.Uuid
   opportunityId String?     @map("opportunity_id") @db.Uuid
@@ -326,6 +356,9 @@ model RoadmapItem {
   experiment    Experiment?  @relation(fields: [experimentId], references: [id])
   feedback      FeedbackItem? @relation(fields: [feedbackId], references: [id])
   votes         RoadmapVote[]
+  createdById   String?       @map("created_by_id") @db.Uuid
+  updatedById   String?       @map("updated_by_id") @db.Uuid
+  source        String        @default("UI") @map("source") @db.VarChar(20)
 
   @@map("roadmap_items")
 }
@@ -333,16 +366,19 @@ model RoadmapItem {
 // ─── Squads ───────────────────────────────────────────────────────────────────
 
 model Squad {
-  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId String        @map("workspace_id") @db.Uuid
-  name        String        @db.VarChar(255)
-  color       String        @default("#6366f1") @db.VarChar(50)
-  createdAt   DateTime      @default(now()) @map("created_at")
-  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
-  objectives   Objective[]
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String        @map("workspace_id") @db.Uuid
+  name          String        @db.VarChar(255)
+  color         String        @default("#6366f1") @db.VarChar(50)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  workspace     Workspace     @relation(fields: [workspaceId], references: [id])
+  objectives    Objective[]
   opportunities Opportunity[]
-  experiments  Experiment[]
-  roadmapItems RoadmapItem[]
+  experiments   Experiment[]
+  roadmapItems  RoadmapItem[]
+  createdById   String?       @map("created_by_id") @db.Uuid
+  updatedById   String?       @map("updated_by_id") @db.Uuid
+  source        String        @default("UI") @map("source") @db.VarChar(20)
 
   @@map("squads")
 }
@@ -363,8 +399,11 @@ model CustomFieldDefinition {
   order       Int      @default(0)
   createdAt   DateTime @default(now()) @map("created_at")
 
-  workspace Workspace          @relation(fields: [workspaceId], references: [id])
-  values    CustomFieldValue[]
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id])
+  values      CustomFieldValue[]
+  createdById String?            @map("created_by_id") @db.Uuid
+  updatedById String?            @map("updated_by_id") @db.Uuid
+  source      String             @default("UI") @map("source") @db.VarChar(20)
 
   @@map("custom_field_definitions")
 }
@@ -470,6 +509,9 @@ model FeedbackItem {
   portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id])
   votes           FeedbackVote[]
   roadmapItems    RoadmapItem[]
+  createdById     String?   @map("created_by_id") @db.Uuid
+  updatedById     String?   @map("updated_by_id") @db.Uuid
+  source          String    @default("UI") @map("source") @db.VarChar(20)
 
   @@map("feedback")
 }
@@ -503,8 +545,35 @@ model Doc {
   workspace   Workspace @relation(fields: [workspaceId], references: [id])
   parent      Doc?      @relation("DocParent", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   children    Doc[]     @relation("DocParent")
+  createdById String?   @map("created_by_id") @db.Uuid
+  updatedById String?   @map("updated_by_id") @db.Uuid
+  source      String    @default("UI") @map("source") @db.VarChar(20)
 
   @@map("docs")
+}
+
+// ─── Evidence ─────────────────────────────────────────────────────────────────
+
+model Evidence {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String       @map("workspace_id") @db.Uuid
+  /// One of: interview | feedback | support_ticket | experiment_result | analytics
+  sourceType    String       @map("source_type") @db.VarChar(50)
+  excerpt       String       @db.Text
+  sourceUrl     String?      @map("source_url") @db.VarChar(2048)
+  /// One of: high | medium | low
+  confidence    String       @default("medium") @db.VarChar(50)
+  opportunityId String?      @map("opportunity_id") @db.Uuid
+  solutionId    String?      @map("solution_id") @db.Uuid
+  assumptionId  String?      @map("assumption_id") @db.Uuid
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @default(now()) @map("updated_at")
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id])
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  solution      Solution?    @relation(fields: [solutionId], references: [id])
+  assumption    Assumption?  @relation(fields: [assumptionId], references: [id])
+
+  @@map("evidence")
 }
 
 model RoadmapVote {
