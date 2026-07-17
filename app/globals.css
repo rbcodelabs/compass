@@ -80,7 +80,12 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-jakarta), system-ui, -apple-system, sans-serif;
+  /* --font-sans (not --font-jakarta directly) so a workspace's custom font
+     branding — which overrides --font-sans at :root, see
+     components/branding/workspace-theme-style.tsx — actually takes effect.
+     Defaults to --font-jakarta via the @theme inline mapping above, so this
+     is a no-op for unbranded workspaces. */
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

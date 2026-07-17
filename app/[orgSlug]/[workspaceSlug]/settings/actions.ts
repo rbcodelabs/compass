@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
+import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
 import type {
   CustomFieldType,
   CustomFieldObjectType,
@@ -618,4 +619,86 @@ export async function updatePortalSettings(
   });
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
+
+// ─── Workspace Branding ───────────────────────────────────────────────────────
+
+const BRANDING_HEX_RE = /^#[0-9a-fA-F]{6}$/;
+// Blocks CSS/HTML injection characters (`;`, `{`, `}`, `<`, `>`, `"`, backtick, `'`)
+// since fontFamily is interpolated directly into a raw <style> string and a
+// Google Fonts URL — this validation is a security boundary, not just UX.
+const BRANDING_FONT_FAMILY_RE = /^[A-Za-z0-9 '-]{1,60}$/;
+
+/**
+ * Updates a workspace's branding (color palette/custom hex, font preset/custom
+ * family, logo). `primaryHex` and `fontFamily` are eventually interpolated into
+ * a raw `dangerouslySetInnerHTML` <style> string and a font-loading URL by
+ * WorkspaceThemeStyle, so the validation below is load-bearing for security,
+ * not just data hygiene — reject the whole call on any bad field rather than
+ * silently dropping it and saving the rest.
+ */
+export async function updateWorkspaceBranding(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: {
+    paletteId?: string | null;
+    primaryHex?: string | null;
+    fontPresetId?: string | null;
+    fontFamily?: string | null;
+    logoUrl?: string | null;
+  }
+) {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  if (
+    input.primaryHex !== undefined &&
+    input.primaryHex !== null &&
+    !BRANDING_HEX_RE.test(input.primaryHex)
+  ) {
+    throw new Error("Invalid primaryHex — must be a 6-digit hex color like #4f3df2");
+  }
+
+  if (
+    input.fontFamily !== undefined &&
+    input.fontFamily !== null &&
+    !BRANDING_FONT_FAMILY_RE.test(input.fontFamily)
+  ) {
+    throw new Error(
+      "Invalid fontFamily — only letters, numbers, spaces, hyphens, and apostrophes are allowed (max 60 chars)"
+    );
+  }
+
+  if (
+    input.paletteId !== undefined &&
+    input.paletteId !== null &&
+    !PRESET_PALETTES.some((p) => p.id === input.paletteId)
+  ) {
+    throw new Error(`Unknown paletteId: ${input.paletteId}`);
+  }
+
+  if (
+    input.fontPresetId !== undefined &&
+    input.fontPresetId !== null &&
+    !PRESET_FONTS.some((f) => f.id === input.fontPresetId)
+  ) {
+    throw new Error(`Unknown fontPresetId: ${input.fontPresetId}`);
+  }
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: {
+      ...(input.paletteId !== undefined && { brandingPaletteId: input.paletteId }),
+      ...(input.primaryHex !== undefined && { brandingPrimaryHex: input.primaryHex }),
+      ...(input.fontPresetId !== undefined && { brandingFontPresetId: input.fontPresetId }),
+      ...(input.fontFamily !== undefined && { brandingFontFamily: input.fontFamily }),
+      ...(input.logoUrl !== undefined && { brandingLogoUrl: input.logoUrl }),
+      updatedAt: new Date(),
+    },
+  });
+
+  // Branding renders in the settings page AND both authenticated workspace +
+  // public portal layouts — all three revalidations matter.
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  revalidatePath(`/${orgSlug}/${workspaceSlug}`, "layout");
+  revalidatePath(`/portal/${orgSlug}/${workspaceSlug}`, "layout");
 }
