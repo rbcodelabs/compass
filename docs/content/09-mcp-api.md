@@ -48,6 +48,16 @@ The MCP server exposes tools that agents can call:
 | `update_feedback_type` | Reclassify a feedback item as a BUG or an IDEA |
 | `link_feedback_to_opportunity` | Link a feedback item (typically an IDEA) to an existing opportunity, connecting it to the discovery flow |
 | `promote_feedback_to_roadmap` | Promote a feedback item (typically a BUG) directly to the roadmap, skipping discovery entirely |
+| `list_scoring_models` | List an organization's scoring model templates (e.g. RICE, ICE) with status, formula type, version, and metric counts |
+| `get_scoring_model` | Get full detail for a scoring model, including every metric's key, label, bounds, weight, and direction |
+| `create_scoring_model` | Create a new org-level scoring model template with its metrics (WEIGHTED_SUM or MULTIPLICATIVE formula) |
+| `update_scoring_model` | Update a scoring model's name/description and/or replace its metrics (replacing metrics bumps the model version) |
+| `archive_scoring_model` | Archive a scoring model (hidden from new workspace selections, but existing usages remain valid) |
+| `get_workspace_scoring_model` | Get the scoring model currently active for a workspace, including all its metrics |
+| `set_workspace_scoring_model` | Set (or clear) the workspace's active scoring model |
+| `score_opportunity` | Compute and save an opportunity's score using its workspace's active scoring model |
+| `get_opportunity_score` | Get an opportunity's saved score, including a `stale` flag if the live model has since been updated |
+| `list_top_opportunities` | List scored opportunities ranked by normalized score (0-100); pass `orgSlug` for a cross-workspace comparability view or `workspaceId` for a single workspace |
 
 ## Example: Connecting Claude Desktop
 

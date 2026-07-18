@@ -72,12 +72,13 @@ model VerificationToken {
 // ─── Multi-tenancy ────────────────────────────────────────────────────────────
 
 model Organization {
-  id         String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  slug       String               @unique @db.VarChar(255)
-  name       String               @db.VarChar(255)
-  createdAt  DateTime             @default(now()) @map("created_at")
-  workspaces Workspace[]
-  members    OrganizationMember[]
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug          String               @unique @db.VarChar(255)
+  name          String               @db.VarChar(255)
+  createdAt     DateTime             @default(now()) @map("created_at")
+  workspaces    Workspace[]
+  members       OrganizationMember[]
+  scoringModels ScoringModel[]
 
   @@map("organizations")
 }
@@ -116,6 +117,7 @@ model Workspace {
   squads            Squad[]
   feedback          FeedbackItem[]
   docs              Doc[]
+  scoringConfig     WorkspaceScoringConfig?
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -221,6 +223,7 @@ model Opportunity {
   solutions         Solution[]
   roadmapItems      RoadmapItem[]
   feedback          FeedbackItem[]
+  score             OpportunityScore?
 
   @@map("opportunities")
 }
@@ -254,6 +257,114 @@ model Assumption {
   experiments Experiment[]
 
   @@map("assumptions")
+}
+
+// ─── Scoring Models ───────────────────────────────────────────────────────────
+// Org-level scoring model templates (RICE-style and similar), selected per
+// workspace, scoring Opportunities only in v1. See lib/scoring.ts for the
+// formula computation semantics. ADR context: Products/Compass/Brainstorm —
+// Scoring Models for Discovery Objects — 2026-07-16.md.
+
+model ScoringModel {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(255)
+  description    String?  @db.Text
+  /// One of: ACTIVE | ARCHIVED. Archived models are hidden from the workspace
+  /// picker for new selections but remain valid for workspaces already using
+  /// them and for existing OpportunityScore history.
+  status         String   @default("ACTIVE") @db.VarChar(50)
+  /// One of: WEIGHTED_SUM | MULTIPLICATIVE. See lib/scoring.ts for the
+  /// computation semantics of each.
+  formulaType    String   @default("WEIGHTED_SUM") @map("formula_type") @db.VarChar(50)
+  /// Bumped by app code (not a DB trigger) whenever the metrics array
+  /// changes shape/weights — never on name/description-only edits. Snapshotted
+  /// onto every OpportunityScore at scoring time so historical scores are
+  /// self-describing even after the live model changes.
+  version        Int      @default(1)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  organization     Organization             @relation(fields: [organizationId], references: [id])
+  metrics          ScoringModelMetric[]
+  workspaceConfigs WorkspaceScoringConfig[]
+  scores           OpportunityScore[]
+
+  @@index([organizationId])
+  @@map("scoring_models")
+}
+
+model ScoringModelMetric {
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scoringModelId String  @map("scoring_model_id") @db.Uuid
+  /// Stable machine key referenced in OpportunityScore.rawValues JSON,
+  /// e.g. "reach", "impact", "effort". Immutable after creation in practice
+  /// (changing it orphans historical rawValues keys) — enforced in the UI by
+  /// not allowing key edits after first save, only add/remove/reweight.
+  key            String  @db.VarChar(50)
+  label          String  @db.VarChar(255)
+  description    String? @db.Text
+  minValue       Float   @default(0) @map("min_value")
+  maxValue       Float   @default(10) @map("max_value")
+  /// Scalar multiplier applied to the raw input value before it enters the
+  /// formula. Default 1 = faithful classic RICE/ICE (no extra weighting).
+  weight         Float   @default(1)
+  /// POSITIVE = this metric increases the score (added in WEIGHTED_SUM,
+  /// multiplied into the numerator in MULTIPLICATIVE, e.g. Reach/Impact/
+  /// Confidence). NEGATIVE = this metric decreases the score (subtracted in
+  /// WEIGHTED_SUM, divided into the denominator in MULTIPLICATIVE, e.g.
+  /// Effort). This one field drives both formula types — see lib/scoring.ts.
+  direction      String  @default("POSITIVE") @db.VarChar(10)
+  order          Int     @default(0)
+
+  scoringModel ScoringModel @relation(fields: [scoringModelId], references: [id])
+
+  @@unique([scoringModelId, key])
+  @@map("scoring_model_metrics")
+}
+
+model WorkspaceScoringConfig {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String   @unique @map("workspace_id") @db.Uuid
+  scoringModelId String?  @map("scoring_model_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id])
+  scoringModel ScoringModel? @relation(fields: [scoringModelId], references: [id])
+
+  @@map("workspace_scoring_configs")
+}
+
+model OpportunityScore {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  opportunityId   String   @unique @map("opportunity_id") @db.Uuid
+  scoringModelId  String   @map("scoring_model_id") @db.Uuid
+  /// ScoringModel.version at the moment this score was computed. If this no
+  /// longer matches the live ScoringModel.version, the UI shows a
+  /// "scored under an earlier version" banner rather than silently
+  /// recomputing (opt-in re-score, per the versioning decision).
+  modelVersion    Int      @map("model_version")
+  /// Snapshot of the metric definitions (key/label/min/max/weight/direction)
+  /// used to compute this score, so history survives future template edits
+  /// without needing a fully versioned ScoringModelMetric table.
+  formulaSnapshot Json     @map("formula_snapshot")
+  /// { [metricKey]: number } — the raw input values as entered.
+  rawValues       Json     @map("raw_values")
+  rawScore        Float    @map("raw_score")
+  /// 0-100, comparable across workspaces/templates. This is what any
+  /// cross-workspace "top opportunities" view sorts on.
+  normalizedScore Float    @map("normalized_score")
+  scoredAt        DateTime @default(now()) @map("scored_at")
+  scoredByUserId  String?  @map("scored_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @map("updated_at")
+
+  opportunity  Opportunity  @relation(fields: [opportunityId], references: [id])
+  scoringModel ScoringModel @relation(fields: [scoringModelId], references: [id])
+
+  @@index([scoringModelId])
+  @@map("opportunity_scores")
 }
 
 // ─── Experiments ──────────────────────────────────────────────────────────────

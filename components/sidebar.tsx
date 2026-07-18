@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { Target, Lightbulb, FlaskConical, Map, MessageSquare, BookOpen, Settings, ChevronDown, HelpCircle, Check } from "lucide-react"
+import { Target, Lightbulb, FlaskConical, Map, MessageSquare, BookOpen, Settings, ChevronDown, HelpCircle, Check, Building2 } from "lucide-react"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -20,6 +20,8 @@ interface SidebarProps {
   userName: string
   userImage?: string
   workspaces: { id: string; name: string; slug: string; orgSlug: string }[]
+  /** Org admins/owners see an "Org Settings" link near the workspace switcher. */
+  isOrgAdmin?: boolean
 }
 
 const navItems = [
@@ -47,6 +49,7 @@ export function Sidebar({
   userName,
   userImage,
   workspaces,
+  isOrgAdmin = false,
 }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
@@ -123,6 +126,23 @@ export function Sidebar({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {isOrgAdmin && (
+        <div className="px-3 pb-4 -mt-2">
+          <Link
+            href={`/${orgSlug}/settings`}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+              pathname.startsWith(`/${orgSlug}/settings`)
+                ? "bg-indigo-600/20 text-white"
+                : "text-slate-500 hover:bg-slate-800/50 hover:text-slate-300"
+            )}
+          >
+            <Building2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            Org Settings
+          </Link>
+        </div>
+      )}
 
       <div className="mx-3 h-px bg-slate-800/70" />
 

@@ -17,11 +17,17 @@ const mockAssumption = {
   update: vi.fn(),
   delete: vi.fn(),
 };
+const mockWorkspace = { findFirst: vi.fn() };
+const mockWorkspaceScoringConfig = { findUnique: vi.fn() };
+const mockOpportunityScore = { upsert: vi.fn() };
 
 const mockPrisma = {
   opportunity: mockOpportunity,
   solution: mockSolution,
   assumption: mockAssumption,
+  workspace: mockWorkspace,
+  workspaceScoringConfig: mockWorkspaceScoringConfig,
+  opportunityScore: mockOpportunityScore,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -30,6 +36,11 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+vi.mock("@/auth", () => ({
+  auth: vi.fn(),
+}));
+
+import { auth } from "@/auth";
 import {
   createOpportunity,
   updateOpportunityStatus,
@@ -45,7 +56,10 @@ import {
   reorderOpportunity,
   reorderSolution,
   reorderAssumption,
+  saveOpportunityScore,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
+
+const mockAuth = vi.mocked(auth);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -57,6 +71,12 @@ beforeEach(() => {
   mockAssumption.create.mockResolvedValue({ id: "ass-1", title: "Test Assumption" });
   mockAssumption.update.mockResolvedValue({ id: "ass-1" });
   mockAssumption.delete.mockResolvedValue({ id: "ass-1" });
+  mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T>
+    ? T
+    : never);
+  mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" });
+  mockWorkspaceScoringConfig.findUnique.mockResolvedValue(null);
+  mockOpportunityScore.upsert.mockResolvedValue({ id: "score-1" });
 });
 
 // ─── createOpportunity ───────────────────────────────────────────────────────
@@ -272,5 +292,110 @@ describe("reorderAssumption", () => {
       where: { id: "ass-1" },
       data: { sortOrder: 1 },
     });
+  });
+});
+
+// ─── saveOpportunityScore ───────────────────────────────────────────────────────
+
+describe("saveOpportunityScore", () => {
+  const weightedSumModel = {
+    id: "model-1",
+    formulaType: "WEIGHTED_SUM",
+    version: 2,
+    metrics: [
+      { key: "reach", label: "Reach", minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE" },
+      { key: "effort", label: "Effort", minValue: 0, maxValue: 10, weight: 1, direction: "NEGATIVE" },
+    ],
+  };
+
+  beforeEach(() => {
+    mockOpportunity.findFirst.mockResolvedValue({ id: "opp-1" });
+    mockWorkspaceScoringConfig.findUnique.mockResolvedValue({
+      scoringModelId: "model-1",
+      scoringModel: weightedSumModel,
+    });
+  });
+
+  it("computes and upserts a score for valid raw values", async () => {
+    const result = await saveOpportunityScore(
+      "org",
+      "ws",
+      "opp-1",
+      { reach: 8, effort: 2 },
+      "/path"
+    );
+
+    expect(result.rawScore).toBe(6); // 8 - 2
+    expect(mockOpportunityScore.upsert).toHaveBeenCalledWith({
+      where: { opportunityId: "opp-1" },
+      create: expect.objectContaining({
+        opportunityId: "opp-1",
+        scoringModelId: "model-1",
+        modelVersion: 2,
+        rawScore: 6,
+        scoredByUserId: "user-1",
+      }),
+      update: expect.objectContaining({
+        scoringModelId: "model-1",
+        modelVersion: 2,
+        rawScore: 6,
+        scoredByUserId: "user-1",
+        updatedAt: expect.any(Date),
+      }),
+    });
+  });
+
+  it("snapshots the formula definitions at save time", async () => {
+    await saveOpportunityScore("org", "ws", "opp-1", { reach: 5, effort: 1 }, "/path");
+
+    const createArg = mockOpportunityScore.upsert.mock.calls[0][0].create;
+    expect(createArg.formulaSnapshot).toEqual([
+      { key: "reach", label: "Reach", minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE" },
+      { key: "effort", label: "Effort", minValue: 0, maxValue: 10, weight: 1, direction: "NEGATIVE" },
+    ]);
+  });
+
+  it("throws Opportunity not found when it doesn't belong to this workspace", async () => {
+    mockOpportunity.findFirst.mockResolvedValue(null);
+    await expect(
+      saveOpportunityScore("org", "ws", "opp-1", { reach: 5, effort: 1 }, "/path")
+    ).rejects.toThrow("Opportunity not found");
+    expect(mockOpportunityScore.upsert).not.toHaveBeenCalled();
+  });
+
+  it("throws when the workspace has no active scoring model", async () => {
+    mockWorkspaceScoringConfig.findUnique.mockResolvedValue(null);
+    await expect(
+      saveOpportunityScore("org", "ws", "opp-1", { reach: 5, effort: 1 }, "/path")
+    ).rejects.toThrow("no active scoring model");
+    expect(mockOpportunityScore.upsert).not.toHaveBeenCalled();
+  });
+
+  it("throws when a required metric value is missing", async () => {
+    await expect(
+      saveOpportunityScore("org", "ws", "opp-1", { reach: 5 }, "/path")
+    ).rejects.toThrow('Missing value for metric "effort"');
+    expect(mockOpportunityScore.upsert).not.toHaveBeenCalled();
+  });
+
+  it("throws when a value is outside the metric's bounds", async () => {
+    await expect(
+      saveOpportunityScore("org", "ws", "opp-1", { reach: 50, effort: 1 }, "/path")
+    ).rejects.toThrow('Value for "reach" must be between 0 and 10');
+    expect(mockOpportunityScore.upsert).not.toHaveBeenCalled();
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      saveOpportunityScore("org", "ws", "opp-1", { reach: 5, effort: 1 }, "/path")
+    ).rejects.toThrow("Unauthorized");
+  });
+
+  it("throws Workspace not found when caller is not a member", async () => {
+    mockWorkspace.findFirst.mockResolvedValue(null);
+    await expect(
+      saveOpportunityScore("org", "ws", "opp-1", { reach: 5, effort: 1 }, "/path")
+    ).rejects.toThrow("Workspace not found");
   });
 });

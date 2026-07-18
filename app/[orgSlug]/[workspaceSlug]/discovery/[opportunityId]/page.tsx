@@ -9,6 +9,7 @@ import { AddSolutionForm } from "@/components/discovery/add-solution-form";
 import { OpportunityHeader } from "@/components/discovery/opportunity-header";
 import { OSTTreeView } from "@/components/discovery/ost-tree-view";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
+import { ScoringPanel } from "@/components/discovery/scoring-panel";
 import type {
   OpportunityStatus,
   SolutionStatus,
@@ -20,6 +21,12 @@ import type {
   CustomFieldType,
   CustomFieldValue,
   SquadData,
+  ScoringModelData,
+  ScoringModelStatus,
+  ScoringFormulaType,
+  MetricDirection,
+  OpportunityScoreData,
+  FormulaSnapshotMetric,
 } from "@/lib/types";
 
 export async function generateMetadata({
@@ -163,10 +170,62 @@ export default async function OpportunityDetailPage({ params }: Props) {
       currentValue: (valueByFieldId.get(f.id) ?? null) as CustomFieldValue,
     }));
 
+  // Fetch the workspace's active scoring model (if any) and this
+  // opportunity's existing score. The Scoring tab only renders when the
+  // workspace has an active model, mirroring the hasCustomFields pattern.
+  const scoringConfig = await prisma.workspaceScoringConfig.findUnique({
+    where: { workspaceId: workspace.id },
+    include: { scoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
+  });
+
+  const scoringModel: ScoringModelData | null = scoringConfig?.scoringModel
+    ? {
+        id: scoringConfig.scoringModel.id,
+        name: scoringConfig.scoringModel.name,
+        description: scoringConfig.scoringModel.description,
+        status: scoringConfig.scoringModel.status as ScoringModelStatus,
+        formulaType: scoringConfig.scoringModel.formulaType as ScoringFormulaType,
+        version: scoringConfig.scoringModel.version,
+        metrics: scoringConfig.scoringModel.metrics.map((m) => ({
+          id: m.id,
+          key: m.key,
+          label: m.label,
+          description: m.description,
+          minValue: m.minValue,
+          maxValue: m.maxValue,
+          weight: m.weight,
+          direction: m.direction as MetricDirection,
+          order: m.order,
+        })),
+      }
+    : null;
+
+  const rawScore = scoringModel
+    ? await prisma.opportunityScore.findUnique({ where: { opportunityId } })
+    : null;
+
+  const existingScore: OpportunityScoreData | null =
+    rawScore && scoringModel
+      ? {
+          id: rawScore.id,
+          scoringModelId: rawScore.scoringModelId,
+          scoringModelName: scoringModel.name,
+          modelVersion: rawScore.modelVersion,
+          formulaType: scoringModel.formulaType,
+          formulaSnapshot: rawScore.formulaSnapshot as unknown as FormulaSnapshotMetric[],
+          rawValues: rawScore.rawValues as Record<string, number>,
+          rawScore: rawScore.rawScore,
+          normalizedScore: rawScore.normalizedScore,
+          scoredAt: rawScore.scoredAt.toISOString(),
+          stale: rawScore.modelVersion < scoringModel.version,
+        }
+      : null;
+
   const boardPath = `/${orgSlug}/${workspaceSlug}/discovery`;
   const detailPath = `/${orgSlug}/${workspaceSlug}/discovery/${opportunityId}`;
 
   const hasCustomFields = customFields.length > 0;
+  const hasActiveScoringModel = scoringModel !== null;
 
   return (
     <div className="min-h-full p-4 sm:p-6 md:p-8">
@@ -205,6 +264,9 @@ export default async function OpportunityDetailPage({ params }: Props) {
               Solutions ({opportunity.solutions.length})
             </TabsTrigger>
             <TabsTrigger value="tree">OST Tree</TabsTrigger>
+            {hasActiveScoringModel && (
+              <TabsTrigger value="scoring">Scoring</TabsTrigger>
+            )}
             {hasCustomFields && (
               <TabsTrigger value="details">Details</TabsTrigger>
             )}
@@ -270,6 +332,19 @@ export default async function OpportunityDetailPage({ params }: Props) {
               workspaceSlug={workspaceSlug}
             />
           </TabsContent>
+
+          {hasActiveScoringModel && scoringModel && (
+            <TabsContent value="scoring" className="pt-4">
+              <ScoringPanel
+                orgSlug={orgSlug}
+                workspaceSlug={workspaceSlug}
+                opportunityId={opportunityId}
+                revalidatePathStr={detailPath}
+                scoringModel={scoringModel}
+                existingScore={existingScore}
+              />
+            </TabsContent>
+          )}
 
           {hasCustomFields && (
             <TabsContent value="details" className="pt-4">
