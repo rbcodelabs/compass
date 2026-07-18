@@ -9,10 +9,12 @@ import {
 import { usePanelContext } from "./panel-context";
 import { ExperimentPanel } from "./experiment-panel";
 import { OpportunityPanel } from "./opportunity-panel";
+import { DiscoveryRailPanel } from "./discovery-rail-panel";
 
 const PANEL_TITLES: Record<string, string> = {
   experiment: "Experiment",
   opportunity: "Opportunity",
+  "discovery-rail": "Discovery",
 };
 
 export function PanelShell() {
@@ -42,6 +44,13 @@ export function PanelShell() {
           {panel?.type === "opportunity" && (
             <OpportunityPanel
               opportunityId={panel.id}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+            />
+          )}
+          {panel?.type === "discovery-rail" && (
+            <DiscoveryRailPanel
+              activeOpportunityId={panel.id}
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
             />

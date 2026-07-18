@@ -21,9 +21,10 @@ type Props = {
   /** When set, pre-fills status and hides the status selector (column-embedded mode). */
   defaultStatus?: OpportunityStatus;
   squads?: SquadData[];
+  onCreated?: (id: string) => void;
 };
 
-export function CreateOpportunityForm({ workspaceId, defaultStatus, squads = [] }: Props) {
+export function CreateOpportunityForm({ workspaceId, defaultStatus, squads = [], onCreated }: Props) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [status, setStatus] = useState<OpportunityStatus>(defaultStatus ?? "EXPLORING");
@@ -38,7 +39,7 @@ export function CreateOpportunityForm({ workspaceId, defaultStatus, squads = [] 
     if (!title) return;
 
     startTransition(async () => {
-      await createOpportunity(workspaceId, {
+      const created = await createOpportunity(workspaceId, {
         title,
         description: (data.get("description") as string).trim() || undefined,
         customerSegment:
@@ -50,6 +51,7 @@ export function CreateOpportunityForm({ workspaceId, defaultStatus, squads = [] 
       formRef.current?.reset();
       setStatus(defaultStatus ?? "EXPLORING");
       setSquadId(null);
+      onCreated?.(created.id);
     });
   }
 

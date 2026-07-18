@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useCallback } from "react";
 
-export type PanelType = "experiment" | "opportunity";
+export type PanelType = "experiment" | "opportunity" | "discovery-rail";
 
 export type PanelState = {
   type: PanelType;

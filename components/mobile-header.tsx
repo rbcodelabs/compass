@@ -2,8 +2,9 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Settings, BookOpen, HelpCircle } from "lucide-react"
+import { Settings, BookOpen, HelpCircle, Lightbulb } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { usePanelContext } from "@/components/panels/panel-context"
 
 interface MobileHeaderProps {
   orgSlug: string
@@ -13,7 +14,13 @@ interface MobileHeaderProps {
 
 export function MobileHeader({ orgSlug, workspaceSlug, workspaceName }: MobileHeaderProps) {
   const pathname = usePathname()
+  const { openPanel } = usePanelContext()
   const base = `/${orgSlug}/${workspaceSlug}`
+
+  const discoveryBase = `${base}/discovery`
+  const discoveryDetailMatch = pathname.startsWith(discoveryBase)
+    ? /^\/([^/]+)\/?$/.exec(pathname.slice(discoveryBase.length))
+    : null
 
   return (
     <header
@@ -45,6 +52,16 @@ export function MobileHeader({ orgSlug, workspaceSlug, workspaceName }: MobileHe
 
       {/* Right actions */}
       <div className="flex items-center gap-0.5 shrink-0">
+        {discoveryDetailMatch && (
+          <button
+            onClick={() => openPanel("discovery-rail", discoveryDetailMatch[1])}
+            className="flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors"
+            aria-label="Browse opportunities"
+          >
+            <Lightbulb className="w-3.5 h-3.5" aria-hidden="true" />
+            <span className="text-[10px] font-medium leading-none">Browse</span>
+          </button>
+        )}
         <Link
           href={`${base}/docs`}
           className={cn(
