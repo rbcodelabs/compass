@@ -31,6 +31,7 @@ import {
   promoteToRoadmap,
   promoteFeedbackToRoadmap,
   updateSortOrder,
+  updateRoadmapItem,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 
 beforeEach(() => {
@@ -91,6 +92,19 @@ describe("addRoadmapItem", () => {
     await expect(
       addRoadmapItem("ws-1", { title: "Fail", horizon: "NOW" }, "/path")
     ).rejects.toThrow("DB error");
+  });
+
+  it("passes through optional startDate and endDate", async () => {
+    const startDate = new Date("2026-07-01");
+    const endDate = new Date("2026-09-30");
+    await addRoadmapItem(
+      "ws-1",
+      { title: "Timed feature", horizon: "NOW", startDate, endDate },
+      "/path"
+    );
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.startDate).toBe(startDate);
+    expect(data.endDate).toBe(endDate);
   });
 });
 
@@ -176,6 +190,22 @@ describe("promoteToRoadmap", () => {
     expect(data.squadId).toBe("squad-1");
     expect(data.opportunityId).toBe("opp-1");
   });
+
+  it("passes through optional dates when scheduled directly onto the timeline", async () => {
+    const startDate = new Date("2026-07-01");
+    const endDate = new Date("2026-09-30");
+    await promoteToRoadmap("sol-1", "ws-1", "NOW", null, null, { startDate, endDate });
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.startDate).toBe(startDate);
+    expect(data.endDate).toBe(endDate);
+  });
+
+  it("creates without dates when not scheduled with a timeframe", async () => {
+    await promoteToRoadmap("sol-1", "ws-1", "NOW", null, null);
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.startDate).toBeUndefined();
+    expect(data.endDate).toBeUndefined();
+  });
 });
 
 // ─── promoteFeedbackToRoadmap ─────────────────────────────────────────────────
@@ -226,6 +256,22 @@ describe("promoteFeedbackToRoadmap", () => {
       promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path")
     ).rejects.toThrow("DB error");
   });
+
+  it("passes through optional dates when scheduled directly onto the timeline", async () => {
+    const startDate = new Date("2026-08-01");
+    const endDate = new Date("2026-08-15");
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path", { startDate, endDate });
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.startDate).toBe(startDate);
+    expect(data.endDate).toBe(endDate);
+  });
+
+  it("creates without dates when not scheduled with a timeframe", async () => {
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path");
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.startDate).toBeUndefined();
+    expect(data.endDate).toBeUndefined();
+  });
 });
 
 // ─── updateSortOrder ──────────────────────────────────────────────────────────
@@ -237,5 +283,46 @@ describe("updateSortOrder", () => {
       where: { id: "item-1" },
       data: { sortOrder: 9 },
     });
+  });
+});
+
+// ─── updateRoadmapItem ────────────────────────────────────────────────────────
+
+describe("updateRoadmapItem", () => {
+  it("updates only the provided fields and always sets updatedAt explicitly", async () => {
+    const startDate = new Date("2026-08-01");
+    const endDate = new Date("2026-08-15");
+    await updateRoadmapItem(
+      "item-1",
+      { title: "Renamed", startDate, endDate },
+      "/path"
+    );
+    const call = mockRoadmapItem.update.mock.calls[0][0];
+    expect(call.where).toEqual({ id: "item-1" });
+    expect(call.data.title).toBe("Renamed");
+    expect(call.data.startDate).toBe(startDate);
+    expect(call.data.endDate).toBe(endDate);
+    expect(call.data.description).toBeUndefined();
+    expect(call.data.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("leaves fields untouched when not provided (undefined) but clears when explicitly null", async () => {
+    await updateRoadmapItem(
+      "item-1",
+      { description: "New description", startDate: null, endDate: null },
+      "/path"
+    );
+    const call = mockRoadmapItem.update.mock.calls[0][0];
+    expect(call.data.title).toBeUndefined();
+    expect(call.data.description).toBe("New description");
+    expect(call.data.startDate).toBeNull();
+    expect(call.data.endDate).toBeNull();
+  });
+
+  it("propagates DB errors for a missing item id", async () => {
+    mockRoadmapItem.update.mockRejectedValue(new Error("Record to update not found"));
+    await expect(
+      updateRoadmapItem("item-missing", { title: "X" }, "/path")
+    ).rejects.toThrow("Record to update not found");
   });
 });

@@ -10,6 +10,8 @@ import { OpportunityHeader } from "@/components/discovery/opportunity-header";
 import { OSTTreeView } from "@/components/discovery/ost-tree-view";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { ScoringPanel } from "@/components/discovery/scoring-panel";
+import { EvidenceList } from "@/components/discovery/evidence-list";
+import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import type {
   OpportunityStatus,
   SolutionStatus,
@@ -27,6 +29,8 @@ import type {
   MetricDirection,
   OpportunityScoreData,
   FormulaSnapshotMetric,
+  EvidenceSourceType,
+  EvidenceConfidence,
 } from "@/lib/types";
 
 export async function generateMetadata({
@@ -85,9 +89,11 @@ export default async function OpportunityDetailPage({ params }: Props) {
         solutions: {
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           include: {
+            _count: { select: { evidence: true } },
             assumptions: {
               orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
               include: {
+                _count: { select: { evidence: true } },
                 experiments: {
                   select: {
                     id: true,
@@ -113,6 +119,11 @@ export default async function OpportunityDetailPage({ params }: Props) {
   ]);
 
   if (!opportunity) notFound();
+
+  const evidence = await prisma.evidence.findMany({
+    where: { opportunityId },
+    orderBy: { createdAt: "desc" },
+  });
 
   const squads: SquadData[] = rawSquads.map((s) => ({
     id: s.id,
@@ -267,6 +278,9 @@ export default async function OpportunityDetailPage({ params }: Props) {
             {hasActiveScoringModel && (
               <TabsTrigger value="scoring">Scoring</TabsTrigger>
             )}
+            <TabsTrigger value="evidence">
+              Evidence ({evidence.length})
+            </TabsTrigger>
             {hasCustomFields && (
               <TabsTrigger value="details">Details</TabsTrigger>
             )}
@@ -345,6 +359,23 @@ export default async function OpportunityDetailPage({ params }: Props) {
               />
             </TabsContent>
           )}
+
+          <TabsContent value="evidence" className="flex flex-col gap-3 pt-4">
+            <AddEvidenceDialog
+              workspaceId={workspace.id}
+              nodeType="opportunity"
+              nodeId={opportunityId}
+              revalidatePathStr={detailPath}
+            />
+            <EvidenceList
+              evidence={evidence.map((e) => ({
+                ...e,
+                sourceType: e.sourceType as EvidenceSourceType,
+                confidence: e.confidence as EvidenceConfidence,
+              }))}
+              revalidatePathStr={detailPath}
+            />
+          </TabsContent>
 
           {hasCustomFields && (
             <TabsContent value="details" className="pt-4">

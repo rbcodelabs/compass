@@ -4,9 +4,12 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
+import { RoadmapGantt } from "@/components/roadmap/roadmap-gantt";
+import { RoadmapViewToggle } from "@/components/roadmap/roadmap-view-toggle";
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
 import type { Horizon, SquadData } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
+import type { UnscheduledItem } from "@/components/roadmap/unscheduled-items-panel";
 
 export const metadata = {
   title: "Roadmap",
@@ -14,7 +17,7 @@ export const metadata = {
 
 interface RoadmapPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string }>;
+  searchParams: Promise<{ squad?: string; view?: string }>;
 }
 
 export default async function RoadmapPage({ params, searchParams }: RoadmapPageProps) {
@@ -22,7 +25,8 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const { squad: squadFilter } = await searchParams;
+  const { squad: squadFilter, view: viewParam } = await searchParams;
+  const view = viewParam === "timeline" ? "timeline" : "board";
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
@@ -34,7 +38,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
 
   if (!workspace) notFound();
 
-  const [rawSquads, items, rawKRs, rawSolutions, rawOpportunities, rawExperiments] = await Promise.all([
+  const [rawSquads, items, rawKRs, rawSolutions, rawOpportunities, rawExperiments, unscheduledSolutions, unscheduledBugs] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { createdAt: "asc" },
@@ -69,6 +73,9 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
         feedback: {
           select: { id: true, title: true, type: true },
         },
+        squad: {
+          select: { id: true, name: true, color: true },
+        },
       },
     }),
     prisma.keyResult.findMany({
@@ -98,6 +105,35 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       where: { workspaceId: workspace.id, status: { not: "KILLED" } },
       select: { id: true, title: true, status: true },
       orderBy: { createdAt: "asc" },
+    }),
+    // Validated/in-delivery Solutions with no ACTIVE RoadmapItem yet — the
+    // same "ready to promote" condition as the Discovery solution card's
+    // own Promote-to-Roadmap button, just surfaced on the roadmap itself.
+    prisma.solution.findMany({
+      where: {
+        opportunity: { workspaceId: workspace.id },
+        status: { in: ["VALIDATED", "IN_DELIVERY"] },
+        roadmapItems: { none: { status: "ACTIVE" } },
+      },
+      select: {
+        id: true,
+        title: true,
+        opportunityId: true,
+        opportunity: { select: { title: true, squadId: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    // Bug-type feedback with no ACTIVE RoadmapItem yet. Ideas are excluded —
+    // they're expected to go through Opportunity -> Solution discovery
+    // first, same distinction the Feedback board already makes.
+    prisma.feedbackItem.findMany({
+      where: {
+        workspaceId: workspace.id,
+        type: "BUG",
+        roadmapItems: { none: { status: "ACTIVE" } },
+      },
+      select: { id: true, title: true },
+      orderBy: { voteCount: "desc" },
     }),
   ]);
 
@@ -136,6 +172,8 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     opportunityId: item.opportunityId ?? null,
     experimentId: item.experimentId ?? null,
     feedbackId: item.feedbackId ?? null,
+    startDate: item.startDate ? item.startDate.toISOString() : null,
+    endDate: item.endDate ? item.endDate.toISOString() : null,
     solution: item.solution ?? null,
     keyResult: item.keyResult
       ? {
@@ -150,33 +188,68 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     opportunity: item.opportunity ?? null,
     experiment: item.experiment ?? null,
     feedback: item.feedback ?? null,
+    squad: item.squad ?? null,
   }));
+
+  const unscheduledItems: UnscheduledItem[] = [
+    ...unscheduledSolutions.map((sol) => ({
+      kind: "solution" as const,
+      id: sol.id,
+      title: sol.title,
+      opportunityId: sol.opportunityId,
+      opportunityTitle: sol.opportunity.title,
+      squadId: sol.opportunity.squadId ?? null,
+    })),
+    ...unscheduledBugs.map((fb) => ({
+      kind: "feedback" as const,
+      id: fb.id,
+      title: fb.title,
+    })),
+  ];
 
   return (
     <div className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-h-0">
-      <div className="shrink-0">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Roadmap</h1>
-        <p className="text-slate-500 text-sm mt-1">
-          Drag items between horizons to update your plan.
-        </p>
+      <div className="shrink-0 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Roadmap</h1>
+          <p className="text-slate-500 text-sm mt-1">
+            {view === "timeline"
+              ? "See when items are planned to start and finish."
+              : "Drag items between horizons to update your plan."}
+          </p>
+        </div>
+        <Suspense>
+          <RoadmapViewToggle view={view} />
+        </Suspense>
       </div>
 
       <Suspense>
         <SquadFilterBar squads={squads} />
       </Suspense>
 
-      <div className="overflow-x-auto min-w-0">
-        <RoadmapBoard
-          initialItems={cardItems}
+      {view === "timeline" ? (
+        <RoadmapGantt
+          items={cardItems}
           workspaceId={workspace.id}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          availableKRs={availableKRs}
-          availableSolutions={availableSolutions}
-          availableOpportunities={rawOpportunities}
-          availableExperiments={availableExperiments}
+          unscheduledItems={unscheduledItems}
+          revalidatePathStr={`/${orgSlug}/${workspaceSlug}/roadmap`}
         />
-      </div>
+      ) : (
+        <div className="overflow-x-auto min-w-0">
+          <RoadmapBoard
+            initialItems={cardItems}
+            workspaceId={workspace.id}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            availableKRs={availableKRs}
+            availableSolutions={availableSolutions}
+            availableOpportunities={rawOpportunities}
+            availableExperiments={availableExperiments}
+            unscheduledItems={unscheduledItems}
+            squads={squads}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,200 @@
+/**
+ * Roadmap "Not yet on the roadmap" functional spec.
+ *
+ * Journey:
+ *   1. Create a validated Solution via Discovery and a Bug via the public
+ *      portal — neither is on the roadmap yet.
+ *   2. On the roadmap Board, confirm both appear in the "Not yet on the
+ *      roadmap" panel.
+ *   3. Drag the Solution card onto the NOW column — confirm it lands there
+ *      and disappears from the unscheduled panel.
+ *   4. Use the Bug card's quick-add menu (no drag) to add it to NEXT —
+ *      confirm it lands there too.
+ *   5. Create a second Solution, switch to Timeline view, confirm it's
+ *      listed as unscheduled there too, then drag it onto the Gantt chart
+ *      area — confirm the schedule dialog opens, fill in dates, save, and
+ *      confirm the item now renders as a bar on the Timeline.
+ *
+ * dnd-kit's PointerSensor needs real mouse movement (not a single jump) to
+ * activate past its 8px activation-distance threshold, so drags here are
+ * simulated with page.mouse.move/down/up rather than Playwright's built-in
+ * dragTo (which doesn't reliably trigger pointer-sensor-based DnD).
+ */
+import { test, expect } from "../fixtures/index";
+import type { Page } from "@playwright/test";
+
+async function dragTo(page: Page, source: ReturnType<Page["locator"]>, targetBox: { x: number; y: number; width: number; height: number }) {
+  const sourceBox = await source.boundingBox();
+  if (!sourceBox) throw new Error("drag source has no bounding box");
+
+  const startX = sourceBox.x + sourceBox.width / 2;
+  const startY = sourceBox.y + sourceBox.height / 2;
+  const endX = targetBox.x + targetBox.width / 2;
+  const endY = targetBox.y + targetBox.height / 2;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  // Small initial move past dnd-kit's PointerSensor activation distance (8px).
+  await page.mouse.move(startX + 15, startY + 15, { steps: 5 });
+  await page.mouse.move(endX, endY, { steps: 15 });
+  await page.mouse.up();
+}
+
+async function createValidatedSolution(page: Page, base: string, title: string) {
+  // Deliberately unrelated to `title` (not a substring of it, nor vice
+  // versa) — embedding one title inside the other makes getByText(title)
+  // ambiguously match the opportunity heading too.
+  const oppTitle = `E2E Unsched Opportunity ${Math.random().toString(36).slice(2, 10)}`;
+
+  await page.goto(`${base}/discovery`);
+  await page.waitForLoadState("networkidle");
+
+  await page.getByRole("button", { name: /Add opportunity/i }).first().click();
+  await page.getByLabel("Title").fill(oppTitle);
+  await page.getByRole("button", { name: "Create Opportunity" }).click();
+  await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole("link", { name: oppTitle }).click();
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
+
+  await page.getByRole("button", { name: "Add Solution" }).click();
+  await page.getByLabel("Title").fill(title);
+  await page.getByRole("button", { name: "Add Solution" }).last().click();
+  await expect(page.getByText(title)).toBeVisible({ timeout: 10_000 });
+
+  await page.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
+  await page.getByRole("option", { name: "Validated" }).click();
+
+  // Wait for the Select to close and the server action to finish (isPending
+  // -> false) before asserting the new label, same as discovery-roadmap.spec.ts.
+  await expect(
+    page.locator('[role="combobox"]').filter({ hasText: /Idea|Validated/ })
+  ).not.toBeDisabled({ timeout: 15_000 });
+
+  // Server actions + revalidatePath can lag in dev mode; reload to confirm
+  // the status change actually landed rather than trusting client-only state.
+  await page.reload();
+  await page.waitForLoadState("domcontentloaded");
+  await expect(
+    page.locator('[role="combobox"]').filter({ hasText: "Validated" })
+  ).toBeVisible({ timeout: 10_000 });
+}
+
+test.describe("Roadmap — not yet on the roadmap", () => {
+  test(
+    "drag a solution onto a horizon, quick-add a bug, drag a second solution onto the timeline",
+    async ({ page, base, orgSlug, workspaceSlug }) => {
+      const ts = Date.now();
+      const solTitle = `E2E Board Solution ${ts}`;
+      const sol2Title = `E2E Timeline Solution ${ts}`;
+      const bugTitle = `E2E Unsched Bug ${ts}`;
+
+      // ── 1. Create the candidates ────────────────────────────────────────────
+      await createValidatedSolution(page, base, solTitle);
+      await createValidatedSolution(page, base, sol2Title);
+
+      // Enable the public feedback portal (Settings), same as
+      // feedback-bug-roadmap.spec.ts — PortalSettingsPanel renders three
+      // toggles in a fixed order (roadmap, feedback, portal-auth-required),
+      // so the feedback toggle is always the second switch on the page.
+      await page.goto(`${base}/settings`);
+      await page.waitForLoadState("networkidle");
+      const feedbackToggle = page.getByRole("switch").nth(1);
+      if ((await feedbackToggle.getAttribute("aria-checked")) !== "true") {
+        await feedbackToggle.click();
+        await expect(feedbackToggle).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
+      }
+
+      // NOTE: submission here can be disabled if the workspace currently has
+      // portalAuthRequired on, or fail if "feedback enabled" gets toggled
+      // off — both are workspace-wide settings shared with every other spec
+      // in this run, and portal.spec.ts's account-auth test independently
+      // toggles both for the duration of the magic-link round trip it
+      // drives (with its own before/after tracking, racing against this
+      // spec's). There's no authenticated (non-portal) path to create a
+      // FeedbackItem to route around this. This is a pre-existing
+      // architectural gap in the test suite — shared mutable workspace
+      // state across parallel specs, with no per-test isolation — that
+      // equally affects the existing feedback-bug-roadmap.spec.ts; it's not
+      // something introduced by this feature and out of scope to fix here.
+      await page.goto(`/portal/${orgSlug}/${workspaceSlug}/feedback`);
+      await page.waitForLoadState("networkidle");
+      await page.getByRole("button", { name: "Bug" }).click();
+      await page.getByLabel("Title").fill(bugTitle);
+      await page.getByRole("button", { name: "Submit" }).click();
+      await expect(page.getByText("Thank you for your feedback!")).toBeVisible({ timeout: 10_000 });
+
+      // ── 2. Roadmap Board: confirm both show up as unscheduled ──────────────
+      await page.goto(`${base}/roadmap`);
+      await page.waitForLoadState("networkidle");
+
+      await expect(page.getByText("Not yet on the roadmap")).toBeVisible({ timeout: 10_000 });
+      // Scoped to the panel specifically — dnd-kit's DragOverlay renders a
+      // second (briefly-persisting, drop-animating) clone of the dragged
+      // card elsewhere in the DOM, which would otherwise make these
+      // locators ambiguous right after a drop.
+      const unscheduledPanel = page.locator("#unscheduled-items-panel");
+      const solutionUnscheduledCard = unscheduledPanel
+        .locator('[data-slot="card"]')
+        .filter({ hasText: solTitle });
+      const bugUnscheduledCard = unscheduledPanel.locator('[data-slot="card"]').filter({ hasText: bugTitle });
+      await expect(solutionUnscheduledCard).toBeVisible();
+      await expect(bugUnscheduledCard).toBeVisible();
+
+      // ── 3. Drag the solution onto the NOW column ────────────────────────────
+      const dragHandle = solutionUnscheduledCard.getByLabel("Drag to schedule");
+      const nowColumnBox = await page.locator("#roadmap-column-NOW").boundingBox();
+      if (!nowColumnBox) throw new Error("NOW column not found");
+      await dragTo(page, dragHandle, nowColumnBox);
+
+      await expect(solutionUnscheduledCard).not.toBeVisible({ timeout: 10_000 });
+      const nowColumn = page.locator("#roadmap-column-NOW");
+      // .first() — the promoted item's own title AND its "Solution" link
+      // chip both show the same solution title, so this text appears twice
+      // on the card; either occurrence confirms it landed here.
+      await expect(nowColumn.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
+
+      // ── 4. Quick-add the bug to NEXT via its card menu (no drag) ────────────
+      await bugUnscheduledCard.hover();
+      await bugUnscheduledCard.getByLabel("Card actions").click();
+      await page.getByRole("menuitem", { name: "Add to Next" }).click();
+
+      await expect(bugUnscheduledCard).not.toBeVisible({ timeout: 10_000 });
+      const nextColumn = page.locator("#roadmap-column-NEXT");
+      await expect(nextColumn.getByText(bugTitle)).toBeVisible({ timeout: 10_000 });
+
+      // ── 5. Timeline: drag the second solution onto the chart, schedule it ──
+      await page.getByRole("tab", { name: "Timeline" }).click();
+      await expect(page).toHaveURL(/view=timeline/);
+      await page.waitForLoadState("networkidle");
+
+      const sol2UnscheduledCard = unscheduledPanel.locator('[data-slot="card"]').filter({ hasText: sol2Title });
+      await expect(sol2UnscheduledCard).toBeVisible({ timeout: 10_000 });
+
+      const dropZoneBox = await page.locator("#gantt-drop-zone").boundingBox();
+      if (!dropZoneBox) throw new Error("Gantt drop zone not found");
+      await dragTo(page, sol2UnscheduledCard.getByLabel("Drag to schedule"), dropZoneBox);
+
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.getByRole("heading", { name: "Schedule on the roadmap" })).toBeVisible({
+        timeout: 10_000,
+      });
+      // The unscheduled panel still shows the card behind the dialog at this
+      // point (it's only removed from state once scheduling succeeds), so
+      // scope to the dialog to avoid matching both.
+      await expect(dialog.getByText(sol2Title)).toBeVisible();
+      // Dates are pre-filled with sensible defaults (today -> +14 days); just submit.
+      await dialog.getByRole("button", { name: "Schedule" }).click();
+
+      await expect(page.getByRole("heading", { name: "Schedule on the roadmap" })).not.toBeVisible({
+        timeout: 10_000,
+      });
+      await expect(sol2UnscheduledCard).not.toBeVisible({ timeout: 10_000 });
+      // The Gantt library renders the task name in both its own grid table
+      // and our custom bar template, so scope to .first() to avoid a
+      // strict-mode violation — either occurrence confirms it rendered.
+      await expect(page.getByText(sol2Title).first()).toBeVisible({ timeout: 10_000 });
+    }
+  );
+});

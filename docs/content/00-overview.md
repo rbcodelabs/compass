@@ -28,6 +28,8 @@ Compass organises product work into five connected layers:
 
 Every section in Compass is designed to reinforce the others. When you promote an opportunity to ACTIVE status on the Discovery board, it surfaces as a candidate for your roadmap. When an experiment concludes with PROCEED, the validated solution can be linked to a roadmap item. OKR check-ins pull in linked roadmap progress automatically.
 
+Any opportunity, solution, or assumption can also carry linked **Evidence** — interview quotes, feedback, support tickets, experiment results, or analytics — so a claim on the tree is never just an opinion. See the Evidence section under Discovery for details.
+
 The **OST Tree view** in Discovery lets you see the full tree at a glance: outcome at the top, opportunities branching below, solutions hanging off each opportunity, and assumptions attached to each solution.
 
 ## Supporting Features
@@ -38,6 +40,7 @@ Beyond the core OST workflow, Compass includes:
 - **Docs** — A rich-text editor for internal documentation. Pages live in a hierarchical tree and support inline screenshots.
 - **Squads** — Organise objects by team for filtered views across every section.
 - **Custom Fields** — Extend any object type with your own fields (text, number, date, select, etc.).
+- **Branding** — Customize a workspace's accent color, font, and logo — applied consistently across the internal app and its public feedback/roadmap portal.
 - **MCP API** — Connect AI agents to Compass via the Model Context Protocol so they can read and write discovery data programmatically.
 
 ## Getting Started

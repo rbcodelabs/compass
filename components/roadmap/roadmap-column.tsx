@@ -43,6 +43,7 @@ type Props = {
   revalidatePathStr: string;
   onItemAdded: (item: RoadmapCardData) => void;
   onArchive: (itemId: string) => void;
+  onUpdate: (item: RoadmapCardData) => void;
   availableKRs?: AvailableKR[];
   availableSolutions?: AvailableSolution[];
   availableOpportunities?: AvailableOpportunity[];
@@ -58,6 +59,7 @@ export function RoadmapColumn({
   revalidatePathStr,
   onItemAdded,
   onArchive,
+  onUpdate,
   availableKRs,
   availableSolutions,
   availableOpportunities,
@@ -82,6 +84,7 @@ export function RoadmapColumn({
       {/* Drop zone / card list */}
       <div
         ref={setNodeRef}
+        id={`roadmap-column-${horizon}`}
         className={[
           "flex flex-col gap-2 min-h-[180px] rounded-xl p-2.5 transition-colors",
           isOver
@@ -106,6 +109,7 @@ export function RoadmapColumn({
                 item={item}
                 revalidatePathStr={revalidatePathStr}
                 onArchive={onArchive}
+                onUpdate={onUpdate}
                 orgSlug={orgSlug}
                 workspaceSlug={workspaceSlug}
               />

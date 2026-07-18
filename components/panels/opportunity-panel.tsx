@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ExternalLinkIcon } from "lucide-react";
+import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evidence-list";
+import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 
 type OpportunityData = {
   id: string;
@@ -12,6 +14,7 @@ type OpportunityData = {
   status: string;
   description: string | null;
   customerSegment: string | null;
+  workspaceId: string;
   linkedKeyResult: {
     id: string;
     title: string;
@@ -21,6 +24,7 @@ type OpportunityData = {
     objective: { title: string; cycleId: string } | null;
   } | null;
   solutions: Array<{ id: string; title: string; status: string }>;
+  evidence: EvidenceListItem[];
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -56,16 +60,21 @@ export function OpportunityPanel({
   const [data, setData] = useState<OpportunityData | null>(null);
   const [error, setError] = useState(false);
 
-  useEffect(() => {
-    setData(null);
-    setError(false);
-    fetch(`/api/panels/opportunity/${opportunityId}`)
+  function refresh() {
+    return fetch(`/api/panels/opportunity/${opportunityId}`)
       .then((r) => {
         if (!r.ok) throw new Error("fetch failed");
         return r.json();
       })
       .then(setData)
       .catch(() => setError(true));
+  }
+
+  useEffect(() => {
+    setData(null);
+    setError(false);
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opportunityId]);
 
   const fullPageHref = `/${orgSlug}/${workspaceSlug}/discovery/${opportunityId}`;
@@ -188,6 +197,28 @@ export function OpportunityPanel({
             ))}
           </div>
         )}
+      </div>
+
+      <Separator />
+
+      {/* Evidence */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Evidence{" "}
+            {data.evidence.length > 0 && (
+              <span className="normal-case font-normal">({data.evidence.length})</span>
+            )}
+          </p>
+        </div>
+        <AddEvidenceDialog
+          workspaceId={data.workspaceId}
+          nodeType="opportunity"
+          nodeId={data.id}
+          revalidatePathStr={fullPageHref}
+          onMutated={refresh}
+        />
+        <EvidenceList evidence={data.evidence} revalidatePathStr={fullPageHref} />
       </div>
     </div>
   );

@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
 import { PortalAuthStatus } from "@/components/portal/portal-auth-status";
+import { WorkspaceThemeStyle } from "@/components/branding/workspace-theme-style";
+import { resolveWorkspaceBranding } from "@/lib/branding";
 
 type Props = {
   children: ReactNode;
@@ -15,19 +17,28 @@ export default async function PortalLayout({ children, params }: Props) {
   const [workspace, portalSession] = await Promise.all([
     prisma.workspace.findFirst({
       where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-      select: { name: true },
+      select: {
+        name: true,
+        brandingPaletteId: true,
+        brandingPrimaryHex: true,
+        brandingFontPresetId: true,
+        brandingFontFamily: true,
+        brandingLogoUrl: true,
+      },
     }),
     getPortalSession(),
   ]);
 
   const workspaceName = workspace?.name ?? workspaceSlug;
+  const branding = workspace ? resolveWorkspaceBranding(workspace) : null;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
+      <WorkspaceThemeStyle branding={branding} />
       <header className="border-b border-slate-200 bg-white px-6 py-4">
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-indigo-500 flex items-center justify-center shrink-0 shadow-sm">
+            <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0 shadow-sm">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"

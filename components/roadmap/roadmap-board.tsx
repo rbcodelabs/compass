@@ -17,10 +17,21 @@ import {
   sortableKeyboardCoordinates,
   arrayMove,
 } from "@dnd-kit/sortable";
-import { moveItem, updateSortOrder } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import {
+  moveItem,
+  updateSortOrder,
+  promoteToRoadmap,
+  promoteFeedbackToRoadmap,
+} from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { RoadmapColumn } from "./roadmap-column";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
-import type { Horizon } from "@/lib/types";
+import {
+  UnscheduledItemsPanel,
+  UnscheduledItemPreview,
+  parseUnscheduledDragId,
+  type UnscheduledItem,
+} from "./unscheduled-items-panel";
+import type { Horizon, SquadData } from "@/lib/types";
 
 type ColumnMap = Record<Horizon, RoadmapCardData[]>;
 
@@ -40,7 +51,65 @@ type Props = {
   availableSolutions?: AvailableSolution[];
   availableOpportunities?: AvailableOpportunity[];
   availableExperiments?: AvailableExperiment[];
+  unscheduledItems?: UnscheduledItem[];
+  squads?: SquadData[];
 };
+
+// Builds a RoadmapCardData for a newly-created item from a promote action's
+// return value (a raw RoadmapItem row) plus the UnscheduledItem it came
+// from — the promote actions don't re-fetch/join solution/opportunity data,
+// so the card's relation fields are filled in from what we already know
+// client-side rather than round-tripping for it.
+function cardDataFromPromotion(
+  created: {
+    id: string;
+    title: string;
+    description: string | null;
+    horizon: string;
+    sortOrder: number;
+    solutionId: string | null;
+    keyResultId: string | null;
+    opportunityId: string | null;
+    experimentId: string | null;
+    feedbackId: string | null;
+    startDate: Date | null;
+    endDate: Date | null;
+  },
+  source: UnscheduledItem,
+  squads: SquadData[]
+): RoadmapCardData {
+  // Only solution-sourced items carry a squadId (inherited from the
+  // opportunity's squad, resolved server-side in page.tsx's unscheduledItems
+  // query) — feedback/bug items have no squad concept. Resolve the id against
+  // the already-fetched squads list rather than round-tripping for it, same
+  // as every other relation field on this optimistic card.
+  const squad =
+    source.kind === "solution" && source.squadId
+      ? (squads.find((s) => s.id === source.squadId) ?? null)
+      : null;
+
+  return {
+    id: created.id,
+    title: created.title,
+    description: created.description ?? null,
+    horizon: created.horizon as Horizon,
+    sortOrder: created.sortOrder,
+    solutionId: created.solutionId ?? null,
+    keyResultId: created.keyResultId ?? null,
+    opportunityId: created.opportunityId ?? null,
+    experimentId: created.experimentId ?? null,
+    feedbackId: created.feedbackId ?? null,
+    startDate: created.startDate ? created.startDate.toISOString() : null,
+    endDate: created.endDate ? created.endDate.toISOString() : null,
+    solution: source.kind === "solution" ? { id: source.id, title: source.title } : null,
+    keyResult: null,
+    opportunity:
+      source.kind === "solution" ? { id: source.opportunityId, title: source.opportunityTitle } : null,
+    experiment: null,
+    feedback: source.kind === "feedback" ? { id: source.id, title: source.title, type: "BUG" } : null,
+    squad,
+  };
+}
 
 function buildColumnMap(items: RoadmapCardData[]): ColumnMap {
   return {
@@ -68,11 +137,15 @@ export function RoadmapBoard({
   availableSolutions,
   availableOpportunities,
   availableExperiments,
+  unscheduledItems,
+  squads,
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/roadmap`;
 
   const [columns, setColumns] = useState<ColumnMap>(() => buildColumnMap(initialItems));
+  const [unscheduled, setUnscheduled] = useState<UnscheduledItem[]>(unscheduledItems ?? []);
   const [activeItem, setActiveItem] = useState<RoadmapCardData | null>(null);
+  const [activeUnscheduledItem, setActiveUnscheduledItem] = useState<UnscheduledItem | null>(null);
   // Track the horizon the drag started from so handleDragEnd can detect cross-column moves.
   const [dragSourceHorizon, setDragSourceHorizon] = useState<Horizon | null>(null);
 
@@ -87,8 +160,32 @@ export function RoadmapBoard({
     })
   );
 
+  // Shared by both the drag-and-drop path and the quick-add menu fallback.
+  async function scheduleUnscheduledItem(item: UnscheduledItem, horizon: Horizon) {
+    setUnscheduled((prev) => prev.filter((i) => i !== item));
+    const created =
+      item.kind === "solution"
+        ? await promoteToRoadmap(item.id, workspaceId, horizon, item.squadId, item.opportunityId)
+        : await promoteFeedbackToRoadmap(item.id, workspaceId, horizon, revalidatePathStr);
+    handleItemAdded(cardDataFromPromotion(created, item, squads ?? []));
+  }
+
+  function handleQuickAdd(item: UnscheduledItem, horizon: Horizon) {
+    startTransition(() => {
+      scheduleUnscheduledItem(item, horizon);
+    });
+  }
+
   function handleDragStart(event: DragStartEvent) {
     const id = event.active.id as string;
+
+    const parsed = parseUnscheduledDragId(id);
+    if (parsed) {
+      const found = unscheduled.find((i) => i.id === parsed.id && i.kind === parsed.kind);
+      if (found) setActiveUnscheduledItem(found);
+      return;
+    }
+
     for (const horizon of HORIZONS) {
       const found = columns[horizon].find((i) => i.id === id);
       if (found) {
@@ -151,12 +248,32 @@ export function RoadmapBoard({
     const { active, over } = event;
     setActiveItem(null);
 
+    const activeId = active.id as string;
+    const parsed = parseUnscheduledDragId(activeId);
+    if (parsed) {
+      setActiveUnscheduledItem(null);
+      if (!over) return;
+
+      const overId = over.id as string;
+      const destHorizon = overId.startsWith("column-")
+        ? (overId.replace("column-", "") as Horizon)
+        : findHorizon(columns, overId);
+      if (!destHorizon) return; // dropped somewhere that isn't a horizon column/card
+
+      const item = unscheduled.find((i) => i.id === parsed.id && i.kind === parsed.kind);
+      if (!item) return;
+
+      startTransition(() => {
+        scheduleUnscheduledItem(item, destHorizon);
+      });
+      return;
+    }
+
     if (!over) {
       setDragSourceHorizon(null);
       return;
     }
 
-    const activeId = active.id as string;
     const overId = over.id as string;
 
     const currentHorizon = findHorizon(columns, activeId);
@@ -207,6 +324,15 @@ export function RoadmapBoard({
     }));
   }
 
+  const handleUpdate = useCallback((updated: RoadmapCardData) => {
+    setColumns((prev) => ({
+      ...prev,
+      [updated.horizon]: prev[updated.horizon].map((i) =>
+        i.id === updated.id ? updated : i
+      ),
+    }));
+  }, []);
+
   return (
     <DndContext
       sensors={sensors}
@@ -227,6 +353,7 @@ export function RoadmapBoard({
             revalidatePathStr={revalidatePathStr}
             onItemAdded={handleItemAdded}
             onArchive={handleArchive}
+            onUpdate={handleUpdate}
             availableKRs={availableKRs}
             availableSolutions={availableSolutions}
             availableOpportunities={availableOpportunities}
@@ -234,6 +361,8 @@ export function RoadmapBoard({
           />
         ))}
       </div>
+
+      <UnscheduledItemsPanel items={unscheduled} onQuickAdd={handleQuickAdd} />
 
       {/* DragOverlay renders the card being dragged at its cursor position */}
       <DragOverlay>
@@ -247,6 +376,8 @@ export function RoadmapBoard({
               workspaceSlug={workspaceSlug}
             />
           </div>
+        ) : activeUnscheduledItem ? (
+          <UnscheduledItemPreview item={activeUnscheduledItem} />
         ) : null}
       </DragOverlay>
     </DndContext>

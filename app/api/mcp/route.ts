@@ -15,6 +15,11 @@ import {
   promoteFeedbackToRoadmap,
 } from "@/lib/feedback-tool-handlers"
 import {
+  addEvidence,
+  linkEvidence,
+  listEvidence,
+} from "@/lib/evidence-tool-handlers"
+import {
   listDocs,
   getDoc,
   createDoc,
@@ -32,6 +37,15 @@ import {
   getOpportunityScore,
   listTopOpportunities,
 } from "@/lib/scoring-tool-handlers"
+
+// Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
+// <input type="date"> value, or an MCP caller's ISO date string), which
+// `new Date(...)` parses as UTC midnight. Formatting with `toLocaleDateString()`
+// (local timezone) would shift the displayed date back a day for any negative
+// UTC offset, so format in UTC to match how the date was parsed.
+function formatUtcDate(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
+}
 
 const _handler = createMcpHandler(
   (server) => {
@@ -1001,7 +1015,10 @@ const _handler = createMcpHandler(
               (item.opportunity ? `\n    Opportunity: ${item.opportunity.title}` : "") +
               (item.solution ? `\n    Solution: ${item.solution.title}` : "") +
               (item.experiment ? `\n    Experiment: ${item.experiment.title}` : "") +
-              (item.squad ? `\n    Squad: ${item.squad.name}` : "")
+              (item.squad ? `\n    Squad: ${item.squad.name}` : "") +
+              (item.startDate || item.endDate
+                ? `\n    Dates: ${item.startDate ? formatUtcDate(item.startDate) : "?"} – ${item.endDate ? formatUtcDate(item.endDate) : "?"}`
+                : "")
             )
             return `**${h}**\n${lines.join("\n")}`
           })
@@ -1014,7 +1031,7 @@ const _handler = createMcpHandler(
       {
         title: "Update Roadmap Item",
         description:
-          "Updates an existing roadmap item's horizon, status, title, or description. " +
+          "Updates an existing roadmap item's horizon, status, title, description, or dates. " +
           "Use horizon to move items between NOW / NEXT / LATER. Use status ARCHIVED to remove from view.",
         inputSchema: {
           itemId: z.string().uuid().describe("UUID of the roadmap item"),
@@ -1022,9 +1039,11 @@ const _handler = createMcpHandler(
           status: z.enum(["ACTIVE", "ARCHIVED"]).optional().describe("Set to ARCHIVED to hide from roadmap"),
           title: z.string().min(1).optional().describe("New title for the item"),
           description: z.string().optional().describe("New description"),
+          startDate: z.string().optional().describe("ISO date string for the item's start date, e.g. '2026-07-01'"),
+          endDate: z.string().optional().describe("ISO date string for the item's end date, e.g. '2026-09-30'"),
         },
       },
-      async ({ itemId, horizon, status, title, description }) => {
+      async ({ itemId, horizon, status, title, description, startDate, endDate }) => {
         const prisma = getPrisma()
         const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, title: true, horizon: true, status: true } })
         if (!item) {
@@ -1037,6 +1056,9 @@ const _handler = createMcpHandler(
             ...(status ? { status } : {}),
             ...(title ? { title: title.trim() } : {}),
             ...(description !== undefined ? { description: description.trim() } : {}),
+            ...(startDate !== undefined ? { startDate: new Date(startDate) } : {}),
+            ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
+            updatedAt: new Date(),
           },
         })
         return {
@@ -1044,7 +1066,10 @@ const _handler = createMcpHandler(
             type: "text" as const,
             text:
               `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
-              `Horizon: ${updated.horizon}\nStatus: ${updated.status}`,
+              `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
+              (updated.startDate || updated.endDate
+                ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
+                : ""),
           }],
         }
       }
@@ -1064,9 +1089,11 @@ const _handler = createMcpHandler(
           keyResultId: z.string().uuid().optional().describe("UUID of the Key Result this item is driving"),
           opportunityId: z.string().uuid().optional().describe("UUID of the Opportunity this item addresses"),
           squadId: z.string().uuid().optional().describe("UUID of the owning squad"),
+          startDate: z.string().optional().describe("ISO date string for the item's start date, e.g. '2026-07-01'"),
+          endDate: z.string().optional().describe("ISO date string for the item's end date, e.g. '2026-09-30'"),
         },
       },
-      async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId }) => {
+      async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId, startDate, endDate }) => {
         const prisma = getPrisma()
         const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
         if (!workspace) {
@@ -1088,6 +1115,8 @@ const _handler = createMcpHandler(
             keyResultId: keyResultId ?? null,
             opportunityId: opportunityId ?? null,
             squadId: squadId ?? null,
+            startDate: startDate ? new Date(startDate) : undefined,
+            endDate: endDate ? new Date(endDate) : undefined,
           },
         })
         return {
@@ -1096,7 +1125,10 @@ const _handler = createMcpHandler(
             text: `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
               (solutionId ? `\nLinked Solution: ${solutionId}` : "") +
               (keyResultId ? `\nLinked KR: ${keyResultId}` : "") +
-              (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : ""),
+              (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : "") +
+              (item.startDate || item.endDate
+                ? `\nDates: ${item.startDate ? formatUtcDate(item.startDate) : "?"} – ${item.endDate ? formatUtcDate(item.endDate) : "?"}`
+                : ""),
           }],
         }
       }
@@ -1281,6 +1313,66 @@ const _handler = createMcpHandler(
         },
       },
       promoteFeedbackToRoadmap
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // EVIDENCE
+    // ════════════════════════════════════════════════════════════════
+
+    server.registerTool(
+      "add_evidence",
+      {
+        title: "Add Evidence",
+        description:
+          "Attaches a new piece of evidence (customer signal) to an opportunity, solution, or assumption. " +
+          "Exactly one of opportunityId, solutionId, or assumptionId must be provided. " +
+          "Use this to record why the team believes an OST node is real — an interview quote, a support ticket, " +
+          "an experiment result, analytics data, or feedback.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          sourceType: z.enum(["interview", "feedback", "support_ticket", "experiment_result", "analytics"])
+            .describe("Where this evidence came from"),
+          excerpt: z.string().describe("The evidence text — a quote, summary, or data point"),
+          confidence: z.enum(["high", "medium", "low"]).optional().describe("Confidence level (default medium)"),
+          sourceUrl: z.string().url().optional().describe("Optional link to the source (ticket, recording, doc)"),
+          opportunityId: z.string().uuid().optional().describe("UUID of the opportunity to attach to"),
+          solutionId: z.string().uuid().optional().describe("UUID of the solution to attach to"),
+          assumptionId: z.string().uuid().optional().describe("UUID of the assumption to attach to"),
+        },
+      },
+      addEvidence
+    )
+
+    server.registerTool(
+      "link_evidence",
+      {
+        title: "Link Evidence",
+        description:
+          "Re-parents an existing evidence row to a different OST node. " +
+          "Exactly one of opportunityId, solutionId, or assumptionId must be provided; the other two are cleared.",
+        inputSchema: {
+          evidenceId: z.string().uuid().describe("UUID of the evidence to re-link"),
+          opportunityId: z.string().uuid().optional().describe("UUID of the opportunity to attach to"),
+          solutionId: z.string().uuid().optional().describe("UUID of the solution to attach to"),
+          assumptionId: z.string().uuid().optional().describe("UUID of the assumption to attach to"),
+        },
+      },
+      linkEvidence
+    )
+
+    server.registerTool(
+      "list_evidence",
+      {
+        title: "List Evidence",
+        description:
+          "Lists all evidence attached to a given opportunity, solution, or assumption. " +
+          "Returns each item's source type, confidence, excerpt, source URL, and creation date.",
+        inputSchema: {
+          nodeId: z.string().uuid().describe("UUID of the opportunity, solution, or assumption"),
+          nodeType: z.enum(["opportunity", "solution", "assumption"]).describe("Type of the node identified by nodeId"),
+        },
+      },
+      listEvidence
     )
 
     // ════════════════════════════════════════════════════════════════

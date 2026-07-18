@@ -20,10 +20,15 @@ const PAGES = [
   { file: "okrs.png",            url: "/rbcodelabs/compass/okrs" },
   { file: "discovery-board.png", url: "/rbcodelabs/compass/discovery" },
   { file: "roadmap.png",         url: "/rbcodelabs/compass/roadmap" },
+  { file: "roadmap-timeline.png", url: "/rbcodelabs/compass/roadmap?view=timeline" },
   { file: "experiments.png",     url: "/rbcodelabs/compass/experiments" },
   { file: "feedback.png",        url: "/rbcodelabs/compass/feedback" },
   { file: "docs-editor.png",     url: "/rbcodelabs/compass/docs" },
   { file: "settings.png",        url: "/rbcodelabs/compass/settings" },
+  // Settings is one long scrolling page — Branding sits below Portal, past
+  // the initial viewport a plain (fullPage: false) capture would show, so
+  // it needs its own entry with an explicit scroll-into-view.
+  { file: "branding.png",        url: "/rbcodelabs/compass/settings", scrollToHeading: "Branding" },
 ];
 
 test.describe("docs screenshots", () => {
@@ -33,10 +38,13 @@ test.describe("docs screenshots", () => {
       : undefined,
   });
 
-  for (const { file, url } of PAGES) {
+  for (const { file, url, scrollToHeading } of PAGES) {
     test(`capture ${file}`, async ({ page }) => {
       await page.goto(url);
       await page.waitForLoadState("networkidle");
+      if (scrollToHeading) {
+        await page.getByRole("heading", { name: scrollToHeading }).scrollIntoViewIfNeeded();
+      }
       // Give dynamic content a moment to settle
       await page.waitForTimeout(800);
       await page.screenshot({

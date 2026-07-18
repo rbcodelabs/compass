@@ -128,6 +128,7 @@ vi.mock("@/auth", () => ({
 }));
 
 import { auth } from "@/auth";
+import { revalidatePath } from "next/cache";
 import {
   createSquad,
   updateSquad,
@@ -140,6 +141,7 @@ import {
   createApiKey,
   revokeApiKey,
   updatePortalSettings,
+  updateWorkspaceBranding,
   deleteWorkspace,
   addWorkspaceMember,
   updateWorkspaceMemberRole,
@@ -551,6 +553,137 @@ describe("updatePortalSettings", () => {
     await expect(
       updatePortalSettings("org", "ws", { feedbackEnabled: true })
     ).rejects.toThrow("Unauthorized");
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+});
+
+// ─── updateWorkspaceBranding ────────────────────────────────────────────────
+
+describe("updateWorkspaceBranding", () => {
+  it("persists a preset palette selection and revalidates all 3 paths", async () => {
+    await updateWorkspaceBranding("org", "ws", { paletteId: "emerald", primaryHex: null });
+
+    const [args] = mockWorkspace.update.mock.calls[0];
+    expect(args.where).toEqual({ id: "ws-1" });
+    expect(args.data.brandingPaletteId).toBe("emerald");
+    expect(args.data.brandingPrimaryHex).toBeNull();
+    expect(args.data.updatedAt).toBeInstanceOf(Date);
+
+    expect(revalidatePath).toHaveBeenCalledWith("/org/ws/settings");
+    expect(revalidatePath).toHaveBeenCalledWith("/org/ws", "layout");
+    expect(revalidatePath).toHaveBeenCalledWith("/portal/org/ws", "layout");
+    expect(revalidatePath).toHaveBeenCalledTimes(3);
+  });
+
+  it("persists a valid custom hex color", async () => {
+    await updateWorkspaceBranding("org", "ws", { primaryHex: "#4f3df2", paletteId: null });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.brandingPrimaryHex).toBe("#4f3df2");
+    expect(data.brandingPaletteId).toBeNull();
+  });
+
+  it("persists a preset font selection", async () => {
+    await updateWorkspaceBranding("org", "ws", { fontPresetId: "inter", fontFamily: null });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.brandingFontPresetId).toBe("inter");
+  });
+
+  it("persists a custom font family", async () => {
+    await updateWorkspaceBranding("org", "ws", { fontFamily: "Roboto Slab", fontPresetId: null });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.brandingFontFamily).toBe("Roboto Slab");
+  });
+
+  it("persists a logo URL", async () => {
+    await updateWorkspaceBranding("org", "ws", { logoUrl: "https://blob.example.com/logo.png" });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.brandingLogoUrl).toBe("https://blob.example.com/logo.png");
+  });
+
+  it("clears a logo when logoUrl is explicitly null", async () => {
+    await updateWorkspaceBranding("org", "ws", { logoUrl: null });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.brandingLogoUrl).toBeNull();
+  });
+
+  it("omits fields that are undefined rather than overwriting with null", async () => {
+    await updateWorkspaceBranding("org", "ws", { primaryHex: "#4f3df2" });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.brandingFontFamily).toBeUndefined();
+    expect(data.brandingLogoUrl).toBeUndefined();
+  });
+
+  it("rejects a malformed hex and does not write to the DB", async () => {
+    await expect(
+      updateWorkspaceBranding("org", "ws", { primaryHex: "not-a-hex" })
+    ).rejects.toThrow(/hex/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a hex missing the leading #", async () => {
+    await expect(
+      updateWorkspaceBranding("org", "ws", { primaryHex: "4f3df2" })
+    ).rejects.toThrow(/hex/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a short hex (3-digit shorthand not supported)", async () => {
+    await expect(
+      updateWorkspaceBranding("org", "ws", { primaryHex: "#fff" })
+    ).rejects.toThrow(/hex/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown paletteId and does not write to the DB", async () => {
+    await expect(
+      updateWorkspaceBranding("org", "ws", { paletteId: "not-a-real-palette" })
+    ).rejects.toThrow(/paletteId/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown fontPresetId and does not write to the DB", async () => {
+    await expect(
+      updateWorkspaceBranding("org", "ws", { fontPresetId: "not-a-real-font" })
+    ).rejects.toThrow(/fontPresetId/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a font-name injection attempt containing a semicolon", async () => {
+    await expect(
+      updateWorkspaceBranding("org", "ws", { fontFamily: "Evil; } body { display:none" })
+    ).rejects.toThrow(/fontFamily/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a font-name injection attempt containing a closing style tag", async () => {
+    await expect(
+      updateWorkspaceBranding("org", "ws", { fontFamily: "</style><script>alert(1)</script>" })
+    ).rejects.toThrow(/fontFamily/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a font-name injection attempt containing a double quote", async () => {
+    await expect(
+      updateWorkspaceBranding("org", "ws", { fontFamily: 'Arial", "Comic Sans' })
+    ).rejects.toThrow(/fontFamily/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      updateWorkspaceBranding("org", "ws", { primaryHex: "#4f3df2" })
+    ).rejects.toThrow("Unauthorized");
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("throws when the caller is not a member of the workspace", async () => {
+    // resolveWorkspace scopes findFirst to workspaces the caller is a member
+    // of — a non-member gets null back, same as a nonexistent workspace.
+    mockWorkspace.findFirst.mockResolvedValue(null);
+    await expect(
+      updateWorkspaceBranding("org", "ws", { primaryHex: "#4f3df2" })
+    ).rejects.toThrow("Workspace not found");
     expect(mockWorkspace.update).not.toHaveBeenCalled();
   });
 });
