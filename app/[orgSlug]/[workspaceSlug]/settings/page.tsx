@@ -40,6 +40,9 @@ export default async function SettingsPage({ params }: Props) {
       feedbackEnabled: true,
       roadmapPublic: true,
       portalAuthRequired: true,
+      ssoEnabled: true,
+      ssoSecretEncrypted: true,
+      ssoSecretUpdatedAt: true,
       brandingPaletteId: true,
       brandingPrimaryHex: true,
       brandingFontPresetId: true,
@@ -226,6 +229,9 @@ export default async function SettingsPage({ params }: Props) {
           feedbackEnabled={workspace.feedbackEnabled ?? false}
           roadmapPublic={workspace.roadmapPublic ?? false}
           portalAuthRequired={workspace.portalAuthRequired ?? false}
+          ssoEnabled={workspace.ssoEnabled ?? false}
+          ssoSecretConfigured={Boolean(workspace.ssoSecretEncrypted)}
+          ssoSecretUpdatedAt={workspace.ssoSecretUpdatedAt}
         />
       </section>
 
