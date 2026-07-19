@@ -189,4 +189,85 @@ describe("POST /api/portal/[orgSlug]/[workspaceSlug]/feedback", () => {
     expect(res.status).toBe(422);
     expect(mockFeedbackItem.create).not.toHaveBeenCalled();
   });
+
+  it("persists a valid attachments array via a nested create", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      feedbackEnabled: true,
+      portalAuthRequired: false,
+    });
+    const attachments = [
+      {
+        url: "https://abc123.public.blob.vercel-storage.com/feedback/ws-1/1-screenshot.png",
+        filename: "screenshot.png",
+        fileType: "image/png",
+        fileSize: 1024,
+      },
+    ];
+    mockFeedbackItem.create.mockResolvedValue({
+      id: "fb-1",
+      title: "Test",
+      status: "OPEN",
+      voteCount: 0,
+      type: "IDEA",
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+      attachments: [{ id: "att-1", ...attachments[0] }],
+    });
+
+    const res = await POST(makeRequest({ title: "Idea", attachments }), { params });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.attachments).toEqual([{ id: "att-1", ...attachments[0] }]);
+    expect(mockFeedbackItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        attachments: { create: attachments },
+      }),
+      select: expect.any(Object),
+    });
+  });
+
+  it("422s when the attachments array has more than 5 entries", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      feedbackEnabled: true,
+      portalAuthRequired: false,
+    });
+    const attachments = Array.from({ length: 6 }, (_, i) => ({
+      url: `https://abc123.public.blob.vercel-storage.com/feedback/ws-1/${i}-file.png`,
+      filename: `file-${i}.png`,
+      fileType: "image/png",
+      fileSize: 100,
+    }));
+
+    const res = await POST(makeRequest({ title: "Idea", attachments }), { params });
+    const data = await res.json();
+
+    expect(res.status).toBe(422);
+    expect(data.error).toBe("Maximum 5 attachments");
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
+  });
+
+  it("422s when an attachment URL isn't a valid blob-storage host", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      feedbackEnabled: true,
+      portalAuthRequired: false,
+    });
+    const attachments = [
+      {
+        url: "https://evil.example.com/not-blob-storage.png",
+        filename: "file.png",
+        fileType: "image/png",
+        fileSize: 100,
+      },
+    ];
+
+    const res = await POST(makeRequest({ title: "Idea", attachments }), { params });
+    const data = await res.json();
+
+    expect(res.status).toBe(422);
+    expect(data.error).toBe("Invalid attachment URL");
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
+  });
 });

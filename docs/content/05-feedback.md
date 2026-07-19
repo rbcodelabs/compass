@@ -57,6 +57,12 @@ Visitors to your feedback portal see a list of existing submissions sorted by vo
 
 Submissions automatically appear in your internal feedback triage view immediately.
 
+## Attaching Screenshots & Files
+
+When submitting feedback, visitors can attach files to help illustrate the issue or idea — a screenshot of a bug, a PDF, or a CSV of sample data. Supported file types are images (PNG, JPEG, GIF, WEBP), PDFs, and plain text/CSV files. Each file can be up to 10MB, with a maximum of 5 attachments per submission.
+
+Attachments upload as soon as they're selected, showing a thumbnail (for images) or a file chip (for everything else) with a remove option before the submission is sent. Once submitted, attachments are visible both on the public portal listing and in the internal triage board, so your team can see exactly what the visitor saw.
+
 ## Triaging Feedback Internally
 
 Inside Compass, the **Feedback** section shows all submitted feedback across your workspace. The internal view includes:

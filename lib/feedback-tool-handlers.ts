@@ -9,7 +9,10 @@ export async function getFeedbackItem({ feedbackId }: { feedbackId: string }) {
   const prisma = getPrisma()
   const item = await prisma.feedbackItem.findUnique({
     where: { id: feedbackId },
-    include: { opportunity: { select: { id: true, title: true, status: true } } },
+    include: {
+      opportunity: { select: { id: true, title: true, status: true } },
+      attachments: { select: { filename: true, url: true } },
+    },
   })
   if (!item) {
     return { content: [{ type: "text" as const, text: `Feedback item "${feedbackId}" not found.` }] }
@@ -27,6 +30,7 @@ export async function getFeedbackItem({ feedbackId }: { feedbackId: string }) {
     item.tags ? `**Tags:** ${JSON.stringify(item.tags)}` : null,
     item.opportunityId ? `**Opportunity ID:** ${item.opportunityId}` : null,
     item.opportunity ? `**Linked Opportunity:** ${item.opportunity.title} [${item.opportunity.status}] (ID: ${item.opportunity.id})` : null,
+    ...item.attachments.map((a) => `Attachments: ${a.filename} (${a.url})`),
     `**Created:** ${item.createdAt.toISOString()}`,
     `**Updated:** ${item.updatedAt.toISOString()}`,
   ].filter(Boolean)

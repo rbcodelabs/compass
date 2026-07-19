@@ -8,6 +8,7 @@ import {
   updateFeedbackType,
 } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 import { promoteFeedbackToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import { FeedbackAttachments, type FeedbackAttachmentData } from "@/components/feedback/feedback-attachments";
 import type { FeedbackType, Horizon } from "@/lib/types";
 
 type FeedbackItem = {
@@ -22,6 +23,7 @@ type FeedbackItem = {
   opportunityId: string | null;
   roadmapItem: { id: string; title: string; horizon: string } | null;
   createdAt: string;
+  attachments: FeedbackAttachmentData[];
 };
 
 type OpportunityOption = {
@@ -221,6 +223,7 @@ export function InternalFeedbackBoard({
               {item.description && (
                 <p className="text-xs text-slate-500 line-clamp-1">{item.description}</p>
               )}
+              <FeedbackAttachments attachments={item.attachments} />
               <div className="flex items-center gap-2 mt-0.5">
                 {item.submitterName && (
                   <span className="text-xs text-slate-400">{item.submitterName}</span>
