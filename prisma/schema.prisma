@@ -636,8 +636,23 @@ model FeedbackItem {
   createdById     String?   @map("created_by_id") @db.Uuid
   updatedById     String?   @map("updated_by_id") @db.Uuid
   source          String    @default("UI") @map("source") @db.VarChar(20)
+  attachments     FeedbackAttachment[]
 
   @@map("feedback")
+}
+
+model FeedbackAttachment {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  feedbackItemId String       @map("feedback_item_id") @db.Uuid
+  url            String       @db.Text
+  filename       String       @db.VarChar(255)
+  fileType       String       @map("file_type") @db.VarChar(100)
+  fileSize       Int          @map("file_size")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  feedbackItem   FeedbackItem @relation(fields: [feedbackItemId], references: [id])
+
+  @@map("feedback_attachment")
+  @@index([feedbackItemId])
 }
 
 model FeedbackVote {

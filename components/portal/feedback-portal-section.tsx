@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { ThumbsUp, MessageSquare, Bug, Lightbulb } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { ThumbsUp, MessageSquare, Bug, Lightbulb, File as FileIcon, Loader2, X } from "lucide-react";
 import { PortalSignInGate } from "@/components/portal/portal-sign-in-gate";
+import { FeedbackAttachments, type FeedbackAttachmentData } from "@/components/feedback/feedback-attachments";
 import type { FeedbackType } from "@/lib/types";
 
 type FeedbackItemData = {
@@ -14,6 +15,31 @@ type FeedbackItemData = {
   type: FeedbackType;
   submitterName: string | null;
   createdAt: string;
+  attachments: FeedbackAttachmentData[];
+};
+
+const ALLOWED_ATTACHMENT_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+  "text/plain",
+  "text/csv",
+]);
+
+const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = 5;
+
+type PendingAttachment = {
+  clientId: string;
+  file: File;
+  status: "uploading" | "done" | "error";
+  url?: string;
+  filename?: string;
+  fileType?: string;
+  fileSize?: number;
+  error?: string;
 };
 
 const TYPE_LABELS: Record<FeedbackType, string> = {
@@ -95,6 +121,11 @@ export function FeedbackPortalSection({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
+  // Attachment upload state
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+
   // Per-item vote form state
   const [voteFormOpen, setVoteFormOpen] = useState<string | null>(null);
   const [voteEmail, setVoteEmail] = useState("");
@@ -106,10 +137,128 @@ export function FeedbackPortalSection({
     setVotedIds(getVotedItems(orgSlug, workspaceSlug));
   }, [orgSlug, workspaceSlug]);
 
+  async function uploadAttachment(clientId: string, file: File) {
+    const controller = new AbortController();
+    abortControllersRef.current.set(clientId, controller);
+
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`/api/portal/${orgSlug}/${workspaceSlug}/feedback/upload`, {
+        method: "POST",
+        body: form,
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        setPendingAttachments((prev) =>
+          prev.map((a) =>
+            a.clientId === clientId
+              ? { ...a, status: "error", error: data.error ?? "Upload failed" }
+              : a
+          )
+        );
+        return;
+      }
+
+      const data = (await res.json()) as {
+        url: string;
+        filename: string;
+        fileType: string;
+        fileSize: number;
+      };
+
+      setPendingAttachments((prev) =>
+        prev.map((a) =>
+          a.clientId === clientId
+            ? {
+                ...a,
+                status: "done",
+                url: data.url,
+                filename: data.filename,
+                fileType: data.fileType,
+                fileSize: data.fileSize,
+              }
+            : a
+        )
+      );
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setPendingAttachments((prev) =>
+        prev.map((a) =>
+          a.clientId === clientId ? { ...a, status: "error", error: "Network error" } : a
+        )
+      );
+    } finally {
+      abortControllersRef.current.delete(clientId);
+    }
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // allow re-selecting the same file later
+
+    if (files.length === 0) return;
+
+    setAttachmentError(null);
+
+    if (pendingAttachments.length + files.length > MAX_ATTACHMENTS) {
+      setAttachmentError(`Maximum ${MAX_ATTACHMENTS} attachments`);
+      return;
+    }
+
+    const accepted: File[] = [];
+    for (const file of files) {
+      if (!ALLOWED_ATTACHMENT_TYPES.has(file.type)) {
+        setAttachmentError(`"${file.name}" is an unsupported file type`);
+        continue;
+      }
+      if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+        setAttachmentError(`"${file.name}" is larger than 10MB`);
+        continue;
+      }
+      accepted.push(file);
+    }
+
+    if (accepted.length === 0) return;
+
+    const newEntries: PendingAttachment[] = accepted.map((file) => ({
+      clientId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      file,
+      status: "uploading",
+    }));
+
+    setPendingAttachments((prev) => [...prev, ...newEntries]);
+    for (const entry of newEntries) {
+      uploadAttachment(entry.clientId, entry.file);
+    }
+  }
+
+  function handleRemoveAttachment(clientId: string) {
+    const controller = abortControllersRef.current.get(clientId);
+    if (controller) {
+      controller.abort();
+      abortControllersRef.current.delete(clientId);
+    }
+    setPendingAttachments((prev) => prev.filter((a) => a.clientId !== clientId));
+  }
+
+  const isUploadingAttachments = pendingAttachments.some((a) => a.status === "uploading");
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
     setIsSubmitting(true);
+
+    const uploadedAttachments = pendingAttachments
+      .filter((a) => a.status === "done")
+      .map((a) => ({
+        url: a.url!,
+        filename: a.filename!,
+        fileType: a.fileType!,
+        fileSize: a.fileSize!,
+      }));
 
     try {
       const res = await fetch(`/api/portal/${orgSlug}/${workspaceSlug}/feedback`, {
@@ -121,6 +270,7 @@ export function FeedbackPortalSection({
           type,
           submitterName: submitterName.trim() || undefined,
           submitterEmail: submitterEmail.trim() || undefined,
+          attachments: uploadedAttachments,
         }),
       });
 
@@ -137,6 +287,7 @@ export function FeedbackPortalSection({
         voteCount: number;
         type: FeedbackType;
         createdAt: string;
+        attachments: FeedbackAttachmentData[];
       };
 
       setItems((prev) => [
@@ -149,6 +300,7 @@ export function FeedbackPortalSection({
           type: newItem.type,
           submitterName: submitterName.trim() || null,
           createdAt: newItem.createdAt,
+          attachments: newItem.attachments,
         },
         ...prev,
       ]);
@@ -158,6 +310,8 @@ export function FeedbackPortalSection({
       setType("IDEA");
       setSubmitterName("");
       setSubmitterEmail("");
+      setPendingAttachments([]);
+      setAttachmentError(null);
       setSubmitSuccess(true);
       setTimeout(() => setSubmitSuccess(false), 3000);
     } catch {
@@ -280,6 +434,52 @@ export function FeedbackPortalSection({
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-none"
             />
           </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="fb-attachments" className="text-xs font-medium text-slate-600">
+              Attachments
+            </label>
+            <input
+              id="fb-attachments"
+              type="file"
+              multiple
+              accept="image/*,application/pdf,text/plain,text/csv"
+              onChange={handleFileSelect}
+              className="text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-600 hover:file:bg-slate-200"
+            />
+            {attachmentError && <p className="text-xs text-red-500">{attachmentError}</p>}
+            {pendingAttachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-1">
+                {pendingAttachments.map((a) => (
+                  <div
+                    key={a.clientId}
+                    className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs max-w-[12rem]"
+                  >
+                    {a.status === "done" && a.fileType?.startsWith("image/") ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={a.url} alt={a.filename} className="w-6 h-6 rounded object-cover shrink-0" />
+                    ) : (
+                      <FileIcon className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                    )}
+                    <span className="truncate flex-1 text-slate-600">{a.file.name}</span>
+                    {a.status === "uploading" && (
+                      <Loader2 className="w-3.5 h-3.5 shrink-0 text-slate-400 animate-spin" />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttachment(a.clientId)}
+                      className="shrink-0 text-slate-400 hover:text-slate-600"
+                      aria-label={`Remove ${a.file.name}`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                    {a.status === "error" && (
+                      <span className="w-full text-red-500 basis-full">{a.error}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           {portalAuthRequired ? (
             requiresSignIn ? (
               <PortalSignInGate actionLabel="submit feedback" />
@@ -334,10 +534,10 @@ export function FeedbackPortalSection({
           )}
           <button
             type="submit"
-            disabled={isSubmitting || !title.trim() || requiresSignIn}
+            disabled={isSubmitting || isUploadingAttachments || !title.trim() || requiresSignIn}
             className="self-start rounded-lg bg-indigo-600 text-white text-sm px-4 py-2 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
           >
-            {isSubmitting ? "Submitting..." : "Submit"}
+            {isSubmitting ? "Submitting..." : isUploadingAttachments ? "Uploading..." : "Submit"}
           </button>
         </form>
       </div>
@@ -406,6 +606,7 @@ export function FeedbackPortalSection({
                   {item.description && (
                     <p className="text-xs text-slate-500 leading-relaxed">{item.description}</p>
                   )}
+                  <FeedbackAttachments attachments={item.attachments} />
                   <div className="flex items-center gap-2 mt-0.5">
                     {item.submitterName && (
                       <span className="text-xs text-slate-400">{item.submitterName}</span>

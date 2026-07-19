@@ -45,6 +45,9 @@ export default async function PortalFeedbackPage({ params }: Props) {
       type: true,
       submitterName: true,
       createdAt: true,
+      attachments: {
+        select: { id: true, url: true, filename: true, fileType: true },
+      },
     },
   });
 
@@ -63,6 +66,7 @@ export default async function PortalFeedbackPage({ params }: Props) {
         type: i.type as FeedbackType,
         submitterName: i.submitterName,
         createdAt: i.createdAt.toISOString(),
+        attachments: i.attachments,
       }))}
     />
   );

@@ -44,6 +44,9 @@ export default async function FeedbackPage({ params }: Props) {
           take: 1,
           orderBy: { createdAt: "desc" },
         },
+        attachments: {
+          select: { id: true, url: true, filename: true, fileType: true },
+        },
       },
     }),
     prisma.opportunity.findMany({
@@ -80,6 +83,7 @@ export default async function FeedbackPage({ params }: Props) {
             ? { id: f.roadmapItems[0].id, title: f.roadmapItems[0].title, horizon: f.roadmapItems[0].horizon }
             : null,
           createdAt: f.createdAt.toISOString(),
+          attachments: f.attachments,
         }))}
         opportunities={opportunities}
       />

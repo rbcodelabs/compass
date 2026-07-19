@@ -66,6 +66,7 @@ const sampleItem = {
   createdAt: new Date("2025-01-01T00:00:00Z"),
   updatedAt: new Date("2025-01-01T00:00:00Z"),
   opportunity: null,
+  attachments: [],
 }
 
 const sampleOpportunity = {
@@ -100,11 +101,32 @@ describe("getFeedbackItem", () => {
     expect(text).toContain("**Email:** alice@example.com")
     expect(text).toContain("Users want a dark mode option.")
     expect(text).toContain("**Created:** 2025-01-01T00:00:00.000Z")
+    expect(text).not.toContain("Attachments:")
 
     expect(mockFeedbackItem.findUnique).toHaveBeenCalledWith({
       where: { id: FEED_ID },
-      include: { opportunity: { select: { id: true, title: true, status: true } } },
+      include: {
+        opportunity: { select: { id: true, title: true, status: true } },
+        attachments: { select: { filename: true, url: true } },
+      },
     })
+  })
+
+  it("includes an Attachments line per attachment when attachments are present", async () => {
+    const itemWithAttachments = {
+      ...sampleItem,
+      attachments: [
+        { filename: "screenshot.png", url: "https://abc123.public.blob.vercel-storage.com/screenshot.png" },
+        { filename: "notes.txt", url: "https://abc123.public.blob.vercel-storage.com/notes.txt" },
+      ],
+    }
+    mockFeedbackItem.findUnique.mockResolvedValueOnce(itemWithAttachments)
+
+    const result = await getFeedbackItem({ feedbackId: FEED_ID })
+    const text = result.content[0].text
+
+    expect(text).toContain("Attachments: screenshot.png (https://abc123.public.blob.vercel-storage.com/screenshot.png)")
+    expect(text).toContain("Attachments: notes.txt (https://abc123.public.blob.vercel-storage.com/notes.txt)")
   })
 
   it("returns opportunity details when item is linked to an opportunity", async () => {

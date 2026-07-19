@@ -4,6 +4,40 @@ import { getPortalSession } from "@/lib/portal-auth";
 
 type Params = { orgSlug: string; workspaceSlug: string };
 
+type AttachmentInput = {
+  url: string;
+  filename: string;
+  fileType: string;
+  fileSize: number;
+};
+
+/**
+ * A submitted attachment is only trusted if its URL is an https:// URL on
+ * Vercel Blob's public storage domain — this stops arbitrary URLs (e.g.
+ * pointing at internal services or unrelated hosts) from being injected
+ * into feedback records via the JSON body.
+ */
+function isValidBlobAttachment(value: unknown): value is AttachmentInput {
+  if (!value || typeof value !== "object") return false;
+  const { url, filename, fileType, fileSize } = value as Record<string, unknown>;
+
+  if (typeof url !== "string" || typeof filename !== "string" || typeof fileType !== "string") {
+    return false;
+  }
+  if (typeof fileSize !== "number" || !Number.isFinite(fileSize)) {
+    return false;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+
+  return parsed.protocol === "https:" && parsed.hostname.endsWith(".public.blob.vercel-storage.com");
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<Params> }
@@ -48,6 +82,9 @@ export async function GET(
       status: true,
       voteCount: true,
       createdAt: true,
+      attachments: {
+        select: { id: true, url: true, filename: true, fileType: true },
+      },
     },
     orderBy: { createdAt: "desc" },
     take: limit,
@@ -62,6 +99,7 @@ export async function GET(
       status: item.status,
       voteCount: item.voteCount,
       createdAt: item.createdAt.toISOString(),
+      attachments: item.attachments,
     })),
   });
 }
@@ -83,7 +121,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { title, description, submitterName, submitterEmail, type } = body as Record<string, unknown>;
+  const { title, description, submitterName, submitterEmail, type, attachments } = body as Record<string, unknown>;
 
   if (!title || typeof title !== "string" || title.trim().length === 0) {
     return NextResponse.json({ error: "Title is required" }, { status: 422 });
@@ -98,6 +136,23 @@ export async function POST(
   }
 
   const feedbackType = type === "BUG" ? "BUG" : "IDEA";
+
+  const rawAttachments = attachments === undefined ? [] : attachments;
+  if (!Array.isArray(rawAttachments)) {
+    return NextResponse.json({ error: "Invalid attachment URL" }, { status: 422 });
+  }
+  if (rawAttachments.length > 5) {
+    return NextResponse.json({ error: "Maximum 5 attachments" }, { status: 422 });
+  }
+  if (!rawAttachments.every(isValidBlobAttachment)) {
+    return NextResponse.json({ error: "Invalid attachment URL" }, { status: 422 });
+  }
+  const validatedAttachments = rawAttachments as {
+    url: string;
+    filename: string;
+    fileType: string;
+    fileSize: number;
+  }[];
 
   const prisma = getPrisma();
 
@@ -143,8 +198,19 @@ export async function POST(
       submitterName: typeof submitterName === "string" && submitterName.trim() ? submitterName.trim() : null,
       submitterEmail: effectiveSubmitterEmail,
       portalAccountId,
+      attachments: { create: validatedAttachments },
     },
-    select: { id: true, title: true, status: true, voteCount: true, type: true, createdAt: true },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      voteCount: true,
+      type: true,
+      createdAt: true,
+      attachments: {
+        select: { id: true, url: true, filename: true, fileType: true },
+      },
+    },
   });
 
   return NextResponse.json({
@@ -154,5 +220,6 @@ export async function POST(
     voteCount: item.voteCount,
     type: item.type,
     createdAt: item.createdAt.toISOString(),
+    attachments: item.attachments,
   });
 }
