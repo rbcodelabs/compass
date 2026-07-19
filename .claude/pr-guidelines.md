@@ -18,6 +18,25 @@
 
 ## Before Opening a PR
 
+### 0. Sync with `main` first
+
+This repo runs many concurrent worktrees/PRs — branches go stale fast (PR #49 landed 10 commits behind `main` and hit real merge conflicts across `schema.prisma`, layout files, and the MCP docs table because this step was skipped).
+
+Before starting a feature and again right before opening the PR:
+
+```bash
+git fetch origin main
+git rev-list --left-right --count origin/main...HEAD   # <ahead>  <behind>
+```
+
+If the branch is behind by more than a couple commits, merge main in **before** writing more code (small, early conflicts are far cheaper to resolve than a full feature's worth):
+
+```bash
+git merge origin/main --no-edit
+```
+
+When resolving conflicts, be suspicious of any conflict where two branches added props/fields with the **same surrounding text** (e.g. two components both taking `orgSlug`/`workspaceSlug`/`workspaceName` as their first props) — git's diff can misalign and attach one branch's new lines to the wrong JSX tag or function. Re-read the resolved file, don't just trust that the merge tool aligned things correctly. Re-run the full verification suite (tests, typecheck, build, E2E) *after* resolving conflicts, not just before — a clean merge can still break typecheck (e.g. a prop moved to the wrong component).
+
 ### 1. Unit and Integration Tests
 
 ```bash
@@ -98,9 +117,14 @@ Use browser DevTools device emulation or resize to verify. Screenshot both break
 
 Vercel creates a preview deployment automatically for each PR branch. Before requesting review:
 
-1. Wait for the preview URL to appear in the PR.
-2. Smoke-test the primary user flows in the preview (login, workspace nav, at least one data view).
-3. Note the preview URL in the PR description.
+1. Confirm the PR is actually mergeable — do not rely on eyeballing the diff:
+   ```bash
+   gh pr view <N> --json mergeable,mergeStateStatus
+   ```
+   Must read `"mergeable":"MERGEABLE"`. `"CONFLICTING"` means resolve now (see "Sync with main first" above) — don't report the PR as done with unresolved conflicts. `mergeStateStatus` of `UNSTABLE` just means CI/deploy checks are still running; wait and re-check rather than treating it as a conflict.
+2. Wait for the preview URL to appear in the PR.
+3. Smoke-test the primary user flows in the preview (login, workspace nav, at least one data view).
+4. Note the preview URL in the PR description.
 
 ### Production deployment (after merge to main)
 
