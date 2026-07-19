@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import matter from "gray-matter";
 import { remark } from "remark";
+import remarkGfm from "remark-gfm";
 import remarkRehype from "remark-rehype";
 import rehypeStringify from "rehype-stringify";
 import rehypeSlug from "rehype-slug";
@@ -47,6 +48,7 @@ export async function getDoc(slug: string): Promise<DocPage | null> {
   const raw = fs.readFileSync(file, "utf-8");
   const { data, content } = matter(raw);
   const result = await remark()
+    .use(remarkGfm)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeSlug)
     .use(rehypeStringify, { allowDangerousHtml: true })
