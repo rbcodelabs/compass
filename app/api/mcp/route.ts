@@ -25,6 +25,18 @@ import {
   createDoc,
   updateDoc,
 } from "@/lib/doc-tool-handlers"
+import {
+  listScoringModels,
+  getScoringModel,
+  createScoringModel,
+  updateScoringModel,
+  archiveScoringModel,
+  getWorkspaceScoringModel,
+  setWorkspaceScoringModel,
+  scoreOpportunity,
+  getOpportunityScore,
+  listTopOpportunities,
+} from "@/lib/scoring-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -1434,6 +1446,183 @@ const _handler = createMcpHandler(
         },
       },
       updateDoc
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // SCORING
+    // ════════════════════════════════════════════════════════════════
+
+    const metricInputSchema = z.object({
+      key: z.string().min(1).describe("Stable machine key, e.g. \"reach\" (immutable after creation)"),
+      label: z.string().min(1).describe("Human-readable label, e.g. \"Reach\""),
+      description: z.string().optional().describe("Optional explanation of what this metric measures"),
+      minValue: z.number().describe("Minimum allowed raw input value"),
+      maxValue: z.number().describe("Maximum allowed raw input value"),
+      weight: z.number().describe("Scalar multiplier applied before the metric enters the formula (1 = no extra weighting)"),
+      direction: z.enum(["POSITIVE", "NEGATIVE"]).describe("POSITIVE increases the score, NEGATIVE decreases it (e.g. Effort)"),
+    })
+
+    server.registerTool(
+      "list_scoring_models",
+      {
+        title: "List Scoring Models",
+        description:
+          "Lists an organization's scoring model templates (e.g. RICE, ICE) with status, formula " +
+          "type, version, and metric counts. Use this to discover scoring model IDs before calling " +
+          "get_scoring_model, update_scoring_model, or set_workspace_scoring_model.",
+        inputSchema: {
+          orgSlug: z.string().describe("Slug of the organization"),
+        },
+      },
+      listScoringModels
+    )
+
+    server.registerTool(
+      "get_scoring_model",
+      {
+        title: "Get Scoring Model",
+        description:
+          "Returns full detail for a single scoring model, including every metric's key, label, " +
+          "bounds, weight, and direction.",
+        inputSchema: {
+          scoringModelId: z.string().uuid().describe("UUID of the scoring model"),
+        },
+      },
+      getScoringModel
+    )
+
+    server.registerTool(
+      "create_scoring_model",
+      {
+        title: "Create Scoring Model",
+        description:
+          "Creates a new org-level scoring model template with its metrics. Formula type is either " +
+          "WEIGHTED_SUM (metrics summed/subtracted by direction) or MULTIPLICATIVE (true RICE-style " +
+          "Reach×Impact×Confidence÷Effort) — for MULTIPLICATIVE, every metric's minValue must be " +
+          "greater than 0.",
+        inputSchema: {
+          orgSlug: z.string().describe("Slug of the organization"),
+          name: z.string().min(1).describe("Name of the scoring model, e.g. \"RICE\""),
+          description: z.string().optional().describe("Optional description of when to use this model"),
+          formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]).describe("Formula type"),
+          metrics: z.array(metricInputSchema).describe("The model's metrics, in display order"),
+        },
+      },
+      createScoringModel
+    )
+
+    server.registerTool(
+      "update_scoring_model",
+      {
+        title: "Update Scoring Model",
+        description:
+          "Updates a scoring model's name/description and/or replaces its metrics. Only the fields " +
+          "you provide are changed. Providing `metrics` replaces the full metric set and bumps the " +
+          "model's version — existing OpportunityScore rows keep their own frozen formula snapshot " +
+          "and are unaffected until re-scored.",
+        inputSchema: {
+          scoringModelId: z.string().uuid().describe("UUID of the scoring model to update"),
+          name: z.string().min(1).optional().describe("New name"),
+          description: z.string().optional().describe("New description"),
+          formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]).optional().describe("New formula type (only applied when metrics is also provided)"),
+          metrics: z.array(metricInputSchema).optional().describe("Full replacement metric set (bumps version)"),
+        },
+      },
+      updateScoringModel
+    )
+
+    server.registerTool(
+      "archive_scoring_model",
+      {
+        title: "Archive Scoring Model",
+        description:
+          "Archives a scoring model (status ARCHIVED). Archive-only — never hard-deleted, since " +
+          "workspaces or historical scores may still reference it. Archived models are hidden from " +
+          "the workspace picker for new selections but remain valid for existing usages.",
+        inputSchema: {
+          scoringModelId: z.string().uuid().describe("UUID of the scoring model to archive"),
+        },
+      },
+      archiveScoringModel
+    )
+
+    server.registerTool(
+      "get_workspace_scoring_model",
+      {
+        title: "Get Workspace Scoring Model",
+        description:
+          "Returns the scoring model currently active for a workspace, including all its metrics. " +
+          "Returns a message indicating no active model if none is set.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+        },
+      },
+      getWorkspaceScoringModel
+    )
+
+    server.registerTool(
+      "set_workspace_scoring_model",
+      {
+        title: "Set Workspace Scoring Model",
+        description:
+          "Sets (or clears, by omitting scoringModelId) the workspace's active scoring model. " +
+          "Members can then score opportunities against it via score_opportunity.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          scoringModelId: z.string().uuid().nullable().describe("UUID of the scoring model to activate, or null to clear"),
+        },
+      },
+      setWorkspaceScoringModel
+    )
+
+    server.registerTool(
+      "score_opportunity",
+      {
+        title: "Score Opportunity",
+        description:
+          "Computes and saves a score for an opportunity using its workspace's active scoring " +
+          "model. Validates each raw value against the metric's bounds, then upserts the raw and " +
+          "0-100 normalized score along with a frozen snapshot of the formula that produced it.",
+        inputSchema: {
+          opportunityId: z.string().uuid().describe("UUID of the opportunity to score"),
+          rawValues: z
+            .record(z.string(), z.number())
+            .describe("Map of metric key -> raw input value, e.g. { \"reach\": 8, \"effort\": 2 }"),
+        },
+      },
+      scoreOpportunity
+    )
+
+    server.registerTool(
+      "get_opportunity_score",
+      {
+        title: "Get Opportunity Score",
+        description:
+          "Returns an opportunity's saved score (raw and normalized), the model version it was " +
+          "scored under, and a `stale` flag that is true when the live scoring model has since been " +
+          "updated to a newer version.",
+        inputSchema: {
+          opportunityId: z.string().uuid().describe("UUID of the opportunity"),
+        },
+      },
+      getOpportunityScore
+    )
+
+    server.registerTool(
+      "list_top_opportunities",
+      {
+        title: "List Top Opportunities",
+        description:
+          "Lists scored opportunities ranked by normalized score (0-100), descending. Pass " +
+          "workspaceId for a single-workspace ranking, or orgSlug (without workspaceId) for a " +
+          "cross-workspace \"what matters most\" view comparable across different scoring templates.",
+        inputSchema: {
+          workspaceId: z.string().uuid().optional().describe("UUID of the workspace (single-workspace view)"),
+          orgSlug: z.string().optional().describe("Slug of the organization (cross-workspace view; omit workspaceId)"),
+          limit: z.number().int().min(1).max(100).optional().describe("Max items to return (default 20)"),
+        },
+      },
+      listTopOpportunities
     )
 
   },

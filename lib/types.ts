@@ -75,3 +75,55 @@ export interface MemberData {
   name: string | null
   role: WorkspaceRole
 }
+
+// Scoring Models
+export type ScoringModelStatus = "ACTIVE" | "ARCHIVED"
+export type ScoringFormulaType = "WEIGHTED_SUM" | "MULTIPLICATIVE"
+export type MetricDirection = "POSITIVE" | "NEGATIVE"
+
+export interface ScoringMetricData {
+  id: string
+  key: string
+  label: string
+  description: string | null
+  minValue: number
+  maxValue: number
+  weight: number
+  direction: MetricDirection
+  order: number
+}
+
+export interface ScoringModelData {
+  id: string
+  name: string
+  description: string | null
+  status: ScoringModelStatus
+  formulaType: ScoringFormulaType
+  version: number
+  metrics: ScoringMetricData[]
+}
+
+/** A metric definition frozen at scoring time — stored in OpportunityScore.formulaSnapshot. */
+export interface FormulaSnapshotMetric {
+  key: string
+  label: string
+  minValue: number
+  maxValue: number
+  weight: number
+  direction: MetricDirection
+}
+
+export interface OpportunityScoreData {
+  id: string
+  scoringModelId: string
+  scoringModelName: string
+  modelVersion: number
+  formulaType: ScoringFormulaType
+  formulaSnapshot: FormulaSnapshotMetric[]
+  rawValues: Record<string, number>
+  rawScore: number
+  normalizedScore: number
+  scoredAt: string
+  /** True when scoringModelId's live ScoringModel.version is ahead of modelVersion. */
+  stale: boolean
+}

@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
+import { resolveWorkspaceAdmin } from "@/lib/permissions";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
 import { encrypt } from "@/lib/crypto-secrets";
 import { generateSsoSecret } from "@/lib/portal-sso";
@@ -600,6 +601,31 @@ export async function deleteWorkspace(
 
   const nextWorkspace = remainingWorkspaces[0];
   return { redirectTo: `/${org?.slug ?? orgSlug}/${nextWorkspace.slug}` };
+}
+
+// ─── Scoring (workspace admin only) ────────────────────────────────────────────
+
+/**
+ * Sets (or clears, with scoringModelId=null) the workspace's active scoring
+ * model. Any member can subsequently input opportunity scores against it
+ * (see the Opportunity ScoringPanel's saveOpportunityScore action, gated by
+ * the plain resolveWorkspace membership check) — only *picking* the model
+ * is admin-gated, per the brainstorm decision.
+ */
+export async function setActiveScoringModel(
+  orgSlug: string,
+  workspaceSlug: string,
+  scoringModelId: string | null
+) {
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+
+  await prisma.workspaceScoringConfig.upsert({
+    where: { workspaceId },
+    create: { workspaceId, scoringModelId },
+    update: { scoringModelId, updatedAt: new Date() },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }
 
 // ─── Portal Settings ──────────────────────────────────────────────────────────
