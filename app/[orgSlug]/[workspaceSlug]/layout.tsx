@@ -1,6 +1,7 @@
 import { auth } from "@/auth"
 import { redirect, notFound } from "next/navigation"
 import { getWorkspace, getUserWorkspaces } from "@/lib/workspace"
+import getPrisma from "@/lib/db"
 import { Sidebar } from "@/components/sidebar"
 import { BottomNav } from "@/components/bottom-nav"
 import { MobileHeader } from "@/components/mobile-header"
@@ -32,6 +33,13 @@ export default async function WorkspaceLayout({
 
   const workspaces = await getUserWorkspaces(session.user.id)
 
+  const prisma = getPrisma()
+  const orgMembership = await prisma.organizationMember.findFirst({
+    where: { organization: { slug: orgSlug }, userId: session.user.id },
+    select: { role: true },
+  })
+  const isOrgAdmin = orgMembership?.role === "OWNER" || orgMembership?.role === "ADMIN"
+
   return (
     <>
       <WorkspaceThemeStyle branding={resolveWorkspaceBranding(workspace)} />
@@ -53,6 +61,7 @@ export default async function WorkspaceLayout({
             userName={session.user.name ?? session.user.email ?? ""}
             userImage={session.user.image ?? undefined}
             workspaces={workspaces}
+            isOrgAdmin={isOrgAdmin}
           />
 
           {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}

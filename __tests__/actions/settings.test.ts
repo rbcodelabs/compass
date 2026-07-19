@@ -88,6 +88,7 @@ const mockWorkspaceMember = {
   count: vi.fn(),
 };
 const mockDoc = { deleteMany: vi.fn() };
+const mockWorkspaceScoringConfig = { upsert: vi.fn() };
 
 const mockPrisma = {
   squad: mockSquad,
@@ -113,6 +114,7 @@ const mockPrisma = {
   assumption: mockAssumption,
   workspaceMember: mockWorkspaceMember,
   doc: mockDoc,
+  workspaceScoringConfig: mockWorkspaceScoringConfig,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -144,6 +146,7 @@ import {
   addWorkspaceMember,
   updateWorkspaceMemberRole,
   removeWorkspaceMember,
+  setActiveScoringModel,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
 
 const mockAuth = vi.mocked(auth);
@@ -171,6 +174,7 @@ beforeEach(() => {
   mockApiKey.create.mockResolvedValue({ id: "key-1" });
   mockApiKey.findFirst.mockResolvedValue({ id: "key-1", keyHash: "hash", keyPrefix: "pref" });
   mockApiKey.update.mockResolvedValue({ id: "key-1" });
+  mockWorkspaceScoringConfig.upsert.mockResolvedValue({ id: "config-1" });
 
   // deleteWorkspace defaults
   mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
@@ -983,5 +987,65 @@ describe("removeWorkspaceMember", () => {
     await expect(removeWorkspaceMember("org", "ws", "ws-member-1")).rejects.toThrow(
       "Unauthorized"
     );
+  });
+});
+
+// ─── setActiveScoringModel ──────────────────────────────────────────────────────
+// Gated by resolveWorkspaceAdmin (lib/permissions.ts), not the local
+// resolveWorkspace() helper — the workspace.findFirst() shape it queries
+// includes the caller's own membership role.
+
+describe("setActiveScoringModel", () => {
+  function mockAdminWorkspace(role: "ADMIN" | "MEMBER" = "ADMIN") {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      organizationId: "org-1",
+      members: [{ role }],
+    });
+  }
+
+  it("upserts the workspace scoring config with the chosen model", async () => {
+    mockAdminWorkspace();
+
+    await setActiveScoringModel("org", "ws", "model-1");
+
+    expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-1" },
+      create: { workspaceId: "ws-1", scoringModelId: "model-1" },
+      update: { scoringModelId: "model-1", updatedAt: expect.any(Date) },
+    });
+  });
+
+  it("allows clearing the active model with null", async () => {
+    mockAdminWorkspace();
+
+    await setActiveScoringModel("org", "ws", null);
+
+    expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-1" },
+      create: { workspaceId: "ws-1", scoringModelId: null },
+      update: { scoringModelId: null, updatedAt: expect.any(Date) },
+    });
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(setActiveScoringModel("org", "ws", "model-1")).rejects.toThrow("Unauthorized");
+    expect(mockWorkspaceScoringConfig.upsert).not.toHaveBeenCalled();
+  });
+
+  it("throws Workspace not found when caller is not a member", async () => {
+    mockWorkspace.findFirst.mockResolvedValue(null);
+    await expect(setActiveScoringModel("org", "ws", "model-1")).rejects.toThrow(
+      "Workspace not found"
+    );
+  });
+
+  it("throws Forbidden when caller is a workspace MEMBER, not admin", async () => {
+    mockAdminWorkspace("MEMBER");
+    await expect(setActiveScoringModel("org", "ws", "model-1")).rejects.toThrow(
+      "Forbidden: workspace admin required"
+    );
+    expect(mockWorkspaceScoringConfig.upsert).not.toHaveBeenCalled();
   });
 });

@@ -1,12 +1,18 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
+import { Prisma } from "@prisma/client";
+import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring";
 import type {
   OpportunityStatus,
   SolutionStatus,
   AssumptionStatus,
   RiskLevel,
+  ScoringFormulaType,
+  MetricDirection,
+  FormulaSnapshotMetric,
   EvidenceSourceType,
   EvidenceConfidence,
 } from "@/lib/types";
@@ -228,6 +234,127 @@ export async function reorderAssumption(
     data: { sortOrder },
   });
   revalidatePath(revalidatePathStr);
+}
+
+// ─── Helper: resolve workspace and assert membership ─────────────────────────
+// Mirrors resolveWorkspace in ../settings/actions.ts (kept local/private there,
+// same shape here) — any workspace member may save an opportunity score, per
+// the brainstorm decision (only *picking* the active model is admin-gated).
+
+async function resolveWorkspace(orgSlug: string, workspaceSlug: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const prisma = getPrisma();
+  const workspace = await prisma.workspace.findFirst({
+    where: {
+      slug: workspaceSlug,
+      organization: { slug: orgSlug },
+      members: { some: { userId: session.user.id } },
+    },
+    select: { id: true },
+  });
+
+  if (!workspace) throw new Error("Workspace not found");
+  return { prisma, workspaceId: workspace.id, userId: session.user.id };
+}
+
+// ─── Opportunity Scoring ───────────────────────────────────────────────────────
+
+/**
+ * Computes and upserts an Opportunity's score against its workspace's active
+ * scoring model. Validates raw values against each metric's bounds, snapshots
+ * the formula definitions (so historical scores survive future template
+ * edits), and stamps the model's current version — see
+ * OpportunityScore.modelVersion in prisma/schema.prisma for the staleness
+ * semantics this enables.
+ */
+export async function saveOpportunityScore(
+  orgSlug: string,
+  workspaceSlug: string,
+  opportunityId: string,
+  rawValues: Record<string, number>,
+  revalidatePathStr: string
+) {
+  const { prisma, workspaceId, userId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  const opportunity = await prisma.opportunity.findFirst({
+    where: { id: opportunityId, workspaceId },
+    select: { id: true },
+  });
+  if (!opportunity) throw new Error("Opportunity not found");
+
+  const scoringConfig = await prisma.workspaceScoringConfig.findUnique({
+    where: { workspaceId },
+    include: { scoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
+  });
+  if (!scoringConfig?.scoringModel) {
+    throw new Error("This workspace has no active scoring model");
+  }
+
+  const model = scoringConfig.scoringModel;
+  const formulaType = model.formulaType as ScoringFormulaType;
+  const metricDefs: ScoringMetricDef[] = model.metrics.map((m) => ({
+    key: m.key,
+    minValue: m.minValue,
+    maxValue: m.maxValue,
+    weight: m.weight,
+    direction: m.direction as MetricDirection,
+  }));
+
+  validateMetricsForFormula(metricDefs, formulaType);
+
+  for (const metric of metricDefs) {
+    const value = rawValues[metric.key];
+    if (typeof value !== "number" || Number.isNaN(value)) {
+      throw new Error(`Missing value for metric "${metric.key}"`);
+    }
+    if (value < metric.minValue || value > metric.maxValue) {
+      throw new Error(
+        `Value for "${metric.key}" must be between ${metric.minValue} and ${metric.maxValue}`
+      );
+    }
+  }
+
+  const { rawScore, normalizedScore } = computeScore(metricDefs, rawValues, formulaType);
+
+  const formulaSnapshot: FormulaSnapshotMetric[] = model.metrics.map((m) => ({
+    key: m.key,
+    label: m.label,
+    minValue: m.minValue,
+    maxValue: m.maxValue,
+    weight: m.weight,
+    direction: m.direction as MetricDirection,
+  }));
+
+  await prisma.opportunityScore.upsert({
+    where: { opportunityId },
+    create: {
+      opportunityId,
+      scoringModelId: model.id,
+      modelVersion: model.version,
+      formulaSnapshot: formulaSnapshot as unknown as Prisma.InputJsonValue,
+      rawValues: rawValues as unknown as Prisma.InputJsonValue,
+      rawScore,
+      normalizedScore,
+      scoredByUserId: userId,
+    },
+    update: {
+      scoringModelId: model.id,
+      modelVersion: model.version,
+      formulaSnapshot: formulaSnapshot as unknown as Prisma.InputJsonValue,
+      rawValues: rawValues as unknown as Prisma.InputJsonValue,
+      rawScore,
+      normalizedScore,
+      scoredAt: new Date(),
+      scoredByUserId: userId,
+      updatedAt: new Date(),
+    },
+  });
+
+  revalidatePath(revalidatePathStr);
+
+  return { rawScore, normalizedScore };
 }
 
 // ─── Evidence ──────────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel"
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { DeleteWorkspacePanel } from "@/components/settings/delete-workspace-panel";
+import { WorkspaceScoringPanel } from "@/components/scoring-models/workspace-scoring-panel";
 import type { ApiKeyRow } from "@/components/settings/manage-api-keys-panel";
 import type {
   CustomFieldDefinitionData,
@@ -34,6 +35,7 @@ export default async function SettingsPage({ params }: Props) {
     where: { slug: workspaceSlug, organization: { slug: orgSlug } },
     select: {
       id: true,
+      organizationId: true,
       name: true,
       feedbackEnabled: true,
       roadmapPublic: true,
@@ -48,7 +50,7 @@ export default async function SettingsPage({ params }: Props) {
 
   if (!workspace) redirect("/dashboard");
 
-  const [rawFields, rawSquads, rawApiKeys, rawMembers] = await Promise.all([
+  const [rawFields, rawSquads, rawApiKeys, rawMembers, rawScoringModels, scoringConfig] = await Promise.all([
     prisma.customFieldDefinition.findMany({
       where: { workspaceId: workspace.id },
       orderBy: [{ objectType: "asc" }, { order: "asc" }],
@@ -67,6 +69,15 @@ export default async function SettingsPage({ params }: Props) {
       where: { workspaceId: workspace.id },
       include: { user: true },
       orderBy: { createdAt: "asc" },
+    }),
+    prisma.scoringModel.findMany({
+      where: { organizationId: workspace.organizationId, status: "ACTIVE" },
+      select: { id: true, name: true, formulaType: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.workspaceScoringConfig.findUnique({
+      where: { workspaceId: workspace.id },
+      select: { scoringModelId: true },
     }),
   ]);
 
@@ -160,6 +171,25 @@ export default async function SettingsPage({ params }: Props) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           initialFields={fields}
+        />
+      </section>
+
+      <div className="border-t border-border" />
+
+      <section className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-base font-semibold">Scoring</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Choose which org-level scoring model this workspace uses to rank opportunities.
+            Templates are managed by organization admins in Org Settings.
+          </p>
+        </div>
+
+        <WorkspaceScoringPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          availableModels={rawScoringModels}
+          currentScoringModelId={scoringConfig?.scoringModelId ?? null}
         />
       </section>
 
