@@ -26,6 +26,10 @@ import {
   updateDoc,
 } from "@/lib/doc-tool-handlers"
 import {
+  updateAssumption,
+  deleteAssumption,
+} from "@/lib/assumption-tool-handlers"
+import {
   listScoringModels,
   getScoringModel,
   createScoringModel,
@@ -717,6 +721,33 @@ const _handler = createMcpHandler(
           }],
         }
       }
+    )
+
+    server.registerTool(
+      "update_assumption",
+      {
+        title: "Update Assumption",
+        description: "Updates an existing Assumption's title, risk level, or status. Use this to self-correct mistakes (wrong title, risk level) or advance status outside an experiment conclusion.",
+        inputSchema: {
+          assumptionId: z.string().uuid().describe("UUID of the assumption"),
+          title: z.string().min(1).optional().describe("New title for the assumption"),
+          riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).optional().describe("New risk level"),
+          status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]).optional().describe("New status"),
+        },
+      },
+      updateAssumption
+    )
+
+    server.registerTool(
+      "delete_assumption",
+      {
+        title: "Delete Assumption",
+        description: "Permanently deletes an Assumption. Any Experiments or Evidence linked to it are unlinked (assumptionId set to null), not deleted.",
+        inputSchema: {
+          assumptionId: z.string().uuid().describe("UUID of the assumption to delete"),
+        },
+      },
+      deleteAssumption
     )
 
     server.registerTool(
