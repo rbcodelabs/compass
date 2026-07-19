@@ -83,8 +83,12 @@ const MIGRATIONS = [
     filePath: path.join(process.cwd(), "prisma/migrations/018_workspace_branding/migration.sql"),
   },
   {
-    name: "019_portal_sso",
-    filePath: path.join(process.cwd(), "prisma/migrations/019_portal_sso/migration.sql"),
+    name: "019_scoring_models",
+    filePath: path.join(process.cwd(), "prisma/migrations/019_scoring_models/migration.sql"),
+  },
+  {
+    name: "020_portal_sso",
+    filePath: path.join(process.cwd(), "prisma/migrations/020_portal_sso/migration.sql"),
   },
 ];
 
