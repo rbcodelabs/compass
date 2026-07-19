@@ -6,6 +6,8 @@ import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
+import { encrypt } from "@/lib/crypto-secrets";
+import { generateSsoSecret } from "@/lib/portal-sso";
 import type {
   CustomFieldType,
   CustomFieldObjectType,
@@ -605,7 +607,12 @@ export async function deleteWorkspace(
 export async function updatePortalSettings(
   orgSlug: string,
   workspaceSlug: string,
-  input: { feedbackEnabled?: boolean; roadmapPublic?: boolean; portalAuthRequired?: boolean }
+  input: {
+    feedbackEnabled?: boolean;
+    roadmapPublic?: boolean;
+    portalAuthRequired?: boolean;
+    ssoEnabled?: boolean;
+  }
 ) {
   const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
 
@@ -615,10 +622,45 @@ export async function updatePortalSettings(
       ...(input.feedbackEnabled !== undefined && { feedbackEnabled: input.feedbackEnabled }),
       ...(input.roadmapPublic !== undefined && { roadmapPublic: input.roadmapPublic }),
       ...(input.portalAuthRequired !== undefined && { portalAuthRequired: input.portalAuthRequired }),
+      ...(input.ssoEnabled !== undefined && { ssoEnabled: input.ssoEnabled }),
     },
   });
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
+
+/**
+ * Generates a brand-new SSO shared secret, encrypts it at rest, and
+ * overwrites whatever secret (if any) the workspace had before — there is
+ * no rotation grace window in v1 (documented limitation). Returns the raw
+ * secret exactly once; it is never stored or returned again after this
+ * call returns, mirroring the ApiKey / createApiKey precedent above.
+ */
+export async function regenerateSsoSecret(
+  orgSlug: string,
+  workspaceSlug: string
+): Promise<{ rawSecret: string }> {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  const encryptionKey = process.env.SSO_SECRET_ENCRYPTION_KEY;
+  if (!encryptionKey) {
+    throw new Error("SSO_SECRET_ENCRYPTION_KEY is not configured on the server");
+  }
+
+  const rawSecret = generateSsoSecret();
+  const ssoSecretEncrypted = encrypt(rawSecret, encryptionKey);
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: {
+      ssoSecretEncrypted,
+      ssoSecretUpdatedAt: new Date(),
+    },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+
+  return { rawSecret };
 }
 
 // ─── Workspace Branding ───────────────────────────────────────────────────────

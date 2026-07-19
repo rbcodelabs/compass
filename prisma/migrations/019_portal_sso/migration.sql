@@ -13,3 +13,4 @@
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS sso_enabled BOOLEAN;
 UPDATE workspaces SET sso_enabled = false WHERE sso_enabled IS NULL;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS sso_secret_encrypted TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS sso_secret_updated_at TIMESTAMP(3);
