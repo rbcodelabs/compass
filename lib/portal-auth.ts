@@ -10,6 +10,7 @@
  * import from this file.
  */
 import { randomBytes, createHash } from "crypto";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import getPrisma from "@/lib/db";
 
@@ -62,35 +63,56 @@ export async function createPortalSession(portalAccountId: string): Promise<stri
  * Reads the compass_portal_session cookie (if present), hashes it, and
  * looks up a matching, unexpired PortalSession. Fails closed: any absence,
  * mismatch, or expiry returns null rather than throwing.
+ *
+ * Memoized per-request with React's `cache()`. The portal layout and each
+ * portal page (roadmap, feedback, ...) independently call this function.
+ * Without memoization, each call issued its own `lastUsedAt` bump UPDATE
+ * against the *same* PortalSession row within the same request. Aurora
+ * DSQL uses optimistic concurrency control rather than row locking, so two
+ * concurrent transactions writing the same row throw a write conflict
+ * (Prisma P2034) instead of one blocking on the other — this was crashing
+ * the public roadmap/feedback pages with a 500 for any visitor who had an
+ * active portal session cookie. Memoizing collapses layout+page into a
+ * single call (and a single write) per request.
  */
-export async function getPortalSession(): Promise<{ portalAccountId: string; email: string } | null> {
-  const cookieStore = await cookies();
-  const rawToken = cookieStore.get(PORTAL_SESSION_COOKIE)?.value;
-  if (!rawToken) return null;
+export const getPortalSession = cache(
+  async (): Promise<{ portalAccountId: string; email: string } | null> => {
+    const cookieStore = await cookies();
+    const rawToken = cookieStore.get(PORTAL_SESSION_COOKIE)?.value;
+    if (!rawToken) return null;
 
-  const tokenHash = hashToken(rawToken);
-  const prisma = getPrisma();
+    const tokenHash = hashToken(rawToken);
+    const prisma = getPrisma();
 
-  const session = await prisma.portalSession.findUnique({
-    where: { tokenHash },
-    select: {
-      portalAccountId: true,
-      expiresAt: true,
-      portalAccount: { select: { email: true } },
-    },
-  });
+    const session = await prisma.portalSession.findUnique({
+      where: { tokenHash },
+      select: {
+        portalAccountId: true,
+        expiresAt: true,
+        portalAccount: { select: { email: true } },
+      },
+    });
 
-  if (!session) return null;
-  if (session.expiresAt.getTime() < Date.now()) return null;
+    if (!session) return null;
+    if (session.expiresAt.getTime() < Date.now()) return null;
 
-  // Bump lastUsedAt on successful use (sliding expiry bookkeeping).
-  await prisma.portalSession.update({
-    where: { tokenHash },
-    data: { lastUsedAt: new Date() },
-  });
+    // Bump lastUsedAt on successful use (sliding expiry bookkeeping). This
+    // is best-effort: a *different* request touching the same row (e.g. a
+    // second tab, or a prefetch racing the real navigation) can still hit
+    // a DSQL write conflict even with per-request memoization. It's just
+    // bookkeeping, so never let it fail the session lookup itself.
+    try {
+      await prisma.portalSession.update({
+        where: { tokenHash },
+        data: { lastUsedAt: new Date() },
+      });
+    } catch (err) {
+      console.error("[portal-auth] failed to bump PortalSession.lastUsedAt", err);
+    }
 
-  return { portalAccountId: session.portalAccountId, email: session.portalAccount.email };
-}
+    return { portalAccountId: session.portalAccountId, email: session.portalAccount.email };
+  }
+);
 
 /**
  * Deletes the current PortalSession row (if any) and always clears the

@@ -145,6 +145,30 @@ describe("getPortalSession", () => {
     // Fails closed without mutating state (no lastUsedAt bump on an expired row).
     expect(mockPortalSession.update).not.toHaveBeenCalled();
   });
+
+  it("still returns the session when the lastUsedAt bump hits a DSQL write conflict", async () => {
+    // Regression test for the production incident (Prisma P2034 /
+    // TransactionWriteConflict, digest 1939714793): a concurrent request
+    // touching the same PortalSession row can make the best-effort
+    // lastUsedAt UPDATE fail. That must never surface as a crashed page —
+    // the session lookup itself already succeeded and should be returned.
+    cookieJar.set(PORTAL_SESSION_COOKIE, "some-token");
+    mockPortalSession.findUnique.mockResolvedValue({
+      portalAccountId: "account-1",
+      expiresAt: new Date(Date.now() + 60_000),
+      portalAccount: { email: "jane@example.com" },
+    });
+    mockPortalSession.update.mockRejectedValue(
+      Object.assign(new Error("Transaction failed due to a write conflict or a deadlock."), {
+        code: "P2034",
+      })
+    );
+
+    const session = await getPortalSession();
+
+    expect(session).toEqual({ portalAccountId: "account-1", email: "jane@example.com" });
+    expect(mockPortalSession.update).toHaveBeenCalled();
+  });
 });
 
 // ─── clearPortalSession ────────────────────────────────────────────────────────
