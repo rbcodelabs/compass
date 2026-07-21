@@ -18,10 +18,24 @@ const mockPrisma = {
     findFirst: vi.fn(),
     create: vi.fn(),
   },
+  organizationMember: {
+    findMany: vi.fn(),
+  },
+  workspaceMember: {
+    createMany: vi.fn(),
+  },
 }
 
 vi.mock("@/lib/db", () => ({
   default: () => mockPrisma,
+}))
+
+// ── next/cache mock — asserts the newly created workspace invalidates the
+// cached workspace list pages (dashboard + sidebar switcher) so it shows up
+// without a hard reload. ─────────────────────────────────────────────────
+const mockRevalidatePath = vi.fn()
+vi.mock("next/cache", () => ({
+  revalidatePath: (...args: unknown[]) => mockRevalidatePath(...args),
 }))
 
 // ── Fake McpServer that captures the last-registered tool callback ───────────
@@ -80,6 +94,10 @@ describe("create_workspace MCP tool", () => {
       name: "My Product",
       slug: "my-product",
     })
+    mockPrisma.organizationMember.findMany.mockResolvedValue([
+      { userId: "user-1", role: "OWNER" },
+    ])
+    mockPrisma.workspaceMember.createMany.mockResolvedValue({ count: 1 })
 
     const handler = getHandler("create_workspace")
     const result = await handler({ orgSlug: "rbcodelabs", name: "My Product", slug: "my-product" })
@@ -99,6 +117,35 @@ describe("create_workspace MCP tool", () => {
         slug: "my-product",
       }),
     })
+  })
+
+  it("revalidates the dashboard and root layout so the new workspace shows up without a hard reload", async () => {
+    // Regression test for: newly created workspace does not appear in the
+    // workspace list UI (soft-nav / client-side router cache serves the
+    // stale pre-creation payload for /dashboard and the sidebar switcher).
+    mockPrisma.organization.findUnique.mockResolvedValue({ id: "org-uuid-1", name: "RB Code Labs" })
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    mockPrisma.workspace.create.mockResolvedValue({
+      id: "ws-uuid-2",
+      name: "Second Product",
+      slug: "second-product",
+    })
+    mockPrisma.organizationMember.findMany.mockResolvedValue([])
+
+    const handler = getHandler("create_workspace")
+    await handler({ orgSlug: "rbcodelabs", name: "Second Product", slug: "second-product" })
+
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/dashboard")
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/", "layout")
+  })
+
+  it("does not revalidate when workspace creation fails (org not found)", async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue(null)
+
+    const handler = getHandler("create_workspace")
+    await handler({ orgSlug: "nonexistent", name: "Foo", slug: "foo" })
+
+    expect(mockRevalidatePath).not.toHaveBeenCalled()
   })
 
   it("returns an error when the org slug is not found", async () => {
