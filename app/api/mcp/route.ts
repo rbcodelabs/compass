@@ -4,6 +4,7 @@
 // Endpoint: POST /api/mcp  (Streamable HTTP transport)
 
 import { createMcpHandler } from "mcp-handler"
+import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { validateMcpAuth } from "@/lib/mcp-auth"
@@ -234,6 +235,19 @@ const _handler = createMcpHandler(
             skipDuplicates: true,
           })
         }
+
+        // This mutation happens via the MCP route (a plain Prisma write, not
+        // a Server Action), so none of Next's automatic revalidation kicks
+        // in. Without this, /dashboard and the workspace sidebar switcher
+        // keep serving the stale pre-creation payload from the client-side
+        // router cache on a soft nav — the workspace exists in the DB but
+        // looks missing until a hard reload. There's no single concrete
+        // per-workspace-slug path to target yet (the workspace is brand
+        // new), so revalidate /dashboard directly plus the root layout to
+        // cover the sidebar switcher on whichever workspace the browsing
+        // user currently has open.
+        revalidatePath("/dashboard")
+        revalidatePath("/", "layout")
 
         return {
           content: [{
