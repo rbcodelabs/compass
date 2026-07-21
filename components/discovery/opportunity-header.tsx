@@ -7,8 +7,12 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxTrigger,
+} from "@/components/ui/combobox";
 import { SquadPicker } from "@/components/squads/squad-picker";
 import {
   updateOpportunityStatus,
@@ -165,31 +169,33 @@ export function OpportunityHeader({
         ) : null}
 
         {availableKeyResults.length > 0 && (
-          <Select
+          <Combobox
+            items={[
+              { value: "__none__", label: "— None —" },
+              ...availableKeyResults.map((kr) => ({
+                value: kr.id,
+                label: kr.title,
+                render: (
+                  <>
+                    <span className="text-muted-foreground text-xs mr-1">
+                      {kr.objectiveTitle} /
+                    </span>
+                    {kr.title}
+                  </>
+                ),
+              })),
+            ]}
             value={opportunity.linkedKeyResult?.id ?? "__none__"}
             onValueChange={handleKRLink}
             disabled={isPending}
           >
-            <SelectTrigger
-              size="sm"
-              className="w-auto h-auto border-0 p-0 shadow-none bg-transparent text-xs text-muted-foreground/60 hover:text-muted-foreground focus-visible:ring-0 [&_svg]:hidden gap-0"
-            >
+            <ComboboxTrigger size="sm" variant="inline">
               <span className="underline underline-offset-2 decoration-dashed">
                 {opportunity.linkedKeyResult ? "change KR" : "Link to key result"}
               </span>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">— None —</SelectItem>
-              {availableKeyResults.map((kr) => (
-                <SelectItem key={kr.id} value={kr.id}>
-                  <span className="text-muted-foreground text-xs mr-1">
-                    {kr.objectiveTitle} /
-                  </span>
-                  {kr.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            </ComboboxTrigger>
+            <ComboboxContent />
+          </Combobox>
         )}
       </div>
     </div>

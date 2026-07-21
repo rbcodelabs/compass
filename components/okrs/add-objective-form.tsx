@@ -7,12 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Combobox,
+  ComboboxContent,
+  ComboboxTrigger,
+  ComboboxValue,
+} from "@/components/ui/combobox";
 import { createObjective } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import type { SquadData } from "@/lib/types";
 
@@ -106,18 +105,13 @@ export function AddObjectiveForm({
       {squads.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="obj-squad">Squad (optional)</Label>
-          <Select
-            value={squadId ?? "__none__"}
-            onValueChange={(v) => setSquadId(v === "__none__" ? null : v)}
-            disabled={isPending}
-          >
-            <SelectTrigger id="obj-squad">
-              <SelectValue placeholder="No squad" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">No squad</SelectItem>
-              {squads.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
+          <Combobox
+            items={[
+              { value: "__none__", label: "No squad" },
+              ...squads.map((s) => ({
+                value: s.id,
+                label: s.name,
+                render: (
                   <span className="flex items-center gap-1.5">
                     <span
                       className="w-2 h-2 rounded-full shrink-0 inline-block"
@@ -125,10 +119,18 @@ export function AddObjectiveForm({
                     />
                     {s.name}
                   </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                ),
+              })),
+            ]}
+            value={squadId ?? "__none__"}
+            onValueChange={(v) => setSquadId(v === "__none__" ? null : v)}
+            disabled={isPending}
+          >
+            <ComboboxTrigger id="obj-squad">
+              <ComboboxValue placeholder="No squad" />
+            </ComboboxTrigger>
+            <ComboboxContent />
+          </Combobox>
         </div>
       )}
 

@@ -10,6 +10,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxTrigger,
+  ComboboxValue,
+} from "@/components/ui/combobox";
 import { updateOpportunityStatus, linkOpportunityToKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { SquadPicker } from "@/components/squads/squad-picker";
@@ -143,24 +149,29 @@ export function OpportunityOverview({
       {/* Key Result link */}
       {availableKeyResults.length > 0 && (
         <Field label="Linked Key Result">
-          <Select
+          <Combobox
+            items={[
+              { value: "__none__", label: "— None —" },
+              ...availableKeyResults.map((kr) => ({
+                value: kr.id,
+                label: kr.title,
+                render: (
+                  <>
+                    <span className="text-muted-foreground text-xs mr-1">{kr.objectiveTitle} /</span>
+                    {kr.title}
+                  </>
+                ),
+              })),
+            ]}
             value={opportunity.linkedKeyResult?.id ?? "__none__"}
             onValueChange={handleKRLink}
             disabled={isPending}
           >
-            <SelectTrigger size="sm" className="w-64">
-              <SelectValue placeholder="Link to a key result…" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">— None —</SelectItem>
-              {availableKeyResults.map((kr) => (
-                <SelectItem key={kr.id} value={kr.id}>
-                  <span className="text-muted-foreground text-xs mr-1">{kr.objectiveTitle} /</span>
-                  {kr.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <ComboboxTrigger size="sm" className="w-64">
+              <ComboboxValue placeholder="Link to a key result…" />
+            </ComboboxTrigger>
+            <ComboboxContent />
+          </Combobox>
           {opportunity.linkedKeyResult && (
             <p className="text-xs text-muted-foreground mt-0.5">
               {opportunity.linkedKeyResult.objective.title} / {opportunity.linkedKeyResult.title}

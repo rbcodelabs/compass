@@ -17,6 +17,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Combobox,
+  ComboboxContent,
+  ComboboxTrigger,
+  ComboboxValue,
+} from "@/components/ui/combobox";
+import {
   updateObjectiveStatus,
   setObjectiveParentKR,
   deleteObjective,
@@ -259,26 +265,31 @@ export function ObjectiveRow({
       {availableKRs && availableKRs.length > 0 && (
         <div className="flex items-center gap-2 pt-1">
           <span className="text-xs text-muted-foreground shrink-0">Supports:</span>
-          <Select
+          <Combobox
+            items={[
+              { value: "__none__", label: "— None —" },
+              ...availableKRs.map((kr) => ({
+                value: kr.id,
+                label: kr.title,
+                render: (
+                  <>
+                    <span className="text-muted-foreground text-xs mr-1">
+                      {kr.objectiveTitle} /
+                    </span>
+                    {kr.title}
+                  </>
+                ),
+              })),
+            ]}
             value={localParentKRId ?? "__none__"}
             onValueChange={handleParentKRChange}
             disabled={isParentKRPending}
           >
-            <SelectTrigger size="sm" className="flex-1 max-w-xs text-xs">
-              <SelectValue placeholder="Link to a company KR…" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">— None —</SelectItem>
-              {availableKRs.map((kr) => (
-                <SelectItem key={kr.id} value={kr.id}>
-                  <span className="text-muted-foreground text-xs mr-1">
-                    {kr.objectiveTitle} /
-                  </span>
-                  {kr.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <ComboboxTrigger size="sm" className="flex-1 max-w-xs text-xs">
+              <ComboboxValue placeholder="Link to a company KR…" />
+            </ComboboxTrigger>
+            <ComboboxContent />
+          </Combobox>
         </div>
       )}
 

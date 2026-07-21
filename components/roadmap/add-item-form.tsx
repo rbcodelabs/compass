@@ -7,12 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Combobox,
+  ComboboxContent,
+  ComboboxTrigger,
+  ComboboxValue,
+} from "@/components/ui/combobox";
 import { addRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import type { Horizon } from "@/lib/types";
@@ -188,95 +187,107 @@ export function AddItemForm({
       {availableOpportunities && availableOpportunities.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`item-opportunity-${horizon}`}>Opportunity (optional)</Label>
-          <Select
+          <Combobox
+            items={[
+              { value: "__none__", label: "— None —" },
+              ...availableOpportunities.map((opp) => ({ value: opp.id, label: opp.title })),
+            ]}
             value={selectedOpportunityId ?? "__none__"}
             onValueChange={(v) => setSelectedOpportunityId(v === "__none__" ? null : v)}
             disabled={isPending}
           >
-            <SelectTrigger id={`item-opportunity-${horizon}`} size="sm">
-              <SelectValue placeholder="Link to an opportunity…" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">— None —</SelectItem>
-              {availableOpportunities.map((opp) => (
-                <SelectItem key={opp.id} value={opp.id}>
-                  {opp.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <ComboboxTrigger id={`item-opportunity-${horizon}`} size="sm">
+              <ComboboxValue placeholder="Link to an opportunity…" />
+            </ComboboxTrigger>
+            <ComboboxContent />
+          </Combobox>
         </div>
       )}
 
       {availableExperiments && availableExperiments.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`item-experiment-${horizon}`}>Experiment (optional)</Label>
-          <Select
+          <Combobox
+            items={[
+              { value: "__none__", label: "— None —" },
+              ...availableExperiments.map((exp) => ({
+                value: exp.id,
+                label: exp.title,
+                render: (
+                  <>
+                    <span className="text-muted-foreground text-xs mr-1">{exp.status} ·</span>
+                    {exp.title}
+                  </>
+                ),
+              })),
+            ]}
             value={selectedExperimentId ?? "__none__"}
             onValueChange={(v) => setSelectedExperimentId(v === "__none__" ? null : v)}
             disabled={isPending}
           >
-            <SelectTrigger id={`item-experiment-${horizon}`} size="sm">
-              <SelectValue placeholder="Link to an experiment…" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">— None —</SelectItem>
-              {availableExperiments.map((exp) => (
-                <SelectItem key={exp.id} value={exp.id}>
-                  <span className="text-muted-foreground text-xs mr-1">{exp.status} ·</span>
-                  {exp.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <ComboboxTrigger id={`item-experiment-${horizon}`} size="sm">
+              <ComboboxValue placeholder="Link to an experiment…" />
+            </ComboboxTrigger>
+            <ComboboxContent />
+          </Combobox>
         </div>
       )}
 
       {availableKRs && availableKRs.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`item-kr-${horizon}`}>Key Result (optional)</Label>
-          <Select
+          <Combobox
+            items={[
+              { value: "__none__", label: "— None —" },
+              ...availableKRs.map((kr) => ({
+                value: kr.id,
+                label: kr.title,
+                render: (
+                  <>
+                    <span className="text-muted-foreground text-xs mr-1">{kr.objectiveTitle} /</span>
+                    {kr.title}
+                  </>
+                ),
+              })),
+            ]}
             value={selectedKRId ?? "__none__"}
             onValueChange={(v) => setSelectedKRId(v === "__none__" ? null : v)}
             disabled={isPending}
           >
-            <SelectTrigger id={`item-kr-${horizon}`} size="sm">
-              <SelectValue placeholder="Link to a key result…" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">— None —</SelectItem>
-              {availableKRs.map((kr) => (
-                <SelectItem key={kr.id} value={kr.id}>
-                  <span className="text-muted-foreground text-xs mr-1">{kr.objectiveTitle} /</span>
-                  {kr.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <ComboboxTrigger id={`item-kr-${horizon}`} size="sm">
+              <ComboboxValue placeholder="Link to a key result…" />
+            </ComboboxTrigger>
+            <ComboboxContent />
+          </Combobox>
         </div>
       )}
 
       {availableSolutions && availableSolutions.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`item-solution-${horizon}`}>Solution (optional)</Label>
-          <Select
+          <Combobox
+            items={[
+              { value: "__none__", label: "— None —" },
+              ...availableSolutions.map((sol) => ({
+                value: sol.id,
+                label: sol.title,
+                render: (
+                  <>
+                    <span className="text-muted-foreground text-xs mr-1">{sol.opportunityTitle} /</span>
+                    {sol.title}
+                  </>
+                ),
+              })),
+            ]}
             value={selectedSolutionId ?? "__none__"}
             onValueChange={(v) => setSelectedSolutionId(v === "__none__" ? null : v)}
             disabled={isPending}
           >
-            <SelectTrigger id={`item-solution-${horizon}`} size="sm">
-              <SelectValue placeholder="Link to a solution…" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">— None —</SelectItem>
-              {availableSolutions.map((sol) => (
-                <SelectItem key={sol.id} value={sol.id}>
-                  <span className="text-muted-foreground text-xs mr-1">{sol.opportunityTitle} /</span>
-                  {sol.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <ComboboxTrigger id={`item-solution-${horizon}`} size="sm">
+              <ComboboxValue placeholder="Link to a solution…" />
+            </ComboboxTrigger>
+            <ComboboxContent />
+          </Combobox>
         </div>
       )}
 
