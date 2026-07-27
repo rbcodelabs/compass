@@ -19,6 +19,22 @@ export type FeedbackType = "BUG" | "IDEA"
 export type EvidenceSourceType = "interview" | "feedback" | "support_ticket" | "experiment_result" | "analytics"
 export type EvidenceConfidence = "high" | "medium" | "low"
 
+// Solution Comments (Plan & Discussion)
+export type CommentType = "PLAN" | "COMMENT"
+export type AuthorType = "AGENT" | "HUMAN"
+
+export interface SolutionComment {
+  id: string
+  solutionId: string
+  commentType: CommentType
+  body: string
+  authorName: string
+  authorType: AuthorType
+  source: "UI" | "MCP"
+  createdAt: string
+  updatedAt: string
+}
+
 // Custom Fields
 export type CustomFieldObjectType =
   | "OPPORTUNITY"

@@ -67,6 +67,12 @@ The MCP server exposes tools that agents can call:
 | `add_evidence` | Attach a piece of evidence (interview, feedback, support ticket, experiment result, or analytics) to an opportunity, solution, or assumption |
 | `link_evidence` | Re-parent existing evidence to a different opportunity, solution, or assumption |
 | `list_evidence` | Fetch all evidence attached to a given opportunity, solution, or assumption |
+| `add_solution_plan` | Log a proposed implementation/engineering plan on a Solution as the pinned "current plan" entry in its Plan & Discussion thread; a later call on the same solution supersedes the previous plan |
+| `add_solution_comment` | Add a reply comment to a Solution's Plan & Discussion thread |
+| `list_solution_comments` | Fetch the full Plan & Discussion thread for a Solution in chronological order, each entry labeled PLAN or COMMENT |
+| `get_solution_comment` | Fetch a single Plan & Discussion entry by ID |
+| `update_solution_comment` | Edit the body of an existing Plan & Discussion entry |
+| `delete_solution_comment` | Permanently delete a Plan & Discussion entry |
 
 ## Example: Connecting Claude Desktop
 

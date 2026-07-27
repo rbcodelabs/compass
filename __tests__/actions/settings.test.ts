@@ -79,6 +79,7 @@ const mockSolution = {
   deleteMany: vi.fn(),
 };
 const mockAssumption = { deleteMany: vi.fn() };
+const mockSolutionComment = { deleteMany: vi.fn() };
 const mockWorkspaceMember = {
   deleteMany: vi.fn(),
   findFirst: vi.fn(),
@@ -112,6 +113,7 @@ const mockPrisma = {
   roadmapVote: mockRoadmapVote,
   solution: mockSolution,
   assumption: mockAssumption,
+  solutionComment: mockSolutionComment,
   workspaceMember: mockWorkspaceMember,
   doc: mockDoc,
   workspaceScoringConfig: mockWorkspaceScoringConfig,
@@ -209,6 +211,7 @@ beforeEach(() => {
   mockSolution.findMany.mockResolvedValue([]);
   mockSolution.deleteMany.mockResolvedValue({ count: 0 });
   mockAssumption.deleteMany.mockResolvedValue({ count: 0 });
+  mockSolutionComment.deleteMany.mockResolvedValue({ count: 0 });
   // Custom fields
   mockCustomFieldDefinition.findMany.mockResolvedValue([]);
   mockCustomFieldDefinition.deleteMany.mockResolvedValue({ count: 0 });
@@ -752,8 +755,11 @@ describe("deleteWorkspace", () => {
       where: { workspaceId: "ws-1" },
     });
 
-    // Assumptions and solutions deleted before opportunities
+    // Assumptions and solution comments deleted before solutions, before opportunities
     expect(mockAssumption.deleteMany).toHaveBeenCalledWith({
+      where: { solutionId: { in: ["sol-1"] } },
+    });
+    expect(mockSolutionComment.deleteMany).toHaveBeenCalledWith({
       where: { solutionId: { in: ["sol-1"] } },
     });
     expect(mockSolution.deleteMany).toHaveBeenCalledWith({
