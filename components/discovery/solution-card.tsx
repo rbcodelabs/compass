@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { EvidenceBadge } from "@/components/discovery/evidence-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -39,12 +40,19 @@ import {
   updateSolutionStatus,
   archiveSolution,
   reorderAssumption,
+  addSolutionComment,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { CardMenu } from "@/components/ui/card-menu";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { AssumptionItem, type AssumptionItemData } from "./assumption-item";
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
-import type { SolutionStatus, RiskLevel, Horizon } from "@/lib/types";
+import type {
+  SolutionStatus,
+  RiskLevel,
+  Horizon,
+  SolutionComment,
+  CommentType,
+} from "@/lib/types";
 
 const STATUS_BADGE_CLASSES: Record<SolutionStatus, string> = {
   IDEA: "bg-secondary text-secondary-foreground",
@@ -69,8 +77,28 @@ export type SolutionCardData = {
   status: SolutionStatus;
   sortOrder: number;
   assumptions: AssumptionItemData[];
+  comments: SolutionComment[];
   _count?: { evidence: number };
 };
+
+const COMMENT_TYPE_LABELS: Record<CommentType, string> = {
+  PLAN: "Plan",
+  COMMENT: "Comment",
+};
+
+const COMMENT_TYPE_BADGE_CLASSES: Record<CommentType, string> = {
+  PLAN: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  COMMENT: "bg-secondary text-secondary-foreground",
+};
+
+function formatCommentTimestamp(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 type Props = {
   solution: SolutionCardData;
@@ -89,6 +117,15 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
   const [assumptionRisk, setAssumptionRisk] = useState<RiskLevel>("MEDIUM");
   const [assumptions, setAssumptions] = useState(solution.assumptions);
   const assumptionInputRef = useRef<HTMLInputElement>(null);
+  const [addingComment, setAddingComment] = useState(false);
+  const [commentType, setCommentType] = useState<CommentType>("COMMENT");
+  const [isCommentPending, startCommentTransition] = useTransition();
+  const commentInputRef = useRef<HTMLTextAreaElement>(null);
+  // Local optimistic copy of the comment thread. revalidatePath alone isn't
+  // reliably reflected in-place in Next dev mode (same reason `assumptions`
+  // above is client state rather than reading solution.assumptions directly)
+  // so we append the server action's returned row ourselves.
+  const [comments, setComments] = useState(solution.comments);
 
   // ─── Outer useSortable (for solutions list) ───────────────────────────────────
   const {
@@ -183,6 +220,40 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
   function handleKill() {
     startTransition(async () => {
       await archiveSolution(solution.id, revalidatePathStr);
+    });
+  }
+
+  // Most recent PLAN entry is the pinned "current plan" — a later
+  // add_solution_plan call supersedes any earlier one (see discovery/actions.ts).
+  const currentPlan = [...comments].reverse().find((c) => c.commentType === "PLAN");
+
+  function handleAddComment(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const data = new FormData(form);
+    const body = (data.get("commentBody") as string).trim();
+    if (!body) return;
+
+    startCommentTransition(async () => {
+      const created = await addSolutionComment(
+        solution.id,
+        { body, commentType },
+        revalidatePathStr
+      );
+      setComments((prev) => [
+        ...prev,
+        {
+          ...created,
+          commentType: created.commentType as CommentType,
+          authorType: created.authorType as SolutionComment["authorType"],
+          source: created.source as SolutionComment["source"],
+          createdAt: new Date(created.createdAt).toISOString(),
+          updatedAt: new Date(created.updatedAt).toISOString(),
+        },
+      ]);
+      form.reset();
+      setCommentType("COMMENT");
+      setAddingComment(false);
     });
   }
 
@@ -404,6 +475,128 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
                 </Button>
               )
             )}
+
+            {/* Plan & Discussion */}
+            <div className="mt-3 pt-3 border-t border-border">
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                Plan &amp; Discussion
+                {comments.length > 0 && (
+                  <span className="ml-1 text-muted-foreground/60">
+                    ({comments.length})
+                  </span>
+                )}
+              </p>
+
+              {currentPlan && (
+                <div
+                  data-testid="current-plan"
+                  className="rounded-md border border-blue-200 dark:border-blue-900/50 bg-blue-50/60 dark:bg-blue-950/20 p-2 mb-2"
+                >
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span
+                      className={`inline-flex h-4 items-center rounded px-1.5 text-[10px] font-medium ${COMMENT_TYPE_BADGE_CLASSES.PLAN}`}
+                    >
+                      Current Plan
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {currentPlan.authorName} · {formatCommentTimestamp(currentPlan.createdAt)}
+                    </span>
+                  </div>
+                  <p className="text-xs whitespace-pre-wrap">{currentPlan.body}</p>
+                </div>
+              )}
+
+              {comments.length === 0 && !addingComment && (
+                <p className="text-xs text-muted-foreground py-1">
+                  No plan or comments yet.
+                </p>
+              )}
+
+              {comments.length > 0 && (
+                <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto pr-1">
+                  {comments.map((c) => (
+                    <div
+                      key={c.id}
+                      className="rounded-md border border-border p-2"
+                    >
+                      <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                        <span
+                          className={`inline-flex h-4 items-center rounded px-1.5 text-[10px] font-medium ${COMMENT_TYPE_BADGE_CLASSES[c.commentType]}`}
+                        >
+                          {COMMENT_TYPE_LABELS[c.commentType]}
+                        </span>
+                        <span className="text-[10px] font-medium">{c.authorName}</span>
+                        {c.authorType === "AGENT" && (
+                          <Badge variant="outline" className="h-4 text-[9px] px-1">
+                            agent
+                          </Badge>
+                        )}
+                        <span className="text-[10px] text-muted-foreground">
+                          {formatCommentTimestamp(c.createdAt)}
+                        </span>
+                      </div>
+                      <p className="text-xs whitespace-pre-wrap">{c.body}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {addingComment ? (
+                <form
+                  onSubmit={handleAddComment}
+                  className="flex flex-col gap-2 mt-2"
+                >
+                  <Textarea
+                    ref={commentInputRef}
+                    name="commentBody"
+                    placeholder="Write a comment or plan update…"
+                    autoFocus
+                    required
+                    disabled={isCommentPending}
+                    className="text-xs min-h-16"
+                  />
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={commentType}
+                      onValueChange={(v: string | null) => {
+                        if (v) setCommentType(v as CommentType);
+                      }}
+                      disabled={isCommentPending}
+                    >
+                      <SelectTrigger size="sm" className="w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="COMMENT">Comment</SelectItem>
+                        <SelectItem value="PLAN">Plan update</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button type="submit" size="sm" disabled={isCommentPending}>
+                      {isCommentPending ? "Posting..." : "Post"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={isCommentPending}
+                      onClick={() => setAddingComment(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="mt-2 text-muted-foreground"
+                  onClick={() => setAddingComment(true)}
+                >
+                  <PlusIcon />
+                  Add Comment
+                </Button>
+              )}
+            </div>
           </CardContent>
         )}
       </Card>

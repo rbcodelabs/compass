@@ -276,8 +276,27 @@ model Solution {
   updatedById   String?       @map("updated_by_id") @db.Uuid
   source        String        @default("UI") @map("source") @db.VarChar(20)
   evidence      Evidence[]
+  comments      SolutionComment[]
 
   @@map("solutions")
+}
+
+model SolutionComment {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  solutionId  String   @map("solution_id") @db.Uuid
+  /// One of: PLAN | COMMENT
+  commentType String   @default("COMMENT") @map("comment_type") @db.VarChar(20)
+  body        String   @db.Text
+  authorName  String   @map("author_name") @db.VarChar(255)
+  /// One of: AGENT | HUMAN
+  authorType  String   @default("HUMAN") @map("author_type") @db.VarChar(20)
+  /// One of: UI | MCP
+  source      String   @default("UI") @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+  solution    Solution @relation(fields: [solutionId], references: [id])
+
+  @@map("solution_comments")
 }
 
 model Assumption {

@@ -538,6 +538,12 @@ export async function deleteWorkspace(
       await prisma.assumption.deleteMany({
         where: { solutionId: { in: solutionIds } },
       });
+      // SolutionComment has no cascade delete (relationMode = "prisma"), so
+      // it must be cleared before the Solution rows themselves are deleted,
+      // same reasoning as the Assumption deleteMany above.
+      await prisma.solutionComment.deleteMany({
+        where: { solutionId: { in: solutionIds } },
+      });
       // ── Step 11: Delete Solutions ───────────────────────────────────────────
       await prisma.solution.deleteMany({
         where: { id: { in: solutionIds } },

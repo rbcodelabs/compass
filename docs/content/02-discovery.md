@@ -42,6 +42,15 @@ Open an opportunity by clicking its card, then click **+ Add Solution** in the d
 
 Solutions have a title, description, squad assignment, and a list of assumptions.
 
+## Plan & Discussion
+
+Expand any solution card and scroll to **Plan & Discussion** to track how a solution is actually going to be built, and to leave a running commentary alongside it. There are two entry types:
+
+- **Plan** — a proposed implementation/engineering plan. Posting a new plan supersedes the previous one, which is pinned at the top of the section as the **Current Plan** so anyone opening the card immediately sees the latest thinking.
+- **Comment** — a reply in the thread: a question, a status update, a decision. Comments don't supersede anything and just accumulate in order.
+
+Click **+ Add Comment**, write the body, and choose **Comment** or **Plan update** from the type selector before posting. Both humans (via the UI) and agents (via the `add_solution_plan` / `add_solution_comment` MCP tools — see [MCP API](/help/09-mcp-api)) can post to the same thread, so an agent's proposed plan and a teammate's feedback on it show up side by side.
+
 ## Assumptions
 
 Assumptions are the riskiest beliefs that need to be true for a solution to succeed. Click **+ Add Assumption** on any solution to capture them. Each assumption can be linked to an Experiment for testing.

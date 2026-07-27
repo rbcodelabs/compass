@@ -31,6 +31,8 @@ import type {
   FormulaSnapshotMetric,
   EvidenceSourceType,
   EvidenceConfidence,
+  CommentType,
+  AuthorType,
 } from "@/lib/types";
 
 export async function generateMetadata({
@@ -107,6 +109,9 @@ export default async function OpportunityDetailPage({ params }: Props) {
                   orderBy: { createdAt: "desc" },
                 },
               },
+            },
+            comments: {
+              orderBy: { createdAt: "asc" },
             },
           },
         },
@@ -303,6 +308,14 @@ export default async function OpportunityDetailPage({ params }: Props) {
                   sortOrder: a.sortOrder,
                   riskLevel: a.riskLevel as RiskLevel,
                   status: a.status as AssumptionStatus,
+                })),
+                comments: solution.comments.map((c) => ({
+                  ...c,
+                  commentType: c.commentType as CommentType,
+                  authorType: c.authorType as AuthorType,
+                  source: c.source as "UI" | "MCP",
+                  createdAt: c.createdAt.toISOString(),
+                  updatedAt: c.updatedAt.toISOString(),
                 })),
               }))}
               revalidatePathStr={detailPath}

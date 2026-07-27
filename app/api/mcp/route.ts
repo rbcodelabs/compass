@@ -31,6 +31,14 @@ import {
   deleteAssumption,
 } from "@/lib/assumption-tool-handlers"
 import {
+  addSolutionPlan,
+  addSolutionComment,
+  listSolutionComments,
+  getSolutionComment,
+  updateSolutionComment,
+  deleteSolutionComment,
+} from "@/lib/solution-comment-tool-handlers"
+import {
   listScoringModels,
   getScoringModel,
   createScoringModel,
@@ -556,6 +564,15 @@ const _handler = createMcpHandler(
                   orderBy: { createdAt: "asc" },
                   include: { experiments: { select: { id: true, title: true, status: true, conclusion: true }, orderBy: { createdAt: "desc" } } },
                 },
+                // Only the latest PLAN entry is needed here — the full thread
+                // is fetched separately via list_solution_comments, to avoid
+                // bloating this nested-tree payload.
+                comments: {
+                  where: { commentType: "PLAN" },
+                  orderBy: { createdAt: "desc" },
+                  take: 1,
+                },
+                _count: { select: { comments: true } },
               },
             },
           },
@@ -575,6 +592,14 @@ const _handler = createMcpHandler(
 
         for (const sol of opp.solutions) {
           lines.push(`## Solution: ${sol.title} [${sol.status}]  — ID: ${sol.id}`)
+          const latestPlan = sol.comments[0]
+          const commentCount = sol._count.comments
+          if (latestPlan) {
+            const truncated = latestPlan.body.length > 120 ? `${latestPlan.body.slice(0, 120)}...` : latestPlan.body
+            lines.push(`  Plan: ${truncated} (updated ${formatUtcDate(latestPlan.updatedAt)}) · ${commentCount} comments`)
+          } else if (commentCount > 0) {
+            lines.push(`  ${commentCount} comments`)
+          }
           for (const a of sol.assumptions) {
             lines.push(`  Assumption [${a.status}/${a.riskLevel}]: ${a.title}  — ID: ${a.id}`)
             for (const e of a.experiments) {
@@ -762,6 +787,84 @@ const _handler = createMcpHandler(
         },
       },
       deleteAssumption
+    )
+
+    server.registerTool(
+      "add_solution_plan",
+      {
+        title: "Add Solution Plan",
+        description: "Logs a proposed implementation/engineering plan on a Solution as the pinned 'current plan' entry in its Plan & Discussion thread. A later add_solution_plan call on the same solution supersedes this one.",
+        inputSchema: {
+          solutionId: z.string().uuid().describe("UUID of the solution"),
+          body: z.string().min(1).describe("The plan content"),
+          authorName: z.string().min(1).describe("Name of the agent or person proposing this plan"),
+        },
+      },
+      addSolutionPlan
+    )
+
+    server.registerTool(
+      "add_solution_comment",
+      {
+        title: "Add Solution Comment",
+        description: "Adds a reply comment to a Solution's Plan & Discussion thread.",
+        inputSchema: {
+          solutionId: z.string().uuid().describe("UUID of the solution"),
+          body: z.string().min(1).describe("The comment content"),
+          authorName: z.string().min(1).describe("Name of the agent or person posting this comment"),
+          authorType: z.enum(["AGENT", "HUMAN"]).optional().describe("Who is posting this comment (defaults to AGENT)"),
+        },
+      },
+      addSolutionComment
+    )
+
+    server.registerTool(
+      "list_solution_comments",
+      {
+        title: "List Solution Comments",
+        description: "Returns the full Plan & Discussion thread for a Solution in chronological order, each entry labeled PLAN or COMMENT.",
+        inputSchema: {
+          solutionId: z.string().uuid().describe("UUID of the solution"),
+        },
+      },
+      listSolutionComments
+    )
+
+    server.registerTool(
+      "get_solution_comment",
+      {
+        title: "Get Solution Comment",
+        description: "Fetches a single Solution plan or comment entry by ID.",
+        inputSchema: {
+          commentId: z.string().uuid().describe("UUID of the comment"),
+        },
+      },
+      getSolutionComment
+    )
+
+    server.registerTool(
+      "update_solution_comment",
+      {
+        title: "Update Solution Comment",
+        description: "Updates the body text of an existing Solution plan or comment entry.",
+        inputSchema: {
+          commentId: z.string().uuid().describe("UUID of the comment"),
+          body: z.string().min(1).describe("New body content"),
+        },
+      },
+      updateSolutionComment
+    )
+
+    server.registerTool(
+      "delete_solution_comment",
+      {
+        title: "Delete Solution Comment",
+        description: "Permanently deletes a Solution plan or comment entry.",
+        inputSchema: {
+          commentId: z.string().uuid().describe("UUID of the comment to delete"),
+        },
+      },
+      deleteSolutionComment
     )
 
     server.registerTool(
