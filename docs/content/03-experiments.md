@@ -25,7 +25,7 @@ Experiments move through these statuses:
 
 ## Creating an Experiment
 
-Click **+ Add Experiment** on the Experiments page. Fill in:
+Click **+ Add Experiment** on the Experiments page, or click **Test this assumption →** next to any untested assumption in Discovery's OST Tree view — that pre-fills the assumption picker below so you don't have to hunt for it. Fill in:
 
 - **Title** — A short name for the experiment (e.g. "Trial expiry email A/B test")
 - **Hypothesis** — A falsifiable prediction in the format: *"We believe [action] will result in [outcome] for [audience], as measured by [metric]."*
