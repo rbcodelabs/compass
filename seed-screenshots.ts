@@ -299,6 +299,54 @@ async function main() {
   }
   console.log("Feedback:", feedbackDefs.length);
 
+  // ── Docs ──────────────────────────────────────────────────────────────────
+  // sort_order -1 so this doc wins the docs-index "firstDoc" redirect
+  // (orderBy sortOrder asc, createdAt asc) ahead of any pre-existing empty
+  // Untitled docs in this workspace, so /docs opens on real content.
+  const docTitle = "PRD: AI-Powered Opportunity Clustering";
+  const docContent = `## Problem
+
+PMs manually scan the Discovery board looking for opportunities that describe
+the same underlying customer pain in different words. As the OST grows past
+a few dozen nodes, duplicate or near-duplicate opportunities get created
+independently by different PMs, fragmenting evidence and vote counts across
+several nodes instead of one strong signal.
+
+## Proposed Approach
+
+Run a semantic similarity pass over opportunity titles and descriptions
+whenever a new opportunity is created. Surface a "Similar opportunities"
+suggestion in the creation flow so the PM can link evidence to an existing
+node instead of creating a duplicate, or merge two opportunities after the
+fact from the tree view.
+
+## Success Metrics
+
+- Reduce duplicate opportunity creation rate by 60% within one quarter
+- Cut median time-to-triage for new feedback from 4 days to under 1 day
+- At least 70% of surfaced suggestions are accepted (merged or linked) by PMs
+
+## Open Questions
+
+- Do we cluster on title only, or title + description + linked evidence?
+- Should clustering run synchronously on create, or as a nightly batch job?
+`;
+  const docMetadata = {
+    status: "In Review",
+    owner: "Priya Shah",
+    tags: ["ai", "discovery", "q4-planning"],
+    targetDate: "2026-09-30",
+  };
+  const existingDoc = await one(`SELECT id FROM "${S}".docs WHERE workspace_id = $1 AND title = $2`, [ws.id, docTitle]);
+  if (!existingDoc) {
+    await one(
+      `INSERT INTO "${S}".docs (workspace_id, title, content, metadata, sort_order)
+       VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      [ws.id, docTitle, docContent, JSON.stringify(docMetadata), -1]
+    );
+  }
+  console.log("Docs seeded: 1");
+
   await pool.end();
   console.log("\n✅ Seed complete!");
 }
