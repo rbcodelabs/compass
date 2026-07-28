@@ -292,6 +292,11 @@ model SolutionComment {
   authorType  String   @default("HUMAN") @map("author_type") @db.VarChar(20)
   /// One of: UI | MCP
   source      String   @default("UI") @db.VarChar(20)
+  /// One of: PENDING | APPROVED | REJECTED. Only meaningful on PLAN entries
+  /// (always PENDING on COMMENT rows — approval applies to plans, not
+  /// replies). Purely a status marker: approving/rejecting a plan has no
+  /// side effects on the parent Solution's status.
+  planStatus  String   @default("PENDING") @map("plan_status") @db.VarChar(20)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @map("updated_at")
   solution    Solution @relation(fields: [solutionId], references: [id])

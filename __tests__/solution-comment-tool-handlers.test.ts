@@ -1,7 +1,8 @@
 /**
  * Unit tests for the SolutionComment MCP tool handlers (add_solution_plan,
  * add_solution_comment, list_solution_comments, get_solution_comment,
- * update_solution_comment, delete_solution_comment).
+ * update_solution_comment, delete_solution_comment, approve_solution_plan,
+ * reject_solution_plan).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -37,6 +38,8 @@ import {
   getSolutionComment,
   updateSolutionComment,
   deleteSolutionComment,
+  approveSolutionPlan,
+  rejectSolutionPlan,
 } from "@/lib/solution-comment-tool-handlers"
 
 // ---------------------------------------------------------------------------
@@ -320,5 +323,91 @@ describe("deleteSolutionComment", () => {
     expect(text).toContain(`ID: ${COMMENT_ID}`)
     expect(text).not.toContain("**ID:**")
     expect(text).toContain("COMMENT")
+  })
+})
+
+describe("approveSolutionPlan", () => {
+  it("returns a not-found message when the comment does not exist", async () => {
+    mockSolutionComment.findUnique.mockResolvedValueOnce(null)
+
+    const result = await approveSolutionPlan({ commentId: "missing-id" })
+
+    expect(textOf(result)).toContain("not found")
+    expect(mockSolutionComment.update).not.toHaveBeenCalled()
+  })
+
+  it("refuses to approve a COMMENT (only PLAN entries qualify)", async () => {
+    mockSolutionComment.findUnique.mockResolvedValueOnce({
+      id: COMMENT_ID,
+      commentType: "COMMENT",
+      body: "Existing comment",
+    })
+
+    const result = await approveSolutionPlan({ commentId: COMMENT_ID })
+
+    expect(textOf(result)).toContain("Only PLAN entries can be approved or rejected")
+    expect(mockSolutionComment.update).not.toHaveBeenCalled()
+  })
+
+  it("sets planStatus to APPROVED and updatedAt explicitly (no DB trigger on DSQL)", async () => {
+    mockSolutionComment.findUnique.mockResolvedValueOnce({
+      id: COMMENT_ID,
+      commentType: "PLAN",
+      body: "Ship behind a flag",
+    })
+
+    const result = await approveSolutionPlan({ commentId: COMMENT_ID })
+
+    expect(mockSolutionComment.update).toHaveBeenCalledWith({
+      where: { id: COMMENT_ID },
+      data: { planStatus: "APPROVED", updatedAt: expect.any(Date) },
+    })
+    const text = textOf(result)
+    expect(text).toContain(`ID: ${COMMENT_ID}`)
+    expect(text).not.toContain("**ID:**")
+    expect(text).toContain("approved")
+  })
+})
+
+describe("rejectSolutionPlan", () => {
+  it("returns a not-found message when the comment does not exist", async () => {
+    mockSolutionComment.findUnique.mockResolvedValueOnce(null)
+
+    const result = await rejectSolutionPlan({ commentId: "missing-id" })
+
+    expect(textOf(result)).toContain("not found")
+    expect(mockSolutionComment.update).not.toHaveBeenCalled()
+  })
+
+  it("refuses to reject a COMMENT (only PLAN entries qualify)", async () => {
+    mockSolutionComment.findUnique.mockResolvedValueOnce({
+      id: COMMENT_ID,
+      commentType: "COMMENT",
+      body: "Existing comment",
+    })
+
+    const result = await rejectSolutionPlan({ commentId: COMMENT_ID })
+
+    expect(textOf(result)).toContain("Only PLAN entries can be approved or rejected")
+    expect(mockSolutionComment.update).not.toHaveBeenCalled()
+  })
+
+  it("sets planStatus to REJECTED and updatedAt explicitly (no DB trigger on DSQL)", async () => {
+    mockSolutionComment.findUnique.mockResolvedValueOnce({
+      id: COMMENT_ID,
+      commentType: "PLAN",
+      body: "Ship behind a flag",
+    })
+
+    const result = await rejectSolutionPlan({ commentId: COMMENT_ID })
+
+    expect(mockSolutionComment.update).toHaveBeenCalledWith({
+      where: { id: COMMENT_ID },
+      data: { planStatus: "REJECTED", updatedAt: expect.any(Date) },
+    })
+    const text = textOf(result)
+    expect(text).toContain(`ID: ${COMMENT_ID}`)
+    expect(text).not.toContain("**ID:**")
+    expect(text).toContain("rejected")
   })
 })

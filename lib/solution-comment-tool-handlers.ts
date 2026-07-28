@@ -17,6 +17,7 @@ import getPrisma from "@/lib/db"
 
 type CommentType = "PLAN" | "COMMENT"
 type AuthorType = "AGENT" | "HUMAN"
+type PlanStatus = "PENDING" | "APPROVED" | "REJECTED"
 
 function truncate(s: string, max: number) {
   return s.length > max ? `${s.slice(0, max)}...` : s
@@ -264,4 +265,57 @@ export async function deleteSolutionComment({ commentId }: { commentId: string }
   }
 }
 
-export type { CommentType, AuthorType }
+// ── approve_solution_plan / reject_solution_plan ───────────────────────────
+// Approving/rejecting only applies to PLAN entries — a COMMENT has nothing
+// to approve. Purely a status marker: no side effects on Solution.status.
+
+async function setSolutionPlanStatus(commentId: string, planStatus: PlanStatus) {
+  const prisma = getPrisma()
+
+  const existing = await prisma.solutionComment.findUnique({
+    where: { id: commentId },
+    select: { id: true, commentType: true, body: true },
+  })
+  if (!existing) {
+    return {
+      content: [{ type: "text" as const, text: `Comment "${commentId}" not found.` }],
+    }
+  }
+  if (existing.commentType !== "PLAN") {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Comment "${commentId}" is a COMMENT, not a PLAN. Only PLAN entries can be approved or rejected.`,
+        },
+      ],
+    }
+  }
+
+  const updated = await prisma.solutionComment.update({
+    where: { id: commentId },
+    data: { planStatus, updatedAt: new Date() },
+  })
+
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          `**Plan ${planStatus === "APPROVED" ? "approved" : "rejected"}**\n` +
+          `Body: ${truncate(updated.body, 120)}\n` +
+          `ID: ${updated.id}`,
+      },
+    ],
+  }
+}
+
+export async function approveSolutionPlan({ commentId }: { commentId: string }) {
+  return setSolutionPlanStatus(commentId, "APPROVED")
+}
+
+export async function rejectSolutionPlan({ commentId }: { commentId: string }) {
+  return setSolutionPlanStatus(commentId, "REJECTED")
+}
+
+export type { CommentType, AuthorType, PlanStatus }

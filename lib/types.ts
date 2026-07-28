@@ -22,6 +22,9 @@ export type EvidenceConfidence = "high" | "medium" | "low"
 // Solution Comments (Plan & Discussion)
 export type CommentType = "PLAN" | "COMMENT"
 export type AuthorType = "AGENT" | "HUMAN"
+// Only meaningful on PLAN entries — COMMENT rows stay PENDING and the UI
+// never surfaces a status badge for them.
+export type PlanStatus = "PENDING" | "APPROVED" | "REJECTED"
 
 export interface SolutionComment {
   id: string
@@ -31,6 +34,7 @@ export interface SolutionComment {
   authorName: string
   authorType: AuthorType
   source: "UI" | "MCP"
+  planStatus: PlanStatus
   createdAt: string
   updatedAt: string
 }

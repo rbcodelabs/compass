@@ -51,6 +51,10 @@ Expand any solution card and scroll to **Plan & Discussion** to track how a solu
 
 Click **+ Add Comment**, write the body, and choose **Comment** or **Plan update** from the type selector before posting. Both humans (via the UI) and agents (via the `add_solution_plan` / `add_solution_comment` MCP tools — see [MCP API](/help/09-mcp-api)) can post to the same thread, so an agent's proposed plan and a teammate's feedback on it show up side by side.
 
+### Approving or rejecting a plan
+
+The pinned **Current Plan** carries a status — **Pending**, **Approved**, or **Rejected** — shown as a badge next to it. Use the **Approve** / **Reject** buttons on the Current Plan box to record a decision; either humans (via the UI) or agents (via the `approve_solution_plan` / `reject_solution_plan` MCP tools) can do this. A decision can be changed at any time by clicking the other button. This is purely a status marker — approving or rejecting a plan doesn't change the Solution's own status or trigger anything else automatically.
+
 ## Assumptions
 
 Assumptions are the riskiest beliefs that need to be true for a solution to succeed. Click **+ Add Assumption** on any solution to capture them. Each assumption can be linked to an Experiment for testing.

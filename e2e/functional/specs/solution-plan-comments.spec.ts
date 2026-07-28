@@ -4,7 +4,8 @@
  * Journey: Create opportunity → navigate to detail → add solution →
  *          expand solution card → post a Comment → post a Plan update →
  *          verify the Plan is pinned as "Current Plan" and both entries
- *          appear in the thread.
+ *          appear in the thread → approve the plan → reject it (a decision
+ *          can be changed at any time).
  */
 import { test, expect } from "../fixtures/index";
 
@@ -82,6 +83,23 @@ test.describe("Solution Plan & Discussion", () => {
       // Both entries are still individually visible in the full thread.
       await expect(page.getByText(commentBody)).toBeVisible();
       await expect(page.getByText(planBody).first()).toBeVisible();
+
+      // ── 9. New plans start Pending ──────────────────────────────────────────
+      const planStatusBadge = page.getByTestId("plan-status-badge");
+      await expect(planStatusBadge).toHaveText("Pending");
+
+      // ── 10. Approve the plan ────────────────────────────────────────────────
+      await pinnedPlan.getByRole("button", { name: "Approve" }).click();
+      await expect(planStatusBadge).toHaveText("Approved", { timeout: 10_000 });
+      // Approve button reflects the current decision (disabled once active).
+      await expect(pinnedPlan.getByRole("button", { name: "Approve" })).toBeDisabled();
+      await expect(pinnedPlan.getByRole("button", { name: "Reject" })).toBeEnabled();
+
+      // ── 11. A decision can be changed — reject it instead ───────────────────
+      await pinnedPlan.getByRole("button", { name: "Reject" }).click();
+      await expect(planStatusBadge).toHaveText("Rejected", { timeout: 10_000 });
+      await expect(pinnedPlan.getByRole("button", { name: "Reject" })).toBeDisabled();
+      await expect(pinnedPlan.getByRole("button", { name: "Approve" })).toBeEnabled();
     }
   );
 });

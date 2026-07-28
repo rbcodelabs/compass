@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useState, useTransition, useRef } from "react";
-import { ChevronDownIcon, ChevronRightIcon, PlusIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, PlusIcon, CheckIcon, XIcon } from "lucide-react";
 import { GripVertical } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -41,6 +41,8 @@ import {
   archiveSolution,
   reorderAssumption,
   addSolutionComment,
+  approveSolutionPlan,
+  rejectSolutionPlan,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { CardMenu } from "@/components/ui/card-menu";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
@@ -52,6 +54,7 @@ import type {
   Horizon,
   SolutionComment,
   CommentType,
+  PlanStatus,
 } from "@/lib/types";
 
 const STATUS_BADGE_CLASSES: Record<SolutionStatus, string> = {
@@ -91,6 +94,18 @@ const COMMENT_TYPE_BADGE_CLASSES: Record<CommentType, string> = {
   COMMENT: "bg-secondary text-secondary-foreground",
 };
 
+const PLAN_STATUS_LABELS: Record<PlanStatus, string> = {
+  PENDING: "Pending",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+};
+
+const PLAN_STATUS_BADGE_CLASSES: Record<PlanStatus, string> = {
+  PENDING: "bg-secondary text-secondary-foreground",
+  APPROVED: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  REJECTED: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+};
+
 function formatCommentTimestamp(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
     month: "short",
@@ -121,6 +136,7 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
   const [commentType, setCommentType] = useState<CommentType>("COMMENT");
   const [isCommentPending, startCommentTransition] = useTransition();
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
+  const [isPlanStatusPending, startPlanStatusTransition] = useTransition();
   // Local optimistic copy of the comment thread. revalidatePath alone isn't
   // reliably reflected in-place in Next dev mode (same reason `assumptions`
   // above is client state rather than reading solution.assumptions directly)
@@ -247,6 +263,7 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
           commentType: created.commentType as CommentType,
           authorType: created.authorType as SolutionComment["authorType"],
           source: created.source as SolutionComment["source"],
+          planStatus: created.planStatus as PlanStatus,
           createdAt: new Date(created.createdAt).toISOString(),
           updatedAt: new Date(created.updatedAt).toISOString(),
         },
@@ -254,6 +271,21 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
       form.reset();
       setCommentType("COMMENT");
       setAddingComment(false);
+    });
+  }
+
+  // Approving/rejecting only ever targets the pinned plan — buttons live on
+  // the Current Plan box, so there's always a concrete plan id to act on.
+  function handlePlanDecision(planId: string, status: "APPROVED" | "REJECTED") {
+    startPlanStatusTransition(async () => {
+      if (status === "APPROVED") {
+        await approveSolutionPlan(planId, revalidatePathStr);
+      } else {
+        await rejectSolutionPlan(planId, revalidatePathStr);
+      }
+      setComments((prev) =>
+        prev.map((c) => (c.id === planId ? { ...c, planStatus: status } : c))
+      );
     });
   }
 
@@ -492,17 +524,45 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
                   data-testid="current-plan"
                   className="rounded-md border border-blue-200 dark:border-blue-900/50 bg-blue-50/60 dark:bg-blue-950/20 p-2 mb-2"
                 >
-                  <div className="flex items-center gap-1.5 mb-1">
+                  <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                     <span
                       className={`inline-flex h-4 items-center rounded px-1.5 text-[10px] font-medium ${COMMENT_TYPE_BADGE_CLASSES.PLAN}`}
                     >
                       Current Plan
+                    </span>
+                    <span
+                      data-testid="plan-status-badge"
+                      className={`inline-flex h-4 items-center rounded px-1.5 text-[10px] font-medium ${PLAN_STATUS_BADGE_CLASSES[currentPlan.planStatus]}`}
+                    >
+                      {PLAN_STATUS_LABELS[currentPlan.planStatus]}
                     </span>
                     <span className="text-[10px] text-muted-foreground">
                       {currentPlan.authorName} · {formatCommentTimestamp(currentPlan.createdAt)}
                     </span>
                   </div>
                   <p className="text-xs whitespace-pre-wrap">{currentPlan.body}</p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant={currentPlan.planStatus === "APPROVED" ? "default" : "outline"}
+                      disabled={isPlanStatusPending || currentPlan.planStatus === "APPROVED"}
+                      onClick={() => handlePlanDecision(currentPlan.id, "APPROVED")}
+                    >
+                      <CheckIcon />
+                      Approve
+                    </Button>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant={currentPlan.planStatus === "REJECTED" ? "destructive" : "outline"}
+                      disabled={isPlanStatusPending || currentPlan.planStatus === "REJECTED"}
+                      onClick={() => handlePlanDecision(currentPlan.id, "REJECTED")}
+                    >
+                      <XIcon />
+                      Reject
+                    </Button>
+                  </div>
                 </div>
               )}
 
@@ -525,6 +585,13 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
                         >
                           {COMMENT_TYPE_LABELS[c.commentType]}
                         </span>
+                        {c.commentType === "PLAN" && c.planStatus !== "PENDING" && (
+                          <span
+                            className={`inline-flex h-4 items-center rounded px-1.5 text-[10px] font-medium ${PLAN_STATUS_BADGE_CLASSES[c.planStatus]}`}
+                          >
+                            {PLAN_STATUS_LABELS[c.planStatus]}
+                          </span>
+                        )}
                         <span className="text-[10px] font-medium">{c.authorName}</span>
                         {c.authorType === "AGENT" && (
                           <Badge variant="outline" className="h-4 text-[9px] px-1">
