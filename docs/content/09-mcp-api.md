@@ -73,6 +73,8 @@ The MCP server exposes tools that agents can call:
 | `get_solution_comment` | Fetch a single Plan & Discussion entry by ID |
 | `update_solution_comment` | Edit the body of an existing Plan & Discussion entry |
 | `delete_solution_comment` | Permanently delete a Plan & Discussion entry |
+| `approve_solution_plan` | Mark a PLAN entry as APPROVED (only applies to PLAN entries, not COMMENT replies) |
+| `reject_solution_plan` | Mark a PLAN entry as REJECTED (only applies to PLAN entries, not COMMENT replies) |
 
 ## Example: Connecting Claude Desktop
 

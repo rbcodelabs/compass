@@ -37,6 +37,8 @@ import {
   getSolutionComment,
   updateSolutionComment,
   deleteSolutionComment,
+  approveSolutionPlan,
+  rejectSolutionPlan,
 } from "@/lib/solution-comment-tool-handlers"
 import {
   listScoringModels,
@@ -865,6 +867,30 @@ const _handler = createMcpHandler(
         },
       },
       deleteSolutionComment
+    )
+
+    server.registerTool(
+      "approve_solution_plan",
+      {
+        title: "Approve Solution Plan",
+        description: "Marks a PLAN entry in a Solution's Plan & Discussion thread as APPROVED. Only applies to PLAN entries — pass the ID of the plan itself, not a COMMENT reply.",
+        inputSchema: {
+          commentId: z.string().uuid().describe("UUID of the PLAN entry to approve"),
+        },
+      },
+      approveSolutionPlan
+    )
+
+    server.registerTool(
+      "reject_solution_plan",
+      {
+        title: "Reject Solution Plan",
+        description: "Marks a PLAN entry in a Solution's Plan & Discussion thread as REJECTED. Only applies to PLAN entries — pass the ID of the plan itself, not a COMMENT reply.",
+        inputSchema: {
+          commentId: z.string().uuid().describe("UUID of the PLAN entry to reject"),
+        },
+      },
+      rejectSolutionPlan
     )
 
     server.registerTool(

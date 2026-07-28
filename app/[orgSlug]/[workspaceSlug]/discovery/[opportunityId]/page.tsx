@@ -33,6 +33,7 @@ import type {
   EvidenceConfidence,
   CommentType,
   AuthorType,
+  PlanStatus,
 } from "@/lib/types";
 
 export async function generateMetadata({
@@ -314,6 +315,7 @@ export default async function OpportunityDetailPage({ params }: Props) {
                   commentType: c.commentType as CommentType,
                   authorType: c.authorType as AuthorType,
                   source: c.source as "UI" | "MCP",
+                  planStatus: c.planStatus as PlanStatus,
                   createdAt: c.createdAt.toISOString(),
                   updatedAt: c.updatedAt.toISOString(),
                 })),
