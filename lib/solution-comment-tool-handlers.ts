@@ -151,7 +151,7 @@ export async function listSolutionComments({ solutionId }: { solutionId: string 
 
   const entries = comments.map(
     (c) =>
-      `[${c.commentType}] ${c.authorName} (${c.authorType}) — ${c.createdAt.toISOString()}\n` +
+      `[${c.commentType}${c.commentType === "PLAN" ? ` — ${c.planStatus}` : ""}] ${c.authorName} (${c.authorType}) — ${c.createdAt.toISOString()}\n` +
       `${c.body}\n` +
       `ID: ${c.id}`
   )
@@ -184,6 +184,7 @@ export async function getSolutionComment({ commentId }: { commentId: string }) {
         type: "text" as const,
         text:
           `[${comment.commentType}] ${comment.authorName} (${comment.authorType})\n` +
+          (comment.commentType === "PLAN" ? `Status: ${comment.planStatus}\n` : "") +
           `${comment.body}\n` +
           `Created: ${comment.createdAt.toISOString()}\n` +
           `ID: ${comment.id}`,
