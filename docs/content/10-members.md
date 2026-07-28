@@ -32,3 +32,9 @@ You can't demote the workspace's last remaining Admin — promote someone else t
 Click the trash icon next to a member's name to remove their access to the workspace. This does not delete their Compass account or affect their access to any other workspace.
 
 You can't remove the last member of a workspace, and you can't remove the last remaining Admin — promote another member to Admin first if you need to remove the current one.
+
+## Deleting a Workspace
+
+Deleting a workspace is an admin-only action found in **Settings**, in a dedicated danger-zone panel. Click **Delete workspace**, then type the workspace's exact name to confirm — the delete button stays disabled until the typed name matches.
+
+Deleting a workspace permanently removes all of its data, including OKRs, opportunities, experiments, roadmap items, and feedback. This action cannot be undone.

@@ -25,6 +25,12 @@ Opportunities move through four columns on the kanban board:
 
 Drag cards between columns to update status. You can filter the board by squad using the filter bar at the top of the page.
 
+## Discovery Rail
+
+The Discovery Rail is a collapsible left-side panel that lists every opportunity in the workspace, independent of which view (board or tree) or which opportunity you're currently looking at. Use the search box at the top to filter opportunities by title; results are grouped by status (Exploring, Validating, Prioritized, Active), with Archived opportunities tucked into a collapsible section at the bottom.
+
+On desktop, the rail runs as a full sidebar alongside the Discovery page — click the collapse icon to shrink it to a slim icon strip when you need more room, and expand it again from the same spot. Your collapse preference is remembered locally so it stays put across sessions. The rail also appears as a slide-out panel when navigating to Discovery from other sections of the app, giving you the same opportunity list without leaving the page you're on.
+
 ## Creating Opportunities
 
 Click **+ Add Opportunity** in any column. An opportunity needs:

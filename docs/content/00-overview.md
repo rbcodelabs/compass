@@ -43,6 +43,10 @@ Beyond the core OST workflow, Compass includes:
 - **Branding** — Customize a workspace's accent color, font, and logo — applied consistently across the internal app and its public feedback/roadmap portal.
 - **MCP API** — Connect AI agents to Compass via the Model Context Protocol so they can read and write discovery data programmatically.
 
+## Signing In
+
+Compass supports email magic-link sign-in by default — enter your email and click the link sent to your inbox. In production, you can also sign in with **Continue with Google**. Development environments don't register a Google provider, so local sign-in instead shows a **Dev Login** button for instant access.
+
 ## Getting Started
 
 The fastest path to value is:

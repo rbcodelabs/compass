@@ -38,6 +38,16 @@ Click the **image icon** in the toolbar to upload a screenshot. You can also pas
 
 Images are stored in Vercel Blob storage and served via a CDN. They are always private — only workspace members can view them.
 
+## Page Properties
+
+Above the editor, a collapsible **Properties** panel lets you attach arbitrary key/value metadata to a page — similar to frontmatter. Click **Properties** to expand it, then **+ Add property** to create a new entry.
+
+- String-array values render as removable tag chips — type a value and press Enter or `,` to add another.
+- Any property whose key contains `date`, `created`, `updated`, or `modified` (or ends in `at`), or whose value already looks like a date (`YYYY-MM-DD`), gets a date picker input instead of a plain text field.
+- Click a property's key to rename it inline.
+
+Like the rest of the editor, properties autosave about 800ms after you stop typing — there's no manual save button.
+
 ## Auto-save
 
 The editor auto-saves your changes every few seconds. There is no manual save button. The last saved timestamp appears at the top of the editor. You can safely close the tab and return — your work is preserved.
