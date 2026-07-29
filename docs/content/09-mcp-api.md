@@ -89,9 +89,14 @@ The MCP server exposes tools that agents can call, grouped below by area.
 
 | Tool | Description |
 |---|---|
-| `list_roadmap_items` | Fetch active roadmap items for a workspace, grouped by horizon, including start/end dates when set |
+| `list_roadmap_items` | Fetch active roadmap items for a workspace, grouped by horizon (including LAUNCHING/LAUNCHED), including start/end dates when set |
 | `add_to_roadmap` | Create a roadmap item in NOW/NEXT/LATER/SHIPPED, optionally with a start date and end date for the Timeline view |
-| `update_roadmap_item` | Update a roadmap item's horizon, status, title, description, or start/end dates |
+| `update_roadmap_item` | Update a roadmap item's horizon, status, title, description, or start/end dates. Rejects `horizon: LAUNCHING`/`LAUNCHED` — use `set_launch_tier` to move an item into LAUNCHING |
+| `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items |
+| `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier |
+| `set_launch_tier` | Move a roadmap item into the LAUNCHING horizon by picking a launch tier; attaches a checklist cloned from an explicit or auto-resolved (most recent ACTIVE) template for that tier. Rejects items already LAUNCHING/LAUNCHED |
+| `get_launch_checklist` | Get the launch checklist for a roadmap item, including each item's status and ID |
+| `update_launch_checklist_item` | Set a launch checklist item's status (PENDING/DONE/SKIPPED) |
 
 ### Squads
 
@@ -124,8 +129,8 @@ The MCP server exposes tools that agents can call, grouped below by area.
 | Tool | Description |
 |---|---|
 | `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc` |
-| `get_doc` | Return the full content of a single doc, including its parent, children list, and complete markdown body |
-| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc |
+| `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body, and `docType`/`roadmapItemId` when set |
+| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted) |
 | `update_doc` | Update an existing doc's title, content, and/or icon |
 
 ### Scoring

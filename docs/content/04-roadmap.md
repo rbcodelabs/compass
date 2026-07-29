@@ -60,6 +60,14 @@ Ideas (as opposed to Bugs) aren't included in this panel — they're expected to
 
 Within each horizon, drag cards to reorder them. Order within a horizon communicates relative priority: items higher in the list are higher priority. This ordering is persisted and visible to all workspace members.
 
+## Launch Tiers & Checklists
+
+Moving a roadmap item into the Launching phase requires picking a launch tier: Tier 1 (major launch), Tier 2 (minor launch), or Tier 3 (silent launch). Setting a tier attaches a checklist cloned from your workspace's active checklist template for that tier, and moves the item to the LAUNCHING horizon. Once launching begins, the item cannot be moved back through the tier-selection step, since the roadmap is tracking a real-world GTM commitment, not just an internal work status.
+
+Checklist templates are workspace-owned and reusable: define one per tier (for example, a Major Launch Checklist for Tier 1 with items like Write launch announcement, Brief support team, and Update pricing page), and every future Tier 1 launch reuses it. Each launch gets its own frozen copy of the checklist at attach time, so editing a template later does not retroactively change checklists already in flight. Checklist items are tracked as Pending, Done, or Skipped, since Skipped exists so a genuinely inapplicable item does not block completion the way an incomplete Pending item would.
+
+This is currently managed via the MCP API (set_launch_tier, get_launch_checklist, update_launch_checklist_item, create_checklist_template). No dedicated UI ships yet.
+
 ## Keeping the Roadmap Honest
 
 A roadmap that isn't updated is worse than no roadmap — it creates false confidence. Compass is designed to make updates low-friction: drag to move between horizons, click to update details. The links to opportunities, KRs, and experiments mean the roadmap is always one click away from the evidence behind it.
