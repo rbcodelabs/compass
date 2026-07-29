@@ -2,17 +2,45 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Settings, BookOpen, HelpCircle, Lightbulb } from "lucide-react"
+import { Settings, BookOpen, HelpCircle, Lightbulb, CircleUser } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { usePanelContext } from "@/components/panels/panel-context"
+import { signOutAction } from "@/lib/actions/auth-actions"
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu"
+
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase()
+}
 
 interface MobileHeaderProps {
   orgSlug: string
   workspaceSlug: string
   workspaceName: string
+  userName: string
+  userEmail: string
+  userImage?: string
 }
 
-export function MobileHeader({ orgSlug, workspaceSlug, workspaceName }: MobileHeaderProps) {
+export function MobileHeader({
+  orgSlug,
+  workspaceSlug,
+  workspaceName,
+  userName,
+  userEmail,
+  userImage,
+}: MobileHeaderProps) {
   const pathname = usePathname()
   const { openPanel } = usePanelContext()
   const base = `/${orgSlug}/${workspaceSlug}`
@@ -101,6 +129,40 @@ export function MobileHeader({ orgSlug, workspaceSlug, workspaceName }: MobileHe
           <HelpCircle className="w-3.5 h-3.5" aria-hidden="true" />
           <span className="text-[10px] font-medium leading-none">Help</span>
         </Link>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors"
+            aria-label="Account"
+          >
+            <CircleUser className="w-3.5 h-3.5" aria-hidden="true" />
+            <span className="text-[10px] font-medium leading-none">Account</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="bg-slate-900 text-slate-200 ring-slate-700 min-w-[220px]">
+            <div className="flex items-center gap-2.5 px-1.5 py-1.5">
+              <Avatar className="w-7 h-7 shrink-0">
+                {userImage && <AvatarImage src={userImage} alt={userName} />}
+                <AvatarFallback className="text-[10px] font-semibold bg-slate-700 text-slate-200">
+                  {getInitials(userName || "?")}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-100 truncate">{userName}</p>
+                <p className="text-xs text-slate-500 truncate">{userEmail}</p>
+              </div>
+            </div>
+            <DropdownMenuSeparator className="bg-slate-700" />
+            <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+              <form action={signOutAction} className="w-full">
+                <button
+                  type="submit"
+                  className="w-full text-left px-1.5 py-1 cursor-pointer"
+                >
+                  Sign out
+                </button>
+              </form>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   )
