@@ -8,6 +8,7 @@ import { GripVertical } from "lucide-react";
 import { CheckInForm } from "@/components/okrs/check-in-form";
 import { CardMenu } from "@/components/ui/card-menu";
 import { deleteKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
+import { clampProgress } from "@/lib/okrs";
 
 interface KeyResultBarProps {
   keyResult: {
@@ -19,11 +20,6 @@ interface KeyResultBarProps {
   };
   orgSlug: string;
   workspaceSlug: string;
-}
-
-function clampProgress(current: number, target: number): number {
-  if (target === 0) return 0;
-  return Math.min(100, Math.max(0, Math.round((current / target) * 100)));
 }
 
 export function KeyResultBar({ keyResult, orgSlug, workspaceSlug }: KeyResultBarProps) {

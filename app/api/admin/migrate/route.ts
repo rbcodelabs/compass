@@ -94,6 +94,10 @@ const MIGRATIONS = [
     name: "021_feedback_attachments",
     filePath: path.join(process.cwd(), "prisma/migrations/021_feedback_attachments/migration.sql"),
   },
+  {
+    name: "022_canvas_node_positions",
+    filePath: path.join(process.cwd(), "prisma/migrations/022_canvas_node_positions/migration.sql"),
+  },
 ];
 
 async function getPool(): Promise<Pool> {

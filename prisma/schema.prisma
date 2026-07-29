@@ -137,6 +137,7 @@ model Workspace {
   docs              Doc[]
   scoringConfig     WorkspaceScoringConfig?
   evidence          Evidence[]
+  canvasNodePositions CanvasNodePosition[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -689,6 +690,34 @@ model Doc {
   source      String    @default("UI") @map("source") @db.VarChar(20)
 
   @@map("docs")
+}
+
+// ─── Canvas Viewer ────────────────────────────────────────────────────────────
+// Phase 1 (this model ships now, unpopulated — no drag-to-pin UI yet, see
+// Claude/compass-canvas-viewer-design-2026-07-21.md §8). A row only ever
+// exists once a user explicitly pins a node's position; pinned defaults true
+// so the flag is ready for a future unpin-as-update path instead of forcing
+// delete/recreate races. Phase 2 requirement (not yet implemented): every
+// hard-delete path for a pinnable entity (deleteObjective, deleteKeyResult)
+// must delete its CanvasNodePosition row first, following the deleteSquad
+// no-cascade-cleanup precedent — moot in Phase 1 since no row can exist yet.
+
+model CanvasNodePosition {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  /// OBJECTIVE | KEY_RESULT (Phase 1 only; OPPORTUNITY | SOLUTION | ASSUMPTION |
+  /// EXPERIMENT | ROADMAP_ITEM added in Phase 2 — see CanvasEntityType in lib/types.ts)
+  entityType  String    @map("entity_type") @db.VarChar(50)
+  entityId    String    @map("entity_id") @db.Uuid
+  x           Float
+  y           Float
+  pinned      Boolean   @default(true)
+  updatedAt   DateTime  @default(now()) @map("updated_at")
+  updatedById String?   @map("updated_by_id") @db.Uuid
+
+  @@unique([workspaceId, entityType, entityId])
+  @@map("canvas_node_positions")
 }
 
 // ─── Evidence ─────────────────────────────────────────────────────────────────

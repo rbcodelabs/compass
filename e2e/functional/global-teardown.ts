@@ -96,6 +96,13 @@ export default async function globalTeardown() {
         [wsId]
       );
 
+      // canvas_node_positions — table exists even though Phase 1 never
+      // writes to it (no drag-to-pin UI yet), needed once Phase 2 starts.
+      await pool.query(
+        `DELETE FROM "${S}".canvas_node_positions WHERE workspace_id = $1`,
+        [wsId]
+      );
+
       // key_results → objectives → okr_cycles
       await pool.query(
         `DELETE FROM "${S}".key_results

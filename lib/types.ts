@@ -28,6 +28,13 @@ export type CustomFieldObjectType =
   | "KEY_RESULT"
   | "ROADMAP_ITEM"
 
+// Canvas Viewer
+// Phase 1 only. Phase 2 adds: "OPPORTUNITY" | "SOLUTION" | "ASSUMPTION" |
+// "EXPERIMENT" | "ROADMAP_ITEM".
+export type CanvasEntityType =
+  | "OBJECTIVE"
+  | "KEY_RESULT"
+
 export type CustomFieldType =
   | "TEXT"
   | "NUMBER"
