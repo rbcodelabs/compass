@@ -6,7 +6,7 @@ import { getWorkspace } from "@/lib/workspace"
 import { ExperimentBoard } from "@/components/experiments/experiment-board"
 import { CreateExperimentForm } from "@/components/experiments/create-experiment-form"
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar"
-import type { ExperimentStatus, SquadData } from "@/lib/types"
+import type { AssumptionOptionData, ExperimentStatus, SquadData } from "@/lib/types"
 import type { ExperimentCardData } from "@/components/experiments/experiment-card"
 
 export const metadata = {
@@ -15,7 +15,7 @@ export const metadata = {
 
 interface ExperimentsPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>
-  searchParams: Promise<{ squad?: string }>
+  searchParams: Promise<{ squad?: string; assumptionId?: string }>
 }
 
 export default async function ExperimentsPage({
@@ -23,7 +23,7 @@ export default async function ExperimentsPage({
   searchParams,
 }: ExperimentsPageProps) {
   const { orgSlug, workspaceSlug } = await params
-  const { squad: squadFilter } = await searchParams
+  const { squad: squadFilter, assumptionId: prefillAssumptionId } = await searchParams
 
   const session = await auth()
   const userId = session?.user?.id
@@ -38,7 +38,7 @@ export default async function ExperimentsPage({
 
   const prisma = getPrisma()
 
-  const [rawSquads, rawExperiments] = await Promise.all([
+  const [rawSquads, rawExperiments, rawAssumptions] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { createdAt: "asc" },
@@ -59,12 +59,33 @@ export default async function ExperimentsPage({
         conclusion: true,
       },
     }),
+    prisma.assumption.findMany({
+      where: { solution: { opportunity: { workspaceId: workspace.id } } },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        title: true,
+        solution: {
+          select: {
+            title: true,
+            opportunity: { select: { title: true } },
+          },
+        },
+      },
+    }),
   ])
 
   const squads: SquadData[] = rawSquads.map((s) => ({
     id: s.id,
     name: s.name,
     color: s.color,
+  }))
+
+  const assumptions: AssumptionOptionData[] = rawAssumptions.map((a) => ({
+    id: a.id,
+    title: a.title,
+    solutionTitle: a.solution.title,
+    opportunityTitle: a.solution.opportunity.title,
   }))
 
   const experiments: ExperimentCardData[] = rawExperiments.map((e) => ({
@@ -81,7 +102,12 @@ export default async function ExperimentsPage({
             Design, run, and conclude experiments to validate assumptions.
           </p>
         </div>
-        <CreateExperimentForm workspaceId={workspace.id} squads={squads} />
+        <CreateExperimentForm
+          workspaceId={workspace.id}
+          squads={squads}
+          assumptions={assumptions}
+          prefillAssumptionId={prefillAssumptionId ?? null}
+        />
       </div>
 
       <Suspense>

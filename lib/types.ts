@@ -87,6 +87,14 @@ export interface SquadData {
   color: string
 }
 
+// Assumption picker (create-experiment-form)
+export interface AssumptionOptionData {
+  id: string
+  title: string
+  solutionTitle: string
+  opportunityTitle: string
+}
+
 // Workspace Members
 export interface MemberData {
   id: string

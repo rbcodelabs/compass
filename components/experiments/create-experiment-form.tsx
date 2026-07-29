@@ -13,18 +13,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxTrigger,
+  ComboboxValue,
+} from "@/components/ui/combobox"
 import { createExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
-import type { SquadData } from "@/lib/types"
+import type { AssumptionOptionData, SquadData } from "@/lib/types"
 
 interface CreateExperimentFormProps {
   workspaceId: string
   squads?: SquadData[]
+  assumptions?: AssumptionOptionData[]
+  /** Pre-selects an assumption and auto-opens the form — used by the
+   * "Test this assumption" CTA on the OST tree (?assumptionId=... query param). */
+  prefillAssumptionId?: string | null
 }
 
-export function CreateExperimentForm({ workspaceId, squads = [] }: CreateExperimentFormProps) {
-  const [open, setOpen] = useState(false)
+export function CreateExperimentForm({
+  workspaceId,
+  squads = [],
+  assumptions = [],
+  prefillAssumptionId = null,
+}: CreateExperimentFormProps) {
+  const [open, setOpen] = useState(!!prefillAssumptionId)
   const [isPending, startTransition] = useTransition()
   const [squadId, setSquadId] = useState<string | null>(null)
+  const [assumptionId, setAssumptionId] = useState<string | null>(prefillAssumptionId)
   const formRef = useRef<HTMLFormElement>(null)
 
   function handleSubmit(formData: FormData) {
@@ -42,9 +58,11 @@ export function CreateExperimentForm({ workspaceId, squads = [] }: CreateExperim
         method,
         killCondition,
         squadId,
+        assumptionId: assumptionId ?? undefined,
       })
       setOpen(false)
       setSquadId(null)
+      setAssumptionId(null)
       formRef.current?.reset()
     })
   }
@@ -65,6 +83,41 @@ export function CreateExperimentForm({ workspaceId, squads = [] }: CreateExperim
       className="rounded-xl ring-1 ring-border bg-muted/30 p-4 flex flex-col gap-3 w-full max-w-lg"
     >
       <p className="text-sm font-medium">New Experiment</p>
+
+      {assumptions.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="exp-assumption">Testing assumption (optional)</Label>
+          <Combobox
+            items={[
+              { value: "__none__", label: "No assumption" },
+              ...assumptions.map((a) => ({
+                value: a.id,
+                label: a.title,
+                render: (
+                  <span className="flex flex-col items-start">
+                    <span className="text-xs text-muted-foreground leading-tight">
+                      {a.opportunityTitle} / {a.solutionTitle}
+                    </span>
+                    <span>{a.title}</span>
+                  </span>
+                ),
+              })),
+            ]}
+            value={assumptionId ?? "__none__"}
+            onValueChange={(v) => setAssumptionId(!v || v === "__none__" ? null : v)}
+            disabled={isPending}
+          >
+            <ComboboxTrigger id="exp-assumption" className="w-full">
+              <ComboboxValue placeholder="No assumption" />
+            </ComboboxTrigger>
+            <ComboboxContent emptyMessage="No assumptions found." />
+          </Combobox>
+          <p className="text-xs text-muted-foreground">
+            Linking an assumption lets concluding this experiment automatically
+            update the assumption&apos;s validated/invalidated status.
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="exp-title">Title</Label>
@@ -170,6 +223,7 @@ export function CreateExperimentForm({ workspaceId, squads = [] }: CreateExperim
           onClick={() => {
             setOpen(false)
             setSquadId(null)
+            setAssumptionId(null)
             formRef.current?.reset()
           }}
         >
