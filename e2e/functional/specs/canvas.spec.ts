@@ -93,11 +93,13 @@ test.describe("Canvas", () => {
     });
     await expect(page.getByText(objectiveBTitle)).toBeVisible();
 
-    // Both KR progress rows are visible ("0% / 100%" per clampProgress with
-    // a fresh, un-checked-in KR).
+    // Both KR progress rows are visible. KeyResultNode renders
+    // "{current}{unit} / {target}{unit}" with a leading space before a
+    // present unit (matching key-result-bar.tsx's exact format) — a fresh,
+    // un-checked-in KR with target 100 and unit "%" reads "0 % / 100 %".
     await expect(page.getByText(krATitle)).toBeVisible();
     await expect(page.getByText(krBTitle)).toBeVisible();
-    await expect(page.getByText("0% / 100%").first()).toBeVisible();
+    await expect(page.getByText("0 % / 100 %").first()).toBeVisible();
 
     // ── 5. Pan: drag on the pane, content survives the transform ────────────
     const pane = page.locator(".react-flow__pane");

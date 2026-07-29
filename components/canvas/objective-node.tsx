@@ -38,7 +38,14 @@ function ObjectiveNodeComponent({ data }: NodeProps<ObjectiveNodeType>) {
               title={data.squad.name}
             />
           )}
-          <h3 className="font-medium text-sm leading-snug">{data.title}</h3>
+          {/* Truncated to a single line, not wrapped: computeObjectiveLayout
+              estimates each card's height from a fixed base (see
+              BASE_NODE_HEIGHT in lib/canvas/layout.ts) assuming a one-line
+              title. A wrapped multi-line title would grow taller than that
+              estimate and visually overlap the next row's cards. */}
+          <h3 className="font-medium text-sm leading-snug truncate min-w-0 flex-1" title={data.title}>
+            {data.title}
+          </h3>
         </div>
         <span
           className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[11px] font-medium ${badge.className}`}
