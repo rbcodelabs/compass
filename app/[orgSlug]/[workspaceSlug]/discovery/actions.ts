@@ -15,6 +15,8 @@ import type {
   FormulaSnapshotMetric,
   EvidenceSourceType,
   EvidenceConfidence,
+  CommentType,
+  PlanStatus,
 } from "@/lib/types";
 
 // Types live in @/lib/types — import from there directly.
@@ -438,4 +440,105 @@ export async function linkEvidence(
   });
   revalidatePath(revalidatePathStr);
   return evidence;
+}
+
+// ─── Solution Comments (Plan & Discussion) ────────────────────────────────────
+// UI-originated posts. authorName/authorType are derived from the
+// authenticated session user (unlike the MCP tools, which require an explicit
+// authorName since there's no resolved per-user identity over MCP).
+
+export async function addSolutionComment(
+  solutionId: string,
+  data: { body: string; commentType?: CommentType },
+  revalidatePathStr: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const prisma = getPrisma();
+  const authorName = session.user.name ?? session.user.email ?? "Unknown";
+
+  const comment = await prisma.solutionComment.create({
+    data: {
+      solutionId,
+      commentType: data.commentType ?? "COMMENT",
+      body: data.body.trim(),
+      authorName,
+      authorType: "HUMAN",
+      source: "UI",
+    },
+  });
+  revalidatePath(revalidatePathStr);
+  return comment;
+}
+
+export async function updateSolutionComment(
+  commentId: string,
+  body: string,
+  revalidatePathStr: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const prisma = getPrisma();
+  const comment = await prisma.solutionComment.update({
+    where: { id: commentId },
+    data: { body: body.trim(), updatedAt: new Date() },
+  });
+  revalidatePath(revalidatePathStr);
+  return comment;
+}
+
+export async function deleteSolutionComment(
+  commentId: string,
+  revalidatePathStr: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const prisma = getPrisma();
+  await prisma.solutionComment.delete({ where: { id: commentId } });
+  revalidatePath(revalidatePathStr);
+}
+
+// Approving/rejecting only applies to PLAN entries — a COMMENT has nothing
+// to approve. Purely a status marker: no side effects on Solution.status.
+async function setSolutionPlanStatus(
+  commentId: string,
+  planStatus: PlanStatus,
+  revalidatePathStr: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const prisma = getPrisma();
+  const existing = await prisma.solutionComment.findUnique({
+    where: { id: commentId },
+    select: { id: true, commentType: true },
+  });
+  if (!existing) throw new Error("Comment not found");
+  if (existing.commentType !== "PLAN") {
+    throw new Error("Only PLAN entries can be approved or rejected");
+  }
+
+  const comment = await prisma.solutionComment.update({
+    where: { id: commentId },
+    data: { planStatus, updatedAt: new Date() },
+  });
+  revalidatePath(revalidatePathStr);
+  return comment;
+}
+
+export async function approveSolutionPlan(
+  commentId: string,
+  revalidatePathStr: string
+) {
+  return setSolutionPlanStatus(commentId, "APPROVED", revalidatePathStr);
+}
+
+export async function rejectSolutionPlan(
+  commentId: string,
+  revalidatePathStr: string
+) {
+  return setSolutionPlanStatus(commentId, "REJECTED", revalidatePathStr);
 }
