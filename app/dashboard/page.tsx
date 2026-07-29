@@ -35,7 +35,7 @@ export default async function DashboardPage() {
   }
 
   return (
-    <main className="flex flex-col flex-1 p-8 gap-6 max-w-4xl mx-auto w-full">
+    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 max-w-4xl mx-auto w-full">
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Workspaces</h1>
         <p className="text-slate-500 text-sm">Choose a workspace to continue.</p>
