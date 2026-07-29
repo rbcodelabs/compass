@@ -59,6 +59,9 @@ export default async function OrgSettingsLayout({
         orgSlug={orgSlug}
         workspaceSlug={anchorWorkspace.slug}
         workspaceName={anchorWorkspace.name}
+        userName={session.user.name ?? session.user.email ?? ""}
+        userEmail={session.user.email ?? ""}
+        userImage={session.user.image ?? undefined}
       />
 
       <div className="flex h-[calc(100dvh-3.5rem)] md:h-screen overflow-hidden">
@@ -67,6 +70,7 @@ export default async function OrgSettingsLayout({
           workspaceSlug={anchorWorkspace.slug}
           workspaceName={anchorWorkspace.name}
           userName={session.user.name ?? session.user.email ?? ""}
+          userEmail={session.user.email ?? ""}
           userImage={session.user.image ?? undefined}
           workspaces={workspaces}
           isOrgAdmin

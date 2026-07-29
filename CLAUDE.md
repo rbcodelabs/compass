@@ -7,6 +7,13 @@
   - To fix: `vercel env rm MIGRATION_SECRET production` then `vercel env add MIGRATION_SECRET production` (paste the 1Password value, no trailing newline), then **redeploy** — env var changes don't take effect until a fresh deployment.
   - Verify the new value actually stuck by hitting the live endpoint (GET status query) with it — don't trust `vercel env pull`/`env ls` display alone.
 
+- **`REPAIR_SECRET`** (gates `/api/admin/repair-workspace-memberships`, the one-time membership-backfill endpoint): stored in **1Password** under **"Compass Prod REPAIR_SECRET"**.
+  - Same trust boundary and same rotate-and-lose-it risk as `MIGRATION_SECRET` — it's a Vercel "sensitive" var, write-only once set.
+  - To rotate: `vercel env rm REPAIR_SECRET production` then `vercel env add REPAIR_SECRET production` (paste the 1Password value, no trailing newline), then **redeploy**.
+  - Verify without mutating real data: `POST` with a garbage `orgSlug` (e.g. `__verify-probe__`) — a correct secret returns `404 "No org found with slug ..."`; a wrong/stale secret returns `401 Unauthorized`.
+
+**Standing rule for any secret in this project:** the moment you rotate a value in Vercel, save it to 1Password *before* doing anything else with it (before testing, before moving to the next step) — a dropped connection or a session that dies mid-task should never mean losing the value again. If a saved 1Password copy no longer matches what's live in Vercel (write-only vars can't be read back to confirm), treat it as an incident: rotate fresh, save immediately, redeploy, and verify live — don't assume the stale copy might still work.
+
 ## Portal SSO Identify — resyncing a drifted customer secret
 
 A customer's SSO Identify integration signs JWTs with a shared secret that

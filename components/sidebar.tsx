@@ -12,12 +12,14 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
+import { signOutAction } from "@/lib/actions/auth-actions"
 
 interface SidebarProps {
   orgSlug: string
   workspaceSlug: string
   workspaceName: string
   userName: string
+  userEmail: string
   userImage?: string
   workspaces: { id: string; name: string; slug: string; orgSlug: string }[]
   /** Org admins/owners see an "Org Settings" link near the workspace switcher. */
@@ -48,6 +50,7 @@ export function Sidebar({
   workspaceSlug,
   workspaceName,
   userName,
+  userEmail,
   userImage,
   workspaces,
   isOrgAdmin = false,
@@ -253,14 +256,35 @@ export function Sidebar({
       <div className="mx-3 h-px bg-slate-800/70" />
 
       {/* User */}
-      <div className="flex items-center gap-2.5 px-3.5 py-3.5">
-        <Avatar className="w-6 h-6 shrink-0">
-          {userImage && <AvatarImage src={userImage} alt={userName} />}
-          <AvatarFallback className="text-[10px] font-semibold bg-slate-700 text-slate-200">
-            {getInitials(userName || "?")}
-          </AvatarFallback>
-        </Avatar>
-        <span className="text-xs text-slate-400 truncate">{userName}</span>
+      <div className="px-3 py-3.5">
+        <DropdownMenu>
+          <DropdownMenuTrigger className="w-full flex items-center gap-2.5 rounded-lg px-0.5 py-1 text-left hover:bg-slate-800/60 transition-colors">
+            <Avatar className="w-6 h-6 shrink-0">
+              {userImage && <AvatarImage src={userImage} alt={userName} />}
+              <AvatarFallback className="text-[10px] font-semibold bg-slate-700 text-slate-200">
+                {getInitials(userName || "?")}
+              </AvatarFallback>
+            </Avatar>
+            <span className="text-xs text-slate-400 truncate flex-1">{userName}</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="bg-slate-900 text-slate-200 ring-slate-700">
+            <div className="px-1.5 py-1">
+              <p className="text-sm font-medium text-slate-100 truncate">{userName}</p>
+              <p className="text-xs text-slate-500 truncate">{userEmail}</p>
+            </div>
+            <DropdownMenuSeparator className="bg-slate-700" />
+            <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+              <form action={signOutAction} className="w-full">
+                <button
+                  type="submit"
+                  className="w-full text-left px-1.5 py-1 cursor-pointer"
+                >
+                  Sign out
+                </button>
+              </form>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </aside>
   )

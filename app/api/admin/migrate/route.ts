@@ -95,8 +95,16 @@ const MIGRATIONS = [
     filePath: path.join(process.cwd(), "prisma/migrations/021_feedback_attachments/migration.sql"),
   },
   {
-    name: "022_canvas_node_positions",
-    filePath: path.join(process.cwd(), "prisma/migrations/022_canvas_node_positions/migration.sql"),
+    name: "022_solution_comments",
+    filePath: path.join(process.cwd(), "prisma/migrations/022_solution_comments/migration.sql"),
+  },
+  {
+    name: "023_solution_comment_plan_status",
+    filePath: path.join(process.cwd(), "prisma/migrations/023_solution_comment_plan_status/migration.sql"),
+  },
+  {
+    name: "024_canvas_node_positions",
+    filePath: path.join(process.cwd(), "prisma/migrations/024_canvas_node_positions/migration.sql"),
   },
 ];
 

@@ -30,6 +30,9 @@ const PAGES = [
   // the initial viewport a plain (fullPage: false) capture would show, so
   // it needs its own entry with an explicit scroll-into-view.
   { file: "branding.png",        url: "/rbcodelabs/compass/settings", scrollToHeading: "Branding" },
+  // Danger Zone (DeleteWorkspacePanel) is the last section on the settings
+  // page, below Branding — same situation branding.png solves above.
+  { file: "danger-zone.png",     url: "/rbcodelabs/compass/settings", scrollToHeading: "Danger Zone" },
 ];
 
 test.describe("docs screenshots", () => {
