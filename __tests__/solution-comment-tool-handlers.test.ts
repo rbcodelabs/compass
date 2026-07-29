@@ -72,6 +72,7 @@ beforeEach(() => {
     authorName: "Dev User",
     authorType: "HUMAN",
     source: "UI",
+    planStatus: "PENDING",
     createdAt: NOW,
     updatedAt: NOW,
   })
@@ -225,6 +226,7 @@ describe("listSolutionComments", () => {
         body: "Initial plan",
         authorName: "Claude",
         authorType: "AGENT",
+        planStatus: "PENDING",
         createdAt: NOW,
       },
       {
@@ -233,6 +235,7 @@ describe("listSolutionComments", () => {
         body: "Sounds good",
         authorName: "Rick",
         authorType: "HUMAN",
+        planStatus: "PENDING",
         createdAt: NOW,
       },
     ])
@@ -244,10 +247,44 @@ describe("listSolutionComments", () => {
       orderBy: { createdAt: "asc" },
     })
     const text = textOf(result)
-    expect(text).toContain("[PLAN]")
+    expect(text).toContain("[PLAN — PENDING]")
     expect(text).toContain("[COMMENT]")
     expect(text).toContain("ID: c1")
     expect(text).toContain("ID: c2")
+  })
+
+  it("surfaces the plan's approval status so a caller doesn't need a separate lookup", async () => {
+    mockSolutionComment.findMany.mockResolvedValueOnce([
+      {
+        id: "c1",
+        commentType: "PLAN",
+        body: "Ship behind a flag",
+        authorName: "Claude",
+        authorType: "AGENT",
+        planStatus: "APPROVED",
+        createdAt: NOW,
+      },
+      {
+        id: "c2",
+        commentType: "COMMENT",
+        body: "Sounds good",
+        authorName: "Rick",
+        authorType: "HUMAN",
+        planStatus: "PENDING",
+        createdAt: NOW,
+      },
+    ])
+
+    const result = await listSolutionComments({ solutionId: SOLUTION_ID })
+
+    const text = textOf(result)
+    // The PLAN entry's decision is visible directly in the thread listing...
+    expect(text).toContain("APPROVED")
+    // ...but COMMENT rows (which always default to PENDING) don't get a
+    // meaningless status label cluttering the thread.
+    const commentLine = text.split("\n\n").find((block) => block.startsWith("[COMMENT]"))
+    expect(commentLine).toBeDefined()
+    expect(commentLine).not.toContain("PENDING")
   })
 })
 
@@ -269,6 +306,33 @@ describe("getSolutionComment", () => {
     expect(text).toContain("Existing comment");
     expect(text).toContain(`ID: ${COMMENT_ID}`)
     expect(text).not.toContain("**ID:**")
+  })
+
+  it("does not show a Status line for a COMMENT (only PLAN entries have one)", async () => {
+    const result = await getSolutionComment({ commentId: COMMENT_ID })
+
+    expect(textOf(result)).not.toContain("Status:")
+  })
+
+  it("surfaces a PLAN's approval status so a caller doesn't need a separate lookup", async () => {
+    mockSolutionComment.findUnique.mockResolvedValueOnce({
+      id: COMMENT_ID,
+      solutionId: SOLUTION_ID,
+      commentType: "PLAN",
+      body: "Ship behind a flag",
+      authorName: "Claude",
+      authorType: "AGENT",
+      source: "MCP",
+      planStatus: "APPROVED",
+      createdAt: NOW,
+      updatedAt: NOW,
+    })
+
+    const result = await getSolutionComment({ commentId: COMMENT_ID })
+
+    const text = textOf(result)
+    expect(text).toContain("[PLAN]")
+    expect(text).toContain("Status: APPROVED")
   })
 })
 
