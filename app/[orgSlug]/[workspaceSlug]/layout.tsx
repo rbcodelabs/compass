@@ -49,6 +49,9 @@ export default async function WorkspaceLayout({
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           workspaceName={workspace.name}
+          userName={session.user.name ?? session.user.email ?? ""}
+          userEmail={session.user.email ?? ""}
+          userImage={session.user.image ?? undefined}
         />
 
         {/* On mobile: subtract the 56px header height so the content area fills the rest */}
@@ -59,6 +62,7 @@ export default async function WorkspaceLayout({
             workspaceSlug={workspaceSlug}
             workspaceName={workspace.name}
             userName={session.user.name ?? session.user.email ?? ""}
+            userEmail={session.user.email ?? ""}
             userImage={session.user.image ?? undefined}
             workspaces={workspaces}
             isOrgAdmin={isOrgAdmin}
