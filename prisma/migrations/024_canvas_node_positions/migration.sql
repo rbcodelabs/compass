@@ -1,4 +1,4 @@
--- Migration 022: Canvas Node Positions
+-- Migration 024: Canvas Node Positions
 -- Adds a CanvasNodePosition table for the /canvas pan/zoom viewer (Phase 1,
 -- see Claude/compass-canvas-viewer-design-2026-07-21.md §8). Ships unpopulated
 -- this phase — no drag-to-pin UI yet — so Phase 2's layout logic doesn't need
