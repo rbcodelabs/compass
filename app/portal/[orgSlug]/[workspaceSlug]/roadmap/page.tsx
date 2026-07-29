@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { MessageSquare } from "lucide-react";
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
 import { RoadmapVoteSection } from "@/components/portal/roadmap-vote-section";
@@ -37,7 +39,13 @@ export default async function PortalRoadmapPage({ params }: Props) {
   const [workspace, portalSession] = await Promise.all([
     prisma.workspace.findFirst({
       where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-      select: { id: true, name: true, roadmapPublic: true, portalAuthRequired: true },
+      select: {
+        id: true,
+        name: true,
+        roadmapPublic: true,
+        portalAuthRequired: true,
+        feedbackEnabled: true,
+      },
     }),
     getPortalSession(),
   ]);
@@ -78,11 +86,22 @@ export default async function PortalRoadmapPage({ params }: Props) {
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Public Roadmap</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          See what we are working on and vote for what matters to you.
-        </p>
+      <div className="flex flex-row justify-between items-start gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Public Roadmap</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            See what we are working on and vote for what matters to you.
+          </p>
+        </div>
+        {workspace.feedbackEnabled && (
+          <Link
+            href={`/portal/${orgSlug}/${workspaceSlug}/feedback`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 shrink-0"
+          >
+            <MessageSquare className="w-4 h-4" />
+            Give Feedback
+          </Link>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
