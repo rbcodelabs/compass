@@ -52,6 +52,12 @@ Like the rest of the editor, properties autosave about 800ms after you stop typi
 
 The editor auto-saves your changes every few seconds. There is no manual save button. The last saved timestamp appears at the top of the editor. You can safely close the tab and return — your work is preserved.
 
+## Positioning & Messaging Briefs
+
+A Positioning & Messaging Brief is a Doc linked one-to-one to a Roadmap Item, used to nail down the story before a launch: problem statement, target audience, core message, proof points, and competitive differentiation. Create one via the MCP API's create_doc tool with docType set to GTM_POSITIONING_BRIEF and roadmapItemId set to the roadmap item it belongs to; if you do not pass explicit content, Compass fills in a five-section starter template you can edit like any other doc. Attempting to link a second brief to the same roadmap item is rejected, since the relationship is one-to-one.
+
+There is no dedicated UI for briefs yet; they appear in the regular Docs tree like any other page, and get_doc surfaces the linked roadmap item and doc type so an agent can discover the linkage.
+
 ## Page Titles
 
 Click the title area at the top of the editor to rename a page. Titles are saved immediately on blur.

@@ -138,6 +138,7 @@ model Workspace {
   scoringConfig     WorkspaceScoringConfig?
   evidence          Evidence[]
   canvasNodePositions CanvasNodePosition[]
+  checklistTemplates ChecklistTemplate[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -508,8 +509,94 @@ model RoadmapItem {
   createdById   String?       @map("created_by_id") @db.Uuid
   updatedById   String?       @map("updated_by_id") @db.Uuid
   source        String        @default("UI") @map("source") @db.VarChar(20)
+  launchChecklist   LaunchChecklist?
+  positioningBrief  Doc?
 
   @@map("roadmap_items")
+}
+
+// ─── Launch Tiers & Checklists ──────────────────────────────────────────────
+// Moving a RoadmapItem to the LAUNCHING horizon requires picking a launch
+// tier, which auto-attaches a checklist cloned from a workspace-scoped
+// template. Mirrors the ScoringModel/ScoringModelMetric → OpportunityScore
+// template-vs-instance pattern above: templates are editable named presets,
+// checklists are frozen per-launch instances (with a JSON snapshot of the
+// template at attach time) so later template edits/archival don't retroactively
+// change an in-flight launch's checklist.
+// See Claude/2026-07-21-compass-gtm-planning-design.md and
+// Claude/2026-07-21-compass-gtm-roadmap-lifecycle-adr.md for design context.
+
+model ChecklistTemplate {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  /// One of: TIER_1 | TIER_2 | TIER_3 (major / minor / silent launch)
+  tier        String   @db.VarChar(20)
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  /// One of: ACTIVE | ARCHIVED. Archived templates are hidden from
+  /// set_launch_tier's auto-resolution but remain valid for any
+  /// LaunchChecklist already created from them.
+  status      String   @default("ACTIVE") @db.VarChar(50)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  workspace  Workspace               @relation(fields: [workspaceId], references: [id])
+  items      ChecklistTemplateItem[]
+  checklists LaunchChecklist[]
+
+  @@map("checklist_templates")
+}
+
+model ChecklistTemplateItem {
+  id                  String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  checklistTemplateId String  @map("checklist_template_id") @db.Uuid
+  label               String  @db.VarChar(255)
+  description         String? @db.Text
+  order               Int     @default(0)
+
+  checklistTemplate ChecklistTemplate @relation(fields: [checklistTemplateId], references: [id])
+
+  @@map("checklist_template_items")
+}
+
+model LaunchChecklist {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roadmapItemId       String   @unique @map("roadmap_item_id") @db.Uuid
+  checklistTemplateId String   @map("checklist_template_id") @db.Uuid
+  /// Denormalized copy of the template's tier at attach time — survives
+  /// template edits/archival.
+  tier                String   @db.VarChar(20)
+  /// JSON-encoded (TEXT, not a Json column — matches the formula_snapshot
+  /// convention in migration 019_scoring_models) snapshot of the template +
+  /// its items at attach time, so historical checklists are self-describing
+  /// even after the live template changes.
+  templateSnapshot    String   @map("template_snapshot") @db.Text
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @default(now()) @map("updated_at")
+
+  roadmapItem       RoadmapItem           @relation(fields: [roadmapItemId], references: [id])
+  checklistTemplate ChecklistTemplate     @relation(fields: [checklistTemplateId], references: [id])
+  items             LaunchChecklistItem[]
+
+  @@map("launch_checklists")
+}
+
+model LaunchChecklistItem {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  launchChecklistId String    @map("launch_checklist_id") @db.Uuid
+  label             String    @db.VarChar(255)
+  description       String?   @db.Text
+  /// Tri-state (not boolean) so a SKIPPED item doesn't falsely register as
+  /// blocking a later launch-readiness gate. One of: PENDING | DONE | SKIPPED.
+  status            String    @default("PENDING") @db.VarChar(20)
+  order             Int       @default(0)
+  completedAt       DateTime? @map("completed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @map("updated_at")
+
+  launchChecklist LaunchChecklist @relation(fields: [launchChecklistId], references: [id])
+
+  @@map("launch_checklist_items")
 }
 
 // ─── Squads ───────────────────────────────────────────────────────────────────
@@ -696,22 +783,30 @@ model FeedbackVote {
 // ─── Docs ─────────────────────────────────────────────────────────────────────
 
 model Doc {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId String    @map("workspace_id") @db.Uuid
-  parentId    String?   @map("parent_id") @db.Uuid
-  title       String    @db.VarChar(255)
-  content     String?   @db.Text
-  metadata    Json?     @map("metadata") @db.Json
-  icon        String?   @db.VarChar(50)
-  sortOrder   Int       @default(0) @map("sort_order")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @default(now()) @map("updated_at")
-  workspace   Workspace @relation(fields: [workspaceId], references: [id])
-  parent      Doc?      @relation("DocParent", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  children    Doc[]     @relation("DocParent")
-  createdById String?   @map("created_by_id") @db.Uuid
-  updatedById String?   @map("updated_by_id") @db.Uuid
-  source      String    @default("UI") @map("source") @db.VarChar(20)
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String       @map("workspace_id") @db.Uuid
+  parentId      String?      @map("parent_id") @db.Uuid
+  title         String       @db.VarChar(255)
+  content       String?      @db.Text
+  metadata      Json?        @map("metadata") @db.Json
+  icon          String?      @db.VarChar(50)
+  sortOrder     Int          @default(0) @map("sort_order")
+  /// UUID of the RoadmapItem this doc is a Positioning & Messaging Brief for,
+  /// 1:1 (unique). Null for ordinary docs. See docType.
+  roadmapItemId String?      @unique @map("roadmap_item_id") @db.Uuid
+  /// One of: STANDARD | GTM_POSITIONING_BRIEF. Drives whether create_doc
+  /// auto-fills GTM_POSITIONING_BRIEF_TEMPLATE and whether roadmapItemId is
+  /// meaningful.
+  docType       String       @default("STANDARD") @map("doc_type") @db.VarChar(50)
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @default(now()) @map("updated_at")
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id])
+  parent        Doc?         @relation("DocParent", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  children      Doc[]        @relation("DocParent")
+  roadmapItem   RoadmapItem? @relation(fields: [roadmapItemId], references: [id])
+  createdById   String?      @map("created_by_id") @db.Uuid
+  updatedById   String?      @map("updated_by_id") @db.Uuid
+  source        String       @default("UI") @map("source") @db.VarChar(20)
 
   @@map("docs")
 }

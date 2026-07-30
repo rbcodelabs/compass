@@ -20,9 +20,14 @@ const mockWorkspace = {
   findUnique: vi.fn(),
 }
 
+const mockRoadmapItem = {
+  findUnique: vi.fn(),
+}
+
 const mockPrisma = {
   doc: mockDoc,
   workspace: mockWorkspace,
+  roadmapItem: mockRoadmapItem,
 }
 
 vi.mock("@/lib/db", () => ({
@@ -30,7 +35,7 @@ vi.mock("@/lib/db", () => ({
 }))
 
 // Import handlers AFTER the mock is in place
-import { createDoc, updateDoc } from "@/lib/doc-tool-handlers"
+import { createDoc, updateDoc, getDoc } from "@/lib/doc-tool-handlers"
 
 // ---------------------------------------------------------------------------
 
@@ -147,5 +152,148 @@ Focus areas.`
 
     const stored = mockDoc.update.mock.calls[0][0].data.content as string
     expect(stored).toBe(cleanContent)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe("createDoc — roadmapItemId / docType (GTM Positioning Brief)", () => {
+  const ROADMAP_ITEM_ID = "ri-1"
+
+  it("returns a not-found message when roadmapItemId does not resolve to a real roadmap item", async () => {
+    mockRoadmapItem.findUnique.mockResolvedValueOnce(null)
+
+    const result = await createDoc({
+      workspaceId: WORKSPACE_ID,
+      title: "Launch Brief",
+      roadmapItemId: "missing-item",
+    })
+
+    expect(result.content[0].text).toContain("not found")
+    expect(mockDoc.create).not.toHaveBeenCalled()
+  })
+
+  it("returns a conflict message with the existing doc's ID when the roadmap item already has a linked doc", async () => {
+    mockRoadmapItem.findUnique.mockResolvedValueOnce({ id: ROADMAP_ITEM_ID, title: "Ship payments" })
+    mockDoc.findUnique.mockResolvedValueOnce({ id: "existing-brief-1", title: "Existing Brief" })
+
+    const result = await createDoc({
+      workspaceId: WORKSPACE_ID,
+      title: "Launch Brief",
+      roadmapItemId: ROADMAP_ITEM_ID,
+    })
+
+    const text = result.content[0].text
+    expect(text).toContain("already has a linked doc")
+    expect(text).toContain("ID: existing-brief-1")
+    expect(mockDoc.create).not.toHaveBeenCalled()
+  })
+
+  it("auto-fills the GTM_POSITIONING_BRIEF_TEMPLATE when docType is GTM_POSITIONING_BRIEF and no content is given", async () => {
+    mockRoadmapItem.findUnique.mockResolvedValueOnce({ id: ROADMAP_ITEM_ID, title: "Ship payments" })
+    mockDoc.findUnique.mockResolvedValueOnce(null)
+
+    await createDoc({
+      workspaceId: WORKSPACE_ID,
+      title: "Launch Brief",
+      roadmapItemId: ROADMAP_ITEM_ID,
+      docType: "GTM_POSITIONING_BRIEF",
+    })
+
+    const data = mockDoc.create.mock.calls[0][0].data
+    expect(data.content).toContain("## Problem Statement")
+    expect(data.content).toContain("## Target Audience")
+    expect(data.content).toContain("## Core Message")
+    expect(data.content).toContain("## Proof Points")
+    expect(data.content).toContain("## Competitive Differentiation")
+    expect(data.docType).toBe("GTM_POSITIONING_BRIEF")
+    expect(data.roadmapItemId).toBe(ROADMAP_ITEM_ID)
+  })
+
+  it("prefers explicit content over the template when both docType and content are given", async () => {
+    mockRoadmapItem.findUnique.mockResolvedValueOnce({ id: ROADMAP_ITEM_ID, title: "Ship payments" })
+    mockDoc.findUnique.mockResolvedValueOnce(null)
+
+    await createDoc({
+      workspaceId: WORKSPACE_ID,
+      title: "Launch Brief",
+      roadmapItemId: ROADMAP_ITEM_ID,
+      docType: "GTM_POSITIONING_BRIEF",
+      content: "# Custom brief content",
+    })
+
+    const data = mockDoc.create.mock.calls[0][0].data
+    expect(data.content).toBe("# Custom brief content")
+    expect(data.content).not.toContain("## Problem Statement")
+  })
+
+  it("defaults docType to STANDARD when omitted", async () => {
+    await createDoc({ workspaceId: WORKSPACE_ID, title: "Plain doc" })
+
+    const data = mockDoc.create.mock.calls[0][0].data
+    expect(data.docType).toBe("STANDARD")
+    expect(data.roadmapItemId).toBeNull()
+  })
+
+  it("includes the linked roadmap item and doc type in the response text", async () => {
+    mockRoadmapItem.findUnique.mockResolvedValueOnce({ id: ROADMAP_ITEM_ID, title: "Ship payments" })
+    mockDoc.findUnique.mockResolvedValueOnce(null)
+
+    const result = await createDoc({
+      workspaceId: WORKSPACE_ID,
+      title: "Launch Brief",
+      roadmapItemId: ROADMAP_ITEM_ID,
+      docType: "GTM_POSITIONING_BRIEF",
+    })
+
+    const text = result.content[0].text
+    expect(text).toContain(`Linked Roadmap Item: ${ROADMAP_ITEM_ID}`)
+    expect(text).toContain("Doc Type: GTM_POSITIONING_BRIEF")
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe("getDoc — roadmapItemId / docType exposure", () => {
+  it("surfaces the linked roadmap item and doc type when set", async () => {
+    mockDoc.findUnique.mockResolvedValueOnce({
+      id: DOC_ID,
+      title: "Launch Brief",
+      icon: null,
+      content: "## Problem Statement",
+      metadata: null,
+      updatedAt: new Date("2026-07-01T00:00:00Z"),
+      parent: null,
+      children: [],
+      docType: "GTM_POSITIONING_BRIEF",
+      roadmapItemId: "ri-1",
+    })
+
+    const result = await getDoc({ docId: DOC_ID })
+
+    const text = result.content[0].text
+    expect(text).toContain("Doc Type: GTM_POSITIONING_BRIEF")
+    expect(text).toContain("Linked Roadmap Item: ri-1")
+  })
+
+  it("omits doc type / linked roadmap item lines for a standard, unlinked doc", async () => {
+    mockDoc.findUnique.mockResolvedValueOnce({
+      id: DOC_ID,
+      title: "Plain doc",
+      icon: null,
+      content: "Some content",
+      metadata: null,
+      updatedAt: new Date("2026-07-01T00:00:00Z"),
+      parent: null,
+      children: [],
+      docType: "STANDARD",
+      roadmapItemId: null,
+    })
+
+    const result = await getDoc({ docId: DOC_ID })
+
+    const text = result.content[0].text
+    expect(text).not.toContain("Doc Type:")
+    expect(text).not.toContain("Linked Roadmap Item:")
   })
 })

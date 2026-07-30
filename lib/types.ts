@@ -169,3 +169,24 @@ export interface OpportunityScoreData {
   /** True when scoringModelId's live ScoringModel.version is ahead of modelVersion. */
   stale: boolean
 }
+
+// Launch Tiers & Checklists
+export type LaunchTier = "TIER_1" | "TIER_2" | "TIER_3"
+export type ChecklistTemplateStatus = "ACTIVE" | "ARCHIVED"
+export type LaunchChecklistItemStatus = "PENDING" | "DONE" | "SKIPPED"
+
+/** A checklist template item definition frozen at attach time — stored (as
+ *  part of a ChecklistTemplateSnapshot) in LaunchChecklist.templateSnapshot. */
+export interface ChecklistTemplateSnapshotItem {
+  label: string
+  description: string | null
+  order: number
+}
+
+/** JSON shape stored (as a string) in LaunchChecklist.templateSnapshot. */
+export interface ChecklistTemplateSnapshot {
+  templateId: string
+  templateName: string
+  tier: LaunchTier
+  items: ChecklistTemplateSnapshotItem[]
+}

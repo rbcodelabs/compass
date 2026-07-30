@@ -13,6 +13,7 @@
 import getPrisma from "@/lib/db"
 import matter from "gray-matter"
 import { Prisma } from "@prisma/client"
+import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates"
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -157,8 +158,10 @@ export async function getDoc({ docId }: { docId: string }) {
       ? `Parent: ${doc.parent.title} (${doc.parent.id})`
       : "Parent: (root)",
     `Updated: ${doc.updatedAt.toISOString()}`,
+    doc.docType !== "STANDARD" ? `Doc Type: ${doc.docType}` : null,
+    doc.roadmapItemId ? `Linked Roadmap Item: ${doc.roadmapItemId}` : null,
     "",
-  ]
+  ].filter((line): line is string => line !== null)
 
   if (fullContent) {
     lines.push("## Content", "", fullContent, "")
@@ -186,12 +189,16 @@ export async function createDoc({
   content,
   parentId,
   icon,
+  roadmapItemId,
+  docType,
 }: {
   workspaceId: string
   title: string
   content?: string
   parentId?: string | null
   icon?: string
+  roadmapItemId?: string | null
+  docType?: "STANDARD" | "GTM_POSITIONING_BRIEF"
 }) {
   const prisma = getPrisma()
 
@@ -231,14 +238,52 @@ export async function createDoc({
     }
   }
 
+  if (roadmapItemId) {
+    const roadmapItem = await prisma.roadmapItem.findUnique({
+      where: { id: roadmapItemId },
+      select: { id: true, title: true },
+    })
+    if (!roadmapItem) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Roadmap item "${roadmapItemId}" not found.`,
+          },
+        ],
+      }
+    }
+
+    const existingBrief = await prisma.doc.findUnique({
+      where: { roadmapItemId },
+      select: { id: true, title: true },
+    })
+    if (existingBrief) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text:
+              `Roadmap item "${roadmapItem.title}" already has a linked doc: "${existingBrief.title}".\n` +
+              `ID: ${existingBrief.id}`,
+          },
+        ],
+      }
+    }
+  }
+
   const lastSibling = await prisma.doc.findFirst({
     where: { workspaceId, parentId: parentId ?? null },
     orderBy: { sortOrder: "desc" },
     select: { sortOrder: true },
   })
 
+  const effectiveDocType = docType ?? "STANDARD"
+  const effectiveContent =
+    content ?? (effectiveDocType === "GTM_POSITIONING_BRIEF" ? GTM_POSITIONING_BRIEF_TEMPLATE : undefined)
+
   const { body, metadata } =
-    content != null ? parseContent(content) : { body: null, metadata: null }
+    effectiveContent != null ? parseContent(effectiveContent) : { body: null, metadata: null }
 
   const doc = await prisma.doc.create({
     data: {
@@ -249,6 +294,8 @@ export async function createDoc({
       metadata: metadata != null ? toJsonInput(metadata) : undefined,
       icon: icon?.trim() ?? null,
       sortOrder: lastSibling ? lastSibling.sortOrder + 1 : 0,
+      roadmapItemId: roadmapItemId ?? null,
+      docType: effectiveDocType,
     },
   })
 
@@ -262,6 +309,8 @@ export async function createDoc({
           `Title: ${doc.title}\n` +
           (parentId ? `Parent: ${parentId}\n` : "Location: root\n") +
           (metadata ? `Properties: ${Object.keys(metadata).join(", ")}\n` : "") +
+          (roadmapItemId ? `Linked Roadmap Item: ${roadmapItemId}\n` : "") +
+          (effectiveDocType !== "STANDARD" ? `Doc Type: ${effectiveDocType}\n` : "") +
           `URL: /${workspace.organization.slug}/${workspace.slug}/docs`,
       },
     ],
