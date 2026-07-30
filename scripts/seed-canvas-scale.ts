@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * Seeds a dedicated, throwaway org/workspace with a large synthetic set of
- * OKR cycles/Objectives/Key Results, for manually verifying the Canvas
- * viewer's render/pan/zoom performance at "hundreds of Objectives across
- * many cycles" — Phase 1's stated acceptance criterion (design doc §8; see
- * also the Canvas Phase 1 plan's Step 7). No automated perf-assertion
- * tooling exists in this repo (no Lighthouse CI, no Playwright perf
- * traces) — this script only prepares the data; the actual check is manual
- * (load the printed URL, watch DevTools FPS while panning/zooming).
+ * Seeds a dedicated, throwaway org/workspace with a large synthetic OST +
+ * Roadmap graph — OKR cycles/Objectives/Key Results, plus Opportunities,
+ * Solutions, Assumptions, Experiments, and RoadmapItems — for manually
+ * verifying the Canvas viewer's render/pan/zoom performance and edge
+ * correctness at scale (see the Canvas OST + Roadmap Graph plan's
+ * Verification section). No automated perf-assertion tooling exists in this
+ * repo (no Lighthouse CI, no Playwright perf traces) — this script only
+ * prepares the data; the actual check is manual (load the printed URL,
+ * watch DevTools FPS while panning/zooming, spot-check edges).
  *
  * Independent of `e2e-test-org` (functional E2E fixtures) and the
  * `rbcodelabs/compass` docs-screenshot demo workspace — safe to run
@@ -16,11 +17,18 @@
  * Usage:
  *   node --env-file=.env.local --experimental-strip-types scripts/seed-canvas-scale.ts
  *
- * CANVAS_SCALE_OBJECTIVES (default 400) sets the approximate total
- * Objective count; always creates at least 20 cycles regardless. Re-running
- * wipes and regenerates this workspace's OKR data each time, so the scale
- * of a given run is always exactly what you asked for — not creeping
- * upward across repeated runs the way an insert-only idempotent seed would.
+ * CANVAS_SCALE_OBJECTIVES (default 80) sets the approximate total Objective
+ * count; always creates at least 20 cycles regardless. Deliberately smaller
+ * than the Objective-only Phase's 400 — KeyResult promotion to a real node
+ * type plus 5 new entity types already multiplies node count well beyond
+ * that; a full combinatorial OST seed at 400 Objectives would stress ELK far
+ * beyond a meaningful check. Full un-tiered scale is exactly the problem
+ * semantic zoom tiers solve later, not this increment.
+ *
+ * Re-running wipes and regenerates this workspace's OKR + OST + Roadmap data
+ * each time, so the scale of a given run is always exactly what you asked
+ * for — not creeping upward across repeated runs the way an insert-only
+ * idempotent seed would.
  */
 import pg from "pg";
 
@@ -33,9 +41,17 @@ const S = process.env.PGSCHEMA ? `${process.env.PGSCHEMA}_dev` : "compass_dev";
 const ORG_SLUG = "canvas-scale-test-org";
 const WORKSPACE_SLUG = "canvas-scale";
 const USER_EMAIL = "canvas-scale-seed@localhost.dev";
-const TARGET_OBJECTIVES = Number(process.env.CANVAS_SCALE_OBJECTIVES ?? 400);
+const TARGET_OBJECTIVES = Number(process.env.CANVAS_SCALE_OBJECTIVES ?? 80);
 const MIN_CYCLES = 20;
 const OBJECTIVE_STATUSES = ["ON_TRACK", "AT_RISK", "OFF_TRACK", "COMPLETE"];
+const OPPORTUNITY_STATUSES = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"];
+const SOLUTION_STATUSES = ["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"];
+const RISK_LEVELS = ["HIGH", "MEDIUM", "LOW"];
+const ASSUMPTION_STATUSES = ["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"];
+const EXPERIMENT_STATUSES = ["DESIGNING", "RUNNING", "COMPLETE", "KILLED"];
+const CONCLUSIONS = ["PROCEED", "KILL", "ITERATE"];
+const HORIZONS = ["NOW", "NEXT", "LATER", "SHIPPED"];
+const FEEDBACK_TYPES = ["BUG", "IDEA"];
 
 async function q<T extends pg.QueryResultRow = Record<string, unknown>>(
   sql: string,
@@ -70,7 +86,7 @@ async function main() {
   }
 
   console.log(
-    `Seeding canvas scale test data (target ~${TARGET_OBJECTIVES} objectives across >=${MIN_CYCLES} cycles)...`
+    `Seeding canvas scale test data (target ~${TARGET_OBJECTIVES} objectives across >=${MIN_CYCLES} cycles, plus OST + Roadmap)...`
   );
 
   const user = await one<{ id: string }>(
@@ -122,8 +138,43 @@ async function main() {
     [ws.id, user.id]
   );
 
-  // Wipe this workspace's prior OKR data so each run produces exactly the
-  // requested scale, in strict dependency order (no DB-level cascades).
+  // Wipe this workspace's prior OST + Roadmap + OKR data so each run
+  // produces exactly the requested scale, in strict FK-dependency order (no
+  // DB-level cascades). Roadmap/Experiment/Assumption before
+  // Solution/Opportunity, before Objective/KeyResult.
+  await pool.query(
+    `DELETE FROM "${S}".roadmap_items WHERE workspace_id = $1`,
+    [ws.id]
+  );
+  await pool.query(`DELETE FROM "${S}".feedback WHERE workspace_id = $1`, [
+    ws.id,
+  ]);
+  await pool.query(
+    `DELETE FROM "${S}".experiments WHERE workspace_id = $1`,
+    [ws.id]
+  );
+  await pool.query(
+    `
+    DELETE FROM "${S}".assumptions WHERE solution_id IN (
+      SELECT id FROM "${S}".solutions WHERE opportunity_id IN (
+        SELECT id FROM "${S}".opportunities WHERE workspace_id = $1
+      )
+    )
+  `,
+    [ws.id]
+  );
+  await pool.query(
+    `
+    DELETE FROM "${S}".solutions WHERE opportunity_id IN (
+      SELECT id FROM "${S}".opportunities WHERE workspace_id = $1
+    )
+  `,
+    [ws.id]
+  );
+  await pool.query(
+    `DELETE FROM "${S}".opportunities WHERE workspace_id = $1`,
+    [ws.id]
+  );
   await pool.query(
     `
     DELETE FROM "${S}".key_results WHERE objective_id IN (
@@ -146,9 +197,11 @@ async function main() {
     ws.id,
   ]);
 
+  // ── OKR cycles / Objectives / Key Results ─────────────────────────────
   let objectivesCreated = 0;
   let cycleIndex = 0;
   const startYear = 2024;
+  const allKeyResultIds: string[] = [];
 
   while (objectivesCreated < TARGET_OBJECTIVES || cycleIndex < MIN_CYCLES) {
     cycleIndex++;
@@ -182,11 +235,12 @@ async function main() {
       const keyResultCount = randInt(1, 4);
       for (let k = 0; k < keyResultCount; k++) {
         const target = randInt(10, 1000);
-        await pool.query(
+        const kr = await one<{ id: string }>(
           `
           INSERT INTO "${S}".key_results
             (id, objective_id, title, target, current, sort_order, created_at, updated_at)
           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW(), NOW())
+          RETURNING id
         `,
           [
             obj.id,
@@ -196,6 +250,7 @@ async function main() {
             k,
           ]
         );
+        allKeyResultIds.push(kr.id);
       }
 
       objectivesCreated++;
@@ -205,9 +260,160 @@ async function main() {
     }
   }
 
+  // ── Opportunities (~60), ~half linked to a seeded Key Result ──────────
+  const OPPORTUNITY_COUNT = 60;
+  const opportunityIds: string[] = [];
+  for (let i = 0; i < OPPORTUNITY_COUNT; i++) {
+    const linkedKeyResultId =
+      allKeyResultIds.length > 0 && i % 2 === 0 ? pick(allKeyResultIds) : null;
+    const opp = await one<{ id: string }>(
+      `
+      INSERT INTO "${S}".opportunities
+        (id, workspace_id, title, status, linked_key_result_id, sort_order, created_at, updated_at)
+      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW(), NOW())
+      RETURNING id
+    `,
+      [ws.id, `Synthetic Opportunity ${i + 1}`, pick(OPPORTUNITY_STATUSES), linkedKeyResultId, i]
+    );
+    opportunityIds.push(opp.id);
+  }
+
+  // ── Solutions (~90, 1-2 per Opportunity) ───────────────────────────────
+  const solutionIds: string[] = [];
+  let solutionCounter = 0;
+  for (const oppId of opportunityIds) {
+    const count = randInt(1, 2);
+    for (let i = 0; i < count; i++) {
+      solutionCounter++;
+      const sol = await one<{ id: string }>(
+        `
+        INSERT INTO "${S}".solutions
+          (id, opportunity_id, title, status, sort_order, created_at, updated_at)
+        VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())
+        RETURNING id
+      `,
+        [oppId, `Synthetic Solution ${solutionCounter}`, pick(SOLUTION_STATUSES), i]
+      );
+      solutionIds.push(sol.id);
+      if (solutionIds.length >= 90) break;
+    }
+    if (solutionIds.length >= 90) break;
+  }
+
+  // ── Assumptions (~120, 1-2 per Solution) ───────────────────────────────
+  const assumptionIds: string[] = [];
+  let assumptionCounter = 0;
+  for (const solId of solutionIds) {
+    const count = randInt(1, 2);
+    for (let i = 0; i < count; i++) {
+      assumptionCounter++;
+      const a = await one<{ id: string }>(
+        `
+        INSERT INTO "${S}".assumptions
+          (id, solution_id, title, risk_level, status, sort_order, created_at, updated_at)
+        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW(), NOW())
+        RETURNING id
+      `,
+        [solId, `Synthetic Assumption ${assumptionCounter}`, pick(RISK_LEVELS), pick(ASSUMPTION_STATUSES), i]
+      );
+      assumptionIds.push(a.id);
+      if (assumptionIds.length >= 120) break;
+    }
+    if (assumptionIds.length >= 120) break;
+  }
+
+  // ── Experiments (~100): ~70% linked to an Assumption, ~30% independent ─
+  const EXPERIMENT_COUNT = 100;
+  const experimentIds: string[] = [];
+  for (let i = 0; i < EXPERIMENT_COUNT; i++) {
+    const linked = assumptionIds.length > 0 && Math.random() < 0.7;
+    const assumptionId = linked ? pick(assumptionIds) : null;
+    const status = pick(EXPERIMENT_STATUSES);
+    const conclusion = status === "COMPLETE" ? pick(CONCLUSIONS) : null;
+    const exp = await one<{ id: string }>(
+      `
+      INSERT INTO "${S}".experiments
+        (id, workspace_id, assumption_id, title, hypothesis, method, kill_condition, status, conclusion, sort_order, created_at, updated_at)
+      VALUES (gen_random_uuid(), $1, $2, $3, 'Synthetic hypothesis', 'Synthetic method', 'Synthetic kill condition', $4, $5, $6, NOW(), NOW())
+      RETURNING id
+    `,
+      [ws.id, assumptionId, `Synthetic Experiment ${i + 1}`, status, conclusion, i]
+    );
+    experimentIds.push(exp.id);
+  }
+
+  // ── Feedback (for RoadmapItem.feedbackId -> isBug) ─────────────────────
+  const FEEDBACK_COUNT = 20;
+  const feedbackIds: string[] = [];
+  for (let i = 0; i < FEEDBACK_COUNT; i++) {
+    const fb = await one<{ id: string }>(
+      `
+      INSERT INTO "${S}".feedback
+        (id, workspace_id, title, type, status, created_at, updated_at)
+      VALUES (gen_random_uuid(), $1, $2, $3, 'OPEN', NOW(), NOW())
+      RETURNING id
+    `,
+      [ws.id, `Synthetic Feedback ${i + 1}`, pick(FEEDBACK_TYPES)]
+    );
+    feedbackIds.push(fb.id);
+  }
+
+  // ── RoadmapItems (~100): primary-only / multi-parent / orphan mixes ───
+  const ROADMAP_COUNT = 100;
+  let roadmapCreated = 0;
+  for (let i = 0; i < ROADMAP_COUNT; i++) {
+    let solutionId: string | null = null;
+    let experimentId: string | null = null;
+    let opportunityId: string | null = null;
+    let keyResultId: string | null = null;
+    let feedbackId: string | null = null;
+
+    const bucket = i % 10;
+    if (bucket < 4) {
+      // Primary-only: exactly one FK set, exercises simple solid-edge cases.
+      const choice = randInt(0, 3);
+      if (choice === 0 && solutionIds.length > 0) solutionId = pick(solutionIds);
+      else if (choice === 1 && experimentIds.length > 0) experimentId = pick(experimentIds);
+      else if (choice === 2 && opportunityIds.length > 0) opportunityId = pick(opportunityIds);
+      else if (allKeyResultIds.length > 0) keyResultId = pick(allKeyResultIds);
+    } else if (bucket < 7) {
+      // Multi-parent: 2-3 FKs set, exercises precedence + dashed edges.
+      if (solutionIds.length > 0) solutionId = pick(solutionIds);
+      if (experimentIds.length > 0) experimentId = pick(experimentIds);
+      if (Math.random() < 0.5 && opportunityIds.length > 0) opportunityId = pick(opportunityIds);
+      if (Math.random() < 0.5 && allKeyResultIds.length > 0) keyResultId = pick(allKeyResultIds);
+    } else if (bucket < 9) {
+      // Orphan, feedback-only: no resolvable edge parent, still shows isBug.
+      if (feedbackIds.length > 0) feedbackId = pick(feedbackIds);
+    }
+    // bucket === 9: true orphan, nothing set at all.
+
+    await pool.query(
+      `
+      INSERT INTO "${S}".roadmap_items
+        (id, workspace_id, title, horizon, status, sort_order, solution_id, key_result_id, opportunity_id, experiment_id, feedback_id, created_at, updated_at)
+      VALUES (gen_random_uuid(), $1, $2, $3, 'ACTIVE', $4, $5, $6, $7, $8, $9, NOW(), NOW())
+    `,
+      [ws.id, `Synthetic Roadmap Item ${i + 1}`, pick(HORIZONS), i, solutionId, keyResultId, opportunityId, experimentId, feedbackId]
+    );
+    roadmapCreated++;
+  }
+
+  const totalNodes =
+    objectivesCreated +
+    allKeyResultIds.length +
+    opportunityIds.length +
+    solutionIds.length +
+    assumptionIds.length +
+    experimentIds.length +
+    roadmapCreated;
+
   console.log(
-    `Seeded ${cycleIndex} cycles, ${objectivesCreated} objectives (org=${org.id} workspace=${ws.id}).`
+    `Seeded ${cycleIndex} cycles, ${objectivesCreated} objectives, ${allKeyResultIds.length} key results, ` +
+      `${opportunityIds.length} opportunities, ${solutionIds.length} solutions, ${assumptionIds.length} assumptions, ` +
+      `${experimentIds.length} experiments, ${roadmapCreated} roadmap items (org=${org.id} workspace=${ws.id}).`
   );
+  console.log(`Total canvas node count: ${totalNodes}`);
   console.log(
     `\nOpen: http://localhost:3008/${ORG_SLUG}/${WORKSPACE_SLUG}/canvas`
   );

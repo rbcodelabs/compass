@@ -730,8 +730,10 @@ model CanvasNodePosition {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId String    @map("workspace_id") @db.Uuid
   workspace   Workspace @relation(fields: [workspaceId], references: [id])
-  /// OBJECTIVE | KEY_RESULT (Phase 1 only; OPPORTUNITY | SOLUTION | ASSUMPTION |
-  /// EXPERIMENT | ROADMAP_ITEM added in Phase 2 — see CanvasEntityType in lib/types.ts)
+  /// One of: OBJECTIVE | KEY_RESULT | OPPORTUNITY | SOLUTION | ASSUMPTION |
+  /// EXPERIMENT | ROADMAP_ITEM — see CanvasEntityType in lib/types.ts. No
+  /// writer exists yet (drag-to-pin UI is still deferred), so this table
+  /// stays empty in practice, but every entity type is queryable already.
   entityType  String    @map("entity_type") @db.VarChar(50)
   entityId    String    @map("entity_id") @db.Uuid
   x           Float

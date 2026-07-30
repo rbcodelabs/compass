@@ -49,11 +49,18 @@ export type CustomFieldObjectType =
   | "ROADMAP_ITEM"
 
 // Canvas Viewer
-// Phase 1 only. Phase 2 adds: "OPPORTUNITY" | "SOLUTION" | "ASSUMPTION" |
-// "EXPERIMENT" | "ROADMAP_ITEM".
+// Full OST + Roadmap graph (Objective -> KeyResult -> Opportunity ->
+// Solution -> Assumption -> Experiment, plus RoadmapItem). Semantic zoom
+// tiers, lazy per-KR fetch, and drag-to-pin are still deferred — see
+// lib/canvas/data.ts and lib/canvas/layout.ts.
 export type CanvasEntityType =
   | "OBJECTIVE"
   | "KEY_RESULT"
+  | "OPPORTUNITY"
+  | "SOLUTION"
+  | "ASSUMPTION"
+  | "EXPERIMENT"
+  | "ROADMAP_ITEM"
 
 export type CustomFieldType =
   | "TEXT"

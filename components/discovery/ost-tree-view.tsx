@@ -17,6 +17,14 @@ import type {
   ExperimentStatus,
   Conclusion,
 } from "@/lib/types";
+import {
+  OPPORTUNITY_STATUS_BADGE,
+  SOLUTION_STATUS_BADGE,
+  ASSUMPTION_STATUS_BADGE,
+  RISK_LEVEL_BADGE,
+  EXPERIMENT_STATUS_BADGE,
+  CONCLUSION_BADGE,
+} from "@/lib/discovery";
 
 // ─── Data types ───────────────────────────────────────────────────────────────
 
@@ -61,50 +69,6 @@ type Props = {
   workspaceSlug: string;
 };
 
-// ─── Status labels / colors ──────────────────────────────────────────────────
-
-const SOLUTION_STATUS: Record<SolutionStatus, { label: string; cls: string }> = {
-  IDEA:        { label: "Idea",        cls: "bg-slate-100 text-slate-600" },
-  VALIDATED:   { label: "Validated",   cls: "bg-green-100 text-green-700" },
-  IN_DELIVERY: { label: "In Delivery", cls: "bg-blue-100 text-blue-700" },
-  SHIPPED:     { label: "Shipped",     cls: "bg-purple-100 text-purple-700" },
-  KILLED:      { label: "Killed",      cls: "bg-red-100 text-red-500" },
-};
-
-const ASSUMPTION_STATUS: Record<AssumptionStatus, { label: string; cls: string }> = {
-  UNTESTED:    { label: "Untested",    cls: "bg-slate-100 text-slate-500" },
-  TESTING:     { label: "Testing",     cls: "bg-amber-100 text-amber-700" },
-  VALIDATED:   { label: "Validated",   cls: "bg-green-100 text-green-700" },
-  INVALIDATED: { label: "Invalidated", cls: "bg-red-100 text-red-500" },
-};
-
-const RISK_LEVEL: Record<RiskLevel, { cls: string }> = {
-  HIGH:   { cls: "text-red-500" },
-  MEDIUM: { cls: "text-amber-500" },
-  LOW:    { cls: "text-green-500" },
-};
-
-const EXPERIMENT_STATUS: Record<ExperimentStatus, { label: string; cls: string }> = {
-  DESIGNING: { label: "Designing", cls: "bg-slate-100 text-slate-600" },
-  RUNNING:   { label: "Running",   cls: "bg-blue-100 text-blue-700" },
-  COMPLETE:  { label: "Complete",  cls: "bg-emerald-100 text-emerald-700" },
-  KILLED:    { label: "Killed",    cls: "bg-red-100 text-red-500" },
-};
-
-const CONCLUSION_LABELS: Record<Conclusion, { label: string; cls: string }> = {
-  PROCEED: { label: "Proceed", cls: "bg-green-100 text-green-700" },
-  KILL:    { label: "Kill",    cls: "bg-red-100 text-red-500" },
-  ITERATE: { label: "Iterate", cls: "bg-amber-100 text-amber-700" },
-};
-
-const OPP_STATUS: Record<OpportunityStatus, { label: string; cls: string }> = {
-  EXPLORING:  { label: "Exploring",  cls: "bg-violet-100 text-violet-700" },
-  VALIDATING: { label: "Validating", cls: "bg-amber-100 text-amber-700" },
-  PRIORITIZED:{ label: "Prioritized",cls: "bg-blue-100 text-blue-700" },
-  ACTIVE:     { label: "Active",     cls: "bg-green-100 text-green-700" },
-  ARCHIVED:   { label: "Archived",   cls: "bg-slate-100 text-slate-400" },
-};
-
 // ─── Badge helper ─────────────────────────────────────────────────────────────
 
 function Badge({ className, children }: { className: string; children: React.ReactNode }) {
@@ -146,8 +110,8 @@ function ExperimentCard({
   exp: OSTExperimentNode;
   href: string;
 }) {
-  const s = EXPERIMENT_STATUS[exp.status];
-  const c = exp.conclusion ? CONCLUSION_LABELS[exp.conclusion] : null;
+  const s = EXPERIMENT_STATUS_BADGE[exp.status];
+  const c = exp.conclusion ? CONCLUSION_BADGE[exp.conclusion] : null;
 
   return (
     <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 flex items-start gap-2.5">
@@ -164,8 +128,8 @@ function ExperimentCard({
         </p>
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <Badge className={s.cls}>{s.label}</Badge>
-        {c && <Badge className={c.cls}>{c.label}</Badge>}
+        <Badge className={s.className}>{s.label}</Badge>
+        {c && <Badge className={c.className}>{c.label}</Badge>}
       </div>
     </div>
   );
@@ -180,20 +144,20 @@ function AssumptionCard({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const s = ASSUMPTION_STATUS[assumption.status];
-  const r = RISK_LEVEL[assumption.riskLevel];
+  const s = ASSUMPTION_STATUS_BADGE[assumption.status];
+  const r = RISK_LEVEL_BADGE[assumption.riskLevel];
   const hasExperiments = assumption.experiments.length > 0;
 
   return (
     <div>
       <div className="rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2 flex items-start gap-2.5">
-        <AlertTriangle className={`size-3.5 shrink-0 mt-0.5 ${r.cls}`} />
+        <AlertTriangle className={`size-3.5 shrink-0 mt-0.5 ${r.className}`} />
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-slate-800 leading-snug">{assumption.title}</p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <Badge className={`${r.cls} bg-transparent border border-current/20`}>{assumption.riskLevel.toLowerCase()}</Badge>
-          <Badge className={s.cls}>{s.label}</Badge>
+          <Badge className={`${r.className} bg-transparent border border-current/20`}>{assumption.riskLevel.toLowerCase()}</Badge>
+          <Badge className={s.className}>{s.label}</Badge>
         </div>
       </div>
 
@@ -234,7 +198,7 @@ function SolutionCard({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const s = SOLUTION_STATUS[solution.status];
+  const s = SOLUTION_STATUS_BADGE[solution.status];
   const hasAssumptions = solution.assumptions.length > 0;
 
   return (
@@ -242,7 +206,7 @@ function SolutionCard({
       <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2 flex items-center gap-2.5">
         <Layers className="size-3.5 shrink-0 text-blue-500" />
         <p className="flex-1 text-xs font-medium text-slate-800 leading-snug">{solution.title}</p>
-        <Badge className={`${s.cls} shrink-0`}>{s.label}</Badge>
+        <Badge className={`${s.className} shrink-0`}>{s.label}</Badge>
       </div>
 
       {hasAssumptions && (
@@ -271,7 +235,7 @@ function SolutionCard({
 // ─── Root tree component ──────────────────────────────────────────────────────
 
 export function OSTTreeView({ opportunity, orgSlug, workspaceSlug }: Props) {
-  const oppStatus = OPP_STATUS[opportunity.status];
+  const oppStatus = OPPORTUNITY_STATUS_BADGE[opportunity.status];
   const hasSolutions = opportunity.solutions.length > 0;
 
   return (
@@ -347,7 +311,7 @@ function OppAndSolutions({
   opportunity: OSTOpportunityNode;
   orgSlug: string;
   workspaceSlug: string;
-  oppStatus: { label: string; cls: string };
+  oppStatus: { label: string; className: string };
   hasSolutions: boolean;
 }) {
   return (
@@ -358,7 +322,7 @@ function OppAndSolutions({
         <p className="flex-1 text-sm font-semibold text-violet-900 leading-snug">
           {opportunity.title}
         </p>
-        <Badge className={`${oppStatus.cls} shrink-0`}>{oppStatus.label}</Badge>
+        <Badge className={`${oppStatus.className} shrink-0`}>{oppStatus.label}</Badge>
       </div>
 
       {hasSolutions ? (

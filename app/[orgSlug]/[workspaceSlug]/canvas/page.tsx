@@ -31,10 +31,10 @@ export default async function CanvasPage({ params }: CanvasPageProps) {
 
   if (!workspace) notFound();
 
-  // Scope: all OKR cycles, not just active. This is deliberate — Phase 1's
-  // own stated acceptance criterion is validating render/pan/zoom at
-  // "hundreds of Objectives across many cycles" (design doc §8); scoping to
-  // only the active cycle would make that test meaningless.
+  // Scope: all OKR cycles, not just active. This is deliberate — the
+  // Canvas viewer's stated acceptance criterion is validating render/pan/
+  // zoom at scale across a full portfolio; scoping to only the active cycle
+  // would make that test meaningless.
   const overview = await getCanvasOverview(prisma, workspace.id);
 
   return (
@@ -45,12 +45,12 @@ export default async function CanvasPage({ params }: CanvasPageProps) {
             Canvas
           </h1>
           <p className="text-slate-500 text-sm mt-1">
-            Pan and zoom across every Objective and Key Result.
+            Pan and zoom across your full OKR, discovery, and roadmap graph.
           </p>
         </div>
       </div>
       <div className="flex-1 min-h-0">
-        <CanvasFlow objectives={overview.objectives} />
+        <CanvasFlow overview={overview} />
       </div>
     </main>
   );

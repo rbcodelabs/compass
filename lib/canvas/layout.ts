@@ -1,21 +1,24 @@
 /**
- * Pin-aware ELK layout wrapper for the Canvas viewer's Objective tier (T1).
+ * Pin-aware ELK layout wrapper for the Canvas viewer's full OST + Roadmap
+ * graph (Objective -> KeyResult -> Opportunity -> Solution -> Assumption ->
+ * Experiment, plus RoadmapItem).
  *
  * Pure data in/out — no Prisma, no React Flow types — so it's fully
- * unit-testable without mocking anything. Scoped to Objectives only for
- * Phase 1; Phase 2 will generalize this to the other entity tiers.
+ * unit-testable without mocking anything. Layout only carries
+ * `{id, type, position}` per node; full entity data (title, status, etc.)
+ * stays out of this round-trip and gets joined back in canvas-flow.tsx.
  *
- * Every Objective is partitioned into pinned (a user has explicitly saved a
- * {x,y} for it — Phase 1's CanvasNodePosition table is always empty, but the
- * partition exists now so Phase 2's drag-to-pin doesn't need to touch this
- * function's core logic) vs. unpinned (ELK computes placement). Pinned nodes
- * are still handed to ELK — with their saved position and
- * `elk.interactive: true` — so the unpinned layout can account for them, but
- * the *returned* coordinates for a pinned node are always its saved {x,y}
- * verbatim, never whatever ELK nudges it to.
+ * Every node is partitioned into pinned (a user has explicitly saved a
+ * {x,y} for it — CanvasNodePosition has no writer yet, so this is always
+ * empty today, but the partition exists so a future drag-to-pin UI doesn't
+ * need to touch this function's core logic) vs. unpinned (ELK computes
+ * placement). Pinned nodes are still handed to ELK — with their saved
+ * position and `elk.interactive: true` — so the unpinned layout can account
+ * for them, but the *returned* coordinates for a pinned node are always its
+ * saved {x,y} verbatim, never whatever ELK nudges it to.
  */
 import ElkConstructor from "elkjs/lib/elk-api";
-import type { ElkNode } from "elkjs/lib/elk-api";
+import type { ElkNode, ElkExtendedEdge } from "elkjs/lib/elk-api";
 
 // elkjs's default entry point (`elkjs`, aka lib/main.js) probes for an
 // optional `web-worker` package via a bare `require("web-worker")` that we
@@ -36,13 +39,28 @@ const elk = new ElkConstructor({
   workerFactory: (url?: string) => new ElkSyncWorker(url) as Worker,
 });
 
-// Objective card sizing — must stay roughly in sync with the Tailwind
-// dimensions of components/canvas/objective-node.tsx so ELK's spacing
-// decisions match what actually renders.
-const NODE_WIDTH = 320;
-const BASE_NODE_HEIGHT = 88; // title + squad dot + status badge + progress bar
-const KEY_RESULT_ROW_HEIGHT = 30;
-const MIN_NODE_HEIGHT = 120;
+export type CanvasNodeType =
+  | "objective"
+  | "keyResult"
+  | "opportunity"
+  | "solution"
+  | "assumption"
+  | "experiment"
+  | "roadmapItem";
+
+// Per-type card sizing — must stay roughly in sync with the Tailwind
+// dimensions of the corresponding components/canvas/*-node.tsx so ELK's
+// spacing decisions match what actually renders. Starting estimates, not
+// load-bearing precision.
+const NODE_SIZE: Record<CanvasNodeType, { width: number; height: number }> = {
+  objective: { width: 320, height: 100 },
+  keyResult: { width: 280, height: 90 },
+  opportunity: { width: 300, height: 90 },
+  solution: { width: 280, height: 72 },
+  assumption: { width: 280, height: 84 },
+  experiment: { width: 300, height: 92 },
+  roadmapItem: { width: 260, height: 80 },
+};
 
 export interface CanvasPosition {
   x: number;
@@ -50,64 +68,65 @@ export interface CanvasPosition {
   pinned: boolean;
 }
 
-export interface ObjectiveLayoutInput {
+export interface CanvasLayoutInput {
   id: string;
-  title: string;
-  keyResults: {
-    id: string;
-    title: string;
-    current: number;
-    target: number;
-    unit: string | null;
-  }[];
+  type: CanvasNodeType;
   position: CanvasPosition | null;
 }
 
-export interface LaidOutObjectiveNode {
+export interface CanvasLayoutEdge {
   id: string;
-  x: number;
-  y: number;
-  data: Omit<ObjectiveLayoutInput, "position">;
+  source: string;
+  target: string;
 }
 
-function estimatedNodeHeight(keyResultCount: number): number {
-  return Math.max(
-    MIN_NODE_HEIGHT,
-    BASE_NODE_HEIGHT + keyResultCount * KEY_RESULT_ROW_HEIGHT
-  );
+export interface LaidOutCanvasNode {
+  id: string;
+  type: CanvasNodeType;
+  x: number;
+  y: number;
 }
 
 function isPinned(
-  input: ObjectiveLayoutInput
-): input is ObjectiveLayoutInput & { position: CanvasPosition } {
+  input: CanvasLayoutInput
+): input is CanvasLayoutInput & { position: CanvasPosition } {
   return input.position !== null && input.position.pinned;
 }
 
-export async function computeObjectiveLayout(
-  objectives: ObjectiveLayoutInput[]
-): Promise<LaidOutObjectiveNode[]> {
-  if (objectives.length === 0) return [];
+export async function computeCanvasLayout(
+  nodes: CanvasLayoutInput[],
+  edges: CanvasLayoutEdge[]
+): Promise<LaidOutCanvasNode[]> {
+  if (nodes.length === 0) return [];
 
-  const children: ElkNode[] = objectives.map((obj) => ({
-    id: obj.id,
-    width: NODE_WIDTH,
-    height: estimatedNodeHeight(obj.keyResults.length),
-    ...(isPinned(obj) ? { x: obj.position.x, y: obj.position.y } : {}),
+  const children: ElkNode[] = nodes.map((node) => ({
+    id: node.id,
+    ...NODE_SIZE[node.type],
+    ...(isPinned(node) ? { x: node.position.x, y: node.position.y } : {}),
+  }));
+
+  const elkEdges: ElkExtendedEdge[] = edges.map((edge) => ({
+    id: edge.id,
+    sources: [edge.source],
+    targets: [edge.target],
   }));
 
   const graph: ElkNode = {
-    id: "canvas-objectives-root",
+    id: "canvas-root",
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "RIGHT",
       "elk.spacing.nodeNode": "48",
       "elk.layered.spacing.nodeNodeBetweenLayers": "96",
+      // Reduces visual fan-out where many RoadmapItems/Opportunities share
+      // a common parent.
+      "elk.layered.mergeEdges": "true",
       // Bias the algorithm toward preserving the x/y we already supplied for
       // pinned nodes rather than treating every node as free to move.
       "elk.interactive": "true",
     },
     children,
-    edges: [],
+    edges: elkEdges,
   };
 
   const laidOutGraph = await elk.layout(graph);
@@ -115,19 +134,22 @@ export async function computeObjectiveLayout(
     (laidOutGraph.children ?? []).map((child) => [child.id, child])
   );
 
-  return objectives.map((obj) => {
-    const { position: _position, ...data } = obj;
-
-    if (isPinned(obj)) {
-      return { id: obj.id, x: obj.position.x, y: obj.position.y, data };
+  return nodes.map((node) => {
+    if (isPinned(node)) {
+      return {
+        id: node.id,
+        type: node.type,
+        x: node.position.x,
+        y: node.position.y,
+      };
     }
 
-    const laidOutChild = laidOutById.get(obj.id);
+    const laidOutChild = laidOutById.get(node.id);
     return {
-      id: obj.id,
+      id: node.id,
+      type: node.type,
       x: laidOutChild?.x ?? 0,
       y: laidOutChild?.y ?? 0,
-      data,
     };
   });
 }

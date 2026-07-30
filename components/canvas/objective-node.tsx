@@ -2,22 +2,26 @@
 
 /**
  * React Flow custom node for an Objective card: title, squad dot,
- * STATUS_BADGE, overall progress, and the embedded KR list (see
- * KeyResultNode) — all inline in the same card. Presentational-only, unlike
+ * STATUS_BADGE, and an aggregate progress bar only. KeyResult is now its
+ * own first-class node type (see key-result-node.tsx) connected by a real
+ * edge, so this card is a fixed-height shell with no embedded KR list and
+ * no variable-height sizing logic. Presentational-only, unlike
  * components/okrs/objective-row.tsx: no useSortable, no inline edit forms,
  * no server-action wiring.
  */
 import { memo } from "react";
+import { Handle, Position } from "@xyflow/react";
 import type { Node, NodeProps } from "@xyflow/react";
 import type { ObjectiveStatus, SquadData } from "@/lib/types";
 import { averageProgress, STATUS_BADGE } from "@/lib/okrs";
-import { KeyResultNode, type CanvasKeyResultData } from "@/components/canvas/key-result-node";
 
 export interface ObjectiveNodeData extends Record<string, unknown> {
   title: string;
   status: ObjectiveStatus;
   squad: SquadData | null;
-  keyResults: CanvasKeyResultData[];
+  /** Just enough of each Key Result to average progress — the KRs
+   * themselves render as separate connected nodes now. */
+  keyResults: { current: number; target: number }[];
 }
 
 export type ObjectiveNodeType = Node<ObjectiveNodeData, "objective">;
@@ -28,6 +32,7 @@ function ObjectiveNodeComponent({ data }: NodeProps<ObjectiveNodeType>) {
 
   return (
     <div className="flex w-80 flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+      <Handle type="target" position={Position.Left} className="opacity-0" />
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2 min-w-0">
@@ -38,11 +43,11 @@ function ObjectiveNodeComponent({ data }: NodeProps<ObjectiveNodeType>) {
               title={data.squad.name}
             />
           )}
-          {/* Truncated to a single line, not wrapped: computeObjectiveLayout
-              estimates each card's height from a fixed base (see
-              BASE_NODE_HEIGHT in lib/canvas/layout.ts) assuming a one-line
-              title. A wrapped multi-line title would grow taller than that
-              estimate and visually overlap the next row's cards. */}
+          {/* Truncated to a single line, not wrapped: computeCanvasLayout
+              estimates each card's height from a fixed NODE_SIZE (see
+              lib/canvas/layout.ts) assuming a one-line title. A wrapped
+              multi-line title would grow taller than that estimate and
+              visually overlap the next row's cards. */}
           <h3 className="font-medium text-sm leading-snug truncate min-w-0 flex-1" title={data.title}>
             {data.title}
           </h3>
@@ -54,7 +59,7 @@ function ObjectiveNodeComponent({ data }: NodeProps<ObjectiveNodeType>) {
         </span>
       </div>
 
-      {/* Overall progress */}
+      {/* Aggregate progress across this Objective's Key Results */}
       {data.keyResults.length > 0 && (
         <div className="flex items-center gap-2">
           <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -68,15 +73,7 @@ function ObjectiveNodeComponent({ data }: NodeProps<ObjectiveNodeType>) {
           </span>
         </div>
       )}
-
-      {/* Embedded KR list */}
-      {data.keyResults.length > 0 && (
-        <div className="flex flex-col gap-2 pl-2 border-l border-border">
-          {data.keyResults.map((kr) => (
-            <KeyResultNode key={kr.id} keyResult={kr} />
-          ))}
-        </div>
-      )}
+      <Handle type="source" position={Position.Right} className="opacity-0" />
     </div>
   );
 }
