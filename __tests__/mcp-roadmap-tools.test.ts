@@ -18,9 +18,29 @@ const mockPrisma = {
   roadmapItem: {
     findFirst: vi.fn(),
     findUnique: vi.fn(),
+    findMany: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
   },
+  checklistTemplate: {
+    create: vi.fn(),
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    findFirst: vi.fn(),
+  },
+  checklistTemplateItem: {
+    createMany: vi.fn(),
+  },
+  launchChecklist: {
+    create: vi.fn(),
+    findUnique: vi.fn(),
+  },
+  launchChecklistItem: {
+    createMany: vi.fn(),
+    findUnique: vi.fn(),
+    update: vi.fn(),
+  },
+  $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
 }
 
 vi.mock("@/lib/db", () => ({
@@ -168,5 +188,70 @@ describe("update_roadmap_item MCP tool — dates", () => {
 
     expect(text).toContain("not found")
     expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+})
+
+describe("update_roadmap_item MCP tool — launch horizon guard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("rejects horizon: LAUNCHING with no DB read or write, pointing at set_launch_tier", async () => {
+    const handler = getHandler("update_roadmap_item")
+    const result = await handler({ itemId: "item-1", horizon: "LAUNCHING" })
+    const text = textOf(result)
+
+    expect(text).toContain("set_launch_tier")
+    expect(mockPrisma.roadmapItem.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects horizon: LAUNCHED with no DB read or write", async () => {
+    const handler = getHandler("update_roadmap_item")
+    const result = await handler({ itemId: "item-1", horizon: "LAUNCHED" })
+    const text = textOf(result)
+
+    expect(text).toMatch(/implemented yet/i)
+    expect(mockPrisma.roadmapItem.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+})
+
+describe("list_roadmap_items MCP tool — LAUNCHING/LAUNCHED visibility", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("includes LAUNCHING and LAUNCHED items in the rendered output (regression: they must not be silently omitted)", async () => {
+    mockPrisma.roadmapItem.findMany.mockResolvedValue([
+      { id: "now-1", title: "Now item", horizon: "NOW", opportunity: null, solution: null, squad: null, experiment: null, startDate: null, endDate: null },
+      { id: "launching-1", title: "Launching item", horizon: "LAUNCHING", opportunity: null, solution: null, squad: null, experiment: null, startDate: null, endDate: null },
+      { id: "launched-1", title: "Launched item", horizon: "LAUNCHED", opportunity: null, solution: null, squad: null, experiment: null, startDate: null, endDate: null },
+    ])
+
+    const handler = getHandler("list_roadmap_items")
+    const result = await handler({ workspaceId: "ws-1" })
+    const text = textOf(result)
+
+    expect(text).toContain("Launching item")
+    expect(text).toContain("ID: launching-1")
+    expect(text).toContain("**LAUNCHING**")
+    expect(text).toContain("Launched item")
+    expect(text).toContain("ID: launched-1")
+    expect(text).toContain("**LAUNCHED**")
+  })
+
+  it("accepts horizon: LAUNCHING as an explicit filter", async () => {
+    mockPrisma.roadmapItem.findMany.mockResolvedValue([
+      { id: "launching-1", title: "Launching item", horizon: "LAUNCHING", opportunity: null, solution: null, squad: null, experiment: null, startDate: null, endDate: null },
+    ])
+
+    const handler = getHandler("list_roadmap_items")
+    const result = await handler({ workspaceId: "ws-1", horizon: "LAUNCHING" })
+
+    expect(mockPrisma.roadmapItem.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ horizon: "LAUNCHING" }) })
+    )
+    expect(textOf(result)).toContain("Launching item")
   })
 })

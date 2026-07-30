@@ -52,6 +52,13 @@ import {
   getOpportunityScore,
   listTopOpportunities,
 } from "@/lib/scoring-tool-handlers"
+import {
+  createChecklistTemplate,
+  listChecklistTemplates,
+  setLaunchTier,
+  getLaunchChecklist,
+  updateLaunchChecklistItem,
+} from "@/lib/roadmap-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -1148,11 +1155,11 @@ const _handler = createMcpHandler(
       {
         title: "List Roadmap Items",
         description:
-          "Lists all active roadmap items for a workspace grouped by horizon (NOW / NEXT / LATER). " +
+          "Lists all active roadmap items for a workspace grouped by horizon (NOW / NEXT / LATER / LAUNCHING / LAUNCHED / SHIPPED). " +
           "Includes linked opportunity and solution titles, squad, and IDs.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]).optional().describe("Filter to a specific horizon (omit for all)"),
+          horizon: z.enum(["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional().describe("Filter to a specific horizon (omit for all)"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
         },
       },
@@ -1176,12 +1183,12 @@ const _handler = createMcpHandler(
         if (!items.length) {
           return { content: [{ type: "text" as const, text: "No active roadmap items found." }] }
         }
-        const groups: Record<string, typeof items> = { NOW: [], NEXT: [], LATER: [] }
+        const groups: Record<string, typeof items> = { NOW: [], NEXT: [], LATER: [], LAUNCHING: [], LAUNCHED: [] }
         for (const item of items) {
           groups[item.horizon] ??= []
           groups[item.horizon].push(item)
         }
-        const sections = (["NOW", "NEXT", "LATER", "SHIPPED"] as const)
+        const sections = (["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED"] as const)
           .filter(h => groups[h]?.length)
           .map(h => {
             const lines = groups[h].map(item =>
@@ -1206,10 +1213,11 @@ const _handler = createMcpHandler(
         title: "Update Roadmap Item",
         description:
           "Updates an existing roadmap item's horizon, status, title, description, or dates. " +
-          "Use horizon to move items between NOW / NEXT / LATER. Use status ARCHIVED to remove from view.",
+          "Use horizon to move items between NOW / NEXT / LATER. Use status ARCHIVED to remove from view. " +
+          "LAUNCHING and LAUNCHED cannot be set here — use set_launch_tier to move an item into LAUNCHING.",
         inputSchema: {
           itemId: z.string().uuid().describe("UUID of the roadmap item"),
-          horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]).optional().describe("Move to a new horizon"),
+          horizon: z.enum(["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional().describe("Move to a new horizon (LAUNCHING/LAUNCHED are rejected here — use set_launch_tier)"),
           status: z.enum(["ACTIVE", "ARCHIVED"]).optional().describe("Set to ARCHIVED to hide from roadmap"),
           title: z.string().min(1).optional().describe("New title for the item"),
           description: z.string().optional().describe("New description"),
@@ -1218,6 +1226,22 @@ const _handler = createMcpHandler(
         },
       },
       async ({ itemId, horizon, status, title, description, startDate, endDate }) => {
+        if (horizon === "LAUNCHING") {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.`,
+            }],
+          }
+        }
+        if (horizon === "LAUNCHED") {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`,
+            }],
+          }
+        }
         const prisma = getPrisma()
         const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, title: true, horizon: true, status: true } })
         if (!item) {
@@ -1306,6 +1330,83 @@ const _handler = createMcpHandler(
           }],
         }
       }
+    )
+
+    server.registerTool(
+      "create_checklist_template",
+      {
+        title: "Create Checklist Template",
+        description:
+          "Creates a reusable launch checklist template for a workspace, scoped to a launch tier " +
+          "(TIER_1 major / TIER_2 minor / TIER_3 silent). set_launch_tier auto-resolves the workspace's " +
+          "most recent ACTIVE template for a tier when no explicit templateId is given.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]).describe("Launch tier this template is for"),
+          name: z.string().min(1).describe("Name of the template"),
+          description: z.string().optional().describe("Optional description"),
+          items: z.array(z.object({
+            label: z.string().min(1).describe("Checklist item label"),
+            description: z.string().optional().describe("Optional item description"),
+          })).describe("Ordered list of checklist items"),
+        },
+      },
+      createChecklistTemplate
+    )
+
+    server.registerTool(
+      "list_checklist_templates",
+      {
+        title: "List Checklist Templates",
+        description: "Lists checklist templates for a workspace, optionally filtered by launch tier.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]).optional().describe("Filter to a specific launch tier"),
+        },
+      },
+      listChecklistTemplates
+    )
+
+    server.registerTool(
+      "set_launch_tier",
+      {
+        title: "Set Launch Tier",
+        description:
+          "Moves a roadmap item into the LAUNCHING horizon by picking a launch tier and attaching a " +
+          "checklist cloned from a checklist template. Rejects items that are already LAUNCHING or LAUNCHED. " +
+          "If templateId is omitted, resolves the workspace's most recent ACTIVE template for the given tier.",
+        inputSchema: {
+          itemId: z.string().uuid().describe("UUID of the roadmap item"),
+          tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]).describe("Launch tier to set"),
+          templateId: z.string().uuid().optional().describe("UUID of a specific checklist template to use (must match tier)"),
+        },
+      },
+      setLaunchTier
+    )
+
+    server.registerTool(
+      "get_launch_checklist",
+      {
+        title: "Get Launch Checklist",
+        description: "Returns the launch checklist for a roadmap item, including each item's status and ID.",
+        inputSchema: {
+          roadmapItemId: z.string().uuid().describe("UUID of the roadmap item"),
+        },
+      },
+      getLaunchChecklist
+    )
+
+    server.registerTool(
+      "update_launch_checklist_item",
+      {
+        title: "Update Launch Checklist Item",
+        description: "Sets the status of a single launch checklist item (PENDING, DONE, or SKIPPED).",
+        inputSchema: {
+          itemId: z.string().uuid().describe("UUID of the launch checklist item"),
+          status: z.enum(["PENDING", "DONE", "SKIPPED"]).describe("New status for the item"),
+        },
+      },
+      updateLaunchChecklistItem
     )
 
     // ════════════════════════════════════════════════════════════════
@@ -1588,7 +1689,9 @@ const _handler = createMcpHandler(
         title: "Create Doc",
         description:
           "Creates a new doc in a workspace. Optionally nest it under a parent doc. " +
-          "Content should be markdown. Returns the new doc ID and the docs URL.",
+          "Content should be markdown. Returns the new doc ID and the docs URL. " +
+          "Pass roadmapItemId and docType: GTM_POSITIONING_BRIEF to create a Positioning & Messaging Brief " +
+          "linked 1:1 to a roadmap item -- if content is omitted, a starter template is used.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Doc title"),
@@ -1600,6 +1703,16 @@ const _handler = createMcpHandler(
             .optional()
             .describe("UUID of a parent doc to nest this under (omit for root)"),
           icon: z.string().optional().describe("Emoji or icon string, e.g. '📋'"),
+          roadmapItemId: z
+            .string()
+            .uuid()
+            .nullable()
+            .optional()
+            .describe("UUID of a roadmap item to link this doc to as its Positioning & Messaging Brief (1:1 -- fails if that item already has a linked doc)"),
+          docType: z
+            .enum(["STANDARD", "GTM_POSITIONING_BRIEF"])
+            .optional()
+            .describe("Doc type. GTM_POSITIONING_BRIEF auto-fills a starter template when content is omitted. Defaults to STANDARD."),
         },
       },
       createDoc
