@@ -7,6 +7,14 @@ import { defineConfig, devices } from "@playwright/test";
  */
 const functional = !!process.env.E2E_FUNCTIONAL;
 
+// This repo runs many worktrees/dev servers in parallel, so the default port
+// can collide with an unrelated concurrent worktree's server. Override via
+// E2E_PORT (e.g. `E2E_PORT=3033 pnpm test:e2e:functional`) rather than
+// editing the checked-in default — same pattern as DOCS_BASE_URL below.
+const FUNCTIONAL_PORT = process.env.E2E_PORT
+  ? Number(process.env.E2E_PORT)
+  : 3002;
+
 export default defineConfig({
   // 90-second per-test timeout for functional specs — server actions + router
   // revalidation in Next.js dev mode can be slow.  Screenshots tests are
@@ -18,9 +26,9 @@ export default defineConfig({
     globalTeardown: "./e2e/functional/global-teardown.ts",
     webServer: {
       command: "pnpm dev",
-      port: 3002,
+      port: FUNCTIONAL_PORT,
       reuseExistingServer: !process.env.CI,
-      env: { PORT: "3002" },
+      env: { PORT: String(FUNCTIONAL_PORT) },
       timeout: 120_000,
     },
   }),
@@ -32,14 +40,14 @@ export default defineConfig({
     {
       name: "functional-setup",
       testMatch: "e2e/functional/auth.setup.ts",
-      use: { baseURL: "http://localhost:3002" },
+      use: { baseURL: `http://localhost:${FUNCTIONAL_PORT}` },
     },
     {
       name: "functional",
       testDir: "./e2e/functional/specs",
       use: {
         storageState: "e2e/functional/.auth/user.json",
-        baseURL: "http://localhost:3002",
+        baseURL: `http://localhost:${FUNCTIONAL_PORT}`,
       },
       dependencies: ["functional-setup"],
     },
