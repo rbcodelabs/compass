@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Lightbulb, FlaskConical, Layers, TrendingUp, Bug, CalendarDays } from "lucide-react";
+import { GripVertical, Lightbulb, FlaskConical, Layers, TrendingUp, Bug, CalendarDays, Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -21,6 +21,7 @@ export type RoadmapCardData = {
   description: string | null;
   horizon: Horizon;
   sortOrder: number;
+  isPrivate: boolean;
   solutionId: string | null;
   keyResultId: string | null;
   opportunityId: string | null;
@@ -131,6 +132,15 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
               <span className="inline-flex items-center gap-1 rounded-full bg-red-50 text-red-600 px-1.5 py-0.5 text-[10px] font-medium shrink-0">
                 <Bug className="size-2.5" />
                 Bug
+              </span>
+            )}
+            {item.isPrivate && (
+              <span
+                title="Hidden from the public portal roadmap"
+                className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 px-1.5 py-0.5 text-[10px] font-medium shrink-0"
+              >
+                <Lock className="size-2.5" />
+                Private
               </span>
             )}
             {item.title}

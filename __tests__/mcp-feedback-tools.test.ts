@@ -302,6 +302,7 @@ describe("promoteFeedbackToRoadmap", () => {
         horizon: "NOW",
         sortOrder: 0,
         feedbackId: FEED_ID,
+        isPrivate: false,
       },
     })
   })
@@ -320,6 +321,7 @@ describe("promoteFeedbackToRoadmap", () => {
         horizon: "NEXT",
         sortOrder: 5,
         feedbackId: FEED_ID,
+        isPrivate: false,
       },
     })
   })
@@ -331,5 +333,22 @@ describe("promoteFeedbackToRoadmap", () => {
 
     expect(result.content[0].text).toContain(`"${FEED_ID}" not found`)
     expect(mockRoadmapItem.create).not.toHaveBeenCalled()
+  })
+
+  it("passes through isPrivate: true (e.g. a security-flagged bug) and surfaces it in the response text", async () => {
+    mockFeedbackItem.findUnique.mockResolvedValueOnce({ id: FEED_ID, title: "Auth bypass", type: "BUG" })
+    mockRoadmapItem.findFirst.mockResolvedValueOnce(null)
+    mockRoadmapItem.create.mockResolvedValueOnce({ id: "item-3", title: "Auth bypass", isPrivate: true })
+
+    const result = await promoteFeedbackToRoadmap({
+      feedbackId: FEED_ID,
+      workspaceId: WS_ID,
+      horizon: "NOW",
+      isPrivate: true,
+    })
+
+    const data = mockRoadmapItem.create.mock.calls[0][0].data
+    expect(data.isPrivate).toBe(true)
+    expect(result.content[0].text).toContain("Private: yes")
   })
 })

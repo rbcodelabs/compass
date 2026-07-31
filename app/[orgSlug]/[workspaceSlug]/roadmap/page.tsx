@@ -167,6 +167,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     description: item.description ?? null,
     horizon: item.horizon as Horizon,
     sortOrder: item.sortOrder,
+    isPrivate: item.isPrivate,
     solutionId: item.solutionId ?? null,
     keyResultId: item.keyResultId ?? null,
     opportunityId: item.opportunityId ?? null,
