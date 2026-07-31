@@ -14,7 +14,7 @@ import { SignJWT } from "jose";
 test.describe("Portal — SSO Identify", () => {
   test(
     "enable SSO in settings, generate a secret, and sign in a visitor via a customer-signed JWT",
-    async ({ page, base, orgSlug, workspaceSlug, browser }) => {
+    async ({ page, base, orgSlug, workspaceSlug, browser, baseURL }) => {
       // ── 1. Go to Settings ─────────────────────────────────────────────────
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
@@ -65,7 +65,7 @@ test.describe("Portal — SSO Identify", () => {
       const anonContext = await browser.newContext({ storageState: undefined });
       const anonPage = await anonContext.newPage();
       await anonPage.goto(
-        `http://localhost:3002/api/portal/${orgSlug}/${workspaceSlug}/sso?token=${encodeURIComponent(goodToken)}`
+        `${baseURL}/api/portal/${orgSlug}/${workspaceSlug}/sso?token=${encodeURIComponent(goodToken)}`
       );
       await anonPage.waitForLoadState("networkidle");
       await expect(anonPage.getByText(`Signed in as ${testEmail}`)).toBeVisible({
@@ -82,11 +82,11 @@ test.describe("Portal — SSO Identify", () => {
         .sign(wrongKey);
 
       const badRes = await anonContext.request.get(
-        `http://localhost:3002/api/portal/${orgSlug}/${workspaceSlug}/sso?token=${encodeURIComponent(badToken)}`
+        `${baseURL}/api/portal/${orgSlug}/${workspaceSlug}/sso?token=${encodeURIComponent(badToken)}`
       );
       expect(badRes.status()).toBe(400);
 
-      await anonContext.request.post("http://localhost:3002/api/portal/auth/signout");
+      await anonContext.request.post(`${baseURL}/api/portal/auth/signout`);
       await anonContext.close();
 
       // ── 7. Cleanup: disable SSO, restore roadmap toggle to its original

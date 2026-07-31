@@ -5,6 +5,8 @@ import getPrisma from "@/lib/db";
 import { Sidebar } from "@/components/sidebar";
 import { BottomNav } from "@/components/bottom-nav";
 import { MobileHeader } from "@/components/mobile-header";
+import { PanelProvider } from "@/components/panels/panel-context";
+import { PanelShell } from "@/components/panels/panel-shell";
 
 interface OrgSettingsLayoutProps {
   children: React.ReactNode;
@@ -54,7 +56,14 @@ export default async function OrgSettingsLayout({
   }
 
   return (
-    <>
+    // MobileHeader calls usePanelContext() unconditionally, so it needs a
+    // PanelProvider ancestor here just like the workspace layout provides —
+    // without it, the org settings route crashes client-side on every visit
+    // ("usePanelContext must be used inside PanelProvider"). PanelShell is
+    // included for parity with the workspace layout; the discovery-rail
+    // panel MobileHeader can open is never reachable from this org-scoped
+    // route, so it stays closed here.
+    <PanelProvider orgSlug={orgSlug} workspaceSlug={anchorWorkspace.slug}>
       <MobileHeader
         orgSlug={orgSlug}
         workspaceSlug={anchorWorkspace.slug}
@@ -80,6 +89,8 @@ export default async function OrgSettingsLayout({
       </div>
 
       <BottomNav orgSlug={orgSlug} workspaceSlug={anchorWorkspace.slug} />
-    </>
+
+      <PanelShell />
+    </PanelProvider>
   );
 }
