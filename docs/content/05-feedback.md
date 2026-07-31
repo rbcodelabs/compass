@@ -63,6 +63,15 @@ When submitting feedback, visitors can attach files to help illustrate the issue
 
 Attachments upload as soon as they're selected, showing a thumbnail (for images) or a file chip (for everything else) with a remove option before the submission is sent. Once submitted, attachments are visible both on the public portal listing and in the internal triage board, so your team can see exactly what the visitor saw.
 
+## Submitting Feedback From Inside Compass
+
+You don't have to wait for a customer submission to add something to the queue — your own team can log feedback directly, without going through the public portal:
+
+- **On a workspace's Feedback board**, click **New Feedback** (also available from the empty state) to log an idea or bug against that workspace. It shows up in the board immediately, scoped just like a portal submission.
+- **From anywhere in Compass** — any org, any workspace — use **Send Feedback about Compass** in the sidebar (or the feedback icon in the mobile header) to report a bug or suggest an improvement about Compass itself. This always lands in the Compass team's own workspace, regardless of which org or workspace you're currently working in, so it reaches the team no matter where you are.
+
+Both flows attach your name and email automatically from your Compass login, so the team knows who to follow up with.
+
 ## Triaging Feedback Internally
 
 Inside Compass, the **Feedback** section shows all submitted feedback across your workspace. The internal view includes:

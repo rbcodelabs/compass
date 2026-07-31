@@ -10,7 +10,11 @@
  */
 import path from "path";
 import pg from "pg";
-import { E2E_ORG_SLUG } from "./fixtures/seed-e2e";
+import {
+  E2E_ORG_SLUG,
+  COMPASS_META_ORG_SLUG,
+  COMPASS_META_WORKSPACE_SLUG,
+} from "./fixtures/seed-e2e";
 
 const S = process.env.PGSCHEMA
   ? `${process.env.PGSCHEMA}_dev`
@@ -36,6 +40,24 @@ export default async function globalTeardown() {
 
   const pool = new pg.Pool({ connectionString });
   try {
+    // The "Send Feedback about Compass" target workspace (rbcodelabs/compass)
+    // persists across runs like its production counterpart — only the test
+    // feedback rows the global-feedback spec creates are cleaned up here
+    // (titled "E2E ..." per this suite's naming convention), not the
+    // workspace itself or any other seeded content in it.
+    const { rows: metaWsRows } = await pool.query<{ id: string }>(
+      `SELECT w.id FROM "${S}".workspaces w
+       JOIN "${S}".organizations o ON o.id = w.organization_id
+       WHERE o.slug = $1 AND w.slug = $2`,
+      [COMPASS_META_ORG_SLUG, COMPASS_META_WORKSPACE_SLUG]
+    );
+    if (metaWsRows[0]) {
+      await pool.query(
+        `DELETE FROM "${S}".feedback WHERE workspace_id = $1 AND title LIKE 'E2E %'`,
+        [metaWsRows[0].id]
+      );
+    }
+
     const { rows } = await pool.query<{ id: string }>(
       `SELECT id FROM "${S}".organizations WHERE slug = $1`,
       [E2E_ORG_SLUG]

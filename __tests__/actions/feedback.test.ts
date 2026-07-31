@@ -2,10 +2,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockFeedbackItem = {
   update: vi.fn(),
+  create: vi.fn(),
+};
+
+const mockWorkspace = {
+  findFirst: vi.fn(),
 };
 
 const mockPrisma = {
   feedbackItem: mockFeedbackItem,
+  workspace: mockWorkspace,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -23,6 +29,7 @@ import {
   updateFeedbackStatus,
   linkFeedbackToOpportunity,
   updateFeedbackType,
+  createFeedback,
 } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 
 const mockAuth = vi.mocked(auth);
@@ -31,6 +38,19 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T> ? T : never);
   mockFeedbackItem.update.mockResolvedValue({ id: "fb-1" });
+  mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" });
+  mockFeedbackItem.create.mockResolvedValue({
+    id: "fb-new",
+    title: "New idea",
+    description: null,
+    submitterName: "Dev User",
+    submitterEmail: "dev@localhost.dev",
+    status: "OPEN",
+    voteCount: 0,
+    type: "IDEA",
+    opportunityId: null,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  });
 });
 
 // ─── updateFeedbackStatus ─────────────────────────────────────────────────────
@@ -140,5 +160,109 @@ describe("updateFeedbackType", () => {
     await expect(
       updateFeedbackType("fb-999", "BUG", "/path")
     ).rejects.toThrow("not found");
+  });
+});
+
+// ─── createFeedback ───────────────────────────────────────────────────────────
+
+describe("createFeedback", () => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({
+      user: { id: "user-1", name: "Dev User", email: "dev@localhost.dev" },
+    } as ReturnType<typeof auth> extends Promise<infer T> ? T : never);
+  });
+
+  it("creates a feedback item scoped to the resolved workspace and returns it", async () => {
+    const result = await createFeedback(
+      "acme",
+      "widgets",
+      { title: "New idea", description: "", type: "IDEA" },
+      "/acme/widgets/feedback"
+    );
+
+    expect(mockWorkspace.findFirst).toHaveBeenCalledWith({
+      where: { slug: "widgets", organization: { slug: "acme" } },
+      select: { id: true },
+    });
+    expect(mockFeedbackItem.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          workspaceId: "ws-1",
+          title: "New idea",
+          description: null,
+          type: "IDEA",
+          submitterName: "Dev User",
+          submitterEmail: "dev@localhost.dev",
+        }),
+      })
+    );
+    expect(result).toEqual({
+      ok: true,
+      item: expect.objectContaining({ id: "fb-new", title: "New idea" }),
+    });
+  });
+
+  it("uses the authenticated session's name/email, not any client-supplied value", async () => {
+    mockAuth.mockResolvedValue({
+      user: { id: "user-1", name: "Session Name", email: "session@example.com" },
+    } as ReturnType<typeof auth> extends Promise<infer T> ? T : never);
+
+    await createFeedback(
+      "acme",
+      "widgets",
+      { title: "Idea", description: "", type: "IDEA" },
+      "/path"
+    );
+
+    expect(mockFeedbackItem.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          submitterName: "Session Name",
+          submitterEmail: "session@example.com",
+        }),
+      })
+    );
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(
+      createFeedback("acme", "widgets", { title: "Idea", description: "", type: "IDEA" }, "/path")
+    ).rejects.toThrow("Unauthorized");
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
+  });
+
+  it("returns a validation error and does not touch the DB when title is blank", async () => {
+    const result = await createFeedback(
+      "acme",
+      "widgets",
+      { title: "   ", description: "", type: "IDEA" },
+      "/path"
+    );
+
+    expect(result).toEqual({ ok: false, error: "Title is required" });
+    expect(mockWorkspace.findFirst).not.toHaveBeenCalled();
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
+  });
+
+  it("returns a not-found error when the workspace doesn't resolve", async () => {
+    mockWorkspace.findFirst.mockResolvedValue(null);
+
+    const result = await createFeedback(
+      "acme",
+      "missing-workspace",
+      { title: "Idea", description: "", type: "IDEA" },
+      "/path"
+    );
+
+    expect(result).toEqual({ ok: false, error: "Workspace not found" });
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
+  });
+
+  it("propagates DB errors", async () => {
+    mockFeedbackItem.create.mockRejectedValue(new Error("DB error"));
+    await expect(
+      createFeedback("acme", "widgets", { title: "Idea", description: "", type: "IDEA" }, "/path")
+    ).rejects.toThrow("DB error");
   });
 });

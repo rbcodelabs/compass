@@ -14,6 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
+import { SendCompassFeedbackDialog } from "@/components/feedback/send-compass-feedback-dialog"
 
 function getInitials(name: string): string {
   return name
@@ -116,6 +117,7 @@ export function MobileHeader({
           <Settings className="w-3.5 h-3.5" aria-hidden="true" />
           <span className="text-[10px] font-medium leading-none">Settings</span>
         </Link>
+        <SendCompassFeedbackDialog compact />
         <Link
           href="/help"
           className={cn(
