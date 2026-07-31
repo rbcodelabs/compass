@@ -103,12 +103,27 @@ const MIGRATIONS = [
     filePath: path.join(process.cwd(), "prisma/migrations/023_solution_comment_plan_status/migration.sql"),
   },
   {
+    name: "024_canvas_node_positions",
+    filePath: path.join(process.cwd(), "prisma/migrations/024_canvas_node_positions/migration.sql"),
+  },
+  {
+    // Numbered "024" on main too — both branches independently picked the
+    // next sequential number off of 023 before either merged. Different
+    // migration names (tracked by full string, not numeric prefix), so no
+    // functional collision — just cosmetic. Not renumbering
+    // 024_canvas_node_positions since it's already applied against this
+    // PR's preview deployment; renaming it would make the migrate endpoint
+    // treat already-applied DDL as new.
     name: "024_launch_tiers_checklists",
     filePath: path.join(process.cwd(), "prisma/migrations/024_launch_tiers_checklists/migration.sql"),
   },
   {
     name: "025_doc_gtm_positioning_brief",
     filePath: path.join(process.cwd(), "prisma/migrations/025_doc_gtm_positioning_brief/migration.sql"),
+  },
+  {
+    name: "026_roadmap_private_items",
+    filePath: path.join(process.cwd(), "prisma/migrations/026_roadmap_private_items/migration.sql"),
   },
 ];
 

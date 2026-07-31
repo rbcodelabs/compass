@@ -65,6 +65,7 @@ export default async function PortalRoadmapPage({ params }: Props) {
     where: {
       workspaceId: workspace.id,
       status: { not: "ARCHIVED" },
+      isPrivate: false,
     },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     select: {

@@ -23,19 +23,26 @@ const functional = !!process.env.E2E_FUNCTIONAL;
  * one run surfaced a `Module not found: Can't resolve '@/auth'` Build Error
  * that belonged entirely to a different worktree's checkout.
  *
- * Deriving the port from a hash of the worktree path keeps it stable across
- * repeated runs in the *same* worktree (so `reuseExistingServer` still gets
- * its intended fast-reuse benefit locally) while giving concurrent
- * worktrees distinct ports so they can never collide. Range 4100-4899 is
- * chosen to stay clear of the 3000-3099 range used by this project's
- * `nextdev` worktree dev-server manager.
+ * `E2E_PORT` still wins if set (e.g. to pin a fixed CI runner config), but
+ * that requires a human/agent to remember to set it every time — the actual
+ * bug report this fixes came from a run that didn't. So the *default* (no
+ * `E2E_PORT`) now derives the port from a hash of the worktree path instead
+ * of a fixed 3002: stable across repeated runs in the *same* worktree (so
+ * `reuseExistingServer` still gets its intended fast-reuse benefit locally)
+ * while giving concurrent worktrees distinct ports so they can never
+ * collide by default. Range 4100-4899 stays clear of the 3000-3099 range
+ * used by this project's `nextdev` worktree dev-server manager.
  */
 function functionalPort(): number {
   const hash = crypto.createHash("md5").update(process.cwd()).digest();
   return 4100 + (hash.readUInt16BE(0) % 800);
 }
 
-const FUNCTIONAL_PORT = functional ? functionalPort() : 3002;
+const FUNCTIONAL_PORT = process.env.E2E_PORT
+  ? Number(process.env.E2E_PORT)
+  : functional
+    ? functionalPort()
+    : 3002;
 const FUNCTIONAL_BASE_URL = `http://localhost:${FUNCTIONAL_PORT}`;
 
 export default defineConfig({

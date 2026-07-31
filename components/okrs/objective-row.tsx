@@ -6,6 +6,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
+import { averageProgress, STATUS_BADGE } from "@/lib/okrs";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
@@ -52,41 +53,6 @@ interface ObjectiveRowProps {
   revalidatePathStr?: string;
   availableKRs?: { id: string; title: string; objectiveTitle: string }[];
   parentKeyResultId?: string | null;
-}
-
-const STATUS_BADGE: Record<
-  ObjectiveStatus,
-  { label: string; className: string }
-> = {
-  ON_TRACK: {
-    label: "On track",
-    className:
-      "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  },
-  AT_RISK: {
-    label: "At risk",
-    className:
-      "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
-  },
-  OFF_TRACK: {
-    label: "Off track",
-    className:
-      "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  },
-  COMPLETE: {
-    label: "Complete",
-    className:
-      "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  },
-};
-
-function averageProgress(keyResults: KeyResult[]): number {
-  if (keyResults.length === 0) return 0;
-  const total = keyResults.reduce((sum, kr) => {
-    if (kr.target === 0) return sum;
-    return sum + Math.min(100, Math.max(0, (kr.current / kr.target) * 100));
-  }, 0);
-  return Math.round(total / keyResults.length);
 }
 
 export function ObjectiveRow({

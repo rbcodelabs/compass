@@ -106,6 +106,22 @@ describe("addRoadmapItem", () => {
     expect(data.startDate).toBe(startDate);
     expect(data.endDate).toBe(endDate);
   });
+
+  it("defaults isPrivate to false when not provided", async () => {
+    await addRoadmapItem("ws-1", { title: "Public by default", horizon: "NOW" }, "/path");
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.isPrivate).toBe(false);
+  });
+
+  it("passes through isPrivate: true", async () => {
+    await addRoadmapItem(
+      "ws-1",
+      { title: "Security fix", horizon: "NOW", isPrivate: true },
+      "/path"
+    );
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.isPrivate).toBe(true);
+  });
 });
 
 // ─── moveItem ─────────────────────────────────────────────────────────────────
@@ -206,6 +222,18 @@ describe("promoteToRoadmap", () => {
     expect(data.startDate).toBeUndefined();
     expect(data.endDate).toBeUndefined();
   });
+
+  it("defaults isPrivate to false when not provided", async () => {
+    await promoteToRoadmap("sol-1", "ws-1", "NOW", null, null);
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.isPrivate).toBe(false);
+  });
+
+  it("passes through isPrivate: true", async () => {
+    await promoteToRoadmap("sol-1", "ws-1", "NOW", null, null, undefined, true);
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.isPrivate).toBe(true);
+  });
 });
 
 // ─── promoteFeedbackToRoadmap ─────────────────────────────────────────────────
@@ -272,6 +300,18 @@ describe("promoteFeedbackToRoadmap", () => {
     expect(data.startDate).toBeUndefined();
     expect(data.endDate).toBeUndefined();
   });
+
+  it("defaults isPrivate to false when not provided", async () => {
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path");
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.isPrivate).toBe(false);
+  });
+
+  it("passes through isPrivate: true (e.g. a security-flagged bug)", async () => {
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path", undefined, true);
+    const data = mockRoadmapItem.create.mock.calls[0][0].data;
+    expect(data.isPrivate).toBe(true);
+  });
 });
 
 // ─── updateSortOrder ──────────────────────────────────────────────────────────
@@ -324,5 +364,23 @@ describe("updateRoadmapItem", () => {
     await expect(
       updateRoadmapItem("item-missing", { title: "X" }, "/path")
     ).rejects.toThrow("Record to update not found");
+  });
+
+  it("leaves isPrivate untouched when not provided", async () => {
+    await updateRoadmapItem("item-1", { title: "Renamed" }, "/path");
+    const call = mockRoadmapItem.update.mock.calls[0][0];
+    expect(call.data.isPrivate).toBeUndefined();
+  });
+
+  it("sets isPrivate when explicitly provided", async () => {
+    await updateRoadmapItem("item-1", { isPrivate: true }, "/path");
+    const call = mockRoadmapItem.update.mock.calls[0][0];
+    expect(call.data.isPrivate).toBe(true);
+  });
+
+  it("can toggle isPrivate back to false", async () => {
+    await updateRoadmapItem("item-1", { isPrivate: false }, "/path");
+    const call = mockRoadmapItem.update.mock.calls[0][0];
+    expect(call.data.isPrivate).toBe(false);
   });
 });
