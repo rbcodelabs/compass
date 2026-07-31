@@ -60,7 +60,11 @@ test.describe("In-App Feedback Submission", () => {
     await expect(
       page.getByText("Thanks — your feedback was sent to the Compass team.")
     ).toBeVisible({ timeout: 10_000 });
-    await page.getByRole("button", { name: "Close" }).click();
+    // Two elements match role=button/name=Close here: the dialog's built-in
+    // top-right X close button (DialogContent showCloseButton) and our
+    // explicit footer "Close" button, which renders later in the DOM — take
+    // the last match to target ours specifically rather than the X icon.
+    await page.getByRole("button", { name: "Close" }).last().click();
 
     // Confirm it landed in rbcodelabs/compass, not the current workspace —
     // the whole point of this entry point being workspace-independent.
