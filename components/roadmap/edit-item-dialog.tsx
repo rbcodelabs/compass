@@ -34,6 +34,7 @@ export function EditItemDialog({ item, open, onOpenChange, revalidatePathStr, on
   const [description, setDescription] = useState(item.description ?? "");
   const [startDate, setStartDate] = useState(toDateInputValue(item.startDate));
   const [endDate, setEndDate] = useState(toDateInputValue(item.endDate));
+  const [isPrivate, setIsPrivate] = useState(item.isPrivate);
   const [isPending, startTransition] = useTransition();
 
   // Reset local form state whenever the dialog is (re)opened for this item.
@@ -43,6 +44,7 @@ export function EditItemDialog({ item, open, onOpenChange, revalidatePathStr, on
       setDescription(item.description ?? "");
       setStartDate(toDateInputValue(item.startDate));
       setEndDate(toDateInputValue(item.endDate));
+      setIsPrivate(item.isPrivate);
     }
   }, [open, item]);
 
@@ -59,6 +61,7 @@ export function EditItemDialog({ item, open, onOpenChange, revalidatePathStr, on
           description: description.trim() || undefined,
           startDate: startDate ? new Date(startDate) : null,
           endDate: endDate ? new Date(endDate) : null,
+          isPrivate,
         },
         revalidatePathStr
       );
@@ -69,6 +72,7 @@ export function EditItemDialog({ item, open, onOpenChange, revalidatePathStr, on
         description: updated.description ?? null,
         startDate: updated.startDate ? updated.startDate.toISOString() : null,
         endDate: updated.endDate ? updated.endDate.toISOString() : null,
+        isPrivate: updated.isPrivate,
       });
       onOpenChange(false);
     });
@@ -126,6 +130,17 @@ export function EditItemDialog({ item, open, onOpenChange, revalidatePathStr, on
               />
             </div>
           </div>
+
+          <label className="flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isPrivate}
+              onChange={(e) => setIsPrivate(e.target.checked)}
+              disabled={isPending}
+              className="size-3.5 rounded border-input"
+            />
+            Private (hidden from public roadmap)
+          </label>
 
           <DialogFooter>
             <Button type="submit" size="sm" disabled={isPending}>

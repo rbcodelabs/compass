@@ -133,10 +133,12 @@ export async function promoteFeedbackToRoadmap({
   feedbackId,
   workspaceId,
   horizon,
+  isPrivate,
 }: {
   feedbackId: string
   workspaceId: string
   horizon: "NOW" | "NEXT" | "LATER" | "SHIPPED"
+  isPrivate?: boolean
 }) {
   const prisma = getPrisma()
   const feedback = await prisma.feedbackItem.findUnique({
@@ -161,6 +163,7 @@ export async function promoteFeedbackToRoadmap({
       horizon,
       sortOrder,
       feedbackId,
+      isPrivate: isPrivate ?? false,
     },
   })
 
@@ -168,6 +171,7 @@ export async function promoteFeedbackToRoadmap({
     `**Promoted to roadmap (${horizon})**`,
     `ID: ${item.id}`,
     `Title: ${item.title}`,
+    ...(item.isPrivate ? [`Private: yes (hidden from public portal)`] : []),
     `Linked Feedback: ${feedback.title} [${feedback.type}]`,
   ]
   return { content: [{ type: "text" as const, text: lines.join("\n") }] }

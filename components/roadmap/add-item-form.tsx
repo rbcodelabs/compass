@@ -48,6 +48,7 @@ export function AddItemForm({
   const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(null);
   const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(null);
   const [selectedExperimentId, setSelectedExperimentId] = useState<string | null>(null);
+  const [isPrivate, setIsPrivate] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
   function reset() {
@@ -55,6 +56,7 @@ export function AddItemForm({
     setSelectedSolutionId(null);
     setSelectedOpportunityId(null);
     setSelectedExperimentId(null);
+    setIsPrivate(false);
     formRef.current?.reset();
   }
 
@@ -83,6 +85,7 @@ export function AddItemForm({
           experimentId: selectedExperimentId ?? undefined,
           startDate,
           endDate,
+          isPrivate,
         },
         revalidatePathStr
       );
@@ -95,6 +98,7 @@ export function AddItemForm({
         description: item.description ?? null,
         horizon: item.horizon as Horizon,
         sortOrder: item.sortOrder,
+        isPrivate: item.isPrivate,
         solutionId: item.solutionId ?? null,
         keyResultId: item.keyResultId ?? null,
         opportunityId: item.opportunityId ?? null,
@@ -290,6 +294,17 @@ export function AddItemForm({
           </Combobox>
         </div>
       )}
+
+      <label className="flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer">
+        <input
+          type="checkbox"
+          checked={isPrivate}
+          onChange={(e) => setIsPrivate(e.target.checked)}
+          disabled={isPending}
+          className="size-3.5 rounded border-input"
+        />
+        Private (hidden from public roadmap)
+      </label>
 
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={isPending}>

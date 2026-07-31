@@ -48,7 +48,7 @@ beforeEach(() => {
   mockFeedbackItem.findFirst.mockResolvedValue({ id: "fb-1", voteCount: 0 });
   mockFeedbackVote.findFirst.mockResolvedValue(null);
   mockFeedbackItem.update.mockResolvedValue({ voteCount: 1 });
-  mockRoadmapItem.findFirst.mockResolvedValue({ id: "rm-1" });
+  mockRoadmapItem.findFirst.mockResolvedValue({ id: "rm-1", isPrivate: false });
   mockRoadmapVote.findFirst.mockResolvedValue(null);
   mockRoadmapVote.count.mockResolvedValue(1);
 });
@@ -173,6 +173,30 @@ describe("POST /api/portal/[orgSlug]/[workspaceSlug]/vote — roadmap votes", ()
 
     const res = await POST(makeRequest({ type: "roadmap", itemId: "rm-1" }), { params });
     expect(res.status).toBe(401);
+    expect(mockRoadmapVote.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects voting on a private roadmap item with 404, even with a valid session", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      feedbackEnabled: true,
+      roadmapPublic: true,
+      portalAuthRequired: true,
+    });
+    mockGetPortalSession.mockResolvedValue({
+      portalAccountId: "account-1",
+      email: "verified@example.com",
+    });
+    mockRoadmapItem.findFirst.mockResolvedValue({ id: "rm-private", isPrivate: true });
+
+    const res = await POST(
+      makeRequest({ type: "roadmap", itemId: "rm-private", voterName: "Jane" }),
+      { params }
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(404);
+    expect(data.error).toBe("Roadmap item not found");
     expect(mockRoadmapVote.create).not.toHaveBeenCalled();
   });
 });
