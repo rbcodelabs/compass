@@ -193,6 +193,53 @@ const _handler = createMcpHandler(
     )
 
     // ----------------------------------------------------------------
+    // get_workspace_by_slug — resolves a workspace ID directly from
+    // org slug + workspace slug, without listing all workspaces first
+    // ----------------------------------------------------------------
+    server.registerTool(
+      "get_workspace_by_slug",
+      {
+        title: "Get Workspace By Slug",
+        description:
+          "Looks up a single workspace by org slug + workspace slug and returns its ID, name, " +
+          "slug, and description. Use this instead of list_workspaces when you already know both " +
+          "slugs (e.g. from a URL like /org-slug/workspace-slug) and just need the workspace ID.",
+        inputSchema: {
+          orgSlug: z.string().min(1).describe("The organization slug (e.g. 'rbcodelabs')"),
+          workspaceSlug: z.string().min(1).describe("The workspace slug (e.g. 'compass')"),
+        },
+      },
+      async ({ orgSlug, workspaceSlug }) => {
+        const prisma = getPrisma()
+        const org = await prisma.organization.findUnique({
+          where: { slug: orgSlug },
+          select: { id: true, name: true },
+        })
+        if (!org) {
+          return { content: [{ type: "text" as const, text: `No organization found with slug "${orgSlug}".` }] }
+        }
+        const workspace = await prisma.workspace.findFirst({
+          where: { organizationId: org.id, slug: workspaceSlug },
+          select: { id: true, name: true, slug: true, description: true },
+        })
+        if (!workspace) {
+          return { content: [{ type: "text" as const, text: `No workspace found with slug "${workspaceSlug}" in organization "${org.name}".` }] }
+        }
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              `**Workspace:** ${workspace.name}\n` +
+              `ID: ${workspace.id}\n` +
+              `Slug: ${workspace.slug}\n` +
+              (workspace.description ? `${workspace.description}\n` : "") +
+              `URL: /${orgSlug}/${workspace.slug}`,
+          }],
+        }
+      }
+    )
+
+    // ----------------------------------------------------------------
     // create_workspace — creates a new workspace inside an organization
     // ----------------------------------------------------------------
     server.registerTool(
