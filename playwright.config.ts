@@ -6,9 +6,6 @@ import { defineConfig, devices } from "@playwright/test";
  * preserving existing CI behaviour with no local server or DB required.
  */
 const functional = !!process.env.E2E_FUNCTIONAL;
-// Override with E2E_FUNCTIONAL_PORT when 3002 is already taken locally (e.g.
-// another worktree's dev server). Defaults to 3002 for CI and everyone else.
-const FUNCTIONAL_PORT = Number(process.env.E2E_FUNCTIONAL_PORT) || 3002;
 
 // This repo runs many worktrees/dev servers in parallel, so the default port
 // can collide with an unrelated concurrent worktree's server. Override via
