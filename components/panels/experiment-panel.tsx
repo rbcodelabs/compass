@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ExternalLinkIcon } from "lucide-react";
+import { EditableText, StatusSelect, type EditContext } from "./panel-parts";
 
 type ExperimentData = {
   id: string;
@@ -39,6 +40,14 @@ const RISK_CLASS: Record<string, string> = {
   MEDIUM: "bg-amber-100 text-amber-700",
   LOW: "bg-green-100 text-green-700",
 };
+
+const STATUS_MAP: Record<string, { label: string; className: string }> = {
+  DESIGNING: { label: STATUS_LABELS.DESIGNING, className: STATUS_CLASS.DESIGNING },
+  RUNNING: { label: STATUS_LABELS.RUNNING, className: STATUS_CLASS.RUNNING },
+  COMPLETE: { label: STATUS_LABELS.COMPLETE, className: STATUS_CLASS.COMPLETE },
+  KILLED: { label: STATUS_LABELS.KILLED, className: STATUS_CLASS.KILLED },
+};
+const STATUS_ORDER = ["DESIGNING", "RUNNING", "COMPLETE", "KILLED"] as const;
 
 export function ExperimentPanel({
   experimentId,
@@ -89,6 +98,14 @@ export function ExperimentPanel({
 
   const isActive = data.status === "RUNNING" || data.status === "DESIGNING";
 
+  const edit: EditContext = {
+    type: "experiment",
+    id: experimentId,
+    orgSlug,
+    workspaceSlug,
+    onSaved: (d) => setData(d as ExperimentData),
+  };
+
   return (
     <div className="flex flex-col gap-5 px-5 pb-8 overflow-y-auto">
       {/* Open full page link */}
@@ -101,18 +118,27 @@ export function ExperimentPanel({
       </Link>
 
       {/* Status + title */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 items-start">
         <div className="flex items-center gap-2 flex-wrap">
-          <Badge className={STATUS_CLASS[data.status] ?? "bg-slate-100 text-slate-700"}>
-            {STATUS_LABELS[data.status] ?? data.status}
-          </Badge>
+          <StatusSelect
+            value={data.status}
+            field="status"
+            options={STATUS_ORDER}
+            map={STATUS_MAP}
+            edit={edit}
+          />
           {data.conclusion && (
             <Badge variant="outline" className="text-xs">
               {data.conclusion}
             </Badge>
           )}
         </div>
-        <h2 className="text-base font-semibold leading-snug">{data.title}</h2>
+        <EditableText
+          value={data.title}
+          field="title"
+          edit={edit}
+          className="text-base font-semibold leading-snug w-full"
+        />
       </div>
 
       {/* Kill condition — prominent when active */}

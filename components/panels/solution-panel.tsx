@@ -7,9 +7,11 @@ import {
   PanelContainer,
   FullPageLink,
   PanelTitle,
+  EditableText,
   Section,
   RelationList,
   type RelationItem,
+  type EditContext,
 } from "./panel-parts";
 
 type SolutionData = {
@@ -31,6 +33,8 @@ const STATUS: Record<string, { label: string; className: string }> = {
   SELECTED: { label: "Selected", className: "bg-blue-100 text-blue-700" },
 };
 
+const STATUS_ORDER = ["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"] as const;
+
 const RISK: Record<string, string> = {
   HIGH: "bg-red-100 text-red-700",
   MEDIUM: "bg-amber-100 text-amber-700",
@@ -46,7 +50,7 @@ export function SolutionPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error } = useEntityDetail<SolutionData>(
+  const { data, error, mutate } = useEntityDetail<SolutionData>(
     "solution",
     id,
     orgSlug,
@@ -55,6 +59,14 @@ export function SolutionPanel({
 
   if (error) return <PanelError label="solution" />;
   if (!data) return <PanelSkeleton />;
+
+  const edit: EditContext = {
+    type: "solution",
+    id,
+    orgSlug,
+    workspaceSlug,
+    onSaved: (d) => mutate(d as SolutionData),
+  };
 
   const oppItems: RelationItem[] = data.opportunity
     ? [{ type: "opportunity", id: data.opportunity.id, title: data.opportunity.title }]
@@ -80,11 +92,21 @@ export function SolutionPanel({
         />
       )}
 
-      <PanelTitle title={data.title} status={STATUS[data.status] ?? { label: data.status }} />
+      <PanelTitle
+        title={data.title}
+        status={{ value: data.status, ...(STATUS[data.status] ?? { label: data.status }) }}
+        edit={edit}
+        statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
+      />
 
-      {data.description && (
-        <p className="text-sm text-foreground/80 leading-relaxed">{data.description}</p>
-      )}
+      <EditableText
+        value={data.description}
+        field="description"
+        edit={edit}
+        multiline
+        placeholder="Add a description…"
+        className="text-sm text-foreground/80 leading-relaxed"
+      />
 
       <Section label="Opportunity">
         <RelationList items={oppItems} empty="No parent opportunity." />

@@ -7,10 +7,13 @@ import {
   PanelContainer,
   FullPageLink,
   PanelTitle,
+  EditableText,
+  StatusSelect,
   Section,
   Field,
   RelationList,
   type RelationItem,
+  type EditContext,
 } from "./panel-parts";
 
 type FeedbackData = {
@@ -37,6 +40,17 @@ const TYPE: Record<string, { label: string; className: string }> = {
   IDEA: { label: "Idea", className: "bg-violet-100 text-violet-700" },
 };
 
+const STATUS: Record<string, { label: string; className: string }> = {
+  OPEN: { label: "Open", className: "bg-slate-100 text-slate-600" },
+  UNDER_REVIEW: { label: "Under review", className: "bg-yellow-100 text-yellow-700" },
+  PLANNED: { label: "Planned", className: "bg-blue-100 text-blue-700" },
+  IN_PROGRESS: { label: "In progress", className: "bg-indigo-100 text-indigo-700" },
+  COMPLETED: { label: "Completed", className: "bg-green-100 text-green-700" },
+  DECLINED: { label: "Declined", className: "bg-red-100 text-red-600" },
+};
+
+const STATUS_ORDER = ["OPEN", "UNDER_REVIEW", "PLANNED", "IN_PROGRESS", "COMPLETED", "DECLINED"] as const;
+
 export function FeedbackPanel({
   id,
   orgSlug,
@@ -46,7 +60,7 @@ export function FeedbackPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error } = useEntityDetail<FeedbackData>(
+  const { data, error, mutate } = useEntityDetail<FeedbackData>(
     "feedback",
     id,
     orgSlug,
@@ -56,6 +70,14 @@ export function FeedbackPanel({
   if (error) return <PanelError label="feedback" />;
   if (!data) return <PanelSkeleton />;
 
+  const edit: EditContext = {
+    type: "feedback",
+    id,
+    orgSlug,
+    workspaceSlug,
+    onSaved: (d) => mutate(d as FeedbackData),
+  };
+
   const oppItems: RelationItem[] = data.opportunity
     ? [{ type: "opportunity", id: data.opportunity.id, title: data.opportunity.title }]
     : [];
@@ -64,14 +86,34 @@ export function FeedbackPanel({
     <PanelContainer>
       <FullPageLink href={`/${orgSlug}/${workspaceSlug}/feedback`} />
 
-      <PanelTitle title={data.title} status={TYPE[data.type] ?? { label: data.type }} />
+      <PanelTitle
+        title={data.title}
+        status={TYPE[data.type] ?? { label: data.type }}
+        edit={edit}
+      />
 
-      {data.description && (
-        <p className="text-sm text-foreground/80 leading-relaxed">{data.description}</p>
-      )}
+      <EditableText
+        value={data.description}
+        field="description"
+        edit={edit}
+        multiline
+        placeholder="Add a description…"
+        className="text-sm text-foreground/80 leading-relaxed"
+      />
 
       <div className="flex flex-col gap-3">
-        <Field label="Status">{data.status}</Field>
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Status
+          </p>
+          <StatusSelect
+            value={data.status}
+            field="status"
+            options={STATUS_ORDER}
+            map={STATUS}
+            edit={edit}
+          />
+        </div>
         <Field label="Votes">{data.voteCount}</Field>
         {data.submitterName && <Field label="Submitted by">{data.submitterName}</Field>}
       </div>

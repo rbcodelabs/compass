@@ -7,10 +7,12 @@ import {
   PanelContainer,
   FullPageLink,
   PanelTitle,
+  EditableText,
   Section,
   Field,
   RelationList,
   type RelationItem,
+  type EditContext,
 } from "./panel-parts";
 
 type ObjectiveData = {
@@ -37,6 +39,8 @@ const STATUS: Record<string, { label: string; className: string }> = {
   COMPLETE: { label: "Complete", className: "bg-blue-100 text-blue-700" },
 };
 
+const STATUS_ORDER = ["ON_TRACK", "AT_RISK", "OFF_TRACK", "COMPLETE"] as const;
+
 export function ObjectivePanel({
   id,
   orgSlug,
@@ -46,7 +50,7 @@ export function ObjectivePanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error } = useEntityDetail<ObjectiveData>(
+  const { data, error, mutate } = useEntityDetail<ObjectiveData>(
     "objective",
     id,
     orgSlug,
@@ -55,6 +59,14 @@ export function ObjectivePanel({
 
   if (error) return <PanelError label="objective" />;
   if (!data) return <PanelSkeleton />;
+
+  const edit: EditContext = {
+    type: "objective",
+    id,
+    orgSlug,
+    workspaceSlug,
+    onSaved: (d) => mutate(d as ObjectiveData),
+  };
 
   const krItems: RelationItem[] = data.keyResults.map((kr) => {
     const pct = kr.target > 0 ? Math.round((kr.current / kr.target) * 100) : null;
@@ -72,11 +84,21 @@ export function ObjectivePanel({
         <FullPageLink href={`/${orgSlug}/${workspaceSlug}/okrs/${data.cycle.id}`} />
       )}
 
-      <PanelTitle title={data.title} status={STATUS[data.status] ?? { label: data.status }} />
+      <PanelTitle
+        title={data.title}
+        status={{ value: data.status, ...(STATUS[data.status] ?? { label: data.status }) }}
+        edit={edit}
+        statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
+      />
 
-      {data.description && (
-        <p className="text-sm text-foreground/80 leading-relaxed">{data.description}</p>
-      )}
+      <EditableText
+        value={data.description}
+        field="description"
+        edit={edit}
+        multiline
+        placeholder="Add a description…"
+        className="text-sm text-foreground/80 leading-relaxed"
+      />
 
       {(data.owner || data.squad || data.cycle) && (
         <div className="flex flex-col gap-3">
