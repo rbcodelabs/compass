@@ -110,6 +110,17 @@ export async function seedE2E(pool: pg.Pool): Promise<SeedResult> {
     )
   `, [ws.id]);
 
+  // ── Baseline task ──────────────────────────────────────────────────────────
+  await pool.query(`
+    INSERT INTO "${S}".tasks
+      (id, workspace_id, title, status, priority, sort_order, created_at, updated_at)
+    SELECT gen_random_uuid(), $1, 'E2E Baseline Task', 'TODO', 'MEDIUM', 0, NOW(), NOW()
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "${S}".tasks
+      WHERE workspace_id = $1 AND title = 'E2E Baseline Task'
+    )
+  `, [ws.id]);
+
   // ── "Send Feedback about Compass" target org/workspace ───────────────────
   // Owned by the same seeded user, so no separate login is needed to view
   // feedback that lands here via the global dialog.

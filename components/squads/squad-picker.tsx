@@ -11,7 +11,7 @@ import { assignSquad } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
 import type { SquadData } from "@/lib/types";
 
 interface Props {
-  objectType: "objective" | "opportunity" | "experiment" | "roadmapItem";
+  objectType: "objective" | "opportunity" | "experiment" | "roadmapItem" | "task";
   objectId: string;
   currentSquadId: string | null;
   squads: SquadData[];

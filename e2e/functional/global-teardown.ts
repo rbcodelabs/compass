@@ -118,6 +118,20 @@ export default async function globalTeardown() {
         [wsId]
       );
 
+      // task_links → tasks (self-referencing parent_task_id has no DB FK, so
+      // no ordering constraint between tasks themselves — just delete links first)
+      await pool.query(
+        `DELETE FROM "${S}".task_links
+         WHERE task_id IN (
+           SELECT id FROM "${S}".tasks WHERE workspace_id = $1
+         )`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".tasks WHERE workspace_id = $1`,
+        [wsId]
+      );
+
       // canvas_node_positions — table exists even though Phase 1 never
       // writes to it (no drag-to-pin UI yet), needed once Phase 2 starts.
       await pool.query(

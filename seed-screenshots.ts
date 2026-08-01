@@ -299,6 +299,47 @@ async function main() {
   }
   console.log("Feedback:", feedbackDefs.length);
 
+  // ── Tasks ─────────────────────────────────────────────────────────────────
+  const taskDefs = [
+    { title: "Design health score visual treatment for OST branches", status: "DONE", priority: "MEDIUM", squad: "Growth", points: 3 },
+    { title: "Implement staleness detection query", status: "IN_PROGRESS", priority: "HIGH", squad: "Growth", points: 5, owner: "Priya Shah" },
+    { title: "Wire health score banner into OST tree view", status: "TODO", priority: "HIGH", squad: "Growth", points: 3 },
+    { title: "Investigate flaky staleness-detection test in CI", status: "BLOCKED", priority: "URGENT", squad: "Platform", points: 2 },
+    { title: "Write launch announcement for drag-to-relink", status: "IN_REVIEW", priority: "MEDIUM", squad: "Core Product", points: 1 },
+    { title: "Spike: bulk re-link drag interaction prototype", status: "BACKLOG", priority: "LOW", squad: "Core Product", points: 8 },
+    { title: "Q3 onboarding revamp", status: "TODO", priority: "HIGH", owner: "Rick Bowman", iteration: "Q3 Initiatives" },
+  ];
+  const tasks: string[] = [];
+  for (let i = 0; i < taskDefs.length; i++) {
+    const t = taskDefs[i] as (typeof taskDefs)[number] & { squad?: string; owner?: string; iteration?: string };
+    const exists = await one(`SELECT id FROM "${S}".tasks WHERE workspace_id = $1 AND title = $2`, [ws.id, t.title]);
+    if (exists) { tasks.push(exists.id); continue; }
+    const r = await one(
+      `INSERT INTO "${S}".tasks (workspace_id, squad_id, title, status, priority, story_points, owner_name, iteration, sort_order)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [ws.id, t.squad ? squads[t.squad] : null, t.title, t.status, t.priority, (t as any).points ?? null, t.owner ?? null, t.iteration ?? null, i]
+    );
+    tasks.push(r.id);
+  }
+  // Link the first task to the health-score Solution and the Growth
+  // Opportunity it originated from, so the Links tab has real content to screenshot.
+  const taskLinkDefs = [
+    { taskIdx: 0, linkedType: "SOLUTION", linkedId: solutions[1] },
+    { taskIdx: 1, linkedType: "OPPORTUNITY", linkedId: opps[0] },
+  ];
+  for (const l of taskLinkDefs) {
+    const exists = await one(
+      `SELECT id FROM "${S}".task_links WHERE task_id = $1 AND linked_type = $2 AND linked_id = $3`,
+      [tasks[l.taskIdx], l.linkedType, l.linkedId]
+    );
+    if (exists) continue;
+    await one(
+      `INSERT INTO "${S}".task_links (task_id, linked_type, linked_id) VALUES ($1,$2,$3) RETURNING id`,
+      [tasks[l.taskIdx], l.linkedType, l.linkedId]
+    );
+  }
+  console.log("Tasks:", tasks.length);
+
   // ── Docs ──────────────────────────────────────────────────────────────────
   // sort_order -1 so this doc wins the docs-index "firstDoc" redirect
   // (orderBy sortOrder asc, createdAt asc) ahead of any pre-existing empty

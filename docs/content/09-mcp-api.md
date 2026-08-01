@@ -104,7 +104,22 @@ The MCP server exposes tools that agents can call, grouped below by area.
 | Tool | Description |
 |---|---|
 | `list_squads` | List all squads in a workspace with their IDs and colors |
-| `assign_squad` | Assign a Squad to any object — opportunity, experiment, roadmap item, or objective (or clear it) |
+| `assign_squad` | Assign a Squad to any object — opportunity, experiment, roadmap item, objective, or task (or clear it) |
+
+### Tasks
+
+Task is the standalone delivery/tracking entity used both for full engineering sprint delivery (replacing a Jira-style board) and lightweight PM initiative tracking — one status vocabulary, `BACKLOG → TODO → IN_PROGRESS → BLOCKED ⇄ IN_REVIEW → DONE`, with `CANCELLED` as a terminal state and `BLOCKED` a first-class column. Tasks link to other Compass objects (Opportunity, Solution, Roadmap Item, Objective, Key Result, Doc, Experiment, Feedback Item) many-to-many via `TaskLink`, and support Epic → Task → Subtask hierarchy via `parentTaskId`.
+
+| Tool | Description |
+|---|---|
+| `create_task` | Create a Task with a title (required); optionally description, status (default TODO), priority (default MEDIUM), squad, parent task (to create a Subtask), assignee, freeform owner name, story points, due date, or iteration label |
+| `get_task` | Return full detail for a Task: fields, parent Epic (if any), subtasks, and resolved links to other Compass objects |
+| `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), or a linked object; optionally nest subtasks under their parent |
+| `update_task` | Update a Task's title, description, priority, assignee, owner, story points, due date, or iteration — does not accept status |
+| `move_task_status` | Dedicated status-transition tool for a Task, including moving it into or out of BLOCKED |
+| `link_task` | Link a Task to another Compass object; idempotent — re-linking the same pair is a no-op |
+| `unlink_task` | Remove a link between a Task and another Compass object |
+| `list_task_links` | List all links for a Task, grouped by linked object type with resolved titles |
 
 ### Feedback
 

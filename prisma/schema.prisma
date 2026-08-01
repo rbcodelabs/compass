@@ -139,6 +139,7 @@ model Workspace {
   evidence          Evidence[]
   canvasNodePositions CanvasNodePosition[]
   checklistTemplates ChecklistTemplate[]
+  tasks             Task[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -613,6 +614,7 @@ model Squad {
   opportunities Opportunity[]
   experiments   Experiment[]
   roadmapItems  RoadmapItem[]
+  tasks         Task[]
   createdById   String?       @map("created_by_id") @db.Uuid
   updatedById   String?       @map("updated_by_id") @db.Uuid
   source        String        @default("UI") @map("source") @db.VarChar(20)
@@ -625,7 +627,7 @@ model Squad {
 model CustomFieldDefinition {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
-  /// One of: OPPORTUNITY | SOLUTION | EXPERIMENT | OBJECTIVE | KEY_RESULT | ROADMAP_ITEM
+  /// One of: OPPORTUNITY | SOLUTION | EXPERIMENT | OBJECTIVE | KEY_RESULT | ROADMAP_ITEM | TASK
   objectType  String   @map("object_type") @db.VarChar(50)
   name        String   @db.VarChar(255)
   /// One of: TEXT | NUMBER | DATE | SELECT | MULTI_SELECT | URL | BOOLEAN
@@ -878,4 +880,92 @@ model RoadmapVote {
 
   @@unique([roadmapItemId, voterEmail])
   @@map("roadmap_votes")
+}
+
+// ─── Tasks (Sprint Delivery + PM Initiative Tracking) ──────────────────────────
+// Standalone top-level entity. Same status vocabulary serves two very different
+// audiences — see TaskStatus in lib/types.ts for how a lightweight PM-tracker
+// view and a full engineering Kanban/Scrum board both render off this one field.
+// Links to other Compass objects are many-to-many via TaskLink (see below),
+// NOT via nullable FK columns on this row — a Task can touch a Solution and a
+// Doc and a KeyResult at once. See Claude/compass-task-tracker-design-2026-07-31.md.
+
+model Task {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  squadId        String?   @map("squad_id") @db.Uuid
+  parentTaskId   String?   @map("parent_task_id") @db.Uuid
+  title          String    @db.VarChar(255)
+  description    String?   @db.Text
+  /// One of: BACKLOG | TODO | IN_PROGRESS | BLOCKED | IN_REVIEW | DONE | CANCELLED.
+  /// BLOCKED is a first-class status column — not an orthogonal flag. Same
+  /// vocabulary for full engineering delivery and lightweight PM initiative
+  /// tracking — the UI, not the schema, decides which subset of statuses
+  /// renders as board columns. See lib/types.ts TaskStatus.
+  status         String    @default("TODO") @db.VarChar(50)
+  /// One of: URGENT | HIGH | MEDIUM | LOW.
+  priority       String    @default("MEDIUM") @db.VarChar(20)
+  /// Nullable UUID of a WorkspaceMember's userId. No @relation — same
+  /// reasoning as createdById/updatedById elsewhere in this schema: it's
+  /// resolved against WorkspaceMember at the app layer, not joined by Prisma.
+  assigneeUserId String?   @map("assignee_user_id") @db.Uuid
+  /// Freeform owner name for PM-initiative tracking where the responsible party
+  /// isn't a Compass WorkspaceMember (external stakeholder, exec, etc.). Either
+  /// or both of assigneeUserId / ownerName may be set.
+  ownerName      String?   @map("owner_name") @db.VarChar(255)
+  storyPoints    Float?    @map("story_points")
+  dueDate        DateTime? @map("due_date")
+  /// Freeform sprint/iteration label (e.g. "Sprint 24", "2026-W31"). Reserved
+  /// extension point for a future first-class Sprint entity.
+  iteration      String?   @db.VarChar(100)
+  sortOrder      Int       @default(0) @map("sort_order")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @map("updated_at")
+
+  workspace      Workspace  @relation(fields: [workspaceId], references: [id])
+  squad          Squad?     @relation(fields: [squadId], references: [id])
+  parentTask     Task?      @relation("TaskParent", fields: [parentTaskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  subtasks       Task[]     @relation("TaskParent")
+  links          TaskLink[]
+
+  createdById    String?   @map("created_by_id") @db.Uuid
+  updatedById    String?   @map("updated_by_id") @db.Uuid
+  source         String    @default("UI") @map("source") @db.VarChar(20)
+
+  @@index([workspaceId, status])
+  @@index([squadId])
+  @@index([parentTaskId])
+  @@index([assigneeUserId])
+  @@map("tasks")
+}
+
+// ─── Task Links (polymorphic many-to-many) ─────────────────────────────────
+// Deliberately NOT shaped like Evidence (mutually-exclusive nullable FK
+// columns, one parent per row) — a Task can relate to MULTIPLE objects across
+// MULTIPLE types at once (e.g. one Task tied to both a Solution and a Doc).
+// One row per (task, linked object) pair. linkedId carries no Prisma
+// @relation because a single UUID column can't type-safely join into eight
+// different target tables — same reasoning as CustomFieldValue.objectId
+// above. Cross-type reads are resolved in application code (group links by
+// linkedType, batch-fetch each type, stitch results back together), not via
+// a single Prisma `include`.
+
+model TaskLink {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId      String   @map("task_id") @db.Uuid
+  /// One of: OPPORTUNITY | SOLUTION | ROADMAP_ITEM | OBJECTIVE | KEY_RESULT |
+  /// DOC | EXPERIMENT | FEEDBACK_ITEM. Squad is deliberately excluded — a
+  /// Task's squad is its first-class owning Task.squadId column, not a
+  /// generic link.
+  linkedType  String   @map("linked_type") @db.VarChar(30)
+  linkedId    String   @map("linked_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  createdById String?  @map("created_by_id") @db.Uuid
+  source      String   @default("UI") @map("source") @db.VarChar(20)
+
+  task        Task     @relation(fields: [taskId], references: [id])
+
+  @@unique([taskId, linkedType, linkedId])
+  @@index([linkedType, linkedId])
+  @@map("task_links")
 }

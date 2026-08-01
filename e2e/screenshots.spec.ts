@@ -22,6 +22,8 @@ const PAGES = [
   { file: "discovery-board.png", url: "/rbcodelabs/compass/discovery" },
   { file: "roadmap.png",         url: "/rbcodelabs/compass/roadmap" },
   { file: "roadmap-timeline.png", url: "/rbcodelabs/compass/roadmap?view=timeline" },
+  { file: "tasks.png",           url: "/rbcodelabs/compass/tasks" },
+  { file: "tasks-list.png",      url: "/rbcodelabs/compass/tasks?view=list" },
   { file: "experiments.png",     url: "/rbcodelabs/compass/experiments" },
   { file: "feedback.png",        url: "/rbcodelabs/compass/feedback" },
   { file: "docs-editor.png",     url: "/rbcodelabs/compass/docs" },

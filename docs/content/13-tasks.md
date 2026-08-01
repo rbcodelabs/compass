@@ -1,0 +1,64 @@
+---
+title: "Tasks"
+description: "Track delivery work — from full engineering sprint boards to lightweight PM initiative lists"
+icon: "ListChecks"
+order: 13
+section: "Core Features"
+---
+
+# Tasks
+
+Tasks is Compass's standalone delivery/tracking entity. It's built to scale from a full engineering sprint board (replacing a Jira-style workflow) down to a lightweight list of high-priority initiatives a PM wants to keep an eye on — both use cases share the same status vocabulary and the same underlying entity, so there's nothing to migrate between them.
+
+![Tasks](/screenshots/docs/tasks.png)
+
+> 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
+
+## Status Vocabulary
+
+Every task moves through: **Backlog → To Do → In Progress → Blocked ⇄ In Review → Done**, with **Cancelled** as a terminal escape hatch from any state.
+
+**Blocked is its own column**, not a flag layered on top of another status — dragging a card into Blocked *is* how a task gets blocked, and dragging it back out resumes whatever stage makes sense. This keeps the board a single-axis kanban that matches the mental model of tools like Jira, rather than asking you to track two independent pieces of state.
+
+Cancelled tasks are collapsed behind a **Show cancelled** toggle above the board so a graveyard of abandoned work doesn't clutter the columns you're actively using.
+
+## Board and List Views
+
+Toggle between **Board** and **List** at the top of the Tasks page — `?view=list` in the URL takes you straight there.
+
+- **Board** — the familiar column-per-status kanban. Drag a card to a new column to change its status; drag within a column to reorder (order communicates relative priority, same as the Roadmap).
+- **List** — a flat, filterable table with one row per task, indented by hierarchy depth. This is the better view for the "PM tracking a handful of initiatives" use case, where a full kanban is more structure than the work needs.
+
+Both views read the same underlying data — there's no separate "lite" data model for the list view.
+
+## Creating and Assigning Tasks
+
+Click **Add task** at the bottom of any column (or **Add subtask** on a task's detail page) to create one. A task has:
+
+- **Title** and **Description**
+- **Priority** — Urgent / High / Medium / Low
+- **Assignee** — a Compass workspace member, for engineering accountability and future "my tasks" views
+- **Owner** — a freeform name, for PM-tracked initiatives whose responsible party isn't a Compass user (an external stakeholder, an exec, etc.). Either or both of Assignee and Owner may be set on the same task.
+- **Squad** — the owning team, same convention as Objectives, Opportunities, and Roadmap Items
+- **Story points** and **Due date** — optional estimation/scheduling fields
+- **Iteration** — a freeform sprint label (e.g. "Sprint 24") for teams that want lightweight grouping without a full Sprint entity
+
+## Epics and Subtasks
+
+Tasks can nest: a task with no parent and its own children behaves as an **Epic**, and a task with a parent is a **Subtask**. There's no separate "Epic" type to set — the label is just how the UI describes the shape of the `parentTaskId` tree, so a task's role can never drift out of sync with its actual position in the hierarchy.
+
+Manage a task's children from its detail page's **Subtasks** tab.
+
+## Linking to the Rest of Compass
+
+A task can link to any number of other Compass objects — Opportunities, Solutions, Roadmap Items, Objectives, Key Results, Docs, Experiments, and Feedback Items — from its detail page's **Links** tab. Links are many-to-many with no cap: one task can be linked to both a Solution and a Doc, and one Opportunity can have many tasks pointing at it. This is how delivery work stays traceable back to the discovery and planning context that motivated it.
+
+A task's owning **Squad** is not part of this link system — it's a first-class field on the task itself (same as Opportunities and Roadmap Items), so squad-based board filtering stays a simple, exact match.
+
+## Filtering
+
+Filter the board or list by **Squad**, **Assignee**, or **Priority** using the pill bars above the board — these compose, so you can filter to a specific squad's Urgent tasks assigned to one person. Filtering by squad is strict (a task's own `squadId`, not anything it's linked to).
+
+## Custom Fields
+
+Like other Compass entities, Tasks support workspace-defined custom fields (Settings → Custom Fields → Task). Add fields like "Component" or "T-shirt size" without a schema change; they render on a task's detail page under the **Details** tab.

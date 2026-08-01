@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { Target, Lightbulb, FlaskConical, Map, MessageSquare, BookOpen, Settings, ChevronDown, HelpCircle, Check, Building2, Waypoints } from "lucide-react"
+import { Target, Lightbulb, FlaskConical, Map, MessageSquare, BookOpen, Settings, ChevronDown, HelpCircle, Check, Building2, Waypoints, ListChecks } from "lucide-react"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -32,6 +32,7 @@ const navItems = [
   { label: "Discovery", path: "discovery", Icon: Lightbulb },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
+  { label: "Tasks", path: "tasks", Icon: ListChecks },
   { label: "Feedback", path: "feedback", Icon: MessageSquare },
   { label: "Docs", path: "docs", Icon: BookOpen },
   { label: "Canvas", path: "canvas", Icon: Waypoints },

@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Target, Lightbulb, FlaskConical, Map, MessageSquare } from "lucide-react"
+import { Target, Lightbulb, FlaskConical, Map, MessageSquare, ListChecks } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface BottomNavProps {
@@ -15,6 +15,7 @@ const navItems = [
   { label: "Discovery", path: "discovery", Icon: Lightbulb },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
+  { label: "Tasks", path: "tasks", Icon: ListChecks },
   { label: "Feedback", path: "feedback", Icon: MessageSquare },
 ]
 

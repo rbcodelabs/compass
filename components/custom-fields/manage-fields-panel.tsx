@@ -39,6 +39,7 @@ const OBJECT_TYPE_LABELS: Record<CustomFieldObjectType, string> = {
   OBJECTIVE: "Objective",
   KEY_RESULT: "Key Result",
   ROADMAP_ITEM: "Roadmap Item",
+  TASK: "Task",
 };
 
 const OBJECT_TYPES = Object.keys(OBJECT_TYPE_LABELS) as CustomFieldObjectType[];
