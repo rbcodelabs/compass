@@ -1,0 +1,128 @@
+/**
+ * Unit tests for lib/entity-detail.ts.
+ *
+ * Prisma is mocked (same pattern as api-panels-discovery-rail-route.test.ts).
+ * The load-bearing behavior here is the WORKSPACE SCOPING baked into every
+ * query's where clause — that's the access-control boundary (an entity only
+ * resolves inside the caller's workspace), so each type asserts its exact
+ * scoping filter, directly or via the parent chain.
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const models = {
+  objective: { findFirst: vi.fn() },
+  keyResult: { findFirst: vi.fn() },
+  opportunity: { findFirst: vi.fn() },
+  solution: { findFirst: vi.fn() },
+  assumption: { findFirst: vi.fn() },
+  experiment: { findFirst: vi.fn() },
+  roadmapItem: { findFirst: vi.fn() },
+  feedbackItem: { findFirst: vi.fn() },
+};
+
+vi.mock("@/lib/db", () => ({ default: () => models }));
+
+import {
+  getEntityDetail,
+  isEntityType,
+  ENTITY_TYPES,
+  type EntityType,
+} from "@/lib/entity-detail";
+
+const WS = "ws-1";
+const ID = "ent-1";
+
+// Which prisma model backs each entity type, and the exact where filter that
+// scopes it to a workspace (this is the IDOR defense — assert it precisely).
+const CASES: Array<{
+  type: EntityType;
+  model: keyof typeof models;
+  where: Record<string, unknown>;
+}> = [
+  { type: "objective", model: "objective", where: { id: ID, cycle: { workspaceId: WS } } },
+  {
+    type: "keyResult",
+    model: "keyResult",
+    where: { id: ID, objective: { cycle: { workspaceId: WS } } },
+  },
+  { type: "opportunity", model: "opportunity", where: { id: ID, workspaceId: WS } },
+  { type: "solution", model: "solution", where: { id: ID, opportunity: { workspaceId: WS } } },
+  {
+    type: "assumption",
+    model: "assumption",
+    where: { id: ID, solution: { opportunity: { workspaceId: WS } } },
+  },
+  { type: "experiment", model: "experiment", where: { id: ID, workspaceId: WS } },
+  { type: "roadmapItem", model: "roadmapItem", where: { id: ID, workspaceId: WS } },
+  { type: "feedback", model: "feedbackItem", where: { id: ID, workspaceId: WS } },
+];
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("isEntityType", () => {
+  it("accepts every known entity type", () => {
+    for (const t of ENTITY_TYPES) expect(isEntityType(t)).toBe(true);
+  });
+  it("rejects unknown strings", () => {
+    for (const t of ["", "user", "Objective", "workspace", "opportunit"]) {
+      expect(isEntityType(t)).toBe(false);
+    }
+  });
+});
+
+describe("getEntityDetail — workspace scoping", () => {
+  for (const { type, model, where } of CASES) {
+    it(`scopes ${type} to the workspace (directly or via parent chain)`, async () => {
+      models[model].findFirst.mockResolvedValue({ id: ID });
+      await getEntityDetail(type, ID, WS);
+      expect(models[model].findFirst).toHaveBeenCalledTimes(1);
+      expect(models[model].findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where })
+      );
+    });
+
+    it(`never queries ${type} without the workspace filter`, async () => {
+      models[model].findFirst.mockResolvedValue(null);
+      await getEntityDetail(type, ID, WS);
+      const arg = models[model].findFirst.mock.calls[0][0] as {
+        where: Record<string, unknown>;
+      };
+      // The id alone must never be the whole filter — some workspace
+      // constraint (own field or a relation) must always be present.
+      const keys = Object.keys(arg.where);
+      expect(keys).toContain("id");
+      expect(keys.length).toBeGreaterThan(1);
+    });
+  }
+});
+
+describe("getEntityDetail — return shape", () => {
+  it("wraps a hit as { type, data }", async () => {
+    const row = { id: ID, title: "An opportunity" };
+    models.opportunity.findFirst.mockResolvedValue(row);
+    const result = await getEntityDetail("opportunity", ID, WS);
+    expect(result).toEqual({ type: "opportunity", data: row });
+  });
+
+  it("returns null when the entity isn't in the workspace (findFirst miss)", async () => {
+    models.solution.findFirst.mockResolvedValue(null);
+    const result = await getEntityDetail("solution", ID, WS);
+    expect(result).toBeNull();
+  });
+
+  it("dispatches each type to only its own model", async () => {
+    for (const { type, model } of CASES) {
+      vi.clearAllMocks();
+      models[model].findFirst.mockResolvedValue({ id: ID });
+      const result = await getEntityDetail(type, ID, WS);
+      expect(result).toEqual({ type, data: { id: ID } });
+      // no other model was touched
+      for (const other of CASES) {
+        if (other.model === model) continue;
+        expect(models[other.model].findFirst).not.toHaveBeenCalled();
+      }
+    }
+  });
+});

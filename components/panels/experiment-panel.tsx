@@ -55,14 +55,16 @@ export function ExperimentPanel({
   useEffect(() => {
     setData(null);
     setError(false);
-    fetch(`/api/panels/experiment/${experimentId}`)
+    fetch(
+      `/api/panels/entity/experiment/${experimentId}?orgSlug=${orgSlug}&workspaceSlug=${workspaceSlug}`
+    )
       .then((r) => {
         if (!r.ok) throw new Error("fetch failed");
         return r.json();
       })
-      .then(setData)
+      .then((res) => setData(res.data))
       .catch(() => setError(true));
-  }, [experimentId]);
+  }, [experimentId, orgSlug, workspaceSlug]);
 
   const fullPageHref = `/${orgSlug}/${workspaceSlug}/experiments/${experimentId}`;
 
