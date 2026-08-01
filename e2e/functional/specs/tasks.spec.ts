@@ -73,14 +73,19 @@ test.describe("Tasks", () => {
       ).toBeVisible({ timeout: 10_000 });
 
       // ── 4. Open the task's detail page ──────────────────────────────────────
+      // Wait for the URL to actually change before asserting on content —
+      // a client-side Next.js Link navigation can resolve "networkidle"
+      // almost instantly (no new document load), racing the heading
+      // assertion against the client render.
       await page
         .locator('[data-task-column="IN_PROGRESS"]')
         .locator('[data-slot="card"]')
         .filter({ hasText: taskTitle })
         .getByRole("link", { name: taskTitle })
         .click();
+      await page.waitForURL(/\/tasks\/[0-9a-f-]{36}$/, { timeout: 15_000 });
       await page.waitForLoadState("networkidle");
-      await expect(page.getByRole("heading", { name: taskTitle })).toBeVisible();
+      await expect(page.getByRole("heading", { name: taskTitle })).toBeVisible({ timeout: 15_000 });
 
       // ── 5. Link it to the seeded baseline opportunity ───────────────────────
       await page.getByRole("tab", { name: /Links/ }).click();
