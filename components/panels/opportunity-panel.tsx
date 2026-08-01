@@ -61,12 +61,14 @@ export function OpportunityPanel({
   const [error, setError] = useState(false);
 
   function refresh() {
-    return fetch(`/api/panels/opportunity/${opportunityId}`)
+    return fetch(
+      `/api/panels/entity/opportunity/${opportunityId}?orgSlug=${orgSlug}&workspaceSlug=${workspaceSlug}`
+    )
       .then((r) => {
         if (!r.ok) throw new Error("fetch failed");
         return r.json();
       })
-      .then(setData)
+      .then((res) => setData(res.data))
       .catch(() => setError(true));
   }
 
