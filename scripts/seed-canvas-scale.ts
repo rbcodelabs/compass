@@ -38,11 +38,11 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // Mirror what getActiveSchema() returns when NODE_ENV=development.
 const S = process.env.PGSCHEMA ? `${process.env.PGSCHEMA}_dev` : "compass_dev";
 
-const ORG_SLUG = "canvas-scale-test-org";
-const WORKSPACE_SLUG = "canvas-scale";
-const USER_EMAIL = "canvas-scale-seed@localhost.dev";
+const ORG_SLUG = process.env.CANVAS_SCALE_ORG_SLUG ?? "canvas-scale-test-org";
+const WORKSPACE_SLUG = process.env.CANVAS_SCALE_WORKSPACE_SLUG ?? "canvas-scale";
+const USER_EMAIL = process.env.CANVAS_SCALE_USER_EMAIL ?? "canvas-scale-seed@localhost.dev";
 const TARGET_OBJECTIVES = Number(process.env.CANVAS_SCALE_OBJECTIVES ?? 80);
-const MIN_CYCLES = 20;
+const MIN_CYCLES = Number(process.env.CANVAS_SCALE_MIN_CYCLES ?? 20);
 const OBJECTIVE_STATUSES = ["ON_TRACK", "AT_RISK", "OFF_TRACK", "COMPLETE"];
 const OPPORTUNITY_STATUSES = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"];
 const SOLUTION_STATUSES = ["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"];

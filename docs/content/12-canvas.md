@@ -34,18 +34,34 @@ Every entity renders as its own connected card, laid out automatically:
 
 - **Pan**: click and drag anywhere on the canvas background.
 - **Zoom**: use the zoom controls in the bottom-left corner, your trackpad/mouse wheel, or pinch-to-zoom.
-- Canvas automatically fits the whole graph into view when the page loads.
+- Canvas opens at the **Portfolio** view — a tidy grid of all your Objectives, fit to the screen. (A workspace that has discovery or roadmap work but hasn't set any Objectives yet opens on the full graph instead, since there's no Portfolio to show.)
+
+## Zoom tiers
+
+Canvas shows progressively more detail as you zoom in, so a large workspace doesn't dump everything on screen at once. A small badge near the bottom-left zoom controls always shows which tier you're currently at:
+
+| Tier | Badge | Shows |
+|---|---|---|
+| **T0** | "Portfolio" | Every Objective, arranged in a compact grid — title, status badge, aggregate progress bar. This is the landing view. Key Results and everything downstream are hidden. |
+| **T1** | "Cycle" | Objective + Key Result cards, and the edges between them. Opportunities, Solutions, Assumptions, Experiments, and Roadmap items stay hidden. |
+| **T2** | "Detail" | The full graph — every entity and edge, same as described above. |
+
+**Why the Portfolio grid is its own layout.** In the detailed graph (T1/T2), each Objective is positioned to make room for its whole discovery tree beneath it, so Objectives naturally spread far apart. That's right for exploring one Objective's subtree, but it means "zoom all the way out to see everything" would leave your Objectives scattered across a huge canvas as unreadable specks. So the Portfolio tier lays the Objectives out on their own — a dense, readable grid — independent of how deep the tree beneath each one runs.
+
+**Crossing between Portfolio and detail animates.** Zoom in from the Portfolio grid and Canvas smoothly slides the Objectives from the grid into their detailed-graph positions, centering on whichever Objective you were looking at so you dive into *that* Objective's neighborhood. Zoom back out and they glide back into the grid. Moving between the two detailed tiers (Cycle ↔ Detail) just reveals or hides cards in place — nothing moves. Either way nothing is re-fetched, so switching is instant and non-destructive.
+
+Not yet built: click-to-focus animated navigation to jump straight to a specific node by clicking it, and URL deep-linking (e.g. a link that opens Canvas already zoomed into one Key Result). Both are on the roadmap for a future increment, along with T0 squad-clustering for very large portfolios.
 
 ## Scope of this release
 
 Canvas renders every Objective from **every OKR cycle** in the workspace, not just the active one — this is deliberate, so the view stays useful for tracing history across a full portfolio, not just the current quarter. Opportunities, Solutions, Assumptions, and Experiments are rendered without a status filter for the same reason: excluding, say, an Archived Opportunity would leave any Solution still pointing at it with a dangling edge. Roadmap items are the one exception — only Active items render, since a Roadmap item is always an edge target and filtering it can't orphan anything downstream.
 
-This is one eager, un-tiered render of the full graph — every entity, every time. Not yet included:
+Not yet included:
 
-- **Semantic zoom tiers** — showing only OKRs when zoomed out and progressively revealing Opportunities/Solutions/Assumptions/Experiments as you zoom in, for workspaces where an eager render gets crowded.
 - **Lazy per-Key-Result loading** — fetching a KR's downstream chain on demand instead of the whole workspace graph up front.
 - **Dragging a card to manually pin its position** (positions are computed automatically every time).
-- **Animated focus-navigation** or **URL deep-linking** to a specific node.
+- **Click-to-focus navigation** (clicking a card to fly to it) or **URL deep-linking** to a specific node. Zooming already animates you into the Objective nearest the center of your view, but there's no way yet to target a specific one by clicking or by link.
+- **T0 squad-clustering** — grouping/collapsing Objectives by squad within the Portfolio grid.
 - A dedicated mobile layout — Canvas is reachable on mobile by direct URL, but an infinite pan/zoom surface is a poor fit for small screens, so it isn't in the mobile navigation.
 
 These are on the roadmap for future phases.
