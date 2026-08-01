@@ -1,0 +1,115 @@
+/**
+ * Scoped single-field edits for the detail panels — the write counterpart to
+ * lib/entity-detail.ts. A panel can update an allowlisted field (title,
+ * description, or the entity's primary enum) and the change is constrained to
+ * the caller's workspace using the same `entityScopeWhere` boundary the reads
+ * use, so a write can no more cross workspaces than a read can.
+ *
+ * Only fields in EDIT_CONFIG are writable; anything else is rejected. Enum
+ * fields (status / horizon) are validated against their allowed values. This
+ * keeps the surface deliberately small — the panel is for quick edits, not a
+ * general-purpose entity editor.
+ */
+import getPrisma from "@/lib/db";
+import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
+
+type EnumFieldConfig = { field: "status" | "horizon"; options: readonly string[] };
+
+export type EntityEditConfig = {
+  /** Prisma model accessor name (differs from EntityType only for feedback). */
+  model: string;
+  title: boolean;
+  description: boolean;
+  /** The entity's primary single-select field, if it has one. */
+  enum?: EnumFieldConfig;
+};
+
+const OBJECTIVE_STATUS = ["ON_TRACK", "AT_RISK", "OFF_TRACK", "COMPLETE"] as const;
+const OPPORTUNITY_STATUS = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"] as const;
+const SOLUTION_STATUS = ["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"] as const;
+const ASSUMPTION_STATUS = ["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"] as const;
+const EXPERIMENT_STATUS = ["DESIGNING", "RUNNING", "COMPLETE", "KILLED"] as const;
+const FEEDBACK_STATUS = ["OPEN", "UNDER_REVIEW", "PLANNED", "IN_PROGRESS", "COMPLETED", "DECLINED"] as const;
+const ROADMAP_HORIZON = ["NOW", "NEXT", "LATER", "SHIPPED"] as const;
+
+/**
+ * What each entity type exposes for inline editing in the panel. Exported so
+ * the client renders exactly the controls the server will accept — no drift
+ * between what a panel offers and what the PATCH validates.
+ */
+export const EDIT_CONFIG: Record<EntityType, EntityEditConfig> = {
+  objective: { model: "objective", title: true, description: true, enum: { field: "status", options: OBJECTIVE_STATUS } },
+  keyResult: { model: "keyResult", title: true, description: false },
+  opportunity: { model: "opportunity", title: true, description: true, enum: { field: "status", options: OPPORTUNITY_STATUS } },
+  solution: { model: "solution", title: true, description: true, enum: { field: "status", options: SOLUTION_STATUS } },
+  assumption: { model: "assumption", title: true, description: false, enum: { field: "status", options: ASSUMPTION_STATUS } },
+  experiment: { model: "experiment", title: true, description: false, enum: { field: "status", options: EXPERIMENT_STATUS } },
+  roadmapItem: { model: "roadmapItem", title: true, description: true, enum: { field: "horizon", options: ROADMAP_HORIZON } },
+  feedback: { model: "feedbackItem", title: true, description: true, enum: { field: "status", options: FEEDBACK_STATUS } },
+};
+
+export const TITLE_MAX_LENGTH = 255;
+
+export type UpdateResult =
+  | { ok: true }
+  | { ok: false; status: 400 | 404; error: string };
+
+/**
+ * Validate `field`/`value` against EDIT_CONFIG for `type`, then apply the edit
+ * scoped to `workspaceId`. Returns a 404 result if the entity isn't in the
+ * workspace (verified before the write), a 400 result on invalid input.
+ */
+export async function updateEntityField(
+  type: EntityType,
+  id: string,
+  workspaceId: string,
+  field: string,
+  value: unknown
+): Promise<UpdateResult> {
+  const config = EDIT_CONFIG[type];
+
+  // ── Validate the field is editable and coerce the value ──────────────────
+  let data: Record<string, unknown>;
+  if (field === "title") {
+    if (!config.title) return { ok: false, status: 400, error: "Title is not editable" };
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return { ok: false, status: 400, error: "Title is required" };
+    }
+    if (value.trim().length > TITLE_MAX_LENGTH) {
+      return { ok: false, status: 400, error: `Title must be ${TITLE_MAX_LENGTH} characters or fewer` };
+    }
+    data = { title: value.trim() };
+  } else if (field === "description") {
+    if (!config.description) return { ok: false, status: 400, error: "Description is not editable" };
+    if (value !== null && typeof value !== "string") {
+      return { ok: false, status: 400, error: "Description must be text" };
+    }
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    data = { description: trimmed.length > 0 ? trimmed : null };
+  } else if (config.enum && field === config.enum.field) {
+    if (typeof value !== "string" || !config.enum.options.includes(value)) {
+      return { ok: false, status: 400, error: `Invalid ${field}` };
+    }
+    data = { [field]: value };
+  } else {
+    return { ok: false, status: 400, error: `Field "${field}" is not editable` };
+  }
+
+  // DSQL has no @updatedAt trigger — every update must set it explicitly.
+  data.updatedAt = new Date();
+
+  // ── Scoped write: confirm the entity is in the workspace, then update ─────
+  // updateMany's where doesn't support the relation filters the indirect
+  // entities need, so verify with the scoped findFirst first, then update by
+  // id. Same access boundary as reads (entityScopeWhere).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const model = (getPrisma() as any)[config.model];
+  const exists = await model.findFirst({
+    where: entityScopeWhere(type, id, workspaceId),
+    select: { id: true },
+  });
+  if (!exists) return { ok: false, status: 404, error: "Not found" };
+
+  await model.update({ where: { id }, data });
+  return { ok: true };
+}

@@ -10,6 +10,7 @@ import {
   Section,
   RelationList,
   type RelationItem,
+  type EditContext,
 } from "./panel-parts";
 
 type KeyResultData = {
@@ -33,7 +34,7 @@ export function KeyResultPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error } = useEntityDetail<KeyResultData>(
+  const { data, error, mutate } = useEntityDetail<KeyResultData>(
     "keyResult",
     id,
     orgSlug,
@@ -42,6 +43,14 @@ export function KeyResultPanel({
 
   if (error) return <PanelError label="key result" />;
   if (!data) return <PanelSkeleton />;
+
+  const edit: EditContext = {
+    type: "keyResult",
+    id,
+    orgSlug,
+    workspaceSlug,
+    onSaved: (d) => mutate(d as KeyResultData),
+  };
 
   const pct = data.target > 0 ? Math.round((data.current / data.target) * 100) : null;
 
@@ -68,7 +77,7 @@ export function KeyResultPanel({
         />
       )}
 
-      <PanelTitle title={data.title} />
+      <PanelTitle title={data.title} edit={edit} />
 
       {/* Progress */}
       <div className="flex flex-col gap-1.5">

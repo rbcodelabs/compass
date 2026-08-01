@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
 import { getEntityDetail, isEntityType } from "@/lib/entity-detail";
+import { updateEntityField } from "@/lib/entity-mutations";
 
 /**
  * Detail-panel data source for every entity type. GET
@@ -53,5 +54,66 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  return NextResponse.json(detail);
+}
+
+/**
+ * Inline edit from the panel: PATCH …?orgSlug&workspaceSlug with body
+ * `{ field, value }`. Same two-layer auth as GET (session + workspace
+ * membership); the write itself is workspace-scoped in updateEntityField, so
+ * the IDOR boundary applies to edits exactly as it does to reads. Returns the
+ * refreshed `{ type, data }` so the client updates in a single round-trip.
+ */
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ type: string; id: string }> }
+) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { type, id } = await params;
+  if (!isEntityType(type)) {
+    return NextResponse.json({ error: "Unknown entity type" }, { status: 400 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  const orgSlug = searchParams.get("orgSlug");
+  const workspaceSlug = searchParams.get("workspaceSlug");
+  if (!orgSlug || !workspaceSlug) {
+    return NextResponse.json(
+      { error: "orgSlug and workspaceSlug are required" },
+      { status: 400 }
+    );
+  }
+
+  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
+  if (!workspace) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  let body: { field?: unknown; value?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  if (typeof body.field !== "string") {
+    return NextResponse.json({ error: "field is required" }, { status: 400 });
+  }
+
+  const result = await updateEntityField(
+    type,
+    id,
+    workspace.id,
+    body.field,
+    body.value
+  );
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
+  }
+
+  const detail = await getEntityDetail(type, id, workspace.id);
   return NextResponse.json(detail);
 }

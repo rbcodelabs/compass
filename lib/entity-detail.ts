@@ -46,6 +46,30 @@ export function isEntityType(value: string): value is EntityType {
   return (ENTITY_TYPES as readonly string[]).includes(value);
 }
 
+/**
+ * The Prisma `where` filter that scopes an entity to a workspace — directly
+ * for workspace-owned entities, or through the parent chain for the indirect
+ * ones. Shared by the read fetchers and the write path (lib/entity-mutations)
+ * so both enforce the exact same access boundary.
+ */
+export function entityScopeWhere(type: EntityType, id: string, workspaceId: string) {
+  switch (type) {
+    case "objective":
+      return { id, cycle: { workspaceId } };
+    case "keyResult":
+      return { id, objective: { cycle: { workspaceId } } };
+    case "solution":
+      return { id, opportunity: { workspaceId } };
+    case "assumption":
+      return { id, solution: { opportunity: { workspaceId } } };
+    case "opportunity":
+    case "experiment":
+    case "roadmapItem":
+    case "feedback":
+      return { id, workspaceId };
+  }
+}
+
 // ── Per-entity scoped fetchers ──────────────────────────────────────────────
 // Each returns the entity (with detail relations) iff it resolves inside
 // `workspaceId`, else null. findFirst (not findUnique) so we can add the

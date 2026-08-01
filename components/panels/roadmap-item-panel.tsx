@@ -7,10 +7,12 @@ import {
   PanelContainer,
   FullPageLink,
   PanelTitle,
+  EditableText,
   Section,
   Field,
   RelationList,
   type RelationItem,
+  type EditContext,
 } from "./panel-parts";
 
 type RoadmapItemData = {
@@ -38,6 +40,8 @@ const HORIZON: Record<string, { label: string; className: string }> = {
   SHIPPED: { label: "Shipped", className: "bg-green-100 text-green-700" },
 };
 
+const HORIZON_ORDER = ["NOW", "NEXT", "LATER", "SHIPPED"] as const;
+
 export function RoadmapItemPanel({
   id,
   orgSlug,
@@ -47,7 +51,7 @@ export function RoadmapItemPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error } = useEntityDetail<RoadmapItemData>(
+  const { data, error, mutate } = useEntityDetail<RoadmapItemData>(
     "roadmapItem",
     id,
     orgSlug,
@@ -56,6 +60,14 @@ export function RoadmapItemPanel({
 
   if (error) return <PanelError label="roadmap item" />;
   if (!data) return <PanelSkeleton />;
+
+  const edit: EditContext = {
+    type: "roadmapItem",
+    id,
+    orgSlug,
+    workspaceSlug,
+    onSaved: (d) => mutate(d as RoadmapItemData),
+  };
 
   // The five possible origins collapse into one "linked" list.
   const linked: RelationItem[] = [];
@@ -74,11 +86,21 @@ export function RoadmapItemPanel({
     <PanelContainer>
       <FullPageLink href={`/${orgSlug}/${workspaceSlug}/roadmap`} />
 
-      <PanelTitle title={data.title} status={HORIZON[data.horizon] ?? { label: data.horizon }} />
+      <PanelTitle
+        title={data.title}
+        status={{ value: data.horizon, ...(HORIZON[data.horizon] ?? { label: data.horizon }) }}
+        edit={edit}
+        statusEdit={{ field: "horizon", options: HORIZON_ORDER, map: HORIZON }}
+      />
 
-      {data.description && (
-        <p className="text-sm text-foreground/80 leading-relaxed">{data.description}</p>
-      )}
+      <EditableText
+        value={data.description}
+        field="description"
+        edit={edit}
+        multiline
+        placeholder="Add a description…"
+        className="text-sm text-foreground/80 leading-relaxed"
+      />
 
       <div className="flex flex-col gap-3">
         <Field label="Status">{data.status}</Field>

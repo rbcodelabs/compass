@@ -7,6 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { ExternalLinkIcon } from "lucide-react";
 import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evidence-list";
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
+import { EditableText, StatusSelect, type EditContext } from "./panel-parts";
 
 type OpportunityData = {
   id: string;
@@ -27,19 +28,17 @@ type OpportunityData = {
   evidence: EvidenceListItem[];
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  EXPLORING: "Exploring",
-  VALIDATED: "Validated",
-  DEPRIORITIZED: "Deprioritized",
-  ARCHIVED: "Archived",
+// Matches the actual Opportunity status enum (see lib/entity-mutations.ts /
+// opportunity-card). The panel previously carried a stale set (VALIDATED /
+// DEPRIORITIZED) that never matched real data.
+const STATUS_MAP: Record<string, { label: string; className: string }> = {
+  EXPLORING: { label: "Exploring", className: "bg-violet-100 text-violet-700" },
+  VALIDATING: { label: "Validating", className: "bg-blue-100 text-blue-700" },
+  PRIORITIZED: { label: "Prioritized", className: "bg-indigo-100 text-indigo-700" },
+  ACTIVE: { label: "Active", className: "bg-green-100 text-green-700" },
+  ARCHIVED: { label: "Archived", className: "bg-slate-100 text-slate-500" },
 };
-
-const STATUS_CLASS: Record<string, string> = {
-  EXPLORING: "bg-violet-100 text-violet-700",
-  VALIDATED: "bg-green-100 text-green-700",
-  DEPRIORITIZED: "bg-slate-100 text-slate-500",
-  ARCHIVED: "bg-slate-100 text-slate-400",
-};
+const STATUS_ORDER = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"] as const;
 
 const SOLUTION_STATUS_CLASS: Record<string, string> = {
   IDEA: "bg-slate-100 text-slate-600",
@@ -100,6 +99,14 @@ export function OpportunityPanel({
     );
   }
 
+  const edit: EditContext = {
+    type: "opportunity",
+    id: opportunityId,
+    orgSlug,
+    workspaceSlug,
+    onSaved: (d) => setData(d as OpportunityData),
+  };
+
   const krProgress =
     data.linkedKeyResult && data.linkedKeyResult.target > 0
       ? Math.round((data.linkedKeyResult.current / data.linkedKeyResult.target) * 100)
@@ -117,17 +124,31 @@ export function OpportunityPanel({
       </Link>
 
       {/* Status + title */}
-      <div className="flex flex-col gap-2">
-        <Badge className={STATUS_CLASS[data.status] ?? "bg-slate-100 text-slate-700"}>
-          {STATUS_LABELS[data.status] ?? data.status}
-        </Badge>
-        <h2 className="text-base font-semibold leading-snug">{data.title}</h2>
+      <div className="flex flex-col gap-2 items-start">
+        <StatusSelect
+          value={data.status}
+          field="status"
+          options={STATUS_ORDER}
+          map={STATUS_MAP}
+          edit={edit}
+        />
+        <EditableText
+          value={data.title}
+          field="title"
+          edit={edit}
+          className="text-base font-semibold leading-snug w-full"
+        />
       </div>
 
       {/* Description */}
-      {data.description && (
-        <p className="text-sm text-foreground/80 leading-relaxed">{data.description}</p>
-      )}
+      <EditableText
+        value={data.description}
+        field="description"
+        edit={edit}
+        multiline
+        placeholder="Add a description…"
+        className="text-sm text-foreground/80 leading-relaxed"
+      />
 
       {data.customerSegment && (
         <div className="flex flex-col gap-1">

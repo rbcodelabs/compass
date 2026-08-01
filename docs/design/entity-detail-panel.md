@@ -55,7 +55,7 @@ It already had `opportunity` and `experiment` panels, but **only roadmap cards a
 - **PR 1 — Foundation + IDOR fix** ✅: `lib/entity-detail.ts`, consolidated scoped route, migrate + delete old routes, unit tests (scoping per type + cross-workspace-access regression). No UI change beyond the two panels' fetch URL.
 - **PR 2 — Read-only panels + URL sync + first wave of triggers** ✅: all 6 new panel bodies, shared `panel-parts`, URL-addressable state (`?detail=<type>:<id>` with push/back + deep-link restore), widened `PanelType`, and click triggers on **Canvas nodes, Discovery (opportunity), Experiments, and OKRs (objective + key result)**. This is where "click a card → details" lands end-to-end. The solution/assumption/roadmapItem/feedback panels are reachable via Canvas nodes and in-panel relation hops even before their own board cards are wired.
 - **PR 3 — Remaining board triggers** ✅: wired the cards with more interaction nuance — Discovery `solution-card` (title opens the panel, chevron still expands inline), Feedback rows, and the Roadmap card title — to open their panels. Every board card + Canvas node now opens its detail panel.
-- **PR 4 — Inline editing**: per-entity editable fields + permissions + optimistic updates.
+- **PR 4 — Inline editing** ✅: status/horizon dropdown + inline-editable title and description in all 8 panels. A scoped `updateEntityField` + PATCH on the same route (same workspace-membership boundary as reads — a write can no more cross workspaces than a read can). Members can edit. Also fixed the opportunity panel's stale status labels (VALIDATED/DEPRIORITIZED → the real EXPLORING/VALIDATING/PRIORITIZED/ACTIVE/ARCHIVED).
 - **PR 5 — Polish**: e2e per screen, user-facing docs page, a11y/mobile pass.
 
 ## Risks / open items

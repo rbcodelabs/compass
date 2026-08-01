@@ -11,6 +11,7 @@ import {
   Field,
   RelationList,
   type RelationItem,
+  type EditContext,
 } from "./panel-parts";
 
 type AssumptionData = {
@@ -32,6 +33,8 @@ const STATUS: Record<string, { label: string; className: string }> = {
   VALIDATED: { label: "Validated", className: "bg-green-100 text-green-700" },
   INVALIDATED: { label: "Invalidated", className: "bg-red-100 text-red-700" },
 };
+
+const STATUS_ORDER = ["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"] as const;
 
 const RISK: Record<string, string> = {
   HIGH: "bg-red-100 text-red-700",
@@ -55,7 +58,7 @@ export function AssumptionPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error } = useEntityDetail<AssumptionData>(
+  const { data, error, mutate } = useEntityDetail<AssumptionData>(
     "assumption",
     id,
     orgSlug,
@@ -64,6 +67,14 @@ export function AssumptionPanel({
 
   if (error) return <PanelError label="assumption" />;
   if (!data) return <PanelSkeleton />;
+
+  const edit: EditContext = {
+    type: "assumption",
+    id,
+    orgSlug,
+    workspaceSlug,
+    onSaved: (d) => mutate(d as AssumptionData),
+  };
 
   const solutionItems: RelationItem[] = data.solution
     ? [{ type: "solution", id: data.solution.id, title: data.solution.title }]
@@ -83,7 +94,12 @@ export function AssumptionPanel({
         />
       )}
 
-      <PanelTitle title={data.title} status={STATUS[data.status] ?? { label: data.status }} />
+      <PanelTitle
+        title={data.title}
+        status={{ value: data.status, ...(STATUS[data.status] ?? { label: data.status }) }}
+        edit={edit}
+        statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
+      />
 
       <Field label="Risk level">
         <span
