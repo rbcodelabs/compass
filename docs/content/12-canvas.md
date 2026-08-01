@@ -34,7 +34,7 @@ Every entity renders as its own connected card, laid out automatically:
 
 - **Pan**: click and drag anywhere on the canvas background.
 - **Zoom**: use the zoom controls in the bottom-left corner, your trackpad/mouse wheel, or pinch-to-zoom.
-- Canvas opens at the **Portfolio** view — a tidy grid of all your Objectives, fit to the screen.
+- Canvas opens at the **Portfolio** view — a tidy grid of all your Objectives, fit to the screen. (A workspace that has discovery or roadmap work but hasn't set any Objectives yet opens on the full graph instead, since there's no Portfolio to show.)
 
 ## Zoom tiers
 

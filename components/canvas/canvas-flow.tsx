@@ -169,14 +169,25 @@ function nearestObjectiveToViewportCenter(
 }
 
 export function CanvasFlow({ overview }: CanvasFlowProps) {
+  // The tier system is rooted in Objectives: T0 (Portfolio) is the grid of
+  // Objectives, and each tier down reveals their descendants. A workspace with
+  // *no* Objectives — e.g. a discovery-first one that has Opportunities,
+  // Solutions, and Roadmap items but hasn't set OKRs yet — has no Portfolio to
+  // show, so landing on T0 would render a blank canvas even though there's
+  // plenty of content one tier down. In that case we disable tiering entirely:
+  // pin to T2 (everything visible) and ignore zoom-driven tier changes, so
+  // Canvas behaves like the plain full-graph view it was before tiers existed.
+  const hasObjectives = overview.objectives.length > 0;
+
   const [nodes, setNodes] = useState<CanvasFlowNode[] | null>(null);
   const [edges, setEdges] = useState<Edge[]>([]);
   // Default T0: the first paint is the compact Portfolio grid (see
   // computeObjectiveGridPositions). Unlike the old shared-layout T0 — which
   // showed Objectives scattered across the full ELK canvas and so had to
   // default to T2 to avoid flashing an empty view — the grid is always a
-  // readable starting screen, so T0 is the natural landing tier.
-  const [tier, setTier] = useState<CanvasTier>("T0");
+  // readable starting screen, so T0 is the natural landing tier. With no
+  // Objectives there's no grid, so start (and stay) at T2 instead.
+  const [tier, setTier] = useState<CanvasTier>(hasObjectives ? "T0" : "T2");
 
   // Current rendered position of each Objective, keyed by id. This is the one
   // piece of layout that animates: at rest it equals the grid position (T0)
@@ -208,7 +219,7 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
   // The last tier the transition effect acted on, so it can tell a genuine
   // T0<->detail boundary crossing (needs animation) from a T1<->T2 change
   // (visibility only, no movement).
-  const prevTierRef = useRef<CanvasTier>("T0");
+  const prevTierRef = useRef<CanvasTier>(hasObjectives ? "T0" : "T2");
 
   const totalEntityCount =
     overview.objectives.length +
@@ -376,7 +387,7 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
         objectiveIdsRef.current = objectiveIds;
         gridPosRef.current = gridPos;
         elkPosRef.current = elkPos;
-        prevTierRef.current = "T0";
+        prevTierRef.current = objectiveIds.length > 0 ? "T0" : "T2";
 
         setNodes(computedNodes);
         setEdges(computedEdges);
@@ -575,20 +586,27 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
         // out. Lowered so all three tiers are actually reachable.
         minZoom={0.2}
         fitView
-        // The initial fit frames the T0 grid (tier defaults to T0, so only
-        // Objectives — at their grid positions — are visible). Cap the fit
-        // zoom below the T0/T1 threshold so a small grid doesn't zoom in past
-        // Portfolio into Cycle; pad a touch so cards aren't flush to the edge.
-        fitViewOptions={{ maxZoom: T0_FIT_MAX_ZOOM, padding: T0_FIT_PADDING }}
+        // With Objectives, the initial fit frames the T0 grid (tier defaults
+        // to T0, so only Objectives — at their grid positions — are visible);
+        // cap the fit zoom below the T0/T1 threshold so a small grid doesn't
+        // zoom in past Portfolio into Cycle. With no Objectives we're pinned at
+        // T2 showing the full graph, so use the plain fit (no Portfolio cap) —
+        // capping there would just leave the content awkwardly zoomed out.
+        fitViewOptions={
+          hasObjectives
+            ? { maxZoom: T0_FIT_MAX_ZOOM, padding: T0_FIT_PADDING }
+            : { padding: T0_FIT_PADDING }
+        }
         // Tier is driven by onMoveEnd (fires once a pan/zoom gesture settles),
         // not continuous onMove — cheaper, avoids recomputing hidden-state on
         // every scroll tick. The transitioning guard makes the handler ignore
         // the onMoveEnd fired by our *own* programmatic camera animation (see
         // the tier transition effect) so it can't re-derive a tier mid-move
-        // and thrash. onMoveEnd fires once for the initial fit too, seeding
-        // the starting tier (which is already T0, so that's a no-op).
+        // and thrash. When there are no Objectives, tiering is disabled — stay
+        // pinned at T2 (full graph) regardless of zoom, so zooming out can't
+        // drop into an empty Portfolio.
         onMoveEnd={(_event, viewport) => {
-          if (transitioningRef.current) return;
+          if (transitioningRef.current || !hasObjectives) return;
           setTier(getTierForZoom(viewport.zoom));
         }}
         // No drag-to-pin UI yet — nodes render at their computed layout
