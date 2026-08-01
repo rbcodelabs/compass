@@ -209,10 +209,6 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
   const gridPosRef = useRef<Map<string, GridPosition>>(new Map());
   const elkPosRef = useRef<Map<string, GridPosition>>(new Map());
   const objectiveIdsRef = useRef<string[]>([]);
-  // True while a programmatic camera animation is in flight. onMoveEnd fires
-  // at the end of that animation too; this guard makes the handler ignore its
-  // own camera moves so they can't re-derive a tier and thrash the transition.
-  const transitioningRef = useRef(false);
   // Handle for the in-flight position tween's rAF loop, so a new transition
   // can cancel a still-running one.
   const rafRef = useRef<number | null>(null);
@@ -441,17 +437,25 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
     // canvas and zoom back out into T0, oscillating. Instead keep the user's
     // zoom and recenter on the Objective they were looking at, so they land
     // on real content (its neighborhood) rather than empty space.
+    //
+    // These setCenter calls deliberately preserve the tier: entering T0 lands
+    // at gridFitZoom (always < 0.4, i.e. still T0), and exiting keeps the
+    // user's current zoom (still the same detail tier). So the onMoveEnd that
+    // fires when the animation settles just re-derives the same tier — a
+    // no-op setState — which is why we don't (and mustn't) guard onMoveEnd
+    // against it. An earlier version flipped a `transitioning` flag cleared in
+    // the setCenter promise's .then(); when the user interrupted the camera
+    // animation (a very normal thing — keep scrolling to zoom), the underlying
+    // transition fired "interrupt" not "end", the promise never resolved, the
+    // flag stuck true, and onMoveEnd ignored every subsequent zoom forever —
+    // so zooming back out never returned to Portfolio. No flag = no way to get
+    // wedged.
     const rf = rfRef.current;
     if (rf) {
-      transitioningRef.current = true;
       if (isT0) {
         const zoom = gridFitZoom(to, ids, wrapperRef.current);
         const c = centerOfPositions(to, ids);
-        void rf
-          .setCenter(c.x, c.y, { zoom, duration: TIER_TRANSITION_MS })
-          .then(() => {
-            transitioningRef.current = false;
-          });
+        void rf.setCenter(c.x, c.y, { zoom, duration: TIER_TRANSITION_MS });
       } else {
         const focalId = nearestObjectiveToViewportCenter(
           from,
@@ -461,14 +465,11 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
         );
         const target = (focalId && to.get(focalId)) || centerOfPositions(to, ids);
         const zoom = rf.getViewport().zoom;
-        void rf
-          .setCenter(target.x + NODE_SIZE.objective.width / 2, target.y + NODE_SIZE.objective.height / 2, {
-            zoom,
-            duration: TIER_TRANSITION_MS,
-          })
-          .then(() => {
-            transitioningRef.current = false;
-          });
+        void rf.setCenter(
+          target.x + NODE_SIZE.objective.width / 2,
+          target.y + NODE_SIZE.objective.height / 2,
+          { zoom, duration: TIER_TRANSITION_MS }
+        );
       }
     }
 
@@ -599,14 +600,14 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
         }
         // Tier is driven by onMoveEnd (fires once a pan/zoom gesture settles),
         // not continuous onMove — cheaper, avoids recomputing hidden-state on
-        // every scroll tick. The transitioning guard makes the handler ignore
-        // the onMoveEnd fired by our *own* programmatic camera animation (see
-        // the tier transition effect) so it can't re-derive a tier mid-move
-        // and thrash. When there are no Objectives, tiering is disabled — stay
-        // pinned at T2 (full graph) regardless of zoom, so zooming out can't
-        // drop into an empty Portfolio.
+        // every scroll tick. Our own transition setCenter calls preserve the
+        // tier (see the transition effect), so their terminal onMoveEnd is a
+        // harmless same-value setState — no guard needed. When there are no
+        // Objectives, tiering is disabled — stay pinned at T2 (full graph)
+        // regardless of zoom, so zooming out can't drop into an empty
+        // Portfolio.
         onMoveEnd={(_event, viewport) => {
-          if (transitioningRef.current || !hasObjectives) return;
+          if (!hasObjectives) return;
           setTier(getTierForZoom(viewport.zoom));
         }}
         // No drag-to-pin UI yet — nodes render at their computed layout
