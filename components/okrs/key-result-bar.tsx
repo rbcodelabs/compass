@@ -7,6 +7,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 import { CheckInForm } from "@/components/okrs/check-in-form";
 import { CardMenu } from "@/components/ui/card-menu";
+import { usePanelContext } from "@/components/panels/panel-context";
 import { deleteKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import { clampProgress } from "@/lib/okrs";
 
@@ -24,6 +25,7 @@ interface KeyResultBarProps {
 
 export function KeyResultBar({ keyResult, orgSlug, workspaceSlug }: KeyResultBarProps) {
   const [, startTransition] = useTransition();
+  const { openPanel } = usePanelContext();
   const progress = clampProgress(keyResult.current, keyResult.target);
   const unit = keyResult.unit ? ` ${keyResult.unit}` : "";
   const okrsPath = `/${orgSlug}/${workspaceSlug}/okrs`;
@@ -64,7 +66,15 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug }: KeyResultBar
           >
             <GripVertical className="size-3.5" />
           </button>
-          <span className="text-sm text-foreground truncate">{keyResult.title}</span>
+          <button
+            type="button"
+            onClick={() => openPanel("keyResult", keyResult.id)}
+            className="min-w-0 text-left"
+          >
+            <span className="text-sm text-foreground truncate hover:underline underline-offset-2">
+              {keyResult.title}
+            </span>
+          </button>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-muted-foreground">

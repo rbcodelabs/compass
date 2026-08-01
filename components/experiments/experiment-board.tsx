@@ -119,7 +119,6 @@ function ExperimentColumn({
               <ExperimentCard
                 key={exp.id}
                 experiment={exp}
-                href={`/${orgSlug}/${workspaceSlug}/experiments/${exp.id}`}
                 revalidatePathStr={revalidatePathStr}
               />
             ))
@@ -291,7 +290,6 @@ export function ExperimentBoard({
           <div className="rotate-1 scale-105">
             <ExperimentCard
               experiment={activeItem}
-              href={`/${orgSlug}/${workspaceSlug}/experiments/${activeItem.id}`}
               revalidatePathStr={revalidatePathStr}
             />
           </div>

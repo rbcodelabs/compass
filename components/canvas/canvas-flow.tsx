@@ -21,6 +21,7 @@ import { ReactFlow, Background, Controls, Panel, MarkerType } from "@xyflow/reac
 import type { Edge, ReactFlowInstance } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Waypoints } from "lucide-react";
+import { usePanelContext, type PanelType } from "@/components/panels/panel-context";
 import {
   computeCanvasLayout,
   computeObjectiveGridPositions,
@@ -178,6 +179,9 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
   // pin to T2 (everything visible) and ignore zoom-driven tier changes, so
   // Canvas behaves like the plain full-graph view it was before tiers existed.
   const hasObjectives = overview.objectives.length > 0;
+
+  // Clicking a node opens that entity's detail panel (see components/panels).
+  const { openPanel } = usePanelContext();
 
   const [nodes, setNodes] = useState<CanvasFlowNode[] | null>(null);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -581,6 +585,9 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
           rfRef.current = instance as unknown as ReactFlowInstance;
         }}
         onlyRenderVisibleElements
+        // Click a node → open its detail panel. Node ids are the entity ids
+        // and node.type is the entity type, so this maps straight through.
+        onNodeClick={(_event, node) => openPanel(node.type as PanelType, node.id)}
         // React Flow's default minZoom is 0.5, which sits above the T0
         // tier threshold (zoom < 0.4, see lib/canvas/tiers.ts) — leaving it
         // at the default would make T0 physically unreachable by zooming
