@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { signOutAction } from "@/lib/actions/auth-actions"
+import { SendCompassFeedbackDialog } from "@/components/feedback/send-compass-feedback-dialog"
 
 interface SidebarProps {
   orgSlug: string
@@ -251,6 +252,14 @@ export function Sidebar({
           />
           Help
         </Link>
+      </nav>
+
+      <div className="mx-3 h-px bg-slate-800/70" />
+
+      {/* Send Feedback about Compass — global entry point, not workspace-scoped;
+          always routes into the configured target workspace server-side. */}
+      <nav className="px-2 py-2" aria-label="Feedback navigation">
+        <SendCompassFeedbackDialog />
       </nav>
 
       <div className="mx-3 h-px bg-slate-800/70" />

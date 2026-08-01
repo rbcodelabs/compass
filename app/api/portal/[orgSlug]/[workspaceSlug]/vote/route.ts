@@ -117,10 +117,15 @@ export async function POST(
 
   const roadmapItem = await prisma.roadmapItem.findFirst({
     where: { id: itemId, workspaceId: workspace.id },
-    select: { id: true },
+    select: { id: true, isPrivate: true },
   });
 
-  if (!roadmapItem) {
+  // Private items are never rendered on the public portal, but guard the
+  // vote endpoint directly too — a private item's id could still be known
+  // to a caller (e.g. leaked via an internal share) and must not be votable
+  // even though it's never linked from the public page. 404 (not 403) so the
+  // response doesn't confirm the id belongs to a real, just-hidden item.
+  if (!roadmapItem || roadmapItem.isPrivate) {
     return NextResponse.json({ error: "Roadmap item not found" }, { status: 404 });
   }
 

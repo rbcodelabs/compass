@@ -74,6 +74,7 @@ function cardDataFromPromotion(
     feedbackId: string | null;
     startDate: Date | null;
     endDate: Date | null;
+    isPrivate: boolean;
   },
   source: UnscheduledItem,
   squads: SquadData[]
@@ -94,6 +95,7 @@ function cardDataFromPromotion(
     description: created.description ?? null,
     horizon: created.horizon as Horizon,
     sortOrder: created.sortOrder,
+    isPrivate: created.isPrivate,
     solutionId: created.solutionId ?? null,
     keyResultId: created.keyResultId ?? null,
     opportunityId: created.opportunityId ?? null,

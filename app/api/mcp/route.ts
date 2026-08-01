@@ -193,6 +193,53 @@ const _handler = createMcpHandler(
     )
 
     // ----------------------------------------------------------------
+    // get_workspace_by_slug — resolves a workspace ID directly from
+    // org slug + workspace slug, without listing all workspaces first
+    // ----------------------------------------------------------------
+    server.registerTool(
+      "get_workspace_by_slug",
+      {
+        title: "Get Workspace By Slug",
+        description:
+          "Looks up a single workspace by org slug + workspace slug and returns its ID, name, " +
+          "slug, and description. Use this instead of list_workspaces when you already know both " +
+          "slugs (e.g. from a URL like /org-slug/workspace-slug) and just need the workspace ID.",
+        inputSchema: {
+          orgSlug: z.string().min(1).describe("The organization slug (e.g. 'rbcodelabs')"),
+          workspaceSlug: z.string().min(1).describe("The workspace slug (e.g. 'compass')"),
+        },
+      },
+      async ({ orgSlug, workspaceSlug }) => {
+        const prisma = getPrisma()
+        const org = await prisma.organization.findUnique({
+          where: { slug: orgSlug },
+          select: { id: true, name: true },
+        })
+        if (!org) {
+          return { content: [{ type: "text" as const, text: `No organization found with slug "${orgSlug}".` }] }
+        }
+        const workspace = await prisma.workspace.findFirst({
+          where: { organizationId: org.id, slug: workspaceSlug },
+          select: { id: true, name: true, slug: true, description: true },
+        })
+        if (!workspace) {
+          return { content: [{ type: "text" as const, text: `No workspace found with slug "${workspaceSlug}" in organization "${org.name}".` }] }
+        }
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              `**Workspace:** ${workspace.name}\n` +
+              `ID: ${workspace.id}\n` +
+              `Slug: ${workspace.slug}\n` +
+              (workspace.description ? `${workspace.description}\n` : "") +
+              `URL: /${orgSlug}/${workspace.slug}`,
+          }],
+        }
+      }
+    )
+
+    // ----------------------------------------------------------------
     // create_workspace — creates a new workspace inside an organization
     // ----------------------------------------------------------------
     server.registerTool(
@@ -909,9 +956,10 @@ const _handler = createMcpHandler(
           solutionId: z.string().uuid().describe("UUID of the solution to promote"),
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]).describe("Which roadmap horizon to place this in"),
+          isPrivate: z.boolean().optional().describe("Set to true to hide this item from the public portal roadmap and block voting on it"),
         },
       },
-      async ({ solutionId, workspaceId, horizon }) => {
+      async ({ solutionId, workspaceId, horizon, isPrivate }) => {
         const prisma = getPrisma()
         const solution = await prisma.solution.findUnique({
           where: { id: solutionId },
@@ -934,12 +982,15 @@ const _handler = createMcpHandler(
             solutionId,
             opportunityId: solution.opportunity.id,
             squadId: solution.opportunity.squadId ?? null,
+            isPrivate: isPrivate ?? false,
           },
         })
         return {
           content: [{
             type: "text" as const,
-            text: `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}\nLinked Solution: ${solutionId}\nLinked Opportunity: ${solution.opportunity.title}`,
+            text: `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
+              (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
+              `\nLinked Solution: ${solutionId}\nLinked Opportunity: ${solution.opportunity.title}`,
           }],
         }
       }
@@ -1192,7 +1243,7 @@ const _handler = createMcpHandler(
           .filter(h => groups[h]?.length)
           .map(h => {
             const lines = groups[h].map(item =>
-              `  • **${item.title}**\n    ID: ${item.id}` +
+              `  • **${item.title}**${item.isPrivate ? " 🔒 PRIVATE" : ""}\n    ID: ${item.id}` +
               (item.opportunity ? `\n    Opportunity: ${item.opportunity.title}` : "") +
               (item.solution ? `\n    Solution: ${item.solution.title}` : "") +
               (item.experiment ? `\n    Experiment: ${item.experiment.title}` : "") +
@@ -1223,9 +1274,10 @@ const _handler = createMcpHandler(
           description: z.string().optional().describe("New description"),
           startDate: z.string().optional().describe("ISO date string for the item's start date, e.g. '2026-07-01'"),
           endDate: z.string().optional().describe("ISO date string for the item's end date, e.g. '2026-09-30'"),
+          isPrivate: z.boolean().optional().describe("Set to true to hide this item from the public portal roadmap and block voting on it"),
         },
       },
-      async ({ itemId, horizon, status, title, description, startDate, endDate }) => {
+      async ({ itemId, horizon, status, title, description, startDate, endDate, isPrivate }) => {
         if (horizon === "LAUNCHING") {
           return {
             content: [{
@@ -1256,6 +1308,7 @@ const _handler = createMcpHandler(
             ...(description !== undefined ? { description: description.trim() } : {}),
             ...(startDate !== undefined ? { startDate: new Date(startDate) } : {}),
             ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
+            ...(isPrivate !== undefined ? { isPrivate } : {}),
             updatedAt: new Date(),
           },
         })
@@ -1265,6 +1318,7 @@ const _handler = createMcpHandler(
             text:
               `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
               `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
+              (updated.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
               (updated.startDate || updated.endDate
                 ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
                 : ""),
@@ -1289,9 +1343,10 @@ const _handler = createMcpHandler(
           squadId: z.string().uuid().optional().describe("UUID of the owning squad"),
           startDate: z.string().optional().describe("ISO date string for the item's start date, e.g. '2026-07-01'"),
           endDate: z.string().optional().describe("ISO date string for the item's end date, e.g. '2026-09-30'"),
+          isPrivate: z.boolean().optional().describe("Set to true to hide this item from the public portal roadmap and block voting on it (e.g. internal security work)"),
         },
       },
-      async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId, startDate, endDate }) => {
+      async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId, startDate, endDate, isPrivate }) => {
         const prisma = getPrisma()
         const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
         if (!workspace) {
@@ -1315,12 +1370,14 @@ const _handler = createMcpHandler(
             squadId: squadId ?? null,
             startDate: startDate ? new Date(startDate) : undefined,
             endDate: endDate ? new Date(endDate) : undefined,
+            isPrivate: isPrivate ?? false,
           },
         })
         return {
           content: [{
             type: "text" as const,
             text: `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
+              (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
               (solutionId ? `\nLinked Solution: ${solutionId}` : "") +
               (keyResultId ? `\nLinked KR: ${keyResultId}` : "") +
               (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : "") +
@@ -1585,6 +1642,7 @@ const _handler = createMcpHandler(
           feedbackId: z.string().uuid().describe("UUID of the feedback item to promote"),
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]).describe("Which roadmap horizon to place this in"),
+          isPrivate: z.boolean().optional().describe("Set to true to hide this item from the public portal roadmap and block voting on it (e.g. a security-flagged bug)"),
         },
       },
       promoteFeedbackToRoadmap

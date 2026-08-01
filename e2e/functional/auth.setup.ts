@@ -39,7 +39,8 @@ setup("authenticate as dev user", async ({ page }) => {
   if (url.includes("/login")) {
     throw new Error(
       "[auth setup] Dev login did not succeed — still on login page. " +
-        "Ensure NODE_ENV=development and the server is running on port 3002."
+        "Ensure NODE_ENV=development and the functional webServer is running " +
+        "(see playwright.config.ts for its per-worktree port)."
     );
   }
 

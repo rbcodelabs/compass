@@ -12,7 +12,7 @@ import { test, expect } from "../fixtures/index";
 test.describe("Portal — public roadmap", () => {
   test(
     "enable public roadmap in settings → portal page loads without auth",
-    async ({ page, base, orgSlug, workspaceSlug, browser }) => {
+    async ({ page, base, orgSlug, workspaceSlug, browser, baseURL }) => {
       // ── 1. Go to Settings ─────────────────────────────────────────────────
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
@@ -44,7 +44,7 @@ test.describe("Portal — public roadmap", () => {
       const anonContext = await browser.newContext({ storageState: undefined });
       const anonPage = await anonContext.newPage();
 
-      await anonPage.goto(`http://localhost:3002${portalUrl}`);
+      await anonPage.goto(`${baseURL}${portalUrl}`);
       await anonPage.waitForLoadState("networkidle");
 
       // The portal page should render the public roadmap heading, NOT the
@@ -73,7 +73,7 @@ test.describe("Portal — public roadmap", () => {
 test.describe("Portal — account authentication (portalAuthRequired)", () => {
   test(
     "anonymous vote is rejected, magic-link sign-in lets the same visitor vote",
-    async ({ page, base, orgSlug, workspaceSlug, browser }) => {
+    async ({ page, base, orgSlug, workspaceSlug, browser, baseURL }) => {
       // ── 1. Go to Settings ─────────────────────────────────────────────────
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
@@ -118,8 +118,7 @@ test.describe("Portal — account authentication (portalAuthRequired)", () => {
       const anonContext = await browser.newContext({ storageState: undefined });
 
       const anonVoteRes = await anonContext.request.post(
-        "http://localhost:3002" +
-          `/api/portal/${orgSlug}/${workspaceSlug}/vote`,
+        `${baseURL}/api/portal/${orgSlug}/${workspaceSlug}/vote`,
         {
           data: { type: "feedback", itemId: feedbackItemId, voterEmail: "anon@example.com" },
         }
@@ -131,7 +130,7 @@ test.describe("Portal — account authentication (portalAuthRequired)", () => {
       // ── 6. Drive the magic-link flow in that SAME context ──────────────────
       const testEmail = `e2e-portal-${Date.now()}@example.com`;
       const sendRes = await anonContext.request.post(
-        "http://localhost:3002/api/portal/auth/send",
+        `${baseURL}/api/portal/auth/send`,
         { data: { email: testEmail } }
       );
       expect(sendRes.ok()).toBe(true);
@@ -139,14 +138,15 @@ test.describe("Portal — account authentication (portalAuthRequired)", () => {
       expect(sendBody.devVerifyUrl).toBeTruthy();
 
       // The devVerifyUrl's host reflects NEXT_PUBLIC_APP_URL, which may not
-      // match the port Playwright's webServer actually started on (3002) —
-      // rebuild it against the known-correct local base instead of trusting
-      // the host in the response.
+      // match the port Playwright's webServer actually started on (it's
+      // derived per-worktree — see playwright.config.ts) — rebuild it
+      // against the known-correct local base instead of trusting the host
+      // in the response.
       const verifyPathAndQuery =
         new URL(sendBody.devVerifyUrl!).pathname + new URL(sendBody.devVerifyUrl!).search;
 
       const anonPage = await anonContext.newPage();
-      await anonPage.goto(`http://localhost:3002${verifyPathAndQuery}`);
+      await anonPage.goto(`${baseURL}${verifyPathAndQuery}`);
       await anonPage.waitForLoadState("networkidle");
       await expect(anonPage.getByText(`Signed in as ${testEmail}`)).toBeVisible({
         timeout: 10_000,
@@ -154,8 +154,7 @@ test.describe("Portal — account authentication (portalAuthRequired)", () => {
 
       // ── 7. Vote again in the now-signed-in context → expect success ────────
       const signedInVoteRes = await anonContext.request.post(
-        "http://localhost:3002" +
-          `/api/portal/${orgSlug}/${workspaceSlug}/vote`,
+        `${baseURL}/api/portal/${orgSlug}/${workspaceSlug}/vote`,
         {
           data: { type: "feedback", itemId: feedbackItemId },
         }
@@ -169,7 +168,7 @@ test.describe("Portal — account authentication (portalAuthRequired)", () => {
       expect(signedInVoteBody.voteCount).toBe(1);
 
       // ── 8. Cleanup: sign out, restore toggles to their original state ──────
-      await anonContext.request.post("http://localhost:3002/api/portal/auth/signout");
+      await anonContext.request.post(`${baseURL}/api/portal/auth/signout`);
       await anonContext.close();
 
       if (!authWasRequired) {

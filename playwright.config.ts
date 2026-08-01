@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import crypto from "node:crypto";
 
 /**
  * Set E2E_FUNCTIONAL=1 to enable the functional test suite.
@@ -7,13 +8,42 @@ import { defineConfig, devices } from "@playwright/test";
  */
 const functional = !!process.env.E2E_FUNCTIONAL;
 
-// This repo runs many worktrees/dev servers in parallel, so the default port
-// can collide with an unrelated concurrent worktree's server. Override via
-// E2E_PORT (e.g. `E2E_PORT=3033 pnpm test:e2e:functional`) rather than
-// editing the checked-in default — same pattern as DOCS_BASE_URL below.
+/**
+ * Port for the functional suite's `pnpm dev` webServer.
+ *
+ * This used to be a hardcoded 3002. That's a real hazard in a repo that runs
+ * many concurrent git worktrees (see pr-guidelines.md): locally,
+ * `reuseExistingServer: !process.env.CI` is true, so if *any* process is
+ * already listening on 3002 — most commonly another worktree's own
+ * `pnpm dev` — Playwright silently attaches to that unrelated server
+ * instead of starting its own. Tests then run against a different
+ * worktree's code (and potentially a stale/incompatible build), producing
+ * failures that have nothing to do with the change under test. This was
+ * confirmed while investigating a "functional suite fails broadly" report:
+ * one run surfaced a `Module not found: Can't resolve '@/auth'` Build Error
+ * that belonged entirely to a different worktree's checkout.
+ *
+ * `E2E_PORT` still wins if set (e.g. to pin a fixed CI runner config), but
+ * that requires a human/agent to remember to set it every time — the actual
+ * bug report this fixes came from a run that didn't. So the *default* (no
+ * `E2E_PORT`) now derives the port from a hash of the worktree path instead
+ * of a fixed 3002: stable across repeated runs in the *same* worktree (so
+ * `reuseExistingServer` still gets its intended fast-reuse benefit locally)
+ * while giving concurrent worktrees distinct ports so they can never
+ * collide by default. Range 4100-4899 stays clear of the 3000-3099 range
+ * used by this project's `nextdev` worktree dev-server manager.
+ */
+function functionalPort(): number {
+  const hash = crypto.createHash("md5").update(process.cwd()).digest();
+  return 4100 + (hash.readUInt16BE(0) % 800);
+}
+
 const FUNCTIONAL_PORT = process.env.E2E_PORT
   ? Number(process.env.E2E_PORT)
-  : 3002;
+  : functional
+    ? functionalPort()
+    : 3002;
+const FUNCTIONAL_BASE_URL = `http://localhost:${FUNCTIONAL_PORT}`;
 
 export default defineConfig({
   // 90-second per-test timeout for functional specs — server actions + router
@@ -40,14 +70,14 @@ export default defineConfig({
     {
       name: "functional-setup",
       testMatch: "e2e/functional/auth.setup.ts",
-      use: { baseURL: `http://localhost:${FUNCTIONAL_PORT}` },
+      use: { baseURL: FUNCTIONAL_BASE_URL },
     },
     {
       name: "functional",
       testDir: "./e2e/functional/specs",
       use: {
         storageState: "e2e/functional/.auth/user.json",
-        baseURL: `http://localhost:${FUNCTIONAL_PORT}`,
+        baseURL: FUNCTIONAL_BASE_URL,
       },
       dependencies: ["functional-setup"],
     },

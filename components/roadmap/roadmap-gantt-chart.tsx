@@ -11,6 +11,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
+import { Lock } from "lucide-react";
 import { Gantt, type IScaleConfig } from "@svar-ui/react-gantt";
 import "@svar-ui/react-gantt/all.css";
 import {
@@ -136,6 +137,7 @@ type GanttTask = {
   type: "task";
   horizon: Horizon;
   hasDates: boolean;
+  isPrivate: boolean;
   parent?: string | number;
 };
 
@@ -224,6 +226,13 @@ function TaskBar({ data }: TaskTemplateProps) {
 
   const color = HORIZON_COLORS[data.horizon] ?? HORIZON_COLORS.NOW;
 
+  const privateIcon = data.isPrivate ? (
+    <Lock
+      className="mr-1 size-3 shrink-0"
+      aria-label="Private — hidden from public portal roadmap"
+    />
+  ) : null;
+
   if (!data.hasDates) {
     return (
       <div
@@ -235,6 +244,7 @@ function TaskBar({ data }: TaskTemplateProps) {
           color,
         }}
       >
+        {privateIcon}
         {data.text}
         <span className="ml-1 shrink-0 opacity-70">(unscheduled)</span>
       </div>
@@ -242,7 +252,10 @@ function TaskBar({ data }: TaskTemplateProps) {
   }
 
   return (
-    <div style={{ ...BAR_BASE_STYLE, backgroundColor: color, color: "#fff" }}>{data.text}</div>
+    <div style={{ ...BAR_BASE_STYLE, backgroundColor: color, color: "#fff" }}>
+      {privateIcon}
+      {data.text}
+    </div>
   );
 }
 
@@ -294,6 +307,7 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
           type: "task" as const,
           horizon: item.horizon,
           hasDates,
+          isPrivate: item.isPrivate,
         };
       }),
     [items, placeholderStart, placeholderEnd]

@@ -18,6 +18,7 @@ export async function addRoadmapItem(
     experimentId?: string;
     startDate?: Date;
     endDate?: Date;
+    isPrivate?: boolean;
   },
   revalidatePathStr: string
 ) {
@@ -45,6 +46,7 @@ export async function addRoadmapItem(
       experimentId: data.experimentId,
       startDate: data.startDate,
       endDate: data.endDate,
+      isPrivate: data.isPrivate ?? false,
     },
   });
 
@@ -61,6 +63,7 @@ export async function updateRoadmapItem(
     description?: string;
     startDate?: Date | null;
     endDate?: Date | null;
+    isPrivate?: boolean;
   },
   revalidatePathStr: string
 ) {
@@ -71,6 +74,7 @@ export async function updateRoadmapItem(
     description?: string;
     startDate?: Date | null;
     endDate?: Date | null;
+    isPrivate?: boolean;
     updatedAt: Date;
   } = { updatedAt: new Date() };
 
@@ -78,6 +82,7 @@ export async function updateRoadmapItem(
   if (data.description !== undefined) updateData.description = data.description;
   if (data.startDate !== undefined) updateData.startDate = data.startDate;
   if (data.endDate !== undefined) updateData.endDate = data.endDate;
+  if (data.isPrivate !== undefined) updateData.isPrivate = data.isPrivate;
 
   const item = await prisma.roadmapItem.update({
     where: { id: itemId },
@@ -139,7 +144,8 @@ export async function promoteToRoadmap(
   horizon: Horizon,
   squadId: string | null,
   opportunityId: string | null,
-  dates?: { startDate?: Date; endDate?: Date }
+  dates?: { startDate?: Date; endDate?: Date },
+  isPrivate?: boolean
 ) {
   const prisma = getPrisma();
 
@@ -167,6 +173,7 @@ export async function promoteToRoadmap(
       opportunityId: opportunityId ?? null,
       startDate: dates?.startDate,
       endDate: dates?.endDate,
+      isPrivate: isPrivate ?? false,
     },
   });
 
@@ -181,7 +188,8 @@ export async function promoteFeedbackToRoadmap(
   workspaceId: string,
   horizon: Horizon,
   revalidatePathStr: string,
-  dates?: { startDate?: Date; endDate?: Date }
+  dates?: { startDate?: Date; endDate?: Date },
+  isPrivate?: boolean
 ) {
   const prisma = getPrisma();
 
@@ -207,6 +215,7 @@ export async function promoteFeedbackToRoadmap(
       feedbackId,
       startDate: dates?.startDate,
       endDate: dates?.endDate,
+      isPrivate: isPrivate ?? false,
     },
   });
 

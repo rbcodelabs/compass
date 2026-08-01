@@ -488,6 +488,7 @@ model RoadmapItem {
   description   String?     @db.Text
   horizon       String      @default("NOW") @db.VarChar(50)
   status        String      @default("ACTIVE") @db.VarChar(50)
+  isPrivate     Boolean     @default(false) @map("is_private")
   sortOrder     Int         @default(0) @map("sort_order")
   startDate     DateTime?   @map("start_date")
   endDate       DateTime?   @map("end_date")

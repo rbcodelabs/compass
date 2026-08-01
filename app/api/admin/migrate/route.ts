@@ -121,6 +121,10 @@ const MIGRATIONS = [
     name: "025_doc_gtm_positioning_brief",
     filePath: path.join(process.cwd(), "prisma/migrations/025_doc_gtm_positioning_brief/migration.sql"),
   },
+  {
+    name: "026_roadmap_private_items",
+    filePath: path.join(process.cwd(), "prisma/migrations/026_roadmap_private_items/migration.sql"),
+  },
 ];
 
 async function getPool(): Promise<Pool> {

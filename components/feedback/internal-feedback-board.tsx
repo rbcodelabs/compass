@@ -9,6 +9,8 @@ import {
 } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 import { promoteFeedbackToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { FeedbackAttachments, type FeedbackAttachmentData } from "@/components/feedback/feedback-attachments";
+import { CreateFeedbackDialog } from "@/components/feedback/create-feedback-dialog";
+import type { CreatedFeedbackItem } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 import type { FeedbackType, Horizon } from "@/lib/types";
 
 type FeedbackItem = {
@@ -137,6 +139,10 @@ export function InternalFeedbackBoard({
     });
   }
 
+  function handleCreated(item: CreatedFeedbackItem) {
+    setItems((prev) => [{ ...item, roadmapItem: null, attachments: [] }, ...prev]);
+  }
+
   function handlePromote(itemId: string, horizon: Horizon) {
     setPromotePickerOpen(null);
     startTransition(async () => {
@@ -162,36 +168,52 @@ export function InternalFeedbackBoard({
 
   if (items.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-center">
+      <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
         <p className="text-sm text-slate-500">No feedback submitted yet.</p>
-        <p className="text-xs text-slate-400 mt-1">
-          Enable the public feedback portal in Settings to start collecting submissions.
+        <p className="text-xs text-slate-400">
+          Enable the public feedback portal in Settings to start collecting submissions,
+          or log one yourself below.
         </p>
+        <CreateFeedbackDialog
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          revalidatePathStr={revalidatePath}
+          onCreated={handleCreated}
+          variant="empty-state"
+        />
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-4" aria-busy={isPending}>
-      {/* Type filter tabs */}
-      <div className="inline-flex rounded-lg border border-slate-200 p-0.5 self-start">
-        {(["ALL", "IDEA", "BUG"] as const).map((filter) => (
-          <button
-            key={filter}
-            type="button"
-            onClick={() => setTypeFilter(filter)}
-            className={[
-              "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-              typeFilter === filter
-                ? "bg-slate-100 text-slate-800"
-                : "text-slate-500 hover:text-slate-700",
-            ].join(" ")}
-          >
-            {filter === "BUG" && <Bug className="w-3.5 h-3.5" />}
-            {filter === "IDEA" && <Lightbulb className="w-3.5 h-3.5" />}
-            {filter === "ALL" ? "All" : filter === "BUG" ? "Bugs" : "Ideas"}
-          </button>
-        ))}
+      {/* Type filter tabs + New Feedback trigger */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="inline-flex rounded-lg border border-slate-200 p-0.5 self-start">
+          {(["ALL", "IDEA", "BUG"] as const).map((filter) => (
+            <button
+              key={filter}
+              type="button"
+              onClick={() => setTypeFilter(filter)}
+              className={[
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                typeFilter === filter
+                  ? "bg-slate-100 text-slate-800"
+                  : "text-slate-500 hover:text-slate-700",
+              ].join(" ")}
+            >
+              {filter === "BUG" && <Bug className="w-3.5 h-3.5" />}
+              {filter === "IDEA" && <Lightbulb className="w-3.5 h-3.5" />}
+              {filter === "ALL" ? "All" : filter === "BUG" ? "Bugs" : "Ideas"}
+            </button>
+          ))}
+        </div>
+        <CreateFeedbackDialog
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          revalidatePathStr={revalidatePath}
+          onCreated={handleCreated}
+        />
       </div>
 
       {/* Header row */}
