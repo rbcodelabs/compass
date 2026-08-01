@@ -52,7 +52,7 @@ export type CanvasNodeType =
 // dimensions of the corresponding components/canvas/*-node.tsx so ELK's
 // spacing decisions match what actually renders. Starting estimates, not
 // load-bearing precision.
-const NODE_SIZE: Record<CanvasNodeType, { width: number; height: number }> = {
+export const NODE_SIZE: Record<CanvasNodeType, { width: number; height: number }> = {
   objective: { width: 320, height: 100 },
   keyResult: { width: 280, height: 90 },
   opportunity: { width: 300, height: 90 },
@@ -152,4 +152,64 @@ export async function computeCanvasLayout(
       y: laidOutChild?.y ?? 0,
     };
   });
+}
+
+/**
+ * Compact "Portfolio" (T0) layout: a tidy grid of just the Objective cards,
+ * computed independently of the full ELK graph.
+ *
+ * Why this exists at all: the ELK layout (computeCanvasLayout above) packs
+ * each Objective *together with its whole OST subtree* as a disconnected
+ * component and tiles those components across a very large canvas — at a
+ * realistic ~30 Objectives the Objective-only bounding box is already
+ * ~17,000px wide, so fitting every Objective on screen needs a zoom around
+ * 0.03 (unreadable specks). The T0 tier's entire promise is "zoom out and
+ * see all your Objectives at once," which the shared ELK coordinates can't
+ * deliver. This function gives T0 its own dense grid — Objectives only, no
+ * subtree spacing — so they stay readable at a sane zoom regardless of how
+ * deep the discovery tree beneath each one is.
+ *
+ * Pure and deterministic (order in = order out), so it's unit-testable with
+ * plain id arrays and carries no React Flow / Prisma dependency, same as the
+ * rest of this module.
+ *
+ * The grid is biased wide (more columns than rows) to match the typical
+ * landscape aspect of the canvas pane, so fitView doesn't waste zoom on
+ * empty vertical space. `TARGET_ASPECT` is the rough width:height ratio we
+ * aim the grid's bounding box at.
+ */
+const OBJECTIVE_GRID_GAP_X = 80;
+const OBJECTIVE_GRID_GAP_Y = 60;
+const OBJECTIVE_GRID_TARGET_ASPECT = 2.2;
+
+export interface GridPosition {
+  x: number;
+  y: number;
+}
+
+export function computeObjectiveGridPositions(
+  objectiveIds: string[]
+): Map<string, GridPosition> {
+  const positions = new Map<string, GridPosition>();
+  const n = objectiveIds.length;
+  if (n === 0) return positions;
+
+  // cols grows sublinearly with n (√n) and is biased wide by the pane
+  // aspect. Clamped to [1, n] so a single Objective is one cell and we never
+  // ask for more columns than Objectives.
+  const cols = Math.min(
+    n,
+    Math.max(1, Math.round(Math.sqrt(n * OBJECTIVE_GRID_TARGET_ASPECT)))
+  );
+
+  const cellW = NODE_SIZE.objective.width + OBJECTIVE_GRID_GAP_X;
+  const cellH = NODE_SIZE.objective.height + OBJECTIVE_GRID_GAP_Y;
+
+  objectiveIds.forEach((id, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    positions.set(id, { x: col * cellW, y: row * cellH });
+  });
+
+  return positions;
 }
