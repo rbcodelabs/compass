@@ -14,11 +14,22 @@
  * lib/canvas/edges.ts's precedence logic exists for: solutionId wins as the
  * solid primary edge, opportunityId becomes a dashed secondary.
  *
- * Then navigate to /canvas and verify every new entity renders, real edges
- * exist (Phase 1 always had zero), and at least one is dashed.
+ * Then navigate to /canvas. It opens at the Portfolio tier (T0): a compact
+ * grid of Objectives only, so we confirm the Objective is visible and the
+ * downstream cards are hidden. Zoom in to Detail (T2) — which animates the
+ * Objectives out of the grid into the detailed graph, centered on the
+ * Objective nearest the viewport — and confirm the Objective's neighborhood
+ * (its Key Result) and real edges render (Phase 1 always had zero edges).
+ * Finally zoom back out and confirm the Portfolio grid re-forms with the
+ * downstream cards hidden again — proving the tier switch hides rather than
+ * destroys.
  *
- * Explicitly not tested: focus nav, drag-to-pin persistence, semantic zoom
- * tiers — none of that ships this phase.
+ * Not asserted here (covered by unit tests / out of scope): exhaustive
+ * all-entities-on-screen-at-once (the detailed graph is wider than the
+ * viewport, and onlyRenderVisibleElements unmounts off-screen cards by
+ * design) and dashed-edge precedence (see canvas-edges.test.ts). Also not
+ * tested: click-to-focus nav, drag-to-pin persistence, URL deep-linking,
+ * T0 squad-clustering — none of that ships this phase.
  */
 import { test, expect } from "../fixtures/index";
 
@@ -35,6 +46,27 @@ test.describe("Canvas", () => {
     const solTitle = `Canvas E2E Solution ${ts}`;
     const assumptionTitle = `Canvas E2E Assumption ${ts}`;
     const expTitle = `Canvas E2E Experiment ${ts}`;
+
+    // Click a zoom control repeatedly until the tier badge reads `badgeLabel`.
+    // The wait between clicks (500ms) comfortably exceeds the 400ms tier
+    // transition so each step settles before the next — the T0<->detail
+    // crossing animates the camera, and racing it with rapid clicks would be
+    // flaky. Returns once the badge appears; the caller then asserts on it.
+    const zoomUntil = async (
+      controlSelector: string,
+      badgeLabel: string,
+      maxClicks = 16
+    ) => {
+      for (let i = 0; i < maxClicks; i++) {
+        const shown = await page
+          .getByText(badgeLabel, { exact: true })
+          .isVisible()
+          .catch(() => false);
+        if (shown) return;
+        await page.locator(controlSelector).click();
+        await page.waitForTimeout(500);
+      }
+    };
 
     // Pre-existing, out-of-scope bug (confirmed independently, also present
     // in assumption-experiment-linking.spec.ts's identical journey through
@@ -170,31 +202,34 @@ test.describe("Canvas", () => {
 
     await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15_000 });
 
-    // Every entity in the chain renders.
+    // Canvas opens at the Portfolio tier (T0): a compact grid of Objectives
+    // only. The Objective renders; the Key Result and Opportunity are hidden
+    // until you zoom in.
+    await expect(page.getByText("Portfolio", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(page.getByText(objectiveTitle)).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText(krTitle)).toBeVisible();
-    await expect(page.getByText("0 % / 100 %").first()).toBeVisible();
-    await expect(page.getByText(oppTitle)).toBeVisible();
-    await expect(page.getByText(assumptionTitle)).toBeVisible();
-    await expect(page.getByText(expTitle)).toBeVisible();
-    // The RoadmapItem is titled after the Solution it was promoted from
-    // (promoteToRoadmap copies solution.title) — same text renders twice
-    // now (Solution card + RoadmapItem card), so check count rather than a
-    // single-match toBeVisible().
-    await expect(page.getByText(solTitle)).toHaveCount(2);
+    await expect(page.getByText(krTitle)).not.toBeVisible();
+    await expect(page.getByText(oppTitle)).not.toBeVisible();
 
-    // Real edges exist now — Phase 1 always rendered zero.
+    // ── 9. Zoom in to Detail: dive into the Objective's neighborhood ────────
+    // Crossing out of the Portfolio band animates the Objectives from the
+    // grid into their detailed-graph positions, centered on the Objective
+    // nearest the viewport center (here, the only one). Its Key Result comes
+    // into view, connected by a real edge (Phase 1 always rendered zero).
+    // Deeper cards can sit outside the viewport at this zoom and get unmounted
+    // by onlyRenderVisibleElements — expected, so we don't assert on them.
+    await zoomUntil(".react-flow__controls-zoomin", "Detail");
+    await expect(page.getByText("Detail", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByText(objectiveTitle)).toBeVisible();
+    await expect(page.getByText(krTitle)).toBeVisible();
+
     const edgeCount = await page.locator(".react-flow__edge").count();
     expect(edgeCount).toBeGreaterThan(0);
 
-    // At least one dashed secondary edge (the Opportunity -> RoadmapItem
-    // edge, since Solution -> RoadmapItem wins the solid primary slot).
-    const dashedEdgeCount = await page
-      .locator('.react-flow__edge-path[style*="stroke-dasharray"]')
-      .count();
-    expect(dashedEdgeCount).toBeGreaterThan(0);
-
-    // ── 9. Pan: drag on the pane, content survives the transform ────────────
+    // ── 10. Pan: drag on the pane, content survives the transform ───────────
     const pane = page.locator(".react-flow__pane");
     const paneBox = await pane.boundingBox();
     if (!paneBox) throw new Error("Canvas pane did not render a bounding box");
@@ -210,21 +245,21 @@ test.describe("Canvas", () => {
       { steps: 10 }
     );
     await page.mouse.up();
-
-    // ── 10. Zoom: use the built-in zoom controls ─────────────────────────────
-    await page.locator(".react-flow__controls-zoomin").click();
-    await page.locator(".react-flow__controls-zoomin").click();
-    await page.locator(".react-flow__controls-zoomout").click();
-
-    // Content survives pan + zoom without crashing. Not re-asserting a
-    // specific node's title here (unlike Phase 1's tight 2-Objective
-    // cluster): the full 7-tier chain now spans much wider under ELK's
-    // left-to-right layout, so this exact pan (which deliberately drags
-    // toward the Objective/KeyResult end) combined with zooming in can
-    // legitimately scroll the Objective off-screen — `onlyRenderVisibleElements`
-    // then unmounts it, which is correct behavior, not a bug.
     await expect(page.locator(".react-flow")).toBeVisible();
     expect(await page.locator(".react-flow__node").count()).toBeGreaterThan(0);
+
+    // ── 11. Zoom back out to Portfolio: the grid re-forms, non-destructively ─
+    // Proves the tier switch hid rather than destroyed the downstream cards:
+    // the Objective returns in the grid and the Key Result / Opportunity are
+    // hidden again. React Flow's zoomOut clamps at minZoom (0.2), well under
+    // the T0 threshold (0.4), so enough clicks always land back in Portfolio.
+    await zoomUntil(".react-flow__controls-zoomout", "Portfolio");
+    await expect(page.getByText("Portfolio", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByText(objectiveTitle)).toBeVisible();
+    await expect(page.getByText(krTitle)).not.toBeVisible();
+    await expect(page.getByText(oppTitle)).not.toBeVisible();
 
     // Zero console errors across the whole journey.
     expect(consoleErrors).toEqual([]);
