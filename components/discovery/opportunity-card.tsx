@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { useTransition } from "react";
-import Link from "next/link";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
@@ -10,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EvidenceBadge } from "@/components/discovery/evidence-badge";
 import { CardMenu } from "@/components/ui/card-menu";
+import { usePanelContext } from "@/components/panels/panel-context";
 import {
   updateOpportunityStatus,
   archiveOpportunity,
@@ -50,6 +50,7 @@ type Props = {
 
 export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) {
   const [isPending, startTransition] = useTransition();
+  const { openPanel } = usePanelContext();
 
   const {
     attributes,
@@ -67,7 +68,6 @@ export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) 
     opacity: isDragging ? 0.4 : 1,
   };
 
-  const detailPath = `/${orgSlug}/${workspaceSlug}/discovery/${opportunity.id}`;
   const boardPath = `/${orgSlug}/${workspaceSlug}/discovery`;
 
   function moveStatus(status: OpportunityStatus) {
@@ -111,12 +111,13 @@ export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) 
               />
             )}
             <CardTitle className="flex-1">
-              <Link
-                href={detailPath}
-                className="hover:underline underline-offset-2 line-clamp-2"
+              <button
+                type="button"
+                onClick={() => openPanel("opportunity", opportunity.id)}
+                className="text-left hover:underline underline-offset-2 line-clamp-2"
               >
                 {opportunity.title}
-              </Link>
+              </button>
             </CardTitle>
             <CardMenu
               items={[

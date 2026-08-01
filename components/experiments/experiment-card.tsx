@@ -2,13 +2,13 @@
 
 import * as React from "react"
 import { useTransition } from "react"
-import Link from "next/link"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { GripVertical } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { CardMenu } from "@/components/ui/card-menu"
+import { usePanelContext } from "@/components/panels/panel-context"
 import { archiveExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
 import type { ExperimentStatus } from "@/lib/types"
 
@@ -38,12 +38,12 @@ const STATUS_CLASS: Record<ExperimentStatus, string> = {
 
 interface ExperimentCardProps {
   experiment: ExperimentCardData
-  href: string
   revalidatePathStr: string
 }
 
-export function ExperimentCard({ experiment, href, revalidatePathStr }: ExperimentCardProps) {
+export function ExperimentCard({ experiment, revalidatePathStr }: ExperimentCardProps) {
   const [, startTransition] = useTransition()
+  const { openPanel } = usePanelContext()
 
   const {
     attributes,
@@ -90,11 +90,15 @@ export function ExperimentCard({ experiment, href, revalidatePathStr }: Experime
 
           <div className="flex-1 min-w-0">
             <div className="flex items-start gap-2">
-              <Link href={href} className="flex-1 hover:underline underline-offset-2">
+              <button
+                type="button"
+                onClick={() => openPanel("experiment", experiment.id)}
+                className="flex-1 text-left hover:underline underline-offset-2"
+              >
                 <CardTitle className="line-clamp-2 text-sm font-medium">
                   {experiment.title}
                 </CardTitle>
-              </Link>
+              </button>
               <Badge className={statusClass + " shrink-0"}>{statusLabel}</Badge>
             </div>
           </div>

@@ -29,6 +29,7 @@ import {
   deleteObjective,
 } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import { CardMenu } from "@/components/ui/card-menu";
+import { usePanelContext } from "@/components/panels/panel-context";
 
 interface KeyResult {
   id: string;
@@ -65,6 +66,7 @@ export function ObjectiveRow({
 }: ObjectiveRowProps) {
   const [isPending, startTransition] = useTransition();
   const [isParentKRPending, startParentKRTransition] = useTransition();
+  const { openPanel } = usePanelContext();
   const [localParentKRId, setLocalParentKRId] = useState<string | null>(
     parentKeyResultId ?? null
   );
@@ -139,7 +141,13 @@ export function ObjectiveRow({
                   title={objective.squad.name}
                 />
               )}
-              <h3 className="font-medium text-base">{objective.title}</h3>
+              <button
+                type="button"
+                onClick={() => openPanel("objective", objective.id)}
+                className="text-left font-medium text-base hover:underline underline-offset-2"
+              >
+                {objective.title}
+              </button>
             </div>
             {objective.owner && (
               <p className="text-xs text-muted-foreground">{objective.owner}</p>
