@@ -59,6 +59,16 @@ import {
   getLaunchChecklist,
   updateLaunchChecklistItem,
 } from "@/lib/roadmap-tool-handlers"
+import {
+  createTask,
+  getTask,
+  listTasks,
+  updateTask,
+  moveTaskStatus,
+  linkTask,
+  unlinkTask,
+  listTaskLinks,
+} from "@/lib/task-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -1497,9 +1507,9 @@ const _handler = createMcpHandler(
       "assign_squad",
       {
         title: "Assign Squad",
-        description: "Assigns a Squad to any object: opportunity, experiment, roadmap_item, or objective. Pass null squadId to clear.",
+        description: "Assigns a Squad to any object: opportunity, experiment, roadmap_item, objective, or task. Pass null squadId to clear.",
         inputSchema: {
-          objectType: z.enum(["opportunity", "experiment", "roadmap_item", "objective"]).describe("Type of object to assign the squad to"),
+          objectType: z.enum(["opportunity", "experiment", "roadmap_item", "objective", "task"]).describe("Type of object to assign the squad to"),
           objectId: z.string().uuid().describe("UUID of the object"),
           squadId: z.string().uuid().nullable().describe("UUID of the squad, or null to clear"),
         },
@@ -1520,6 +1530,9 @@ const _handler = createMcpHandler(
           case "objective":
             await prisma.objective.update({ where: { id: objectId }, data })
             break
+          case "task":
+            await prisma.task.update({ where: { id: objectId }, data: { ...data, updatedAt: new Date() } })
+            break
         }
         return {
           content: [{
@@ -1530,6 +1543,151 @@ const _handler = createMcpHandler(
           }],
         }
       }
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // TASKS
+    // ════════════════════════════════════════════════════════════════
+
+    server.registerTool(
+      "create_task",
+      {
+        title: "Create Task",
+        description:
+          "Creates a Task — the standalone delivery/tracking entity used for both full engineering sprint delivery " +
+          "and lightweight PM initiative tracking. Defaults to status TODO and priority MEDIUM. Set parentTaskId to " +
+          "create a Subtask under an Epic (a Task with no parent and children is an Epic).",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          title: z.string().min(1).describe("Task title"),
+          description: z.string().optional().describe("Optional description"),
+          status: z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE", "CANCELLED"]).optional().describe("Initial status (default TODO)"),
+          priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional().describe("Priority (default MEDIUM)"),
+          squadId: z.string().uuid().optional().describe("Owning squad UUID"),
+          parentTaskId: z.string().uuid().optional().describe("Parent task UUID, to create this as a Subtask"),
+          assigneeUserId: z.string().uuid().optional().describe("UUID of the assignee's WorkspaceMember userId"),
+          ownerName: z.string().optional().describe("Freeform owner name for non-Compass stakeholders"),
+          storyPoints: z.number().optional().describe("Story points estimate"),
+          dueDate: z.string().optional().describe("Due date, ISO 8601"),
+          iteration: z.string().optional().describe("Freeform sprint/iteration label, e.g. 'Sprint 24'"),
+        },
+      },
+      createTask
+    )
+
+    server.registerTool(
+      "get_task",
+      {
+        title: "Get Task",
+        description: "Returns full detail for a Task: fields, parent Epic (if any), subtasks, and resolved links to other Compass objects.",
+        inputSchema: {
+          taskId: z.string().uuid().describe("UUID of the task"),
+        },
+      },
+      getTask
+    )
+
+    server.registerTool(
+      "list_tasks",
+      {
+        title: "List Tasks",
+        description:
+          "Lists tasks in a workspace, filterable by status, priority, squad, assignee, parent (pass parentTaskId " +
+          "explicitly as null to list only top-level Epics/tasks), or a linkedType+linkedId pair (e.g. all tasks " +
+          "linked to an Opportunity). Set includeSubtasks to nest children under their parent in the response.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          status: z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE", "CANCELLED"]).optional().describe("Filter by status"),
+          priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional().describe("Filter by priority"),
+          squadId: z.string().uuid().optional().describe("Filter by owning squad"),
+          assigneeUserId: z.string().uuid().optional().describe("Filter by assignee"),
+          parentTaskId: z.string().uuid().nullable().optional().describe("Filter by parent task; pass null for top-level tasks/Epics only"),
+          linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM"]).optional().describe("Filter to tasks linked to this object type (pair with linkedId)"),
+          linkedId: z.string().uuid().optional().describe("UUID of the linked object (pair with linkedType)"),
+          includeSubtasks: z.boolean().optional().describe("Nest subtasks under their parent in the response"),
+        },
+      },
+      listTasks
+    )
+
+    server.registerTool(
+      "update_task",
+      {
+        title: "Update Task",
+        description:
+          "Updates a Task's title/description/priority/assignee/owner/story points/due date/iteration. " +
+          "Does not accept status — use move_task_status for status transitions.",
+        inputSchema: {
+          taskId: z.string().uuid().describe("UUID of the task"),
+          title: z.string().min(1).optional().describe("New title"),
+          description: z.string().optional().describe("New description"),
+          priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional().describe("New priority"),
+          squadId: z.string().uuid().nullable().optional().describe("New owning squad, or null to clear"),
+          assigneeUserId: z.string().uuid().nullable().optional().describe("New assignee userId, or null to clear"),
+          ownerName: z.string().nullable().optional().describe("New freeform owner name, or null to clear"),
+          storyPoints: z.number().nullable().optional().describe("New story points, or null to clear"),
+          dueDate: z.string().nullable().optional().describe("New due date (ISO 8601), or null to clear"),
+          iteration: z.string().nullable().optional().describe("New iteration label, or null to clear"),
+        },
+      },
+      updateTask
+    )
+
+    server.registerTool(
+      "move_task_status",
+      {
+        title: "Move Task Status",
+        description:
+          "Dedicated status-transition tool for a Task — BACKLOG, TODO, IN_PROGRESS, BLOCKED, IN_REVIEW, DONE, or " +
+          "CANCELLED. BLOCKED is a first-class status, not a flag. Places the task at the end of the destination column.",
+        inputSchema: {
+          taskId: z.string().uuid().describe("UUID of the task"),
+          status: z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE", "CANCELLED"]).describe("New status"),
+        },
+      },
+      moveTaskStatus
+    )
+
+    server.registerTool(
+      "link_task",
+      {
+        title: "Link Task",
+        description:
+          "Links a Task to another Compass object (Opportunity, Solution, Roadmap Item, Objective, Key Result, Doc, " +
+          "Experiment, or Feedback Item). Idempotent — re-linking the same pair is a no-op, not an error.",
+        inputSchema: {
+          taskId: z.string().uuid().describe("UUID of the task"),
+          linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM"]).describe("Type of the object to link"),
+          linkedId: z.string().uuid().describe("UUID of the object to link"),
+        },
+      },
+      linkTask
+    )
+
+    server.registerTool(
+      "unlink_task",
+      {
+        title: "Unlink Task",
+        description: "Removes a link between a Task and another Compass object.",
+        inputSchema: {
+          taskId: z.string().uuid().describe("UUID of the task"),
+          linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM"]).describe("Type of the linked object"),
+          linkedId: z.string().uuid().describe("UUID of the linked object"),
+        },
+      },
+      unlinkTask
+    )
+
+    server.registerTool(
+      "list_task_links",
+      {
+        title: "List Task Links",
+        description: "Returns all links for a Task, grouped by linked object type, each resolved to a human-readable title.",
+        inputSchema: {
+          taskId: z.string().uuid().describe("UUID of the task"),
+        },
+      },
+      listTaskLinks
     )
 
     // ════════════════════════════════════════════════════════════════

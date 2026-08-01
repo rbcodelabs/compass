@@ -47,6 +47,7 @@ export type CustomFieldObjectType =
   | "OBJECTIVE"
   | "KEY_RESULT"
   | "ROADMAP_ITEM"
+  | "TASK"
 
 // Canvas Viewer
 // Full OST + Roadmap graph (Objective -> KeyResult -> Opportunity ->
@@ -189,4 +190,55 @@ export interface ChecklistTemplateSnapshot {
   templateName: string
   tier: LaunchTier
   items: ChecklistTemplateSnapshotItem[]
+}
+
+// Tasks
+export type TaskStatus =
+  | "BACKLOG"
+  | "TODO"
+  | "IN_PROGRESS"
+  | "BLOCKED"
+  | "IN_REVIEW"
+  | "DONE"
+  | "CANCELLED"
+export type TaskPriority = "URGENT" | "HIGH" | "MEDIUM" | "LOW"
+
+export type TaskLinkedType =
+  | "OPPORTUNITY"
+  | "SOLUTION"
+  | "ROADMAP_ITEM"
+  | "OBJECTIVE"
+  | "KEY_RESULT"
+  | "DOC"
+  | "EXPERIMENT"
+  | "FEEDBACK_ITEM"
+
+export interface TaskLinkData {
+  id: string
+  linkedType: TaskLinkedType
+  linkedId: string
+  /** Resolved at read time from the target table — not stored on TaskLink. */
+  linkedTitle: string
+}
+
+export interface TaskData {
+  id: string
+  workspaceId: string
+  squadId: string | null
+  parentTaskId: string | null
+  title: string
+  description: string | null
+  status: TaskStatus
+  priority: TaskPriority
+  assigneeUserId: string | null
+  ownerName: string | null
+  storyPoints: number | null
+  dueDate: string | null
+  iteration: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+  links: TaskLinkData[]
+  subtaskCount: number
+  squad: { id: string; name: string; color: string } | null
 }

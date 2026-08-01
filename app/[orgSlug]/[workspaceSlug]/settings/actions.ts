@@ -77,7 +77,7 @@ export async function deleteSquad(
 }
 
 export async function assignSquad(
-  objectType: "objective" | "opportunity" | "experiment" | "roadmapItem",
+  objectType: "objective" | "opportunity" | "experiment" | "roadmapItem" | "task",
   objectId: string,
   squadId: string | null,
   revalidatePathStr: string
@@ -95,6 +95,8 @@ export async function assignSquad(
     await prisma.experiment.update({ where: { id: objectId }, data: { squadId } });
   } else if (objectType === "roadmapItem") {
     await prisma.roadmapItem.update({ where: { id: objectId }, data: { squadId } });
+  } else if (objectType === "task") {
+    await prisma.task.update({ where: { id: objectId }, data: { squadId, updatedAt: new Date() } });
   }
 
   revalidatePath(revalidatePathStr);
