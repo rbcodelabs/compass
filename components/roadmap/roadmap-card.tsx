@@ -143,7 +143,13 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
                 Private
               </span>
             )}
-            {item.title}
+            <button
+              type="button"
+              onClick={() => openPanel("roadmapItem", item.id)}
+              className="text-left hover:underline underline-offset-2"
+            >
+              {item.title}
+            </button>
           </CardTitle>
 
           <CardMenu

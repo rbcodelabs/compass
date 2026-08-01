@@ -45,6 +45,7 @@ import {
   rejectSolutionPlan,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { CardMenu } from "@/components/ui/card-menu";
+import { usePanelContext } from "@/components/panels/panel-context";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { AssumptionItem, type AssumptionItemData } from "./assumption-item";
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
@@ -124,6 +125,7 @@ type Props = {
 };
 
 export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportunityId, squadId }: Props) {
+  const { openPanel } = usePanelContext();
   const [expanded, setExpanded] = useState(false);
   const [addingAssumption, setAddingAssumption] = useState(false);
   const [promotingToRoadmap, setPromotingToRoadmap] = useState(false);
@@ -321,7 +323,15 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
             </button>
 
             <div className="flex-1 min-w-[8rem]">
-              <CardTitle className="leading-snug">{solution.title}</CardTitle>
+              <CardTitle className="leading-snug">
+                <button
+                  type="button"
+                  onClick={() => openPanel("solution", solution.id)}
+                  className="text-left hover:underline underline-offset-2"
+                >
+                  {solution.title}
+                </button>
+              </CardTitle>
               {solution.description && (
                 <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
                   {solution.description}

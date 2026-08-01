@@ -10,6 +10,7 @@ import {
 import { promoteFeedbackToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { FeedbackAttachments, type FeedbackAttachmentData } from "@/components/feedback/feedback-attachments";
 import { CreateFeedbackDialog } from "@/components/feedback/create-feedback-dialog";
+import { usePanelContext } from "@/components/panels/panel-context";
 import type { CreatedFeedbackItem } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 import type { FeedbackType, Horizon } from "@/lib/types";
 
@@ -98,6 +99,7 @@ export function InternalFeedbackBoard({
   initialItems,
   opportunities,
 }: Props) {
+  const { openPanel } = usePanelContext();
   const [items, setItems] = useState(initialItems);
   const [isPending, startTransition] = useTransition();
   const [linkPickerOpen, setLinkPickerOpen] = useState<string | null>(null);
@@ -241,7 +243,13 @@ export function InternalFeedbackBoard({
           >
             {/* Title + meta */}
             <div className="flex flex-col gap-0.5 min-w-0">
-              <p className="text-sm font-medium text-slate-800">{item.title}</p>
+              <button
+                type="button"
+                onClick={() => openPanel("feedback", item.id)}
+                className="text-left text-sm font-medium text-slate-800 hover:underline underline-offset-2 w-fit max-w-full truncate"
+              >
+                {item.title}
+              </button>
               {item.description && (
                 <p className="text-xs text-slate-500 line-clamp-1">{item.description}</p>
               )}
