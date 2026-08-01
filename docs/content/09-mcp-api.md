@@ -38,6 +38,7 @@ The MCP server exposes tools that agents can call, grouped below by area.
 |---|---|
 | `get_workspace_summary` | Returns high-level counts and status for a workspace: OKR cycles, opportunities, experiments, roadmap items, active experiments, active OKR cycle, and squads |
 | `list_workspaces` | List all workspaces in an organization by org slug; use as the first call when you don't yet know a workspace ID |
+| `get_workspace_by_slug` | Look up a single workspace's ID, name, and description directly by org slug + workspace slug, without listing all workspaces |
 | `create_workspace` | Create a new workspace inside an organization |
 
 ### OKRs
