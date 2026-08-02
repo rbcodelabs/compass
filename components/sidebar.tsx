@@ -178,7 +178,10 @@ export function Sidebar({
           live in this dropdown instead of cluttering primary nav. */}
       <div className="px-3 py-3.5">
         <DropdownMenu>
-          <DropdownMenuTrigger className="w-full flex items-center gap-2.5 rounded-lg px-0.5 py-1 text-left hover:bg-slate-800/60 transition-colors">
+          <DropdownMenuTrigger
+            className="w-full flex items-center gap-2.5 rounded-lg px-0.5 py-1 text-left hover:bg-slate-800/60 transition-colors"
+            aria-label="Account menu"
+          >
             <Avatar className="w-6 h-6 shrink-0">
               {userImage && <AvatarImage src={userImage} alt={userName} />}
               <AvatarFallback className="text-[10px] font-semibold bg-slate-700 text-slate-200">
@@ -228,7 +231,10 @@ export function Sidebar({
                 Help
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+            <DropdownMenuItem
+              className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
+              closeOnClick={false}
+            >
               <SendCompassFeedbackDialog />
             </DropdownMenuItem>
             <DropdownMenuSeparator className="bg-slate-700" />

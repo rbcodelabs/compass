@@ -158,7 +158,10 @@ export function MobileHeader({
                 Help
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+            <DropdownMenuItem
+              className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
+              closeOnClick={false}
+            >
               <SendCompassFeedbackDialog />
             </DropdownMenuItem>
             <DropdownMenuSeparator className="bg-slate-700" />

@@ -10,16 +10,14 @@
 import { test, expect } from "../fixtures/index";
 import { E2E_USER_EMAIL } from "../fixtures/seed-e2e";
 
-const E2E_USER_NAME = "Dev User";
-
 test.describe("Sign Out", () => {
   test("sidebar dropdown shows signed-in email and signs out", async ({ page, base }) => {
     // ── 1. Navigate to an authenticated workspace page ──────────────────────
     await page.goto(`${base}/okrs`);
     await page.waitForLoadState("networkidle");
 
-    // ── 2. Open the sidebar account dropdown (trigger shows the user's name) ─
-    await page.getByRole("button", { name: E2E_USER_NAME }).click();
+    // ── 2. Open the sidebar account dropdown ────────────────────────────────
+    await page.getByRole("button", { name: "Account menu" }).click();
     await expect(page.getByText(E2E_USER_EMAIL)).toBeVisible();
 
     // ── 3. Sign out ──────────────────────────────────────────────────────────
