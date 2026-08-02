@@ -7,9 +7,9 @@
  * every other existing MCP tool.
  */
 
-import { randomUUID } from "crypto"
 import getPrisma from "@/lib/db"
-import type { LaunchTier, ChecklistTemplateSnapshot } from "@/lib/types"
+import type { LaunchTier } from "@/lib/types"
+import { setLaunchTierCore, updateChecklistItemCore } from "@/lib/launch-checklist"
 
 interface ChecklistItemInput {
   label: string
@@ -164,38 +164,12 @@ export async function setLaunchTier({
     }
   }
 
-  const snapshot: ChecklistTemplateSnapshot = {
-    templateId: template.id,
-    templateName: template.name,
-    tier: template.tier as LaunchTier,
+  const { launchChecklistId } = await setLaunchTierCore(item.id, tier, {
+    id: template.id,
+    name: template.name,
+    tier: template.tier,
     items: template.items.map((i) => ({ label: i.label, description: i.description, order: i.order })),
-  }
-
-  const launchChecklistId = randomUUID()
-
-  await prisma.$transaction([
-    prisma.launchChecklist.create({
-      data: {
-        id: launchChecklistId,
-        roadmapItemId: item.id,
-        checklistTemplateId: template.id,
-        tier,
-        templateSnapshot: JSON.stringify(snapshot),
-      },
-    }),
-    prisma.launchChecklistItem.createMany({
-      data: template.items.map((i) => ({
-        launchChecklistId,
-        label: i.label,
-        description: i.description,
-        order: i.order,
-      })),
-    }),
-    prisma.roadmapItem.update({
-      where: { id: item.id },
-      data: { horizon: "LAUNCHING", updatedAt: new Date() },
-    }),
-  ])
+  })
 
   return {
     content: [{
@@ -265,24 +239,10 @@ export async function updateLaunchChecklistItem({
   itemId: string
   status: "PENDING" | "DONE" | "SKIPPED"
 }) {
-  const prisma = getPrisma()
-
-  const existing = await prisma.launchChecklistItem.findUnique({
-    where: { id: itemId },
-    select: { id: true, label: true },
-  })
-  if (!existing) {
+  const updated = await updateChecklistItemCore(itemId, status)
+  if (!updated) {
     return { content: [{ type: "text" as const, text: `Launch checklist item "${itemId}" not found.` }] }
   }
-
-  const updated = await prisma.launchChecklistItem.update({
-    where: { id: itemId },
-    data: {
-      status,
-      completedAt: status === "DONE" ? new Date() : null,
-      updatedAt: new Date(),
-    },
-  })
 
   return {
     content: [{

@@ -14,9 +14,14 @@ import {
   type RelationItem,
   type EditContext,
 } from "./panel-parts";
+import { HORIZON_META, SETTABLE_HORIZONS } from "@/lib/roadmap";
+import { LaunchTierPicker } from "./launch-tier-picker";
+import { LaunchChecklist, type LaunchChecklistItemData } from "./launch-checklist";
+import { PositioningBriefRow } from "./positioning-brief-row";
 
 type RoadmapItemData = {
   id: string;
+  workspaceId: string;
   title: string;
   description: string | null;
   horizon: string;
@@ -30,17 +35,21 @@ type RoadmapItemData = {
   opportunity: { id: string; title: string } | null;
   experiment: { id: string; title: string } | null;
   feedback: { id: string; title: string } | null;
+  launchChecklist: { id: string; tier: string; items: LaunchChecklistItemData[] } | null;
+  positioningBrief: { id: string; title: string } | null;
   _count: { votes: number };
 };
 
-const HORIZON: Record<string, { label: string; className: string }> = {
-  NOW: { label: "Now", className: "bg-indigo-100 text-indigo-700" },
-  NEXT: { label: "Next", className: "bg-blue-100 text-blue-700" },
-  LATER: { label: "Later", className: "bg-slate-100 text-slate-600" },
-  SHIPPED: { label: "Shipped", className: "bg-green-100 text-green-700" },
-};
+// Display map for the horizon badge — every horizon, including the launch
+// ones (an item can currently be in LAUNCHING/LAUNCHED and must render).
+const HORIZON: Record<string, { label: string; className: string }> = Object.fromEntries(
+  Object.entries(HORIZON_META).map(([h, m]) => [h, { label: m.label, className: m.badgeClass }])
+);
 
-const HORIZON_ORDER = ["NOW", "NEXT", "LATER", "SHIPPED"] as const;
+// The dropdown only offers horizons the generic single-field edit will accept
+// — LAUNCHING is excluded (only setLaunchTier may enter it). Display of a
+// current LAUNCHING value still works via the map above.
+const HORIZON_ORDER = SETTABLE_HORIZONS;
 
 export function RoadmapItemPanel({
   id,
@@ -51,7 +60,7 @@ export function RoadmapItemPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error, mutate } = useEntityDetail<RoadmapItemData>(
+  const { data, error, mutate, refresh } = useEntityDetail<RoadmapItemData>(
     "roadmapItem",
     id,
     orgSlug,
@@ -60,6 +69,8 @@ export function RoadmapItemPanel({
 
   if (error) return <PanelError label="roadmap item" />;
   if (!data) return <PanelSkeleton />;
+
+  const roadmapPath = `/${orgSlug}/${workspaceSlug}/roadmap`;
 
   const edit: EditContext = {
     type: "roadmapItem",
@@ -108,6 +119,34 @@ export function RoadmapItemPanel({
         <Field label="Votes">{data._count.votes}</Field>
         {data.isPrivate && <Field label="Visibility">Private (hidden from public roadmap)</Field>}
       </div>
+
+      <Section label="Launch">
+        <div className="flex flex-col gap-4">
+          {data.launchChecklist ? (
+            <LaunchChecklist
+              horizon={data.horizon}
+              tier={data.launchChecklist.tier}
+              items={data.launchChecklist.items}
+              workspaceId={data.workspaceId}
+              revalidatePathStr={roadmapPath}
+            />
+          ) : (
+            <LaunchTierPicker
+              itemId={id}
+              workspaceId={data.workspaceId}
+              revalidatePathStr={roadmapPath}
+              onDone={refresh}
+            />
+          )}
+          <PositioningBriefRow
+            itemId={id}
+            workspaceId={data.workspaceId}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            brief={data.positioningBrief}
+          />
+        </div>
+      </Section>
 
       <Section label="Linked to" count={linked.length}>
         <RelationList items={linked} empty="Not linked to any discovery item." />

@@ -31,11 +31,13 @@ import {
   parseUnscheduledDragId,
   type UnscheduledItem,
 } from "./unscheduled-items-panel";
+import { usePanelContext } from "@/components/panels/panel-context";
+import { INTERNAL_BOARD_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
 import type { Horizon, SquadData } from "@/lib/types";
 
 type ColumnMap = Record<Horizon, RoadmapCardData[]>;
 
-const HORIZONS: Horizon[] = ["NOW", "NEXT", "LATER", "SHIPPED"];
+const HORIZONS: Horizon[] = INTERNAL_BOARD_HORIZONS;
 
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
 type AvailableSolution = { id: string; title: string; opportunityTitle: string };
@@ -110,16 +112,21 @@ function cardDataFromPromotion(
     experiment: null,
     feedback: source.kind === "feedback" ? { id: source.id, title: source.title, type: "BUG" } : null,
     squad,
+    launchChecklist: null,
   };
 }
 
 function buildColumnMap(items: RoadmapCardData[]): ColumnMap {
-  return {
-    NOW: items.filter((i) => i.horizon === "NOW").sort((a, b) => a.sortOrder - b.sortOrder),
-    NEXT: items.filter((i) => i.horizon === "NEXT").sort((a, b) => a.sortOrder - b.sortOrder),
-    LATER: items.filter((i) => i.horizon === "LATER").sort((a, b) => a.sortOrder - b.sortOrder),
-    SHIPPED: items.filter((i) => i.horizon === "SHIPPED").sort((a, b) => a.sortOrder - b.sortOrder),
-  };
+  // Exhaustive over every horizon so columns[horizon] is never undefined at
+  // runtime, even for horizons that currently hold no items.
+  const map = Object.fromEntries(HORIZONS.map((h) => [h, [] as RoadmapCardData[]])) as ColumnMap;
+  for (const item of items) {
+    (map[item.horizon] ??= []).push(item);
+  }
+  for (const h of HORIZONS) {
+    map[h].sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+  return map;
 }
 
 // Find which column (horizon) an item currently lives in.
@@ -143,6 +150,7 @@ export function RoadmapBoard({
   squads,
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/roadmap`;
+  const { openPanel } = usePanelContext();
 
   const [columns, setColumns] = useState<ColumnMap>(() => buildColumnMap(initialItems));
   const [unscheduled, setUnscheduled] = useState<UnscheduledItem[]>(unscheduledItems ?? []);
@@ -285,6 +293,25 @@ export function RoadmapBoard({
     }
 
     if (dragSourceHorizon && dragSourceHorizon !== currentHorizon) {
+      // Dropping onto a launch column can't be a plain move — LAUNCHING needs
+      // a tier + checklist. Revert the optimistic move from handleDragOver and
+      // open the item's panel so the user can pick a launch tier there.
+      if (isLaunchHorizon(currentHorizon)) {
+        const source = dragSourceHorizon;
+        setColumns((prev) => {
+          const moved = prev[currentHorizon].find((i) => i.id === activeId);
+          if (!moved) return prev;
+          const reverted = { ...moved, horizon: source };
+          return {
+            ...prev,
+            [currentHorizon]: prev[currentHorizon].filter((i) => i.id !== activeId),
+            [source]: [...prev[source].filter((i) => i.id !== activeId), reverted],
+          };
+        });
+        setDragSourceHorizon(null);
+        openPanel("roadmapItem", activeId);
+        return;
+      }
       startTransition(async () => {
         await moveItem(activeId, currentHorizon, workspaceId, revalidatePathStr);
       });

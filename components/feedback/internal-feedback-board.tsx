@@ -12,6 +12,7 @@ import { FeedbackAttachments, type FeedbackAttachmentData } from "@/components/f
 import { CreateFeedbackDialog } from "@/components/feedback/create-feedback-dialog";
 import { usePanelContext } from "@/components/panels/panel-context";
 import type { CreatedFeedbackItem } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
+import { HORIZON_META, PROMOTE_TARGET_HORIZONS } from "@/lib/roadmap";
 import type { FeedbackType, Horizon } from "@/lib/types";
 
 type FeedbackItem = {
@@ -81,14 +82,14 @@ const TYPE_COLORS: Record<FeedbackType, string> = {
 
 const ALL_TYPES: FeedbackType[] = ["IDEA", "BUG"];
 
-const ALL_HORIZONS: Horizon[] = ["NOW", "NEXT", "LATER", "SHIPPED"];
+// Promote targets exclude the launch horizons (those need a tier + checklist).
+const ALL_HORIZONS: Horizon[] = PROMOTE_TARGET_HORIZONS;
 
-const HORIZON_LABELS: Record<Horizon, string> = {
-  NOW: "Now",
-  NEXT: "Next",
-  LATER: "Later",
-  SHIPPED: "Shipped",
-};
+// Labels for every horizon so an already-promoted item that's in LAUNCHING/
+// LAUNCHED still renders a name.
+const HORIZON_LABELS: Record<Horizon, string> = Object.fromEntries(
+  Object.entries(HORIZON_META).map(([h, m]) => [h, m.label])
+) as Record<Horizon, string>;
 
 type TypeFilter = "ALL" | FeedbackType;
 

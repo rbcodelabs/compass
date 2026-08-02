@@ -27,6 +27,7 @@ import {
 } from "./unscheduled-items-panel";
 import { ScheduleItemDialog } from "./schedule-item-dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { HORIZON_META } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
 
 // The Gantt library reads Date components with local-timezone getters
@@ -68,12 +69,9 @@ function addDays(date: Date, days: number): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
 }
 
-const HORIZON_COLORS: Record<Horizon, string> = {
-  NOW: "#10b981", // emerald-500
-  NEXT: "#3b82f6", // blue-500
-  LATER: "#94a3b8", // slate-400
-  SHIPPED: "#a855f7", // purple-500
-};
+const HORIZON_COLORS: Record<Horizon, string> = Object.fromEntries(
+  Object.entries(HORIZON_META).map(([h, m]) => [h, m.color])
+) as Record<Horizon, string>;
 
 // Named zoom levels, each swapping the Gantt's header scale + column width.
 // The library also ships a continuous wheel-zoom mode (the `zoom` prop), but

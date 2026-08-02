@@ -199,6 +199,10 @@ function fetchRoadmapItem(id: string, workspaceId: string) {
       opportunity: { select: { id: true, title: true } },
       experiment: { select: { id: true, title: true } },
       feedback: { select: { id: true, title: true } },
+      // Launch section: the item's checklist (with ordered items) and its 1:1
+      // positioning brief, if either exists. `horizon` is already a scalar.
+      launchChecklist: { include: { items: { orderBy: { order: "asc" } } } },
+      positioningBrief: { select: { id: true, title: true } },
       _count: { select: { votes: true } },
     },
   });

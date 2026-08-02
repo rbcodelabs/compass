@@ -76,6 +76,9 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
         squad: {
           select: { id: true, name: true, color: true },
         },
+        launchChecklist: {
+          select: { tier: true, items: { select: { status: true } } },
+        },
       },
     }),
     prisma.keyResult.findMany({
@@ -190,6 +193,13 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     experiment: item.experiment ?? null,
     feedback: item.feedback ?? null,
     squad: item.squad ?? null,
+    launchChecklist: item.launchChecklist
+      ? {
+          tier: item.launchChecklist.tier,
+          done: item.launchChecklist.items.filter((i) => i.status === "DONE").length,
+          total: item.launchChecklist.items.length,
+        }
+      : null,
   }));
 
   const unscheduledItems: UnscheduledItem[] = [

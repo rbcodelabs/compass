@@ -23,15 +23,13 @@ import {
   promoteFeedbackToRoadmap,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { UnscheduledItem } from "./unscheduled-items-panel";
+import { HORIZON_META, QUICK_ADD_HORIZONS } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
 
-const HORIZON_LABELS: Record<Horizon, string> = {
-  NOW: "Now",
-  NEXT: "Next",
-  LATER: "Later",
-  SHIPPED: "Shipped",
-};
-const HORIZON_OPTIONS: Horizon[] = ["NOW", "NEXT", "LATER"];
+const HORIZON_LABELS: Record<Horizon, string> = Object.fromEntries(
+  Object.entries(HORIZON_META).map(([h, m]) => [h, m.label])
+) as Record<Horizon, string>;
+const HORIZON_OPTIONS: Horizon[] = QUICK_ADD_HORIZONS;
 
 function todayDateInputValue(): string {
   return toDateInputValue(new Date());

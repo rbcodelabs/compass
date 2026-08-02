@@ -5,29 +5,7 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
 import { AddItemForm } from "./add-item-form";
 import type { Horizon } from "@/lib/types";
-
-const HORIZON_CONFIG: Record<Horizon, { label: string; accentClass: string; emptyText: string }> = {
-  NOW: {
-    label: "Now",
-    accentClass: "bg-emerald-500",
-    emptyText: "What are you shipping right now?",
-  },
-  NEXT: {
-    label: "Next",
-    accentClass: "bg-blue-500",
-    emptyText: "What's coming up after the current work?",
-  },
-  LATER: {
-    label: "Later",
-    accentClass: "bg-slate-400",
-    emptyText: "Ideas and things on the horizon.",
-  },
-  SHIPPED: {
-    label: "Shipped",
-    accentClass: "bg-purple-500",
-    emptyText: "Nothing shipped yet",
-  },
-};
+import { HORIZON_META, isLaunchHorizon } from "@/lib/roadmap";
 
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
 type AvailableSolution = { id: string; title: string; opportunityTitle: string };
@@ -65,8 +43,11 @@ export function RoadmapColumn({
   availableOpportunities,
   availableExperiments,
 }: Props) {
-  const { label, accentClass, emptyText } = HORIZON_CONFIG[horizon];
+  const { label, accentClass, emptyText } = HORIZON_META[horizon];
   const itemIds = items.map((i) => i.id);
+  // A launch horizon (LAUNCHING/LAUNCHED) can't take a freshly-typed item —
+  // items get there only via setLaunchTier — so don't offer the add form.
+  const allowAdd = !isLaunchHorizon(horizon);
 
   const { setNodeRef, isOver } = useDroppable({ id: `column-${horizon}`, data: { horizon } });
 
@@ -118,17 +99,19 @@ export function RoadmapColumn({
         </SortableContext>
       </div>
 
-      {/* Inline add form at column bottom */}
-      <AddItemForm
-        workspaceId={workspaceId}
-        horizon={horizon}
-        revalidatePathStr={revalidatePathStr}
-        onAdd={onItemAdded}
-        availableKRs={availableKRs}
-        availableSolutions={availableSolutions}
-        availableOpportunities={availableOpportunities}
-        availableExperiments={availableExperiments}
-      />
+      {/* Inline add form at column bottom (not on launch horizons) */}
+      {allowAdd && (
+        <AddItemForm
+          workspaceId={workspaceId}
+          horizon={horizon}
+          revalidatePathStr={revalidatePathStr}
+          onAdd={onItemAdded}
+          availableKRs={availableKRs}
+          availableSolutions={availableSolutions}
+          availableOpportunities={availableOpportunities}
+          availableExperiments={availableExperiments}
+        />
+      )}
     </div>
   );
 }

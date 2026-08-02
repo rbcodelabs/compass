@@ -6,6 +6,7 @@ import { GripVertical, Layers, Bug } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
+import { HORIZON_META, QUICK_ADD_HORIZONS } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
 
 // A candidate item that could be scheduled onto the roadmap but isn't yet:
@@ -44,16 +45,12 @@ export function parseUnscheduledDragId(
   return { kind: match[1] as "solution" | "feedback", id: match[2] };
 }
 
-const HORIZON_LABELS: Record<Horizon, string> = {
-  NOW: "Now",
-  NEXT: "Next",
-  LATER: "Later",
-  SHIPPED: "Shipped",
-};
-// "Shipped" is deliberately omitted from quick-add/drag targets here —
-// promoting something straight to Shipped without it ever having been
-// planned doesn't match how the horizon is used elsewhere.
-const QUICK_ADD_HORIZONS: Horizon[] = ["NOW", "NEXT", "LATER"];
+const HORIZON_LABELS: Record<Horizon, string> = Object.fromEntries(
+  Object.entries(HORIZON_META).map(([h, m]) => [h, m.label])
+) as Record<Horizon, string>;
+// QUICK_ADD_HORIZONS (NOW/NEXT/LATER) deliberately omits Shipped and the
+// launch horizons — promoting straight there without planning doesn't match
+// how those horizons are used.
 
 type Props = {
   items: UnscheduledItem[];
