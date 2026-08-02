@@ -119,6 +119,7 @@ export function AddItemForm({
         // promoteToRoadmap's squadId param, not this manual-add path) — new
         // items always start unassigned here, same as before this field existed.
         squad: null,
+        launchChecklist: null,
       });
       setOpen(false);
       reset();

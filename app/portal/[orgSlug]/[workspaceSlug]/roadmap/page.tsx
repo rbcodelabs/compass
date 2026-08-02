@@ -3,6 +3,7 @@ import { MessageSquare } from "lucide-react";
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
 import { RoadmapVoteSection } from "@/components/portal/roadmap-vote-section";
+import { HORIZON_META, PORTAL_HORIZONS, portalBucketFor } from "@/lib/roadmap";
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
@@ -16,21 +17,10 @@ type RoadmapItemWithVotes = {
   _count: { votes: number };
 };
 
-const HORIZONS = ["NOW", "NEXT", "LATER", "SHIPPED"] as const;
-
-const HORIZON_LABELS: Record<string, string> = {
-  NOW: "Now",
-  NEXT: "Next",
-  LATER: "Later",
-  SHIPPED: "Shipped",
-};
-
-const HORIZON_DESCRIPTIONS: Record<string, string> = {
-  NOW: "In progress or shipping soon",
-  NEXT: "Planned for the next cycle",
-  LATER: "On the horizon",
-  SHIPPED: "Completed and live",
-};
+// Public columns: NOW / NEXT / LATER / LAUNCHING / SHIPPED. LAUNCHED items
+// fold into the Shipped column (portalBucketFor); private items are already
+// excluded by the query below.
+const HORIZONS = PORTAL_HORIZONS;
 
 export default async function PortalRoadmapPage({ params }: Props) {
   const { orgSlug, workspaceSlug } = await params;
@@ -79,11 +69,15 @@ export default async function PortalRoadmapPage({ params }: Props) {
 
   const itemsByHorizon = HORIZONS.reduce(
     (acc, h) => {
-      acc[h] = rawItems.filter((i) => i.horizon === h);
+      acc[h] = [];
       return acc;
     },
     {} as Record<string, RoadmapItemWithVotes[]>
   );
+  for (const item of rawItems) {
+    const bucket = portalBucketFor(item.horizon);
+    if (bucket) itemsByHorizon[bucket].push(item);
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -105,14 +99,14 @@ export default async function PortalRoadmapPage({ params }: Props) {
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
         {HORIZONS.map((horizon) => (
           <div key={horizon} className="flex flex-col gap-3">
             <div className="flex flex-col gap-0.5 pb-2 border-b border-slate-200">
               <span className="text-sm font-semibold text-slate-800">
-                {HORIZON_LABELS[horizon]}
+                {HORIZON_META[horizon].label}
               </span>
-              <span className="text-xs text-slate-500">{HORIZON_DESCRIPTIONS[horizon]}</span>
+              <span className="text-xs text-slate-500">{HORIZON_META[horizon].portalDescription}</span>
             </div>
             <div className="flex flex-col gap-2">
               {itemsByHorizon[horizon].length === 0 ? (

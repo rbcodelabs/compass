@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
 import type { Horizon } from "@/lib/types";
+import { isLaunchHorizon } from "@/lib/roadmap";
 
 // ─── Add Roadmap Item ─────────────────────────────────────────────────────────
 
@@ -101,6 +102,16 @@ export async function moveItem(
   workspaceId: string,
   revalidatePathStr: string
 ) {
+  // A bare move can't enter a launch horizon — LAUNCHING requires a tier +
+  // checklist (setLaunchTier), and LAUNCHED its own transition. The board's
+  // drag handler already intercepts these drops and opens the panel instead;
+  // this is the server-side backstop mirroring the MCP move guard.
+  if (isLaunchHorizon(horizon)) {
+    throw new Error(
+      "Use a launch tier to move an item into LAUNCHING/LAUNCHED — it can't be set by a plain move.",
+    );
+  }
+
   const prisma = getPrisma();
 
   // Place the moved item at the end of the destination column.

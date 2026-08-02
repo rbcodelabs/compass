@@ -81,5 +81,7 @@ export const HORIZON_BADGE: Record<Horizon, { label: string; className: string }
   NOW: { label: "Now", className: "bg-emerald-500" },
   NEXT: { label: "Next", className: "bg-blue-500" },
   LATER: { label: "Later", className: "bg-slate-400" },
+  LAUNCHING: { label: "Launching", className: "bg-amber-500" },
+  LAUNCHED: { label: "Launched", className: "bg-teal-500" },
   SHIPPED: { label: "Shipped", className: "bg-purple-500" },
 };

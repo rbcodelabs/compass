@@ -12,6 +12,7 @@
  */
 import getPrisma from "@/lib/db";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
+import { SETTABLE_HORIZONS } from "@/lib/roadmap";
 
 type EnumFieldConfig = { field: "status" | "horizon"; options: readonly string[] };
 
@@ -30,7 +31,11 @@ const SOLUTION_STATUS = ["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"
 const ASSUMPTION_STATUS = ["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"] as const;
 const EXPERIMENT_STATUS = ["DESIGNING", "RUNNING", "COMPLETE", "KILLED"] as const;
 const FEEDBACK_STATUS = ["OPEN", "UNDER_REVIEW", "PLANNED", "IN_PROGRESS", "COMPLETED", "DECLINED"] as const;
-const ROADMAP_HORIZON = ["NOW", "NEXT", "LATER", "SHIPPED"] as const;
+// Horizons the generic single-field edit may set. LAUNCHING is deliberately
+// absent — entering it must go through setLaunchTier (which creates the
+// checklist transactionally), never a bare horizon PATCH. See the explicit
+// guard in updateEntityField.
+const ROADMAP_HORIZON = SETTABLE_HORIZONS;
 
 /**
  * What each entity type exposes for inline editing in the panel. Exported so
@@ -87,6 +92,18 @@ export async function updateEntityField(
     const trimmed = typeof value === "string" ? value.trim() : "";
     data = { description: trimmed.length > 0 ? trimmed : null };
   } else if (config.enum && field === config.enum.field) {
+    // Load-bearing guard: LAUNCHING may only be entered via setLaunchTier,
+    // which creates the launch checklist in the same transaction. A bare
+    // horizon write here would flip the item to LAUNCHING with no checklist,
+    // bypassing that invariant — reject it explicitly with a clear message
+    // (it's also absent from SETTABLE_HORIZONS, but say why).
+    if (type === "roadmapItem" && field === "horizon" && value === "LAUNCHING") {
+      return {
+        ok: false,
+        status: 400,
+        error: "Set a launch tier to move an item into LAUNCHING — it can't be set directly.",
+      };
+    }
     if (typeof value !== "string" || !config.enum.options.includes(value)) {
       return { ok: false, status: 400, error: `Invalid ${field}` };
     }

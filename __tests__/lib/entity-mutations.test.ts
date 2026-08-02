@@ -88,6 +88,21 @@ describe("updateEntityField — validation", () => {
     expect(r.ok).toBe(false);
   });
 
+  it("accepts LAUNCHED as a settable horizon", async () => {
+    const r = await updateEntityField("roadmapItem", "e1", WS, "horizon", "LAUNCHED");
+    expect(r.ok).toBe(true);
+    expect(models.roadmapItem.update.mock.calls[0][0].data.horizon).toBe("LAUNCHED");
+  });
+
+  it("rejects a bare LAUNCHING horizon PATCH — only setLaunchTier may enter LAUNCHING (load-bearing guard)", async () => {
+    const r = await updateEntityField("roadmapItem", "e1", WS, "horizon", "LAUNCHING");
+    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ status: 400 });
+    if (!r.ok) expect(r.error).toMatch(/launch tier/i);
+    // Critically: no write ever happens, so the checklist-creation transaction can't be bypassed.
+    expect(models.roadmapItem.update).not.toHaveBeenCalled();
+  });
+
   it("rejects an entirely unknown field", async () => {
     const r = await updateEntityField("opportunity", "e1", WS, "workspaceId", "other-ws");
     expect(r).toEqual({ ok: false, status: 400, error: 'Field "workspaceId" is not editable' });

@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Lightbulb, FlaskConical, Layers, TrendingUp, Bug, CalendarDays, Lock } from "lucide-react";
+import { GripVertical, Lightbulb, FlaskConical, Layers, TrendingUp, Bug, CalendarDays, Lock, Rocket } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -14,6 +14,7 @@ import { usePanelContext } from "@/components/panels/panel-context";
 import { EditItemDialog } from "./edit-item-dialog";
 
 import type { Horizon } from "@/lib/types";
+import { isLaunchHorizon } from "@/lib/roadmap";
 
 export type RoadmapCardData = {
   id: string;
@@ -42,6 +43,7 @@ export type RoadmapCardData = {
   experiment: { id: string; title: string } | null;
   feedback: { id: string; title: string; type: string } | null;
   squad: { id: string; name: string; color: string } | null;
+  launchChecklist: { tier: string; done: number; total: number } | null;
 };
 
 // Compact "Mar 3 – Apr 10" style range formatter. Handles single-ended ranges too.
@@ -143,6 +145,20 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
                 Private
               </span>
             )}
+            {isLaunchHorizon(item.horizon) && item.launchChecklist && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openPanel("roadmapItem", item.id);
+                }}
+                title={`Launch checklist: ${item.launchChecklist.done} of ${item.launchChecklist.total} done`}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors px-1.5 py-0.5 text-[10px] font-medium shrink-0"
+              >
+                <Rocket className="size-2.5" />
+                {item.launchChecklist.done}/{item.launchChecklist.total}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => openPanel("roadmapItem", item.id)}
@@ -157,6 +173,10 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
               {
                 label: "Edit",
                 onClick: () => setEditOpen(true),
+              },
+              {
+                label: "Launch",
+                onClick: () => openPanel("roadmapItem", item.id),
               },
               {
                 label: "Archive",

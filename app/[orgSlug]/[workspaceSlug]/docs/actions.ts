@@ -2,6 +2,7 @@
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
+import { createPositioningBriefCore } from "@/lib/positioning-brief";
 
 export async function createDoc(
   workspaceId: string,
@@ -47,6 +48,26 @@ export async function updateDocMetadata(
     data: { metadata: metadata as any, updatedAt: new Date() },
   });
   revalidatePath(revalidatePathStr);
+}
+
+/**
+ * Create (or return the existing) Positioning & Messaging Brief for a roadmap
+ * item, from the roadmap-item panel's Launch section. Returns the brief's doc
+ * id so the caller can navigate straight to the editor.
+ */
+export async function createPositioningBrief(
+  roadmapItemId: string,
+  workspaceId: string,
+  revalidatePathStr: string
+): Promise<{ docId: string }> {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const result = await createPositioningBriefCore(roadmapItemId, workspaceId);
+  if (!result.ok) throw new Error("Roadmap item not found");
+
+  revalidatePath(revalidatePathStr);
+  return { docId: result.docId };
 }
 
 export async function deleteDoc(docId: string, revalidatePathStr: string) {
