@@ -133,23 +133,6 @@ export function Sidebar({
         </DropdownMenu>
       </div>
 
-      {isOrgAdmin && (
-        <div className="px-3 pb-4 -mt-2">
-          <Link
-            href={`/${orgSlug}/settings`}
-            className={cn(
-              "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-              pathname.startsWith(`/${orgSlug}/settings`)
-                ? "bg-indigo-600/20 text-white"
-                : "text-slate-500 hover:bg-slate-800/50 hover:text-slate-300"
-            )}
-          >
-            <Building2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-            Org Settings
-          </Link>
-        </div>
-      )}
-
       <div className="mx-3 h-px bg-slate-800/70" />
 
       {/* Nav links */}
@@ -191,84 +174,14 @@ export function Sidebar({
 
       <div className="mx-3 h-px bg-slate-800/70" />
 
-      {/* Settings */}
-      <nav className="px-2 py-2" aria-label="Settings navigation">
-        {(() => {
-          const href = `${base}/settings`
-          const isActive = pathname.startsWith(href)
-          return (
-            <Link
-              href={href}
-              className={cn(
-                "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150",
-                isActive
-                  ? "bg-primary/20 text-white"
-                  : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
-              )}
-            >
-              {isActive && (
-                <span
-                  className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-full"
-                  aria-hidden="true"
-                />
-              )}
-              <Settings
-                className={cn(
-                  "w-4 h-4 shrink-0 transition-colors",
-                  isActive ? "text-primary" : "text-slate-500"
-                )}
-                aria-hidden="true"
-              />
-              Settings
-            </Link>
-          )
-        })()}
-      </nav>
-
-      <div className="mx-3 h-px bg-slate-800/70" />
-
-      {/* Help — absolute link, outside workspace scope */}
-      <nav className="px-2 py-2" aria-label="Help navigation">
-        <Link
-          href="/help"
-          className={cn(
-            "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150",
-            pathname.startsWith("/help")
-              ? "bg-primary/20 text-white"
-              : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
-          )}
-        >
-          {pathname.startsWith("/help") && (
-            <span
-              className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-full"
-              aria-hidden="true"
-            />
-          )}
-          <HelpCircle
-            className={cn(
-              "w-4 h-4 shrink-0 transition-colors",
-              pathname.startsWith("/help") ? "text-primary" : "text-slate-500"
-            )}
-            aria-hidden="true"
-          />
-          Help
-        </Link>
-      </nav>
-
-      <div className="mx-3 h-px bg-slate-800/70" />
-
-      {/* Send Feedback about Compass — global entry point, not workspace-scoped;
-          always routes into the configured target workspace server-side. */}
-      <nav className="px-2 py-2" aria-label="Feedback navigation">
-        <SendCompassFeedbackDialog />
-      </nav>
-
-      <div className="mx-3 h-px bg-slate-800/70" />
-
-      {/* User */}
+      {/* User — secondary items (Settings, Org Settings, Help, Send Feedback)
+          live in this dropdown instead of cluttering primary nav. */}
       <div className="px-3 py-3.5">
         <DropdownMenu>
-          <DropdownMenuTrigger className="w-full flex items-center gap-2.5 rounded-lg px-0.5 py-1 text-left hover:bg-slate-800/60 transition-colors">
+          <DropdownMenuTrigger
+            className="w-full flex items-center gap-2.5 rounded-lg px-0.5 py-1 text-left hover:bg-slate-800/60 transition-colors"
+            aria-label="Account menu"
+          >
             <Avatar className="w-6 h-6 shrink-0">
               {userImage && <AvatarImage src={userImage} alt={userName} />}
               <AvatarFallback className="text-[10px] font-semibold bg-slate-700 text-slate-200">
@@ -277,11 +190,53 @@ export function Sidebar({
             </Avatar>
             <span className="text-xs text-slate-400 truncate flex-1">{userName}</span>
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="bg-slate-900 text-slate-200 ring-slate-700">
+          <DropdownMenuContent className="bg-slate-900 text-slate-200 ring-slate-700 min-w-[200px]">
             <div className="px-1.5 py-1">
               <p className="text-sm font-medium text-slate-100 truncate">{userName}</p>
               <p className="text-xs text-slate-500 truncate">{userEmail}</p>
             </div>
+            <DropdownMenuSeparator className="bg-slate-700" />
+            <DropdownMenuItem
+              className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
+            >
+              <Link
+                href={`${base}/settings`}
+                className="flex w-full items-center gap-2 px-1.5 py-1"
+              >
+                <Settings className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                Settings
+              </Link>
+            </DropdownMenuItem>
+            {isOrgAdmin && (
+              <DropdownMenuItem
+                className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
+              >
+                <Link
+                  href={`/${orgSlug}/settings`}
+                  className="flex w-full items-center gap-2 px-1.5 py-1"
+                >
+                  <Building2 className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                  Org Settings
+                </Link>
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
+            >
+              <Link
+                href="/help"
+                className="flex w-full items-center gap-2 px-1.5 py-1"
+              >
+                <HelpCircle className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                Help
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
+              closeOnClick={false}
+            >
+              <SendCompassFeedbackDialog />
+            </DropdownMenuItem>
             <DropdownMenuSeparator className="bg-slate-700" />
             <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
               <form action={signOutAction} className="w-full">

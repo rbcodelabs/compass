@@ -68,7 +68,7 @@ Attachments upload as soon as they're selected, showing a thumbnail (for images)
 You don't have to wait for a customer submission to add something to the queue — your own team can log feedback directly, without going through the public portal:
 
 - **On a workspace's Feedback board**, click **New Feedback** (also available from the empty state) to log an idea or bug against that workspace. It shows up in the board immediately, scoped just like a portal submission.
-- **From anywhere in Compass** — any org, any workspace — use **Send Feedback about Compass** in the sidebar (or the feedback icon in the mobile header) to report a bug or suggest an improvement about Compass itself. This always lands in the Compass team's own workspace, regardless of which org or workspace you're currently working in, so it reaches the team no matter where you are.
+- **From anywhere in Compass** — any org, any workspace — open the account menu under your avatar (bottom of the sidebar on desktop, or **Account** in the mobile header) and choose **Send Feedback about Compass** to report a bug or suggest an improvement about Compass itself. This always lands in the Compass team's own workspace, regardless of which org or workspace you're currently working in, so it reaches the team no matter where you are.
 
 Both flows attach your name and email automatically from your Compass login, so the team knows who to follow up with.
 

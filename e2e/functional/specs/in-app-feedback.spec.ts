@@ -6,12 +6,14 @@
  *         — previously this board was triage-only (view/status-change
  *         existing items), with no way to create a new item in-app.
  *
- * Part B: the global "Send Feedback about Compass" entry point (sidebar),
- *         reachable from ANY org/workspace the user is in, which always
- *         routes the submission into the rbcodelabs/compass workspace
+ * Part B: the global "Send Feedback about Compass" entry point, reachable
+ *         from ANY org/workspace the user is in, which always routes the
+ *         submission into the rbcodelabs/compass workspace
  *         (COMPASS_META_ORG_SLUG/COMPASS_META_WORKSPACE_SLUG) regardless of
  *         current context — the in-app replacement for the prior workaround
  *         of an external agent skill hardcoding a curl to rbcodelabs/compass.
+ *         Lives inside the sidebar's avatar "Account menu" dropdown
+ *         alongside Settings/Org Settings/Help, not as a standalone link.
  */
 import { test, expect } from "../fixtures/index";
 import {
@@ -53,6 +55,9 @@ test.describe("In-App Feedback Submission", () => {
     await page.goto(`${base}/okrs`);
     await page.waitForLoadState("networkidle");
 
+    // "Send Feedback about Compass" lives inside the avatar dropdown menu,
+    // not as a standalone sidebar link — open it first.
+    await page.getByRole("button", { name: "Account menu" }).click();
     await page.getByRole("button", { name: "Send Feedback about Compass" }).click();
     await page.getByLabel("Title").fill(title);
     await page.getByRole("button", { name: "Send", exact: true }).click();
