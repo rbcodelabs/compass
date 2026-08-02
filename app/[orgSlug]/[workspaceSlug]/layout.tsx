@@ -52,6 +52,7 @@ export default async function WorkspaceLayout({
           userName={session.user.name ?? session.user.email ?? ""}
           userEmail={session.user.email ?? ""}
           userImage={session.user.image ?? undefined}
+          isOrgAdmin={isOrgAdmin}
         />
 
         {/* On mobile: subtract the 56px header height so the content area fills the rest */}

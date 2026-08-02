@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Settings, BookOpen, HelpCircle, Lightbulb, CircleUser } from "lucide-react"
+import { Settings, BookOpen, HelpCircle, Lightbulb, CircleUser, Building2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { usePanelContext } from "@/components/panels/panel-context"
 import { signOutAction } from "@/lib/actions/auth-actions"
@@ -32,6 +32,8 @@ interface MobileHeaderProps {
   userName: string
   userEmail: string
   userImage?: string
+  /** Org admins/owners see an "Org Settings" link in the account menu. */
+  isOrgAdmin?: boolean
 }
 
 export function MobileHeader({
@@ -41,6 +43,7 @@ export function MobileHeader({
   userName,
   userEmail,
   userImage,
+  isOrgAdmin = false,
 }: MobileHeaderProps) {
   const pathname = usePathname()
   const { openPanel } = usePanelContext()
@@ -104,33 +107,6 @@ export function MobileHeader({
           <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
           <span className="text-[10px] font-medium leading-none">Docs</span>
         </Link>
-        <Link
-          href={`${base}/settings`}
-          className={cn(
-            "flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 transition-colors",
-            pathname.startsWith(`${base}/settings`)
-              ? "bg-primary/20 text-primary"
-              : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
-          )}
-          aria-label="Settings"
-        >
-          <Settings className="w-3.5 h-3.5" aria-hidden="true" />
-          <span className="text-[10px] font-medium leading-none">Settings</span>
-        </Link>
-        <SendCompassFeedbackDialog compact />
-        <Link
-          href="/help"
-          className={cn(
-            "flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 transition-colors",
-            pathname.startsWith("/help")
-              ? "bg-primary/20 text-primary"
-              : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
-          )}
-          aria-label="Help"
-        >
-          <HelpCircle className="w-3.5 h-3.5" aria-hidden="true" />
-          <span className="text-[10px] font-medium leading-none">Help</span>
-        </Link>
         <DropdownMenu>
           <DropdownMenuTrigger
             className="flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors"
@@ -152,6 +128,39 @@ export function MobileHeader({
                 <p className="text-xs text-slate-500 truncate">{userEmail}</p>
               </div>
             </div>
+            <DropdownMenuSeparator className="bg-slate-700" />
+            <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+              <Link
+                href={`${base}/settings`}
+                className="flex w-full items-center gap-2 px-1.5 py-1"
+              >
+                <Settings className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                Settings
+              </Link>
+            </DropdownMenuItem>
+            {isOrgAdmin && (
+              <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+                <Link
+                  href={`/${orgSlug}/settings`}
+                  className="flex w-full items-center gap-2 px-1.5 py-1"
+                >
+                  <Building2 className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                  Org Settings
+                </Link>
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+              <Link
+                href="/help"
+                className="flex w-full items-center gap-2 px-1.5 py-1"
+              >
+                <HelpCircle className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                Help
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+              <SendCompassFeedbackDialog />
+            </DropdownMenuItem>
             <DropdownMenuSeparator className="bg-slate-700" />
             <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
               <form action={signOutAction} className="w-full">
