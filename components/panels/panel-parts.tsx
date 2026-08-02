@@ -301,17 +301,19 @@ export function EditableText({
   className?: string;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value ?? "");
   const [saving, setSaving] = useState(false);
+  // Uncontrolled input read via ref: commit takes the field's *actual* value
+  // at commit time rather than a `draft` state snapshot. Reading state would
+  // race when the value arrives all at once and Enter follows immediately —
+  // a paste-then-Enter, or a programmatic fill — because React may not have
+  // re-rendered the new draft into the commit closure yet.
+  const ref = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
 
-  const begin = () => {
-    setDraft(value ?? "");
-    setEditing(true);
-  };
+  const begin = () => setEditing(true);
 
   const commit = async () => {
     setEditing(false);
-    const next = draft.trim();
+    const next = (ref.current?.value ?? "").trim();
     if (next === (value ?? "").trim()) return; // unchanged
     setSaving(true);
     try {
@@ -335,16 +337,16 @@ export function EditableText({
   if (editing) {
     const shared = {
       autoFocus: true,
-      value: draft,
-      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-        setDraft(e.target.value),
+      defaultValue: value ?? "",
       onBlur: commit,
       placeholder,
+      "aria-label": `Edit ${field}`,
       className: `w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring ${className ?? ""}`,
     };
     return multiline ? (
       <textarea
         {...shared}
+        ref={ref as React.RefObject<HTMLTextAreaElement>}
         rows={4}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void commit();
@@ -354,6 +356,7 @@ export function EditableText({
     ) : (
       <input
         {...shared}
+        ref={ref as React.RefObject<HTMLInputElement>}
         onKeyDown={(e) => {
           if (e.key === "Enter") void commit();
           if (e.key === "Escape") setEditing(false);
