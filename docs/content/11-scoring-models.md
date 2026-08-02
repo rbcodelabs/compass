@@ -20,7 +20,7 @@ Scoring in Compass has three layers:
 
 ## Creating a Scoring Model
 
-Organization admins manage scoring models in **Org Settings → Scoring Models** (linked from the sidebar for admins/owners). When creating a model, specify:
+Organization admins manage scoring models in **Org Settings → Scoring Models** (reachable via **Org Settings** in the avatar account menu for admins/owners). When creating a model, specify:
 
 - **Name** — e.g. "RICE", "ICE", "Effort vs. Impact"
 - **Description** — When and why to use this model
