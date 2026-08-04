@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils"
 import { signOutAction } from "@/lib/actions/auth-actions"
 import { SendCompassFeedbackDialog } from "@/components/feedback/send-compass-feedback-dialog"
+import { getWorkspaceSwitchPath } from "@/lib/workspace-nav"
 
 interface SidebarProps {
   orgSlug: string
@@ -61,9 +62,6 @@ export function Sidebar({
   const router = useRouter()
   const base = `/${orgSlug}/${workspaceSlug}`
 
-  // Strip the /{orgSlug}/{workspaceSlug} prefix to get the current section (e.g. "/okrs")
-  const currentSection = pathname.startsWith(base) ? pathname.slice(base.length) : ""
-
   const otherWorkspaces = workspaces.filter(
     (ws) => !(ws.slug === workspaceSlug && ws.orgSlug === orgSlug)
   )
@@ -108,7 +106,11 @@ export function Sidebar({
               <DropdownMenuItem
                 key={ws.id}
                 className="flex items-center gap-2 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
-                onClick={() => router.push(`/${ws.orgSlug}/${ws.slug}${currentSection}`)}
+                onClick={() =>
+                  router.push(
+                    getWorkspaceSwitchPath(pathname, orgSlug, workspaceSlug, ws.orgSlug, ws.slug)
+                  )
+                }
               >
                 <div className="w-4 h-4 flex items-center justify-center shrink-0">
                   {ws.slug === workspaceSlug && ws.orgSlug === orgSlug && (

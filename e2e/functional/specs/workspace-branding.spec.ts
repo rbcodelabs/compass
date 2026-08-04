@@ -176,10 +176,9 @@ test.describe.serial("Workspace Branding", () => {
         .toBe("rgb(225, 29, 72)");
 
       // ── 2. Ensure the public roadmap is enabled so the portal page renders ──
-      // PortalSettingsPanel renders roadmap as the first switch (see
-      // portal.spec.ts for the same structural-locator convention — no
-      // aria-label exists on these toggles).
-      const roadmapToggle = page.locator('[role="switch"]').first();
+      // No aria-label exists on these toggles (see portal.spec.ts), so locate
+      // by the stable data-testid rather than a positional index.
+      const roadmapToggle = page.getByTestId("portal-toggle-roadmap");
       const wasPublic = (await roadmapToggle.getAttribute("aria-checked")) === "true";
       if (!wasPublic) {
         await roadmapToggle.click();

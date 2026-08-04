@@ -21,10 +21,11 @@ test.describe("Portal — public roadmap", () => {
       // The toggle button has role="switch" + aria-checked, but NO aria-label.
       // Its accessible name is empty: the visible label ("Public roadmap") is a
       // sibling <span>, not a <label> element, so getByRole("switch", {name})
-      // matches nothing. Use a structural locator instead: the first
-      // [role="switch"] on the settings page is always the roadmap toggle
-      // (it renders above the feedback toggle in the portal-settings-panel).
-      const toggle = page.locator('[role="switch"]').first();
+      // matches nothing. Use the stable data-testid instead of a positional
+      // [role="switch"] locator — positional indices shift when other specs
+      // running concurrently against the shared seeded workspace toggle
+      // sibling switches, causing intermittent cross-spec flakiness.
+      const toggle = page.getByTestId("portal-toggle-roadmap");
 
       const ariaChecked = await toggle.getAttribute("aria-checked");
       const isChecked = ariaChecked === "true";
@@ -78,11 +79,12 @@ test.describe("Portal — account authentication (portalAuthRequired)", () => {
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
 
-      // Switch order in the portal-settings-panel DOM: [0]=roadmap,
-      // [1]=feedback, [2]=portalAuthRequired (only rendered once the portal
-      // is public — i.e. once feedback or roadmap is on). No aria-label on
-      // any of them (see the roadmap test above), so locate structurally.
-      const feedbackToggle = page.locator('[role="switch"]').nth(1);
+      // No aria-label on these toggles (see the roadmap test above), so use
+      // the stable data-testid rather than a positional index — indices
+      // shift when concurrently-running specs add/remove sibling switches
+      // (e.g. the auth-required and SSO toggles only render once the portal
+      // is public), which was the root cause of the cross-spec flakiness.
+      const feedbackToggle = page.getByTestId("portal-toggle-feedback");
 
       // ── 2. Ensure feedback is enabled (needed to submit + vote at all) ─────
       const feedbackWasEnabled =
@@ -103,9 +105,9 @@ test.describe("Portal — account authentication (portalAuthRequired)", () => {
       expect(createRes.ok()).toBe(true);
       const { id: feedbackItemId } = (await createRes.json()) as { id: string };
 
-      // ── 4. Now enable "require an account" — the third switch, which only
-      //        exists in the DOM now that feedback is public. ───────────────
-      const portalAuthToggle = page.locator('[role="switch"]').nth(2);
+      // ── 4. Now enable "require an account" — only exists in the DOM now
+      //        that feedback is public. ─────────────────────────────────────
+      const portalAuthToggle = page.getByTestId("portal-toggle-auth-required");
       await expect(portalAuthToggle).toBeVisible({ timeout: 5_000 });
       const authWasRequired =
         (await portalAuthToggle.getAttribute("aria-checked")) === "true";
