@@ -20,18 +20,18 @@ test.describe("Portal — SSO Identify", () => {
       await page.waitForLoadState("networkidle");
 
       // ── 2. Ensure the portal is public (SSO section only renders once it
-      //        is) — reuse the roadmap toggle, same structural locator as
-      //        portal.spec.ts ([0]=roadmap, [1]=feedback). ───────────────────
-      const roadmapToggle = page.locator('[role="switch"]').first();
+      //        is) — reuse the roadmap toggle via its stable data-testid,
+      //        same as portal.spec.ts. ────────────────────────────────────
+      const roadmapToggle = page.getByTestId("portal-toggle-roadmap");
       const roadmapWasPublic = (await roadmapToggle.getAttribute("aria-checked")) === "true";
       if (!roadmapWasPublic) {
         await roadmapToggle.click();
         await page.waitForLoadState("networkidle");
       }
 
-      // ── 3. Enable SSO Identify. Once the portal is public, switches are:
-      //        [0]=roadmap, [1]=feedback, [2]=require-account, [3]=SSO. ──────
-      const ssoToggle = page.locator('[role="switch"]').nth(3);
+      // ── 3. Enable SSO Identify — located by its stable data-testid rather
+      //        than positional index (see portal.spec.ts for why). ──────────
+      const ssoToggle = page.getByTestId("portal-toggle-sso");
       await expect(ssoToggle).toBeVisible({ timeout: 5_000 });
       const ssoWasEnabled = (await ssoToggle.getAttribute("aria-checked")) === "true";
       if (!ssoWasEnabled) {

@@ -22,7 +22,7 @@ import { test, expect } from "../fixtures/index";
 test.describe("Roadmap — private items", () => {
   test(
     "private item is hidden from the public portal and not votable, public item is unaffected",
-    async ({ page, base, orgSlug, workspaceSlug, browser }) => {
+    async ({ page, base, orgSlug, workspaceSlug, browser, baseURL }) => {
       const ts = Date.now();
       const privateTitle = `E2E Private Item ${ts}`;
       const publicTitle = `E2E Public Item ${ts}`;
@@ -71,7 +71,7 @@ test.describe("Roadmap — private items", () => {
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
 
-      const roadmapToggle = page.locator('[role="switch"]').first();
+      const roadmapToggle = page.getByTestId("portal-toggle-roadmap");
       const roadmapWasPublic = (await roadmapToggle.getAttribute("aria-checked")) === "true";
       if (!roadmapWasPublic) {
         await roadmapToggle.click();
@@ -85,7 +85,7 @@ test.describe("Roadmap — private items", () => {
         const anonPage = await anonContext.newPage();
 
         await anonPage.goto(
-          `http://localhost:3002/portal/${orgSlug}/${workspaceSlug}/roadmap`
+          `${baseURL}/portal/${orgSlug}/${workspaceSlug}/roadmap`
         );
         await anonPage.waitForLoadState("networkidle");
 
@@ -97,8 +97,7 @@ test.describe("Roadmap — private items", () => {
         //      same as a nonexistent item — defense in depth even if the ID
         //      leaks some other way ─────────────────────────────────────────
         const voteRes = await anonContext.request.post(
-          "http://localhost:3002" +
-            `/api/portal/${orgSlug}/${workspaceSlug}/vote`,
+          `${baseURL}/api/portal/${orgSlug}/${workspaceSlug}/vote`,
           {
             data: {
               type: "roadmap",

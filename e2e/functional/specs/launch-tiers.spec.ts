@@ -113,9 +113,9 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
       //       under the "Launching" column in an unauthenticated context ─────
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
-      // The first [role="switch"] on settings is the public-roadmap toggle
-      // (see portal.spec.ts — it has no accessible name, so locate structurally).
-      const toggle = page.locator('[role="switch"]').first();
+      // The public-roadmap toggle has no accessible name (see portal.spec.ts),
+      // so locate it by its stable data-testid rather than a positional index.
+      const toggle = page.getByTestId("portal-toggle-roadmap");
       const wasEnabled = (await toggle.getAttribute("aria-checked")) === "true";
       if (!wasEnabled) {
         await toggle.click();

@@ -107,6 +107,7 @@ export function PortalSettingsPanel({
         <button
           type="button"
           role="switch"
+          data-testid="portal-toggle-roadmap"
           aria-checked={roadmapPublic}
           disabled={isPending}
           onClick={() => handleToggle("roadmapPublic", !roadmapPublic)}
@@ -146,6 +147,7 @@ export function PortalSettingsPanel({
         <button
           type="button"
           role="switch"
+          data-testid="portal-toggle-feedback"
           aria-checked={feedbackEnabled}
           disabled={isPending}
           onClick={() => handleToggle("feedbackEnabled", !feedbackEnabled)}
@@ -175,6 +177,7 @@ export function PortalSettingsPanel({
           <button
             type="button"
             role="switch"
+            data-testid="portal-toggle-auth-required"
             aria-checked={portalAuthRequired}
             disabled={isPending}
             onClick={() => handleToggle("portalAuthRequired", !portalAuthRequired)}
@@ -211,6 +214,7 @@ export function PortalSettingsPanel({
             <button
               type="button"
               role="switch"
+              data-testid="portal-toggle-sso"
               aria-checked={ssoEnabled}
               disabled={isPending}
               onClick={() => handleToggle("ssoEnabled", !ssoEnabled)}
