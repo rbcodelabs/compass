@@ -69,6 +69,12 @@ import {
   unlinkTask,
   listTaskLinks,
 } from "@/lib/task-tool-handlers"
+import {
+  createSquad,
+  getSquad,
+  listSquads,
+  updateSquad,
+} from "@/lib/squad-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -1481,6 +1487,24 @@ const _handler = createMcpHandler(
     // ════════════════════════════════════════════════════════════════
 
     server.registerTool(
+      "create_squad",
+      {
+        title: "Create Squad",
+        description: "Creates a new squad in a workspace. Returns the squad ID, name, and color.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          name: z.string().trim().min(1).describe("Human-readable squad name"),
+          color: z
+            .string()
+            .regex(/^#[0-9a-fA-F]{6}$/, "Color must be a six-digit hex value such as #6366f1")
+            .optional()
+            .describe("Squad color as a six-digit hex value (defaults to #6366f1)"),
+        },
+      },
+      createSquad
+    )
+
+    server.registerTool(
       "list_squads",
       {
         title: "List Squads",
@@ -1489,18 +1513,37 @@ const _handler = createMcpHandler(
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
         },
       },
-      async ({ workspaceId }) => {
-        const prisma = getPrisma()
-        const squads = await prisma.squad.findMany({
-          where: { workspaceId },
-          orderBy: { createdAt: "asc" },
-        })
-        if (!squads.length) {
-          return { content: [{ type: "text" as const, text: "No squads in this workspace." }] }
-        }
-        const lines = squads.map(s => `• **${s.name}** (${s.color}) — ID: ${s.id}`)
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
-      }
+      listSquads
+    )
+
+    server.registerTool(
+      "get_squad",
+      {
+        title: "Get Squad",
+        description: "Returns a squad's ID, workspace ID, name, and color.",
+        inputSchema: {
+          squadId: z.string().uuid().describe("UUID of the squad"),
+        },
+      },
+      getSquad
+    )
+
+    server.registerTool(
+      "update_squad",
+      {
+        title: "Update Squad",
+        description: "Updates a squad's name and/or color. Returns the updated squad.",
+        inputSchema: {
+          squadId: z.string().uuid().describe("UUID of the squad"),
+          name: z.string().trim().min(1).optional().describe("New human-readable squad name"),
+          color: z
+            .string()
+            .regex(/^#[0-9a-fA-F]{6}$/, "Color must be a six-digit hex value such as #6366f1")
+            .optional()
+            .describe("New squad color as a six-digit hex value"),
+        },
+      },
+      updateSquad
     )
 
     server.registerTool(

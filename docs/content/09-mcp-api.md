@@ -103,7 +103,10 @@ The MCP server exposes tools that agents can call, grouped below by area.
 
 | Tool | Description |
 |---|---|
+| `create_squad` | Create a squad in a workspace with a name and optional six-digit hex color |
 | `list_squads` | List all squads in a workspace with their IDs and colors |
+| `get_squad` | Return a squad's ID, workspace ID, name, and color |
+| `update_squad` | Update a squad's name and/or color |
 | `assign_squad` | Assign a Squad to any object — opportunity, experiment, roadmap item, objective, or task (or clear it) |
 
 ### Tasks
