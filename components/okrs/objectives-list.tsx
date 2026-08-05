@@ -27,6 +27,7 @@ import type {
   CustomFieldValue,
   SquadData,
 } from "@/lib/types";
+import type { ParentKROption } from "@/components/okrs/objective-row";
 
 interface KeyResult {
   id: string;
@@ -34,6 +35,14 @@ interface KeyResult {
   current: number;
   target: number;
   unit: string | null;
+  supportingObjectives?: Array<{
+    id: string;
+    title: string;
+    status: ObjectiveStatus;
+    cycle: { id: string; title: string };
+    squad: SquadData | null;
+    keyResults: Array<{ current: number; target: number }>;
+  }>;
 }
 
 interface ObjectiveData {
@@ -52,7 +61,7 @@ type Props = {
   orgSlug: string;
   workspaceSlug: string;
   cyclePath: string;
-  availableKRs?: { id: string; title: string; objectiveTitle: string }[];
+  availableKRs?: ParentKROption[];
 };
 
 export function ObjectivesList({
@@ -109,10 +118,7 @@ export function ObjectivesList({
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
             revalidatePathStr={cyclePath}
-            availableKRs={availableKRs.filter((kr) => {
-              // Exclude KRs that belong to this objective
-              return !obj.keyResults.some((okr) => okr.id === kr.id);
-            })}
+            availableKRs={availableKRs}
             parentKeyResultId={obj.parentKeyResultId ?? null}
           />
         ))}
@@ -135,7 +141,7 @@ function ObjectiveRowWithKRSort({
   orgSlug: string;
   workspaceSlug: string;
   revalidatePathStr: string;
-  availableKRs?: { id: string; title: string; objectiveTitle: string }[];
+  availableKRs?: ParentKROption[];
   parentKeyResultId?: string | null;
 }) {
   const [keyResults, setKeyResults] = useState(objective.keyResults);

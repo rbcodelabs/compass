@@ -32,6 +32,32 @@ describe("buildCanvasEdges", () => {
     expect(edges).toEqual([{ id: "e-obj-1-kr-1", source: "obj-1", target: "kr-1", dashed: false }]);
   });
 
+  it("builds a parent KeyResult -> supporting Objective hierarchy edge", () => {
+    const overview = makeOverview({
+      objectives: [
+        { id: "annual-obj", title: "Annual", status: "ON_TRACK", squad: null, position: null },
+        {
+          id: "quarterly-obj",
+          title: "Quarterly",
+          status: "ON_TRACK",
+          squad: null,
+          parentKeyResultId: "annual-kr",
+          position: null,
+        },
+      ],
+      keyResults: [
+        { id: "annual-kr", objectiveId: "annual-obj", title: "Annual KR", current: 0, target: 1, unit: null, position: null },
+      ],
+    });
+
+    expect(buildCanvasEdges(overview)).toContainEqual({
+      id: "e-annual-kr-quarterly-obj",
+      source: "annual-kr",
+      target: "quarterly-obj",
+      dashed: false,
+    });
+  });
+
   it("builds a KeyResult -> Opportunity edge when linkedKeyResultId is set", () => {
     const overview = makeOverview({
       keyResults: [

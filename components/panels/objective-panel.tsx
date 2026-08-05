@@ -30,6 +30,15 @@ type ObjectiveData = {
     target: number;
     unit: string | null;
   }>;
+  parentKeyResult: {
+    id: string;
+    title: string;
+    objective: {
+      id: string;
+      title: string;
+      cycle: { id: string; title: string; status: string };
+    };
+  } | null;
 };
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -77,6 +86,17 @@ export function ObjectivePanel({
       badge: pct !== null ? { label: `${pct}%`, className: "bg-indigo-100 text-indigo-700" } : undefined,
     };
   });
+  const parentItems: RelationItem[] = data.parentKeyResult
+    ? [{
+        type: "keyResult",
+        id: data.parentKeyResult.id,
+        title: data.parentKeyResult.title,
+        badge: {
+          label: data.parentKeyResult.objective.cycle.title,
+          className: "bg-violet-100 text-violet-700",
+        },
+      }]
+    : [];
 
   return (
     <PanelContainer>
@@ -110,6 +130,10 @@ export function ObjectivePanel({
 
       <Section label="Key Results" count={data.keyResults.length}>
         <RelationList items={krItems} empty="No key results yet." />
+      </Section>
+
+      <Section label="Supports">
+        <RelationList items={parentItems} empty="No higher-level Key Result." />
       </Section>
     </PanelContainer>
   );

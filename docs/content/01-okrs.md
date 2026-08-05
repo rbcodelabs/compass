@@ -37,6 +37,25 @@ Key Results are the measurable outcomes that tell you whether you've hit your Ob
 
 A well-formed Key Result is binary-testable at the end of the cycle: either you hit the target or you didn't.
 
+## Linking annual and quarterly OKRs
+
+Objectives in a shorter cycle can support a Key Result in a longer cycle. This creates a measurable hierarchy without duplicating annual goals inside every quarter:
+
+```text
+Annual Objective
+└── Annual Key Result
+    ├── Q1 Objective
+    │   └── Quarterly Key Results
+    └── Q2 Objective
+        └── Quarterly Key Results
+```
+
+Open the quarterly cycle and use the **Supports** picker on an Objective. Compass offers Key Results from open, longer-horizon cycles whose dates fully contain the quarterly cycle. For example, a January 1–December 31 annual cycle can be the parent of a January 1–March 31 quarterly cycle.
+
+The quarterly Objective shows its selected parent KR. The annual KR lists every supporting quarterly Objective, including its cycle, squad, and current progress. Existing relationships remain visible after a cycle closes, but closed cycles cannot receive new supporting Objectives.
+
+Compass does not automatically calculate annual KR progress from quarterly KR percentages. Annual and quarterly KRs may use different measures, targets, or weighting, so each KR retains its own check-ins and current value.
+
 ## Check-ins
 
 Click the **+ Check-in** button on any Key Result to record the current value. Check-ins create a timestamped history so you can track progress over time. The progress bar on each KR reflects the latest check-in value relative to the target.

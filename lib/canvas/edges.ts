@@ -56,6 +56,12 @@ export function buildCanvasEdges(overview: CanvasOverview): CanvasEdge[] {
     edges.push({ id: `e-${source}-${target}`, source, target, dashed });
   };
 
+  for (const objective of overview.objectives) {
+    if (objective.parentKeyResultId) {
+      addEdge(objective.parentKeyResultId, objective.id);
+    }
+  }
+
   for (const kr of overview.keyResults) {
     addEdge(kr.objectiveId, kr.id);
   }

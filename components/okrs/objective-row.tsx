@@ -38,6 +38,23 @@ interface KeyResult {
   current: number;
   target: number;
   unit: string | null;
+  supportingObjectives?: Array<{
+    id: string;
+    title: string;
+    status: ObjectiveStatus;
+    cycle: { id: string; title: string };
+    squad: SquadData | null;
+    keyResults: Array<{ current: number; target: number }>;
+  }>;
+}
+
+export interface ParentKROption {
+  id: string;
+  title: string;
+  objectiveTitle: string;
+  cycleId: string;
+  cycleTitle: string;
+  cycleStatus: string;
 }
 
 interface ObjectiveRowProps {
@@ -53,7 +70,7 @@ interface ObjectiveRowProps {
   orgSlug: string;
   workspaceSlug: string;
   revalidatePathStr?: string;
-  availableKRs?: { id: string; title: string; objectiveTitle: string }[];
+  availableKRs?: ParentKROption[];
   parentKeyResultId?: string | null;
 }
 
@@ -67,6 +84,7 @@ export function ObjectiveRow({
 }: ObjectiveRowProps) {
   const [isPending, startTransition] = useTransition();
   const [isParentKRPending, startParentKRTransition] = useTransition();
+  const [parentKRError, setParentKRError] = useState<string | null>(null);
   const { openPanel } = usePanelContext();
   const [localParentKRId, setLocalParentKRId] = useState<string | null>(
     parentKeyResultId ?? null
@@ -104,9 +122,16 @@ export function ObjectiveRow({
 
   function handleParentKRChange(value: string | null) {
     const newId = !value || value === "__none__" ? null : value;
+    const previousId = localParentKRId;
+    setParentKRError(null);
     setLocalParentKRId(newId);
     startParentKRTransition(async () => {
-      await setObjectiveParentKR(objective.id, newId, orgSlug, workspaceSlug);
+      try {
+        await setObjectiveParentKR(objective.id, newId, orgSlug, workspaceSlug);
+      } catch (error) {
+        setLocalParentKRId(previousId);
+        setParentKRError(error instanceof Error ? error.message : "Could not update hierarchy.");
+      }
     });
   }
 
@@ -235,22 +260,24 @@ export function ObjectiveRow({
       )}
 
       {/* Supports KR picker */}
-      {availableKRs && availableKRs.length > 0 && (
-        <div className="flex items-center gap-2 pt-1">
-          <span className="text-xs text-muted-foreground shrink-0">Supports:</span>
+      {availableKRs && (
+        <div className="flex flex-col gap-1 pt-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground shrink-0">Supports:</span>
           <Combobox
             items={[
               { value: "__none__", label: "— None —" },
               ...availableKRs.map((kr) => ({
                 value: kr.id,
-                label: kr.title,
+                label: `${kr.cycleTitle} ${kr.objectiveTitle} ${kr.title}`,
                 render: (
-                  <>
-                    <span className="text-muted-foreground text-xs mr-1">
-                      {kr.objectiveTitle} /
+                  <span className="flex min-w-0 flex-col text-left">
+                    <span className="truncate text-xs font-medium">{kr.title}</span>
+                    <span className="truncate text-[11px] text-muted-foreground">
+                      {kr.cycleTitle} · {kr.objectiveTitle}
+                      {kr.cycleStatus === "CLOSED" ? " · Closed" : ""}
                     </span>
-                    {kr.title}
-                  </>
+                  </span>
                 ),
               })),
             ]}
@@ -258,11 +285,16 @@ export function ObjectiveRow({
             onValueChange={handleParentKRChange}
             disabled={isParentKRPending}
           >
-            <ComboboxTrigger size="sm" className="flex-1 max-w-xs text-xs">
-              <ComboboxValue placeholder="Link to a company KR…" />
+            <ComboboxTrigger size="sm" className="flex-1 max-w-md text-xs">
+              <ComboboxValue placeholder="Choose a longer-horizon KR…" />
             </ComboboxTrigger>
-            <ComboboxContent />
+            <ComboboxContent
+              inputPlaceholder="Search cycles, objectives, and KRs…"
+              emptyMessage="No longer-horizon Key Results cover this cycle."
+            />
           </Combobox>
+          </div>
+          {parentKRError && <p className="pl-16 text-xs text-destructive">{parentKRError}</p>}
         </div>
       )}
 

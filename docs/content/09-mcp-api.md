@@ -47,11 +47,12 @@ The MCP server exposes tools that agents can call, grouped below by area.
 |---|---|
 | `list_okr_cycles` | List all OKR cycles for a workspace with IDs, titles, dates, and status |
 | `create_okr_cycle` | Create a new OKR cycle for a workspace (defaults to DRAFT status) |
-| `get_okr_cycle` | Return a full OKR cycle with all objectives and their key results, including current progress |
-| `create_objective` | Create a new Objective inside an OKR cycle; optionally assign a squad or link to a parent KR it supports |
+| `get_okr_cycle` | Return a full OKR cycle with Objective/KR progress, higher-level parent links, and supporting Objectives |
+| `create_objective` | Create an Objective; optionally assign a squad or link to an eligible KR in a longer-horizon cycle |
 | `add_key_result` | Add a Key Result to an existing Objective |
 | `log_checkin` | Record a progress check-in for a Key Result and update its current value |
-| `set_objective_parent_kr` | Link a squad objective to the company-level Key Result it is supporting (or clear the link) |
+| `list_eligible_parent_key_results` | List open, longer-horizon KRs whose cycle contains the specified child cycle |
+| `set_objective_parent_kr` | Link an Objective to an eligible higher-level KR it supports, or clear the link |
 
 ### Discovery — Opportunities, Solutions, Assumptions
 

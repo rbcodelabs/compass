@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // Mock the DB module so Prisma is never instantiated during tests.
 vi.mock("@/lib/db", () => ({
@@ -25,6 +25,13 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+vi.mock("@/auth", () => ({ auth: vi.fn().mockResolvedValue({ user: { id: "user-1" } }) }));
+vi.mock("@/lib/workspace", () => ({
+  getWorkspace: vi.fn().mockResolvedValue({ id: "workspace-1" }),
+}));
+vi.mock("@/lib/okr-hierarchy", () => ({
+  setObjectiveParentKeyResult: vi.fn().mockResolvedValue({ id: "obj-123" }),
+}));
 
 import {
   createObjective,

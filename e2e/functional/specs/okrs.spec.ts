@@ -118,4 +118,57 @@ test.describe("OKRs", () => {
       page.locator('[role="combobox"]').nth(0)
     ).toContainText(/AT_RISK|At risk/, { timeout: 10_000 });
   });
+
+  test("link a quarterly Objective to an annual Key Result", async ({ page, base }) => {
+    const ts = Date.now();
+    const annualCycle = `E2E Annual ${ts}`;
+    const annualObjective = `E2E Annual Objective ${ts}`;
+    const annualKR = `E2E Annual KR ${ts}`;
+    const quarterlyCycle = `E2E Q1 ${ts}`;
+    const quarterlyObjective = `E2E Quarterly Objective ${ts}`;
+
+    const createCycle = async (title: string, start: string, end: string) => {
+      await page.goto(`${base}/okrs`);
+      await page.getByRole("button", { name: "New Cycle" }).click();
+      await page.getByLabel("Title").fill(title);
+      await page.getByLabel("Start date").fill(start);
+      await page.getByLabel("End date").fill(end);
+      await page.getByRole("button", { name: "Create cycle" }).click();
+      await expect(page.getByText(title)).toBeVisible({ timeout: 15_000 });
+      await page.getByText(title).click();
+      await page.waitForLoadState("networkidle");
+    };
+
+    await createCycle(annualCycle, "2027-01-01", "2027-12-31");
+    await page.getByRole("button", { name: /Add objective/i }).click();
+    await page.getByLabel("Title").fill(annualObjective);
+    await page.getByRole("button", { name: "Add objective" }).click();
+    await expect(page.getByText(annualObjective)).toBeVisible({ timeout: 10_000 });
+
+    const annualRow = page.locator(".rounded-xl.border").filter({ hasText: annualObjective });
+    await annualRow.getByRole("button", { name: /Add key result/i }).click();
+    await annualRow.getByLabel("Title").fill(annualKR);
+    await annualRow.getByLabel("Target").fill("100");
+    await annualRow.getByRole("button", { name: "Add key result" }).click();
+    await expect(annualRow.getByLabel("Target")).not.toBeVisible({ timeout: 20_000 });
+
+    await createCycle(quarterlyCycle, "2027-01-01", "2027-03-31");
+    await page.getByRole("button", { name: /Add objective/i }).click();
+    await page.getByLabel("Title").fill(quarterlyObjective);
+    await page.getByRole("button", { name: "Add objective" }).click();
+    await expect(page.getByText(quarterlyObjective)).toBeVisible({ timeout: 10_000 });
+    await page.reload();
+
+    const quarterlyRow = page.locator(".rounded-xl.border").filter({ hasText: quarterlyObjective });
+    const supportsPicker = quarterlyRow.getByRole("combobox").nth(1);
+    await supportsPicker.click();
+    await page.getByRole("option", { name: new RegExp(annualKR) }).click();
+    await expect(supportsPicker).toContainText(annualKR, { timeout: 10_000 });
+
+    await page.goto(`${base}/okrs`);
+    await page.getByText(annualCycle).click();
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByText("Supporting objectives")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(quarterlyObjective)).toBeVisible();
+  });
 });

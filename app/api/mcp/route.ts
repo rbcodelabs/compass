@@ -81,6 +81,11 @@ import {
   searchHelp,
   getHelp,
 } from "@/lib/help-tool-handlers"
+import {
+  getEligibleParentKeyResults,
+  setObjectiveParentKeyResult,
+} from "@/lib/okr-hierarchy"
+import { listEligibleParentKeyResults } from "@/lib/okr-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -454,8 +459,30 @@ const _handler = createMcpHandler(
             objectives: {
               orderBy: { createdAt: "asc" },
               include: {
-                keyResults: { orderBy: { createdAt: "asc" } },
+                keyResults: {
+                  orderBy: { createdAt: "asc" },
+                  include: {
+                    supportingObjectives: {
+                      select: {
+                        id: true,
+                        title: true,
+                        status: true,
+                        cycle: { select: { id: true, title: true } },
+                      },
+                      orderBy: [{ cycle: { startDate: "asc" } }, { createdAt: "asc" }],
+                    },
+                  },
+                },
                 squad: { select: { name: true } },
+                parentKeyResult: {
+                  select: {
+                    id: true,
+                    title: true,
+                    objective: {
+                      select: { title: true, cycle: { select: { title: true } } },
+                    },
+                  },
+                },
               },
             },
           },
@@ -476,10 +503,17 @@ const _handler = createMcpHandler(
             : 0
           lines.push(`## ${obj.title} [${obj.status}] ${obj.squad ? `(${obj.squad.name})` : ""}  — ${avg}%`)
           lines.push(`Objective ID: ${obj.id}`)
-          if (obj.parentKeyResultId) lines.push(`Supports KR: ${obj.parentKeyResultId}`)
+          if (obj.parentKeyResult) {
+            lines.push(
+              `Supports: ${obj.parentKeyResult.objective.cycle.title} / ${obj.parentKeyResult.objective.title} / ${obj.parentKeyResult.title} (${obj.parentKeyResult.id})`
+            )
+          }
           for (const kr of obj.keyResults) {
             const pct = kr.target > 0 ? ((kr.current / kr.target) * 100).toFixed(0) : "—"
             lines.push(`  • ${kr.title}: ${kr.current}/${kr.target}${kr.unit ? " " + kr.unit : ""} (${pct}%) — KR ID: ${kr.id}`)
+            for (const supporting of kr.supportingObjectives) {
+              lines.push(`    ↳ ${supporting.cycle.title} / ${supporting.title} [${supporting.status}] — Objective ID: ${supporting.id}`)
+            }
           }
           lines.push("")
         }
@@ -492,7 +526,7 @@ const _handler = createMcpHandler(
       "create_objective",
       {
         title: "Create Objective",
-        description: "Creates a new Objective inside an OKR cycle. Optionally assign a squad or link to a parent KR (for squad objectives that support a company KR).",
+        description: "Creates a new Objective inside an OKR cycle. Optionally assign a squad or link it to a higher-level KR from a longer cycle.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           cycleId: z.string().uuid().describe("UUID of the OKR cycle"),
@@ -500,7 +534,7 @@ const _handler = createMcpHandler(
           description: z.string().optional().describe("Longer description"),
           owner: z.string().optional().describe("Name or email of the accountable owner"),
           squadId: z.string().uuid().optional().describe("UUID of the squad this objective belongs to"),
-          parentKeyResultId: z.string().uuid().optional().describe("UUID of a company-level KR this squad objective is supporting"),
+          parentKeyResultId: z.string().uuid().optional().describe("UUID of a higher-level KR from a longer cycle in the same workspace"),
         },
       },
       async ({ workspaceId, cycleId, title, description, owner, squadId, parentKeyResultId }) => {
@@ -508,6 +542,12 @@ const _handler = createMcpHandler(
         const cycle = await prisma.oKRCycle.findFirst({ where: { id: cycleId, workspaceId }, select: { id: true, title: true } })
         if (!cycle) {
           return { content: [{ type: "text" as const, text: `OKR cycle "${cycleId}" not found in workspace.` }] }
+        }
+        if (parentKeyResultId) {
+          const eligible = await getEligibleParentKeyResults(workspaceId, cycleId)
+          if (!eligible.some((kr) => kr.id === parentKeyResultId)) {
+            return { content: [{ type: "text" as const, text: "The parent KR must be in an open, longer-horizon cycle that contains this cycle." }] }
+          }
         }
         const objective = await prisma.objective.create({
           data: { cycleId, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
@@ -583,10 +623,23 @@ const _handler = createMcpHandler(
     )
 
     register(
+      "list_eligible_parent_key_results",
+      {
+        title: "List Eligible Parent Key Results",
+        description: "Lists KRs in open, longer-horizon cycles that can be supported by Objectives in a specified child cycle.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          cycleId: z.string().uuid().describe("UUID of the child OKR cycle"),
+        },
+      },
+      listEligibleParentKeyResults
+    )
+
+    register(
       "set_objective_parent_kr",
       {
         title: "Set Objective Parent KR",
-        description: "Links a squad objective to a company-level Key Result it is supporting. Pass null keyResultId to clear the link.",
+        description: "Links an Objective to a higher-level Key Result it supports. Pass null keyResultId to clear the link.",
         inputSchema: {
           objectiveId: z.string().uuid().describe("UUID of the objective"),
           keyResultId: z.string().uuid().nullable().describe("UUID of the company KR to support, or null to clear"),
@@ -594,7 +647,22 @@ const _handler = createMcpHandler(
       },
       async ({ objectiveId, keyResultId }) => {
         const prisma = getPrisma()
-        await prisma.objective.update({ where: { id: objectiveId }, data: { parentKeyResultId: keyResultId } })
+        const objective = await prisma.objective.findUnique({
+          where: { id: objectiveId },
+          select: { cycle: { select: { workspaceId: true } } },
+        })
+        if (!objective) {
+          return { content: [{ type: "text" as const, text: `Objective "${objectiveId}" not found.` }] }
+        }
+        try {
+          await setObjectiveParentKeyResult({
+            workspaceId: objective.cycle.workspaceId,
+            objectiveId,
+            keyResultId,
+          })
+        } catch (error) {
+          return { content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Could not update OKR hierarchy." }] }
+        }
         return {
           content: [{
             type: "text" as const,
