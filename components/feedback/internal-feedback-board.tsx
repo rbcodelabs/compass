@@ -14,6 +14,7 @@ import { usePanelContext } from "@/components/panels/panel-context";
 import type { CreatedFeedbackItem } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 import { HORIZON_META, PROMOTE_TARGET_HORIZONS } from "@/lib/roadmap";
 import type { FeedbackType, Horizon } from "@/lib/types";
+import { EmptyState } from "@/components/patterns/empty-state";
 
 type FeedbackItem = {
   id: string;
@@ -171,20 +172,13 @@ export function InternalFeedbackBoard({
 
   if (items.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
-        <p className="text-sm text-slate-500">No feedback submitted yet.</p>
-        <p className="text-xs text-slate-400">
-          Enable the public feedback portal in Settings to start collecting submissions,
-          or log one yourself below.
-        </p>
-        <CreateFeedbackDialog
+      <EmptyState title="No feedback submitted yet" description="Enable the public feedback portal in Settings to start collecting submissions, or log one yourself below." primaryAction={<CreateFeedbackDialog
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           revalidatePathStr={revalidatePath}
           onCreated={handleCreated}
           variant="empty-state"
-        />
-      </div>
+        />} />
     );
   }
 
@@ -229,9 +223,7 @@ export function InternalFeedbackBoard({
       </div>
 
       {visibleItems.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <p className="text-sm text-slate-500">No {typeFilter === "BUG" ? "bugs" : "ideas"} match this filter.</p>
-        </div>
+        <EmptyState compact title={`No ${typeFilter === "BUG" ? "bugs" : "ideas"} match this filter`} />
       )}
 
       {visibleItems.map((item) => {

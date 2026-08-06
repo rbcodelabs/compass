@@ -70,7 +70,7 @@ export default async function WorkspaceLayout({
           />
 
           {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}
-          <main className="flex-1 overflow-y-auto bg-slate-50 pb-16 md:pb-0">
+          <main className="flex-1 overflow-y-auto bg-surface-app pb-16 md:pb-0">
             {children}
           </main>
         </div>

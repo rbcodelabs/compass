@@ -35,7 +35,8 @@ test.describe("Assumption ↔ Experiment linking", () => {
       await page.getByRole("button", { name: "Create Opportunity" }).click();
       await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
-      await page.getByRole("link", { name: oppTitle }).click();
+      await page.getByRole("button", { name: oppTitle, exact: true }).click();
+      await page.getByRole("link", { name: "Open full page" }).click();
       await page.waitForLoadState("networkidle");
       await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
 
@@ -57,11 +58,11 @@ test.describe("Assumption ↔ Experiment linking", () => {
       await page.reload();
       await page.waitForLoadState("networkidle");
       await page.getByRole("button", { name: "Expand" }).click();
-      await expect(page.getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText(assumptionTitle).first()).toBeVisible({ timeout: 10_000 });
 
       // ── 4. Switch to the OST Tree tab ──────────────────────────────────────
       await page.getByRole("tab", { name: "OST Tree" }).click();
-      await expect(page.getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByLabel("OST Tree").getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
 
       // "No experiments yet" + the new CTA should be visible for this
       // brand-new, unlinked assumption.
@@ -92,7 +93,8 @@ test.describe("Assumption ↔ Experiment linking", () => {
 
       // ── 7. Verify the OST tree now shows the linked experiment ─────────────
       await page.goto(`${base}/discovery`);
-      await page.getByRole("link", { name: oppTitle }).click();
+      await page.getByRole("button", { name: oppTitle, exact: true }).click();
+      await page.getByRole("link", { name: "Open full page" }).click();
       await page.waitForLoadState("networkidle");
       await page.getByRole("tab", { name: "OST Tree" }).click();
 

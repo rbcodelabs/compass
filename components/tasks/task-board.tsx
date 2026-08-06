@@ -22,6 +22,7 @@ import { moveTaskStatus, updateSortOrder } from "@/app/[orgSlug]/[workspaceSlug]
 import { TaskColumn } from "./task-column";
 import { TaskCard, type TaskCardData } from "./task-card";
 import type { TaskStatus, MemberData } from "@/lib/types";
+import { Board } from "@/components/patterns/board";
 
 type ColumnMap = Record<TaskStatus, TaskCardData[]>;
 
@@ -210,7 +211,7 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex gap-4 overflow-x-auto pb-6 items-start">
+        <Board label="Task board" className="items-start pb-6">
           {visibleStatuses.map((status) => (
             <TaskColumn
               key={status}
@@ -226,7 +227,7 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
               onUpdate={handleUpdate}
             />
           ))}
-        </div>
+        </Board>
 
         <DragOverlay>
           {activeTask ? (

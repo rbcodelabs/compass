@@ -22,6 +22,10 @@ export function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/api/docs/") ||
     // Product docs — public, no auth required
     pathname.startsWith("/help") ||
+    // Repository-native UI registry. The page itself returns 404 in production
+    // unless COMPASS_UI_REGISTRY=1; keeping the route public makes the enabled
+    // registry deterministic and independent of session/database fixtures.
+    pathname === "/ui" ||
     // Images referenced by the public product docs (e.g. /help/02-discovery
     // embeds /screenshots/docs/discovery-board.png) — served from public/,
     // so the middleware matcher catches them like any other route. Without

@@ -34,6 +34,7 @@ import {
 import { usePanelContext } from "@/components/panels/panel-context";
 import { INTERNAL_BOARD_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
 import type { Horizon, SquadData } from "@/lib/types";
+import { Board } from "@/components/patterns/board";
 
 type ColumnMap = Record<Horizon, RoadmapCardData[]>;
 
@@ -370,7 +371,7 @@ export function RoadmapBoard({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex gap-4 overflow-x-auto pb-6 items-start">
+      <Board label="Roadmap board" className="items-start pb-6">
         {HORIZONS.map((horizon) => (
           <RoadmapColumn
             key={horizon}
@@ -389,7 +390,7 @@ export function RoadmapBoard({
             availableExperiments={availableExperiments}
           />
         ))}
-      </div>
+      </Board>
 
       <UnscheduledItemsPanel items={unscheduled} onQuickAdd={handleQuickAdd} />
 

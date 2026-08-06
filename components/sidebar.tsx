@@ -67,7 +67,7 @@ export function Sidebar({
   )
 
   return (
-    <aside className="hidden md:flex w-[220px] shrink-0 flex-col h-full bg-slate-950 text-slate-100 border-r border-slate-800/50">
+    <aside className="hidden md:flex w-[220px] shrink-0 flex-col h-full bg-surface-navigation text-text-inverse border-r border-white/10">
       {/* Logo + app name */}
       <div className="flex items-center gap-2.5 px-4 pt-5 pb-4">
         <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0 shadow-sm">
@@ -86,20 +86,20 @@ export function Sidebar({
             <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
           </svg>
         </div>
-        <span className="font-semibold text-sm tracking-tight text-white">Compass</span>
+        <span className="font-semibold text-sm tracking-tight text-text-inverse">Compass</span>
       </div>
 
       {/* Workspace selector */}
       <div className="px-3 pb-4">
         <DropdownMenu>
-          <DropdownMenuTrigger className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-slate-800/60 transition-colors group">
+          <DropdownMenuTrigger className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-surface-navigation-active transition-colors group">
             <div className="w-5 h-5 rounded-md bg-primary/30 border border-primary/30 flex items-center justify-center shrink-0">
               <span className="text-[10px] font-bold text-primary leading-none">
                 {workspaceName[0]?.toUpperCase() ?? "W"}
               </span>
             </div>
-            <span className="text-xs font-medium text-slate-300 truncate flex-1">{workspaceName}</span>
-            <ChevronDown className="w-3 h-3 text-slate-500 shrink-0 group-hover:text-slate-400 transition-colors" />
+            <span className="text-xs font-medium text-text-inverse/80 truncate flex-1">{workspaceName}</span>
+            <ChevronDown className="w-3 h-3 text-text-inverse/40 shrink-0 group-hover:text-text-inverse/70 transition-colors" />
           </DropdownMenuTrigger>
           <DropdownMenuContent className="bg-slate-900 text-slate-200 ring-slate-700">
             {workspaces.map((ws) => (
@@ -135,7 +135,7 @@ export function Sidebar({
         </DropdownMenu>
       </div>
 
-      <div className="mx-3 h-px bg-slate-800/70" />
+      <div className="mx-3 h-px bg-white/10" />
 
       {/* Nav links */}
       <nav className="flex-1 px-2 py-3 space-y-0.5" aria-label="Main navigation">
@@ -150,8 +150,8 @@ export function Sidebar({
               className={cn(
                 "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150",
                 isActive
-                  ? "bg-primary/20 text-white"
-                  : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                  ? "bg-surface-navigation-active text-text-inverse"
+                  : "text-text-inverse/60 hover:bg-surface-navigation-active hover:text-text-inverse"
               )}
             >
               {/* Active left accent bar */}
@@ -164,7 +164,7 @@ export function Sidebar({
               <Icon
                 className={cn(
                   "w-4 h-4 shrink-0 transition-colors",
-                  isActive ? "text-primary" : "text-slate-500"
+                  isActive ? "text-primary" : "text-text-inverse/40"
                 )}
                 aria-hidden="true"
               />
@@ -174,23 +174,23 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="mx-3 h-px bg-slate-800/70" />
+      <div className="mx-3 h-px bg-white/10" />
 
       {/* User — secondary items (Settings, Org Settings, Help, Send Feedback)
           live in this dropdown instead of cluttering primary nav. */}
       <div className="px-3 py-3.5">
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="w-full flex items-center gap-2.5 rounded-lg px-0.5 py-1 text-left hover:bg-slate-800/60 transition-colors"
+            className="w-full flex items-center gap-2.5 rounded-lg px-0.5 py-1 text-left hover:bg-surface-navigation-active transition-colors"
             aria-label="Account menu"
           >
             <Avatar className="w-6 h-6 shrink-0">
               {userImage && <AvatarImage src={userImage} alt={userName} />}
-              <AvatarFallback className="text-[10px] font-semibold bg-slate-700 text-slate-200">
+              <AvatarFallback className="text-[10px] font-semibold bg-surface-navigation-active text-text-inverse">
                 {getInitials(userName || "?")}
               </AvatarFallback>
             </Avatar>
-            <span className="text-xs text-slate-400 truncate flex-1">{userName}</span>
+            <span className="text-xs text-text-inverse/60 truncate flex-1">{userName}</span>
           </DropdownMenuTrigger>
           <DropdownMenuContent className="bg-slate-900 text-slate-200 ring-slate-700 min-w-[200px]">
             <div className="px-1.5 py-1">

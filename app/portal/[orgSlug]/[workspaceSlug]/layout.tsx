@@ -33,9 +33,9 @@ export default async function PortalLayout({ children, params }: Props) {
   const branding = workspace ? resolveWorkspaceBranding(workspace) : null;
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="flex min-h-screen flex-col bg-surface-app">
       <WorkspaceThemeStyle branding={branding} />
-      <header className="border-b border-slate-200 bg-white px-6 py-4">
+      <header className="border-b border-border-default bg-surface-panel px-6 py-4">
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0 shadow-sm">
@@ -54,7 +54,7 @@ export default async function PortalLayout({ children, params }: Props) {
                 <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
               </svg>
             </div>
-            <span className="font-semibold text-sm text-slate-800">{workspaceName}</span>
+            <span className="text-sm font-semibold text-text-primary">{workspaceName}</span>
           </div>
           {portalSession && <PortalAuthStatus email={portalSession.email} />}
         </div>
@@ -64,8 +64,8 @@ export default async function PortalLayout({ children, params }: Props) {
         {children}
       </main>
 
-      <footer className="border-t border-slate-200 bg-white px-6 py-4 text-center">
-        <p className="text-xs text-slate-400">Powered by Compass</p>
+      <footer className="border-t border-border-default bg-surface-panel px-6 py-4 text-center">
+        <p className="text-xs text-text-subtle">Powered by Compass</p>
       </footer>
     </div>
   );

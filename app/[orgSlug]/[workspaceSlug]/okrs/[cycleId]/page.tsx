@@ -14,6 +14,7 @@ import type {
   CustomFieldValue,
   SquadData,
 } from "@/lib/types";
+import { PageHeader, StatusBadge } from "@/components/patterns";
 
 export const metadata = {
   title: "OKR Cycle",
@@ -24,10 +25,8 @@ interface CyclePageProps {
   searchParams: Promise<{ squad?: string }>;
 }
 
-const CYCLE_STATUS_STYLES: Record<CycleStatus, string> = {
-  ACTIVE: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  DRAFT: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
-  CLOSED: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+const CYCLE_STATUS_TONE: Record<CycleStatus, "success" | "neutral"> = {
+  ACTIVE: "success", DRAFT: "neutral", CLOSED: "neutral",
 };
 
 const CYCLE_STATUS_LABELS: Record<CycleStatus, string> = {
@@ -170,22 +169,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
-      {/* Cycle header */}
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">
-            {cycle.title}
-          </h1>
-          <span
-            className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-medium ${CYCLE_STATUS_STYLES[cycleStatus]}`}
-          >
-            {CYCLE_STATUS_LABELS[cycleStatus]}
-          </span>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          {formatDate(cycle.startDate)} – {formatDate(cycle.endDate)}
-        </p>
-      </div>
+      <PageHeader title={<span className="flex items-center gap-2">{cycle.title}<StatusBadge status={CYCLE_STATUS_TONE[cycleStatus]}>{CYCLE_STATUS_LABELS[cycleStatus]}</StatusBadge></span>} description={`${formatDate(cycle.startDate)} – ${formatDate(cycle.endDate)}`} />
 
       <Suspense>
         <SquadFilterBar squads={squads} />

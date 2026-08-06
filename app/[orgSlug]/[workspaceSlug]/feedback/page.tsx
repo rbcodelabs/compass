@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { InternalFeedbackBoard } from "@/components/feedback/internal-feedback-board";
 import type { FeedbackType } from "@/lib/types";
+import { PageHeader } from "@/components/patterns/page-header";
 
 export const metadata = { title: "Feedback" };
 
@@ -58,12 +59,7 @@ export default async function FeedbackPage({ params }: Props) {
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Feedback</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Customer submissions for {workspace.name}
-        </p>
-      </div>
+      <PageHeader title="Feedback" description={<>Customer submissions for {workspace.name}</>} />
 
       <InternalFeedbackBoard
         orgSlug={orgSlug}

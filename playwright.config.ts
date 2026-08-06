@@ -50,6 +50,10 @@ export default defineConfig({
   // revalidation in Next.js dev mode can be slow.  Screenshots tests are
   // page-load-only and finish in a few seconds so this is fine for both.
   timeout: 90_000,
+  // Functional specs mutate one shared seeded workspace. Running them in
+  // parallel creates cross-test races in portal auth, membership, and roadmap
+  // settings, so serialize only that suite; screenshot captures stay parallel.
+  workers: functional ? 1 : undefined,
 
   ...(functional && {
     globalSetup: "./e2e/functional/global-setup.ts",
@@ -58,7 +62,11 @@ export default defineConfig({
       command: "pnpm dev",
       port: FUNCTIONAL_PORT,
       reuseExistingServer: !process.env.CI,
-      env: { PORT: String(FUNCTIONAL_PORT) },
+      env: {
+        PORT: String(FUNCTIONAL_PORT),
+        // Deterministic test-only key; production must provide its own secret.
+        SSO_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+      },
       timeout: 120_000,
     },
   }),
@@ -69,7 +77,11 @@ export default defineConfig({
     // Requires E2E_FUNCTIONAL=1 to activate webServer + globalSetup.
     {
       name: "functional-setup",
-      testMatch: "e2e/functional/auth.setup.ts",
+      // Scope discovery to the canonical suite. Searching from repository root
+      // also finds auth.setup.ts files inside .claude/worktrees, whose separate
+      // node_modules load Playwright a second time and abort the run.
+      testDir: "./e2e/functional",
+      testMatch: "auth.setup.ts",
       use: { baseURL: FUNCTIONAL_BASE_URL },
     },
     {

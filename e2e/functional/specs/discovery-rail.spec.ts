@@ -48,16 +48,17 @@ test.describe("Discovery Rail", () => {
     // the menu trigger is only visually hidden (opacity-0), not removed
     // from the accessibility tree, so an unscoped lookup would be ambiguous.
     const cardC = page
-      .locator("div.group", { has: page.getByRole("link", { name: oppTitleC }) })
+      .locator("div.group", { has: page.getByRole("button", { name: oppTitleC, exact: true }) })
       .first();
     await cardC.getByRole("button", { name: "Card actions" }).click();
     await page.getByRole("menuitem", { name: "Archive" }).click();
-    await expect(page.getByRole("link", { name: oppTitleC })).not.toBeVisible({
+    await expect(page.getByRole("button", { name: oppTitleC, exact: true })).not.toBeVisible({
       timeout: 15_000,
     });
 
     // ── 2. Open opportunity A's detail page — rail appears ─────────────────
-    await page.getByRole("link", { name: oppTitleA }).click();
+    await page.getByRole("button", { name: oppTitleA, exact: true }).click();
+    await page.getByRole("link", { name: "Open full page" }).click();
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: oppTitleA })).toBeVisible();
 
@@ -125,7 +126,8 @@ test.describe("Discovery Rail", () => {
       await page.getByRole("button", { name: "Create Opportunity" }).click();
       await expect(page.getByText(oppTitleB)).toBeVisible({ timeout: 15_000 });
 
-      await page.getByRole("link", { name: oppTitleA }).click();
+      await page.getByRole("button", { name: oppTitleA, exact: true }).click();
+      await page.getByRole("link", { name: "Open full page" }).click();
       await page.waitForLoadState("networkidle");
       await expect(page.getByRole("heading", { name: oppTitleA })).toBeVisible();
 

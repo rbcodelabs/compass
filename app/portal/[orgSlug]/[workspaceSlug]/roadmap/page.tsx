@@ -4,6 +4,9 @@ import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
 import { RoadmapVoteSection } from "@/components/portal/roadmap-vote-section";
 import { HORIZON_META, PORTAL_HORIZONS, portalBucketFor } from "@/lib/roadmap";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/patterns/empty-state";
+import { PageHeader } from "@/components/patterns/page-header";
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
@@ -42,12 +45,10 @@ export default async function PortalRoadmapPage({ params }: Props) {
 
   if (!workspace || !workspace.roadmapPublic) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-center">
-        <p className="text-lg font-semibold text-slate-700">This roadmap is not public</p>
-        <p className="text-sm text-slate-500 mt-1">
-          The workspace owner has not enabled the public roadmap.
-        </p>
-      </div>
+      <EmptyState
+        title="This roadmap is not public"
+        description="The workspace owner has not enabled the public roadmap."
+      />
     );
   }
 
@@ -81,36 +82,29 @@ export default async function PortalRoadmapPage({ params }: Props) {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-row justify-between items-start gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Public Roadmap</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            See what we are working on and vote for what matters to you.
-          </p>
-        </div>
-        {workspace.feedbackEnabled && (
-          <Link
-            href={`/portal/${orgSlug}/${workspaceSlug}/feedback`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 shrink-0"
-          >
-            <MessageSquare className="w-4 h-4" />
+      <PageHeader
+        title="Public Roadmap"
+        description="See what we are working on and vote for what matters to you."
+        actions={workspace.feedbackEnabled ? (
+          <Button nativeButton={false} render={<Link href={`/portal/${orgSlug}/${workspaceSlug}/feedback`} />} variant="outline">
+            <MessageSquare />
             Give Feedback
-          </Link>
-        )}
-      </div>
+          </Button>
+        ) : undefined}
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
         {HORIZONS.map((horizon) => (
-          <div key={horizon} className="flex flex-col gap-3">
-            <div className="flex flex-col gap-0.5 pb-2 border-b border-slate-200">
-              <span className="text-sm font-semibold text-slate-800">
+          <section key={horizon} className="flex flex-col gap-3 rounded-xl border border-border-default bg-surface-inset p-3">
+            <div className="flex flex-col gap-0.5 border-b border-border-default pb-2">
+              <span className="text-sm font-semibold text-text-primary">
                 {HORIZON_META[horizon].label}
               </span>
-              <span className="text-xs text-slate-500">{HORIZON_META[horizon].portalDescription}</span>
+              <span className="text-xs text-text-subtle">{HORIZON_META[horizon].portalDescription}</span>
             </div>
             <div className="flex flex-col gap-2">
               {itemsByHorizon[horizon].length === 0 ? (
-                <p className="text-xs text-slate-400 py-4 text-center">Nothing here yet</p>
+                <p className="py-4 text-center text-xs text-text-subtle">Nothing here yet</p>
               ) : (
                 itemsByHorizon[horizon].map((item) => (
                   <RoadmapVoteSection
@@ -124,7 +118,7 @@ export default async function PortalRoadmapPage({ params }: Props) {
                 ))
               )}
             </div>
-          </div>
+          </section>
         ))}
       </div>
     </div>

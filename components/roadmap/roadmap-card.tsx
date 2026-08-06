@@ -6,7 +6,8 @@ import Link from "next/link";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Lightbulb, FlaskConical, Layers, TrendingUp, Bug, CalendarDays, Lock, Rocket } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EntityCard } from "@/components/patterns/entity-card";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { archiveItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
@@ -111,39 +112,29 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
 
   return (
     <div ref={setNodeRef} style={style} className="touch-none group">
-      <Card
-        size="sm"
-        className="w-full bg-white shadow-sm transition-all duration-150 data-[dragging=true]:shadow-xl data-[dragging=true]:ring-2 data-[dragging=true]:ring-indigo-200"
+      <EntityCard
+        interactive
+        className="w-full p-3 data-[pending]:opacity-60 data-[dragging=true]:shadow-[var(--shadow-panel)] data-[dragging=true]:ring-2 data-[dragging=true]:ring-ring/30"
         data-dragging={isDragging ? true : undefined}
-      >
-        <CardHeader className="flex-row items-start gap-2 pr-2">
-          {/* Drag handle */}
+        data-pending={isArchiving ? true : undefined}
+        leading={
           <button
             ref={setActivatorNodeRef}
             {...attributes}
             {...listeners}
-            className="mt-0.5 shrink-0 cursor-grab touch-none text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+            className="shrink-0 cursor-grab touch-none rounded text-text-subtle/60 hover:text-text-subtle active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
             aria-label="Drag to reorder"
           >
             <GripVertical className="size-3.5" />
           </button>
-
-          {/* Title */}
-          <CardTitle className="flex-1 text-sm leading-snug flex items-center gap-1.5 flex-wrap">
+        }
+        title={
+          <span className="flex flex-wrap items-center gap-1.5">
             {item.feedback?.type === "BUG" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-50 text-red-600 px-1.5 py-0.5 text-[10px] font-medium shrink-0">
-                <Bug className="size-2.5" />
-                Bug
-              </span>
+              <StatusBadge status="danger" icon={<Bug />}>Bug</StatusBadge>
             )}
             {item.isPrivate && (
-              <span
-                title="Hidden from the public portal roadmap"
-                className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 px-1.5 py-0.5 text-[10px] font-medium shrink-0"
-              >
-                <Lock className="size-2.5" />
-                Private
-              </span>
+              <StatusBadge status="neutral" icon={<Lock />} title="Hidden from the public portal roadmap">Private</StatusBadge>
             )}
             {isLaunchHorizon(item.horizon) && item.launchChecklist && (
               <button
@@ -153,7 +144,7 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
                   openPanel("roadmapItem", item.id);
                 }}
                 title={`Launch checklist: ${item.launchChecklist.done} of ${item.launchChecklist.total} done`}
-                className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors px-1.5 py-0.5 text-[10px] font-medium shrink-0"
+                className="inline-flex h-5 items-center gap-1 rounded-full bg-status-warning-surface px-2 text-xs font-medium text-status-warning hover:brightness-95"
               >
                 <Rocket className="size-2.5" />
                 {item.launchChecklist.done}/{item.launchChecklist.total}
@@ -166,8 +157,10 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
             >
               {item.title}
             </button>
-          </CardTitle>
-
+          </span>
+        }
+        description={item.description}
+        actions={
           <CardMenu
             items={[
               {
@@ -185,19 +178,11 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
               },
             ]}
           />
-        </CardHeader>
-
-        {(item.description || hasLinks || hasDates) && (
-          <CardContent className="flex flex-col gap-2 pt-0">
-            {item.description && (
-              <p className="text-xs text-muted-foreground line-clamp-2">
-                {item.description}
-              </p>
-            )}
-
-            {(hasLinks || hasDates) && (
+        }
+      >
+        {(hasLinks || hasDates) && (
               <TooltipProvider delay={400}>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/40 pt-2 mt-0.5">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border-default pt-2">
                   {/* Dates */}
                   {hasDates && (
                     <span className="flex items-center gap-1 text-[11px] text-muted-foreground/60 min-w-0">
@@ -311,10 +296,8 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
                   )}
                 </div>
               </TooltipProvider>
-            )}
-          </CardContent>
         )}
-      </Card>
+      </EntityCard>
 
       <EditItemDialog
         item={item}

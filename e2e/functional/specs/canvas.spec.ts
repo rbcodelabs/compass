@@ -122,7 +122,8 @@ test.describe("Canvas", () => {
     await page.getByRole("button", { name: "Create Opportunity" }).click();
     await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
-    await page.getByRole("link", { name: oppTitle }).click();
+    await page.getByRole("button", { name: oppTitle, exact: true }).click();
+    await page.getByRole("link", { name: "Open full page" }).click();
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
 
@@ -187,7 +188,8 @@ test.describe("Canvas", () => {
     // spec-level comment above.
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
-    await page.getByRole("link", { name: oppTitle }).click();
+    await page.getByRole("button", { name: oppTitle, exact: true }).click();
+    await page.getByRole("link", { name: "Open full page" }).click();
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Expand" }).click();
     await page.getByRole("button", { name: /Promote to Roadmap/i }).click();

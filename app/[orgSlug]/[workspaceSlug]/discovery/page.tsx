@@ -6,6 +6,7 @@ import { OpportunityBoard } from "@/components/discovery/opportunity-board";
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
 import type { OpportunityStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
+import { PageHeader } from "@/components/patterns/page-header";
 
 export const metadata = {
   title: "Discovery",
@@ -127,12 +128,10 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-w-0">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Discovery</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Opportunity Solution Tree for {workspace.name}
-        </p>
-      </div>
+      <PageHeader
+        title="Discovery"
+        description={<>Opportunity Solution Tree for {workspace.name}</>}
+      />
 
       <Suspense>
         <SquadFilterBar squads={squads} />

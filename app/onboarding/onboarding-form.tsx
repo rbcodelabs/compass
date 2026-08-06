@@ -4,7 +4,7 @@ import { useActionState, useState } from "react"
 import { createOrganizationAndWorkspace, type OnboardingState } from "./actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { FormField } from "@/components/patterns/form-field"
 
 const initialState: OnboardingState = {}
 
@@ -37,7 +37,7 @@ export function OnboardingForm() {
       {/* Header */}
       <div className="flex flex-col items-center gap-2 text-center">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 24 24"
@@ -55,16 +55,16 @@ export function OnboardingForm() {
           </div>
           <span className="text-xl font-semibold tracking-tight">Compass</span>
         </div>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-text-subtle">
           Let&apos;s set up your organization.
         </p>
       </div>
 
       {/* Step indicator */}
       <div className="flex items-center gap-2 justify-center">
-        <div className={`w-2 h-2 rounded-full ${step >= 1 ? "bg-slate-900" : "bg-slate-300"}`} />
-        <div className={`w-8 h-px ${step >= 2 ? "bg-slate-900" : "bg-slate-200"}`} />
-        <div className={`w-2 h-2 rounded-full ${step >= 2 ? "bg-slate-900" : "bg-slate-300"}`} />
+        <div className={`h-2 w-2 rounded-full ${step >= 1 ? "bg-primary" : "bg-border-strong"}`} />
+        <div className={`h-px w-8 ${step >= 2 ? "bg-primary" : "bg-border-default"}`} />
+        <div className={`h-2 w-2 rounded-full ${step >= 2 ? "bg-primary" : "bg-border-strong"}`} />
       </div>
 
       <form action={formAction} className="space-y-6">
@@ -73,21 +73,20 @@ export function OnboardingForm() {
         <input type="hidden" name="orgSlug" value={orgSlug} />
         <input type="hidden" name="workspaceName" value={workspaceName} />
 
-        <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm space-y-6">
+        <div className="space-y-6 rounded-xl border border-border-default bg-surface-panel p-6 shadow-[var(--shadow-card)]">
           {step === 1 && (
             <>
               <div className="space-y-1">
-                <h1 className="text-lg font-semibold text-slate-900">
+                <h1 className="text-lg font-semibold text-text-primary">
                   Create your organization
                 </h1>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-text-subtle">
                   Your organization is the top-level container for all workspaces and teams.
                 </p>
               </div>
 
               <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="orgName-input">Organization name</Label>
+                <FormField id="orgName-input" label="Organization name" required error={state.errors?.orgName?.[0]}>
                   <Input
                     id="orgName-input"
                     value={orgName}
@@ -96,18 +95,14 @@ export function OnboardingForm() {
                     required
                     autoFocus
                   />
-                  {state.errors?.orgName && (
-                    <p className="text-sm text-red-600">{state.errors.orgName[0]}</p>
-                  )}
-                </div>
+                </FormField>
 
-                <div className="space-y-2">
-                  <Label htmlFor="orgSlug-input">
+                <FormField id="orgSlug-input" required error={state.errors?.orgSlug?.[0]} label={<>
                     URL slug
-                    <span className="ml-2 text-xs text-slate-400 font-normal">
+                    <span className="ml-2 text-xs font-normal text-text-subtle">
                       compass.app/<strong>{orgSlug || "your-org"}</strong>
                     </span>
-                  </Label>
+                  </>}>
                   <Input
                     id="orgSlug-input"
                     value={orgSlug}
@@ -116,14 +111,11 @@ export function OnboardingForm() {
                     pattern="[a-z0-9-]+"
                     required
                   />
-                  {state.errors?.orgSlug && (
-                    <p className="text-sm text-red-600">{state.errors.orgSlug[0]}</p>
-                  )}
-                </div>
+                </FormField>
               </div>
 
               {state.errors?._form && (
-                <p className="text-sm text-red-600">{state.errors._form[0]}</p>
+                <p role="alert" className="text-sm text-status-danger">{state.errors._form[0]}</p>
               )}
             </>
           )}
@@ -131,17 +123,16 @@ export function OnboardingForm() {
           {step === 2 && (
             <>
               <div className="space-y-1">
-                <h1 className="text-lg font-semibold text-slate-900">
+                <h1 className="text-lg font-semibold text-text-primary">
                   Name your first workspace
                 </h1>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-text-subtle">
                   A workspace is where your team works on OKRs, discovery, and experiments.
                   You can add more later.
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="workspaceName-input">Workspace name</Label>
+              <FormField id="workspaceName-input" label="Workspace name" required error={state.errors?.workspaceName?.[0]}>
                 <Input
                   id="workspaceName-input"
                   value={workspaceName}
@@ -150,13 +141,10 @@ export function OnboardingForm() {
                   required
                   autoFocus
                 />
-                {state.errors?.workspaceName && (
-                  <p className="text-sm text-red-600">{state.errors.workspaceName[0]}</p>
-                )}
-              </div>
+              </FormField>
 
               {state.errors?._form && (
-                <p className="text-sm text-red-600">{state.errors._form[0]}</p>
+                <p role="alert" className="text-sm text-status-danger">{state.errors._form[0]}</p>
               )}
             </>
           )}
@@ -197,7 +185,7 @@ export function OnboardingForm() {
         </div>
 
         {hasStep1Errors && step === 2 && (
-          <p className="text-sm text-red-600 text-center">
+          <p role="alert" className="text-center text-sm text-status-danger">
             Please go back and fix the errors above.
           </p>
         )}

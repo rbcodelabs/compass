@@ -3,7 +3,6 @@ import Link from "next/link"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { getWorkspace } from "@/lib/workspace"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { ResultItem } from "@/components/experiments/result-item"
@@ -13,6 +12,9 @@ import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-pane
 import { SquadPicker } from "@/components/squads/squad-picker"
 import { startExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
 import { ChevronLeftIcon } from "lucide-react"
+import { EmptyState } from "@/components/patterns/empty-state"
+import { PageHeader } from "@/components/patterns/page-header"
+import { StatusBadge } from "@/components/patterns/status-badge"
 import type { CustomFieldDefinitionData, CustomFieldType, CustomFieldValue, SquadData } from "@/lib/types"
 
 interface ExperimentDetailPageProps {
@@ -26,13 +28,18 @@ const STATUS_LABELS: Record<string, string> = {
   KILLED: "Killed",
 }
 
-const STATUS_CLASS: Record<string, string> = {
-  DESIGNING: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-  RUNNING: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  COMPLETE:
-    "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  KILLED: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-}
+const STATUS_TONE = {
+  DESIGNING: "neutral",
+  RUNNING: "info",
+  COMPLETE: "success",
+  KILLED: "danger",
+} as const
+
+const CONCLUSION_TONE = {
+  PROCEED: "success",
+  KILL: "danger",
+  ITERATE: "warning",
+} as const
 
 const CONCLUSION_LABELS: Record<string, string> = {
   PROCEED: "Proceed",
@@ -107,7 +114,7 @@ export default async function ExperimentDetailPage({
   const experimentDetailPath = `/${orgSlug}/${workspaceSlug}/experiments/${id}`
 
   const statusLabel = STATUS_LABELS[experiment.status] ?? experiment.status
-  const statusClass = STATUS_CLASS[experiment.status] ?? ""
+  const statusTone = STATUS_TONE[experiment.status as keyof typeof STATUS_TONE] ?? "neutral"
   const isActive =
     experiment.status === "RUNNING" || experiment.status === "DESIGNING"
   const canStart = experiment.status === "DESIGNING"
@@ -147,20 +154,19 @@ export default async function ExperimentDetailPage({
 
       {/* Header */}
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">
-            {experiment.title}
-          </h1>
-          <div className="flex items-center gap-2 shrink-0">
-            <Badge className={statusClass}>{statusLabel}</Badge>
-            {experiment.conclusion && (
-              <Badge variant="outline">
-                {CONCLUSION_LABELS[experiment.conclusion] ??
-                  experiment.conclusion}
-              </Badge>
-            )}
-          </div>
-        </div>
+        <PageHeader
+          title={experiment.title}
+          actions={(
+            <>
+              <StatusBadge status={statusTone}>{statusLabel}</StatusBadge>
+              {experiment.conclusion && (
+                <StatusBadge status={CONCLUSION_TONE[experiment.conclusion as keyof typeof CONCLUSION_TONE] ?? "neutral"}>
+                  {CONCLUSION_LABELS[experiment.conclusion] ?? experiment.conclusion}
+                </StatusBadge>
+              )}
+            </>
+          )}
+        />
 
         {/* Dates */}
         {(experiment.startDate || experiment.endDate) && (
@@ -296,10 +302,11 @@ export default async function ExperimentDetailPage({
         </div>
 
         {experiment.results.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4 text-center">
-            No results logged yet.
-            {isActive && <> Click &ldquo;Log Result&rdquo; to record observations.</>}
-          </p>
+          <EmptyState
+            compact
+            title="No results logged yet"
+            description={isActive ? "Log a result to record observations from this experiment." : undefined}
+          />
         ) : (
           <div>
             {experiment.results.map((result) => (

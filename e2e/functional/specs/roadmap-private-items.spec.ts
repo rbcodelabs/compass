@@ -77,6 +77,12 @@ test.describe("Roadmap — private items", () => {
         await roadmapToggle.click();
         await page.waitForLoadState("networkidle");
       }
+      const authToggle = page.getByRole("switch", { name: "Require portal sign-in" });
+      const authWasRequired = (await authToggle.getAttribute("aria-checked")) === "true";
+      if (authWasRequired) {
+        await authToggle.click();
+        await expect(authToggle).toHaveAttribute("aria-checked", "false");
+      }
 
       try {
         // ── 5. Anonymous portal view: public item shows, private item never
@@ -119,6 +125,10 @@ test.describe("Roadmap — private items", () => {
             await roadmapToggle.click();
             await page.waitForLoadState("networkidle");
           }
+        }
+        if (authWasRequired) {
+          await authToggle.click();
+          await expect(authToggle).toHaveAttribute("aria-checked", "true");
         }
       }
     }

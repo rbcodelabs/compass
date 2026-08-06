@@ -6,7 +6,8 @@ import Link from "next/link";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, CalendarDays, Layers } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EntityCard } from "@/components/patterns/entity-card";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
 import { cancelTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
@@ -34,11 +35,11 @@ export type TaskCardData = {
   links: { id: string; linkedType: TaskLinkedType; linkedId: string; linkedTitle: string }[];
 };
 
-const PRIORITY_STYLES: Record<TaskPriority, string> = {
-  URGENT: "bg-red-50 text-red-600",
-  HIGH: "bg-orange-50 text-orange-600",
-  MEDIUM: "bg-blue-50 text-blue-600",
-  LOW: "bg-slate-100 text-slate-500",
+const PRIORITY_STATUS: Record<TaskPriority, "danger" | "warning" | "info" | "neutral"> = {
+  URGENT: "danger",
+  HIGH: "warning",
+  MEDIUM: "info",
+  LOW: "neutral",
 };
 
 function formatDueDate(iso: string | null): string | null {
@@ -90,41 +91,35 @@ export function TaskCard({ task, revalidatePathStr, orgSlug, workspaceSlug, memb
 
   return (
     <div ref={setNodeRef} style={style} className="touch-none group">
-      <Card
-        size="sm"
-        className="w-full bg-white shadow-sm transition-all duration-150 data-[dragging=true]:shadow-xl data-[dragging=true]:ring-2 data-[dragging=true]:ring-indigo-200"
+      <EntityCard
+        interactive
+        className="w-full p-3 data-[dragging=true]:shadow-[var(--shadow-panel)] data-[dragging=true]:ring-2 data-[dragging=true]:ring-ring/30"
         data-dragging={isDragging ? true : undefined}
-      >
-        <CardHeader className="flex-row items-start gap-2 pr-2">
+        leading={
           <button
             ref={setActivatorNodeRef}
             {...attributes}
             {...listeners}
-            className="mt-0.5 shrink-0 cursor-grab touch-none text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+            className="shrink-0 cursor-grab touch-none rounded text-text-subtle/60 hover:text-text-subtle active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
             aria-label="Drag to reorder"
           >
             <GripVertical className="size-3.5" />
           </button>
-
-          <CardTitle className="flex-1 text-sm leading-snug">
-            <Link href={detailHref} className="hover:underline underline-offset-2">
-              {task.title}
-            </Link>
-          </CardTitle>
-
+        }
+        title={<Link href={detailHref} className="hover:underline underline-offset-2">{task.title}</Link>}
+        description={task.description}
+        actions={
           <CardMenu
             items={[
               { label: "Edit", onClick: () => setEditOpen(true) },
               { label: "Cancel", onClick: () => handleCancel(), destructive: true },
             ]}
           />
-        </CardHeader>
-
-        <CardContent className="flex flex-col gap-2 pt-0">
+        }
+      >
+        <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${PRIORITY_STYLES[task.priority]}`}>
-              {task.priority}
-            </span>
+            <StatusBadge status={PRIORITY_STATUS[task.priority]}>{task.priority}</StatusBadge>
             {task.squad && (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                 <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: task.squad.color }} />
@@ -155,8 +150,8 @@ export function TaskCard({ task, revalidatePathStr, orgSlug, workspaceSlug, memb
           </div>
 
           <TaskLinksBadge count={task.links.length} className="self-start" />
-        </CardContent>
-      </Card>
+        </div>
+      </EntityCard>
 
       <EditTaskDialog
         task={task}

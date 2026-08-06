@@ -40,10 +40,11 @@ export function PortalSettingsPanel({
   const [ssoError, setSsoError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const base = typeof window !== "undefined" ? window.location.origin : "";
   const roadmapUrl = `/portal/${orgSlug}/${workspaceSlug}/roadmap`;
   const feedbackUrl = `/portal/${orgSlug}/${workspaceSlug}/feedback`;
-  const ssoExchangeUrl = `${base}/api/portal/${orgSlug}/${workspaceSlug}/sso?token=<jwt>&returnTo=/portal/${orgSlug}/${workspaceSlug}/roadmap`;
+  // Keep the first server and client render identical. The relative endpoint
+  // is also portable across local, preview, and production hosts.
+  const ssoExchangeUrl = `/api/portal/${orgSlug}/${workspaceSlug}/sso?token=<jwt>&returnTo=/portal/${orgSlug}/${workspaceSlug}/roadmap`;
 
   function handleToggle(
     field: "feedbackEnabled" | "roadmapPublic" | "portalAuthRequired" | "ssoEnabled",
@@ -178,6 +179,7 @@ export function PortalSettingsPanel({
             type="button"
             role="switch"
             data-testid="portal-toggle-auth-required"
+            aria-label="Require portal sign-in"
             aria-checked={portalAuthRequired}
             disabled={isPending}
             onClick={() => handleToggle("portalAuthRequired", !portalAuthRequired)}

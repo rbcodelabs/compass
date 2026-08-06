@@ -22,8 +22,7 @@ export function PortalSignInGate({ actionLabel }: Props) {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSend() {
     setError(null);
 
     const trimmed = email.trim();
@@ -59,28 +58,30 @@ export function PortalSignInGate({ actionLabel }: Props) {
   }
 
   return (
-    <form onSubmit={handleSend} className="flex flex-col gap-2">
-      <label className="text-xs font-medium text-slate-600">
+    <div className="flex flex-col gap-2">
+      <label htmlFor="portal-sign-in-email" className="text-xs font-medium text-text-secondary">
         Sign in with email to {actionLabel}
       </label>
       <div className="flex gap-2">
         <input
           type="email"
+          id="portal-sign-in-email"
           placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
-          className="flex-1 text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          className="flex-1 rounded-lg border border-border-default px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <button
-          type="submit"
+          type="button"
+          onClick={handleSend}
           disabled={isSending}
-          className="shrink-0 text-xs rounded-lg bg-indigo-600 text-white px-3 py-1.5 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs text-primary-foreground transition-colors hover:bg-primary/80 disabled:opacity-50"
         >
           {isSending ? "Sending..." : "Send magic link"}
         </button>
       </div>
-      {error && <p className="text-xs text-red-500">{error}</p>}
-    </form>
+      {error && <p role="alert" className="text-xs text-status-danger">{error}</p>}
+    </div>
   );
 }

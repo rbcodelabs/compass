@@ -27,12 +27,13 @@ import {
   reorderExperiment,
 } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions";
 import type { ExperimentStatus } from "@/lib/types";
+import { Board, BoardColumn, EmptyState } from "@/components/patterns";
 
-const COLUMNS: { status: ExperimentStatus; label: string; color: string }[] = [
-  { status: "DESIGNING", label: "Designing", color: "bg-slate-400" },
-  { status: "RUNNING", label: "Running", color: "bg-blue-500" },
-  { status: "COMPLETE", label: "Complete", color: "bg-emerald-500" },
-  { status: "KILLED", label: "Killed", color: "bg-red-400" },
+const COLUMNS: { status: ExperimentStatus; label: string; accent: "neutral" | "info" | "success" | "danger" }[] = [
+  { status: "DESIGNING", label: "Designing", accent: "neutral" },
+  { status: "RUNNING", label: "Running", accent: "info" },
+  { status: "COMPLETE", label: "Complete", accent: "success" },
+  { status: "KILLED", label: "Killed", accent: "danger" },
 ];
 
 const ALL_STATUSES: ExperimentStatus[] = ["DESIGNING", "RUNNING", "COMPLETE", "KILLED"];
@@ -60,18 +61,14 @@ function findStatus(columns: ColumnMap, itemId: string): ExperimentStatus | null
 function ExperimentColumn({
   status,
   label,
-  color,
+  accent,
   items,
-  orgSlug,
-  workspaceSlug,
   revalidatePathStr,
 }: {
   status: ExperimentStatus;
   label: string;
-  color: string;
+  accent: "neutral" | "info" | "success" | "danger";
   items: ExperimentCardData[];
-  orgSlug: string;
-  workspaceSlug: string;
   revalidatePathStr: string;
 }) {
   const itemIds = items.map((i) => i.id);
@@ -81,39 +78,10 @@ function ExperimentColumn({
   });
 
   return (
-    <div className="flex flex-col gap-2 min-w-[280px] flex-1">
-      {/* Column header */}
-      <div className="flex items-center gap-2 px-1 mb-1">
-        <span className={`w-2 h-2 rounded-full shrink-0 ${color}`} aria-hidden="true" />
-        <span className="text-sm font-semibold text-slate-700">{label}</span>
-        <span className="ml-auto text-xs font-medium text-slate-400 bg-slate-200/60 rounded-full px-2 py-0.5 tabular-nums">
-          {items.length}
-        </span>
-      </div>
-
-      {/* Drop zone */}
-      <div
-        ref={setNodeRef}
-        className={[
-          "flex flex-col gap-2 rounded-xl p-2.5 min-h-[180px] transition-colors",
-          isOver
-            ? "bg-indigo-50/80 ring-2 ring-inset ring-indigo-200"
-            : "bg-slate-100/80",
-        ].join(" ")}
-      >
+    <BoardColumn title={label} count={items.length} accent={accent} className="min-w-[280px] flex-1" bodyRef={setNodeRef} bodyClassName={isOver ? "min-h-44 rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : "min-h-44"}>
         <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
           {items.length === 0 ? (
-            <div
-              className={[
-                "flex flex-col items-center justify-center gap-2 flex-1 min-h-[120px] rounded-lg border border-dashed py-6 transition-colors",
-                isOver ? "border-indigo-300" : "border-slate-300/70",
-              ].join(" ")}
-            >
-              <div className="w-8 h-8 rounded-full bg-slate-200/70 flex items-center justify-center">
-                <FlaskConical className="w-4 h-4 text-slate-400" />
-              </div>
-              <p className="text-xs text-slate-400">No experiments yet</p>
-            </div>
+            <EmptyState compact icon={<FlaskConical className="size-4" />} title="No experiments yet" className={isOver ? "border-border-interactive" : undefined} />
           ) : (
             items.map((exp) => (
               <ExperimentCard
@@ -124,8 +92,7 @@ function ExperimentColumn({
             ))
           )}
         </SortableContext>
-      </div>
-    </div>
+    </BoardColumn>
   );
 }
 
@@ -270,20 +237,18 @@ export function ExperimentBoard({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
-        {COLUMNS.map(({ status, label, color }) => (
+      <Board label="Experiment board" className="items-start md:grid md:grid-cols-2 xl:grid-cols-4 md:overflow-visible">
+        {COLUMNS.map(({ status, label, accent }) => (
           <ExperimentColumn
             key={status}
             status={status}
             label={label}
-            color={color}
+            accent={accent}
             items={columns[status]}
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
             revalidatePathStr={revalidatePathStr}
           />
         ))}
-      </div>
+      </Board>
 
       <DragOverlay>
         {activeItem ? (

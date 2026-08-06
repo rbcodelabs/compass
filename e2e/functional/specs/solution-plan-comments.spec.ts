@@ -31,7 +31,8 @@ test.describe("Solution Plan & Discussion", () => {
       await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
       // ── 3. Navigate to the opportunity detail page ─────────────────────────
-      await page.getByRole("link", { name: oppTitle }).click();
+      await page.getByRole("button", { name: oppTitle, exact: true }).click();
+      await page.getByRole("link", { name: "Open full page" }).click();
       await page.waitForLoadState("networkidle");
       await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
 

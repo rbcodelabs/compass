@@ -1,0 +1,50 @@
+name: UI system
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm ui:colors
+
+  screenshots:
+    if: ${{ vars.COMPASS_SCREENSHOT_BASE_URL != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Restore screenshot session
+        run: mkdir -p e2e/functional/.auth && printf '%s' "$SCREENSHOT_SESSION_BASE64" | base64 --decode > e2e/functional/.auth/screenshots.json
+        env:
+          SCREENSHOT_SESSION_BASE64: ${{ secrets.COMPASS_SCREENSHOT_SESSION_BASE64 }}
+      - run: pnpm test:e2e
+        env:
+          DOCS_BASE_URL: ${{ vars.COMPASS_SCREENSHOT_BASE_URL }}
+          DOCS_SESSION_FILE: e2e/functional/.auth/screenshots.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compass-ui-screenshots
+          path: public/screenshots/docs

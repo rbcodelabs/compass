@@ -1,7 +1,7 @@
 /**
  * Discovery → Roadmap functional spec.
  *
- * Journey: Create opportunity (in EXPLORING column) → navigate to detail →
+ * Journey: Create opportunity (in EXPLORING column) → open detail panel →
  *          add solution → change solution status to IN_DELIVERY →
  *          expand solution card → promote to roadmap (NOW horizon) →
  *          verify card appears in roadmap NOW column.
@@ -33,11 +33,12 @@ test.describe("Discovery → Roadmap", () => {
       // Opportunity card appears in the board
       await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
-      // ── 3. Navigate to the opportunity detail page ─────────────────────────
-      await page.getByRole("link", { name: oppTitle }).click();
-      await page.waitForLoadState("networkidle");
+      // ── 3. Open the opportunity detail panel ───────────────────────────────
+      await page.getByRole("button", { name: oppTitle }).click();
+      await expect(page).toHaveURL(/detail=opportunity/);
 
-      // Confirm we're on the detail page (opportunity title in heading)
+      // Continue into the full-page editor, where solutions are managed.
+      await page.getByRole("link", { name: "Open full page" }).click();
       await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
 
       // ── 4. Add a solution ─────────────────────────────────────────────────

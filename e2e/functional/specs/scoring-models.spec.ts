@@ -83,7 +83,8 @@ test.describe("Scoring Models", () => {
       await page.goto(`${base}/discovery`);
       await page.waitForLoadState("networkidle");
 
-      await page.getByRole("link", { name: "E2E Baseline Opportunity" }).click();
+      await page.getByRole("button", { name: "E2E Baseline Opportunity", exact: true }).click();
+      await page.getByRole("link", { name: "Open full page" }).click();
       await page.waitForLoadState("networkidle");
 
       await page.getByRole("tab", { name: "Scoring" }).click();

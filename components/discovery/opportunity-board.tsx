@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useCallback } from "react";
+import { useState, useTransition } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -21,6 +21,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { Lightbulb } from "lucide-react";
+import { Board, BoardColumn, EmptyState } from "@/components/patterns";
 import { OpportunityCard, type OpportunityCardData } from "./opportunity-card";
 import { CreateOpportunityForm } from "./create-opportunity-form";
 import {
@@ -29,11 +30,11 @@ import {
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import type { OpportunityStatus, SquadData } from "@/lib/types";
 
-const COLUMNS: { status: OpportunityStatus; label: string; color: string }[] = [
-  { status: "EXPLORING", label: "Exploring", color: "bg-violet-500" },
-  { status: "VALIDATING", label: "Validating", color: "bg-amber-500" },
-  { status: "PRIORITIZED", label: "Prioritized", color: "bg-blue-500" },
-  { status: "ACTIVE", label: "Active", color: "bg-emerald-500" },
+const COLUMNS: { status: OpportunityStatus; label: string; accent: "neutral" | "info" | "warning" | "success" }[] = [
+  { status: "EXPLORING", label: "Exploring", accent: "neutral" },
+  { status: "VALIDATING", label: "Validating", accent: "warning" },
+  { status: "PRIORITIZED", label: "Prioritized", accent: "info" },
+  { status: "ACTIVE", label: "Active", accent: "success" },
 ];
 
 const ALL_STATUSES: OpportunityStatus[] = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"];
@@ -63,7 +64,7 @@ function findStatus(columns: ColumnMap, itemId: string): OpportunityStatus | nul
 function DiscoveryColumn({
   status,
   label,
-  color,
+  accent,
   items,
   orgSlug,
   workspaceSlug,
@@ -72,7 +73,7 @@ function DiscoveryColumn({
 }: {
   status: OpportunityStatus;
   label: string;
-  color: string;
+  accent: "neutral" | "info" | "warning" | "success";
   items: OpportunityCardData[];
   orgSlug: string;
   workspaceSlug: string;
@@ -86,39 +87,17 @@ function DiscoveryColumn({
   });
 
   return (
-    <div className="flex flex-col gap-2 min-w-[280px] w-[280px]">
-      {/* Column header */}
-      <div className="flex items-center gap-2 px-1 mb-1">
-        <span className={`w-2 h-2 rounded-full shrink-0 ${color}`} aria-hidden="true" />
-        <span className="text-sm font-semibold text-slate-700">{label}</span>
-        <span className="ml-auto text-xs font-medium text-slate-400 bg-slate-200/60 rounded-full px-2 py-0.5 tabular-nums">
-          {items.length}
-        </span>
-      </div>
-
-      {/* Drop zone */}
-      <div
-        ref={setNodeRef}
-        className={[
-          "flex flex-col gap-2 rounded-xl p-2.5 min-h-[180px] transition-colors",
-          isOver
-            ? "bg-indigo-50/80 ring-2 ring-inset ring-indigo-200"
-            : "bg-slate-100/80",
-        ].join(" ")}
-      >
+    <BoardColumn
+      title={label}
+      count={items.length}
+      accent={accent}
+      bodyRef={setNodeRef}
+      bodyClassName={isOver ? "min-h-44 rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : "min-h-44"}
+      footer={<CreateOpportunityForm workspaceId={workspaceId} defaultStatus={status} squads={squads} />}
+    >
         <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
           {items.length === 0 ? (
-            <div
-              className={[
-                "flex flex-col items-center justify-center gap-2 flex-1 min-h-[120px] rounded-lg border border-dashed py-6 transition-colors",
-                isOver ? "border-indigo-300" : "border-slate-300/70",
-              ].join(" ")}
-            >
-              <div className="w-8 h-8 rounded-full bg-slate-200/70 flex items-center justify-center">
-                <Lightbulb className="w-4 h-4 text-slate-400" />
-              </div>
-              <p className="text-xs text-slate-400">No opportunities yet</p>
-            </div>
+            <EmptyState compact icon={<Lightbulb className="size-4" />} title="No opportunities yet" className={isOver ? "border-border-interactive" : undefined} />
           ) : (
             items.map((opp) => (
               <OpportunityCard
@@ -130,15 +109,7 @@ function DiscoveryColumn({
             ))
           )}
         </SortableContext>
-      </div>
-
-      {/* Add button */}
-      <CreateOpportunityForm
-        workspaceId={workspaceId}
-        defaultStatus={status}
-        squads={squads}
-      />
-    </div>
+    </BoardColumn>
   );
 }
 
@@ -279,16 +250,6 @@ export function OpportunityBoard({
     setDragSourceStatus(null);
   }
 
-  const handleArchive = useCallback((itemId: string) => {
-    setColumns((prev) => {
-      const next = { ...prev } as ColumnMap;
-      for (const status of ALL_STATUSES) {
-        next[status] = prev[status].filter((i) => i.id !== itemId);
-      }
-      return next;
-    });
-  }, []);
-
   return (
     <DndContext
       sensors={sensors}
@@ -297,13 +258,13 @@ export function OpportunityBoard({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex gap-4 overflow-x-auto pb-4">
-        {COLUMNS.map(({ status, label, color }) => (
+      <Board label="Opportunity board" className="pb-4">
+        {COLUMNS.map(({ status, label, accent }) => (
           <DiscoveryColumn
             key={status}
             status={status}
             label={label}
-            color={color}
+            accent={accent}
             items={columns[status]}
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
@@ -311,7 +272,7 @@ export function OpportunityBoard({
             squads={squads}
           />
         ))}
-      </div>
+      </Board>
 
       <DragOverlay>
         {activeItem ? (
