@@ -10,11 +10,18 @@
 // POST with no body. Streams plain-text progress as the sandbox boots,
 // installs dependencies, and runs the Agent SDK query() against the fixed
 // test prompt "What workspaces exist for org rbcodelabs?".
+//
+// Auth: reuses the existing MCP_API_KEY bearer-token contract from
+// lib/mcp-auth.ts (Authorization: Bearer <MCP_API_KEY>) rather than
+// introducing a new auth mechanism for a throwaway spike route. This is
+// deliberately the *service-account* key, not per-user ApiKey scoping --
+// that's explicitly deferred to the follow-up full-build plan.
 
 import { readFileSync } from "fs"
 import path from "path"
 import { NextRequest } from "next/server"
 import { Sandbox } from "@vercel/sandbox"
+import { validateMcpAuth } from "@/lib/mcp-auth"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -27,6 +34,11 @@ function readEntryScript(): string {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await validateMcpAuth(request)
+  if (!auth.valid) {
+    return new Response("Unauthorized", { status: 401 })
+  }
+
   const mcpApiKey = process.env.MCP_API_KEY
   if (!mcpApiKey) {
     return new Response("MCP_API_KEY is not configured on this deployment.", { status: 500 })

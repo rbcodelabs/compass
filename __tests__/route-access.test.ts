@@ -19,6 +19,10 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/admin/migrate")).toBe(true);
   });
 
+  it("allows spike routes (Bearer MCP_API_KEY auth handled by the route itself)", () => {
+    expect(isPublicPath("/api/spike/agent-sandbox")).toBe(true);
+  });
+
   it("allows the public feedback/roadmap portal and its API", () => {
     expect(isPublicPath("/portal/rbcodelabs/compass/roadmap")).toBe(true);
     expect(isPublicPath("/api/portal/rbcodelabs/compass/feedback")).toBe(true);

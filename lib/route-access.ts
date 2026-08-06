@@ -15,6 +15,10 @@ export function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/api/mcp") ||
     // All admin routes use x-migration-secret header auth
     pathname.startsWith("/api/admin/") ||
+    // Experimental spike routes use the same Bearer MCP_API_KEY auth as
+    // /api/mcp (see app/api/spike/agent-sandbox/route.ts) -- let the route
+    // handler validate and return 401, not a 302 to /login.
+    pathname.startsWith("/api/spike/") ||
     // Public portal routes — no auth, workspace settings control access
     pathname.startsWith("/portal/") ||
     pathname.startsWith("/api/portal/") ||
