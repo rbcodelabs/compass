@@ -10,9 +10,15 @@
 // are ever passed into the sandbox — the tool is a thin HTTP client.
 //
 // Required env vars (passed in by the route via sandbox.runCommand):
-//   ANTHROPIC_API_KEY - Claude API key for the Agent SDK
-//   MCP_API_KEY       - Compass's existing MCP service-account bearer token
-//   MCP_BASE_URL      - Base URL of the Compass deployment to call back into
+//   ANTHROPIC_API_KEY      - Claude API key for the Agent SDK
+//   MCP_API_KEY            - Compass's existing MCP service-account bearer token
+//   MCP_BASE_URL           - Base URL of the Compass deployment to call back into
+//   SPIKE_MCP_BYPASS_SECRET (optional) - Vercel protection-bypass secret, only
+//     needed when MCP_BASE_URL points at a Vercel-SSO-protected preview
+//     deployment (the sandbox's outbound call is unauthenticated w.r.t.
+//     Vercel's own deployment protection, which is a separate layer from the
+//     app-level MCP_API_KEY check). Not needed against an unprotected
+//     production domain.
 
 import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
@@ -21,6 +27,7 @@ import { z } from "zod"
 
 const MCP_BASE_URL = process.env.MCP_BASE_URL
 const MCP_API_KEY = process.env.MCP_API_KEY
+const SPIKE_MCP_BYPASS_SECRET = process.env.SPIKE_MCP_BYPASS_SECRET
 
 if (!MCP_BASE_URL) {
   console.error("[spike-entry] Missing MCP_BASE_URL env var")
@@ -43,7 +50,12 @@ async function callCompassListWorkspaces(orgSlug: string): Promise<string> {
     new URL("/api/mcp", MCP_BASE_URL),
     {
       requestInit: {
-        headers: { Authorization: `Bearer ${MCP_API_KEY}` },
+        headers: {
+          Authorization: `Bearer ${MCP_API_KEY}`,
+          ...(SPIKE_MCP_BYPASS_SECRET
+            ? { "x-vercel-protection-bypass": SPIKE_MCP_BYPASS_SECRET }
+            : {}),
+        },
       },
     }
   )

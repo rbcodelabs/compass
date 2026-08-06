@@ -49,6 +49,11 @@ export async function POST(request: NextRequest) {
   }
 
   const mcpBaseUrl = request.nextUrl.origin
+  // Optional: only needed when this deployment is itself behind Vercel's
+  // project-level deployment protection (SSO), so the sandbox's outbound
+  // call back to this same deployment's /api/mcp can get past it. Separate
+  // trust boundary from MCP_API_KEY, which is the app-level auth check.
+  const spikeMcpBypassSecret = process.env.SPIKE_MCP_BYPASS_SECRET
   const entryScript = readEntryScript()
   const startedAt = Date.now()
 
@@ -114,6 +119,9 @@ export async function POST(request: NextRequest) {
             ANTHROPIC_API_KEY: anthropicApiKey,
             MCP_API_KEY: mcpApiKey,
             MCP_BASE_URL: mcpBaseUrl,
+            ...(spikeMcpBypassSecret
+              ? { SPIKE_MCP_BYPASS_SECRET: spikeMcpBypassSecret }
+              : {}),
           },
           detached: true,
           timeoutMs: 4 * 60_000,
