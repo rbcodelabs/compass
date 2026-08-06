@@ -7,6 +7,9 @@ import { BottomNav } from "@/components/bottom-nav";
 import { MobileHeader } from "@/components/mobile-header";
 import { PanelProvider } from "@/components/panels/panel-context";
 import { PanelShell } from "@/components/panels/panel-shell";
+import { cookies } from "next/headers";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 interface OrgSettingsLayoutProps {
   children: React.ReactNode;
@@ -54,6 +57,8 @@ export default async function OrgSettingsLayout({
     // workspace members) but fail safe rather than crash the chrome.
     notFound();
   }
+  const cookieStore = await cookies();
+  const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
 
   return (
     // MobileHeader calls usePanelContext() unconditionally, so it needs a
@@ -73,20 +78,31 @@ export default async function OrgSettingsLayout({
         userImage={session.user.image ?? undefined}
       />
 
-      <div className="flex h-[calc(100dvh-3.5rem)] md:h-screen overflow-hidden">
-        <Sidebar
-          orgSlug={orgSlug}
-          workspaceSlug={anchorWorkspace.slug}
-          workspaceName={anchorWorkspace.name}
-          userName={session.user.name ?? session.user.email ?? ""}
-          userEmail={session.user.email ?? ""}
-          userImage={session.user.image ?? undefined}
-          workspaces={workspaces}
-          isOrgAdmin
-        />
+      <TooltipProvider>
+        <SidebarProvider
+          defaultOpen={sidebarDefaultOpen}
+          className="h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden md:h-screen"
+          style={{
+            "--sidebar-width": "13.75rem",
+            "--sidebar-width-icon": "3.5rem",
+          } as React.CSSProperties}
+        >
+          <Sidebar
+            orgSlug={orgSlug}
+            workspaceSlug={anchorWorkspace.slug}
+            workspaceName={anchorWorkspace.name}
+            userName={session.user.name ?? session.user.email ?? ""}
+            userEmail={session.user.email ?? ""}
+            userImage={session.user.image ?? undefined}
+            workspaces={workspaces}
+            isOrgAdmin
+          />
 
-        <main className="flex-1 overflow-y-auto bg-slate-50 pb-16 md:pb-0">{children}</main>
-      </div>
+          <SidebarInset className="min-w-0 overflow-y-auto bg-surface-app pb-16 md:pb-0">
+            {children}
+          </SidebarInset>
+        </SidebarProvider>
+      </TooltipProvider>
 
       <BottomNav orgSlug={orgSlug} workspaceSlug={anchorWorkspace.slug} />
 

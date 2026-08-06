@@ -9,6 +9,9 @@ import { PanelProvider } from "@/components/panels/panel-context"
 import { PanelShell } from "@/components/panels/panel-shell"
 import { WorkspaceThemeStyle } from "@/components/branding/workspace-theme-style"
 import { resolveWorkspaceBranding } from "@/lib/branding"
+import { cookies } from "next/headers"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 interface WorkspaceLayoutProps {
   children: React.ReactNode
@@ -39,6 +42,8 @@ export default async function WorkspaceLayout({
     select: { role: true },
   })
   const isOrgAdmin = orgMembership?.role === "OWNER" || orgMembership?.role === "ADMIN"
+  const cookieStore = await cookies()
+  const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false"
 
   return (
     <>
@@ -55,25 +60,32 @@ export default async function WorkspaceLayout({
           isOrgAdmin={isOrgAdmin}
         />
 
-        {/* On mobile: subtract the 56px header height so the content area fills the rest */}
-        <div className="flex h-[calc(100dvh-3.5rem)] md:h-screen overflow-hidden">
-          {/* Desktop sidebar — hidden on mobile via sidebar.tsx */}
-          <Sidebar
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-            workspaceName={workspace.name}
-            userName={session.user.name ?? session.user.email ?? ""}
-            userEmail={session.user.email ?? ""}
-            userImage={session.user.image ?? undefined}
-            workspaces={workspaces}
-            isOrgAdmin={isOrgAdmin}
-          />
+        <TooltipProvider>
+          <SidebarProvider
+            defaultOpen={sidebarDefaultOpen}
+            className="h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden md:h-screen"
+            style={{
+              "--sidebar-width": "13.75rem",
+              "--sidebar-width-icon": "3.5rem",
+            } as React.CSSProperties}
+          >
+            <Sidebar
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+              workspaceName={workspace.name}
+              userName={session.user.name ?? session.user.email ?? ""}
+              userEmail={session.user.email ?? ""}
+              userImage={session.user.image ?? undefined}
+              workspaces={workspaces}
+              isOrgAdmin={isOrgAdmin}
+            />
 
-          {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}
-          <main className="flex-1 overflow-y-auto bg-slate-50 pb-16 md:pb-0">
-            {children}
-          </main>
-        </div>
+            {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}
+            <SidebarInset className="min-w-0 overflow-y-auto bg-surface-app pb-16 md:pb-0">
+              {children}
+            </SidebarInset>
+          </SidebarProvider>
+        </TooltipProvider>
 
         {/* Mobile bottom nav — shown on small screens only */}
         <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} />

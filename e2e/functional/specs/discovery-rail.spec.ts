@@ -48,16 +48,17 @@ test.describe("Discovery Rail", () => {
     // the menu trigger is only visually hidden (opacity-0), not removed
     // from the accessibility tree, so an unscoped lookup would be ambiguous.
     const cardC = page
-      .locator("div.group", { has: page.getByRole("link", { name: oppTitleC }) })
+      .locator("div.group", { has: page.getByRole("button", { name: oppTitleC, exact: true }) })
       .first();
     await cardC.getByRole("button", { name: "Card actions" }).click();
     await page.getByRole("menuitem", { name: "Archive" }).click();
-    await expect(page.getByRole("link", { name: oppTitleC })).not.toBeVisible({
+    await expect(page.getByRole("button", { name: oppTitleC, exact: true })).not.toBeVisible({
       timeout: 15_000,
     });
 
     // ── 2. Open opportunity A's detail page — rail appears ─────────────────
-    await page.getByRole("link", { name: oppTitleA }).click();
+    await page.getByRole("button", { name: oppTitleA, exact: true }).click();
+    await page.getByRole("link", { name: "Open full page" }).click();
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: oppTitleA })).toBeVisible();
 
@@ -67,18 +68,13 @@ test.describe("Discovery Rail", () => {
     await expect(page.getByRole("link", { name: oppTitleB })).toBeVisible();
 
     // ── 3. Expand the Archived group (search still empty, so it's present) ──
-    // Scoped via the summary's own text rather than an anchored regex — the
-    // "▶" indicator glyph shares a wrapping <span> with the "Archived (n)"
-    // text, so an exact/anchored match against the combined text would never
-    // hit an element cleanly.
-    const archivedDetails = page
-      .locator("details")
-      .filter({ has: page.locator("summary", { hasText: "Archived" }) });
-    const archivedSummary = archivedDetails.locator("summary");
-    await expect(archivedSummary).toBeVisible();
-    await expect(archivedDetails).not.toHaveAttribute("open", "");
-    await archivedSummary.click();
-    await expect(archivedDetails).toHaveAttribute("open", "");
+    // The shadcn Collapsible exposes its state through the trigger's standard
+    // aria-expanded contract.
+    const archivedTrigger = page.getByRole("button", { name: /Archived \(\d+\)/ });
+    await expect(archivedTrigger).toBeVisible();
+    await expect(archivedTrigger).toHaveAttribute("aria-expanded", "false");
+    await archivedTrigger.click();
+    await expect(archivedTrigger).toHaveAttribute("aria-expanded", "true");
 
     // ── 4. Click the other opportunity — navigates without losing the ──────
     //      expanded-group state (search is still empty at this point).
@@ -86,7 +82,7 @@ test.describe("Discovery Rail", () => {
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: oppTitleB })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`${base}/discovery/[^/]+$`));
-    await expect(archivedDetails).toHaveAttribute("open", "");
+    await expect(archivedTrigger).toHaveAttribute("aria-expanded", "true");
 
     // ── 5. Search filters the list live ─────────────────────────────────────
     const searchTermA = oppTitleA.slice(0, 20);
@@ -125,7 +121,8 @@ test.describe("Discovery Rail", () => {
       await page.getByRole("button", { name: "Create Opportunity" }).click();
       await expect(page.getByText(oppTitleB)).toBeVisible({ timeout: 15_000 });
 
-      await page.getByRole("link", { name: oppTitleA }).click();
+      await page.getByRole("button", { name: oppTitleA, exact: true }).click();
+      await page.getByRole("link", { name: "Open full page" }).click();
       await page.waitForLoadState("networkidle");
       await expect(page.getByRole("heading", { name: oppTitleA })).toBeVisible();
 

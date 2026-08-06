@@ -9,6 +9,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { DocTreeSidebar, type DocTreeItem } from "./doc-tree-sidebar"
+import { Button } from "@/components/ui/button"
 
 interface DocsMobileDrawerProps {
   docs: DocTreeItem[]
@@ -28,14 +29,17 @@ export function DocsMobileDrawer({
   return (
     <>
       {/* Trigger button — mobile only */}
-      <button
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
         onClick={() => setOpen(true)}
-        className="md:hidden flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 px-2 py-1.5 rounded-md hover:bg-slate-100 transition-colors"
+        className="md:hidden text-slate-600 hover:text-slate-900"
         aria-label="Open pages"
       >
         <PanelLeft className="w-4 h-4" />
         <span className="font-medium">Pages</span>
-      </button>
+      </Button>
 
       {/* Drawer */}
       <Sheet open={open} onOpenChange={setOpen}>

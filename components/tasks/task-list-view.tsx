@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { CalendarDays } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TaskLinksBadge } from "./task-links-badge";
 import type { TaskCardData } from "./task-card";
 import type { MemberData } from "@/lib/types";
@@ -51,36 +52,36 @@ export function TaskListView({ tasks, orgSlug, workspaceSlug, members }: Props) 
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-border">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-            <th className="px-3 py-2 font-medium">Title</th>
-            <th className="px-3 py-2 font-medium">Assignee</th>
-            <th className="px-3 py-2 font-medium">Squad</th>
-            <th className="px-3 py-2 font-medium">Priority</th>
-            <th className="px-3 py-2 font-medium">Status</th>
-            <th className="px-3 py-2 font-medium">Due</th>
-            <th className="px-3 py-2 font-medium">Points</th>
-            <th className="px-3 py-2 font-medium">Links</th>
-          </tr>
-        </thead>
-        <tbody>
+    <div className="overflow-hidden rounded-xl border border-border">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-muted/40 text-xs text-muted-foreground hover:bg-muted/40">
+            <TableHead className="px-3 py-2">Title</TableHead>
+            <TableHead className="px-3 py-2">Assignee</TableHead>
+            <TableHead className="px-3 py-2">Squad</TableHead>
+            <TableHead className="px-3 py-2">Priority</TableHead>
+            <TableHead className="px-3 py-2">Status</TableHead>
+            <TableHead className="px-3 py-2">Due</TableHead>
+            <TableHead className="px-3 py-2">Points</TableHead>
+            <TableHead className="px-3 py-2">Links</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {rows.map(({ task, depth }) => {
             const assigneeMember = task.assigneeUserId ? members.find((m) => m.userId === task.assigneeUserId) : null;
             const assigneeLabel = assigneeMember?.name || assigneeMember?.email || task.ownerName || "—";
             return (
-              <tr key={task.id} className="border-b border-border/60 last:border-b-0 hover:bg-muted/30">
-                <td className="px-3 py-2" style={{ paddingLeft: `${12 + depth * 20}px` }}>
+              <TableRow key={task.id} className="hover:bg-muted/30">
+                <TableCell className="px-3 py-2" style={{ paddingLeft: `${12 + depth * 20}px` }}>
                   <Link
                     href={`/${orgSlug}/${workspaceSlug}/tasks/${task.id}`}
                     className="font-medium hover:underline underline-offset-2"
                   >
                     {task.title}
                   </Link>
-                </td>
-                <td className="px-3 py-2 text-muted-foreground">{assigneeLabel}</td>
-                <td className="px-3 py-2">
+                </TableCell>
+                <TableCell className="px-3 py-2 text-muted-foreground">{assigneeLabel}</TableCell>
+                <TableCell className="px-3 py-2">
                   {task.squad ? (
                     <span className="flex items-center gap-1.5 text-muted-foreground">
                       <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: task.squad.color }} />
@@ -89,14 +90,14 @@ export function TaskListView({ tasks, orgSlug, workspaceSlug, members }: Props) 
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
-                </td>
-                <td className="px-3 py-2">
+                </TableCell>
+                <TableCell className="px-3 py-2">
                   <Badge variant="outline">{task.priority}</Badge>
-                </td>
-                <td className="px-3 py-2">
+                </TableCell>
+                <TableCell className="px-3 py-2">
                   <Badge variant="secondary">{task.status}</Badge>
-                </td>
-                <td className="px-3 py-2 text-muted-foreground">
+                </TableCell>
+                <TableCell className="px-3 py-2 text-muted-foreground">
                   {task.dueDate ? (
                     <span className="flex items-center gap-1">
                       <CalendarDays className="size-3 shrink-0" />
@@ -105,16 +106,16 @@ export function TaskListView({ tasks, orgSlug, workspaceSlug, members }: Props) 
                   ) : (
                     "—"
                   )}
-                </td>
-                <td className="px-3 py-2 text-muted-foreground">{task.storyPoints ?? "—"}</td>
-                <td className="px-3 py-2">
+                </TableCell>
+                <TableCell className="px-3 py-2 text-muted-foreground">{task.storyPoints ?? "—"}</TableCell>
+                <TableCell className="px-3 py-2">
                   <TaskLinksBadge count={task.links.length} />
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             );
           })}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }

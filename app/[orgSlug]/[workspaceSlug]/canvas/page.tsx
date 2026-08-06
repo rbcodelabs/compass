@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { getCanvasOverview } from "@/lib/canvas/data";
 import { CanvasFlow } from "@/components/canvas/canvas-flow";
+import { PageHeader } from "@/components/patterns/page-header";
 
 export const metadata = {
   title: "Canvas",
@@ -39,15 +40,11 @@ export default async function CanvasPage({ params }: CanvasPageProps) {
 
   return (
     <main className="flex flex-col h-full">
-      <div className="flex flex-wrap items-start justify-between gap-4 p-4 sm:p-6 md:p-8 pb-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-            Canvas
-          </h1>
-          <p className="text-slate-500 text-sm mt-1">
-            Pan and zoom across your full OKR, discovery, and roadmap graph.
-          </p>
-        </div>
+      <div className="p-4 pb-4 sm:p-6 sm:pb-4 md:p-8 md:pb-4">
+        <PageHeader
+          title="Canvas"
+          description="Pan and zoom across your full OKR, discovery, and roadmap graph."
+        />
       </div>
       <div className="flex-1 min-h-0">
         <CanvasFlow overview={overview} />

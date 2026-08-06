@@ -10,6 +10,7 @@ import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
 import type { Horizon, SquadData } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import type { UnscheduledItem } from "@/components/roadmap/unscheduled-items-panel";
+import { PageHeader } from "@/components/patterns/page-header";
 
 export const metadata = {
   title: "Roadmap",
@@ -220,19 +221,11 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
 
   return (
     <div className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-h-0">
-      <div className="shrink-0 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Roadmap</h1>
-          <p className="text-slate-500 text-sm mt-1">
-            {view === "timeline"
-              ? "See when items are planned to start and finish."
-              : "Drag items between horizons to update your plan."}
-          </p>
-        </div>
-        <Suspense>
-          <RoadmapViewToggle view={view} />
-        </Suspense>
-      </div>
+      <PageHeader
+        title="Roadmap"
+        description={view === "timeline" ? "See when items are planned to start and finish." : "Drag items between horizons to update your plan."}
+        actions={<Suspense><RoadmapViewToggle view={view} /></Suspense>}
+      />
 
       <Suspense>
         <SquadFilterBar squads={squads} />

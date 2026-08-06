@@ -17,6 +17,8 @@ import type {
   SquadData,
   MemberData,
 } from "@/lib/types";
+import { PageHeader } from "@/components/patterns/page-header";
+import { SettingsSection } from "@/components/patterns/settings-section";
 
 export const metadata = { title: "Workspace Settings" };
 
@@ -122,107 +124,51 @@ export default async function SettingsPage({ params }: Props) {
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8 max-w-3xl">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Settings</h1>
-        <p className="text-sm text-slate-500 mt-1">{workspace.name}</p>
-      </div>
+      <PageHeader title="Settings" description={workspace.name} />
 
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-base font-semibold">Squads</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Teams within this workspace. Squads can be assigned to objectives, opportunities, experiments, and roadmap items.
-          </p>
-        </div>
-
+      <SettingsSection title="Squads" description="Teams within this workspace. Squads can be assigned to objectives, opportunities, experiments, and roadmap items.">
         <ManageSquadsPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           initialSquads={squads}
         />
-      </section>
+      </SettingsSection>
 
-      <div className="border-t border-border" />
-
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-base font-semibold">Members</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            People with access to this workspace. Admins can manage settings, squads, and members; members have standard access.
-          </p>
-        </div>
-
+      <SettingsSection title="Members" description="People with access to this workspace. Admins can manage settings, squads, and members; members have standard access.">
         <ManageMembersPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           initialMembers={members}
           currentUserMembershipId={currentUserMembershipId}
         />
-      </section>
+      </SettingsSection>
 
-      <div className="border-t border-border" />
-
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-base font-semibold">Custom Fields</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Add fields to any object type. Click any field value on a record to edit it.
-          </p>
-        </div>
-
+      <SettingsSection title="Custom Fields" description="Add fields to any object type. Click any field value on a record to edit it.">
         <ManageFieldsPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           initialFields={fields}
         />
-      </section>
+      </SettingsSection>
 
-      <div className="border-t border-border" />
-
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-base font-semibold">Scoring</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Choose which org-level scoring model this workspace uses to rank opportunities.
-            Templates are managed by organization admins in Org Settings.
-          </p>
-        </div>
-
+      <SettingsSection title="Scoring" description="Choose which org-level scoring model this workspace uses to rank opportunities. Templates are managed by organization admins in Org Settings.">
         <WorkspaceScoringPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           availableModels={rawScoringModels}
           currentScoringModelId={scoringConfig?.scoringModelId ?? null}
         />
-      </section>
+      </SettingsSection>
 
-      <div className="border-t border-border" />
-
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-base font-semibold">API Keys</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Generate personal API keys for MCP / programmatic access. Each key is tied to your account and can be revoked independently.
-          </p>
-        </div>
-
+      <SettingsSection title="API Keys" description="Generate personal API keys for MCP / programmatic access. Each key is tied to your account and can be revoked independently.">
         <ManageApiKeysPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           initialKeys={apiKeys}
         />
-      </section>
+      </SettingsSection>
 
-      <div className="border-t border-border" />
-
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-base font-semibold">Portal</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Control which parts of this workspace are publicly accessible without login.
-          </p>
-        </div>
-
+      <SettingsSection title="Portal" description="Control which parts of this workspace are publicly accessible without login.">
         <PortalSettingsPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
@@ -233,19 +179,9 @@ export default async function SettingsPage({ params }: Props) {
           ssoSecretConfigured={Boolean(workspace.ssoSecretEncrypted)}
           ssoSecretUpdatedAt={workspace.ssoSecretUpdatedAt}
         />
-      </section>
+      </SettingsSection>
 
-      <div className="border-t border-border" />
-
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-base font-semibold">Branding</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Customize the accent color, font, and logo shown across this workspace
-            and its public portal.
-          </p>
-        </div>
-
+      <SettingsSection title="Branding" description="Customize the accent color, font, and logo shown across this workspace and its public portal.">
         <WorkspaceBrandingPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
@@ -255,24 +191,15 @@ export default async function SettingsPage({ params }: Props) {
           initialFontFamily={workspace.brandingFontFamily}
           initialLogoUrl={workspace.brandingLogoUrl}
         />
-      </section>
+      </SettingsSection>
 
-      <div className="border-t border-border" />
-
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-base font-semibold text-red-600">Danger Zone</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Destructive actions that cannot be undone.
-          </p>
-        </div>
-
+      <SettingsSection danger title="Danger Zone" description="Destructive actions that cannot be undone.">
         <DeleteWorkspacePanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           workspaceName={workspace.name}
         />
-      </section>
+      </SettingsSection>
     </main>
   );
 }

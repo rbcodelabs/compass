@@ -1,12 +1,7 @@
 import Link from "next/link";
 import type { CycleStatus } from "@/lib/types";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from "@/components/ui/card";
+import { EntityCard } from "@/components/patterns/entity-card";
+import { StatusBadge } from "@/components/patterns/status-badge";
 
 interface CycleCardProps {
   cycle: {
@@ -21,10 +16,8 @@ interface CycleCardProps {
   workspaceSlug: string;
 }
 
-const STATUS_STYLES: Record<CycleStatus, string> = {
-  ACTIVE: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  DRAFT: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
-  CLOSED: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+const STATUS_TONE: Record<CycleStatus, "success" | "neutral"> = {
+  ACTIVE: "success", DRAFT: "neutral", CLOSED: "neutral",
 };
 
 const STATUS_LABELS: Record<CycleStatus, string> = {
@@ -45,28 +38,9 @@ export function CycleCard({ cycle, orgSlug, workspaceSlug }: CycleCardProps) {
       href={`/${orgSlug}/${workspaceSlug}/okrs/${cycle.id}`}
       className="block group"
     >
-      <Card className="bg-white shadow-sm transition-all duration-150 group-hover:shadow-md group-hover:-translate-y-0.5">
-        <CardHeader>
-          <div className="flex items-start justify-between gap-2">
-            <CardTitle>{cycle.title}</CardTitle>
-            <span
-              className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-medium ${STATUS_STYLES[cycle.status]}`}
-            >
-              {STATUS_LABELS[cycle.status]}
-            </span>
-          </div>
-          <CardDescription>
-            {formatDateRange(cycle.startDate, cycle.endDate)}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground text-sm">
-            {cycle._count.objectives === 0
-              ? "No objectives yet"
-              : `${cycle._count.objectives} objective${cycle._count.objectives === 1 ? "" : "s"}`}
-          </p>
-        </CardContent>
-      </Card>
+      <EntityCard interactive className="h-full group-hover:-translate-y-0.5" title={cycle.title} description={formatDateRange(cycle.startDate, cycle.endDate)} status={<StatusBadge status={STATUS_TONE[cycle.status]}>{STATUS_LABELS[cycle.status]}</StatusBadge>}>
+        <p className="text-sm text-text-subtle">{cycle._count.objectives === 0 ? "No objectives yet" : `${cycle._count.objectives} objective${cycle._count.objectives === 1 ? "" : "s"}`}</p>
+      </EntityCard>
     </Link>
   );
 }

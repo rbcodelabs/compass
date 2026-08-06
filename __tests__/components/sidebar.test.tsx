@@ -17,6 +17,8 @@ vi.mock("@/lib/meta-feedback-actions", () => ({
 }));
 
 import { Sidebar } from "@/components/sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const baseProps = {
   orgSlug: "rbcodelabs",
@@ -29,9 +31,20 @@ const baseProps = {
   ],
 };
 
+function renderSidebar(isOrgAdmin: boolean) {
+  return render(
+    <TooltipProvider>
+      <SidebarProvider>
+        <Sidebar {...baseProps} isOrgAdmin={isOrgAdmin} />
+      </SidebarProvider>
+    </TooltipProvider>
+  );
+}
+
 describe("Sidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    document.cookie = "sidebar_state=; max-age=0; path=/";
   });
 
   afterEach(() => {
@@ -39,7 +52,7 @@ describe("Sidebar", () => {
   });
 
   it("does not clutter primary nav with Settings, Org Settings, Help, or Send Feedback", () => {
-    render(<Sidebar {...baseProps} isOrgAdmin />);
+    renderSidebar(true);
 
     const mainNav = screen.getByRole("navigation", { name: "Main navigation" });
     // Primary sections stay in the main nav...
@@ -56,7 +69,7 @@ describe("Sidebar", () => {
   });
 
   it("surfaces Settings, Org Settings, Help, and Send Feedback inside the avatar dropdown for org admins", async () => {
-    render(<Sidebar {...baseProps} isOrgAdmin />);
+    renderSidebar(true);
 
     const trigger = screen.getByText("Rick Bowman").closest("button");
     expect(trigger).not.toBeNull();
@@ -76,12 +89,33 @@ describe("Sidebar", () => {
   });
 
   it("hides Org Settings from the avatar dropdown for non-admins", async () => {
-    render(<Sidebar {...baseProps} isOrgAdmin={false} />);
+    renderSidebar(false);
 
     const trigger = screen.getByText("Rick Bowman").closest("button");
     fireEvent.click(trigger as HTMLButtonElement);
 
     expect(await screen.findByRole("link", { name: "Help" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Org Settings" })).not.toBeInTheDocument();
+  });
+
+  it("collapses to the icon rail and persists the preference", () => {
+    renderSidebar(true);
+
+    const sidebar = document.querySelector('[data-slot="sidebar"][data-state]');
+    expect(sidebar).toHaveAttribute("data-state", "expanded");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Toggle Sidebar" })[0]);
+
+    expect(sidebar).toHaveAttribute("data-state", "collapsed");
+    expect(document.cookie).toContain("sidebar_state=false");
+  });
+
+  it("supports the shadcn Ctrl+B keyboard shortcut", () => {
+    renderSidebar(true);
+
+    const sidebar = document.querySelector('[data-slot="sidebar"][data-state]');
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+
+    expect(sidebar).toHaveAttribute("data-state", "collapsed");
   });
 });

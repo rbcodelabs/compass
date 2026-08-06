@@ -12,6 +12,9 @@ import {
 } from "@/lib/discovery-rail";
 import type { OpportunityStatus, SquadData } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 export type DiscoveryRailOpportunity = {
   id: string;
@@ -76,13 +79,16 @@ export function DiscoveryRail({
   if (variant === "sidebar" && collapsed) {
     return (
       <div className="hidden md:flex w-12 shrink-0 flex-col items-center border-r border-slate-200 bg-white py-3">
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={toggleCollapsed}
-          className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-slate-100 hover:text-foreground"
+          className="text-muted-foreground hover:text-foreground"
           aria-label="Expand discovery rail"
         >
           <PanelLeftOpen className="size-4" />
-        </button>
+        </Button>
       </div>
     );
   }
@@ -100,22 +106,25 @@ export function DiscoveryRail({
       <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 p-3">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+          <Input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search opportunities…"
-            className="w-full rounded-md border border-input bg-transparent py-1.5 pl-7 pr-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+            className="h-8 w-full bg-transparent pl-7 pr-2 text-xs"
           />
         </div>
         {variant === "sidebar" && (
-          <button
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={toggleCollapsed}
-            className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-slate-100 hover:text-foreground"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
             aria-label="Collapse discovery rail"
           >
             <PanelLeftClose className="size-4" />
-          </button>
+          </Button>
         )}
       </div>
 
@@ -143,13 +152,12 @@ export function DiscoveryRail({
         })}
 
         {archived.length > 0 && (
-          <details className="group">
-            <summary className="cursor-pointer list-none px-2 py-1">
-              <span className="flex select-none items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                <span className="inline-block transition-transform group-open:rotate-90">▶</span>
-                Archived ({archived.length})
-              </span>
-            </summary>
+          <Collapsible className="group">
+            <CollapsibleTrigger render={<Button type="button" variant="ghost" size="sm" className="h-7 w-full justify-start px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground" />}>
+              <span className="inline-block transition-transform group-data-open:rotate-90">▶</span>
+              Archived ({archived.length})
+            </CollapsibleTrigger>
+            <CollapsibleContent>
             <div className="mt-1 flex flex-col gap-1">
               {archived.map((opp) => (
                 <RailRow
@@ -161,7 +169,8 @@ export function DiscoveryRail({
                 />
               ))}
             </div>
-          </details>
+            </CollapsibleContent>
+          </Collapsible>
         )}
 
         {filtered.length === 0 && (

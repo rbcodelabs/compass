@@ -54,7 +54,8 @@ async function createValidatedSolution(page: Page, base: string, title: string) 
   await page.getByRole("button", { name: "Create Opportunity" }).click();
   await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
-  await page.getByRole("link", { name: oppTitle }).click();
+  await page.getByRole("button", { name: oppTitle, exact: true }).click();
+  await page.getByRole("link", { name: "Open full page" }).click();
   await page.waitForLoadState("networkidle");
   await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
 
@@ -101,23 +102,18 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
       const feedbackToggle = page.getByRole("switch").nth(1);
+      const authToggle = page.getByRole("switch").nth(2);
       if ((await feedbackToggle.getAttribute("aria-checked")) !== "true") {
         await feedbackToggle.click();
         await expect(feedbackToggle).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
       }
+      if ((await authToggle.getAttribute("aria-checked")) === "true") {
+        await authToggle.click();
+        await expect(authToggle).toHaveAttribute("aria-checked", "false", { timeout: 10_000 });
+      }
 
-      // NOTE: submission here can be disabled if the workspace currently has
-      // portalAuthRequired on, or fail if "feedback enabled" gets toggled
-      // off — both are workspace-wide settings shared with every other spec
-      // in this run, and portal.spec.ts's account-auth test independently
-      // toggles both for the duration of the magic-link round trip it
-      // drives (with its own before/after tracking, racing against this
-      // spec's). There's no authenticated (non-portal) path to create a
-      // FeedbackItem to route around this. This is a pre-existing
-      // architectural gap in the test suite — shared mutable workspace
-      // state across parallel specs, with no per-test isolation — that
-      // equally affects the existing feedback-bug-roadmap.spec.ts; it's not
-      // something introduced by this feature and out of scope to fix here.
+      // Functional specs share one seeded workspace, so make the portal state
+      // required by this journey explicit before submitting anonymously.
       await page.goto(`/portal/${orgSlug}/${workspaceSlug}/feedback`);
       await page.waitForLoadState("networkidle");
       await page.getByRole("button", { name: "Bug" }).click();

@@ -66,7 +66,6 @@ export async function POST(req: NextRequest) {
 
     // Upsert org
     let orgRes = await client.query(`SELECT id FROM "${schema}".organizations WHERE slug = $1`, [orgSlug]);
-    let orgId: string;
     if (!orgRes.rows[0]) {
       orgRes = await client.query(
         `INSERT INTO "${schema}".organizations (name, slug) VALUES ($1, $2) RETURNING id`,
@@ -78,14 +77,13 @@ export async function POST(req: NextRequest) {
       await client.query(`UPDATE "${schema}".organizations SET name = $1, slug = $2 WHERE id = $3`, [orgName, orgSlug, orgRes.rows[0].id]);
       log.push(`Updated org: ${orgName} (${orgSlug})`);
     }
-    orgId = orgRes.rows[0].id;
+    const orgId: string = orgRes.rows[0].id;
 
     // Upsert workspace
     let wsRes = await client.query(
       `SELECT id FROM "${schema}".workspaces WHERE organization_id = $1 AND slug = $2`,
       [orgId, workspaceSlug]
     );
-    let wsId: string;
     if (!wsRes.rows[0]) {
       wsRes = await client.query(
         `INSERT INTO "${schema}".workspaces (organization_id, name, slug, feedback_enabled, roadmap_public) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
@@ -99,7 +97,7 @@ export async function POST(req: NextRequest) {
       );
       log.push(`Updated workspace flags: ${workspaceName} (feedbackEnabled=${feedbackEnabledBool}, roadmapPublic=${roadmapPublicBool})`);
     }
-    wsId = wsRes.rows[0].id;
+    const wsId: string = wsRes.rows[0].id;
 
     // Upsert membership
     const memRes = await client.query(

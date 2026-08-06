@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { updateRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { RoadmapCardData } from "./roadmap-card";
 
@@ -131,16 +132,17 @@ export function EditItemDialog({ item, open, onOpenChange, revalidatePathStr, on
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id={`edit-private-${item.id}`}
               checked={isPrivate}
-              onChange={(e) => setIsPrivate(e.target.checked)}
+              onCheckedChange={setIsPrivate}
               disabled={isPending}
-              className="size-3.5 rounded border-input"
             />
-            Private (hidden from public roadmap)
-          </label>
+            <Label htmlFor={`edit-private-${item.id}`} className="cursor-pointer text-xs font-normal text-muted-foreground">
+              Private (hidden from public roadmap)
+            </Label>
+          </div>
 
           <DialogFooter>
             <Button type="submit" size="sm" disabled={isPending}>

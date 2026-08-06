@@ -10,6 +10,7 @@ import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
 import { AssigneeFilterBar, PriorityFilterBar } from "@/components/tasks/assignee-filter-bar";
 import type { TaskCardData } from "@/components/tasks/task-card";
 import type { TaskStatus, TaskPriority, SquadData, MemberData } from "@/lib/types";
+import { PageHeader } from "@/components/patterns/page-header";
 
 export const metadata = {
   title: "Tasks",
@@ -128,19 +129,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
 
   return (
     <div className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-h-0">
-      <div className="shrink-0 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Tasks</h1>
-          <p className="text-slate-500 text-sm mt-1">
-            {view === "list"
-              ? "A flat, filterable list — good for tracking a handful of high-priority initiatives."
-              : "Drag tasks between columns to update status. Blocked is its own column."}
-          </p>
-        </div>
-        <Suspense>
-          <TasksViewToggle view={view} />
-        </Suspense>
-      </div>
+      <PageHeader title="Tasks" description={view === "list" ? "A flat, filterable list — good for tracking a handful of high-priority initiatives." : "Drag tasks between columns to update status. Blocked is its own column."} actions={<Suspense><TasksViewToggle view={view} /></Suspense>} />
 
       <div className="shrink-0 flex flex-col gap-2">
         <Suspense>

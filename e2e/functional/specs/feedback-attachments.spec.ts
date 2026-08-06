@@ -19,6 +19,7 @@ import { test, expect } from "../fixtures/index";
 const FIXTURE_IMAGE = path.join(__dirname, "..", "..", "fixtures", "test-image.png");
 
 test.describe("Feedback Attachments", () => {
+  test.skip(!process.env.BLOB_READ_WRITE_TOKEN, "requires BLOB_READ_WRITE_TOKEN");
   test(
     "submit feedback with a screenshot via the portal → attachment visible on portal and internal board",
     async ({ page, base, orgSlug, workspaceSlug }) => {

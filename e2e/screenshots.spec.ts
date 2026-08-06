@@ -35,6 +35,12 @@ const PAGES = [
   // Danger Zone (DeleteWorkspacePanel) is the last section on the settings
   // page, below Branding — same situation branding.png solves above.
   { file: "danger-zone.png",     url: "/rbcodelabs/compass/settings", scrollToHeading: "Danger Zone" },
+  // Preview deployments and local DOCS_BASE_URL targets expose the built-in
+  // registry. Production returns 404 unless explicitly enabled, so only add
+  // this capture when the caller intentionally supplied an eligible target.
+  ...(process.env.DOCS_BASE_URL
+    ? [{ file: "ui-registry.png", url: "/ui" }]
+    : []),
 ];
 
 test.describe("docs screenshots", () => {

@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { ManageScoringModelsPanel } from "@/components/scoring-models/manage-scoring-models-panel";
 import type { ScoringModelData, ScoringModelStatus, ScoringFormulaType, MetricDirection } from "@/lib/types";
+import { PageHeader } from "@/components/patterns/page-header";
+import { SettingsSection } from "@/components/patterns/settings-section";
 
 export const metadata = { title: "Organization Settings" };
 
@@ -52,25 +54,14 @@ export default async function OrgSettingsPage({ params }: Props) {
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8 max-w-3xl">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-          Organization Settings
-        </h1>
-        <p className="text-sm text-slate-500 mt-1">{organization.name}</p>
-      </div>
+      <PageHeader title="Organization Settings" description={organization.name} />
 
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-base font-semibold">Scoring Models</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Named templates (e.g. RICE, ICE) that workspaces can select to score and rank
-            opportunities. Every workspace using a given model is comparable on the same 0–100
-            scale, even after the template is edited later.
-          </p>
-        </div>
-
+      <SettingsSection
+        title="Scoring Models"
+        description="Named templates (e.g. RICE, ICE) that workspaces can select to score and rank opportunities. Every workspace using a given model is comparable on the same 0–100 scale, even after the template is edited later."
+      >
         <ManageScoringModelsPanel orgSlug={orgSlug} initialModels={models} />
-      </section>
+      </SettingsSection>
     </main>
   );
 }

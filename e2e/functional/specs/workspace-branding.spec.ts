@@ -46,7 +46,7 @@ test.describe.serial("Workspace Branding", () => {
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const el = document.querySelector("aside .bg-primary");
+            const el = document.querySelector('[data-sidebar="sidebar"] .bg-primary');
             return el ? getComputedStyle(el).backgroundColor : null;
           })
         )
@@ -60,7 +60,7 @@ test.describe.serial("Workspace Branding", () => {
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const el = document.querySelector("aside .bg-primary");
+            const el = document.querySelector('[data-sidebar="sidebar"] .bg-primary');
             return el ? getComputedStyle(el).backgroundColor : null;
           })
         )
@@ -77,7 +77,7 @@ test.describe.serial("Workspace Branding", () => {
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const el = document.querySelector("aside .bg-primary");
+            const el = document.querySelector('[data-sidebar="sidebar"] .bg-primary');
             return el ? getComputedStyle(el).backgroundColor : null;
           })
         )
@@ -123,23 +123,21 @@ test.describe.serial("Workspace Branding", () => {
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const el = document.querySelector("aside .bg-primary");
+            const el = document.querySelector('[data-sidebar="sidebar"] .bg-primary');
             return el ? getComputedStyle(el).backgroundColor : null;
           })
         )
         .toBe("rgb(51, 102, 255)");
 
-      // Active nav link uses bg-primary/20 — same custom hex at 20% alpha.
-      // Chromium serializes color-mix-derived alpha colors as oklab(...),
-      // not rgb(...), so compare against a fresh reference element created
-      // with the identical class in the same page context instead of
-      // hardcoding a browser-specific oklab string.
+      // Active navigation uses the semantic navigation-active surface. Compare
+      // against a fresh reference element so the assertion follows the design
+      // token contract instead of coupling branding to a literal utility.
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const active = document.querySelector('aside a[href$="/okrs"]');
+            const active = document.querySelector('[data-sidebar="sidebar"] a[href$="/okrs"]');
             const reference = document.createElement("div");
-            reference.className = "bg-primary/20";
+            reference.className = "bg-surface-navigation-active";
             document.body.appendChild(reference);
             const activeColor = active ? getComputedStyle(active).backgroundColor : null;
             const referenceColor = getComputedStyle(reference).backgroundColor;
@@ -169,7 +167,7 @@ test.describe.serial("Workspace Branding", () => {
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const el = document.querySelector("aside .bg-primary");
+            const el = document.querySelector('[data-sidebar="sidebar"] .bg-primary');
             return el ? getComputedStyle(el).backgroundColor : null;
           })
         )

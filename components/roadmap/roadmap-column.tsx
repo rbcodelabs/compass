@@ -6,6 +6,7 @@ import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
 import { AddItemForm } from "./add-item-form";
 import type { Horizon } from "@/lib/types";
 import { HORIZON_META, isLaunchHorizon } from "@/lib/roadmap";
+import { BoardColumn, EmptyState } from "@/components/patterns";
 
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
 type AvailableSolution = { id: string; title: string; opportunityTitle: string };
@@ -43,7 +44,8 @@ export function RoadmapColumn({
   availableOpportunities,
   availableExperiments,
 }: Props) {
-  const { label, accentClass, emptyText } = HORIZON_META[horizon];
+  const { label, emptyText } = HORIZON_META[horizon];
+  const accent = ({ NOW: "success", NEXT: "info", LATER: "neutral", LAUNCHING: "warning", LAUNCHED: "success", SHIPPED: "success" } as const)[horizon];
   const itemIds = items.map((i) => i.id);
   // A launch horizon (LAUNCHING/LAUNCHED) can't take a freshly-typed item —
   // items get there only via setLaunchTier — so don't offer the add form.
@@ -52,37 +54,19 @@ export function RoadmapColumn({
   const { setNodeRef, isOver } = useDroppable({ id: `column-${horizon}`, data: { horizon } });
 
   return (
-    <div className="flex flex-col gap-2 min-w-[300px] flex-1">
-      {/* Column header */}
-      <div className="flex items-center gap-2 px-1 mb-1">
-        <div className={`w-2 h-2 rounded-full shrink-0 ${accentClass}`} aria-hidden="true" />
-        <span className="text-sm font-semibold text-slate-700">{label}</span>
-        <span className="ml-auto text-xs font-medium text-slate-400 bg-slate-200/60 rounded-full px-2 py-0.5 tabular-nums">
-          {items.length}
-        </span>
-      </div>
-
-      {/* Drop zone / card list */}
-      <div
-        ref={setNodeRef}
-        id={`roadmap-column-${horizon}`}
-        className={[
-          "flex flex-col gap-2 min-h-[180px] rounded-xl p-2.5 transition-colors",
-          isOver
-            ? "bg-indigo-50/80 ring-2 ring-inset ring-indigo-200"
-            : "bg-slate-100/80",
-        ].join(" ")}
-      >
+    <BoardColumn
+      title={label}
+      count={items.length}
+      accent={accent}
+      className="min-w-[300px] flex-1"
+      bodyRef={setNodeRef}
+      bodyId={`roadmap-column-${horizon}`}
+      bodyClassName={isOver ? "min-h-44 rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : "min-h-44"}
+      footer={allowAdd ? <AddItemForm workspaceId={workspaceId} horizon={horizon} revalidatePathStr={revalidatePathStr} onAdd={onItemAdded} availableKRs={availableKRs} availableSolutions={availableSolutions} availableOpportunities={availableOpportunities} availableExperiments={availableExperiments} /> : undefined}
+    >
         <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
           {items.length === 0 ? (
-            <div
-              className={[
-                "flex items-center justify-center flex-1 min-h-[120px] rounded-lg border border-dashed py-8 text-xs text-center text-slate-400 px-4 transition-colors",
-                isOver ? "border-indigo-300" : "border-slate-300/70",
-              ].join(" ")}
-            >
-              {emptyText}
-            </div>
+            <EmptyState compact title={emptyText} className={isOver ? "border-border-interactive" : undefined} />
           ) : (
             items.map((item) => (
               <RoadmapCard
@@ -97,21 +81,6 @@ export function RoadmapColumn({
             ))
           )}
         </SortableContext>
-      </div>
-
-      {/* Inline add form at column bottom (not on launch horizons) */}
-      {allowAdd && (
-        <AddItemForm
-          workspaceId={workspaceId}
-          horizon={horizon}
-          revalidatePathStr={revalidatePathStr}
-          onAdd={onItemAdded}
-          availableKRs={availableKRs}
-          availableSolutions={availableSolutions}
-          availableOpportunities={availableOpportunities}
-          availableExperiments={availableExperiments}
-        />
-      )}
-    </div>
+    </BoardColumn>
   );
 }

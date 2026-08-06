@@ -8,6 +8,7 @@ import { CreateExperimentForm } from "@/components/experiments/create-experiment
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar"
 import type { AssumptionOptionData, ExperimentStatus, SquadData } from "@/lib/types"
 import type { ExperimentCardData } from "@/components/experiments/experiment-card"
+import { PageHeader } from "@/components/patterns/page-header"
 
 export const metadata = {
   title: "Experiments",
@@ -95,20 +96,12 @@ export default async function ExperimentsPage({
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Experiments</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Design, run, and conclude experiments to validate assumptions.
-          </p>
-        </div>
-        <CreateExperimentForm
+      <PageHeader title="Experiments" description="Design, run, and conclude experiments to validate assumptions." actions={<CreateExperimentForm
           workspaceId={workspace.id}
           squads={squads}
           assumptions={assumptions}
           prefillAssumptionId={prefillAssumptionId ?? null}
-        />
-      </div>
+        />} />
 
       <Suspense>
         <SquadFilterBar squads={squads} />

@@ -1,7 +1,7 @@
 /**
  * Experiments functional spec.
  *
- * Journey: Create experiment (DESIGNING) → navigate to detail →
+ * Journey: Create experiment (DESIGNING) → open panel and full detail →
  *          start experiment (→ RUNNING) → log result →
  *          conclude as Proceed (→ COMPLETE).
  */
@@ -31,9 +31,10 @@ test.describe("Experiments", () => {
       // Experiment card appears in DESIGNING column
       await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
 
-      // ── 3. Navigate to the experiment detail page ─────────────────────────
-      await page.getByRole("link", { name: expTitle }).click();
-      await page.waitForLoadState("networkidle");
+      // ── 3. Open the panel, then continue to the full detail page ──────────
+      await page.getByRole("button", { name: expTitle }).click();
+      await expect(page).toHaveURL(/detail=experiment/);
+      await page.getByRole("link", { name: "Open full page" }).click();
 
       // Confirm we're on the detail page
       await expect(page.getByRole("heading", { name: expTitle })).toBeVisible();

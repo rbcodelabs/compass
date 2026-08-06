@@ -2,18 +2,47 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { Target, Lightbulb, FlaskConical, Map, MessageSquare, BookOpen, Settings, ChevronDown, HelpCircle, Check, Building2, Waypoints, ListChecks } from "lucide-react"
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
+import {
+  BookOpen,
+  Building2,
+  Check,
+  ChevronDown,
+  FlaskConical,
+  HelpCircle,
+  Lightbulb,
+  ListChecks,
+  Map,
+  MessageSquare,
+  Settings,
+  Target,
+  Waypoints,
+} from "lucide-react"
+
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
-  DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { cn } from "@/lib/utils"
-import { signOutAction } from "@/lib/actions/auth-actions"
+import {
+  Sidebar as SidebarRoot,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+  SidebarSeparator,
+  SidebarTrigger,
+} from "@/components/ui/sidebar"
 import { SendCompassFeedbackDialog } from "@/components/feedback/send-compass-feedback-dialog"
+import { signOutAction } from "@/lib/actions/auth-actions"
 import { getWorkspaceSwitchPath } from "@/lib/workspace-nav"
 
 interface SidebarProps {
@@ -24,7 +53,7 @@ interface SidebarProps {
   userEmail: string
   userImage?: string
   workspaces: { id: string; name: string; slug: string; orgSlug: string }[]
-  /** Org admins/owners see an "Org Settings" link near the workspace switcher. */
+  /** Org admins/owners see an "Org Settings" link in the account menu. */
   isOrgAdmin?: boolean
 }
 
@@ -63,196 +92,230 @@ export function Sidebar({
   const base = `/${orgSlug}/${workspaceSlug}`
 
   const otherWorkspaces = workspaces.filter(
-    (ws) => !(ws.slug === workspaceSlug && ws.orgSlug === orgSlug)
+    (workspace) =>
+      !(workspace.slug === workspaceSlug && workspace.orgSlug === orgSlug)
   )
 
   return (
-    <aside className="hidden md:flex w-[220px] shrink-0 flex-col h-full bg-slate-950 text-slate-100 border-r border-slate-800/50">
-      {/* Logo + app name */}
-      <div className="flex items-center gap-2.5 px-4 pt-5 pb-4">
-        <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0 shadow-sm">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="white"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="w-4 h-4"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
-          </svg>
-        </div>
-        <span className="font-semibold text-sm tracking-tight text-white">Compass</span>
-      </div>
-
-      {/* Workspace selector */}
-      <div className="px-3 pb-4">
-        <DropdownMenu>
-          <DropdownMenuTrigger className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-slate-800/60 transition-colors group">
-            <div className="w-5 h-5 rounded-md bg-primary/30 border border-primary/30 flex items-center justify-center shrink-0">
-              <span className="text-[10px] font-bold text-primary leading-none">
-                {workspaceName[0]?.toUpperCase() ?? "W"}
-              </span>
+    <SidebarRoot
+      collapsible="icon"
+      className="border-white/10 bg-surface-navigation text-text-inverse"
+    >
+      <SidebarHeader className="gap-2 px-2 py-3">
+        <div className="flex h-8 items-center gap-2 px-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5 group-data-[collapsible=icon]:hidden">
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary shadow-sm">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="white"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+              </svg>
             </div>
-            <span className="text-xs font-medium text-slate-300 truncate flex-1">{workspaceName}</span>
-            <ChevronDown className="w-3 h-3 text-slate-500 shrink-0 group-hover:text-slate-400 transition-colors" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="bg-slate-900 text-slate-200 ring-slate-700">
-            {workspaces.map((ws) => (
-              <DropdownMenuItem
-                key={ws.id}
-                className="flex items-center gap-2 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
-                onClick={() =>
-                  router.push(
-                    getWorkspaceSwitchPath(pathname, orgSlug, workspaceSlug, ws.orgSlug, ws.slug)
-                  )
+            <span className="truncate text-sm font-semibold tracking-tight">Compass</span>
+          </div>
+          <SidebarTrigger
+            className="size-8 text-text-inverse/55 hover:bg-surface-navigation-active hover:text-text-inverse"
+            title="Toggle sidebar (⌘/Ctrl+B)"
+          />
+        </div>
+
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <SidebarMenuButton
+                    size="lg"
+                    tooltip={`Workspace: ${workspaceName}`}
+                    className="text-text-inverse/80 hover:bg-surface-navigation-active hover:text-text-inverse data-open:bg-surface-navigation-active"
+                    aria-label={`Switch workspace. Current workspace: ${workspaceName}`}
+                  />
                 }
               >
-                <div className="w-4 h-4 flex items-center justify-center shrink-0">
-                  {ws.slug === workspaceSlug && ws.orgSlug === orgSlug && (
-                    <Check className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
-                  )}
+                <div className="flex size-6 shrink-0 items-center justify-center rounded-md border border-primary/30 bg-primary/20">
+                  <span className="text-[10px] font-bold leading-none text-primary">
+                    {workspaceName[0]?.toUpperCase() ?? "W"}
+                  </span>
                 </div>
-                <span className="truncate">{ws.name}</span>
-              </DropdownMenuItem>
-            ))}
-            {otherWorkspaces.length === 0 && (
-              <>
-                <DropdownMenuSeparator className="bg-slate-700" />
-                <DropdownMenuItem
-                  disabled
-                  className="text-slate-500 focus:bg-transparent focus:text-slate-500 cursor-default"
-                >
-                  No other workspaces
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      <div className="mx-3 h-px bg-slate-800/70" />
-
-      {/* Nav links */}
-      <nav className="flex-1 px-2 py-3 space-y-0.5" aria-label="Main navigation">
-        {navItems.map(({ label, path, Icon }) => {
-          const href = `${base}/${path}`
-          const isActive = pathname.startsWith(href)
-
-          return (
-            <Link
-              key={path}
-              href={href}
-              className={cn(
-                "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150",
-                isActive
-                  ? "bg-primary/20 text-white"
-                  : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
-              )}
-            >
-              {/* Active left accent bar */}
-              {isActive && (
-                <span
-                  className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-full"
-                  aria-hidden="true"
-                />
-              )}
-              <Icon
-                className={cn(
-                  "w-4 h-4 shrink-0 transition-colors",
-                  isActive ? "text-primary" : "text-slate-500"
+                <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                  {workspaceName}
+                </span>
+                <ChevronDown className="ml-auto size-3 text-text-inverse/40 group-data-[collapsible=icon]:hidden" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="right"
+                align="start"
+                className="min-w-56 bg-slate-900 text-slate-200 ring-slate-700"
+              >
+                {workspaces.map((workspace) => (
+                  <DropdownMenuItem
+                    key={workspace.id}
+                    className="flex cursor-pointer items-center gap-2 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100"
+                    onClick={() =>
+                      router.push(
+                        getWorkspaceSwitchPath(
+                          pathname,
+                          orgSlug,
+                          workspaceSlug,
+                          workspace.orgSlug,
+                          workspace.slug
+                        )
+                      )
+                    }
+                  >
+                    <div className="flex size-4 shrink-0 items-center justify-center">
+                      {workspace.slug === workspaceSlug &&
+                        workspace.orgSlug === orgSlug && (
+                          <Check className="size-3.5 text-primary" aria-hidden="true" />
+                        )}
+                    </div>
+                    <span className="truncate">{workspace.name}</span>
+                  </DropdownMenuItem>
+                ))}
+                {otherWorkspaces.length === 0 && (
+                  <>
+                    <DropdownMenuSeparator className="bg-slate-700" />
+                    <DropdownMenuItem
+                      disabled
+                      className="cursor-default text-slate-500 focus:bg-transparent focus:text-slate-500"
+                    >
+                      No other workspaces
+                    </DropdownMenuItem>
+                  </>
                 )}
-                aria-hidden="true"
-              />
-              {label}
-            </Link>
-          )
-        })}
-      </nav>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
 
-      <div className="mx-3 h-px bg-slate-800/70" />
+      <SidebarSeparator className="bg-white/10" />
 
-      {/* User — secondary items (Settings, Org Settings, Help, Send Feedback)
-          live in this dropdown instead of cluttering primary nav. */}
-      <div className="px-3 py-3.5">
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className="w-full flex items-center gap-2.5 rounded-lg px-0.5 py-1 text-left hover:bg-slate-800/60 transition-colors"
-            aria-label="Account menu"
-          >
-            <Avatar className="w-6 h-6 shrink-0">
-              {userImage && <AvatarImage src={userImage} alt={userName} />}
-              <AvatarFallback className="text-[10px] font-semibold bg-slate-700 text-slate-200">
-                {getInitials(userName || "?")}
-              </AvatarFallback>
-            </Avatar>
-            <span className="text-xs text-slate-400 truncate flex-1">{userName}</span>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="bg-slate-900 text-slate-200 ring-slate-700 min-w-[200px]">
-            <div className="px-1.5 py-1">
-              <p className="text-sm font-medium text-slate-100 truncate">{userName}</p>
-              <p className="text-xs text-slate-500 truncate">{userEmail}</p>
-            </div>
-            <DropdownMenuSeparator className="bg-slate-700" />
-            <DropdownMenuItem
-              className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
-            >
-              <Link
-                href={`${base}/settings`}
-                className="flex w-full items-center gap-2 px-1.5 py-1"
+      <SidebarContent>
+        <SidebarGroup className="py-3">
+          <SidebarGroupContent>
+            <nav aria-label="Main navigation">
+              <SidebarMenu className="gap-0.5">
+              {navItems.map(({ label, path, Icon }) => {
+                const href = `${base}/${path}`
+                const isActive = pathname.startsWith(href)
+
+                return (
+                  <SidebarMenuItem key={path}>
+                    <SidebarMenuButton
+                      render={<Link href={href} />}
+                      isActive={isActive}
+                      tooltip={label}
+                      className="relative h-9 rounded-lg text-text-inverse/60 hover:bg-surface-navigation-active hover:text-text-inverse data-active:bg-surface-navigation-active data-active:text-text-inverse"
+                    >
+                      {isActive && (
+                        <span
+                          className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary group-data-[collapsible=icon]:hidden"
+                          aria-hidden="true"
+                        />
+                      )}
+                      <Icon
+                        className={
+                          isActive ? "text-primary" : "text-text-inverse/40"
+                        }
+                        aria-hidden="true"
+                      />
+                      <span>{label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
+              </SidebarMenu>
+            </nav>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+
+      <SidebarSeparator className="bg-white/10" />
+
+      <SidebarFooter className="px-2 py-3">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <SidebarMenuButton
+                    size="lg"
+                    tooltip={userName}
+                    className="text-text-inverse/60 hover:bg-surface-navigation-active hover:text-text-inverse data-open:bg-surface-navigation-active"
+                    aria-label="Account menu"
+                  />
+                }
               >
-                <Settings className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
-                Settings
-              </Link>
-            </DropdownMenuItem>
-            {isOrgAdmin && (
-              <DropdownMenuItem
-                className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
+                <Avatar className="size-7 shrink-0">
+                  {userImage && <AvatarImage src={userImage} alt={userName} />}
+                  <AvatarFallback className="bg-surface-navigation-active text-[10px] font-semibold text-text-inverse">
+                    {getInitials(userName || "?")}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="min-w-0 flex-1 truncate text-xs">{userName}</span>
+                <ChevronDown className="ml-auto size-3 text-text-inverse/40 group-data-[collapsible=icon]:hidden" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="right"
+                align="end"
+                className="min-w-56 bg-slate-900 text-slate-200 ring-slate-700"
               >
-                <Link
-                  href={`/${orgSlug}/settings`}
-                  className="flex w-full items-center gap-2 px-1.5 py-1"
+                <div className="px-1.5 py-1">
+                  <p className="truncate text-sm font-medium text-slate-100">{userName}</p>
+                  <p className="truncate text-xs text-slate-500">{userEmail}</p>
+                </div>
+                <DropdownMenuSeparator className="bg-slate-700" />
+                <DropdownMenuItem className="cursor-pointer p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100">
+                  <Link href={`${base}/settings`} className="flex w-full items-center gap-2 px-1.5 py-1">
+                    <Settings className="size-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                    Settings
+                  </Link>
+                </DropdownMenuItem>
+                {isOrgAdmin && (
+                  <DropdownMenuItem className="cursor-pointer p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100">
+                    <Link href={`/${orgSlug}/settings`} className="flex w-full items-center gap-2 px-1.5 py-1">
+                      <Building2 className="size-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                      Org Settings
+                    </Link>
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem className="cursor-pointer p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100">
+                  <Link href="/help" className="flex w-full items-center gap-2 px-1.5 py-1">
+                    <HelpCircle className="size-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                    Help
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="cursor-pointer p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100"
+                  closeOnClick={false}
                 >
-                  <Building2 className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
-                  Org Settings
-                </Link>
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem
-              className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
-            >
-              <Link
-                href="/help"
-                className="flex w-full items-center gap-2 px-1.5 py-1"
-              >
-                <HelpCircle className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
-                Help
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
-              closeOnClick={false}
-            >
-              <SendCompassFeedbackDialog />
-            </DropdownMenuItem>
-            <DropdownMenuSeparator className="bg-slate-700" />
-            <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
-              <form action={signOutAction} className="w-full">
-                <button
-                  type="submit"
-                  className="w-full text-left px-1.5 py-1 cursor-pointer"
-                >
-                  Sign out
-                </button>
-              </form>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </aside>
+                  <SendCompassFeedbackDialog />
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-slate-700" />
+                <DropdownMenuItem className="cursor-pointer p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100">
+                  <form action={signOutAction} className="w-full">
+                    <Button type="submit" variant="ghost" size="sm" className="w-full justify-start">
+                      Sign out
+                    </Button>
+                  </form>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+
+      <SidebarRail />
+    </SidebarRoot>
   )
 }

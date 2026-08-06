@@ -2,6 +2,7 @@ import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
 import { FeedbackPortalSection } from "@/components/portal/feedback-portal-section";
 import type { FeedbackType } from "@/lib/types";
+import { EmptyState } from "@/components/patterns/empty-state";
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
@@ -21,12 +22,10 @@ export default async function PortalFeedbackPage({ params }: Props) {
 
   if (!workspace || !workspace.feedbackEnabled) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-center">
-        <p className="text-lg font-semibold text-slate-700">Feedback is not enabled</p>
-        <p className="text-sm text-slate-500 mt-1">
-          The workspace owner has not enabled the public feedback portal.
-        </p>
-      </div>
+      <EmptyState
+        title="Feedback is not enabled"
+        description="The workspace owner has not enabled the public feedback portal."
+      />
     );
   }
 

@@ -3,6 +3,8 @@ import { redirect, notFound } from "next/navigation";
 import { BookOpen } from "lucide-react";
 import getPrisma from "@/lib/db";
 import { createDoc } from "./actions";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/patterns/empty-state";
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
@@ -44,16 +46,8 @@ export default async function DocsIndexPage({ params }: Props) {
   const basePath = `/${orgSlug}/${workspaceSlug}/docs`;
 
   return (
-    <div className="flex flex-col items-center justify-center h-full min-h-[400px] gap-4">
-      <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center">
-        <BookOpen className="w-7 h-7 text-indigo-400" />
-      </div>
-      <div className="text-center">
-        <h2 className="text-lg font-semibold text-slate-800">No pages yet</h2>
-        <p className="text-sm text-slate-500 mt-1">
-          Create your first page to start documenting.
-        </p>
-      </div>
+    <div className="flex h-full min-h-[400px] items-center justify-center p-6">
+      <EmptyState className="w-full max-w-xl" icon={<BookOpen className="size-6" />} title="No pages yet" description="Create your first page to start documenting." primaryAction={
       <form
         action={async () => {
           "use server";
@@ -70,13 +64,9 @@ export default async function DocsIndexPage({ params }: Props) {
           redirect(`/${orgSlug}/${workspaceSlug}/docs`);
         }}
       >
-        <button
-          type="submit"
-          className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-        >
-          Create your first page
-        </button>
+        <Button type="submit">Create your first page</Button>
       </form>
+      } />
     </div>
   );
 }
