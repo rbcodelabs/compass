@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "ui:colors": "node scripts/check-ui-colors.mjs",
+    "ui:primitives": "node scripts/check-ui-primitives.mjs",
     "ui:colors:baseline": "node scripts/check-ui-colors.mjs --write-baseline",
     "postinstall": "prisma generate",
     "test": "vitest run",

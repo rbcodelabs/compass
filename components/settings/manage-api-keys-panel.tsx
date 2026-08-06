@@ -2,6 +2,11 @@
 
 import { useState, useTransition } from "react"
 import { createApiKey, revokeApiKey } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions"
+import { ChevronRight } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 export type ApiKeyRow = {
   id: string
@@ -75,22 +80,22 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
     <div className="flex flex-col gap-4">
       {/* New key form */}
       <div className="flex gap-2">
-        <input
+        <Input
           type="text"
           placeholder="Key name (e.g. Claude Desktop)"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-          className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          className="h-9 flex-1"
           disabled={isPending}
         />
-        <button
+        <Button
           onClick={handleCreate}
           disabled={isPending || !newName.trim()}
-          className="h-9 px-4 rounded-md bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="h-9"
         >
           Generate
-        </button>
+        </Button>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
@@ -105,59 +110,68 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
             <code className="flex-1 text-xs bg-white border border-emerald-200 rounded px-2 py-1 font-mono break-all">
               {newKey}
             </code>
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => { navigator.clipboard.writeText(newKey); }}
-              className="shrink-0 text-xs text-emerald-700 hover:text-emerald-900 font-medium"
+              className="shrink-0 text-emerald-700 hover:text-emerald-900"
             >
               Copy
-            </button>
+            </Button>
           </div>
-          <button
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => setNewKey(null)}
-            className="self-end text-xs text-emerald-600 hover:text-emerald-800"
+            className="self-end text-emerald-600 hover:text-emerald-800"
           >
             I&apos;ve saved it ✓
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Active keys */}
       {activeKeys.length > 0 && (
         <div className="rounded-md border border-border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="text-left px-3 py-2 text-xs font-medium text-slate-500">Name</th>
-                <th className="text-left px-3 py-2 text-xs font-medium text-slate-500">Prefix</th>
-                <th className="text-left px-3 py-2 text-xs font-medium text-slate-500">Created</th>
-                <th className="text-left px-3 py-2 text-xs font-medium text-slate-500">Last used</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
+          <Table>
+            <TableHeader className="bg-slate-50">
+              <TableRow className="hover:bg-slate-50">
+                <TableHead className="px-3 py-2 text-xs text-slate-500">Name</TableHead>
+                <TableHead className="px-3 py-2 text-xs text-slate-500">Prefix</TableHead>
+                <TableHead className="px-3 py-2 text-xs text-slate-500">Created</TableHead>
+                <TableHead className="px-3 py-2 text-xs text-slate-500">Last used</TableHead>
+                <TableHead className="px-3 py-2"><span className="sr-only">Actions</span></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {activeKeys.map((k) => (
-                <tr key={k.id} className="bg-white">
-                  <td className="px-3 py-2 font-medium text-slate-900">{k.name}</td>
-                  <td className="px-3 py-2 font-mono text-slate-500">cmp_{k.keyPrefix}…</td>
-                  <td className="px-3 py-2 text-slate-500">
+                <TableRow key={k.id} className="bg-white">
+                  <TableCell className="px-3 py-2 font-medium text-slate-900">{k.name}</TableCell>
+                  <TableCell className="px-3 py-2 font-mono text-slate-500">cmp_{k.keyPrefix}…</TableCell>
+                  <TableCell className="px-3 py-2 text-slate-500">
                     {k.createdAt.toLocaleDateString()}
-                  </td>
-                  <td className="px-3 py-2 text-slate-500">
+                  </TableCell>
+                  <TableCell className="px-3 py-2 text-slate-500">
                     {k.lastUsedAt ? k.lastUsedAt.toLocaleDateString() : "Never"}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <button
+                  </TableCell>
+                  <TableCell className="px-3 py-2 text-right">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => handleRevoke(k.id)}
                       disabled={isPending}
-                      className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50"
+                      className="text-destructive hover:text-destructive"
                     >
                       Revoke
-                    </button>
-                  </td>
-                </tr>
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
 
@@ -167,26 +181,31 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
 
       {/* Revoked keys */}
       {revokedKeys.length > 0 && (
-        <details className="text-sm">
-          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+        <Collapsible className="group text-sm">
+          <CollapsibleTrigger
+            render={<Button type="button" variant="ghost" size="sm" className="text-muted-foreground" />}
+          >
+            <ChevronRight className="transition-transform group-data-open:rotate-90" />
             {revokedKeys.length} revoked {revokedKeys.length === 1 ? "key" : "keys"}
-          </summary>
-          <div className="rounded-md border border-border overflow-hidden mt-2">
-            <table className="w-full text-sm">
-              <tbody className="divide-y divide-border">
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+          <div className="mt-2 overflow-hidden rounded-md border border-border">
+            <Table>
+              <TableBody>
                 {revokedKeys.map((k) => (
-                  <tr key={k.id} className="bg-slate-50 opacity-60">
-                    <td className="px-3 py-2 font-medium line-through text-slate-500">{k.name}</td>
-                    <td className="px-3 py-2 font-mono text-slate-400">cmp_{k.keyPrefix}…</td>
-                    <td className="px-3 py-2 text-slate-400">
+                  <TableRow key={k.id} className="bg-muted opacity-60">
+                    <TableCell className="px-3 py-2 font-medium line-through text-slate-500">{k.name}</TableCell>
+                    <TableCell className="px-3 py-2 font-mono text-slate-400">cmp_{k.keyPrefix}…</TableCell>
+                    <TableCell className="px-3 py-2 text-slate-400">
                       Revoked {k.revokedAt?.toLocaleDateString()}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
-        </details>
+          </CollapsibleContent>
+        </Collapsible>
       )}
     </div>
   )

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Combobox,
   ComboboxContent,
@@ -296,16 +297,17 @@ export function AddItemForm({
         </div>
       )}
 
-      <label className="flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer">
-        <input
-          type="checkbox"
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id={`item-private-${horizon}`}
           checked={isPrivate}
-          onChange={(e) => setIsPrivate(e.target.checked)}
+          onCheckedChange={setIsPrivate}
           disabled={isPending}
-          className="size-3.5 rounded border-input"
         />
-        Private (hidden from public roadmap)
-      </label>
+        <Label htmlFor={`item-private-${horizon}`} className="cursor-pointer text-xs font-normal text-muted-foreground">
+          Private (hidden from public roadmap)
+        </Label>
+      </div>
 
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={isPending}>

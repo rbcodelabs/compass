@@ -2,6 +2,7 @@ import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { signOutAction } from "@/lib/actions/auth-actions"
 import { OnboardingForm } from "./onboarding-form"
+import { Button } from "@/components/ui/button"
 
 export default async function OnboardingPage() {
   const session = await auth()
@@ -21,12 +22,14 @@ export default async function OnboardingPage() {
             <span className="font-medium text-text-primary">{session.user.email}</span>
           </span>
           <form action={signOutAction} className="shrink-0">
-            <button
+            <Button
               type="submit"
-              className="text-xs font-medium text-text-subtle hover:text-text-primary hover:underline"
+              variant="ghost"
+              size="sm"
+              className="text-text-subtle hover:text-text-primary"
             >
               Not you? Sign out
-            </button>
+            </Button>
           </form>
         </div>
 

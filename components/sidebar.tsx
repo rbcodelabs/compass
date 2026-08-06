@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -303,9 +304,9 @@ export function Sidebar({
                 <DropdownMenuSeparator className="bg-slate-700" />
                 <DropdownMenuItem className="cursor-pointer p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100">
                   <form action={signOutAction} className="w-full">
-                    <button type="submit" className="w-full cursor-pointer px-1.5 py-1 text-left">
+                    <Button type="submit" variant="ghost" size="sm" className="w-full justify-start">
                       Sign out
-                    </button>
+                    </Button>
                   </form>
                 </DropdownMenuItem>
               </DropdownMenuContent>

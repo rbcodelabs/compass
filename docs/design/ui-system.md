@@ -6,6 +6,7 @@ Compass uses Tailwind CSS 4 and Base UI-backed primitives. This document defines
 
 - Express intent with semantic roles. Prefer `bg-surface-panel` and `text-text-subtle` to literal palette utilities.
 - Reuse an existing primitive before introducing a local control.
+- Use the shared `Switch`, `Checkbox`, `Table`, `Collapsible`, and `AlertDialog` primitives instead of styling their native equivalents in product code.
 - Keep variants small and purposeful. A `className` may place a component in a layout, but should not redefine its anatomy.
 - Default to compact, calm density suitable for a professional work-management product.
 - Preserve Base UI semantics, keyboard behavior, focus management, and accessible naming.
@@ -128,6 +129,7 @@ Do not refresh the baseline simply to make a pull request pass. Use `pnpm ui:col
 - `pnpm lint` checks source quality.
 - `pnpm test` runs the unit and integration suite.
 - `pnpm ui:colors` rejects new literal palette usage in product UI.
+- `pnpm ui:primitives` rejects custom generic controls where a governed shadcn primitive exists.
 - `pnpm test:e2e:functional` exercises authenticated workflows against a local seeded database.
 - `DOCS_BASE_URL=<preview-url> pnpm test:e2e` captures the registry and critical workflow screenshots from an eligible preview deployment.
 

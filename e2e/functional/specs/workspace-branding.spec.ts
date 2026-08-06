@@ -46,7 +46,7 @@ test.describe.serial("Workspace Branding", () => {
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const el = document.querySelector("aside .bg-primary");
+            const el = document.querySelector('[data-sidebar="sidebar"] .bg-primary');
             return el ? getComputedStyle(el).backgroundColor : null;
           })
         )
@@ -60,7 +60,7 @@ test.describe.serial("Workspace Branding", () => {
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const el = document.querySelector("aside .bg-primary");
+            const el = document.querySelector('[data-sidebar="sidebar"] .bg-primary');
             return el ? getComputedStyle(el).backgroundColor : null;
           })
         )
@@ -77,7 +77,7 @@ test.describe.serial("Workspace Branding", () => {
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const el = document.querySelector("aside .bg-primary");
+            const el = document.querySelector('[data-sidebar="sidebar"] .bg-primary');
             return el ? getComputedStyle(el).backgroundColor : null;
           })
         )
@@ -123,7 +123,7 @@ test.describe.serial("Workspace Branding", () => {
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const el = document.querySelector("aside .bg-primary");
+            const el = document.querySelector('[data-sidebar="sidebar"] .bg-primary');
             return el ? getComputedStyle(el).backgroundColor : null;
           })
         )
@@ -135,7 +135,7 @@ test.describe.serial("Workspace Branding", () => {
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const active = document.querySelector('aside a[href$="/okrs"]');
+            const active = document.querySelector('[data-sidebar="sidebar"] a[href$="/okrs"]');
             const reference = document.createElement("div");
             reference.className = "bg-surface-navigation-active";
             document.body.appendChild(reference);
@@ -167,7 +167,7 @@ test.describe.serial("Workspace Branding", () => {
       await expect
         .poll(() =>
           page.evaluate(() => {
-            const el = document.querySelector("aside .bg-primary");
+            const el = document.querySelector('[data-sidebar="sidebar"] .bg-primary');
             return el ? getComputedStyle(el).backgroundColor : null;
           })
         )

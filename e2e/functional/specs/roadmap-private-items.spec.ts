@@ -33,7 +33,7 @@ test.describe("Roadmap — private items", () => {
 
       await page.getByRole("button", { name: "Add item" }).first().click();
       await page.getByLabel("Title").fill(privateTitle);
-      await page.getByLabel("Private (hidden from public roadmap)").check();
+      await page.getByRole("checkbox", { name: "Private (hidden from public roadmap)" }).click();
       await page.getByRole("button", { name: "Add Item", exact: true }).click();
 
       const privateCard = page.locator('[data-slot="card"]').filter({ hasText: privateTitle });
@@ -62,7 +62,7 @@ test.describe("Roadmap — private items", () => {
       expect(privateItemId).toMatch(/^[0-9a-f-]{36}$/);
 
       // The dialog's Private checkbox should reflect the saved state too.
-      await expect(page.getByLabel("Private (hidden from public roadmap)")).toBeChecked();
+      await expect(page.getByRole("checkbox", { name: "Private (hidden from public roadmap)" })).toBeChecked();
 
       await page.keyboard.press("Escape");
       await expect(titleInput).not.toBeVisible({ timeout: 5_000 });

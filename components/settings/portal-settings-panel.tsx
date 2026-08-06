@@ -6,6 +6,8 @@ import {
   regenerateSsoSecret,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
 import { ExternalLink } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   orgSlug: string;
@@ -105,25 +107,13 @@ export function PortalSettingsPanel({
             </a>
           )}
         </div>
-        <button
-          type="button"
-          role="switch"
+        <Switch
           data-testid="portal-toggle-roadmap"
-          aria-checked={roadmapPublic}
+          aria-label="Public roadmap"
+          checked={roadmapPublic}
           disabled={isPending}
-          onClick={() => handleToggle("roadmapPublic", !roadmapPublic)}
-          className={[
-            "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-            roadmapPublic ? "bg-indigo-600" : "bg-slate-200",
-          ].join(" ")}
-        >
-          <span
-            className={[
-              "pointer-events-none block h-4 w-4 rounded-full bg-white shadow-md ring-0 transition-transform",
-              roadmapPublic ? "translate-x-4" : "translate-x-0",
-            ].join(" ")}
-          />
-        </button>
+          onCheckedChange={(checked) => handleToggle("roadmapPublic", checked)}
+        />
       </div>
 
       {/* Feedback toggle */}
@@ -145,25 +135,13 @@ export function PortalSettingsPanel({
             </a>
           )}
         </div>
-        <button
-          type="button"
-          role="switch"
+        <Switch
           data-testid="portal-toggle-feedback"
-          aria-checked={feedbackEnabled}
+          aria-label="Public feedback portal"
+          checked={feedbackEnabled}
           disabled={isPending}
-          onClick={() => handleToggle("feedbackEnabled", !feedbackEnabled)}
-          className={[
-            "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-            feedbackEnabled ? "bg-indigo-600" : "bg-slate-200",
-          ].join(" ")}
-        >
-          <span
-            className={[
-              "pointer-events-none block h-4 w-4 rounded-full bg-white shadow-md ring-0 transition-transform",
-              feedbackEnabled ? "translate-x-4" : "translate-x-0",
-            ].join(" ")}
-          />
-        </button>
+          onCheckedChange={(checked) => handleToggle("feedbackEnabled", checked)}
+        />
       </div>
 
       {/* Require portal account toggle — only meaningful once the portal is public */}
@@ -175,26 +153,13 @@ export function PortalSettingsPanel({
               Visitors must verify their email with a magic link before submitting feedback or voting.
             </span>
           </div>
-          <button
-            type="button"
-            role="switch"
+          <Switch
             data-testid="portal-toggle-auth-required"
             aria-label="Require portal sign-in"
-            aria-checked={portalAuthRequired}
+            checked={portalAuthRequired}
             disabled={isPending}
-            onClick={() => handleToggle("portalAuthRequired", !portalAuthRequired)}
-            className={[
-              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-              portalAuthRequired ? "bg-indigo-600" : "bg-slate-200",
-            ].join(" ")}
-          >
-            <span
-              className={[
-                "pointer-events-none block h-4 w-4 rounded-full bg-white shadow-md ring-0 transition-transform",
-                portalAuthRequired ? "translate-x-4" : "translate-x-0",
-              ].join(" ")}
-            />
-          </button>
+            onCheckedChange={(checked) => handleToggle("portalAuthRequired", checked)}
+          />
         </div>
       )}
 
@@ -213,25 +178,13 @@ export function PortalSettingsPanel({
                 your backend, instead of (or alongside) the email sign-in above.
               </span>
             </div>
-            <button
-              type="button"
-              role="switch"
+            <Switch
               data-testid="portal-toggle-sso"
-              aria-checked={ssoEnabled}
+              aria-label="SSO Identify"
+              checked={ssoEnabled}
               disabled={isPending}
-              onClick={() => handleToggle("ssoEnabled", !ssoEnabled)}
-              className={[
-                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-                ssoEnabled ? "bg-indigo-600" : "bg-slate-200",
-              ].join(" ")}
-            >
-              <span
-                className={[
-                  "pointer-events-none block h-4 w-4 rounded-full bg-white shadow-md ring-0 transition-transform",
-                  ssoEnabled ? "translate-x-4" : "translate-x-0",
-                ].join(" ")}
-              />
-            </button>
+              onCheckedChange={(checked) => handleToggle("ssoEnabled", checked)}
+            />
           </div>
 
           {ssoEnabled && (
@@ -246,23 +199,27 @@ export function PortalSettingsPanel({
                     <code className="flex-1 text-xs bg-white border border-emerald-200 rounded px-2 py-1 font-mono break-all">
                       {revealedSecret}
                     </code>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => {
                         navigator.clipboard.writeText(revealedSecret);
                       }}
-                      className="shrink-0 text-xs text-emerald-700 hover:text-emerald-900 font-medium"
+                      className="shrink-0 text-emerald-700 hover:text-emerald-900"
                     >
                       Copy
-                    </button>
+                    </Button>
                   </div>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setRevealedSecret(null)}
-                    className="self-end text-xs text-emerald-600 hover:text-emerald-800"
+                    className="self-end text-emerald-600 hover:text-emerald-800"
                   >
                     I&apos;ve saved it ✓
-                  </button>
+                  </Button>
                 </div>
               ) : (
                 <div className="flex items-center justify-between gap-3">
@@ -275,14 +232,15 @@ export function PortalSettingsPanel({
                         }.`
                       : "No SSO secret configured yet — generate one to get started."}
                   </span>
-                  <button
+                  <Button
                     type="button"
+                    size="sm"
                     onClick={handleGenerateSsoSecret}
                     disabled={isPending || isGenerating}
-                    className="shrink-0 h-8 px-3 rounded-md bg-slate-900 text-white text-xs font-medium hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="shrink-0"
                   >
                     {ssoSecretConfigured ? "Rotate secret" : "Generate secret"}
-                  </button>
+                  </Button>
                 </div>
               )}
 

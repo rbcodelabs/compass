@@ -20,6 +20,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm ui:colors
+      - run: pnpm ui:primitives
 
   screenshots:
     if: ${{ vars.COMPASS_SCREENSHOT_BASE_URL != '' }}

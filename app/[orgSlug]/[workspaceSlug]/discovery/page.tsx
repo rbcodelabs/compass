@@ -7,6 +7,9 @@ import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
 import type { OpportunityStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { PageHeader } from "@/components/patterns/page-header";
+import { ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 export const metadata = {
   title: "Discovery",
@@ -169,15 +172,12 @@ function ArchivedSection({
   workspaceSlug: string;
 }) {
   return (
-    <details className="group">
-      <summary className="cursor-pointer list-none">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors select-none">
-          <span className="group-open:rotate-90 transition-transform inline-block">
-            ▶
-          </span>
-          <span>Archived ({opportunities.length})</span>
-        </div>
-      </summary>
+    <Collapsible className="group">
+      <CollapsibleTrigger render={<Button type="button" variant="ghost" size="sm" className="text-muted-foreground" />}>
+        <ChevronRight className="transition-transform group-data-open:rotate-90" />
+        Archived ({opportunities.length})
+      </CollapsibleTrigger>
+      <CollapsibleContent>
       <div className="mt-3 flex flex-wrap gap-3">
         {opportunities.map((opp) => (
           <div
@@ -206,6 +206,7 @@ function ArchivedSection({
           </div>
         ))}
       </div>
-    </details>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
