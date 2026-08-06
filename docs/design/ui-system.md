@@ -22,6 +22,16 @@ Compass uses Tailwind CSS 4 and Base UI-backed primitives. This document defines
 
 Product patterns are introduced in phase 2. Do not move domain models or data fetching into the pattern layer.
 
+## Application navigation
+
+The authenticated desktop shell uses the shadcn `Sidebar` primitive in icon-collapse mode. Keep application navigation inside `SidebarProvider` and compose it from `SidebarHeader`, `SidebarContent`, `SidebarMenu`, `SidebarFooter`, `SidebarInset`, and `SidebarRail` rather than recreating fixed-width navigation locally.
+
+- The header trigger and hoverable rail toggle expanded and icon-only modes.
+- `Cmd+B` on macOS and `Ctrl+B` elsewhere provide the keyboard shortcut.
+- The `sidebar_state` cookie persists the preference and is read by the server layout to avoid a layout flash.
+- Collapsed navigation items retain accessible names and expose visible tooltips.
+- Compass's mobile header and bottom navigation remain the mobile information architecture; the desktop sidebar does not replace them.
+
 ## Semantic token vocabulary
 
 ### Surfaces

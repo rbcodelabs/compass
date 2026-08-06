@@ -53,6 +53,16 @@
   --surface-interactive: var(--accent);
   --surface-interactive-hover: oklch(0.929 0.013 255.5);
 
+  /* shadcn Sidebar roles, mapped to the Compass navigation surface. */
+  --sidebar: var(--surface-navigation);
+  --sidebar-foreground: var(--text-inverse);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--surface-navigation-active);
+  --sidebar-accent-foreground: var(--text-inverse);
+  --sidebar-border: oklch(1 0 0 / 0.1);
+  --sidebar-ring: var(--ring);
+
   /* Compass semantic text */
   --text-primary: var(--foreground);
   --text-secondary: oklch(0.372 0.034 259.7);
@@ -143,6 +153,14 @@
   --color-status-warning-surface: var(--status-warning-surface);
   --color-status-danger: var(--status-danger);
   --color-status-danger-surface: var(--status-danger-surface);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 
   /* Radius */
   --radius-sm: calc(var(--radius) - 4px);
