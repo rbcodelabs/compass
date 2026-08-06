@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
                 type: "module",
                 dependencies: {
                   "@anthropic-ai/claude-agent-sdk": "^0.3.222",
-                  "@modelcontextprotocol/sdk": "1.26.0",
+                  "@modelcontextprotocol/sdk": "^1.29.0",
                   zod: "^4.0.0",
                 },
               },
