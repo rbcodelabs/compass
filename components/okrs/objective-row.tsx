@@ -8,6 +8,7 @@ import { GripVertical } from "lucide-react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { averageProgress, STATUS_BADGE } from "@/lib/okrs";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
+import type { SupportingObjectiveOption } from "@/components/okrs/key-result-bar";
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import {
@@ -72,6 +73,7 @@ interface ObjectiveRowProps {
   revalidatePathStr?: string;
   availableKRs?: ParentKROption[];
   parentKeyResultId?: string | null;
+  supportingObjectiveOptions?: SupportingObjectiveOption[];
 }
 
 export function ObjectiveRow({
@@ -81,6 +83,7 @@ export function ObjectiveRow({
   revalidatePathStr,
   availableKRs,
   parentKeyResultId,
+  supportingObjectiveOptions,
 }: ObjectiveRowProps) {
   const [isPending, startTransition] = useTransition();
   const [isParentKRPending, startParentKRTransition] = useTransition();
@@ -243,6 +246,7 @@ export function ObjectiveRow({
               keyResult={kr}
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
+              supportingObjectiveOptions={supportingObjectiveOptions}
             />
           ))}
         </div>
@@ -259,11 +263,13 @@ export function ObjectiveRow({
         </div>
       )}
 
-      {/* Supports KR picker */}
+      {/* Objective alignment */}
       {availableKRs && (
-        <div className="flex flex-col gap-1 pt-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground shrink-0">Supports:</span>
+        <section className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3" aria-label="Alignment">
+          <div>
+            <p className="text-xs font-semibold text-foreground">Alignment</p>
+            <p className="text-xs text-muted-foreground">Supports a higher-level Key Result</p>
+          </div>
           <Combobox
             items={[
               { value: "__none__", label: "— None —" },
@@ -285,7 +291,7 @@ export function ObjectiveRow({
             onValueChange={handleParentKRChange}
             disabled={isParentKRPending}
           >
-            <ComboboxTrigger size="sm" className="flex-1 max-w-md text-xs">
+            <ComboboxTrigger size="sm" className="w-full max-w-lg text-xs" aria-label="Supports a higher-level Key Result">
               <ComboboxValue placeholder="Choose a longer-horizon KR…" />
             </ComboboxTrigger>
             <ComboboxContent
@@ -293,9 +299,13 @@ export function ObjectiveRow({
               emptyMessage="No longer-horizon Key Results cover this cycle."
             />
           </Combobox>
-          </div>
-          {parentKRError && <p className="pl-16 text-xs text-destructive">{parentKRError}</p>}
-        </div>
+          {availableKRs.length === 0 && !localParentKRId && (
+            <p className="text-xs text-muted-foreground">
+              No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle&apos;s dates.
+            </p>
+          )}
+          {parentKRError && <p className="text-xs text-destructive">{parentKRError}</p>}
+        </section>
       )}
 
       {/* Add key result */}

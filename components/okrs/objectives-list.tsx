@@ -28,6 +28,7 @@ import type {
   SquadData,
 } from "@/lib/types";
 import type { ParentKROption } from "@/components/okrs/objective-row";
+import type { SupportingObjectiveOption } from "@/components/okrs/key-result-bar";
 
 interface KeyResult {
   id: string;
@@ -62,6 +63,7 @@ type Props = {
   workspaceSlug: string;
   cyclePath: string;
   availableKRs?: ParentKROption[];
+  supportingObjectiveOptions?: SupportingObjectiveOption[];
 };
 
 export function ObjectivesList({
@@ -70,6 +72,7 @@ export function ObjectivesList({
   workspaceSlug,
   cyclePath,
   availableKRs = [],
+  supportingObjectiveOptions,
 }: Props) {
   const [objectives, setObjectives] = useState(initialObjectives);
   const [, startTransition] = useTransition();
@@ -120,6 +123,7 @@ export function ObjectivesList({
             revalidatePathStr={cyclePath}
             availableKRs={availableKRs}
             parentKeyResultId={obj.parentKeyResultId ?? null}
+            supportingObjectiveOptions={supportingObjectiveOptions}
           />
         ))}
       </SortableContext>
@@ -136,6 +140,7 @@ function ObjectiveRowWithKRSort({
   revalidatePathStr,
   availableKRs,
   parentKeyResultId,
+  supportingObjectiveOptions,
 }: {
   objective: ObjectiveData;
   orgSlug: string;
@@ -143,6 +148,7 @@ function ObjectiveRowWithKRSort({
   revalidatePathStr: string;
   availableKRs?: ParentKROption[];
   parentKeyResultId?: string | null;
+  supportingObjectiveOptions?: SupportingObjectiveOption[];
 }) {
   const [keyResults, setKeyResults] = useState(objective.keyResults);
   const [, startTransition] = useTransition();
@@ -191,6 +197,7 @@ function ObjectiveRowWithKRSort({
           revalidatePathStr={revalidatePathStr}
           availableKRs={availableKRs}
           parentKeyResultId={parentKeyResultId}
+          supportingObjectiveOptions={supportingObjectiveOptions}
         />
       </SortableContext>
     </DndContext>

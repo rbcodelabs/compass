@@ -6,7 +6,10 @@ import getPrisma from "@/lib/db";
 import { ObjectivesList } from "@/components/okrs/objectives-list";
 import { AddObjectiveForm } from "@/components/okrs/add-objective-form";
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
-import { getEligibleParentKeyResults } from "@/lib/okr-hierarchy";
+import {
+  getEligibleParentKeyResults,
+  getEligibleSupportingObjectives,
+} from "@/lib/okr-hierarchy";
 import type {
   CycleStatus,
   ObjectiveStatus,
@@ -69,7 +72,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
 
   const cycleStatus = cycle.status as CycleStatus;
 
-  const [rawSquads, objectives, eligibleParentKRs] = await Promise.all([
+  const [rawSquads, objectives, eligibleParentKRs, eligibleSupportingObjectives] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { createdAt: "asc" },
@@ -82,6 +85,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     }),
     getEligibleParentKeyResults(workspace.id, cycle.id),
+    getEligibleSupportingObjectives(workspace.id, cycle.id),
   ]);
 
   const squads: SquadData[] = rawSquads.map((s) => ({
@@ -229,7 +233,9 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       {/* Objectives list + inline add */}
       <div className="flex flex-col gap-4">
         <ObjectivesList
-          key={objectivesWithData.map((o) => o.id).join(",")}
+          key={objectivesWithData
+            .map((o) => `${o.id}:${o.parentKeyResultId ?? ""}`)
+            .join(",")}
           objectives={objectivesWithData.map((obj) => ({
             ...obj,
             parentKeyResultId: obj.parentKeyResultId ?? null,
@@ -238,6 +244,12 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
           workspaceSlug={workspaceSlug}
           cyclePath={cyclePath}
           availableKRs={parentKROptions}
+          supportingObjectiveOptions={eligibleSupportingObjectives.map((objective) => ({
+            id: objective.id,
+            title: objective.title,
+            cycleId: objective.cycleId,
+            cycleTitle: objective.cycleTitle,
+          }))}
         />
 
         <AddObjectiveForm

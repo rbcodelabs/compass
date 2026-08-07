@@ -93,7 +93,7 @@ export function ObjectivePanel({
         title: data.parentKeyResult.title,
         badge: {
           label: data.parentKeyResult.objective.cycle.title,
-          className: "bg-violet-100 text-violet-700",
+          className: "bg-accent text-accent-foreground",
         },
       }]
     : [];

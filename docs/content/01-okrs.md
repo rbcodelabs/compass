@@ -50,7 +50,12 @@ Annual Objective
         └── Quarterly Key Results
 ```
 
-Open the quarterly cycle and use the **Supports** picker on an Objective. Compass offers Key Results from open, longer-horizon cycles whose dates fully contain the quarterly cycle. For example, a January 1–December 31 annual cycle can be the parent of a January 1–March 31 quarterly cycle.
+You can create the relationship from either side:
+
+- **From the quarterly Objective:** open its **Alignment** section and choose the higher-level KR under **Supports a higher-level Key Result**.
+- **From the annual Key Result:** select **Link supporting objective** and choose an eligible quarterly Objective. Use the unlink control beside a supporting Objective to remove the relationship.
+
+Compass offers parent Key Results only from Draft or Active longer-horizon cycles whose dates fully contain the shorter cycle. On the annual side, it offers only unlinked Objectives from strictly shorter, fully contained cycles. For example, a January 1–December 31 annual cycle can be the parent of a January 1–March 31 quarterly cycle. Compass does not create cycles or Objectives automatically.
 
 The quarterly Objective shows its selected parent KR. The annual KR lists every supporting quarterly Objective, including its cycle, squad, and current progress. Existing relationships remain visible after a cycle closes, but closed cycles cannot receive new supporting Objectives.
 

@@ -4,6 +4,7 @@ const mockCycleFindFirst = vi.fn();
 const mockKRFindMany = vi.fn();
 const mockKRFindFirst = vi.fn();
 const mockObjectiveFindFirst = vi.fn();
+const mockObjectiveFindMany = vi.fn();
 const mockObjectiveFindUnique = vi.fn();
 const mockObjectiveUpdate = vi.fn();
 
@@ -13,6 +14,7 @@ vi.mock("@/lib/db", () => ({
     keyResult: { findMany: mockKRFindMany, findFirst: mockKRFindFirst },
     objective: {
       findFirst: mockObjectiveFindFirst,
+      findMany: mockObjectiveFindMany,
       findUnique: mockObjectiveFindUnique,
       update: mockObjectiveUpdate,
     },
@@ -20,6 +22,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+  getEligibleSupportingObjectives,
   getEligibleParentKeyResults,
   OKRHierarchyError,
   setObjectiveParentKeyResult,
@@ -105,6 +108,47 @@ describe("getEligibleParentKeyResults", () => {
       },
     ]);
     await expect(getEligibleParentKeyResults("ws-1", "q1")).resolves.toEqual([]);
+  });
+});
+
+describe("getEligibleSupportingObjectives", () => {
+  it("returns unlinked Objectives from strictly shorter contained cycles", async () => {
+    mockCycleFindFirst.mockResolvedValue(annualCycle);
+    mockObjectiveFindMany.mockResolvedValue([
+      {
+        id: "quarterly-objective",
+        title: "Win the enterprise segment",
+        sortOrder: 0,
+        cycle: quarterlyCycle,
+      },
+      {
+        id: "peer-objective",
+        title: "Same-horizon peer",
+        sortOrder: 1,
+        cycle: { ...annualCycle, id: "annual-peer" },
+      },
+    ]);
+
+    await expect(getEligibleSupportingObjectives("ws-1", "annual")).resolves.toEqual([
+      expect.objectContaining({
+        id: "quarterly-objective",
+        cycleTitle: "Q1 2027",
+      }),
+    ]);
+    expect(mockObjectiveFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          parentKeyResultId: null,
+          cycle: expect.objectContaining({ workspaceId: "ws-1", id: { not: "annual" } }),
+        }),
+      })
+    );
+  });
+
+  it("returns no candidates when the parent cycle is closed", async () => {
+    mockCycleFindFirst.mockResolvedValue({ ...annualCycle, status: "CLOSED" });
+    await expect(getEligibleSupportingObjectives("ws-1", "annual")).resolves.toEqual([]);
+    expect(mockObjectiveFindMany).not.toHaveBeenCalled();
   });
 });
 

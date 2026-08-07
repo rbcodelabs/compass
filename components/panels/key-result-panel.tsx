@@ -91,7 +91,7 @@ export function KeyResultPanel({
       title: objective.title,
       badge: {
         label: `${objective.cycle.title} · ${progress}%`,
-        className: "bg-violet-100 text-violet-700",
+        className: "bg-accent text-accent-foreground",
       },
     };
   });

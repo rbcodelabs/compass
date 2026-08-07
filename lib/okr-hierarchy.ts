@@ -12,6 +12,15 @@ export type ParentKeyResultOption = {
   cycleEndDate: Date;
 };
 
+export type SupportingObjectiveOption = {
+  id: string;
+  title: string;
+  cycleId: string;
+  cycleTitle: string;
+  cycleStartDate: Date;
+  cycleEndDate: Date;
+};
+
 export class OKRHierarchyError extends Error {
   constructor(
     public readonly code:
@@ -118,6 +127,53 @@ export async function getEligibleParentKeyResults(
       cycleStatus: kr.cycleStatus,
       cycleStartDate: kr.cycleStartDate,
       cycleEndDate: kr.cycleEndDate,
+    }));
+}
+
+/** Return unlinked Objectives in strictly shorter cycles contained by a parent cycle. */
+export async function getEligibleSupportingObjectives(
+  workspaceId: string,
+  parentCycleId: string
+): Promise<SupportingObjectiveOption[]> {
+  const prisma = getPrisma();
+  const parentCycle = await prisma.oKRCycle.findFirst({
+    where: { id: parentCycleId, workspaceId },
+    select: { id: true, status: true, startDate: true, endDate: true },
+  });
+
+  if (!parentCycle || parentCycle.status === "CLOSED") return [];
+
+  const objectives = await prisma.objective.findMany({
+    where: {
+      parentKeyResultId: null,
+      cycle: {
+        workspaceId,
+        id: { not: parentCycle.id },
+        startDate: { gte: parentCycle.startDate },
+        endDate: { lte: parentCycle.endDate },
+      },
+    },
+    include: {
+      cycle: {
+        select: { id: true, title: true, startDate: true, endDate: true },
+      },
+    },
+    orderBy: [{ cycle: { startDate: "asc" } }, { sortOrder: "asc" }],
+  });
+
+  return objectives
+    .filter(
+      (objective) =>
+        objective.cycle.startDate.getTime() !== parentCycle.startDate.getTime() ||
+        objective.cycle.endDate.getTime() !== parentCycle.endDate.getTime()
+    )
+    .map((objective) => ({
+      id: objective.id,
+      title: objective.title,
+      cycleId: objective.cycle.id,
+      cycleTitle: objective.cycle.title,
+      cycleStartDate: objective.cycle.startDate,
+      cycleEndDate: objective.cycle.endDate,
     }));
 }
 
