@@ -10,6 +10,7 @@
  */
 
 import getPrisma from "@/lib/db"
+import { getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { Prisma } from "@prisma/client"
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring"
 import type { ScoringFormulaType, MetricDirection, FormulaSnapshotMetric } from "@/lib/types"
@@ -467,9 +468,16 @@ export async function listTopOpportunities({
   const prisma = getPrisma()
   const take = limit ?? 20
 
+  // In the cross-workspace (orgSlug) view, scope results to the caller's own
+  // workspace memberships so the ranking never surfaces opportunities from
+  // workspaces the user isn't in. The service key sees all. (The workspaceId
+  // view is already gated to a member of that single workspace.)
+  const actor = getMcpActor()
+  const memberScope =
+    isServiceActor(actor) ? {} : { members: { some: { userId: actor.userId! } } }
   const where: Prisma.OpportunityScoreWhereInput = workspaceId
     ? { opportunity: { workspaceId } }
-    : { opportunity: { workspace: { organization: { slug: orgSlug } } } }
+    : { opportunity: { workspace: { organization: { slug: orgSlug }, ...memberScope } } }
 
   const scores = await prisma.opportunityScore.findMany({
     where,

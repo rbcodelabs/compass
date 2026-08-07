@@ -20,15 +20,10 @@ const mockEvidence = {
   updateMany: vi.fn(),
 }
 
-const mockWorkspace = {
-  findFirst: vi.fn(),
-}
-
 const mockPrisma = {
   assumption: mockAssumption,
   experiment: mockExperiment,
   evidence: mockEvidence,
-  workspace: mockWorkspace,
 }
 
 vi.mock("@/lib/db", () => ({
@@ -41,10 +36,6 @@ import { updateAssumption, deleteAssumption } from "@/lib/assumption-tool-handle
 // ---------------------------------------------------------------------------
 
 const ASSUMPTION_ID = "assumption-1"
-// Per-user actor who is a member of the owning workspace (membership mock
-// below returns truthy). The service actor { userId: null } would bypass the
-// membership check entirely; using a real member exercises the full gate.
-const MEMBER = { userId: "user-1" }
 
 function textOf(result: { content: { text: string }[] }) {
   return result.content[0].text
@@ -52,19 +43,12 @@ function textOf(result: { content: { text: string }[] }) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  // The default findUnique return is a SUPERSET carrying both the flat fields
-  // the handler reads AND the nested solution→opportunity→workspaceId path
-  // that assertEntityAccess's resolver reads (mocks ignore `select`), so the
-  // same value satisfies both the authz lookup and the handler's own fetch.
   mockAssumption.findUnique.mockResolvedValue({
     id: ASSUMPTION_ID,
     title: "Existing assumption",
     riskLevel: "MEDIUM",
     status: "UNTESTED",
-    solution: { opportunity: { workspaceId: "ws-1" } },
   })
-  // Membership check passes by default.
-  mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" })
   mockAssumption.update.mockImplementation(({ data }) =>
     Promise.resolve({
       id: ASSUMPTION_ID,
@@ -82,26 +66,17 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("updateAssumption", () => {
-  it("denies (throws) when the assumption does not exist — gate resolves it first", async () => {
+  it("returns a not-found message when the assumption does not exist", async () => {
     mockAssumption.findUnique.mockResolvedValueOnce(null)
 
-    await expect(
-      updateAssumption(MEMBER, { assumptionId: "missing-id", title: "New title" })
-    ).rejects.toThrow(/not found or access denied/)
-    expect(mockAssumption.update).not.toHaveBeenCalled()
-  })
+    const result = await updateAssumption({ assumptionId: "missing-id", title: "New title" })
 
-  it("denies (throws) when the caller is not a member of the owning workspace", async () => {
-    mockWorkspace.findFirst.mockResolvedValueOnce(null) // not a member
-
-    await expect(
-      updateAssumption(MEMBER, { assumptionId: ASSUMPTION_ID, title: "New title" })
-    ).rejects.toThrow(/not found or access denied/)
+    expect(textOf(result)).toContain("not found")
     expect(mockAssumption.update).not.toHaveBeenCalled()
   })
 
   it("updates only the provided fields (title)", async () => {
-    await updateAssumption(MEMBER, { assumptionId: ASSUMPTION_ID, title: "  Revised title  " })
+    await updateAssumption({ assumptionId: ASSUMPTION_ID, title: "  Revised title  " })
 
     expect(mockAssumption.update).toHaveBeenCalledWith({
       where: { id: ASSUMPTION_ID },
@@ -113,7 +88,7 @@ describe("updateAssumption", () => {
   })
 
   it("updates riskLevel and status together", async () => {
-    await updateAssumption(MEMBER, { assumptionId: ASSUMPTION_ID, riskLevel: "HIGH", status: "VALIDATED" })
+    await updateAssumption({ assumptionId: ASSUMPTION_ID, riskLevel: "HIGH", status: "VALIDATED" })
 
     expect(mockAssumption.update).toHaveBeenCalledWith({
       where: { id: ASSUMPTION_ID },
@@ -122,14 +97,14 @@ describe("updateAssumption", () => {
   })
 
   it("always sets updatedAt explicitly (no DB trigger on DSQL)", async () => {
-    await updateAssumption(MEMBER, { assumptionId: ASSUMPTION_ID, title: "New title" })
+    await updateAssumption({ assumptionId: ASSUMPTION_ID, title: "New title" })
 
     const data = mockAssumption.update.mock.calls[0][0].data
     expect(data.updatedAt).toBeInstanceOf(Date)
   })
 
   it("returns the updated fields in the response text with a plain ID line", async () => {
-    const result = await updateAssumption(MEMBER, { assumptionId: ASSUMPTION_ID, status: "TESTING" })
+    const result = await updateAssumption({ assumptionId: ASSUMPTION_ID, status: "TESTING" })
 
     const text = textOf(result)
     expect(text).toContain(`ID: ${ASSUMPTION_ID}`)
@@ -139,26 +114,17 @@ describe("updateAssumption", () => {
 })
 
 describe("deleteAssumption", () => {
-  it("denies (throws) when the assumption does not exist — gate resolves it first", async () => {
+  it("returns a not-found message when the assumption does not exist", async () => {
     mockAssumption.findUnique.mockResolvedValueOnce(null)
 
-    await expect(
-      deleteAssumption(MEMBER, { assumptionId: "missing-id" })
-    ).rejects.toThrow(/not found or access denied/)
-    expect(mockAssumption.delete).not.toHaveBeenCalled()
-  })
+    const result = await deleteAssumption({ assumptionId: "missing-id" })
 
-  it("denies (throws) when the caller is not a member of the owning workspace", async () => {
-    mockWorkspace.findFirst.mockResolvedValueOnce(null) // not a member
-
-    await expect(
-      deleteAssumption(MEMBER, { assumptionId: ASSUMPTION_ID })
-    ).rejects.toThrow(/not found or access denied/)
+    expect(textOf(result)).toContain("not found")
     expect(mockAssumption.delete).not.toHaveBeenCalled()
   })
 
   it("nulls out Experiment and Evidence references before deleting (no FK cascade on DSQL)", async () => {
-    await deleteAssumption(MEMBER, { assumptionId: ASSUMPTION_ID })
+    await deleteAssumption({ assumptionId: ASSUMPTION_ID })
 
     expect(mockExperiment.updateMany).toHaveBeenCalledWith({
       where: { assumptionId: ASSUMPTION_ID },
@@ -186,13 +152,13 @@ describe("deleteAssumption", () => {
       return Promise.resolve({ id: ASSUMPTION_ID })
     })
 
-    await deleteAssumption(MEMBER, { assumptionId: ASSUMPTION_ID })
+    await deleteAssumption({ assumptionId: ASSUMPTION_ID })
 
     expect(order.indexOf("assumption.delete")).toBe(order.length - 1)
   })
 
   it("returns the deleted assumption's title and a plain ID line", async () => {
-    const result = await deleteAssumption(MEMBER, { assumptionId: ASSUMPTION_ID })
+    const result = await deleteAssumption({ assumptionId: ASSUMPTION_ID })
 
     const text = textOf(result)
     expect(text).toContain(`ID: ${ASSUMPTION_ID}`)

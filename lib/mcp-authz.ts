@@ -65,6 +65,15 @@ export function getMcpActor(): McpActor {
 
 const isService = (actor: McpActor): boolean => actor.userId === null
 
+/**
+ * True for the shared service key (global/trusted). List tools that scope
+ * their results by the caller's memberships use this to skip the membership
+ * filter for the service key.
+ */
+export function isServiceActor(actor: McpActor): boolean {
+  return isService(actor)
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Workspace-scoped (pattern b): tools that take a workspaceId directly.
 // ──────────────────────────────────────────────────────────────────────────
@@ -96,6 +105,30 @@ export async function assertWorkspaceAdmin(actor: McpActor, workspaceId: string)
   if (member.role !== "ADMIN") {
     throw new McpAuthzError("Forbidden: workspace admin required.")
   }
+}
+
+/**
+ * Assert the actor may access the workspace identified by org slug +
+ * workspace slug (used by get_workspace_by_slug). Returns the resolved id.
+ */
+export async function assertWorkspaceBySlug(
+  actor: McpActor,
+  orgSlug: string,
+  workspaceSlug: string
+): Promise<{ workspaceId: string }> {
+  const prisma = getPrisma()
+  const ws = await prisma.workspace.findFirst({
+    where: {
+      slug: workspaceSlug,
+      organization: { slug: orgSlug },
+      ...(isService(actor) ? {} : { members: { some: { userId: actor.userId! } } }),
+    },
+    select: { id: true },
+  })
+  if (!ws) {
+    throw new McpAuthzError(`Workspace not found or access denied: ${orgSlug}/${workspaceSlug}`)
+  }
+  return { workspaceId: ws.id }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
