@@ -46,3 +46,9 @@ Once a workspace has an active scoring model, every opportunity detail page show
 ## Why Normalized Scores?
 
 Raw scores from different formulas and scales aren't directly comparable — a RICE score of 40 means something different from an ICE score of 8. Every Opportunity Score also stores a **normalized score from 0 to 100**, computed from the theoretical best/worst possible outcome for that specific model. This is what makes it possible to compare priorities across workspaces that use different scoring templates, and is the basis for any future cross-workspace "top opportunities" view.
+
+## Danger Zone — Delete Organization
+
+At the bottom of **Org Settings** is a **Danger Zone** where an organization owner or admin can permanently delete the entire organization. This removes **every workspace** in the organization and all of their data — OKRs, opportunities, solutions, experiments, roadmap items, docs, feedback, tasks, and scoring models — along with the organization's members and scoring templates.
+
+Deletion is **irreversible** and there is no soft-delete or recovery. To guard against mistakes, the panel lists every workspace that will be destroyed and requires you to **type the organization's name exactly** to confirm; the delete button stays disabled until the typed name matches. Once confirmed, you're redirected to your dashboard and the organization is gone.

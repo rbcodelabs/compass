@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { ManageScoringModelsPanel } from "@/components/scoring-models/manage-scoring-models-panel";
+import { DeleteOrganizationPanel } from "@/components/settings/delete-organization-panel";
 import type { ScoringModelData, ScoringModelStatus, ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
@@ -32,6 +33,12 @@ export default async function OrgSettingsPage({ params }: Props) {
     orderBy: { createdAt: "asc" },
   });
 
+  const workspaces = await prisma.workspace.findMany({
+    where: { organizationId: organization.id },
+    select: { name: true },
+    orderBy: { name: "asc" },
+  });
+
   const models: ScoringModelData[] = rawModels.map((m) => ({
     id: m.id,
     name: m.name,
@@ -61,6 +68,18 @@ export default async function OrgSettingsPage({ params }: Props) {
         description="Named templates (e.g. RICE, ICE) that workspaces can select to score and rank opportunities. Every workspace using a given model is comparable on the same 0–100 scale, even after the template is edited later."
       >
         <ManageScoringModelsPanel orgSlug={orgSlug} initialModels={models} />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Danger Zone"
+        description="Permanently delete this organization and every workspace and record it contains. This action is irreversible."
+        danger
+      >
+        <DeleteOrganizationPanel
+          orgSlug={orgSlug}
+          organizationName={organization.name}
+          workspaces={workspaces}
+        />
       </SettingsSection>
     </main>
   );
