@@ -8,6 +8,7 @@
  * controlled inputs and assert on the returned text.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { runWithMcpActor } from "@/lib/mcp-authz"
 
 // ── Prisma mock ─────────────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ await import("@/app/api/mcp/route")
 function getHandler(name: string): ToolCallback {
   const h = registeredTools[name]
   if (!h) throw new Error(`Tool "${name}" was not registered`)
-  return h
+  return ((args: Record<string, unknown>) => runWithMcpActor({ userId: null }, () => h(args))) as ToolCallback
 }
 
 function textOf(result: { content: Array<{ type: string; text: string }> }): string {

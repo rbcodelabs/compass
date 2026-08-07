@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { runWithMcpActor } from "@/lib/mcp-authz"
 
 const mockOrganization = { findUnique: vi.fn() }
 const mockScoringModel = {
@@ -415,7 +416,7 @@ describe("listTopOpportunities", () => {
       { normalizedScore: 50, opportunity: { id: "opp-b", title: "B", status: "EXPLORING", workspace: { name: "WS" } } },
     ])
 
-    const result = await listTopOpportunities({ workspaceId: WS_ID })
+    const result = await runWithMcpActor({ userId: null }, () => listTopOpportunities({ workspaceId: WS_ID }))
     const text = result.content[0].text
 
     expect(mockOpportunityScore.findMany).toHaveBeenCalledWith(
@@ -433,7 +434,7 @@ describe("listTopOpportunities", () => {
       { normalizedScore: 90, opportunity: { id: "opp-a", title: "A", status: "PRIORITIZED", workspace: { name: "Team Alpha" } } },
     ])
 
-    const result = await listTopOpportunities({ orgSlug: "acme" })
+    const result = await runWithMcpActor({ userId: null }, () => listTopOpportunities({ orgSlug: "acme" }))
 
     expect(mockOpportunityScore.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -444,14 +445,14 @@ describe("listTopOpportunities", () => {
   })
 
   it("returns an error message when neither workspaceId nor orgSlug is provided", async () => {
-    const result = await listTopOpportunities({})
+    const result = await runWithMcpActor({ userId: null }, () => listTopOpportunities({}))
     expect(result.content[0].text).toContain("Provide either workspaceId or orgSlug")
     expect(mockOpportunityScore.findMany).not.toHaveBeenCalled()
   })
 
   it("returns an empty message when there are no scored opportunities", async () => {
     mockOpportunityScore.findMany.mockResolvedValueOnce([])
-    const result = await listTopOpportunities({ workspaceId: WS_ID })
+    const result = await runWithMcpActor({ userId: null }, () => listTopOpportunities({ workspaceId: WS_ID }))
     expect(result.content[0].text).toContain("No scored opportunities found")
   })
 })

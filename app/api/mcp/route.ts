@@ -8,6 +8,8 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { validateMcpAuth } from "@/lib/mcp-auth"
+import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
+import { applyToolGate } from "@/lib/mcp-tool-gates"
 import {
   getFeedbackItem,
   updateFeedbackStatus,
@@ -88,11 +90,29 @@ function formatUtcDate(date: Date): string {
 const _handler = createMcpHandler(
   (server) => {
 
+    // Register every tool THROUGH this wrapper so its authorization gate
+    // (lib/mcp-tool-gates.ts) runs before the handler. Fail-closed: a tool
+    // with no gate entry is denied by applyToolGate. The acting identity is
+    // read from AsyncLocalStorage (set by withMcpAuth). `any` here: the SDK's
+    // registerTool has many generic overloads we don't need to reproduce, and
+    // args are validated by each tool's zod inputSchema before the gate runs.
+    const register = (
+      name: string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      meta: any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      handler: (args: any, extra?: any) => any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ) => (server.registerTool as (...a: any[]) => any)(name, meta, async (args: any, extra: any) => {
+      await applyToolGate(name, getMcpActor(), args ?? {})
+      return handler(args, extra)
+    })
+
     // ════════════════════════════════════════════════════════════════
     // WORKSPACE
     // ════════════════════════════════════════════════════════════════
 
-    server.registerTool(
+    register(
       "get_workspace_summary",
       {
         title: "Get Workspace Summary",
@@ -148,7 +168,7 @@ const _handler = createMcpHandler(
     // ----------------------------------------------------------------
     // list_workspaces — entry-point for agents discovering workspace IDs
     // ----------------------------------------------------------------
-    server.registerTool(
+    register(
       "list_workspaces",
       {
         title: "List Workspaces",
@@ -161,13 +181,20 @@ const _handler = createMcpHandler(
         },
       },
       async ({ orgSlug }) => {
+        const actor = getMcpActor()
         const prisma = getPrisma()
+        // Scope returned workspaces to the caller's memberships (service key
+        // sees all). The gate already asserted org membership.
+        const workspaceFilter = isServiceActor(actor)
+          ? {}
+          : { members: { some: { userId: actor.userId! } } }
         const org = await prisma.organization.findUnique({
           where: { slug: orgSlug },
           select: {
             id: true,
             name: true,
             workspaces: {
+              where: workspaceFilter,
               select: {
                 id: true,
                 slug: true,
@@ -212,7 +239,7 @@ const _handler = createMcpHandler(
     // get_workspace_by_slug — resolves a workspace ID directly from
     // org slug + workspace slug, without listing all workspaces first
     // ----------------------------------------------------------------
-    server.registerTool(
+    register(
       "get_workspace_by_slug",
       {
         title: "Get Workspace By Slug",
@@ -258,7 +285,7 @@ const _handler = createMcpHandler(
     // ----------------------------------------------------------------
     // create_workspace — creates a new workspace inside an organization
     // ----------------------------------------------------------------
-    server.registerTool(
+    register(
       "create_workspace",
       {
         title: "Create Workspace",
@@ -347,7 +374,7 @@ const _handler = createMcpHandler(
     // OKRs
     // ════════════════════════════════════════════════════════════════
 
-    server.registerTool(
+    register(
       "list_okr_cycles",
       {
         title: "List OKR Cycles",
@@ -373,7 +400,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "create_okr_cycle",
       {
         title: "Create OKR Cycle",
@@ -406,7 +433,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "get_okr_cycle",
       {
         title: "Get OKR Cycle",
@@ -457,7 +484,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "create_objective",
       {
         title: "Create Objective",
@@ -490,7 +517,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "add_key_result",
       {
         title: "Add Key Result",
@@ -520,7 +547,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "log_checkin",
       {
         title: "Log Check-In",
@@ -551,7 +578,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "set_objective_parent_kr",
       {
         title: "Set Objective Parent KR",
@@ -579,7 +606,7 @@ const _handler = createMcpHandler(
     // DISCOVERY — Opportunities, Solutions, Assumptions
     // ════════════════════════════════════════════════════════════════
 
-    server.registerTool(
+    register(
       "list_opportunities",
       {
         title: "List Opportunities",
@@ -613,7 +640,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "get_opportunity",
       {
         title: "Get Opportunity",
@@ -685,7 +712,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "create_opportunity",
       {
         title: "Create Opportunity",
@@ -726,7 +753,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "update_opportunity_status",
       {
         title: "Update Opportunity Status",
@@ -752,7 +779,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "link_opportunity_to_kr",
       {
         title: "Link Opportunity to Key Result",
@@ -780,7 +807,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "add_solution",
       {
         title: "Add Solution",
@@ -807,7 +834,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "add_assumption",
       {
         title: "Add Assumption",
@@ -834,7 +861,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "update_assumption",
       {
         title: "Update Assumption",
@@ -849,7 +876,7 @@ const _handler = createMcpHandler(
       updateAssumption
     )
 
-    server.registerTool(
+    register(
       "delete_assumption",
       {
         title: "Delete Assumption",
@@ -861,7 +888,7 @@ const _handler = createMcpHandler(
       deleteAssumption
     )
 
-    server.registerTool(
+    register(
       "add_solution_plan",
       {
         title: "Add Solution Plan",
@@ -875,7 +902,7 @@ const _handler = createMcpHandler(
       addSolutionPlan
     )
 
-    server.registerTool(
+    register(
       "add_solution_comment",
       {
         title: "Add Solution Comment",
@@ -890,7 +917,7 @@ const _handler = createMcpHandler(
       addSolutionComment
     )
 
-    server.registerTool(
+    register(
       "list_solution_comments",
       {
         title: "List Solution Comments",
@@ -902,7 +929,7 @@ const _handler = createMcpHandler(
       listSolutionComments
     )
 
-    server.registerTool(
+    register(
       "get_solution_comment",
       {
         title: "Get Solution Comment",
@@ -914,7 +941,7 @@ const _handler = createMcpHandler(
       getSolutionComment
     )
 
-    server.registerTool(
+    register(
       "update_solution_comment",
       {
         title: "Update Solution Comment",
@@ -927,7 +954,7 @@ const _handler = createMcpHandler(
       updateSolutionComment
     )
 
-    server.registerTool(
+    register(
       "delete_solution_comment",
       {
         title: "Delete Solution Comment",
@@ -939,7 +966,7 @@ const _handler = createMcpHandler(
       deleteSolutionComment
     )
 
-    server.registerTool(
+    register(
       "approve_solution_plan",
       {
         title: "Approve Solution Plan",
@@ -951,7 +978,7 @@ const _handler = createMcpHandler(
       approveSolutionPlan
     )
 
-    server.registerTool(
+    register(
       "reject_solution_plan",
       {
         title: "Reject Solution Plan",
@@ -963,7 +990,7 @@ const _handler = createMcpHandler(
       rejectSolutionPlan
     )
 
-    server.registerTool(
+    register(
       "promote_to_roadmap",
       {
         title: "Promote Solution to Roadmap",
@@ -1016,7 +1043,7 @@ const _handler = createMcpHandler(
     // EXPERIMENTS
     // ════════════════════════════════════════════════════════════════
 
-    server.registerTool(
+    register(
       "list_experiments",
       {
         title: "List Experiments",
@@ -1049,7 +1076,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "get_experiment",
       {
         title: "Get Experiment",
@@ -1100,7 +1127,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "create_experiment",
       {
         title: "Create Experiment",
@@ -1137,7 +1164,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "log_experiment_result",
       {
         title: "Log Experiment Result",
@@ -1168,7 +1195,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "conclude_experiment",
       {
         title: "Conclude Experiment",
@@ -1217,7 +1244,7 @@ const _handler = createMcpHandler(
     // ROADMAP
     // ════════════════════════════════════════════════════════════════
 
-    server.registerTool(
+    register(
       "list_roadmap_items",
       {
         title: "List Roadmap Items",
@@ -1274,7 +1301,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "update_roadmap_item",
       {
         title: "Update Roadmap Item",
@@ -1343,7 +1370,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "add_to_roadmap",
       {
         title: "Add to Roadmap",
@@ -1405,7 +1432,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "create_checklist_template",
       {
         title: "Create Checklist Template",
@@ -1427,7 +1454,7 @@ const _handler = createMcpHandler(
       createChecklistTemplate
     )
 
-    server.registerTool(
+    register(
       "list_checklist_templates",
       {
         title: "List Checklist Templates",
@@ -1440,7 +1467,7 @@ const _handler = createMcpHandler(
       listChecklistTemplates
     )
 
-    server.registerTool(
+    register(
       "set_launch_tier",
       {
         title: "Set Launch Tier",
@@ -1457,7 +1484,7 @@ const _handler = createMcpHandler(
       setLaunchTier
     )
 
-    server.registerTool(
+    register(
       "get_launch_checklist",
       {
         title: "Get Launch Checklist",
@@ -1469,7 +1496,7 @@ const _handler = createMcpHandler(
       getLaunchChecklist
     )
 
-    server.registerTool(
+    register(
       "update_launch_checklist_item",
       {
         title: "Update Launch Checklist Item",
@@ -1486,7 +1513,7 @@ const _handler = createMcpHandler(
     // SQUADS
     // ════════════════════════════════════════════════════════════════
 
-    server.registerTool(
+    register(
       "create_squad",
       {
         title: "Create Squad",
@@ -1504,7 +1531,7 @@ const _handler = createMcpHandler(
       createSquad
     )
 
-    server.registerTool(
+    register(
       "list_squads",
       {
         title: "List Squads",
@@ -1516,7 +1543,7 @@ const _handler = createMcpHandler(
       listSquads
     )
 
-    server.registerTool(
+    register(
       "get_squad",
       {
         title: "Get Squad",
@@ -1528,7 +1555,7 @@ const _handler = createMcpHandler(
       getSquad
     )
 
-    server.registerTool(
+    register(
       "update_squad",
       {
         title: "Update Squad",
@@ -1546,7 +1573,7 @@ const _handler = createMcpHandler(
       updateSquad
     )
 
-    server.registerTool(
+    register(
       "assign_squad",
       {
         title: "Assign Squad",
@@ -1592,7 +1619,7 @@ const _handler = createMcpHandler(
     // TASKS
     // ════════════════════════════════════════════════════════════════
 
-    server.registerTool(
+    register(
       "create_task",
       {
         title: "Create Task",
@@ -1618,7 +1645,7 @@ const _handler = createMcpHandler(
       createTask
     )
 
-    server.registerTool(
+    register(
       "get_task",
       {
         title: "Get Task",
@@ -1630,7 +1657,7 @@ const _handler = createMcpHandler(
       getTask
     )
 
-    server.registerTool(
+    register(
       "list_tasks",
       {
         title: "List Tasks",
@@ -1653,7 +1680,7 @@ const _handler = createMcpHandler(
       listTasks
     )
 
-    server.registerTool(
+    register(
       "update_task",
       {
         title: "Update Task",
@@ -1676,7 +1703,7 @@ const _handler = createMcpHandler(
       updateTask
     )
 
-    server.registerTool(
+    register(
       "move_task_status",
       {
         title: "Move Task Status",
@@ -1691,7 +1718,7 @@ const _handler = createMcpHandler(
       moveTaskStatus
     )
 
-    server.registerTool(
+    register(
       "link_task",
       {
         title: "Link Task",
@@ -1707,7 +1734,7 @@ const _handler = createMcpHandler(
       linkTask
     )
 
-    server.registerTool(
+    register(
       "unlink_task",
       {
         title: "Unlink Task",
@@ -1721,7 +1748,7 @@ const _handler = createMcpHandler(
       unlinkTask
     )
 
-    server.registerTool(
+    register(
       "list_task_links",
       {
         title: "List Task Links",
@@ -1737,7 +1764,7 @@ const _handler = createMcpHandler(
     // FEEDBACK
     // ════════════════════════════════════════════════════════════════
 
-    server.registerTool(
+    register(
       "list_feedback",
       {
         title: "List Feedback",
@@ -1772,7 +1799,7 @@ const _handler = createMcpHandler(
       }
     )
 
-    server.registerTool(
+    register(
       "get_feedback_item",
       {
         title: "Get Feedback Item",
@@ -1785,7 +1812,7 @@ const _handler = createMcpHandler(
       getFeedbackItem
     )
 
-    server.registerTool(
+    register(
       "update_feedback_status",
       {
         title: "Update Feedback Status",
@@ -1800,7 +1827,7 @@ const _handler = createMcpHandler(
       updateFeedbackStatus
     )
 
-    server.registerTool(
+    register(
       "link_feedback_to_opportunity",
       {
         title: "Link Feedback to Opportunity",
@@ -1815,7 +1842,7 @@ const _handler = createMcpHandler(
       linkFeedbackToOpportunity
     )
 
-    server.registerTool(
+    register(
       "update_feedback_type",
       {
         title: "Update Feedback Type",
@@ -1831,7 +1858,7 @@ const _handler = createMcpHandler(
       updateFeedbackType
     )
 
-    server.registerTool(
+    register(
       "promote_feedback_to_roadmap",
       {
         title: "Promote Feedback to Roadmap",
@@ -1853,7 +1880,7 @@ const _handler = createMcpHandler(
     // EVIDENCE
     // ════════════════════════════════════════════════════════════════
 
-    server.registerTool(
+    register(
       "add_evidence",
       {
         title: "Add Evidence",
@@ -1877,7 +1904,7 @@ const _handler = createMcpHandler(
       addEvidence
     )
 
-    server.registerTool(
+    register(
       "link_evidence",
       {
         title: "Link Evidence",
@@ -1894,7 +1921,7 @@ const _handler = createMcpHandler(
       linkEvidence
     )
 
-    server.registerTool(
+    register(
       "list_evidence",
       {
         title: "List Evidence",
@@ -1913,7 +1940,7 @@ const _handler = createMcpHandler(
     // DOCS
     // ════════════════════════════════════════════════════════════════
 
-    server.registerTool(
+    register(
       "list_docs",
       {
         title: "List Docs",
@@ -1928,7 +1955,7 @@ const _handler = createMcpHandler(
       listDocs
     )
 
-    server.registerTool(
+    register(
       "get_doc",
       {
         title: "Get Doc",
@@ -1942,7 +1969,7 @@ const _handler = createMcpHandler(
       getDoc
     )
 
-    server.registerTool(
+    register(
       "create_doc",
       {
         title: "Create Doc",
@@ -1977,7 +2004,7 @@ const _handler = createMcpHandler(
       createDoc
     )
 
-    server.registerTool(
+    register(
       "update_doc",
       {
         title: "Update Doc",
@@ -2008,7 +2035,7 @@ const _handler = createMcpHandler(
       direction: z.enum(["POSITIVE", "NEGATIVE"]).describe("POSITIVE increases the score, NEGATIVE decreases it (e.g. Effort)"),
     })
 
-    server.registerTool(
+    register(
       "list_scoring_models",
       {
         title: "List Scoring Models",
@@ -2023,7 +2050,7 @@ const _handler = createMcpHandler(
       listScoringModels
     )
 
-    server.registerTool(
+    register(
       "get_scoring_model",
       {
         title: "Get Scoring Model",
@@ -2037,7 +2064,7 @@ const _handler = createMcpHandler(
       getScoringModel
     )
 
-    server.registerTool(
+    register(
       "create_scoring_model",
       {
         title: "Create Scoring Model",
@@ -2057,7 +2084,7 @@ const _handler = createMcpHandler(
       createScoringModel
     )
 
-    server.registerTool(
+    register(
       "update_scoring_model",
       {
         title: "Update Scoring Model",
@@ -2077,7 +2104,7 @@ const _handler = createMcpHandler(
       updateScoringModel
     )
 
-    server.registerTool(
+    register(
       "archive_scoring_model",
       {
         title: "Archive Scoring Model",
@@ -2092,7 +2119,7 @@ const _handler = createMcpHandler(
       archiveScoringModel
     )
 
-    server.registerTool(
+    register(
       "get_workspace_scoring_model",
       {
         title: "Get Workspace Scoring Model",
@@ -2106,7 +2133,7 @@ const _handler = createMcpHandler(
       getWorkspaceScoringModel
     )
 
-    server.registerTool(
+    register(
       "set_workspace_scoring_model",
       {
         title: "Set Workspace Scoring Model",
@@ -2121,7 +2148,7 @@ const _handler = createMcpHandler(
       setWorkspaceScoringModel
     )
 
-    server.registerTool(
+    register(
       "score_opportunity",
       {
         title: "Score Opportunity",
@@ -2139,7 +2166,7 @@ const _handler = createMcpHandler(
       scoreOpportunity
     )
 
-    server.registerTool(
+    register(
       "get_opportunity_score",
       {
         title: "Get Opportunity Score",
@@ -2154,7 +2181,7 @@ const _handler = createMcpHandler(
       getOpportunityScore
     )
 
-    server.registerTool(
+    register(
       "list_top_opportunities",
       {
         title: "List Top Opportunities",
@@ -2185,7 +2212,10 @@ async function withMcpAuth(req: Request): Promise<Response> {
   if (!auth.valid) {
     return new Response("Unauthorized", { status: 401, headers: { "WWW-Authenticate": "Bearer" } })
   }
-  return _handler(req)
+  // Carry the acting identity (userId, or null for the shared service key)
+  // into every tool via AsyncLocalStorage; the register() wrapper reads it to
+  // run each tool's authorization gate before its handler.
+  return runWithMcpActor({ userId: auth.userId }, () => _handler(req))
 }
 
 export async function GET(req: Request) { return withMcpAuth(req) }
