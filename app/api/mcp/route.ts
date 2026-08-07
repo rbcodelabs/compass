@@ -9,6 +9,12 @@ import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 import {
+  runWithMcpActor,
+  getMcpActor,
+  assertWorkspaceMember,
+  assertEntityAccess,
+} from "@/lib/mcp-authz"
+import {
   getFeedbackItem,
   updateFeedbackStatus,
   linkFeedbackToOpportunity,
@@ -623,6 +629,7 @@ const _handler = createMcpHandler(
         },
       },
       async ({ opportunityId }) => {
+        await assertEntityAccess(getMcpActor(), "opportunity", opportunityId)
         const prisma = getPrisma()
         const opp = await prisma.opportunity.findUnique({
           where: { id: opportunityId },
@@ -846,7 +853,7 @@ const _handler = createMcpHandler(
           status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]).optional().describe("New status"),
         },
       },
-      updateAssumption
+      (args) => updateAssumption(getMcpActor(), args)
     )
 
     server.registerTool(
@@ -858,7 +865,7 @@ const _handler = createMcpHandler(
           assumptionId: z.string().uuid().describe("UUID of the assumption to delete"),
         },
       },
-      deleteAssumption
+      (args) => deleteAssumption(getMcpActor(), args)
     )
 
     server.registerTool(
@@ -2185,7 +2192,10 @@ async function withMcpAuth(req: Request): Promise<Response> {
   if (!auth.valid) {
     return new Response("Unauthorized", { status: 401, headers: { "WWW-Authenticate": "Bearer" } })
   }
-  return _handler(req)
+  // Carry the acting identity (userId, or null for the shared service key)
+  // into every tool handler via AsyncLocalStorage. Handlers read it with
+  // getMcpActor() and enforce per-user membership/role via lib/mcp-authz.
+  return runWithMcpActor({ userId: auth.userId }, () => _handler(req))
 }
 
 export async function GET(req: Request) { return withMcpAuth(req) }

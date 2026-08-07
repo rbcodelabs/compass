@@ -5,20 +5,25 @@
  */
 
 import getPrisma from "@/lib/db"
+import { type McpActor, assertEntityAccess } from "@/lib/mcp-authz"
 
 // ── update_assumption ───────────────────────────────────────────────────────
 
-export async function updateAssumption({
-  assumptionId,
-  title,
-  riskLevel,
-  status,
-}: {
-  assumptionId: string
-  title?: string
-  riskLevel?: "HIGH" | "MEDIUM" | "LOW"
-  status?: "UNTESTED" | "TESTING" | "VALIDATED" | "INVALIDATED"
-}) {
+export async function updateAssumption(
+  actor: McpActor,
+  {
+    assumptionId,
+    title,
+    riskLevel,
+    status,
+  }: {
+    assumptionId: string
+    title?: string
+    riskLevel?: "HIGH" | "MEDIUM" | "LOW"
+    status?: "UNTESTED" | "TESTING" | "VALIDATED" | "INVALIDATED"
+  }
+) {
+  await assertEntityAccess(actor, "assumption", assumptionId)
   const prisma = getPrisma()
 
   const existing = await prisma.assumption.findUnique({
@@ -60,7 +65,8 @@ export async function updateAssumption({
 
 // ── delete_assumption ────────────────────────────────────────────────────────
 
-export async function deleteAssumption({ assumptionId }: { assumptionId: string }) {
+export async function deleteAssumption(actor: McpActor, { assumptionId }: { assumptionId: string }) {
+  await assertEntityAccess(actor, "assumption", assumptionId)
   const prisma = getPrisma()
 
   const existing = await prisma.assumption.findUnique({
