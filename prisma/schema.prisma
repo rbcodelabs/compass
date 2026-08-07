@@ -97,49 +97,49 @@ model OrganizationMember {
 }
 
 model Workspace {
-  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId     String            @map("organization_id") @db.Uuid
-  slug               String            @db.VarChar(255)
-  name               String            @db.VarChar(255)
-  description        String?           @db.Text
-  feedbackEnabled    Boolean?          @default(false) @map("feedback_enabled")
-  roadmapPublic      Boolean?          @default(false) @map("roadmap_public")
-  portalAuthRequired Boolean?          @default(false) @map("portal_auth_required")
-  brandingPaletteId    String? @db.VarChar(50)  @map("branding_palette_id")
-  brandingPrimaryHex   String? @db.VarChar(7)   @map("branding_primary_hex")
-  brandingFontPresetId String? @db.VarChar(50)  @map("branding_font_preset_id")
-  brandingFontFamily   String? @db.VarChar(100) @map("branding_font_family")
-  brandingLogoUrl      String? @db.Text         @map("branding_logo_url")
-  ssoEnabled         Boolean?          @default(false) @map("sso_enabled")
+  id                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId       String                  @map("organization_id") @db.Uuid
+  slug                 String                  @db.VarChar(255)
+  name                 String                  @db.VarChar(255)
+  description          String?                 @db.Text
+  feedbackEnabled      Boolean?                @default(false) @map("feedback_enabled")
+  roadmapPublic        Boolean?                @default(false) @map("roadmap_public")
+  portalAuthRequired   Boolean?                @default(false) @map("portal_auth_required")
+  brandingPaletteId    String?                 @map("branding_palette_id") @db.VarChar(50)
+  brandingPrimaryHex   String?                 @map("branding_primary_hex") @db.VarChar(7)
+  brandingFontPresetId String?                 @map("branding_font_preset_id") @db.VarChar(50)
+  brandingFontFamily   String?                 @map("branding_font_family") @db.VarChar(100)
+  brandingLogoUrl      String?                 @map("branding_logo_url") @db.Text
+  ssoEnabled           Boolean?                @default(false) @map("sso_enabled")
   // Ciphertext of the raw SSO shared secret (reversible AES-256-GCM
   // encryption via lib/crypto-secrets.ts, not a hash) — Compass must be
   // able to decrypt it to verify inbound customer-signed JWTs. The
   // plaintext is shown to the customer once, at generation time, and
   // never stored or re-displayed. Known v1 limitation: regenerating
   // overwrites the old secret outright — no rotation grace window.
-  ssoSecretEncrypted String?           @map("sso_secret_encrypted") @db.Text
+  ssoSecretEncrypted   String?                 @map("sso_secret_encrypted") @db.Text
   // When the SSO secret was last (re)generated — separate from the
   // workspace's general `updatedAt` because that field is also bumped by
   // unrelated actions (e.g. branding updates), which would otherwise make
   // a "last rotated" timestamp in the settings UI lie.
-  ssoSecretUpdatedAt DateTime?         @map("sso_secret_updated_at")
-  createdAt          DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @default(now()) @map("updated_at")
-  organization    Organization      @relation(fields: [organizationId], references: [id])
-  members           WorkspaceMember[]
-  okrCycles         OKRCycle[]
-  opportunities     Opportunity[]
-  experiments       Experiment[]
-  roadmapItems      RoadmapItem[]
-  customFieldDefs   CustomFieldDefinition[]
-  squads            Squad[]
-  feedback          FeedbackItem[]
-  docs              Doc[]
-  scoringConfig     WorkspaceScoringConfig?
-  evidence          Evidence[]
-  canvasNodePositions CanvasNodePosition[]
-  checklistTemplates ChecklistTemplate[]
-  tasks             Task[]
+  ssoSecretUpdatedAt   DateTime?               @map("sso_secret_updated_at")
+  createdAt            DateTime                @default(now()) @map("created_at")
+  updatedAt            DateTime                @default(now()) @map("updated_at")
+  organization         Organization            @relation(fields: [organizationId], references: [id])
+  members              WorkspaceMember[]
+  okrCycles            OKRCycle[]
+  opportunities        Opportunity[]
+  experiments          Experiment[]
+  roadmapItems         RoadmapItem[]
+  customFieldDefs      CustomFieldDefinition[]
+  squads               Squad[]
+  feedback             FeedbackItem[]
+  docs                 Doc[]
+  scoringConfig        WorkspaceScoringConfig?
+  evidence             Evidence[]
+  canvasNodePositions  CanvasNodePosition[]
+  checklistTemplates   ChecklistTemplate[]
+  tasks                Task[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -237,47 +237,47 @@ model CheckIn {
 // ─── Discovery / OST ──────────────────────────────────────────────────────────
 
 model Opportunity {
-  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId       String         @map("workspace_id") @db.Uuid
-  squadId           String?        @map("squad_id") @db.Uuid
-  title             String         @db.VarChar(255)
-  description       String?        @db.Text
-  customerSegment   String?        @map("customer_segment") @db.VarChar(255)
-  status            String         @default("EXPLORING") @db.VarChar(50)
-  sortOrder         Int            @default(0) @map("sort_order")
-  linkedKeyResultId String?        @map("linked_key_result_id") @db.Uuid
-  createdAt         DateTime       @default(now()) @map("created_at")
-  updatedAt         DateTime       @default(now()) @map("updated_at")
-  workspace         Workspace      @relation(fields: [workspaceId], references: [id])
-  squad             Squad?         @relation(fields: [squadId], references: [id])
-  linkedKeyResult   KeyResult?     @relation(fields: [linkedKeyResultId], references: [id])
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String            @map("workspace_id") @db.Uuid
+  squadId           String?           @map("squad_id") @db.Uuid
+  title             String            @db.VarChar(255)
+  description       String?           @db.Text
+  customerSegment   String?           @map("customer_segment") @db.VarChar(255)
+  status            String            @default("EXPLORING") @db.VarChar(50)
+  sortOrder         Int               @default(0) @map("sort_order")
+  linkedKeyResultId String?           @map("linked_key_result_id") @db.Uuid
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @default(now()) @map("updated_at")
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id])
+  squad             Squad?            @relation(fields: [squadId], references: [id])
+  linkedKeyResult   KeyResult?        @relation(fields: [linkedKeyResultId], references: [id])
   solutions         Solution[]
   roadmapItems      RoadmapItem[]
   feedback          FeedbackItem[]
   score             OpportunityScore?
-  createdById       String?        @map("created_by_id") @db.Uuid
-  updatedById       String?        @map("updated_by_id") @db.Uuid
-  source            String         @default("UI") @map("source") @db.VarChar(20)
+  createdById       String?           @map("created_by_id") @db.Uuid
+  updatedById       String?           @map("updated_by_id") @db.Uuid
+  source            String            @default("UI") @map("source") @db.VarChar(20)
   evidence          Evidence[]
 
   @@map("opportunities")
 }
 
 model Solution {
-  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  opportunityId String        @map("opportunity_id") @db.Uuid
-  title         String        @db.VarChar(255)
-  description   String?       @db.Text
-  status        String        @default("IDEA") @db.VarChar(50)
-  sortOrder     Int           @default(0) @map("sort_order")
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @default(now()) @map("updated_at")
-  opportunity   Opportunity   @relation(fields: [opportunityId], references: [id])
+  id            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  opportunityId String            @map("opportunity_id") @db.Uuid
+  title         String            @db.VarChar(255)
+  description   String?           @db.Text
+  status        String            @default("IDEA") @db.VarChar(50)
+  sortOrder     Int               @default(0) @map("sort_order")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @default(now()) @map("updated_at")
+  opportunity   Opportunity       @relation(fields: [opportunityId], references: [id])
   assumptions   Assumption[]
   roadmapItems  RoadmapItem[]
-  createdById   String?       @map("created_by_id") @db.Uuid
-  updatedById   String?       @map("updated_by_id") @db.Uuid
-  source        String        @default("UI") @map("source") @db.VarChar(20)
+  createdById   String?           @map("created_by_id") @db.Uuid
+  updatedById   String?           @map("updated_by_id") @db.Uuid
+  source        String            @default("UI") @map("source") @db.VarChar(20)
   evidence      Evidence[]
   comments      SolutionComment[]
 
@@ -482,37 +482,37 @@ model ExperimentResult {
 // ─── Roadmap ──────────────────────────────────────────────────────────────────
 
 model RoadmapItem {
-  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId   String      @map("workspace_id") @db.Uuid
-  squadId       String?     @map("squad_id") @db.Uuid
-  title         String      @db.VarChar(255)
-  description   String?     @db.Text
-  horizon       String      @default("NOW") @db.VarChar(50)
-  status        String      @default("ACTIVE") @db.VarChar(50)
-  isPrivate     Boolean     @default(false) @map("is_private")
-  sortOrder     Int         @default(0) @map("sort_order")
-  startDate     DateTime?   @map("start_date")
-  endDate       DateTime?   @map("end_date")
-  solutionId    String?     @map("solution_id") @db.Uuid
-  keyResultId   String?     @map("key_result_id") @db.Uuid
-  opportunityId String?     @map("opportunity_id") @db.Uuid
-  experimentId  String?     @map("experiment_id") @db.Uuid
-  feedbackId    String?     @map("feedback_id") @db.Uuid
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @default(now()) @map("updated_at")
-  workspace     Workspace   @relation(fields: [workspaceId], references: [id])
-  squad         Squad?      @relation(fields: [squadId], references: [id])
-  solution      Solution?   @relation(fields: [solutionId], references: [id])
-  keyResult     KeyResult?  @relation(fields: [keyResultId], references: [id])
-  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
-  experiment    Experiment?  @relation(fields: [experimentId], references: [id])
-  feedback      FeedbackItem? @relation(fields: [feedbackId], references: [id])
-  votes         RoadmapVote[]
-  createdById   String?       @map("created_by_id") @db.Uuid
-  updatedById   String?       @map("updated_by_id") @db.Uuid
-  source        String        @default("UI") @map("source") @db.VarChar(20)
-  launchChecklist   LaunchChecklist?
-  positioningBrief  Doc?
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId      String           @map("workspace_id") @db.Uuid
+  squadId          String?          @map("squad_id") @db.Uuid
+  title            String           @db.VarChar(255)
+  description      String?          @db.Text
+  horizon          String           @default("NOW") @db.VarChar(50)
+  status           String           @default("ACTIVE") @db.VarChar(50)
+  isPrivate        Boolean          @default(false) @map("is_private")
+  sortOrder        Int              @default(0) @map("sort_order")
+  startDate        DateTime?        @map("start_date")
+  endDate          DateTime?        @map("end_date")
+  solutionId       String?          @map("solution_id") @db.Uuid
+  keyResultId      String?          @map("key_result_id") @db.Uuid
+  opportunityId    String?          @map("opportunity_id") @db.Uuid
+  experimentId     String?          @map("experiment_id") @db.Uuid
+  feedbackId       String?          @map("feedback_id") @db.Uuid
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @default(now()) @map("updated_at")
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id])
+  squad            Squad?           @relation(fields: [squadId], references: [id])
+  solution         Solution?        @relation(fields: [solutionId], references: [id])
+  keyResult        KeyResult?       @relation(fields: [keyResultId], references: [id])
+  opportunity      Opportunity?     @relation(fields: [opportunityId], references: [id])
+  experiment       Experiment?      @relation(fields: [experimentId], references: [id])
+  feedback         FeedbackItem?    @relation(fields: [feedbackId], references: [id])
+  votes            RoadmapVote[]
+  createdById      String?          @map("created_by_id") @db.Uuid
+  updatedById      String?          @map("updated_by_id") @db.Uuid
+  source           String           @default("UI") @map("source") @db.VarChar(20)
+  launchChecklist  LaunchChecklist?
+  positioningBrief Doc?
 
   @@map("roadmap_items")
 }
@@ -729,28 +729,28 @@ model PortalVerificationToken {
 // ─── Feedback ─────────────────────────────────────────────────────────────────
 
 model FeedbackItem {
-  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId     String    @map("workspace_id") @db.Uuid
-  opportunityId   String?   @map("opportunity_id") @db.Uuid
-  title           String    @db.VarChar(255)
-  description     String?   @db.Text
-  type            String    @default("IDEA") @db.VarChar(50)
-  submitterName   String?   @map("submitter_name") @db.VarChar(255)
-  submitterEmail  String?   @map("submitter_email") @db.VarChar(255)
-  portalAccountId String?   @map("portal_account_id") @db.Uuid
-  status          String    @default("OPEN") @db.VarChar(50)
-  voteCount       Int       @default(0) @map("vote_count")
+  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String               @map("workspace_id") @db.Uuid
+  opportunityId   String?              @map("opportunity_id") @db.Uuid
+  title           String               @db.VarChar(255)
+  description     String?              @db.Text
+  type            String               @default("IDEA") @db.VarChar(50)
+  submitterName   String?              @map("submitter_name") @db.VarChar(255)
+  submitterEmail  String?              @map("submitter_email") @db.VarChar(255)
+  portalAccountId String?              @map("portal_account_id") @db.Uuid
+  status          String               @default("OPEN") @db.VarChar(50)
+  voteCount       Int                  @default(0) @map("vote_count")
   tags            Json?
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @default(now()) @map("updated_at")
-  workspace       Workspace   @relation(fields: [workspaceId], references: [id])
-  opportunity     Opportunity? @relation(fields: [opportunityId], references: [id])
-  portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id])
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @default(now()) @map("updated_at")
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id])
+  opportunity     Opportunity?         @relation(fields: [opportunityId], references: [id])
+  portalAccount   PortalAccount?       @relation(fields: [portalAccountId], references: [id])
   votes           FeedbackVote[]
   roadmapItems    RoadmapItem[]
-  createdById     String?   @map("created_by_id") @db.Uuid
-  updatedById     String?   @map("updated_by_id") @db.Uuid
-  source          String    @default("UI") @map("source") @db.VarChar(20)
+  createdById     String?              @map("created_by_id") @db.Uuid
+  updatedById     String?              @map("updated_by_id") @db.Uuid
+  source          String               @default("UI") @map("source") @db.VarChar(20)
   attachments     FeedbackAttachment[]
 
   @@map("feedback")
@@ -766,17 +766,17 @@ model FeedbackAttachment {
   createdAt      DateTime     @default(now()) @map("created_at")
   feedbackItem   FeedbackItem @relation(fields: [feedbackItemId], references: [id])
 
-  @@map("feedback_attachment")
   @@index([feedbackItemId])
+  @@map("feedback_attachment")
 }
 
 model FeedbackVote {
-  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  feedbackId      String       @map("feedback_id") @db.Uuid
-  voterEmail      String       @map("voter_email") @db.VarChar(255)
-  portalAccountId String?      @map("portal_account_id") @db.Uuid
-  createdAt       DateTime     @default(now()) @map("created_at")
-  feedbackItem    FeedbackItem @relation(fields: [feedbackId], references: [id])
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  feedbackId      String         @map("feedback_id") @db.Uuid
+  voterEmail      String         @map("voter_email") @db.VarChar(255)
+  portalAccountId String?        @map("portal_account_id") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at")
+  feedbackItem    FeedbackItem   @relation(fields: [feedbackId], references: [id])
   portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id])
 
   @@unique([feedbackId, voterEmail])
@@ -869,13 +869,13 @@ model Evidence {
 }
 
 model RoadmapVote {
-  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  roadmapItemId   String      @map("roadmap_item_id") @db.Uuid
-  voterEmail      String      @map("voter_email") @db.VarChar(255)
-  voterName       String?     @map("voter_name") @db.VarChar(255)
-  portalAccountId String?     @map("portal_account_id") @db.Uuid
-  createdAt       DateTime    @default(now()) @map("created_at")
-  roadmapItem     RoadmapItem @relation(fields: [roadmapItemId], references: [id])
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roadmapItemId   String         @map("roadmap_item_id") @db.Uuid
+  voterEmail      String         @map("voter_email") @db.VarChar(255)
+  voterName       String?        @map("voter_name") @db.VarChar(255)
+  portalAccountId String?        @map("portal_account_id") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at")
+  roadmapItem     RoadmapItem    @relation(fields: [roadmapItemId], references: [id])
   portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id])
 
   @@unique([roadmapItemId, voterEmail])
@@ -922,15 +922,15 @@ model Task {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @default(now()) @map("updated_at")
 
-  workspace      Workspace  @relation(fields: [workspaceId], references: [id])
-  squad          Squad?     @relation(fields: [squadId], references: [id])
-  parentTask     Task?      @relation("TaskParent", fields: [parentTaskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  subtasks       Task[]     @relation("TaskParent")
-  links          TaskLink[]
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id])
+  squad      Squad?     @relation(fields: [squadId], references: [id])
+  parentTask Task?      @relation("TaskParent", fields: [parentTaskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  subtasks   Task[]     @relation("TaskParent")
+  links      TaskLink[]
 
-  createdById    String?   @map("created_by_id") @db.Uuid
-  updatedById    String?   @map("updated_by_id") @db.Uuid
-  source         String    @default("UI") @map("source") @db.VarChar(20)
+  createdById String? @map("created_by_id") @db.Uuid
+  updatedById String? @map("updated_by_id") @db.Uuid
+  source      String  @default("UI") @map("source") @db.VarChar(20)
 
   @@index([workspaceId, status])
   @@index([squadId])
@@ -963,9 +963,34 @@ model TaskLink {
   createdById String?  @map("created_by_id") @db.Uuid
   source      String   @default("UI") @map("source") @db.VarChar(20)
 
-  task        Task     @relation(fields: [taskId], references: [id])
+  task Task @relation(fields: [taskId], references: [id])
 
   @@unique([taskId, linkedType, linkedId])
   @@index([linkedType, linkedId])
   @@map("task_links")
+}
+
+// ─── In-app agent runtime ────────────────────────────────────────────────────
+
+/// Deployment-global singleton holding the current "golden" Vercel Sandbox
+/// snapshot that the in-app agent runtime boots from, so each agent turn skips
+/// `npm install` (~10s → ~200ms). Exactly one row, keyed by scope = "global".
+/// Rebuilt via POST /api/admin/rebuild-agent-snapshot when the sandbox deps
+/// change. See docs/decisions/0001-in-app-agent-architecture.md §3.
+///
+/// DSQL: no FKs; no @updatedAt trigger (updatedAt set explicitly in app code).
+model AgentRuntimeConfig {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Singleton discriminator — always "global"; the @unique guarantees one row.
+  scope            String    @unique @default("global") @db.VarChar(20)
+  /// Vercel Sandbox snapshot id agent turns boot from; null until first build.
+  goldenSnapshotId String?   @map("golden_snapshot_id") @db.VarChar(255)
+  /// SHA-256 of the sandbox deps package.json at build time — detects drift.
+  depsFingerprint  String?   @map("deps_fingerprint") @db.VarChar(64)
+  /// When the current golden snapshot was built.
+  snapshotBuiltAt  DateTime? @map("snapshot_built_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @map("updated_at")
+
+  @@map("agent_runtime_config")
 }

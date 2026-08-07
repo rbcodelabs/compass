@@ -129,6 +129,10 @@ const MIGRATIONS = [
     name: "027_tasks",
     filePath: path.join(process.cwd(), "prisma/migrations/027_tasks/migration.sql"),
   },
+  {
+    name: "028_agent_runtime_config",
+    filePath: path.join(process.cwd(), "prisma/migrations/028_agent_runtime_config/migration.sql"),
+  },
 ];
 
 async function getPool(): Promise<Pool> {
