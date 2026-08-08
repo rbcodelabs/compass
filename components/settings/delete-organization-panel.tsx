@@ -35,30 +35,30 @@ export function DeleteOrganizationPanel({ orgSlug, organizationName, workspaces 
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-4">
+    <div className="flex flex-col gap-4 rounded-xl border border-status-danger/30 bg-status-danger-surface px-4 py-4">
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-semibold text-red-900">
+        <span className="text-sm font-semibold text-status-danger">
           Delete this organization
         </span>
-        <p className="text-sm text-red-700">
+        <p className="text-sm text-status-danger">
           This permanently deletes <strong>{organizationName}</strong> and everything in
           it. This action cannot be undone.
         </p>
         {workspaces.length > 0 ? (
-          <p className="text-sm text-red-700">
+          <p className="text-sm text-status-danger">
             The following {workspaces.length}{" "}
             {workspaces.length === 1 ? "workspace" : "workspaces"} will be deleted, along
             with all of their OKRs, opportunities, experiments, roadmap items, docs, and
             feedback:
           </p>
         ) : (
-          <p className="text-sm text-red-700">
+          <p className="text-sm text-status-danger">
             This organization has no workspaces. Deleting it removes its scoring models
             and members.
           </p>
         )}
         {workspaces.length > 0 && (
-          <ul className="ml-4 list-disc space-y-0.5 text-sm text-red-800">
+          <ul className="ml-4 list-disc space-y-0.5 text-sm text-status-danger">
             {workspaces.map((ws) => (
               <li key={ws.name} className="break-words font-medium">
                 {ws.name}
@@ -69,7 +69,7 @@ export function DeleteOrganizationPanel({ orgSlug, organizationName, workspaces 
       </div>
 
       <div className="flex flex-col gap-2">
-        <label htmlFor="confirm-org-name" className="text-sm font-medium text-red-900">
+        <label htmlFor="confirm-org-name" className="text-sm font-medium text-status-danger">
           Type <span className="font-mono font-semibold">{organizationName}</span> to
           confirm
         </label>
