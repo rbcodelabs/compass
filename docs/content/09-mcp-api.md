@@ -152,6 +152,13 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 | `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted) |
 | `update_doc` | Update an existing doc's title, content, and/or icon |
 
+### Help
+
+| Tool | Description |
+|---|---|
+| `search_help` | Full-text search over Compass's own product/usage documentation (the same content rendered at `/help/[slug]`); returns the best-matching doc section(s) with a `Path` pointer (deep-linking to a heading anchor when applicable) and a short excerpt. Not workspace-scoped |
+| `get_help` | Resolve a free-text topic (a doc slug, title, or close match) to a single help doc and return its full raw markdown content plus its `/help/[slug]` path. Not workspace-scoped |
+
 ### Scoring
 
 | Tool | Description |
