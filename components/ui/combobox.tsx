@@ -47,7 +47,7 @@ function ComboboxTrigger({
   ...props
 }: ComboboxPrimitive.Trigger.Props & {
   size?: "sm" | "default"
-  variant?: "default" | "inline"
+  variant?: "default" | "inline" | "icon"
 }) {
   return (
     <ComboboxPrimitive.Trigger
@@ -56,6 +56,8 @@ function ComboboxTrigger({
       className={cn(
         variant === "inline"
           ? "w-auto h-auto border-0 p-0 shadow-none bg-transparent text-xs text-muted-foreground/60 outline-none select-none hover:text-muted-foreground focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:hidden gap-0"
+          : variant === "icon"
+          ? "inline-flex size-6 items-center justify-center gap-0 rounded-[min(var(--radius-md),10px)] border border-transparent bg-transparent p-0 text-muted-foreground outline-none transition-colors select-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           : "flex w-fit items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-[min(var(--radius-md),10px)] *:data-[slot=combobox-value]:line-clamp-1 *:data-[slot=combobox-value]:flex *:data-[slot=combobox-value]:items-center *:data-[slot=combobox-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}

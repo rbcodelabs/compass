@@ -10,7 +10,9 @@ import { CheckInForm } from "@/components/okrs/check-in-form";
 import { CardMenu } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { deleteKeyResult, setObjectiveParentKR } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
-import { Combobox, ComboboxContent, ComboboxTrigger, ComboboxValue } from "@/components/ui/combobox";
+import { Combobox, ComboboxContent, ComboboxTrigger } from "@/components/ui/combobox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ProgressRing } from "@/components/ui/progress-ring";
 import { averageProgress, clampProgress } from "@/lib/okrs";
 import type { ObjectiveStatus, SquadData } from "@/lib/types";
 
@@ -152,7 +154,8 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
           </button>
         </div>
         <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
-          <span className="text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <ProgressRing value={progress} size={20} className="text-primary" />
             {keyResult.current}{unit} / {keyResult.target}{unit}
           </span>
           <CheckInForm
@@ -174,18 +177,6 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-          <div
-            className="h-full rounded-full bg-primary transition-all"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-        <span className="text-xs text-muted-foreground w-8 text-right">
-          {progress}%
-        </span>
-      </div>
-
       {supportingObjectiveOptions && (
         <div className="ml-5 mt-1 flex flex-col items-start gap-1.5">
           <Combobox
@@ -203,18 +194,25 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
             onValueChange={(objectiveId) => objectiveId && setSupportingObjective(objectiveId, keyResult.id)}
             disabled={isLinkPending || localSupportingOptions.length === 0}
           >
-            <ComboboxTrigger size="sm" aria-label="Link supporting objective">
-              <Link2 className="size-3.5" />
-              <ComboboxValue placeholder="Link supporting objective" />
-            </ComboboxTrigger>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <ComboboxTrigger
+                    variant="icon"
+                    aria-label="Link supporting objective"
+                    className="opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100"
+                  >
+                    <Link2 className="size-3.5" />
+                  </ComboboxTrigger>
+                }
+              />
+              <TooltipContent>Link supporting objective</TooltipContent>
+            </Tooltip>
             <ComboboxContent
               inputPlaceholder="Search shorter-cycle Objectives…"
-              emptyMessage="No unlinked Objectives from shorter contained cycles."
+              emptyMessage="No eligible unlinked Objectives."
             />
           </Combobox>
-          {localSupportingOptions.length === 0 && (
-            <p className="text-[11px] text-muted-foreground">No eligible unlinked Objectives.</p>
-          )}
           {linkError && <p className="text-xs text-destructive">{linkError}</p>}
         </div>
       )}

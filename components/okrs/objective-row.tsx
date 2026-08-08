@@ -4,7 +4,7 @@ import * as React from "react";
 import { useTransition, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical } from "lucide-react";
+import { GripVertical, Link2, X } from "lucide-react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { averageProgress, STATUS_BADGE } from "@/lib/okrs";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
@@ -22,8 +22,9 @@ import {
   Combobox,
   ComboboxContent,
   ComboboxTrigger,
-  ComboboxValue,
 } from "@/components/ui/combobox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ProgressRing } from "@/components/ui/progress-ring";
 import {
   updateObjectiveStatus,
   setObjectiveParentKR,
@@ -187,7 +188,8 @@ export function ObjectiveRow({
         <div className="flex shrink-0 items-center gap-2">
           {/* Overall progress */}
           {objective.keyResults.length > 0 && (
-            <span className="text-sm text-muted-foreground">
+            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <ProgressRing value={avgProgress} size={22} className="text-primary/60" />
               {avgProgress}%
             </span>
           )}
@@ -225,18 +227,6 @@ export function ObjectiveRow({
       }
     >
 
-      {/* Overall progress bar */}
-      {objective.keyResults.length > 0 && (
-        <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-primary/60 transition-all"
-              style={{ width: `${avgProgress}%` }}
-            />
-          </div>
-        </div>
-      )}
-
       {/* Key results */}
       {objective.keyResults.length > 0 && (
         <div className="flex flex-col gap-3 pl-2 border-l border-border">
@@ -265,15 +255,31 @@ export function ObjectiveRow({
 
       {/* Objective alignment */}
       {availableKRs && (
-        <section className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3" aria-label="Alignment">
-          <div>
-            <p className="text-xs font-semibold text-foreground">Alignment</p>
-            <p className="text-xs text-muted-foreground">Supports a higher-level Key Result</p>
-          </div>
-          <Combobox
-            items={[
-              { value: "__none__", label: "— None —" },
-              ...availableKRs.map((kr) => ({
+        <div className="flex items-center gap-1.5">
+          {localParentKRId ? (
+            (() => {
+              const parentKR = availableKRs.find((kr) => kr.id === localParentKRId);
+              const parentLabel = parentKR
+                ? `${parentKR.title} · ${parentKR.cycleTitle}`
+                : "Linked Key Result";
+              return (
+                <div className="flex min-w-0 items-center gap-1 rounded-md bg-muted/50 px-2 py-1 text-[11px] text-muted-foreground">
+                  <span className="min-w-0 truncate">{parentLabel}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleParentKRChange(null)}
+                    disabled={isParentKRPending}
+                    className="shrink-0 rounded p-0.5 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                    aria-label="Unlink parent Key Result"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              );
+            })()
+          ) : (
+            <Combobox
+              items={availableKRs.map((kr) => ({
                 value: kr.id,
                 label: `${kr.cycleTitle} ${kr.objectiveTitle} ${kr.title}`,
                 render: (
@@ -285,27 +291,33 @@ export function ObjectiveRow({
                     </span>
                   </span>
                 ),
-              })),
-            ]}
-            value={localParentKRId ?? "__none__"}
-            onValueChange={handleParentKRChange}
-            disabled={isParentKRPending}
-          >
-            <ComboboxTrigger size="sm" className="w-full max-w-lg text-xs" aria-label="Supports a higher-level Key Result">
-              <ComboboxValue placeholder="Choose a longer-horizon KR…" />
-            </ComboboxTrigger>
-            <ComboboxContent
-              inputPlaceholder="Search cycles, objectives, and KRs…"
-              emptyMessage="No longer-horizon Key Results cover this cycle."
-            />
-          </Combobox>
-          {availableKRs.length === 0 && !localParentKRId && (
-            <p className="text-xs text-muted-foreground">
-              No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle&apos;s dates.
-            </p>
+              }))}
+              value={null}
+              onValueChange={handleParentKRChange}
+              disabled={isParentKRPending}
+            >
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <ComboboxTrigger
+                      variant="icon"
+                      aria-label="Supports a higher-level Key Result"
+                      className="opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100"
+                    >
+                      <Link2 className="size-3.5" />
+                    </ComboboxTrigger>
+                  }
+                />
+                <TooltipContent>Supports a higher-level Key Result</TooltipContent>
+              </Tooltip>
+              <ComboboxContent
+                inputPlaceholder="Search cycles, objectives, and KRs…"
+                emptyMessage="No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle's dates."
+              />
+            </Combobox>
           )}
           {parentKRError && <p className="text-xs text-destructive">{parentKRError}</p>}
-        </section>
+        </div>
       )}
 
       {/* Add key result */}

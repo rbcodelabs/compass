@@ -50,10 +50,12 @@ Annual Objective
         └── Quarterly Key Results
 ```
 
-You can create the relationship from either side:
+You can create the relationship from either side. Both sides use a small link icon that appears on hover (or focus) next to the row — click it to open a searchable popover:
 
-- **From the quarterly Objective:** open its **Alignment** section and choose the higher-level KR under **Supports a higher-level Key Result**.
-- **From the annual Key Result:** select **Link supporting objective** and choose an eligible quarterly Objective. Use the unlink control beside a supporting Objective to remove the relationship.
+- **From the quarterly Objective:** click the link icon (tooltip: **Supports a higher-level Key Result**) and choose the higher-level KR from the popover. Once linked, the Objective shows a small chip with the parent KR's name — click the **×** on the chip to unlink.
+- **From the annual Key Result:** click the link icon (tooltip: **Link supporting objective**) and choose an eligible quarterly Objective from the popover. Use the unlink control beside a supporting Objective to remove the relationship.
+
+If there's nothing eligible to link, the popover explains why instead of showing a permanent message on the card.
 
 Compass offers parent Key Results only from Draft or Active longer-horizon cycles whose dates fully contain the shorter cycle. On the annual side, it offers only unlinked Objectives from strictly shorter, fully contained cycles. For example, a January 1–December 31 annual cycle can be the parent of a January 1–March 31 quarterly cycle. Compass does not create cycles or Objectives automatically.
 
@@ -63,7 +65,7 @@ Compass does not automatically calculate annual KR progress from quarterly KR pe
 
 ## Check-ins
 
-Click the **+ Check-in** button on any Key Result to record the current value. Check-ins create a timestamped history so you can track progress over time. The progress bar on each KR reflects the latest check-in value relative to the target.
+Click the **+ Check-in** button on any Key Result to record the current value. Check-ins create a timestamped history so you can track progress over time. The progress ring next to each KR's value reflects the latest check-in relative to the target; an Objective's ring shows the average progress across its Key Results.
 
 ## Linking OKRs to Discovery
 

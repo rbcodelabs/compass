@@ -151,8 +151,12 @@ test.describe("OKRs", () => {
     await annualRow.getByLabel("Target").fill("100");
     await annualRow.getByRole("button", { name: "Add key result" }).click();
     await expect(annualRow.getByLabel("Target")).not.toBeVisible({ timeout: 20_000 });
-    await expect(annualRow.getByText("Alignment")).toBeVisible();
-    await expect(annualRow.getByText(/longer cycle must be Draft or Active/i)).toBeVisible();
+    // The Alignment UI is now an icon-only trigger revealed on hover/focus — open it
+    // and assert the empty-state copy inside the popover (the annual objective has
+    // no eligible longer-horizon KR to support, since it's already the top cycle).
+    await annualRow.getByRole("combobox", { name: "Supports a higher-level Key Result" }).click();
+    await expect(page.getByText(/longer cycle must be Draft or Active/i)).toBeVisible();
+    await page.keyboard.press("Escape");
 
     await createCycle(quarterlyCycle, "2027-01-01", "2027-03-31");
     await page.getByRole("button", { name: /Add objective/i }).click();
@@ -161,9 +165,13 @@ test.describe("OKRs", () => {
     await expect(page.getByText(quarterlyObjective)).toBeVisible({ timeout: 10_000 });
     await page.reload();
 
+    // The quarterly objective's Alignment trigger should be present, and opening it
+    // should surface the annual KR as an eligible parent (its cycle fully contains
+    // this quarterly cycle's dates).
     const quarterlyRow = page.locator(".rounded-xl.border").filter({ hasText: quarterlyObjective });
-    await expect(quarterlyRow.getByText("Alignment")).toBeVisible();
-    await expect(quarterlyRow.getByText("Supports a higher-level Key Result")).toBeVisible();
+    await quarterlyRow.getByRole("combobox", { name: "Supports a higher-level Key Result" }).click();
+    await expect(page.getByRole("option", { name: new RegExp(annualKR) })).toBeVisible();
+    await page.keyboard.press("Escape");
 
     await page.goto(`${base}/okrs`);
     await page.getByText(annualCycle).click();
