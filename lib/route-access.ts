@@ -20,6 +20,8 @@ export function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/api/portal/") ||
     // Docs API routes use session auth internally — let them handle 401 themselves
     pathname.startsWith("/api/docs/") ||
+    // Agent turn route uses session auth internally (returns 401, not a 302)
+    pathname.startsWith("/api/agent/") ||
     // Product docs — public, no auth required
     pathname.startsWith("/help") ||
     // Repository-native UI registry. The page itself returns 404 in production
