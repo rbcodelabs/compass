@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import getPrisma from "@/lib/db";
+import { auth } from "@/auth";
+import { getWorkspace } from "@/lib/workspace";
+import { setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
 
 // ─── Create Cycle ─────────────────────────────────────────────────────────────
 
@@ -174,11 +177,15 @@ export async function setObjectiveParentKR(
   orgSlug: string,
   workspaceSlug: string
 ) {
-  const prisma = getPrisma();
-  await prisma.objective.update({
-    where: { id: objectiveId },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    data: { parentKeyResultId: keyResultId } as any,
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
+  if (!workspace) throw new Error("Workspace not found");
+
+  await setObjectiveParentKeyResult({
+    workspaceId: workspace.id,
+    objectiveId,
+    keyResultId,
   });
   revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
 }

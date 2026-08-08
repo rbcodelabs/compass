@@ -23,6 +23,14 @@ type KeyResultData = {
   checkIns: Array<{ id: string; value: number; note: string | null; createdAt: string }>;
   roadmapItems: Array<{ id: string; title: string; horizon: string; status: string }>;
   opportunities: Array<{ id: string; title: string; status: string }>;
+  supportingObjectives: Array<{
+    id: string;
+    title: string;
+    status: string;
+    cycle: { id: string; title: string };
+    squad: { id: string; name: string; color: string } | null;
+    keyResults: Array<{ current: number; target: number }>;
+  }>;
 };
 
 export function KeyResultPanel({
@@ -68,6 +76,25 @@ export function KeyResultPanel({
     title: r.title,
     badge: { label: r.horizon, className: "bg-slate-100 text-slate-600" },
   }));
+  const supportingItems: RelationItem[] = data.supportingObjectives.map((objective) => {
+    const progress = objective.keyResults.length
+      ? Math.round(
+          objective.keyResults.reduce(
+            (sum, kr) => sum + (kr.target > 0 ? Math.min(100, (kr.current / kr.target) * 100) : 0),
+            0
+          ) / objective.keyResults.length
+        )
+      : 0;
+    return {
+      type: "objective",
+      id: objective.id,
+      title: objective.title,
+      badge: {
+        label: `${objective.cycle.title} · ${progress}%`,
+        className: "bg-accent text-accent-foreground",
+      },
+    };
+  });
 
   return (
     <PanelContainer>
@@ -98,6 +125,10 @@ export function KeyResultPanel({
 
       <Section label="Objective">
         <RelationList items={objectiveItems} empty="No parent objective." />
+      </Section>
+
+      <Section label="Supporting Objectives" count={data.supportingObjectives.length}>
+        <RelationList items={supportingItems} empty="No supporting Objectives linked." />
       </Section>
 
       <Section label="Linked Opportunities" count={data.opportunities.length}>

@@ -108,6 +108,7 @@ export const TOOL_GATES: Record<string, Gate> = {
     await assertEntityAccess(a, "objective", x.objectiveId)
     if (x.keyResultId) await assertEntityAccess(a, "keyResult", x.keyResultId)
   },
+  list_eligible_parent_key_results: (a, x) => assertChildInDeclaredWorkspace(a, "okrCycle", x.cycleId, x.workspaceId),
 
   // Discovery ---------------------------------------------------------------
   list_opportunities: (a, x) => assertWorkspaceMember(a, x.workspaceId),

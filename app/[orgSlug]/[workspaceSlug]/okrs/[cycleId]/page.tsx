@@ -6,6 +6,10 @@ import getPrisma from "@/lib/db";
 import { ObjectivesList } from "@/components/okrs/objectives-list";
 import { AddObjectiveForm } from "@/components/okrs/add-objective-form";
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
+import {
+  getEligibleParentKeyResults,
+  getEligibleSupportingObjectives,
+} from "@/lib/okr-hierarchy";
 import type {
   CycleStatus,
   ObjectiveStatus,
@@ -68,7 +72,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
 
   const cycleStatus = cycle.status as CycleStatus;
 
-  const [rawSquads, objectives] = await Promise.all([
+  const [rawSquads, objectives, eligibleParentKRs, eligibleSupportingObjectives] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { createdAt: "asc" },
@@ -80,6 +84,8 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     }),
+    getEligibleParentKeyResults(workspace.id, cycle.id),
+    getEligibleSupportingObjectives(workspace.id, cycle.id),
   ]);
 
   const squads: SquadData[] = rawSquads.map((s) => ({
@@ -95,6 +101,19 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
     objectiveIds.length > 0
       ? await prisma.keyResult.findMany({
           where: { objectiveId: { in: objectiveIds } },
+          include: {
+            supportingObjectives: {
+              include: {
+                cycle: { select: { id: true, title: true } },
+                squad: { select: { id: true, name: true, color: true } },
+                keyResults: {
+                  select: { current: true, target: true },
+                  orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+                },
+              },
+              orderBy: [{ cycle: { startDate: "asc" } }, { sortOrder: "asc" }],
+            },
+          },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         })
       : [];
@@ -149,21 +168,57 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
     return {
       ...obj,
       status: obj.status as ObjectiveStatus,
-      keyResults: krByObjective[obj.id] ?? [],
+      keyResults: (krByObjective[obj.id] ?? []).map((kr) => ({
+        ...kr,
+        supportingObjectives: kr.supportingObjectives.map((supporting) => ({
+          ...supporting,
+          status: supporting.status as ObjectiveStatus,
+        })),
+      })),
       customFields,
       squad: obj.squadId ? (squadMap.get(obj.squadId) ?? null) : null,
     };
   });
 
-  // Flat list of all KRs in this cycle, carrying their objective title for display.
-  const allKRsInCycle = objectivesWithData.flatMap((obj) =>
-    obj.keyResults.map((kr) => ({
+  // Eligible longer-horizon KRs plus any existing parent that has since been
+  // closed. Existing historical links remain readable, but closed cycles are
+  // not offered for new relationships.
+  const currentParentIds = [...new Set(objectives.flatMap((obj) =>
+    obj.parentKeyResultId ? [obj.parentKeyResultId] : []
+  ))];
+  const eligibleIds = new Set(eligibleParentKRs.map((kr) => kr.id));
+  const missingCurrentParents = currentParentIds.filter((id) => !eligibleIds.has(id));
+  const currentParentKRs = missingCurrentParents.length
+    ? await prisma.keyResult.findMany({
+        where: {
+          id: { in: missingCurrentParents },
+          objective: { cycle: { workspaceId: workspace.id } },
+        },
+        include: {
+          objective: {
+            include: { cycle: true },
+          },
+        },
+      })
+    : [];
+  const parentKROptions = [
+    ...eligibleParentKRs.map((kr) => ({
       id: kr.id,
       title: kr.title,
-      objectiveTitle: obj.title,
-      objectiveId: obj.id,
-    }))
-  );
+      objectiveTitle: kr.objectiveTitle,
+      cycleId: kr.cycleId,
+      cycleTitle: kr.cycleTitle,
+      cycleStatus: kr.cycleStatus,
+    })),
+    ...currentParentKRs.map((kr) => ({
+      id: kr.id,
+      title: kr.title,
+      objectiveTitle: kr.objective.title,
+      cycleId: kr.objective.cycle.id,
+      cycleTitle: kr.objective.cycle.title,
+      cycleStatus: kr.objective.cycle.status,
+    })),
+  ];
 
   const cyclePath = `/${orgSlug}/${workspaceSlug}/okrs/${cycleId}`;
 
@@ -178,17 +233,23 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       {/* Objectives list + inline add */}
       <div className="flex flex-col gap-4">
         <ObjectivesList
-          key={objectivesWithData.map((o) => o.id).join(",")}
+          key={objectivesWithData
+            .map((o) => `${o.id}:${o.parentKeyResultId ?? ""}`)
+            .join(",")}
           objectives={objectivesWithData.map((obj) => ({
             ...obj,
-            parentKeyResultId:
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (obj as any).parentKeyResultId ?? null,
+            parentKeyResultId: obj.parentKeyResultId ?? null,
           }))}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           cyclePath={cyclePath}
-          availableKRs={allKRsInCycle}
+          availableKRs={parentKROptions}
+          supportingObjectiveOptions={eligibleSupportingObjectives.map((objective) => ({
+            id: objective.id,
+            title: objective.title,
+            cycleId: objective.cycleId,
+            cycleTitle: objective.cycleTitle,
+          }))}
         />
 
         <AddObjectiveForm

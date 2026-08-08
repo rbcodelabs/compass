@@ -85,6 +85,19 @@ function fetchObjective(id: string, workspaceId: string) {
         select: { id: true, title: true, current: true, target: true, unit: true },
         orderBy: { sortOrder: "asc" },
       },
+      parentKeyResult: {
+        select: {
+          id: true,
+          title: true,
+          objective: {
+            select: {
+              id: true,
+              title: true,
+              cycle: { select: { id: true, title: true, status: true } },
+            },
+          },
+        },
+      },
     },
   });
 }
@@ -101,6 +114,17 @@ function fetchKeyResult(id: string, workspaceId: string) {
       },
       roadmapItems: { select: { id: true, title: true, horizon: true, status: true } },
       opportunities: { select: { id: true, title: true, status: true } },
+      supportingObjectives: {
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          cycle: { select: { id: true, title: true } },
+          squad: { select: { id: true, name: true, color: true } },
+          keyResults: { select: { current: true, target: true } },
+        },
+        orderBy: [{ cycle: { startDate: "asc" } }, { sortOrder: "asc" }],
+      },
     },
   });
 }

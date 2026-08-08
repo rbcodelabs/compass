@@ -35,6 +35,7 @@ export interface CanvasObjective {
   title: string;
   status: ObjectiveStatus;
   squad: SquadData | null;
+  parentKeyResultId?: string | null;
   position: CanvasPosition | null;
 }
 
@@ -228,6 +229,7 @@ export async function getCanvasOverview(
     title: obj.title,
     status: obj.status as ObjectiveStatus,
     squad: obj.squadId ? (squadById.get(obj.squadId) ?? null) : null,
+    parentKeyResultId: obj.parentKeyResultId,
     position: positionByEntity.get(`OBJECTIVE:${obj.id}`) ?? null,
   }));
 

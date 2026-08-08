@@ -27,6 +27,8 @@ import type {
   CustomFieldValue,
   SquadData,
 } from "@/lib/types";
+import type { ParentKROption } from "@/components/okrs/objective-row";
+import type { SupportingObjectiveOption } from "@/components/okrs/key-result-bar";
 
 interface KeyResult {
   id: string;
@@ -34,6 +36,14 @@ interface KeyResult {
   current: number;
   target: number;
   unit: string | null;
+  supportingObjectives?: Array<{
+    id: string;
+    title: string;
+    status: ObjectiveStatus;
+    cycle: { id: string; title: string };
+    squad: SquadData | null;
+    keyResults: Array<{ current: number; target: number }>;
+  }>;
 }
 
 interface ObjectiveData {
@@ -52,7 +62,8 @@ type Props = {
   orgSlug: string;
   workspaceSlug: string;
   cyclePath: string;
-  availableKRs?: { id: string; title: string; objectiveTitle: string }[];
+  availableKRs?: ParentKROption[];
+  supportingObjectiveOptions?: SupportingObjectiveOption[];
 };
 
 export function ObjectivesList({
@@ -61,6 +72,7 @@ export function ObjectivesList({
   workspaceSlug,
   cyclePath,
   availableKRs = [],
+  supportingObjectiveOptions,
 }: Props) {
   const [objectives, setObjectives] = useState(initialObjectives);
   const [, startTransition] = useTransition();
@@ -109,11 +121,9 @@ export function ObjectivesList({
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
             revalidatePathStr={cyclePath}
-            availableKRs={availableKRs.filter((kr) => {
-              // Exclude KRs that belong to this objective
-              return !obj.keyResults.some((okr) => okr.id === kr.id);
-            })}
+            availableKRs={availableKRs}
             parentKeyResultId={obj.parentKeyResultId ?? null}
+            supportingObjectiveOptions={supportingObjectiveOptions}
           />
         ))}
       </SortableContext>
@@ -130,13 +140,15 @@ function ObjectiveRowWithKRSort({
   revalidatePathStr,
   availableKRs,
   parentKeyResultId,
+  supportingObjectiveOptions,
 }: {
   objective: ObjectiveData;
   orgSlug: string;
   workspaceSlug: string;
   revalidatePathStr: string;
-  availableKRs?: { id: string; title: string; objectiveTitle: string }[];
+  availableKRs?: ParentKROption[];
   parentKeyResultId?: string | null;
+  supportingObjectiveOptions?: SupportingObjectiveOption[];
 }) {
   const [keyResults, setKeyResults] = useState(objective.keyResults);
   const [, startTransition] = useTransition();
@@ -185,6 +197,7 @@ function ObjectiveRowWithKRSort({
           revalidatePathStr={revalidatePathStr}
           availableKRs={availableKRs}
           parentKeyResultId={parentKeyResultId}
+          supportingObjectiveOptions={supportingObjectiveOptions}
         />
       </SortableContext>
     </DndContext>

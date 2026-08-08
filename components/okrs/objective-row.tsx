@@ -8,6 +8,7 @@ import { GripVertical } from "lucide-react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { averageProgress, STATUS_BADGE } from "@/lib/okrs";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
+import type { SupportingObjectiveOption } from "@/components/okrs/key-result-bar";
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import {
@@ -38,6 +39,23 @@ interface KeyResult {
   current: number;
   target: number;
   unit: string | null;
+  supportingObjectives?: Array<{
+    id: string;
+    title: string;
+    status: ObjectiveStatus;
+    cycle: { id: string; title: string };
+    squad: SquadData | null;
+    keyResults: Array<{ current: number; target: number }>;
+  }>;
+}
+
+export interface ParentKROption {
+  id: string;
+  title: string;
+  objectiveTitle: string;
+  cycleId: string;
+  cycleTitle: string;
+  cycleStatus: string;
 }
 
 interface ObjectiveRowProps {
@@ -53,8 +71,9 @@ interface ObjectiveRowProps {
   orgSlug: string;
   workspaceSlug: string;
   revalidatePathStr?: string;
-  availableKRs?: { id: string; title: string; objectiveTitle: string }[];
+  availableKRs?: ParentKROption[];
   parentKeyResultId?: string | null;
+  supportingObjectiveOptions?: SupportingObjectiveOption[];
 }
 
 export function ObjectiveRow({
@@ -64,9 +83,11 @@ export function ObjectiveRow({
   revalidatePathStr,
   availableKRs,
   parentKeyResultId,
+  supportingObjectiveOptions,
 }: ObjectiveRowProps) {
   const [isPending, startTransition] = useTransition();
   const [isParentKRPending, startParentKRTransition] = useTransition();
+  const [parentKRError, setParentKRError] = useState<string | null>(null);
   const { openPanel } = usePanelContext();
   const [localParentKRId, setLocalParentKRId] = useState<string | null>(
     parentKeyResultId ?? null
@@ -104,9 +125,16 @@ export function ObjectiveRow({
 
   function handleParentKRChange(value: string | null) {
     const newId = !value || value === "__none__" ? null : value;
+    const previousId = localParentKRId;
+    setParentKRError(null);
     setLocalParentKRId(newId);
     startParentKRTransition(async () => {
-      await setObjectiveParentKR(objective.id, newId, orgSlug, workspaceSlug);
+      try {
+        await setObjectiveParentKR(objective.id, newId, orgSlug, workspaceSlug);
+      } catch (error) {
+        setLocalParentKRId(previousId);
+        setParentKRError(error instanceof Error ? error.message : "Could not update hierarchy.");
+      }
     });
   }
 
@@ -218,6 +246,7 @@ export function ObjectiveRow({
               keyResult={kr}
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
+              supportingObjectiveOptions={supportingObjectiveOptions}
             />
           ))}
         </div>
@@ -234,23 +263,27 @@ export function ObjectiveRow({
         </div>
       )}
 
-      {/* Supports KR picker */}
-      {availableKRs && availableKRs.length > 0 && (
-        <div className="flex items-center gap-2 pt-1">
-          <span className="text-xs text-muted-foreground shrink-0">Supports:</span>
+      {/* Objective alignment */}
+      {availableKRs && (
+        <section className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3" aria-label="Alignment">
+          <div>
+            <p className="text-xs font-semibold text-foreground">Alignment</p>
+            <p className="text-xs text-muted-foreground">Supports a higher-level Key Result</p>
+          </div>
           <Combobox
             items={[
               { value: "__none__", label: "— None —" },
               ...availableKRs.map((kr) => ({
                 value: kr.id,
-                label: kr.title,
+                label: `${kr.cycleTitle} ${kr.objectiveTitle} ${kr.title}`,
                 render: (
-                  <>
-                    <span className="text-muted-foreground text-xs mr-1">
-                      {kr.objectiveTitle} /
+                  <span className="flex min-w-0 flex-col text-left">
+                    <span className="truncate text-xs font-medium">{kr.title}</span>
+                    <span className="truncate text-[11px] text-muted-foreground">
+                      {kr.cycleTitle} · {kr.objectiveTitle}
+                      {kr.cycleStatus === "CLOSED" ? " · Closed" : ""}
                     </span>
-                    {kr.title}
-                  </>
+                  </span>
                 ),
               })),
             ]}
@@ -258,12 +291,21 @@ export function ObjectiveRow({
             onValueChange={handleParentKRChange}
             disabled={isParentKRPending}
           >
-            <ComboboxTrigger size="sm" className="flex-1 max-w-xs text-xs">
-              <ComboboxValue placeholder="Link to a company KR…" />
+            <ComboboxTrigger size="sm" className="w-full max-w-lg text-xs" aria-label="Supports a higher-level Key Result">
+              <ComboboxValue placeholder="Choose a longer-horizon KR…" />
             </ComboboxTrigger>
-            <ComboboxContent />
+            <ComboboxContent
+              inputPlaceholder="Search cycles, objectives, and KRs…"
+              emptyMessage="No longer-horizon Key Results cover this cycle."
+            />
           </Combobox>
-        </div>
+          {availableKRs.length === 0 && !localParentKRId && (
+            <p className="text-xs text-muted-foreground">
+              No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle&apos;s dates.
+            </p>
+          )}
+          {parentKRError && <p className="text-xs text-destructive">{parentKRError}</p>}
+        </section>
       )}
 
       {/* Add key result */}
