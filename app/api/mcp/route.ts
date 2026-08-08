@@ -77,6 +77,10 @@ import {
   listSquads,
   updateSquad,
 } from "@/lib/squad-tool-handlers"
+import {
+  searchHelp,
+  getHelp,
+} from "@/lib/help-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -2019,6 +2023,47 @@ const _handler = createMcpHandler(
         },
       },
       updateDoc
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // HELP
+    // ════════════════════════════════════════════════════════════════
+    // Unlike every other tool above, these are NOT workspace-scoped: they
+    // search Compass's own static product documentation (docs/content/*.md,
+    // rendered at /help/[slug]) so any agent can answer "how do I do X in
+    // Compass" questions. See the no-op gate note in lib/mcp-tool-gates.ts.
+
+    register(
+      "search_help",
+      {
+        title: "Search Help",
+        description:
+          "Full-text search over Compass's own product/usage documentation (the same content " +
+          "rendered at /help/[slug]). Returns the best-matching doc section(s) for the query, each " +
+          "with a Path pointer (deep-linking to a heading anchor when the match is under one) and a " +
+          "short excerpt. Use this to answer 'how do I do X in Compass' questions grounded in " +
+          "Compass's actual documentation, without relying on a locally-installed skill.",
+        inputSchema: {
+          query: z.string().min(1).describe("Search terms, e.g. 'how do I link feedback to an opportunity'"),
+          limit: z.number().int().positive().optional().describe("Max results to return (default 5)"),
+        },
+      },
+      searchHelp
+    )
+
+    register(
+      "get_help",
+      {
+        title: "Get Help",
+        description:
+          "Resolves a free-text topic (a doc slug, title, or close match) to a single Compass help " +
+          "doc and returns its full raw markdown content, plus its /help/[slug] path. Use search_help " +
+          "first if you don't already know which doc covers the topic.",
+        inputSchema: {
+          topic: z.string().min(1).describe("Topic to look up, e.g. 'roadmap' or 'mcp api'"),
+        },
+      },
+      getHelp
     )
 
     // ════════════════════════════════════════════════════════════════

@@ -226,6 +226,19 @@ export const TOOL_GATES: Record<string, Gate> = {
   },
   update_doc: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
 
+  // Help ----------------------------------------------------------------
+  // search_help / get_help read Compass's own static product documentation
+  // (docs/content/*.md) -- not workspace- or org-scoped data, so there is
+  // nothing to authorize beyond "the caller has a valid MCP key", which
+  // validateMcpAuth already established before any gate runs. Explicit
+  // no-op entries (rather than omission) so the fail-closed completeness
+  // check in __tests__/mcp-tool-gates.test.ts passes deliberately, not by
+  // accident.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  search_help: async (_a, _x) => {},
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  get_help: async (_a, _x) => {},
+
   // Scoring models (org-scoped) ---------------------------------------------
   list_scoring_models: async (a, x) => void (await assertOrgMemberBySlug(a, x.orgSlug)),
   get_scoring_model: async (a, x) => void (await assertScoringModelAccess(a, x.scoringModelId)),
