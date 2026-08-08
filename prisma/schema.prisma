@@ -26,6 +26,7 @@ model User {
   organizationMembers OrganizationMember[]
   workspaceMembers    WorkspaceMember[]
   apiKeys             ApiKey[]
+  agentConversations  AgentConversation[]
 
   @@map("users")
 }
@@ -140,6 +141,7 @@ model Workspace {
   canvasNodePositions  CanvasNodePosition[]
   checklistTemplates   ChecklistTemplate[]
   tasks                Task[]
+  agentConversations   AgentConversation[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -993,4 +995,51 @@ model AgentRuntimeConfig {
   updatedAt        DateTime  @default(now()) @map("updated_at")
 
   @@map("agent_runtime_config")
+}
+
+// ─── In-app agent conversations ──────────────────────────────────────────────
+
+/// A chat conversation between a user and the in-app agent, scoped to one
+/// workspace. History + per-turn usage live in AgentMessage. Access is gated
+/// by workspace membership + ownership in the session-authed turn route
+/// (not via MCP). See docs/decisions/0001-in-app-agent-architecture.md Phase 3.
+/// DSQL: no FKs, no @updatedAt (set explicitly), no JSON columns.
+model AgentConversation {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  title       String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id])
+  user      User           @relation(fields: [userId], references: [id])
+  messages  AgentMessage[]
+
+  @@index([workspaceId, userId])
+  @@map("agent_conversations")
+}
+
+/// One message in an AgentConversation. `role` is "user" | "assistant".
+/// Assistant rows also carry usage/cost for the turn. The raw structured event
+/// trace, if kept, is stored JSON-encoded as TEXT (formula_snapshot convention)
+/// — never a JSON column (DSQL).
+model AgentMessage {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  role           String   @db.VarChar(20)
+  content        String   @db.Text
+  /// Usage/cost (assistant turns only; null for user messages).
+  model          String?  @db.VarChar(100)
+  inputTokens    Int?     @map("input_tokens")
+  outputTokens   Int?     @map("output_tokens")
+  numTurns       Int?     @map("num_turns")
+  costUsd        Float?   @map("cost_usd")
+  durationMs     Int?     @map("duration_ms")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@map("agent_messages")
 }
