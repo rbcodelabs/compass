@@ -14,6 +14,7 @@ import {
   Map,
   MessageSquare,
   Settings,
+  Sparkles,
   Target,
   Waypoints,
 } from "lucide-react"
@@ -66,6 +67,7 @@ const navItems = [
   { label: "Feedback", path: "feedback", Icon: MessageSquare },
   { label: "Docs", path: "docs", Icon: BookOpen },
   { label: "Canvas", path: "canvas", Icon: Waypoints },
+  { label: "Agent", path: "agent", Icon: Sparkles },
 ]
 
 function getInitials(name: string): string {
