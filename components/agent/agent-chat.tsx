@@ -86,7 +86,12 @@ export function AgentChat({
         body: JSON.stringify({ workspaceId, message: text, conversationId: activeConversationId ?? undefined }),
       })
       if (!res.ok || !res.body) {
-        throw new Error(res.status === 401 ? "Your session expired — reload and sign in." : `Request failed (${res.status}).`)
+        const serverMsg = await res.text().catch(() => "")
+        throw new Error(
+          res.status === 401
+            ? "Your session expired — reload and sign in."
+            : serverMsg || `Request failed (${res.status}).`
+        )
       }
       const reader = res.body.getReader()
       const decoder = new TextDecoder()

@@ -19,6 +19,8 @@ import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
+import { checkAgentUsageLimit } from "@/lib/agent-limits"
+import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
 import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 
@@ -88,6 +90,12 @@ export async function POST(request: NextRequest) {
   })
   if (!workspace) {
     return new Response("Workspace not found or access denied.", { status: 404 })
+  }
+
+  // ── Rate + cost guardrail (Phase 5): cap turns/spend per user per day ───────
+  const limit = await checkAgentUsageLimit(userId)
+  if (!limit.allowed) {
+    return new Response(limit.reason, { status: 429 })
   }
 
   // ── Resolve/verify the conversation (must belong to this user + workspace) ──
@@ -190,6 +198,8 @@ export async function POST(request: NextRequest) {
 
         // The entry script writes one JSON object per line, prefixed with a
         // kind. Stdout may arrive in partial chunks, so buffer and split on \n.
+        // Accumulate the agent's mutation tool calls for the audit log (Phase 5).
+        const auditRows: { toolName: string; argsSummary: string | null }[] = []
         let buffer = ""
         for await (const log of run.logs()) {
           if (log.stream !== "stdout") continue
@@ -204,7 +214,21 @@ export async function POST(request: NextRequest) {
             const rest = sp === -1 ? "" : line.slice(sp + 1)
             if (kind === "AGENT_EVENT") {
               try {
-                sse("agent", JSON.parse(rest))
+                const parsed = JSON.parse(rest)
+                sse("agent", parsed)
+                // Record mutating tool calls (tool_use blocks in assistant messages).
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const content = (parsed?.message?.message?.content ?? []) as any[]
+                if (Array.isArray(content)) {
+                  for (const block of content) {
+                    if (block?.type === "tool_use" && typeof block.name === "string" && isMutationTool(block.name)) {
+                      auditRows.push({
+                        toolName: bareToolName(block.name),
+                        argsSummary: block.input ? JSON.stringify(block.input).slice(0, 1000) : null,
+                      })
+                    }
+                  }
+                }
               } catch {
                 /* ignore malformed intermediate line */
               }
@@ -240,6 +264,19 @@ export async function POST(request: NextRequest) {
           where: { id: conversationIdResolved },
           data: { updatedAt: new Date() },
         })
+
+        // Persist the audit trail of what the agent changed this turn.
+        if (auditRows.length > 0) {
+          await prisma.agentAuditLog.createMany({
+            data: auditRows.map((r) => ({
+              userId,
+              workspaceId,
+              conversationId: conversationIdResolved,
+              toolName: r.toolName,
+              argsSummary: r.argsSummary,
+            })),
+          })
+        }
 
         sse("result", { text: assistantText ?? "", usage, conversationId: conversationIdResolved })
       } catch (err) {
