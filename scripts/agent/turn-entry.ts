@@ -63,6 +63,10 @@ async function main(): Promise<void> {
           type: "http",
           url: new URL("/api/mcp", baseUrl).toString(),
           headers,
+          // Load the full Compass catalog into the prompt up front instead of
+          // deferring it behind ToolSearch. Without this the agent burns turns
+          // searching for tools; with it, it can act directly.
+          alwaysLoad: true,
         },
       },
       // Compass tools only, auto-approved. Headless (no human approver): the
@@ -70,7 +74,7 @@ async function main(): Promise<void> {
       allowedTools: ["mcp__compass"],
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      maxTurns: 12,
+      maxTurns: 30,
     },
   })) {
     emit("AGENT_EVENT", { type: message.type, message })
