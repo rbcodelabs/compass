@@ -1,16 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Link2, X } from "lucide-react";
+import { GripVertical, X } from "lucide-react";
 import { CheckInForm } from "@/components/okrs/check-in-form";
-import { CardMenu } from "@/components/ui/card-menu";
+import { CardMenu, type CardMenuItem } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { deleteKeyResult, setObjectiveParentKR } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
-import { Combobox, ComboboxContent, ComboboxTrigger, ComboboxValue } from "@/components/ui/combobox";
+import { Combobox, ComboboxContent } from "@/components/ui/combobox";
+import { ProgressRing } from "@/components/ui/progress-ring";
 import { averageProgress, clampProgress } from "@/lib/okrs";
 import type { ObjectiveStatus, SquadData } from "@/lib/types";
 
@@ -47,6 +48,8 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
   const [, startTransition] = useTransition();
   const [isLinkPending, startLinkTransition] = useTransition();
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [isLinkOpen, setIsLinkOpen] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const [localSupportingObjectives, setLocalSupportingObjectives] = useState(
     keyResult.supportingObjectives ?? []
   );
@@ -127,6 +130,25 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
     });
   }
 
+  const canLinkSupporting = !!supportingObjectiveOptions && localSupportingOptions.length > 0;
+  const menuItems: CardMenuItem[] = [
+    ...(canLinkSupporting
+      ? [
+          {
+            label: "Link supporting objective…",
+            // Defer until the dropdown has closed so focus moves cleanly into the combobox popup.
+            onClick: () => requestAnimationFrame(() => setIsLinkOpen(true)),
+          },
+        ]
+      : []),
+    {
+      label: "Delete KR",
+      onClick: () => handleDelete(),
+      destructive: true,
+      separator: canLinkSupporting,
+    },
+  ];
+
   return (
     <div ref={setNodeRef} style={style} className="flex flex-col gap-1.5 group touch-none">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -151,8 +173,9 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
             </span>
           </button>
         </div>
-        <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
-          <span className="text-xs text-muted-foreground">
+        <div ref={actionsRef} className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <ProgressRing value={progress} size={20} className="text-primary" />
             {keyResult.current}{unit} / {keyResult.target}{unit}
           </span>
           <CheckInForm
@@ -162,62 +185,37 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
           />
-          <CardMenu
-            items={[
-              {
-                label: "Delete KR",
-                onClick: () => handleDelete(),
-                destructive: true,
-              },
-            ]}
-          />
+          <CardMenu items={menuItems} />
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-          <div
-            className="h-full rounded-full bg-primary transition-all"
-            style={{ width: `${progress}%` }}
+      {canLinkSupporting && (
+        <Combobox
+          items={localSupportingOptions.map((objective) => ({
+            value: objective.id,
+            label: `${objective.title} ${objective.cycleTitle}`,
+            render: (
+              <span className="flex min-w-0 flex-col text-left">
+                <span className="truncate text-xs font-medium">{objective.title}</span>
+                <span className="truncate text-[11px] text-muted-foreground">{objective.cycleTitle}</span>
+              </span>
+            ),
+          }))}
+          value={null}
+          onValueChange={(objectiveId) => objectiveId && setSupportingObjective(objectiveId, keyResult.id)}
+          disabled={isLinkPending}
+          open={isLinkOpen}
+          onOpenChange={setIsLinkOpen}
+        >
+          <ComboboxContent
+            anchor={actionsRef}
+            align="end"
+            inputPlaceholder="Search shorter-cycle Objectives…"
+            emptyMessage="No eligible unlinked Objectives."
           />
-        </div>
-        <span className="text-xs text-muted-foreground w-8 text-right">
-          {progress}%
-        </span>
-      </div>
-
-      {supportingObjectiveOptions && (
-        <div className="ml-5 mt-1 flex flex-col items-start gap-1.5">
-          <Combobox
-            items={localSupportingOptions.map((objective) => ({
-              value: objective.id,
-              label: `${objective.title} ${objective.cycleTitle}`,
-              render: (
-                <span className="flex min-w-0 flex-col text-left">
-                  <span className="truncate text-xs font-medium">{objective.title}</span>
-                  <span className="truncate text-[11px] text-muted-foreground">{objective.cycleTitle}</span>
-                </span>
-              ),
-            }))}
-            value={null}
-            onValueChange={(objectiveId) => objectiveId && setSupportingObjective(objectiveId, keyResult.id)}
-            disabled={isLinkPending || localSupportingOptions.length === 0}
-          >
-            <ComboboxTrigger size="sm" aria-label="Link supporting objective">
-              <Link2 className="size-3.5" />
-              <ComboboxValue placeholder="Link supporting objective" />
-            </ComboboxTrigger>
-            <ComboboxContent
-              inputPlaceholder="Search shorter-cycle Objectives…"
-              emptyMessage="No unlinked Objectives from shorter contained cycles."
-            />
-          </Combobox>
-          {localSupportingOptions.length === 0 && (
-            <p className="text-[11px] text-muted-foreground">No eligible unlinked Objectives.</p>
-          )}
-          {linkError && <p className="text-xs text-destructive">{linkError}</p>}
-        </div>
+        </Combobox>
       )}
+      {linkError && <p className="ml-5 text-xs text-destructive">{linkError}</p>}
 
       {localSupportingObjectives.length > 0 && (
         <div className="ml-5 mt-1 flex flex-col gap-1 rounded-md bg-muted/50 px-2.5 py-2">

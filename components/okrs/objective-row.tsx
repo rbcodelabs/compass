@@ -1,10 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { useTransition, useState } from "react";
+import { useRef, useTransition, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical } from "lucide-react";
+import { GripVertical, X } from "lucide-react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { averageProgress, STATUS_BADGE } from "@/lib/okrs";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
@@ -21,15 +21,14 @@ import {
 import {
   Combobox,
   ComboboxContent,
-  ComboboxTrigger,
-  ComboboxValue,
 } from "@/components/ui/combobox";
+import { ProgressRing } from "@/components/ui/progress-ring";
 import {
   updateObjectiveStatus,
   setObjectiveParentKR,
   deleteObjective,
 } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
-import { CardMenu } from "@/components/ui/card-menu";
+import { CardMenu, type CardMenuItem } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { EntityCard } from "@/components/patterns/entity-card";
 
@@ -88,6 +87,8 @@ export function ObjectiveRow({
   const [isPending, startTransition] = useTransition();
   const [isParentKRPending, startParentKRTransition] = useTransition();
   const [parentKRError, setParentKRError] = useState<string | null>(null);
+  const [isParentLinkOpen, setIsParentLinkOpen] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const { openPanel } = usePanelContext();
   const [localParentKRId, setLocalParentKRId] = useState<string | null>(
     parentKeyResultId ?? null
@@ -146,6 +147,25 @@ export function ObjectiveRow({
     });
   }
 
+  const canLinkParent = !!availableKRs && !localParentKRId && availableKRs.length > 0;
+  const menuItems: CardMenuItem[] = [
+    ...(canLinkParent
+      ? [
+          {
+            label: "Link to parent Key Result…",
+            // Defer until the dropdown has closed so focus moves cleanly into the combobox popup.
+            onClick: () => requestAnimationFrame(() => setIsParentLinkOpen(true)),
+          },
+        ]
+      : []),
+    {
+      label: "Delete Objective",
+      onClick: () => handleDelete(),
+      destructive: true,
+      separator: canLinkParent,
+    },
+  ];
+
   return (
     <EntityCard
       ref={setNodeRef}
@@ -184,10 +204,11 @@ export function ObjectiveRow({
       }
       description={[objective.owner, objective.squad?.name].filter(Boolean).join(" · ") || undefined}
       actions={
-        <div className="flex shrink-0 items-center gap-2">
+        <div ref={actionsRef} className="flex shrink-0 items-center gap-2">
           {/* Overall progress */}
           {objective.keyResults.length > 0 && (
-            <span className="text-sm text-muted-foreground">
+            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <ProgressRing value={avgProgress} size={22} className="text-primary/60" />
               {avgProgress}%
             </span>
           )}
@@ -211,31 +232,10 @@ export function ObjectiveRow({
               ))}
             </SelectContent>
           </Select>
-          <CardMenu
-            items={[
-              {
-                label: "Delete Objective",
-                onClick: () => handleDelete(),
-                separator: true,
-                destructive: true,
-              },
-            ]}
-          />
+          <CardMenu items={menuItems} />
         </div>
       }
     >
-
-      {/* Overall progress bar */}
-      {objective.keyResults.length > 0 && (
-        <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-primary/60 transition-all"
-              style={{ width: `${avgProgress}%` }}
-            />
-          </div>
-        </div>
-      )}
 
       {/* Key results */}
       {objective.keyResults.length > 0 && (
@@ -263,49 +263,66 @@ export function ObjectiveRow({
         </div>
       )}
 
-      {/* Objective alignment */}
-      {availableKRs && (
-        <section className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3" aria-label="Alignment">
-          <div>
-            <p className="text-xs font-semibold text-foreground">Alignment</p>
-            <p className="text-xs text-muted-foreground">Supports a higher-level Key Result</p>
-          </div>
-          <Combobox
-            items={[
-              { value: "__none__", label: "— None —" },
-              ...availableKRs.map((kr) => ({
-                value: kr.id,
-                label: `${kr.cycleTitle} ${kr.objectiveTitle} ${kr.title}`,
-                render: (
-                  <span className="flex min-w-0 flex-col text-left">
-                    <span className="truncate text-xs font-medium">{kr.title}</span>
-                    <span className="truncate text-[11px] text-muted-foreground">
-                      {kr.cycleTitle} · {kr.objectiveTitle}
-                      {kr.cycleStatus === "CLOSED" ? " · Closed" : ""}
-                    </span>
+      {/* Objective alignment — parent KR shown as a compact chip at rest */}
+      {availableKRs && (localParentKRId || parentKRError) && (
+        <div className="flex items-center gap-1.5">
+          {localParentKRId &&
+            (() => {
+              const parentKR = availableKRs.find((kr) => kr.id === localParentKRId);
+              const parentLabel = parentKR
+                ? `${parentKR.title} · ${parentKR.cycleTitle}`
+                : "Linked Key Result";
+              return (
+                <div className="flex min-w-0 items-center gap-1 rounded-md bg-muted/50 px-2 py-1 text-[11px] text-muted-foreground">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                    Supports
                   </span>
-                ),
-              })),
-            ]}
-            value={localParentKRId ?? "__none__"}
-            onValueChange={handleParentKRChange}
-            disabled={isParentKRPending}
-          >
-            <ComboboxTrigger size="sm" className="w-full max-w-lg text-xs" aria-label="Supports a higher-level Key Result">
-              <ComboboxValue placeholder="Choose a longer-horizon KR…" />
-            </ComboboxTrigger>
-            <ComboboxContent
-              inputPlaceholder="Search cycles, objectives, and KRs…"
-              emptyMessage="No longer-horizon Key Results cover this cycle."
-            />
-          </Combobox>
-          {availableKRs.length === 0 && !localParentKRId && (
-            <p className="text-xs text-muted-foreground">
-              No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle&apos;s dates.
-            </p>
-          )}
+                  <span className="min-w-0 truncate">{parentLabel}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleParentKRChange(null)}
+                    disabled={isParentKRPending}
+                    className="shrink-0 rounded p-0.5 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                    aria-label="Unlink parent Key Result"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              );
+            })()}
           {parentKRError && <p className="text-xs text-destructive">{parentKRError}</p>}
-        </section>
+        </div>
+      )}
+
+      {/* Parent-KR link picker — opened from the ⋯ menu, renders nothing until opened */}
+      {canLinkParent && (
+        <Combobox
+          items={availableKRs!.map((kr) => ({
+            value: kr.id,
+            label: `${kr.cycleTitle} ${kr.objectiveTitle} ${kr.title}`,
+            render: (
+              <span className="flex min-w-0 flex-col text-left">
+                <span className="truncate text-xs font-medium">{kr.title}</span>
+                <span className="truncate text-[11px] text-muted-foreground">
+                  {kr.cycleTitle} · {kr.objectiveTitle}
+                  {kr.cycleStatus === "CLOSED" ? " · Closed" : ""}
+                </span>
+              </span>
+            ),
+          }))}
+          value={null}
+          onValueChange={handleParentKRChange}
+          disabled={isParentKRPending}
+          open={isParentLinkOpen}
+          onOpenChange={setIsParentLinkOpen}
+        >
+          <ComboboxContent
+            anchor={actionsRef}
+            align="end"
+            inputPlaceholder="Search cycles, objectives, and KRs…"
+            emptyMessage="No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle's dates."
+          />
+        </Combobox>
       )}
 
       {/* Add key result */}

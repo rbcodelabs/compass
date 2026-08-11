@@ -17,10 +17,13 @@ type ComboboxProps = {
   value?: string | null
   onValueChange?: (value: string | null) => void
   disabled?: boolean
+  /** Controlled open state — use with a triggerless, anchored ComboboxContent. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   children: React.ReactNode
 }
 
-function Combobox({ items, value, onValueChange, disabled, children }: ComboboxProps) {
+function Combobox({ items, value, onValueChange, disabled, open, onOpenChange, children }: ComboboxProps) {
   const selectedItem = React.useMemo(
     () => (value != null ? (items.find((item) => item.value === value) ?? null) : null),
     [items, value]
@@ -32,6 +35,8 @@ function Combobox({ items, value, onValueChange, disabled, children }: ComboboxP
       value={selectedItem}
       onValueChange={(item) => onValueChange?.(item ? item.value : null)}
       disabled={disabled}
+      open={open}
+      onOpenChange={onOpenChange ? (nextOpen) => onOpenChange(nextOpen) : undefined}
       autoHighlight
     >
       {children}
@@ -97,11 +102,12 @@ function ComboboxContent({
   sideOffset = 4,
   align = "center",
   alignOffset = 0,
+  anchor,
   ...props
 }: Omit<ComboboxPrimitive.Popup.Props, "children"> &
   Pick<
     ComboboxPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
+    "align" | "alignOffset" | "side" | "sideOffset" | "anchor"
   > & {
     emptyMessage?: React.ReactNode
     inputPlaceholder?: string
@@ -113,6 +119,7 @@ function ComboboxContent({
         sideOffset={sideOffset}
         align={align}
         alignOffset={alignOffset}
+        anchor={anchor}
         className="isolate z-50"
       >
         <ComboboxPrimitive.Popup

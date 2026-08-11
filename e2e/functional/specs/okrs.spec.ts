@@ -151,8 +151,14 @@ test.describe("OKRs", () => {
     await annualRow.getByLabel("Target").fill("100");
     await annualRow.getByRole("button", { name: "Add key result" }).click();
     await expect(annualRow.getByLabel("Target")).not.toBeVisible({ timeout: 20_000 });
-    await expect(annualRow.getByText("Alignment")).toBeVisible();
-    await expect(annualRow.getByText(/longer cycle must be Draft or Active/i)).toBeVisible();
+    // Linking now lives in the ⋯ (Card actions) overflow menu. The top-level annual
+    // objective has no eligible longer-horizon KR to support, so its menu offers no
+    // "Link to parent Key Result" action at all (no dead affordance).
+    await annualRow.getByRole("button", { name: "Card actions" }).first().click();
+    await expect(
+      page.getByRole("menuitem", { name: /Link to parent Key Result/i })
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
 
     await createCycle(quarterlyCycle, "2027-01-01", "2027-03-31");
     await page.getByRole("button", { name: /Add objective/i }).click();
@@ -161,22 +167,31 @@ test.describe("OKRs", () => {
     await expect(page.getByText(quarterlyObjective)).toBeVisible({ timeout: 10_000 });
     await page.reload();
 
+    // The quarterly objective CAN support the annual KR (its cycle fully contains the
+    // quarter), so its ⋯ menu exposes "Link to parent Key Result…". Opening the picker
+    // should surface the annual KR as an eligible parent.
     const quarterlyRow = page.locator(".rounded-xl.border").filter({ hasText: quarterlyObjective });
-    await expect(quarterlyRow.getByText("Alignment")).toBeVisible();
-    await expect(quarterlyRow.getByText("Supports a higher-level Key Result")).toBeVisible();
+    await quarterlyRow.getByRole("button", { name: "Card actions" }).first().click();
+    await page.getByRole("menuitem", { name: /Link to parent Key Result/i }).click();
+    await expect(page.getByRole("option", { name: new RegExp(annualKR) })).toBeVisible();
+    await page.keyboard.press("Escape");
 
     await page.goto(`${base}/okrs`);
     await page.getByText(annualCycle).click();
     await page.waitForLoadState("networkidle");
-    const parentKRRow = page.locator(".group.touch-none").filter({ hasText: annualKR });
-    await parentKRRow.getByRole("combobox", { name: "Link supporting objective" }).click();
+    // Link from the KR side: the KeyResultBar's ⋯ menu → "Link supporting objective…".
+    // (.flex-col distinguishes the KeyResultBar div from the objective EntityCard article.)
+    const parentKRRow = page.locator(".group.touch-none.flex-col").filter({ hasText: annualKR });
+    await parentKRRow.getByRole("button", { name: "Card actions" }).click();
+    await page.getByRole("menuitem", { name: /Link supporting objective/i }).click();
     await page.getByRole("option", { name: new RegExp(quarterlyObjective) }).click();
     await expect(page.getByText("Supporting objectives")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText(quarterlyObjective)).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("okr-hierarchy-desktop.png"), fullPage: true });
 
+    // Linked state persists on mobile (the compact "Supporting objectives" list).
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByRole("combobox", { name: "Link supporting objective" })).toBeVisible();
+    await expect(page.getByText("Supporting objectives")).toBeVisible();
     await expect(page.getByText(quarterlyObjective)).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("okr-hierarchy-mobile.png"), fullPage: true });
   });
