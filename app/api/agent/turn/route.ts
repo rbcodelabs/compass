@@ -32,15 +32,30 @@ function readEntryScript(): string {
 }
 
 /** Assemble the agent prompt from prior turns + the new user message. */
+type WorkspaceContext = {
+  id: string
+  name: string
+  orgSlug: string
+  workspaceSlug: string
+}
+
 function assemblePrompt(
+  ws: WorkspaceContext,
   history: { role: string; content: string }[],
   userMessage: string
 ): string {
+  // Give the agent its bearings up front so it doesn't waste turns calling
+  // list_workspaces / get_workspace_by_slug just to figure out where it is.
   const framing =
-    "You are Compass's in-app product-discovery assistant. You help the user " +
-    "work with THIS workspace's data (opportunities, solutions, experiments, " +
-    "roadmap, OKRs, feedback, tasks) using the available Compass tools. Be " +
-    "concise. When you change data, say what you changed."
+    `You are Compass's in-app product-discovery assistant, embedded in the ` +
+    `"${ws.name}" workspace (org "${ws.orgSlug}", workspace "${ws.workspaceSlug}").\n\n` +
+    `You are ALREADY in this workspace. Its workspaceId is "${ws.id}" — pass that ` +
+    `id directly to any tool that needs a workspaceId. Do NOT call list_workspaces ` +
+    `or get_workspace_by_slug; you already know the workspace.\n\n` +
+    `You have the Compass tools (mcp__compass__*) to read and update this ` +
+    `workspace's opportunities, solutions, assumptions, experiments, roadmap, ` +
+    `OKRs, feedback, tasks, docs, and scoring. Act directly rather than ` +
+    `exploring to orient. Be concise, and when you change data, say what you changed.`
   const transcript = history
     .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`)
     .join("\n")
@@ -69,7 +84,7 @@ export async function POST(request: NextRequest) {
   // ── Authorize: caller must be a member of the workspace ─────────────────────
   const workspace = await prisma.workspace.findFirst({
     where: { id: workspaceId, members: { some: { userId } } },
-    select: { id: true },
+    select: { id: true, name: true, slug: true, organization: { select: { slug: true } } },
   })
   if (!workspace) {
     return new Response("Workspace not found or access denied.", { status: 404 })
@@ -124,7 +139,16 @@ export async function POST(request: NextRequest) {
     take: MAX_HISTORY_MESSAGES,
     select: { role: true, content: true },
   })
-  const prompt = assemblePrompt(historyRows.slice(0, -1), message.trim())
+  const prompt = assemblePrompt(
+    {
+      id: workspace.id,
+      name: workspace.name,
+      orgSlug: workspace.organization.slug,
+      workspaceSlug: workspace.slug,
+    },
+    historyRows.slice(0, -1),
+    message.trim()
+  )
 
   const mcpBaseUrl = request.nextUrl.origin
   const bypassSecret = process.env.MCP_BYPASS_SECRET

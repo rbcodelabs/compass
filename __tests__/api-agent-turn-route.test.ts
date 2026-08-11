@@ -64,7 +64,7 @@ describe("agent turn route — guards", () => {
     // Membership filter is applied.
     expect(mockPrisma.workspace.findFirst).toHaveBeenCalledWith({
       where: { id: "ws-x", members: { some: { userId: "user-1" } } },
-      select: { id: true },
+      select: { id: true, name: true, slug: true, organization: { select: { slug: true } } },
     })
   })
 
