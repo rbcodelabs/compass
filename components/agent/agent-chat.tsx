@@ -10,15 +10,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Plus, Send, Sparkles, Wrench } from "lucide-react"
+import { Check, Loader2, Plus, Send, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { parseSseFrames } from "@/lib/sse-frames"
+import { humanizeToolName } from "@/lib/agent-tools"
+import { Markdown } from "@/components/agent/markdown"
 
 type Role = "user" | "assistant"
-type Message = { id: string; role: Role; content: string }
+type ToolStep = { id: string; label: string; status: "running" | "done" }
+type Message = { id: string; role: Role; content: string; toolCalls?: ToolStep[] }
 type ConversationSummary = { id: string; title: string | null }
 
 type Props = {
@@ -45,24 +48,23 @@ export function AgentChat({
   const [input, setInput] = useState("")
   const [phase, setPhase] = useState<StreamPhase>("idle")
   const [streamingText, setStreamingText] = useState("")
-  const [toolActivity, setToolActivity] = useState<string | null>(null)
+  const [liveToolSteps, setLiveToolSteps] = useState<ToolStep[]>([])
   const [error, setError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const isStreaming = phase !== "idle"
 
-  // Reset when the server swaps the active conversation.
   useEffect(() => {
     setMessages(initialMessages)
     setStreamingText("")
-    setToolActivity(null)
+    setLiveToolSteps([])
     setError(null)
     setPhase("idle")
   }, [activeConversationId, initialMessages])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
-  }, [messages, streamingText, phase])
+  }, [messages, streamingText, liveToolSteps, phase])
 
   const send = useCallback(async () => {
     const text = input.trim()
@@ -72,9 +74,10 @@ export function AgentChat({
     setMessages((m) => [...m, { id: `local-${Date.now()}`, role: "user", content: text }])
     setPhase("booting")
     setStreamingText("")
-    setToolActivity(null)
+    setLiveToolSteps([])
 
     let assembled = ""
+    let steps: ToolStep[] = []
     let newConversationId: string | null = null
     try {
       const res = await fetch("/api/agent/turn", {
@@ -106,16 +109,21 @@ export function AgentChat({
             setPhase(p.phase === "running" ? "running" : "booting")
             if (typeof p.conversationId === "string") newConversationId = p.conversationId
           } else if (event === "agent") {
-            const m = (p.message ?? {}) as Record<string, unknown>
-            const inner = (m.message ?? {}) as Record<string, unknown>
-            const content = inner.content
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const sdk = (p.message ?? {}) as any
+            const content = sdk?.message?.content
             if (Array.isArray(content)) {
               for (const block of content as Record<string, unknown>[]) {
                 if (block.type === "text" && typeof block.text === "string") {
                   assembled += block.text
                   setStreamingText(assembled)
                 } else if (block.type === "tool_use" && typeof block.name === "string") {
-                  setToolActivity(String(block.name).replace(/^mcp__compass__/, ""))
+                  steps = [...steps, { id: String(block.id ?? steps.length), label: humanizeToolName(block.name), status: "running" }]
+                  setLiveToolSteps(steps)
+                } else if (block.type === "tool_result") {
+                  const tid = String(block.tool_use_id ?? "")
+                  steps = steps.map((s) => (s.id === tid ? { ...s, status: "done" } : s))
+                  setLiveToolSteps(steps)
                 }
               }
             }
@@ -128,11 +136,14 @@ export function AgentChat({
         }
       }
 
-      setMessages((m) => [...m, { id: `a-${Date.now()}`, role: "assistant", content: assembled || "(no response)" }])
+      const finalSteps = steps.map((s) => ({ ...s, status: "done" as const }))
+      setMessages((m) => [
+        ...m,
+        { id: `a-${Date.now()}`, role: "assistant", content: assembled || "(no response)", toolCalls: finalSteps },
+      ])
       setStreamingText("")
-      setToolActivity(null)
+      setLiveToolSteps([])
       setPhase("idle")
-      // Pin a newly-created conversation into the URL + refresh the list.
       if (newConversationId && newConversationId !== activeConversationId) {
         router.replace(`${basePath}/agent?c=${newConversationId}`)
         router.refresh()
@@ -142,28 +153,23 @@ export function AgentChat({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.")
       setStreamingText("")
-      setToolActivity(null)
+      setLiveToolSteps([])
       setPhase("idle")
     }
   }, [input, isStreaming, workspaceId, activeConversationId, basePath, router])
 
-  const statusLabel = useMemo(() => {
+  const phaseLabel = useMemo(() => {
     if (phase === "booting") return "Starting the agent…"
-    if (phase === "running") return toolActivity ? `Using ${toolActivity}…` : "Thinking…"
+    if (phase === "running" && !streamingText && liveToolSteps.length === 0) return "Thinking…"
     return null
-  }, [phase, toolActivity])
+  }, [phase, streamingText, liveToolSteps.length])
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-default bg-surface-panel">
       {/* Conversation list */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-default bg-surface-inset md:flex">
         <div className="p-3">
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full justify-start gap-2"
-            render={<Link href={`${basePath}/agent`} />}
-          >
+          <Button variant="outline" size="sm" className="w-full justify-start gap-2" render={<Link href={`${basePath}/agent`} />}>
             <Plus className="size-4" aria-hidden="true" />
             New chat
           </Button>
@@ -212,11 +218,15 @@ export function AgentChat({
             )}
 
             {messages.map((m) => (
-              <MessageRow key={m.id} role={m.role} content={m.content} userInitials={userInitials} />
+              <MessageRow key={m.id} message={m} userInitials={userInitials} />
             ))}
 
             {isStreaming && (
-              <MessageRow role="assistant" content={streamingText} userInitials={userInitials} status={statusLabel} />
+              <MessageRow
+                message={{ id: "streaming", role: "assistant", content: streamingText, toolCalls: liveToolSteps }}
+                userInitials={userInitials}
+                phaseLabel={phaseLabel}
+              />
             )}
 
             {error && (
@@ -244,12 +254,7 @@ export function AgentChat({
               disabled={isStreaming}
               className="max-h-40 flex-1"
             />
-            <Button
-              size="icon"
-              onClick={() => void send()}
-              disabled={isStreaming || !input.trim()}
-              aria-label="Send message"
-            >
+            <Button size="icon" onClick={() => void send()} disabled={isStreaming || !input.trim()} aria-label="Send message">
               <Send className="size-4" aria-hidden="true" />
             </Button>
           </div>
@@ -259,18 +264,34 @@ export function AgentChat({
   )
 }
 
+function ToolSteps({ steps }: { steps: ToolStep[] }) {
+  if (steps.length === 0) return null
+  return (
+    <ul className="mb-2 flex flex-col gap-1 border-b border-default pb-2">
+      {steps.map((s) => (
+        <li key={s.id} className="flex items-center gap-1.5 text-xs text-text-subtle">
+          {s.status === "running" ? (
+            <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />
+          ) : (
+            <Check className="size-3 shrink-0 text-status-success" aria-hidden="true" />
+          )}
+          <span className="truncate">{s.label}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function MessageRow({
-  role,
-  content,
+  message,
   userInitials,
-  status,
+  phaseLabel,
 }: {
-  role: Role
-  content: string
+  message: Message
   userInitials: string
-  status?: string | null
+  phaseLabel?: string | null
 }) {
-  const isUser = role === "user"
+  const isUser = message.role === "user"
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
       <Avatar className="size-7 shrink-0">
@@ -280,21 +301,21 @@ function MessageRow({
       </Avatar>
       <div
         className={`min-w-0 max-w-[85%] rounded-xl px-4 py-2.5 text-sm ${
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "border border-default bg-surface-card text-text-primary"
+          isUser ? "bg-primary text-primary-foreground" : "border border-default bg-surface-card text-text-primary"
         }`}
       >
-        {status && (
-          <div className="mb-1 flex items-center gap-1.5 text-xs text-text-subtle">
-            <Wrench className="size-3 animate-pulse" aria-hidden="true" />
-            {status}
-          </div>
-        )}
-        {content ? (
-          <p className="whitespace-pre-wrap break-words">{content}</p>
+        {!isUser && message.toolCalls && <ToolSteps steps={message.toolCalls} />}
+        {isUser ? (
+          <p className="whitespace-pre-wrap break-words">{message.content}</p>
+        ) : message.content ? (
+          <Markdown>{message.content}</Markdown>
+        ) : phaseLabel ? (
+          <p className="flex items-center gap-1.5 text-text-subtle">
+            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            {phaseLabel}
+          </p>
         ) : (
-          !status && <p className="text-text-subtle">…</p>
+          <p className="text-text-subtle">…</p>
         )}
       </div>
     </div>
