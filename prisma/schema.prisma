@@ -1043,3 +1043,22 @@ model AgentMessage {
   @@index([conversationId, createdAt])
   @@map("agent_messages")
 }
+
+/// Append-only audit trail of agent-initiated mutation tool calls (ADR 0001,
+/// Phase 5). One row per mutating MCP tool the agent invoked on a user's
+/// behalf. DSQL: no FKs; TEXT for the JSON-encoded args summary; no @updatedAt
+/// (append-only).
+model AgentAuditLog {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  conversationId String?  @map("conversation_id") @db.Uuid
+  toolName       String   @map("tool_name") @db.VarChar(100)
+  /// JSON-encoded, truncated summary of the tool input (TEXT, not a JSON column).
+  argsSummary    String?  @map("args_summary") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt])
+  @@index([userId, createdAt])
+  @@map("agent_audit_log")
+}

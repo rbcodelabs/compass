@@ -25,6 +25,9 @@ vi.mock("@/lib/agent-runtime-config", () => ({ getGoldenSnapshotId: () => mockGe
 vi.mock("@/lib/agent-sandbox", () => ({ bootSandboxFromSnapshot: vi.fn() }))
 vi.mock("@/lib/agent-mcp-key", () => ({ mintAgentMcpKey: vi.fn(), revokeAgentMcpKey: vi.fn() }))
 
+const mockCheckLimit = vi.fn()
+vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => mockCheckLimit() }))
+
 import { POST } from "@/app/api/agent/turn/route"
 
 function req(body: unknown): NextRequest {
@@ -43,6 +46,7 @@ beforeEach(() => {
   mockAuth.mockResolvedValue(SESSION)
   mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
   mockGetGoldenSnapshotId.mockResolvedValue("snap_abc")
+  mockCheckLimit.mockResolvedValue({ allowed: true })
 })
 
 describe("agent turn route — guards", () => {
@@ -55,6 +59,13 @@ describe("agent turn route — guards", () => {
   it("400 on missing/empty message or workspaceId", async () => {
     expect((await POST(req({ workspaceId: "ws-1", message: "   " }))).status).toBe(400)
     expect((await POST(req({ message: "hi" }))).status).toBe(400)
+  })
+
+  it("429 when the user is over their daily rate/cost limit", async () => {
+    mockCheckLimit.mockResolvedValue({ allowed: false, reason: "Daily agent turn limit reached (100/day)." })
+    const res = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+    expect(res.status).toBe(429)
+    expect(await res.text()).toMatch(/limit reached/)
   })
 
   it("404 when the caller is not a member of the workspace", async () => {

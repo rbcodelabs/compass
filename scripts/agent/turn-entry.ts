@@ -72,6 +72,10 @@ async function main(): Promise<void> {
       // Compass tools only, auto-approved. Headless (no human approver): the
       // real security boundary is the disposable sandbox + per-user MCP auth.
       allowedTools: ["mcp__compass"],
+      // Safety default (Phase 5): keep the two irreversible hard-delete tools
+      // out of the agent's reach — everything else is reversible/auditable.
+      // Remove entries here to let the agent perform destructive deletes.
+      disallowedTools: ["mcp__compass__delete_assumption", "mcp__compass__delete_solution_comment"],
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       maxTurns: 30,
