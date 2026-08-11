@@ -1,7 +1,8 @@
 "use client";
 
-import React, { createContext, useContext, useCallback, useMemo } from "react";
+import React, { createContext, useContext, useCallback, useMemo, useRef } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import type { Horizon } from "@/lib/types";
 
 /**
  * The eight OST/roadmap entity types a detail panel can show. These match
@@ -52,12 +53,29 @@ function decodePanel(raw: string | null): PanelState {
   return { type: type as PanelType, id };
 }
 
+/** The subset of an entity's fields a mutation notification can carry. Kept
+ * narrow on purpose — this isn't a general data-sync channel, just enough for
+ * a listener to apply the one change it cares about optimistically. */
+export type EntityMutationPatch = { horizon?: Horizon };
+
+type EntityMutationListener = (id: string, patch?: EntityMutationPatch) => void;
+
 type PanelContextValue = {
   panel: PanelState;
   openPanel: (type: PanelType, id: string) => void;
   closePanel: () => void;
   orgSlug: string;
   workspaceSlug: string;
+  /**
+   * Notify any subscribers that an entity was mutated by a panel — the panel
+   * (PanelShell) is rendered as a sibling of the page content, not a child of
+   * it, so a page's own client state (e.g. RoadmapBoard's optimistic column
+   * state) can't receive the update via props. This is the escape hatch: the
+   * panel calls notifyEntityMutated after a successful mutation, and any
+   * page-level component that cares subscribes with subscribeEntityMutated.
+   */
+  notifyEntityMutated: (type: EntityPanelType, id: string, patch?: EntityMutationPatch) => void;
+  subscribeEntityMutated: (type: EntityPanelType, listener: EntityMutationListener) => () => void;
 };
 
 const PanelContext = createContext<PanelContextValue | null>(null);
@@ -102,9 +120,43 @@ export function PanelProvider({
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [router, pathname, searchParams]);
 
+  // Ref, not state — subscriber bookkeeping shouldn't trigger a re-render of
+  // every panel consumer every time a board mounts/unmounts a listener.
+  const listenersRef = useRef<Map<EntityPanelType, Set<EntityMutationListener>>>(new Map());
+
+  const subscribeEntityMutated = useCallback(
+    (type: EntityPanelType, listener: EntityMutationListener) => {
+      let set = listenersRef.current.get(type);
+      if (!set) {
+        set = new Set();
+        listenersRef.current.set(type, set);
+      }
+      set.add(listener);
+      return () => {
+        set.delete(listener);
+      };
+    },
+    []
+  );
+
+  const notifyEntityMutated = useCallback(
+    (type: EntityPanelType, id: string, patch?: EntityMutationPatch) => {
+      listenersRef.current.get(type)?.forEach((listener) => listener(id, patch));
+    },
+    []
+  );
+
   const value = useMemo(
-    () => ({ panel, openPanel, closePanel, orgSlug, workspaceSlug }),
-    [panel, openPanel, closePanel, orgSlug, workspaceSlug]
+    () => ({
+      panel,
+      openPanel,
+      closePanel,
+      orgSlug,
+      workspaceSlug,
+      notifyEntityMutated,
+      subscribeEntityMutated,
+    }),
+    [panel, openPanel, closePanel, orgSlug, workspaceSlug, notifyEntityMutated, subscribeEntityMutated]
   );
 
   return <PanelContext.Provider value={value}>{children}</PanelContext.Provider>;

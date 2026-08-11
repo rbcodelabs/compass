@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useCallback } from "react";
+import { useState, useTransition, useCallback, useEffect } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -117,7 +117,7 @@ function cardDataFromPromotion(
   };
 }
 
-function buildColumnMap(items: RoadmapCardData[]): ColumnMap {
+export function buildColumnMap(items: RoadmapCardData[]): ColumnMap {
   // Exhaustive over every horizon so columns[horizon] is never undefined at
   // runtime, even for horizons that currently hold no items.
   const map = Object.fromEntries(HORIZONS.map((h) => [h, [] as RoadmapCardData[]])) as ColumnMap;
@@ -138,6 +138,36 @@ function findHorizon(columns: ColumnMap, itemId: string): Horizon | null {
   return null;
 }
 
+/**
+ * Move a card into `targetHorizon`, wherever it currently lives in `columns`.
+ * Used to apply an out-of-band "this item is now horizon X" update (e.g. a
+ * launch tier picked in the roadmap-item panel, which the board otherwise has
+ * no way to learn about — see the subscribeEntityMutated effect below) to the
+ * board's client-only optimistic state, without a full data refetch.
+ *
+ * No-op (returns the same `columns` reference) if the card is already in
+ * `targetHorizon` or isn't found in any column, so callers can pass this
+ * straight to a setState updater without an extra guard.
+ */
+export function moveCardToHorizon(
+  columns: ColumnMap,
+  itemId: string,
+  targetHorizon: Horizon
+): ColumnMap {
+  const sourceHorizon = findHorizon(columns, itemId);
+  if (!sourceHorizon || sourceHorizon === targetHorizon) return columns;
+
+  const item = columns[sourceHorizon].find((i) => i.id === itemId);
+  if (!item) return columns;
+  const moved = { ...item, horizon: targetHorizon };
+
+  return {
+    ...columns,
+    [sourceHorizon]: columns[sourceHorizon].filter((i) => i.id !== itemId),
+    [targetHorizon]: [...columns[targetHorizon], moved],
+  };
+}
+
 export function RoadmapBoard({
   initialItems,
   workspaceId,
@@ -151,7 +181,7 @@ export function RoadmapBoard({
   squads,
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/roadmap`;
-  const { openPanel } = usePanelContext();
+  const { openPanel, subscribeEntityMutated } = usePanelContext();
 
   const [columns, setColumns] = useState<ColumnMap>(() => buildColumnMap(initialItems));
   const [unscheduled, setUnscheduled] = useState<UnscheduledItem[]>(unscheduledItems ?? []);
@@ -170,6 +200,19 @@ export function RoadmapBoard({
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  // Dropping a card on Launching opens the roadmap-item panel (see
+  // handleDragEnd below) instead of moving it directly — LAUNCHING requires a
+  // tier + checklist, which only setLaunchTier can create. That panel is a
+  // sibling of this board, not a child, so once the user actually picks a
+  // tier there, this is how the board learns about it and finishes the move
+  // it optimistically reverted on drop.
+  useEffect(() => {
+    return subscribeEntityMutated("roadmapItem", (id, patch) => {
+      if (!patch?.horizon) return;
+      setColumns((prev) => moveCardToHorizon(prev, id, patch.horizon!));
+    });
+  }, [subscribeEntityMutated]);
 
   // Shared by both the drag-and-drop path and the quick-add menu fallback.
   async function scheduleUnscheduledItem(item: UnscheduledItem, horizon: Horizon) {
