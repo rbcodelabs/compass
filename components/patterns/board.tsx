@@ -21,8 +21,15 @@ type BoardColumnProps = Omit<ComponentProps<"section">, "title"> & {
 export function BoardColumn({ title, count, description, accent, actions, children, emptyState, footer, className, bodyClassName, bodyRef, bodyId, ...props }: BoardColumnProps) {
   const accents = { neutral: "bg-status-neutral", info: "bg-status-info", success: "bg-status-success", warning: "bg-status-warning", danger: "bg-status-danger" };
   return (
-    <section className={cn("w-72 shrink-0 snap-start rounded-xl border border-border-default bg-surface-inset p-3", className)} {...props}>
-      <header className="mb-3">
+    <section className={cn("flex w-72 shrink-0 snap-start flex-col rounded-xl border border-border-default bg-surface-inset p-3", className)} {...props}>
+      {/*
+        md+: the header pins to the top of THIS column's own scroll region (the body div
+        below), so it stays visible while just that column's cards scroll — no coordination
+        needed with the page header's height since each column scrolls independently, not
+        the shared page scroll. Below md, left as normal flow: mobile keeps today's
+        whole-page-scrolls behavior unchanged.
+      */}
+      <header className="mb-3 shrink-0 md:sticky md:top-0 md:z-10 md:-mx-3 md:-mt-3 md:bg-surface-inset md:px-3 md:pt-3 md:pb-3">
         <div className="flex items-center gap-2">
           {accent && <span aria-hidden className={cn("h-4 w-1 rounded-full", accents[accent])} />}
           <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">{title}</h3>
@@ -31,8 +38,8 @@ export function BoardColumn({ title, count, description, accent, actions, childr
         </div>
         {description && <div className="mt-1 text-xs text-text-subtle">{description}</div>}
       </header>
-      <div id={bodyId} ref={bodyRef} className={cn("space-y-3", bodyClassName)}>{children || emptyState}</div>
-      {footer && <div className="mt-3">{footer}</div>}
+      <div id={bodyId} ref={bodyRef} className={cn("space-y-3 md:max-h-[65vh] md:overflow-y-auto md:overscroll-contain", bodyClassName)}>{children || emptyState}</div>
+      {footer && <div className="mt-3 shrink-0">{footer}</div>}
     </section>
   );
 }

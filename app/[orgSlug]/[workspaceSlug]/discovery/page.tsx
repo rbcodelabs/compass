@@ -134,6 +134,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       <PageHeader
         title="Discovery"
         description={<>Opportunity Solution Tree for {workspace.name}</>}
+        sticky
       />
 
       <Suspense>
