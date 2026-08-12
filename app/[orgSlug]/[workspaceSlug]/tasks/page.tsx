@@ -129,7 +129,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
 
   return (
     <div className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-h-0">
-      <PageHeader title="Tasks" description={view === "list" ? "A flat, filterable list — good for tracking a handful of high-priority initiatives." : "Drag tasks between columns to update status. Blocked is its own column."} actions={<Suspense><TasksViewToggle view={view} /></Suspense>} />
+      <PageHeader title="Tasks" description={view === "list" ? "A flat, filterable list — good for tracking a handful of high-priority initiatives." : "Drag tasks between columns to update status. Blocked is its own column."} actions={<Suspense><TasksViewToggle view={view} /></Suspense>} sticky />
 
       <div className="shrink-0 flex flex-col gap-2">
         <Suspense>

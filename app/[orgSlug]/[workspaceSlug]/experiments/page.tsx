@@ -101,7 +101,7 @@ export default async function ExperimentsPage({
           squads={squads}
           assumptions={assumptions}
           prefillAssumptionId={prefillAssumptionId ?? null}
-        />} />
+        />} sticky />
 
       <Suspense>
         <SquadFilterBar squads={squads} />

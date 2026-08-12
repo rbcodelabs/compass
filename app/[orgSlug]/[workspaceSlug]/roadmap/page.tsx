@@ -225,6 +225,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
         title="Roadmap"
         description={view === "timeline" ? "See when items are planned to start and finish." : "Drag items between horizons to update your plan."}
         actions={<Suspense><RoadmapViewToggle view={view} /></Suspense>}
+        sticky
       />
 
       <Suspense>
