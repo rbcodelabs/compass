@@ -93,15 +93,15 @@ export function DocVersionHistoryPanel({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col">
-          <SheetHeader className="px-4 pt-4 pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
-            <SheetTitle className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+          <SheetHeader className="px-4 pt-4 pb-2 border-b border-border-default shrink-0">
+            <SheetTitle className="text-sm font-semibold text-text-primary">
               Version History
             </SheetTitle>
           </SheetHeader>
 
           <div className="flex-1 overflow-y-auto min-h-0">
             {error && (
-              <p className="px-4 pt-3 text-xs text-red-600" role="alert">
+              <p className="px-4 pt-3 text-xs text-status-danger" role="alert">
                 {error}
               </p>
             )}
@@ -141,13 +141,13 @@ function VersionList({
 }) {
   return (
     <div className="p-2">
-      <div className="px-2 py-2 mb-1 rounded-md bg-slate-50 dark:bg-slate-900">
-        <p className="text-sm font-medium text-slate-900 dark:text-slate-50">{currentTitle || "Untitled"}</p>
-        <p className="text-xs text-slate-500 dark:text-slate-400">Current version</p>
+      <div className="px-2 py-2 mb-1 rounded-md bg-surface-inset">
+        <p className="text-sm font-medium text-text-primary">{currentTitle || "Untitled"}</p>
+        <p className="text-xs text-text-subtle">Current version</p>
       </div>
 
       {versions.length === 0 ? (
-        <p className="text-xs text-slate-400 px-2 py-3">
+        <p className="text-xs text-text-subtle px-2 py-3">
           No saved versions yet. Versions appear here automatically as you edit, or you can save a
           named snapshot from the toolbar.
         </p>
@@ -159,18 +159,18 @@ function VersionList({
                 type="button"
                 onClick={() => onSelect(v.id)}
                 disabled={loadingId === v.id}
-                className="w-full text-left px-2 py-2 rounded-md text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+                className="w-full text-left px-2 py-2 rounded-md text-sm hover:bg-surface-interactive transition-colors disabled:opacity-50"
               >
                 {v.label && (
-                  <span className="inline-block mb-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                  <span className="inline-block mb-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide bg-status-info-surface text-status-info">
                     {v.label}
                   </span>
                 )}
-                <p className="text-slate-700 dark:text-slate-200">
+                <p className="text-text-secondary">
                   {v.createdByName ?? "Unknown"}
                   {loadingId === v.id && "…"}
                 </p>
-                <p className="text-xs text-slate-400" title={v.createdAt.toISOString()}>
+                <p className="text-xs text-text-subtle" title={v.createdAt.toISOString()}>
                   {relativeTime(v.createdAt)}
                 </p>
               </button>
@@ -202,19 +202,19 @@ function VersionDiffView({
       <button
         type="button"
         onClick={onBack}
-        className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 self-start"
+        className="text-xs text-text-subtle hover:text-text-primary self-start"
       >
         ← Back to versions
       </button>
 
       <div>
         {version.label && (
-          <span className="inline-block mb-1 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+          <span className="inline-block mb-1 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide bg-status-info-surface text-status-info">
             {version.label}
           </span>
         )}
-        <p className="text-sm font-medium text-slate-900 dark:text-slate-50">{version.title || "Untitled"}</p>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
+        <p className="text-sm font-medium text-text-primary">{version.title || "Untitled"}</p>
+        <p className="text-xs text-text-subtle">
           {version.createdByName ?? "Unknown"} — {relativeTime(version.createdAt)}
         </p>
       </div>
@@ -233,16 +233,16 @@ function VersionDiffView({
 
       <div
         data-testid="doc-version-diff"
-        className="text-sm leading-relaxed whitespace-pre-wrap break-words rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-3"
+        className="text-sm leading-relaxed whitespace-pre-wrap break-words rounded-md border border-border-default bg-surface-card p-3"
       >
         {diffs.map(([op, text], i) => (
           <span
             key={i}
             className={cn(
               op === diff_match_patch.DIFF_INSERT &&
-                "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
+                "bg-status-success-surface text-status-success",
               op === diff_match_patch.DIFF_DELETE &&
-                "bg-red-100 text-red-900 line-through dark:bg-red-950 dark:text-red-300"
+                "bg-status-danger-surface text-status-danger line-through"
             )}
           >
             {text}

@@ -243,7 +243,7 @@ export function DocEditor({ doc, versions, revalidatePathStr }: DocEditorProps) 
         >
           <Italic className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-slate-200 mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1" />
         <ToolbarButton
           onClick={() =>
             editor.chain().focus().toggleHeading({ level: 1 }).run()
@@ -271,7 +271,7 @@ export function DocEditor({ doc, versions, revalidatePathStr }: DocEditorProps) 
         >
           <Heading3 className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-slate-200 mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1" />
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBulletList().run()}
           isActive={editor.isActive("bulletList")}
@@ -293,11 +293,11 @@ export function DocEditor({ doc, versions, revalidatePathStr }: DocEditorProps) 
         >
           <Code2 className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-slate-200 mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1" />
         <ToolbarButton onClick={handleImageButtonClick} title="Add image">
           <ImageIcon className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-slate-200 mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1" />
         <ToolbarButton onClick={() => setHistoryOpen(true)} title="Version history">
           <History className="w-4 h-4" />
         </ToolbarButton>
@@ -309,12 +309,12 @@ export function DocEditor({ doc, versions, revalidatePathStr }: DocEditorProps) 
             <BookmarkPlus className="w-4 h-4" />
           </ToolbarButton>
           {showSaveVersionInput && (
-            <div className="absolute z-10 mt-1 p-2 bg-white border border-slate-200 rounded-lg shadow-md flex items-center gap-1.5">
+            <div className="absolute z-10 mt-1 p-2 bg-surface-card border border-border-default rounded-lg shadow-md flex items-center gap-1.5">
               <input
                 type="text"
                 autoFocus
                 placeholder="Label (optional)"
-                className="w-40 text-sm border border-slate-200 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400"
+                className="w-40 text-sm border border-border-default rounded px-2 py-1 outline-none focus:ring-1 focus:ring-border-focus"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleSaveVersion(e.currentTarget.value);
                   if (e.key === "Escape") setShowSaveVersionInput(false);
