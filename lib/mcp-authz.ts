@@ -202,6 +202,7 @@ export type WorkspaceEntityType =
   | "task"
   | "feedbackItem"
   | "doc"
+  | "docVersion"
   | "evidence"
   | "opportunityScore"
   | "workspaceScoringConfig"
@@ -257,6 +258,9 @@ const WORKSPACE_ENTITY_RESOLVERS: Record<
     (await p.feedbackItem.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   doc: async (p, id) =>
     (await p.doc.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
+  docVersion: async (p, id) =>
+    (await p.docVersion.findUnique({ where: { id }, select: { doc: { select: { workspaceId: true } } } }))
+      ?.doc?.workspaceId ?? null,
   evidence: async (p, id) =>
     (await p.evidence.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   opportunityScore: async (p, id) =>

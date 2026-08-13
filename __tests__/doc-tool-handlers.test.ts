@@ -24,10 +24,22 @@ const mockRoadmapItem = {
   findUnique: vi.fn(),
 }
 
+// updateDoc now snapshots the doc's pre-change state via
+// maybeSnapshotDocVersion (lib/doc-versions.ts) before applying an update —
+// that module resolves getPrisma() from this same mock, so docVersion needs
+// mocking here too even though this file's own assertions are about
+// frontmatter handling, not versioning (see doc-version-tool-handlers.test.ts
+// and lib/doc-versions.test.ts for that coverage).
+const mockDocVersion = {
+  findFirst: vi.fn(),
+  create: vi.fn(),
+}
+
 const mockPrisma = {
   doc: mockDoc,
   workspace: mockWorkspace,
   roadmapItem: mockRoadmapItem,
+  docVersion: mockDocVersion,
 }
 
 vi.mock("@/lib/db", () => ({
@@ -56,6 +68,8 @@ beforeEach(() => {
     Promise.resolve({ id: DOC_ID, ...data })
   )
   mockDoc.findUnique.mockResolvedValue({ title: "Test Doc" })
+  mockDocVersion.findFirst.mockResolvedValue(null)
+  mockDocVersion.create.mockResolvedValue({ id: "version-1" })
   mockDoc.update.mockImplementation(({ data }) =>
     Promise.resolve({ id: DOC_ID, title: "Test Doc", icon: null, ...data, updatedAt: new Date() })
   )

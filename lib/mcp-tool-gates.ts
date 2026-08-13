@@ -226,6 +226,10 @@ export const TOOL_GATES: Record<string, Gate> = {
     if (x.roadmapItemId) await assertChildInDeclaredWorkspace(a, "roadmapItem", x.roadmapItemId, x.workspaceId)
   },
   update_doc: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
+  create_doc_version: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
+  list_doc_versions: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
+  get_doc_version: async (a, x) => void (await assertEntityAccess(a, "docVersion", x.versionId)),
+  restore_doc_version: async (a, x) => void (await assertEntityAccess(a, "docVersion", x.versionId)),
 
   // Help ----------------------------------------------------------------
   // search_help / get_help read Compass's own static product documentation

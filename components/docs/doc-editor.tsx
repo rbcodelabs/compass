@@ -17,10 +17,16 @@ import {
   ListOrdered,
   Code2,
   ImageIcon,
+  History,
+  BookmarkPlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { updateDoc } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+import { updateDoc, createDocVersion } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
 import { DocProperties, type DocMetadata } from "@/components/docs/doc-properties";
+import {
+  DocVersionHistoryPanel,
+  type DocVersionListItem,
+} from "@/components/docs/doc-version-history-panel";
 
 interface DocEditorProps {
   doc: {
@@ -31,16 +37,21 @@ interface DocEditorProps {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     metadata: any;
   };
+  versions: DocVersionListItem[];
   revalidatePathStr: string;
 }
 
 type SaveStatus = "idle" | "saving" | "saved";
 
-export function DocEditor({ doc, revalidatePathStr }: DocEditorProps) {
+export function DocEditor({ doc, versions, revalidatePathStr }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [currentContent, setCurrentContent] = useState(doc.content);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [showSaveVersionInput, setShowSaveVersionInput] = useState(false);
+  const [isSavingVersion, setIsSavingVersion] = useState(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -72,7 +83,9 @@ export function DocEditor({ doc, revalidatePathStr }: DocEditorProps) {
     content: doc.content ?? "",
     onUpdate: ({ editor }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      debouncedSaveContent((editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown());
+      const markdown = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();
+      setCurrentContent(markdown);
+      debouncedSaveContent(markdown);
     },
     editorProps: {
       handleDrop: () => false,
@@ -136,6 +149,22 @@ export function DocEditor({ doc, revalidatePathStr }: DocEditorProps) {
     await uploadAndInsertImage(file);
     // Reset so the same file can be re-selected
     e.target.value = "";
+  }
+
+  async function handleSaveVersion(label: string) {
+    setIsSavingVersion(true);
+    try {
+      await createDocVersion(doc.id, label || undefined, revalidatePathStr);
+      setShowSaveVersionInput(false);
+    } finally {
+      setIsSavingVersion(false);
+    }
+  }
+
+  function handleRestored(content: string | null, restoredTitle: string) {
+    editor?.commands.setContent(content ?? "");
+    setCurrentContent(content);
+    setTitle(restoredTitle);
   }
 
   if (!editor) return null;
@@ -214,7 +243,7 @@ export function DocEditor({ doc, revalidatePathStr }: DocEditorProps) {
         >
           <Italic className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-slate-200 mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1" />
         <ToolbarButton
           onClick={() =>
             editor.chain().focus().toggleHeading({ level: 1 }).run()
@@ -242,7 +271,7 @@ export function DocEditor({ doc, revalidatePathStr }: DocEditorProps) {
         >
           <Heading3 className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-slate-200 mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1" />
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBulletList().run()}
           isActive={editor.isActive("bulletList")}
@@ -264,10 +293,37 @@ export function DocEditor({ doc, revalidatePathStr }: DocEditorProps) {
         >
           <Code2 className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-slate-200 mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1" />
         <ToolbarButton onClick={handleImageButtonClick} title="Add image">
           <ImageIcon className="w-4 h-4" />
         </ToolbarButton>
+        <div className="w-px h-5 bg-border-default mx-1" />
+        <ToolbarButton onClick={() => setHistoryOpen(true)} title="Version history">
+          <History className="w-4 h-4" />
+        </ToolbarButton>
+        <div className="relative">
+          <ToolbarButton
+            onClick={() => setShowSaveVersionInput((v) => !v)}
+            title="Save named version"
+          >
+            <BookmarkPlus className="w-4 h-4" />
+          </ToolbarButton>
+          {showSaveVersionInput && (
+            <div className="absolute z-10 mt-1 p-2 bg-surface-card border border-border-default rounded-lg shadow-md flex items-center gap-1.5">
+              <input
+                type="text"
+                autoFocus
+                placeholder="Label (optional)"
+                className="w-40 text-sm border border-border-default rounded px-2 py-1 outline-none focus:ring-1 focus:ring-border-focus"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveVersion(e.currentTarget.value);
+                  if (e.key === "Escape") setShowSaveVersionInput(false);
+                }}
+                disabled={isSavingVersion}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Hidden file input */}
@@ -286,6 +342,16 @@ export function DocEditor({ doc, revalidatePathStr }: DocEditorProps) {
           className="min-h-[400px] prose-custom"
         />
       </div>
+
+      <DocVersionHistoryPanel
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        currentTitle={title}
+        currentContent={currentContent}
+        versions={versions}
+        revalidatePathStr={revalidatePathStr}
+        onRestored={handleRestored}
+      />
     </div>
   );
 }

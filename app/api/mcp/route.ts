@@ -29,6 +29,12 @@ import {
   updateDoc,
 } from "@/lib/doc-tool-handlers"
 import {
+  createDocVersion,
+  listDocVersions,
+  getDocVersion,
+  restoreDocVersion,
+} from "@/lib/doc-version-tool-handlers"
+import {
   updateAssumption,
   deleteAssumption,
 } from "@/lib/assumption-tool-handlers"
@@ -2091,6 +2097,65 @@ const _handler = createMcpHandler(
         },
       },
       updateDoc
+    )
+
+    register(
+      "create_doc_version",
+      {
+        title: "Create Doc Version",
+        description:
+          "Saves a manual, named snapshot of a doc's current content. Unlike the automatic " +
+          "snapshots taken before every overwriting update_doc call, this always writes a new " +
+          "version -- it never gets coalesced away by the 5-minute same-author window.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the doc to snapshot"),
+          label: z.string().optional().describe("Optional label for this snapshot, e.g. 'Before big rewrite'"),
+          authorName: z.string().min(1).describe("Name to attribute this snapshot to"),
+        },
+      },
+      createDocVersion
+    )
+
+    register(
+      "list_doc_versions",
+      {
+        title: "List Doc Versions",
+        description:
+          "Lists all saved versions of a doc (id, label, author, created date), newest first, " +
+          "alongside the doc's own current title and last-updated time as a reference point. " +
+          "Does not include full content -- call get_doc_version for that.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the doc"),
+        },
+      },
+      listDocVersions
+    )
+
+    register(
+      "get_doc_version",
+      {
+        title: "Get Doc Version",
+        description: "Returns the full content/title/metadata/icon snapshot of a single saved doc version.",
+        inputSchema: {
+          versionId: z.string().uuid().describe("UUID of the doc version"),
+        },
+      },
+      getDocVersion
+    )
+
+    register(
+      "restore_doc_version",
+      {
+        title: "Restore Doc Version",
+        description:
+          "Restores a doc's live content to a previously saved version. The doc's CURRENT state is " +
+          "snapshotted first (labeled 'Before restore'), so restoring never loses data -- you can " +
+          "always restore back to what was there before.",
+        inputSchema: {
+          versionId: z.string().uuid().describe("UUID of the doc version to restore"),
+        },
+      },
+      restoreDocVersion
     )
 
     // ════════════════════════════════════════════════════════════════
