@@ -812,8 +812,34 @@ model Doc {
   createdById   String?      @map("created_by_id") @db.Uuid
   updatedById   String?      @map("updated_by_id") @db.Uuid
   source        String       @default("UI") @map("source") @db.VarChar(20)
+  versions      DocVersion[]
 
   @@map("docs")
+}
+
+/// Point-in-time snapshot of a Doc's content, taken automatically right before
+/// an overwriting save (coalesced -- see lib/doc-versions.ts) or explicitly via
+/// a "named" manual snapshot (label set, always written, never coalesced).
+/// Insert-only: rows are never updated, only created and (on doc deletion)
+/// bulk-deleted. No relationMode cascade on DSQL -- deleteDoc must delete
+/// this table's rows for a doc before deleting the Doc row itself.
+model DocVersion {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  docId         String   @map("doc_id") @db.Uuid
+  title         String   @db.VarChar(255)
+  content       String?  @db.Text
+  metadata      Json?    @db.Json
+  icon          String?  @db.VarChar(50)
+  /// Set only on manual "named" snapshots (bypasses coalescing). Null for
+  /// ordinary auto-snapshots taken before an overwriting save.
+  label         String?  @db.VarChar(100)
+  createdById   String?  @map("created_by_id") @db.Uuid
+  createdByName String?  @map("created_by_name") @db.VarChar(255)
+  createdAt     DateTime @default(now()) @map("created_at")
+  doc           Doc      @relation(fields: [docId], references: [id])
+
+  @@index([docId, createdAt])
+  @@map("doc_versions")
 }
 
 // ─── Canvas Viewer ────────────────────────────────────────────────────────────

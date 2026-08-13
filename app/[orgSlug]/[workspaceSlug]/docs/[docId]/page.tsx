@@ -46,11 +46,21 @@ export default async function DocPage({ params }: Props) {
 
   if (!doc) notFound();
 
+  // Lightweight fields only (no content) -- the full snapshot is fetched on
+  // demand when a version is opened in the history panel, so opening a doc
+  // doesn't pull every historical content blob along with it.
+  const versions = await prisma.docVersion.findMany({
+    where: { docId },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, label: true, createdByName: true, createdAt: true },
+  });
+
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/docs/${docId}`;
 
   return (
     <DocEditor
       doc={doc}
+      versions={versions}
       revalidatePathStr={revalidatePathStr}
     />
   );

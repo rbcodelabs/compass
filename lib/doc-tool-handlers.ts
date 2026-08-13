@@ -14,6 +14,14 @@ import getPrisma from "@/lib/db"
 import matter from "gray-matter"
 import { Prisma } from "@prisma/client"
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates"
+import { maybeSnapshotDocVersion } from "@/lib/doc-versions"
+
+// MCP callers have no session-derived identity to snapshot under (unlike the
+// UI's updateDoc server action, which uses session.user.id/name) —
+// validateMcpAuth only gates the request once at the route level, not a
+// per-user identity carried into handlers. Mirrors how SolutionComment
+// distinguishes MCP callers via a fixed default rather than a resolved user.
+const MCP_AUTHOR_NAME = "MCP Agent"
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -344,6 +352,13 @@ export async function updateDoc({
 
   const { body, metadata } =
     content !== undefined ? parseContent(content) : { body: undefined, metadata: undefined }
+
+  // Snapshot the doc's pre-change state before applying the new values —
+  // but only when this call actually changes something, so a no-op call
+  // never creates a version.
+  if (title !== undefined || content !== undefined || icon !== undefined) {
+    await maybeSnapshotDocVersion(docId, { authorName: MCP_AUTHOR_NAME })
+  }
 
   // Build update payload imperatively to satisfy Prisma's union type constraints
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
