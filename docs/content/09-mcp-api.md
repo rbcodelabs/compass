@@ -159,6 +159,22 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 
 Every `update_doc` call also automatically snapshots the doc's pre-change state before applying the new values (coalesced to one snapshot per 5-minute window per author, so an agent making several quick edits in a row doesn't flood the history) — you don't need to call `create_doc_version` yourself unless you want a deliberately named checkpoint.
 
+### Doc inline comments
+
+Google-Docs-style comments anchored to a span of a doc's text (or left as a general, doc-level note). Threads are one level deep: a root comment optionally carries an anchor; replies attach to a root and never carry their own anchor. Anchors are stored separately and never embedded in the doc's markdown.
+
+| Tool | Description |
+| --- | --- |
+| `add_doc_comment` | Add a comment to a doc. Params: `docId`, `body`, `authorName`, plus optional `parentId` (reply to a root comment) and optional anchor fields (`anchorText`, `anchorPrefix`, `anchorSuffix`, `anchorStart`, `anchorEnd`). Omit all anchor fields for a doc-level general comment. Replies never anchor. Returns the new comment's `ID:` line |
+| `list_doc_comments` | List a doc's comments grouped into threads (roots with their replies), oldest-first. Params: `docId`, optional `status` (`OPEN` or `RESOLVED`) to filter |
+| `get_doc_comment` | Return a single comment's full body, author, status, anchor context, and timestamps. Param: `commentId` |
+| `update_doc_comment` | Edit a comment's body text (does not change status or anchor). Params: `commentId`, `body` |
+| `delete_doc_comment` | Delete a comment. Deleting a root also deletes all of its replies. Param: `commentId` |
+| `resolve_doc_comment` | Mark a comment `RESOLVED` — it drops out of the doc's default open-only view and stops highlighting. Param: `commentId` |
+| `reopen_doc_comment` | Reopen a resolved comment, setting its status back to `OPEN`. Param: `commentId` |
+
+Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-text projection**, not its raw markdown — the same projection the editor highlights against. In practice agents most often add doc-level or freshly-computed anchored comments; the UI is what captures precise anchors from a live text selection.
+
 ### Help
 
 | Tool | Description |

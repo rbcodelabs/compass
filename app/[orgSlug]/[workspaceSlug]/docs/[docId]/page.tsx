@@ -55,12 +55,34 @@ export default async function DocPage({ params }: Props) {
     select: { id: true, label: true, createdByName: true, createdAt: true },
   });
 
+  // All inline comments (open + resolved) for the doc — the editor highlights
+  // the open/anchored ones and the sidebar filters resolved behind a toggle.
+  const comments = await prisma.docComment.findMany({
+    where: { docId },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      parentId: true,
+      body: true,
+      status: true,
+      anchorText: true,
+      anchorStart: true,
+      anchorEnd: true,
+      anchorPrefix: true,
+      anchorSuffix: true,
+      authorName: true,
+      authorType: true,
+      createdAt: true,
+    },
+  });
+
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/docs/${docId}`;
 
   return (
     <DocEditor
       doc={doc}
       versions={versions}
+      comments={comments}
       revalidatePathStr={revalidatePathStr}
     />
   );

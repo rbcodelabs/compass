@@ -230,6 +230,13 @@ export const TOOL_GATES: Record<string, Gate> = {
   list_doc_versions: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
   get_doc_version: async (a, x) => void (await assertEntityAccess(a, "docVersion", x.versionId)),
   restore_doc_version: async (a, x) => void (await assertEntityAccess(a, "docVersion", x.versionId)),
+  add_doc_comment: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
+  list_doc_comments: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
+  get_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
+  update_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
+  delete_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
+  resolve_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
+  reopen_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
 
   // Help ----------------------------------------------------------------
   // search_help / get_help read Compass's own static product documentation

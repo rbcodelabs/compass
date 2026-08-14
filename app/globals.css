@@ -210,6 +210,22 @@ body {
   @apply text-muted-foreground/60 float-left pointer-events-none;
 }
 
+/* Inline comment anchor highlight — a view-layer decoration, never part of the
+   saved markdown. Uses semantic status tokens (so it auto-adapts to dark mode)
+   rather than a raw amber/yellow. The active thread gets a stronger surface +
+   underline so clicking a thread in the sidebar visibly focuses its anchor. */
+.doc-comment-highlight {
+  background-color: var(--status-warning-surface);
+  border-bottom: 2px solid var(--status-warning);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.doc-comment-highlight-active {
+  background-color: var(--status-info-surface);
+  border-bottom-color: var(--status-info);
+}
+
 /* ── Docs prose content (/help) ──────────────────────────────────────── */
 .docs-content h1 { @apply text-3xl font-bold mb-4 mt-8 text-slate-900; }
 .docs-content h2 { @apply text-xl font-semibold mb-3 mt-7 text-slate-800 border-b border-slate-200 pb-2; }

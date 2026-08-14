@@ -66,6 +66,24 @@ Every page keeps a history of past versions, so you can always see what changed 
 
 Version history is also available over MCP — see [MCP API](/help/09-mcp-api) for `create_doc_version`, `list_doc_versions`, `get_doc_version`, and `restore_doc_version`.
 
+## Inline Comments
+
+Leave Google-Docs-style comments anchored to a specific span of a page, so discussion stays attached to the exact text it's about.
+
+**Adding a comment.** Select any text in the editor, then click the **comment icon** (the speech bubble with a plus) in the toolbar — it only lights up once you've selected something. A small composer appears; type your comment and click **Comment** (or press ⌘/Ctrl+Enter). The commented text is highlighted in the page, and the comment opens in the Comments sidebar.
+
+**The highlight is never saved into your content.** Comments are stored separately and the highlight is drawn on top at display time — your page's markdown stays exactly as you wrote it. That also means a comment survives edits: as you rewrite around it, Compass re-locates the anchored text and keeps the highlight in place.
+
+**Orphaned comments.** If the text a comment was anchored to is deleted or changed beyond recognition, the comment isn't lost — it's flagged **orphaned** in the sidebar (no highlight to show), and you can still read, reply to, resolve, or delete it.
+
+**Threads and replies.** Open the Comments sidebar from the **speech-bubble icon** in the toolbar (a badge shows the open-comment count). Each comment is a thread; type in the **Reply** box to respond. Threads are one level deep — replies attach to the original comment, not to each other.
+
+**Resolving.** Click **Resolve** on a thread to mark it done — it drops out of the default open-only view and its highlight disappears. A **Show resolved** toggle at the bottom of the sidebar brings resolved threads back if you need them, and each has a **Reopen** button. You can also delete a thread outright (deleting a comment removes its replies too).
+
+**Doc-level comments.** A comment doesn't have to be anchored — over MCP you can add a general, page-level comment with no anchored text (see below). In the sidebar these are labelled **general**.
+
+Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api) for `add_doc_comment`, `list_doc_comments`, `get_doc_comment`, `update_doc_comment`, `delete_doc_comment`, `resolve_doc_comment`, and `reopen_doc_comment`.
+
 ## Positioning & Messaging Briefs
 
 A Positioning & Messaging Brief is a Doc linked one-to-one to a Roadmap Item, used to nail down the story before a launch: problem statement, target audience, core message, proof points, and competitive differentiation. Create one via the MCP API's create_doc tool with docType set to GTM_POSITIONING_BRIEF and roadmapItemId set to the roadmap item it belongs to; if you do not pass explicit content, Compass fills in a five-section starter template you can edit like any other doc. Attempting to link a second brief to the same roadmap item is rejected, since the relationship is one-to-one.
