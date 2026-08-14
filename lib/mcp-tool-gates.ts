@@ -193,6 +193,7 @@ export const TOOL_GATES: Record<string, Gate> = {
   list_task_links: async (a, x) => void (await assertEntityAccess(a, "task", x.taskId)),
 
   // Feedback ----------------------------------------------------------------
+  create_feedback: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   list_feedback: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_feedback_item: async (a, x) => void (await assertEntityAccess(a, "feedbackItem", x.feedbackId)),
   update_feedback_status: async (a, x) => void (await assertEntityAccess(a, "feedbackItem", x.feedbackId)),

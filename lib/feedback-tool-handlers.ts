@@ -1,9 +1,70 @@
 /**
- * Handler functions for the three Feedback MCP tools.
+ * Handler functions for the Feedback MCP tools.
  * Extracted into this module so they can be unit-tested without the MCP server layer.
  */
 
 import getPrisma from "@/lib/db"
+import { validateFeedbackInput } from "@/lib/feedback"
+
+/**
+ * Creates a FeedbackItem directly via MCP — the internal/agent-facing
+ * counterpart to the public portal submission endpoint (POST
+ * /api/portal/{org}/{workspace}/feedback), which requires a browser session.
+ * Reuses the same title/description validation as the in-app "New Feedback"
+ * dialog. Marked source: "MCP" (see migration 016) to distinguish it from
+ * UI- and portal-submitted feedback.
+ */
+export async function createFeedback({
+  workspaceId,
+  title,
+  description,
+  type,
+  submitterName,
+  submitterEmail,
+}: {
+  workspaceId: string
+  title: string
+  description?: string
+  type?: "BUG" | "IDEA"
+  submitterName?: string
+  submitterEmail?: string
+}) {
+  const prisma = getPrisma()
+
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { id: true },
+  })
+  if (!workspace) {
+    return { content: [{ type: "text" as const, text: `No workspace found with id "${workspaceId}".` }] }
+  }
+
+  const validation = validateFeedbackInput({ title, description })
+  if (!validation.valid) {
+    return { content: [{ type: "text" as const, text: validation.error }] }
+  }
+
+  const item = await prisma.feedbackItem.create({
+    data: {
+      workspaceId,
+      title: validation.data.title,
+      description: validation.data.description,
+      type: type ?? "IDEA",
+      submitterName: submitterName?.trim() || null,
+      submitterEmail: submitterEmail?.trim() || null,
+      source: "MCP",
+    },
+  })
+
+  const lines = [
+    `**Feedback item created**`,
+    `ID: ${item.id}`,
+    `Title: ${item.title}`,
+    `Type: ${item.type}`,
+    `Status: ${item.status}`,
+  ]
+  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+}
 
 export async function getFeedbackItem({ feedbackId }: { feedbackId: string }) {
   const prisma = getPrisma()
