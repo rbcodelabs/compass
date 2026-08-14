@@ -813,8 +813,43 @@ model Doc {
   updatedById   String?      @map("updated_by_id") @db.Uuid
   source        String       @default("UI") @map("source") @db.VarChar(20)
   versions      DocVersion[]
+  comments      DocComment[]
 
   @@map("docs")
+}
+
+/// Inline anchored comment on a Doc (Google-Docs-style). Threads are exactly
+/// one level deep: a root comment (parentId null) optionally carries an anchor
+/// into the doc's plain-text projection; replies (parentId set) never carry an
+/// anchor. Anchors are NEVER embedded in Doc.content -- the markdown stays
+/// untouched. The highlight is resolved at render time (see
+/// lib/comment-anchor.ts + components/docs/comment-highlight-extension.ts).
+/// No relationMode cascade on DSQL -- deleting a root must deleteMany its
+/// replies first, and deleteDoc must bulk-delete this table's rows for a doc
+/// before deleting the Doc row itself.
+model DocComment {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  docId        String       @map("doc_id") @db.Uuid
+  parentId     String?      @map("parent_id") @db.Uuid
+  body         String       @db.Text
+  status       String       @default("OPEN") @map("status") @db.VarChar(20)
+  anchorText   String?      @map("anchor_text") @db.Text
+  anchorPrefix String?      @map("anchor_prefix") @db.VarChar(100)
+  anchorSuffix String?      @map("anchor_suffix") @db.VarChar(100)
+  anchorStart  Int?         @map("anchor_start")
+  anchorEnd    Int?         @map("anchor_end")
+  authorName   String       @map("author_name") @db.VarChar(255)
+  authorId     String?      @map("author_id") @db.Uuid
+  authorType   String       @default("HUMAN") @map("author_type") @db.VarChar(20)
+  source       String       @default("UI") @map("source") @db.VarChar(20)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @default(now()) @map("updated_at")
+  doc          Doc          @relation(fields: [docId], references: [id])
+  parent       DocComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  replies      DocComment[] @relation("CommentReplies")
+
+  @@index([docId, status])
+  @@map("doc_comments")
 }
 
 /// Point-in-time snapshot of a Doc's content, taken automatically right before

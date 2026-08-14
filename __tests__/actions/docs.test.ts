@@ -11,9 +11,14 @@ const mockDocVersion = {
   findUnique: vi.fn(),
 };
 
+const mockDocComment = {
+  deleteMany: vi.fn(),
+};
+
 const mockPrisma = {
   doc: mockDoc,
   docVersion: mockDocVersion,
+  docComment: mockDocComment,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -63,6 +68,7 @@ beforeEach(() => {
   mockDoc.update.mockResolvedValue({ id: "doc-1" });
   mockDoc.delete.mockResolvedValue({ id: "doc-1" });
   mockDocVersion.deleteMany.mockResolvedValue({ count: 0 });
+  mockDocComment.deleteMany.mockResolvedValue({ count: 0 });
   mockMaybeSnapshotDocVersion.mockResolvedValue(undefined);
   mockRestoreDocVersionCore.mockResolvedValue({
     id: "doc-1",
@@ -270,6 +276,15 @@ describe("deleteDoc", () => {
     const deleteVersionsOrder = mockDocVersion.deleteMany.mock.invocationCallOrder[0];
     const deleteDocOrder = mockDoc.delete.mock.invocationCallOrder[0];
     expect(deleteVersionsOrder).toBeLessThan(deleteDocOrder);
+  });
+
+  it("deletes DocComment rows for the doc before deleting the doc itself (no FK cascade on DSQL)", async () => {
+    await deleteDoc("doc-1", "/path");
+
+    expect(mockDocComment.deleteMany).toHaveBeenCalledWith({ where: { docId: "doc-1" } });
+    const deleteCommentsOrder = mockDocComment.deleteMany.mock.invocationCallOrder[0];
+    const deleteDocOrder = mockDoc.delete.mock.invocationCallOrder[0];
+    expect(deleteCommentsOrder).toBeLessThan(deleteDocOrder);
   });
 
   it("throws Unauthorized when session is missing", async () => {

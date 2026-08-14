@@ -35,6 +35,15 @@ import {
   restoreDocVersion,
 } from "@/lib/doc-version-tool-handlers"
 import {
+  addDocComment,
+  listDocComments,
+  getDocComment,
+  updateDocComment,
+  deleteDocComment,
+  resolveDocComment,
+  reopenDocComment,
+} from "@/lib/doc-comment-tool-handlers"
+import {
   updateAssumption,
   deleteAssumption,
 } from "@/lib/assumption-tool-handlers"
@@ -2156,6 +2165,113 @@ const _handler = createMcpHandler(
         },
       },
       restoreDocVersion
+    )
+
+    // ── Doc inline comments ─────────────────────────────────────────
+    register(
+      "add_doc_comment",
+      {
+        title: "Add Doc Comment",
+        description:
+          "Adds an inline comment to a doc. Omit all four anchor fields (anchorText, " +
+          "anchorPrefix, anchorSuffix, anchorStart, anchorEnd) for a doc-level general " +
+          "comment, or pass them to anchor the comment to a specific span of the doc's " +
+          "plain-text projection. Pass parentId to reply to an existing root comment — " +
+          "threads are only one level deep (you can't reply to a reply). Replies never " +
+          "carry an anchor.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the doc to comment on"),
+          body: z.string().min(1).describe("The comment text"),
+          authorName: z.string().min(1).describe("Name to attribute this comment to"),
+          parentId: z.string().uuid().optional().describe("UUID of the root comment to reply to (omit for a new thread)"),
+          anchorText: z.string().optional().describe("Exact selected text this comment anchors to (omit for a general comment)"),
+          anchorPrefix: z.string().optional().describe("~100 chars of text immediately before the anchor, for disambiguation"),
+          anchorSuffix: z.string().optional().describe("~100 chars of text immediately after the anchor, for disambiguation"),
+          anchorStart: z.number().int().optional().describe("Start offset of the anchor in the doc's plain-text projection"),
+          anchorEnd: z.number().int().optional().describe("End offset of the anchor in the doc's plain-text projection"),
+        },
+      },
+      addDocComment
+    )
+
+    register(
+      "list_doc_comments",
+      {
+        title: "List Doc Comments",
+        description:
+          "Lists a doc's inline comments grouped into threads (root comments with their " +
+          "replies), oldest-first. Optionally filter by status (OPEN or RESOLVED).",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the doc"),
+          status: z.enum(["OPEN", "RESOLVED"]).optional().describe("Only return comments with this status"),
+        },
+      },
+      listDocComments
+    )
+
+    register(
+      "get_doc_comment",
+      {
+        title: "Get Doc Comment",
+        description: "Returns a single doc comment's full body, author, status, anchor context, and timestamps.",
+        inputSchema: {
+          commentId: z.string().uuid().describe("UUID of the comment"),
+        },
+      },
+      getDocComment
+    )
+
+    register(
+      "update_doc_comment",
+      {
+        title: "Update Doc Comment",
+        description: "Edits a doc comment's body text. Does not change its status or anchor.",
+        inputSchema: {
+          commentId: z.string().uuid().describe("UUID of the comment to edit"),
+          body: z.string().min(1).describe("The new comment text (replaces the existing body)"),
+        },
+      },
+      updateDocComment
+    )
+
+    register(
+      "delete_doc_comment",
+      {
+        title: "Delete Doc Comment",
+        description:
+          "Deletes a doc comment. Deleting a root comment also deletes all of its replies " +
+          "(there is no undo).",
+        inputSchema: {
+          commentId: z.string().uuid().describe("UUID of the comment to delete"),
+        },
+      },
+      deleteDocComment
+    )
+
+    register(
+      "resolve_doc_comment",
+      {
+        title: "Resolve Doc Comment",
+        description:
+          "Marks a doc comment as RESOLVED. Resolved comments are hidden from the doc's " +
+          "default open-only view and their anchors stop highlighting.",
+        inputSchema: {
+          commentId: z.string().uuid().describe("UUID of the comment to resolve"),
+        },
+      },
+      resolveDocComment
+    )
+
+    register(
+      "reopen_doc_comment",
+      {
+        title: "Reopen Doc Comment",
+        description: "Reopens a previously resolved doc comment, setting its status back to OPEN.",
+        inputSchema: {
+          commentId: z.string().uuid().describe("UUID of the comment to reopen"),
+        },
+      },
+      reopenDocComment
     )
 
     // ════════════════════════════════════════════════════════════════

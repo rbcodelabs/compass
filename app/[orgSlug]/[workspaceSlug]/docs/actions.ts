@@ -4,6 +4,12 @@ import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
 import { createPositioningBriefCore } from "@/lib/positioning-brief";
 import { maybeSnapshotDocVersion, restoreDocVersionCore } from "@/lib/doc-versions";
+import {
+  createDocCommentCore,
+  listDocCommentsCore,
+  setDocCommentStatusCore,
+  deleteDocCommentCore,
+} from "@/lib/doc-comments";
 
 export async function createDoc(
   workspaceId: string,
@@ -144,9 +150,75 @@ export async function deleteDoc(docId: string, revalidatePathStr: string) {
   if (!session?.user?.id) throw new Error("Unauthorized");
   const prisma = getPrisma();
   // DSQL has no FK cascade (relationMode = "prisma" emulates referential
-  // integrity client-side under NoAction) — delete DocVersion rows first or
+  // integrity client-side under NoAction) — delete dependent rows first or
   // the doc.delete below throws on orphaned children.
   await prisma.docVersion.deleteMany({ where: { docId } });
+  await prisma.docComment.deleteMany({ where: { docId } });
   await prisma.doc.delete({ where: { id: docId } });
   revalidatePath(revalidatePathStr);
+}
+
+// ─── Inline comments ──────────────────────────────────────────────────────────
+// Thin session-authenticated wrappers over the shared core in lib/doc-comments.ts
+// (the same core the MCP tools call), attributing writes to the signed-in user.
+
+export async function addDocComment(
+  input: {
+    docId: string;
+    body: string;
+    parentId?: string | null;
+    anchorText?: string | null;
+    anchorPrefix?: string | null;
+    anchorSuffix?: string | null;
+    anchorStart?: number | null;
+    anchorEnd?: number | null;
+  },
+  revalidatePathStr: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const result = await createDocCommentCore({
+    ...input,
+    authorId: session.user.id,
+    authorName: session.user.name ?? session.user.email ?? "Unknown",
+    authorType: "HUMAN",
+    source: "UI",
+  });
+  if (!result.ok) throw new Error(`Could not add comment (${result.error})`);
+
+  revalidatePath(revalidatePathStr);
+  return result.comment;
+}
+
+export async function listDocComments(docId: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  return listDocCommentsCore(docId);
+}
+
+export async function resolveDocComment(
+  commentId: string,
+  resolved: boolean,
+  revalidatePathStr: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const updated = await setDocCommentStatusCore(commentId, resolved ? "RESOLVED" : "OPEN");
+  if (!updated) throw new Error("Comment not found");
+
+  revalidatePath(revalidatePathStr);
+  return updated;
+}
+
+export async function deleteDocComment(commentId: string, revalidatePathStr: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const result = await deleteDocCommentCore(commentId);
+  if (!result) throw new Error("Comment not found");
+
+  revalidatePath(revalidatePathStr);
+  return result;
 }
