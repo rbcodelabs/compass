@@ -129,6 +129,7 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 
 | Tool | Description |
 |---|---|
+| `create_feedback` | Create a new feedback item directly via MCP — the internal/agent-facing counterpart to the public portal submission endpoint, which requires a browser session. Defaults to type IDEA |
 | `list_feedback` | Fetch customer feedback items for a workspace, with vote counts, type (BUG/IDEA), and status |
 | `get_feedback_item` | Fetch full details for a single feedback item, including its linked opportunity if present |
 | `update_feedback_status` | Update a feedback item's status (OPEN, UNDER_REVIEW, PLANNED, CLOSED), with an optional note |

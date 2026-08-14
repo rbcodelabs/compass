@@ -11,6 +11,7 @@ import { validateMcpAuth } from "@/lib/mcp-auth"
 import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
 import {
+  createFeedback,
   getFeedbackItem,
   updateFeedbackStatus,
   linkFeedbackToOpportunity,
@@ -1850,6 +1851,27 @@ const _handler = createMcpHandler(
     // ════════════════════════════════════════════════════════════════
     // FEEDBACK
     // ════════════════════════════════════════════════════════════════
+
+    register(
+      "create_feedback",
+      {
+        title: "Create Feedback",
+        description:
+          "Creates a new FeedbackItem directly via MCP — the internal/agent-facing counterpart to the " +
+          "public portal submission endpoint, which requires a browser session. Use this to log product " +
+          "feedback discovered during dogfooding or agent sessions without dropping into browser automation. " +
+          "Defaults to type IDEA; pass type: 'BUG' for defects.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          title: z.string().min(1).describe("Short title for the feedback item (max 255 characters)"),
+          description: z.string().optional().describe("Longer description or repro details"),
+          type: z.enum(["BUG", "IDEA"]).optional().describe("Feedback type (default IDEA)"),
+          submitterName: z.string().optional().describe("Name to attribute this feedback to"),
+          submitterEmail: z.string().optional().describe("Email to attribute this feedback to"),
+        },
+      },
+      createFeedback
+    )
 
     register(
       "list_feedback",

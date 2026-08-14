@@ -1,5 +1,6 @@
 /**
- * Unit tests for the three Feedback MCP tool handlers:
+ * Unit tests for the Feedback MCP tool handlers:
+ *   - createFeedback
  *   - getFeedbackItem
  *   - updateFeedbackStatus
  *   - linkFeedbackToOpportunity
@@ -15,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 const mockFeedbackItem = {
   findUnique: vi.fn(),
   update: vi.fn(),
+  create: vi.fn(),
 }
 
 const mockOpportunity = {
@@ -26,10 +28,15 @@ const mockRoadmapItem = {
   create: vi.fn(),
 }
 
+const mockWorkspace = {
+  findUnique: vi.fn(),
+}
+
 const mockPrisma = {
   feedbackItem: mockFeedbackItem,
   opportunity: mockOpportunity,
   roadmapItem: mockRoadmapItem,
+  workspace: mockWorkspace,
 }
 
 vi.mock("@/lib/db", () => ({
@@ -38,6 +45,7 @@ vi.mock("@/lib/db", () => ({
 
 // Import handlers AFTER the mock is in place
 import {
+  createFeedback,
   getFeedbackItem,
   updateFeedbackStatus,
   linkFeedbackToOpportunity,
@@ -78,6 +86,115 @@ const sampleOpportunity = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+// ---------------------------------------------------------------------------
+// createFeedback
+// ---------------------------------------------------------------------------
+
+describe("createFeedback", () => {
+  it("creates a feedback item with source MCP and defaults type to IDEA", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ id: WS_ID })
+    mockFeedbackItem.create.mockResolvedValueOnce({
+      id: FEED_ID,
+      title: "Dark mode support",
+      type: "IDEA",
+      status: "OPEN",
+    })
+
+    const result = await createFeedback({ workspaceId: WS_ID, title: "Dark mode support" })
+    const text = result.content[0].text
+
+    expect(text).toContain("Feedback item created")
+    expect(text).toContain(`ID: ${FEED_ID}`)
+    expect(text).toContain("Dark mode support")
+    expect(text).toContain("Type: IDEA")
+    expect(mockFeedbackItem.create).toHaveBeenCalledWith({
+      data: {
+        workspaceId: WS_ID,
+        title: "Dark mode support",
+        description: null,
+        type: "IDEA",
+        submitterName: null,
+        submitterEmail: null,
+        source: "MCP",
+      },
+    })
+  })
+
+  it("passes through an explicit type of BUG", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ id: WS_ID })
+    mockFeedbackItem.create.mockResolvedValueOnce({
+      id: FEED_ID,
+      title: "Login button broken",
+      type: "BUG",
+      status: "OPEN",
+    })
+
+    const result = await createFeedback({ workspaceId: WS_ID, title: "Login button broken", type: "BUG" })
+
+    expect(result.content[0].text).toContain("Type: BUG")
+    expect(mockFeedbackItem.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ type: "BUG" }) })
+    )
+  })
+
+  it("trims and forwards description, submitterName, and submitterEmail", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ id: WS_ID })
+    mockFeedbackItem.create.mockResolvedValueOnce({
+      id: FEED_ID,
+      title: "Dark mode support",
+      type: "IDEA",
+      status: "OPEN",
+    })
+
+    await createFeedback({
+      workspaceId: WS_ID,
+      title: "  Dark mode support  ",
+      description: "  Users want a dark mode option.  ",
+      submitterName: "  Claude Code  ",
+      submitterEmail: "  agent@example.com  ",
+    })
+
+    expect(mockFeedbackItem.create).toHaveBeenCalledWith({
+      data: {
+        workspaceId: WS_ID,
+        title: "Dark mode support",
+        description: "Users want a dark mode option.",
+        type: "IDEA",
+        submitterName: "Claude Code",
+        submitterEmail: "agent@example.com",
+        source: "MCP",
+      },
+    })
+  })
+
+  it("returns error text and does not create when the workspace is not found", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce(null)
+
+    const result = await createFeedback({ workspaceId: WS_ID, title: "Dark mode support" })
+
+    expect(result.content[0].text).toContain(`No workspace found with id "${WS_ID}"`)
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled()
+  })
+
+  it("returns validation error text and does not create when title is blank", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ id: WS_ID })
+
+    const result = await createFeedback({ workspaceId: WS_ID, title: "   " })
+
+    expect(result.content[0].text).toContain("Title is required")
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled()
+  })
+
+  it("returns validation error text when title exceeds the max length", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ id: WS_ID })
+
+    const result = await createFeedback({ workspaceId: WS_ID, title: "x".repeat(256) })
+
+    expect(result.content[0].text).toContain("255 characters or fewer")
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled()
+  })
 })
 
 // ---------------------------------------------------------------------------
