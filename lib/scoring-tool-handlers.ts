@@ -10,6 +10,7 @@
  */
 
 import getPrisma from "@/lib/db"
+import { ok, fail } from "@/lib/mcp-output"
 import { getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { Prisma } from "@prisma/client"
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring"
@@ -42,7 +43,7 @@ export async function listScoringModels({ orgSlug }: { orgSlug: string }) {
   const prisma = getPrisma()
   const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
   if (!org) {
-    return { content: [{ type: "text" as const, text: `Organization "${orgSlug}" not found.` }] }
+    return fail(`Organization "${orgSlug}" not found.`)
   }
 
   const models = await prisma.scoringModel.findMany({
@@ -52,7 +53,7 @@ export async function listScoringModels({ orgSlug }: { orgSlug: string }) {
   })
 
   if (!models.length) {
-    return { content: [{ type: "text" as const, text: "No scoring models in this organization." }] }
+    return fail("No scoring models in this organization.")
   }
 
   const lines = models.map((m) =>
@@ -60,7 +61,16 @@ export async function listScoringModels({ orgSlug }: { orgSlug: string }) {
       `  ID: ${m.id}` +
       (m.description ? `\n  ${m.description}` : "")
   )
-  return { content: [{ type: "text" as const, text: lines.join("\n\n") }] }
+  const items = models.map((m) => ({
+    id: m.id,
+    name: m.name,
+    status: m.status,
+    version: m.version,
+    formulaType: m.formulaType,
+    description: m.description,
+    metrics: m.metrics,
+  }))
+  return ok(lines.join("\n\n"), { items, count: items.length })
 }
 
 // ─── get_scoring_model ───────────────────────────────────────────────────────
@@ -72,7 +82,7 @@ export async function getScoringModel({ scoringModelId }: { scoringModelId: stri
     include: { metrics: { orderBy: { order: "asc" } } },
   })
   if (!model) {
-    return { content: [{ type: "text" as const, text: `Scoring model "${scoringModelId}" not found.` }] }
+    return fail(`Scoring model "${scoringModelId}" not found.`)
   }
 
   const lines = [
@@ -87,7 +97,15 @@ export async function getScoringModel({ scoringModelId }: { scoringModelId: stri
     ...model.metrics.map((m) => `• ${formatMetricSummary(m)}`),
   ].filter((line): line is string => line !== null)
 
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    id: model.id,
+    name: model.name,
+    status: model.status,
+    formulaType: model.formulaType,
+    version: model.version,
+    description: model.description,
+    metrics: model.metrics,
+  })
 }
 
 // ─── create_scoring_model ────────────────────────────────────────────────────
@@ -108,7 +126,7 @@ export async function createScoringModel({
   const prisma = getPrisma()
   const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
   if (!org) {
-    return { content: [{ type: "text" as const, text: `Organization "${orgSlug}" not found.` }] }
+    return fail(`Organization "${orgSlug}" not found.`)
   }
 
   const metricDefs: ScoringMetricDef[] = metrics.map((m) => ({
@@ -121,7 +139,7 @@ export async function createScoringModel({
   try {
     validateMetricsForFormula(metricDefs, formulaType)
   } catch (err) {
-    return { content: [{ type: "text" as const, text: err instanceof Error ? err.message : "Invalid metrics" }] }
+    return fail(err instanceof Error ? err.message : "Invalid metrics")
   }
 
   const model = await prisma.scoringModel.create({
@@ -144,16 +162,13 @@ export async function createScoringModel({
     })
   }
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Scoring model created:** ${name}\n` +
-        `Formula: ${formulaType}\n` +
-        `Metrics: ${metrics.length}\n` +
-        `ID: ${model.id}`,
-    }],
-  }
+  return ok(
+    `**Scoring model created:** ${name}\n` +
+      `Formula: ${formulaType}\n` +
+      `Metrics: ${metrics.length}\n` +
+      `ID: ${model.id}`,
+    { id: model.id, name: model.name, formulaType: model.formulaType, version: model.version, metrics },
+  )
 }
 
 // ─── update_scoring_model ────────────────────────────────────────────────────
@@ -174,7 +189,7 @@ export async function updateScoringModel({
   const prisma = getPrisma()
   const existing = await prisma.scoringModel.findUnique({ where: { id: scoringModelId } })
   if (!existing) {
-    return { content: [{ type: "text" as const, text: `Scoring model "${scoringModelId}" not found.` }] }
+    return fail(`Scoring model "${scoringModelId}" not found.`)
   }
 
   const data: Prisma.ScoringModelUpdateInput = {}
@@ -197,7 +212,7 @@ export async function updateScoringModel({
     try {
       validateMetricsForFormula(metricDefs, effectiveFormulaType)
     } catch (err) {
-      return { content: [{ type: "text" as const, text: err instanceof Error ? err.message : "Invalid metrics" }] }
+      return fail(err instanceof Error ? err.message : "Invalid metrics")
     }
 
     await prisma.scoringModelMetric.deleteMany({ where: { scoringModelId } })
@@ -222,15 +237,18 @@ export async function updateScoringModel({
   data.updatedAt = new Date()
   await prisma.scoringModel.update({ where: { id: scoringModelId }, data })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Scoring model updated**\n` +
-        (versionBumped ? `Version bumped to ${existing.version + 1}\n` : "") +
-        `ID: ${scoringModelId}`,
-    }],
-  }
+  return ok(
+    `**Scoring model updated**\n` +
+      (versionBumped ? `Version bumped to ${existing.version + 1}\n` : "") +
+      `ID: ${scoringModelId}`,
+    {
+      id: scoringModelId,
+      name: name ?? existing.name,
+      formulaType: data.formulaType ?? existing.formulaType,
+      version: versionBumped ? existing.version + 1 : existing.version,
+      metrics: metrics ?? null,
+    },
+  )
 }
 
 // ─── archive_scoring_model ────────────────────────────────────────────────────
@@ -242,7 +260,7 @@ export async function archiveScoringModel({ scoringModelId }: { scoringModelId: 
     select: { id: true, name: true },
   })
   if (!existing) {
-    return { content: [{ type: "text" as const, text: `Scoring model "${scoringModelId}" not found.` }] }
+    return fail(`Scoring model "${scoringModelId}" not found.`)
   }
 
   await prisma.scoringModel.update({
@@ -250,12 +268,11 @@ export async function archiveScoringModel({ scoringModelId }: { scoringModelId: 
     data: { status: "ARCHIVED", updatedAt: new Date() },
   })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text: `**Scoring model archived:** ${existing.name}\nID: ${scoringModelId}`,
-    }],
-  }
+  return ok(`**Scoring model archived:** ${existing.name}\nID: ${scoringModelId}`, {
+    id: existing.id,
+    name: existing.name,
+    status: "ARCHIVED",
+  })
 }
 
 // ─── get_workspace_scoring_model ────────────────────────────────────────────
@@ -268,7 +285,7 @@ export async function getWorkspaceScoringModel({ workspaceId }: { workspaceId: s
   })
 
   if (!config?.scoringModel) {
-    return { content: [{ type: "text" as const, text: "This workspace has no active scoring model." }] }
+    return fail("This workspace has no active scoring model.")
   }
 
   const model = config.scoringModel
@@ -280,7 +297,13 @@ export async function getWorkspaceScoringModel({ workspaceId }: { workspaceId: s
     ...model.metrics.map((m) => `• ${formatMetricSummary(m)}`),
     `ID: ${model.id}`,
   ]
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    id: model.id,
+    name: model.name,
+    formulaType: model.formulaType,
+    version: model.version,
+    metrics: model.metrics,
+  })
 }
 
 // ─── set_workspace_scoring_model ────────────────────────────────────────────
@@ -295,7 +318,7 @@ export async function setWorkspaceScoringModel({
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } })
   if (!workspace) {
-    return { content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }] }
+    return fail(`Workspace "${workspaceId}" not found.`)
   }
 
   if (scoringModelId) {
@@ -304,7 +327,7 @@ export async function setWorkspaceScoringModel({
       select: { id: true },
     })
     if (!model) {
-      return { content: [{ type: "text" as const, text: `Scoring model "${scoringModelId}" not found.` }] }
+      return fail(`Scoring model "${scoringModelId}" not found.`)
     }
   }
 
@@ -314,14 +337,12 @@ export async function setWorkspaceScoringModel({
     update: { scoringModelId, updatedAt: new Date() },
   })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text: scoringModelId
-        ? `**Active scoring model set.**\nWorkspace ID: ${workspaceId}\nScoring Model ID: ${scoringModelId}`
-        : `**Active scoring model cleared.**\nWorkspace ID: ${workspaceId}`,
-    }],
-  }
+  return ok(
+    scoringModelId
+      ? `**Active scoring model set.**\nWorkspace ID: ${workspaceId}\nScoring Model ID: ${scoringModelId}`
+      : `**Active scoring model cleared.**\nWorkspace ID: ${workspaceId}`,
+    { workspaceId, scoringModelId },
+  )
 }
 
 // ─── score_opportunity ───────────────────────────────────────────────────────
@@ -339,7 +360,7 @@ export async function scoreOpportunity({
     select: { id: true, title: true, workspaceId: true },
   })
   if (!opportunity) {
-    return { content: [{ type: "text" as const, text: `Opportunity "${opportunityId}" not found.` }] }
+    return fail(`Opportunity "${opportunityId}" not found.`)
   }
 
   const config = await prisma.workspaceScoringConfig.findUnique({
@@ -347,12 +368,7 @@ export async function scoreOpportunity({
     include: { scoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
   })
   if (!config?.scoringModel) {
-    return {
-      content: [{
-        type: "text" as const,
-        text: `The workspace for opportunity "${opportunityId}" has no active scoring model.`,
-      }],
-    }
+    return fail(`The workspace for opportunity "${opportunityId}" has no active scoring model.`)
   }
 
   const model = config.scoringModel
@@ -368,15 +384,10 @@ export async function scoreOpportunity({
   for (const metric of metricDefs) {
     const value = rawValues[metric.key]
     if (typeof value !== "number" || Number.isNaN(value)) {
-      return { content: [{ type: "text" as const, text: `Missing value for metric "${metric.key}".` }] }
+      return fail(`Missing value for metric "${metric.key}".`)
     }
     if (value < metric.minValue || value > metric.maxValue) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Value for "${metric.key}" must be between ${metric.minValue} and ${metric.maxValue}.`,
-        }],
-      }
+      return fail(`Value for "${metric.key}" must be between ${metric.minValue} and ${metric.maxValue}.`)
     }
   }
 
@@ -413,16 +424,20 @@ export async function scoreOpportunity({
     },
   })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Scored** "${opportunity.title}"\n` +
-        `Raw score: ${rawScore.toFixed(2)}\n` +
-        `Normalized score: ${normalizedScore.toFixed(1)} / 100\n` +
-        `ID: ${score.id}`,
-    }],
-  }
+  return ok(
+    `**Scored** "${opportunity.title}"\n` +
+      `Raw score: ${rawScore.toFixed(2)}\n` +
+      `Normalized score: ${normalizedScore.toFixed(1)} / 100\n` +
+      `ID: ${score.id}`,
+    {
+      id: score.id,
+      opportunityId,
+      scoringModelId: model.id,
+      modelVersion: model.version,
+      rawScore,
+      normalizedScore,
+    },
+  )
 }
 
 // ─── get_opportunity_score ───────────────────────────────────────────────────
@@ -434,7 +449,7 @@ export async function getOpportunityScore({ opportunityId }: { opportunityId: st
     include: { scoringModel: { select: { name: true, version: true } } },
   })
   if (!score) {
-    return { content: [{ type: "text" as const, text: `No score found for opportunity "${opportunityId}".` }] }
+    return fail(`No score found for opportunity "${opportunityId}".`)
   }
 
   const stale = score.modelVersion < score.scoringModel.version
@@ -447,7 +462,17 @@ export async function getOpportunityScore({ opportunityId }: { opportunityId: st
     `Stale: ${stale}`,
     `ID: ${score.id}`,
   ]
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    id: score.id,
+    opportunityId,
+    modelName: score.scoringModel.name,
+    modelVersion: score.modelVersion,
+    liveVersion: score.scoringModel.version,
+    rawScore: score.rawScore,
+    normalizedScore: score.normalizedScore,
+    scoredAt: score.scoredAt.toISOString(),
+    stale,
+  })
 }
 
 // ─── list_top_opportunities ──────────────────────────────────────────────────
@@ -462,7 +487,7 @@ export async function listTopOpportunities({
   limit?: number
 }) {
   if (!workspaceId && !orgSlug) {
-    return { content: [{ type: "text" as const, text: "Provide either workspaceId or orgSlug." }] }
+    return fail("Provide either workspaceId or orgSlug.")
   }
 
   const prisma = getPrisma()
@@ -496,7 +521,7 @@ export async function listTopOpportunities({
   })
 
   if (!scores.length) {
-    return { content: [{ type: "text" as const, text: "No scored opportunities found." }] }
+    return fail("No scored opportunities found.")
   }
 
   // Cross-workspace view (orgSlug, no workspaceId) shows which workspace each
@@ -508,5 +533,12 @@ export async function listTopOpportunities({
       (showWorkspace ? ` (${s.opportunity.workspace.name})` : "") +
       `\n   ID: ${s.opportunity.id}`
   )
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  const items = scores.map((s) => ({
+    opportunityId: s.opportunity.id,
+    title: s.opportunity.title,
+    status: s.opportunity.status,
+    normalizedScore: s.normalizedScore,
+    workspace: s.opportunity.workspace.name,
+  }))
+  return ok(lines.join("\n"), { items, count: items.length })
 }

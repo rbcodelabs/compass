@@ -109,6 +109,10 @@ describe("createFeedback", () => {
     expect(text).toContain(`ID: ${FEED_ID}`)
     expect(text).toContain("Dark mode support")
     expect(text).toContain("Type: IDEA")
+    // structured-output envelope accompanies the text, unchanged
+    expect(result.structuredContent.ok).toBe(true)
+    expect(result.structuredContent.message).toBe(text)
+    expect(result.structuredContent.data).toMatchObject({ id: FEED_ID, type: "IDEA" })
     expect(mockFeedbackItem.create).toHaveBeenCalledWith({
       data: {
         workspaceId: WS_ID,
@@ -175,6 +179,10 @@ describe("createFeedback", () => {
     const result = await createFeedback({ workspaceId: WS_ID, title: "Dark mode support" })
 
     expect(result.content[0].text).toContain(`No workspace found with id "${WS_ID}"`)
+    // failure path: ok=false, null data, and (for backward-compat) no isError flag
+    expect(result.structuredContent.ok).toBe(false)
+    expect(result.structuredContent.data).toBeNull()
+    expect("isError" in result).toBe(false)
     expect(mockFeedbackItem.create).not.toHaveBeenCalled()
   })
 
@@ -219,6 +227,13 @@ describe("getFeedbackItem", () => {
     expect(text).toContain("Users want a dark mode option.")
     expect(text).toContain("**Created:** 2025-01-01T00:00:00.000Z")
     expect(text).not.toContain("Attachments:")
+    // get_* returns the entity object as structured data
+    expect(result.structuredContent.ok).toBe(true)
+    expect(result.structuredContent.data).toMatchObject({
+      id: FEED_ID,
+      status: "OPEN",
+      voteCount: 5,
+    })
 
     expect(mockFeedbackItem.findUnique).toHaveBeenCalledWith({
       where: { id: FEED_ID },

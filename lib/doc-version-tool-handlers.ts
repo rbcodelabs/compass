@@ -14,6 +14,7 @@
  */
 
 import getPrisma from "@/lib/db"
+import { ok, fail } from "@/lib/mcp-output"
 import { maybeSnapshotDocVersion, restoreDocVersionCore } from "@/lib/doc-versions"
 import { relativeTime } from "@/lib/relative-time"
 
@@ -38,9 +39,7 @@ export async function createDocVersion({
     select: { id: true, title: true },
   })
   if (!doc) {
-    return {
-      content: [{ type: "text" as const, text: `Doc "${docId}" not found.` }],
-    }
+    return fail(`Doc "${docId}" not found.`)
   }
 
   await maybeSnapshotDocVersion(docId, {
@@ -53,18 +52,13 @@ export async function createDocVersion({
     orderBy: { createdAt: "desc" },
   })
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text:
-          `**Named snapshot saved** for doc "${doc.title}"\n` +
-          `Label: ${version?.label}\n` +
-          `Author: ${authorName}\n` +
-          `ID: ${version?.id}`,
-      },
-    ],
-  }
+  return ok(
+    `**Named snapshot saved** for doc "${doc.title}"\n` +
+      `Label: ${version?.label}\n` +
+      `Author: ${authorName}\n` +
+      `ID: ${version?.id}`,
+    { id: version?.id, label: version?.label }
+  )
 }
 
 // ── list_doc_versions ───────────────────────────────────────────────────────
@@ -77,9 +71,7 @@ export async function listDocVersions({ docId }: { docId: string }) {
     select: { id: true, title: true, updatedAt: true },
   })
   if (!doc) {
-    return {
-      content: [{ type: "text" as const, text: `Doc "${docId}" not found.` }],
-    }
+    return fail(`Doc "${docId}" not found.`)
   }
 
   const versions = await prisma.docVersion.findMany({
@@ -98,9 +90,7 @@ export async function listDocVersions({ docId }: { docId: string }) {
     `Current — last updated ${doc.updatedAt.toISOString()} (${relativeTime(doc.updatedAt)})`
 
   if (versions.length === 0) {
-    return {
-      content: [{ type: "text" as const, text: `${header}\n\nNo saved versions yet.` }],
-    }
+    return fail(`${header}\n\nNo saved versions yet.`)
   }
 
   const entries = versions.map(
@@ -109,14 +99,18 @@ export async function listDocVersions({ docId }: { docId: string }) {
       `ID: ${v.id}`
   )
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: `${header}\n\n${versions.length} saved version${versions.length === 1 ? "" : "s"}:\n\n${entries.join("\n\n")}`,
-      },
-    ],
-  }
+  return ok(
+    `${header}\n\n${versions.length} saved version${versions.length === 1 ? "" : "s"}:\n\n${entries.join("\n\n")}`,
+    {
+      items: versions.map((v) => ({
+        id: v.id,
+        label: v.label,
+        authorName: v.createdByName,
+        createdAt: v.createdAt,
+      })),
+      count: versions.length,
+    }
+  )
 }
 
 // ── get_doc_version ─────────────────────────────────────────────────────────
@@ -126,9 +120,7 @@ export async function getDocVersion({ versionId }: { versionId: string }) {
 
   const version = await prisma.docVersion.findUnique({ where: { id: versionId } })
   if (!version) {
-    return {
-      content: [{ type: "text" as const, text: `Doc version "${versionId}" not found.` }],
-    }
+    return fail(`Doc version "${versionId}" not found.`)
   }
 
   const lines: string[] = [
@@ -143,7 +135,7 @@ export async function getDocVersion({ versionId }: { versionId: string }) {
 
   lines.push(version.content ? version.content : "*(no content)*")
 
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), version)
 }
 
 // ── restore_doc_version ─────────────────────────────────────────────────────
@@ -159,16 +151,12 @@ export async function restoreDocVersion({ versionId }: { versionId: string }) {
     select: { docId: true },
   })
   if (!version) {
-    return {
-      content: [{ type: "text" as const, text: `Doc version "${versionId}" not found.` }],
-    }
+    return fail(`Doc version "${versionId}" not found.`)
   }
 
   const doc = await prisma.doc.findUnique({ where: { id: version.docId }, select: { id: true } })
   if (!doc) {
-    return {
-      content: [{ type: "text" as const, text: `Doc "${version.docId}" not found.` }],
-    }
+    return fail(`Doc "${version.docId}" not found.`)
   }
 
   const restored = await restoreDocVersionCore(versionId, { authorName: "MCP Agent" })
@@ -176,20 +164,13 @@ export async function restoreDocVersion({ versionId }: { versionId: string }) {
   // checks above and the core call -- an unlikely race, but handle it rather
   // than throw.
   if (!restored) {
-    return {
-      content: [{ type: "text" as const, text: `Doc version "${versionId}" not found.` }],
-    }
+    return fail(`Doc version "${versionId}" not found.`)
   }
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text:
-          `**Doc restored** to version from ${restored.restoredFrom.toISOString()}\n` +
-          `Title: ${restored.title}\n` +
-          `ID: ${restored.id}`,
-      },
-    ],
-  }
+  return ok(
+    `**Doc restored** to version from ${restored.restoredFrom.toISOString()}\n` +
+      `Title: ${restored.title}\n` +
+      `ID: ${restored.id}`,
+    restored
+  )
 }

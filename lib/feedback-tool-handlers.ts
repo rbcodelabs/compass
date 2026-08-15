@@ -5,6 +5,7 @@
 
 import getPrisma from "@/lib/db"
 import { validateFeedbackInput } from "@/lib/feedback"
+import { ok, fail } from "@/lib/mcp-output"
 
 /**
  * Creates a FeedbackItem directly via MCP — the internal/agent-facing
@@ -36,12 +37,12 @@ export async function createFeedback({
     select: { id: true },
   })
   if (!workspace) {
-    return { content: [{ type: "text" as const, text: `No workspace found with id "${workspaceId}".` }] }
+    return fail(`No workspace found with id "${workspaceId}".`)
   }
 
   const validation = validateFeedbackInput({ title, description })
   if (!validation.valid) {
-    return { content: [{ type: "text" as const, text: validation.error }] }
+    return fail(validation.error)
   }
 
   const item = await prisma.feedbackItem.create({
@@ -63,7 +64,18 @@ export async function createFeedback({
     `Type: ${item.type}`,
     `Status: ${item.status}`,
   ]
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    id: item.id,
+    title: item.title,
+    type: item.type,
+    status: item.status,
+    workspaceId: item.workspaceId,
+    description: item.description,
+    submitterName: item.submitterName,
+    submitterEmail: item.submitterEmail,
+    source: item.source,
+    createdAt: item.createdAt,
+  })
 }
 
 export async function getFeedbackItem({ feedbackId }: { feedbackId: string }) {
@@ -76,7 +88,7 @@ export async function getFeedbackItem({ feedbackId }: { feedbackId: string }) {
     },
   })
   if (!item) {
-    return { content: [{ type: "text" as const, text: `Feedback item "${feedbackId}" not found.` }] }
+    return fail(`Feedback item "${feedbackId}" not found.`)
   }
   const lines = [
     `## [${item.type}] ${item.title}`,
@@ -95,7 +107,23 @@ export async function getFeedbackItem({ feedbackId }: { feedbackId: string }) {
     `**Created:** ${item.createdAt.toISOString()}`,
     `**Updated:** ${item.updatedAt.toISOString()}`,
   ].filter(Boolean)
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    id: item.id,
+    title: item.title,
+    type: item.type,
+    status: item.status,
+    voteCount: item.voteCount,
+    workspaceId: item.workspaceId,
+    description: item.description,
+    submitterName: item.submitterName,
+    submitterEmail: item.submitterEmail,
+    tags: item.tags,
+    opportunityId: item.opportunityId,
+    opportunity: item.opportunity,
+    attachments: item.attachments,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  })
 }
 
 export async function updateFeedbackStatus({
@@ -113,7 +141,7 @@ export async function updateFeedbackStatus({
     select: { title: true, status: true },
   })
   if (!existing) {
-    return { content: [{ type: "text" as const, text: `Feedback item "${feedbackId}" not found.` }] }
+    return fail(`Feedback item "${feedbackId}" not found.`)
   }
   const oldStatus = existing.status
   await prisma.feedbackItem.update({
@@ -125,7 +153,13 @@ export async function updateFeedbackStatus({
     `${oldStatus} → ${status}`,
     note ? `Note: ${note}` : null,
   ].filter(Boolean)
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    id: feedbackId,
+    title: existing.title,
+    oldStatus,
+    status,
+    note: note ?? null,
+  })
 }
 
 export async function linkFeedbackToOpportunity({
@@ -141,25 +175,26 @@ export async function linkFeedbackToOpportunity({
     select: { id: true, title: true, workspaceId: true },
   })
   if (!feedback) {
-    return { content: [{ type: "text" as const, text: `Feedback item "${feedbackId}" not found.` }] }
+    return fail(`Feedback item "${feedbackId}" not found.`)
   }
   const opportunity = await prisma.opportunity.findUnique({
     where: { id: opportunityId },
     select: { id: true, title: true, workspaceId: true },
   })
   if (!opportunity) {
-    return { content: [{ type: "text" as const, text: `Opportunity "${opportunityId}" not found.` }] }
+    return fail(`Opportunity "${opportunityId}" not found.`)
   }
   await prisma.feedbackItem.update({
     where: { id: feedbackId },
     data: { opportunityId },
   })
-  return {
-    content: [{
-      type: "text" as const,
-      text: `Linked feedback '${feedback.title}' to opportunity '${opportunity.title}'.`,
-    }],
-  }
+  return ok(`Linked feedback '${feedback.title}' to opportunity '${opportunity.title}'.`, {
+    id: feedback.id,
+    title: feedback.title,
+    workspaceId: feedback.workspaceId,
+    opportunityId: opportunity.id,
+    opportunityTitle: opportunity.title,
+  })
 }
 
 export async function updateFeedbackType({
@@ -175,7 +210,7 @@ export async function updateFeedbackType({
     select: { id: true, title: true, type: true },
   })
   if (!existing) {
-    return { content: [{ type: "text" as const, text: `Feedback item "${feedbackId}" not found.` }] }
+    return fail(`Feedback item "${feedbackId}" not found.`)
   }
   const oldType = existing.type
   await prisma.feedbackItem.update({
@@ -187,7 +222,12 @@ export async function updateFeedbackType({
     `${oldType} → ${type}`,
     `ID: ${existing.id}`,
   ]
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    id: existing.id,
+    title: existing.title,
+    oldType,
+    type,
+  })
 }
 
 export async function promoteFeedbackToRoadmap({
@@ -207,7 +247,7 @@ export async function promoteFeedbackToRoadmap({
     select: { id: true, title: true, type: true },
   })
   if (!feedback) {
-    return { content: [{ type: "text" as const, text: `Feedback item "${feedbackId}" not found.` }] }
+    return fail(`Feedback item "${feedbackId}" not found.`)
   }
 
   const lastItem = await prisma.roadmapItem.findFirst({
@@ -235,5 +275,13 @@ export async function promoteFeedbackToRoadmap({
     ...(item.isPrivate ? [`Private: yes (hidden from public portal)`] : []),
     `Linked Feedback: ${feedback.title} [${feedback.type}]`,
   ]
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    id: item.id,
+    title: item.title,
+    horizon: item.horizon,
+    sortOrder: item.sortOrder,
+    isPrivate: item.isPrivate,
+    workspaceId: item.workspaceId,
+    feedbackId,
+  })
 }

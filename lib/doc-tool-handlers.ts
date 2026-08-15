@@ -13,6 +13,7 @@
 import getPrisma from "@/lib/db"
 import matter from "gray-matter"
 import { Prisma } from "@prisma/client"
+import { ok, fail } from "@/lib/mcp-output"
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates"
 import { maybeSnapshotDocVersion } from "@/lib/doc-versions"
 
@@ -66,14 +67,7 @@ export async function listDocs({ workspaceId }: { workspaceId: string }) {
     select: { name: true },
   })
   if (!workspace) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: `No workspace found with id "${workspaceId}".`,
-        },
-      ],
-    }
+    return fail(`No workspace found with id "${workspaceId}".`)
   }
 
   const allDocs = await prisma.doc.findMany({
@@ -91,14 +85,7 @@ export async function listDocs({ workspaceId }: { workspaceId: string }) {
   })
 
   if (!allDocs.length) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: `No docs found in workspace "${workspace.name}".`,
-        },
-      ],
-    }
+    return fail(`No docs found in workspace "${workspace.name}".`)
   }
 
   const childrenMap = new Map<string | null, typeof allDocs>()
@@ -125,7 +112,14 @@ export async function listDocs({ workspaceId }: { workspaceId: string }) {
   const roots = childrenMap.get(null) ?? []
   for (const root of roots) renderNode(root, 0)
 
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    items: allDocs.map((doc) => ({
+      id: doc.id,
+      title: doc.title,
+      parentId: doc.parentId,
+    })),
+    count: allDocs.length,
+  })
 }
 
 // ── get_doc ──────────────────────────────────────────────────────────────────
@@ -150,9 +144,7 @@ export async function getDoc({ docId }: { docId: string }) {
   })
 
   if (!doc) {
-    return {
-      content: [{ type: "text" as const, text: `Doc "${docId}" not found.` }],
-    }
+    return fail(`Doc "${docId}" not found.`)
   }
 
   // Re-serialize metadata + body so agents see the full frontmatter document
@@ -186,7 +178,12 @@ export async function getDoc({ docId }: { docId: string }) {
     }
   }
 
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    id: doc.id,
+    title: doc.title,
+    content: fullContent,
+    properties: metadata,
+  })
 }
 
 // ── create_doc ───────────────────────────────────────────────────────────────
@@ -219,14 +216,7 @@ export async function createDoc({
     },
   })
   if (!workspace) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: `No workspace found with id "${workspaceId}".`,
-        },
-      ],
-    }
+    return fail(`No workspace found with id "${workspaceId}".`)
   }
 
   if (parentId) {
@@ -235,14 +225,7 @@ export async function createDoc({
       select: { id: true },
     })
     if (!parent) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Parent doc "${parentId}" not found.`,
-          },
-        ],
-      }
+      return fail(`Parent doc "${parentId}" not found.`)
     }
   }
 
@@ -252,14 +235,7 @@ export async function createDoc({
       select: { id: true, title: true },
     })
     if (!roadmapItem) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Roadmap item "${roadmapItemId}" not found.`,
-          },
-        ],
-      }
+      return fail(`Roadmap item "${roadmapItemId}" not found.`)
     }
 
     const existingBrief = await prisma.doc.findUnique({
@@ -267,16 +243,10 @@ export async function createDoc({
       select: { id: true, title: true },
     })
     if (existingBrief) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text:
-              `Roadmap item "${roadmapItem.title}" already has a linked doc: "${existingBrief.title}".\n` +
-              `ID: ${existingBrief.id}`,
-          },
-        ],
-      }
+      return fail(
+        `Roadmap item "${roadmapItem.title}" already has a linked doc: "${existingBrief.title}".\n` +
+          `ID: ${existingBrief.id}`
+      )
     }
   }
 
@@ -307,22 +277,21 @@ export async function createDoc({
     },
   })
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text:
-          `**Doc created**\n` +
-          `ID: ${doc.id}\n` +
-          `Title: ${doc.title}\n` +
-          (parentId ? `Parent: ${parentId}\n` : "Location: root\n") +
-          (metadata ? `Properties: ${Object.keys(metadata).join(", ")}\n` : "") +
-          (roadmapItemId ? `Linked Roadmap Item: ${roadmapItemId}\n` : "") +
-          (effectiveDocType !== "STANDARD" ? `Doc Type: ${effectiveDocType}\n` : "") +
-          `URL: /${workspace.organization.slug}/${workspace.slug}/docs`,
-      },
-    ],
-  }
+  return ok(
+    `**Doc created**\n` +
+      `ID: ${doc.id}\n` +
+      `Title: ${doc.title}\n` +
+      (parentId ? `Parent: ${parentId}\n` : "Location: root\n") +
+      (metadata ? `Properties: ${Object.keys(metadata).join(", ")}\n` : "") +
+      (roadmapItemId ? `Linked Roadmap Item: ${roadmapItemId}\n` : "") +
+      (effectiveDocType !== "STANDARD" ? `Doc Type: ${effectiveDocType}\n` : "") +
+      `URL: /${workspace.organization.slug}/${workspace.slug}/docs`,
+    {
+      id: doc.id,
+      title: doc.title,
+      url: `/${workspace.organization.slug}/${workspace.slug}/docs`,
+    }
+  )
 }
 
 // ── update_doc ───────────────────────────────────────────────────────────────
@@ -345,9 +314,7 @@ export async function updateDoc({
     select: { title: true },
   })
   if (!existing) {
-    return {
-      content: [{ type: "text" as const, text: `Doc "${docId}" not found.` }],
-    }
+    return fail(`Doc "${docId}" not found.`)
   }
 
   const { body, metadata } =
@@ -373,19 +340,19 @@ export async function updateDoc({
     data: updateData,
   })
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text:
-          `**Doc updated**\n` +
-          `ID: ${updated.id}\n` +
-          `Title: ${updated.title}\n` +
-          (updated.icon ? `Icon: ${updated.icon}\n` : "") +
-          `Updated: ${updated.updatedAt.toISOString()}`,
-      },
-    ],
-  }
+  return ok(
+    `**Doc updated**\n` +
+      `ID: ${updated.id}\n` +
+      `Title: ${updated.title}\n` +
+      (updated.icon ? `Icon: ${updated.icon}\n` : "") +
+      `Updated: ${updated.updatedAt.toISOString()}`,
+    {
+      id: updated.id,
+      title: updated.title,
+      icon: updated.icon,
+      updatedAt: updated.updatedAt.toISOString(),
+    }
+  )
 }
 
 // ── update_doc_metadata ───────────────────────────────────────────────────────
@@ -404,9 +371,7 @@ export async function updateDocMetadata({
     select: { title: true },
   })
   if (!existing) {
-    return {
-      content: [{ type: "text" as const, text: `Doc "${docId}" not found.` }],
-    }
+    return fail(`Doc "${docId}" not found.`)
   }
 
   const updated = await prisma.doc.update({
@@ -414,15 +379,13 @@ export async function updateDocMetadata({
     data: { metadata: toJsonInput(metadata), updatedAt: new Date() },
   })
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text:
-          `**Doc metadata updated**\n` +
-          `ID: ${updated.id}\n` +
-          `Properties: ${Object.keys(metadata).join(", ")}`,
-      },
-    ],
-  }
+  return ok(
+    `**Doc metadata updated**\n` +
+      `ID: ${updated.id}\n` +
+      `Properties: ${Object.keys(metadata).join(", ")}`,
+    {
+      id: updated.id,
+      properties: Object.keys(metadata),
+    }
+  )
 }

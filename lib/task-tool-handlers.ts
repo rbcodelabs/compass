@@ -12,6 +12,7 @@
  */
 
 import getPrisma from "@/lib/db"
+import { ok, fail } from "@/lib/mcp-output"
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types"
 
 // Maps each TaskLinkedType to its Prisma model delegate name. Every target
@@ -100,16 +101,16 @@ export async function createTask({
 
   const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } })
   if (!workspace) {
-    return { content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }] }
+    return fail(`Workspace "${workspaceId}" not found.`)
   }
 
   if (parentTaskId) {
     const parent = await prisma.task.findUnique({ where: { id: parentTaskId }, select: { id: true, workspaceId: true } })
     if (!parent) {
-      return { content: [{ type: "text" as const, text: `Parent task "${parentTaskId}" not found.` }] }
+      return fail(`Parent task "${parentTaskId}" not found.`)
     }
     if (parent.workspaceId !== workspaceId) {
-      return { content: [{ type: "text" as const, text: `Parent task "${parentTaskId}" belongs to a different workspace.` }] }
+      return fail(`Parent task "${parentTaskId}" belongs to a different workspace.`)
     }
   }
 
@@ -142,16 +143,13 @@ export async function createTask({
     },
   })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Task created:** ${task.title}\n` +
-        `Status: ${task.status}\n` +
-        `Priority: ${task.priority}\n` +
-        `ID: ${task.id}`,
-    }],
-  }
+  return ok(
+    `**Task created:** ${task.title}\n` +
+      `Status: ${task.status}\n` +
+      `Priority: ${task.priority}\n` +
+      `ID: ${task.id}`,
+    task,
+  )
 }
 
 // ─── get_task ─────────────────────────────────────────────────────────────────
@@ -168,7 +166,7 @@ export async function getTask({ taskId }: { taskId: string }) {
     },
   })
   if (!task) {
-    return { content: [{ type: "text" as const, text: `Task "${taskId}" not found.` }] }
+    return fail(`Task "${taskId}" not found.`)
   }
 
   const links = await formatLinks(prisma, task.links)
@@ -197,7 +195,7 @@ export async function getTask({ taskId }: { taskId: string }) {
     `ID: ${task.id}`,
   ].filter((l) => l !== null)
 
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), { ...task, links })
 }
 
 // ─── list_tasks ───────────────────────────────────────────────────────────────
@@ -227,7 +225,7 @@ export async function listTasks({
 
   const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } })
   if (!workspace) {
-    return { content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }] }
+    return fail(`Workspace "${workspaceId}" not found.`)
   }
 
   // parentTaskId: undefined = no filter, null = top-level only, string = children of that parent.
@@ -248,7 +246,7 @@ export async function listTasks({
   })
 
   if (!tasks.length) {
-    return { content: [{ type: "text" as const, text: "No tasks found." }] }
+    return fail("No tasks found.")
   }
 
   if (includeSubtasks) {
@@ -268,7 +266,16 @@ export async function listTasks({
         ...childLines,
       ].join("\n")
     })
-    return { content: [{ type: "text" as const, text: lines.join("\n\n") }] }
+    return ok(lines.join("\n\n"), {
+      items: topLevel.map((t) => ({
+        id: t.id,
+        status: t.status,
+        title: t.title,
+        priority: t.priority,
+        subtasks: (childrenByParent.get(t.id) ?? []).map((c) => ({ id: c.id, status: c.status, title: c.title })),
+      })),
+      count: topLevel.length,
+    })
   }
 
   const lines = tasks.map((t) =>
@@ -276,7 +283,16 @@ export async function listTasks({
     (t._count.subtasks ? ` — ${t._count.subtasks} subtask(s)` : "") +
     `\n  ID: ${t.id}`
   )
-  return { content: [{ type: "text" as const, text: lines.join("\n\n") }] }
+  return ok(lines.join("\n\n"), {
+    items: tasks.map((t) => ({
+      id: t.id,
+      status: t.status,
+      title: t.title,
+      priority: t.priority,
+      subtaskCount: t._count.subtasks,
+    })),
+    count: tasks.length,
+  })
 }
 
 // ─── update_task ──────────────────────────────────────────────────────────────
@@ -308,7 +324,7 @@ export async function updateTask({
 
   const existing = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true } })
   if (!existing) {
-    return { content: [{ type: "text" as const, text: `Task "${taskId}" not found.` }] }
+    return fail(`Task "${taskId}" not found.`)
   }
 
   const data: Record<string, unknown> = { updatedAt: new Date() }
@@ -324,16 +340,13 @@ export async function updateTask({
 
   const updated = await prisma.task.update({ where: { id: taskId }, data })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Task updated:** ${updated.title}\n` +
-        `Status: ${updated.status}\n` +
-        `Priority: ${updated.priority}\n` +
-        `ID: ${updated.id}`,
-    }],
-  }
+  return ok(
+    `**Task updated:** ${updated.title}\n` +
+      `Status: ${updated.status}\n` +
+      `Priority: ${updated.priority}\n` +
+      `ID: ${updated.id}`,
+    updated,
+  )
 }
 
 // ─── move_task_status ─────────────────────────────────────────────────────────
@@ -346,7 +359,7 @@ export async function moveTaskStatus({ taskId, status }: { taskId: string; statu
     select: { id: true, title: true, workspaceId: true },
   })
   if (!existing) {
-    return { content: [{ type: "text" as const, text: `Task "${taskId}" not found.` }] }
+    return fail(`Task "${taskId}" not found.`)
   }
 
   // Place the task at the end of the destination status column, same
@@ -363,15 +376,12 @@ export async function moveTaskStatus({ taskId, status }: { taskId: string; statu
     data: { status, sortOrder, updatedAt: new Date() },
   })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Status updated:** ${existing.title}\n` +
-        `New status: ${updated.status}\n` +
-        `ID: ${updated.id}`,
-    }],
-  }
+  return ok(
+    `**Status updated:** ${existing.title}\n` +
+      `New status: ${updated.status}\n` +
+      `ID: ${updated.id}`,
+    updated,
+  )
 }
 
 // ─── link_task ────────────────────────────────────────────────────────────────
@@ -389,7 +399,7 @@ export async function linkTask({
 
   const task = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true, title: true } })
   if (!task) {
-    return { content: [{ type: "text" as const, text: `Task "${taskId}" not found.` }] }
+    return fail(`Task "${taskId}" not found.`)
   }
 
   const modelName = LINK_TARGET_MODEL[linkedType]
@@ -397,31 +407,23 @@ export async function linkTask({
   const delegate = (prisma as any)[modelName]
   const target = await delegate.findUnique({ where: { id: linkedId }, select: { id: true, title: true } })
   if (!target) {
-    return { content: [{ type: "text" as const, text: `${linkedType} "${linkedId}" not found.` }] }
+    return fail(`${linkedType} "${linkedId}" not found.`)
   }
 
   const existingLink = await prisma.taskLink.findFirst({
     where: { taskId, linkedType, linkedId },
   })
   if (existingLink) {
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Task "${task.title}" is already linked to ${linkedType} '${target.title}'.\nID: ${existingLink.id}`,
-      }],
-    }
+    return fail(`Task "${task.title}" is already linked to ${linkedType} '${target.title}'.\nID: ${existingLink.id}`)
   }
 
   const link = await prisma.taskLink.create({ data: { taskId, linkedType, linkedId } })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Linked:** ${task.title} → [${linkedType}] ${target.title}\n` +
-        `ID: ${link.id}`,
-    }],
-  }
+  return ok(
+    `**Linked:** ${task.title} → [${linkedType}] ${target.title}\n` +
+      `ID: ${link.id}`,
+    { taskId, linkedType, linkedId },
+  )
 }
 
 // ─── unlink_task ──────────────────────────────────────────────────────────────
@@ -439,17 +441,15 @@ export async function unlinkTask({
 
   const link = await prisma.taskLink.findFirst({ where: { taskId, linkedType, linkedId } })
   if (!link) {
-    return { content: [{ type: "text" as const, text: `No link found between task "${taskId}" and ${linkedType} "${linkedId}".` }] }
+    return fail(`No link found between task "${taskId}" and ${linkedType} "${linkedId}".`)
   }
 
   await prisma.taskLink.delete({ where: { id: link.id } })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text: `Unlinked ${linkedType} "${linkedId}" from task "${taskId}".\nID: ${link.id}`,
-    }],
-  }
+  return ok(
+    `Unlinked ${linkedType} "${linkedId}" from task "${taskId}".\nID: ${link.id}`,
+    { taskId, linkedType, linkedId },
+  )
 }
 
 // ─── list_task_links ──────────────────────────────────────────────────────────
@@ -459,12 +459,12 @@ export async function listTaskLinks({ taskId }: { taskId: string }) {
 
   const task = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true, title: true } })
   if (!task) {
-    return { content: [{ type: "text" as const, text: `Task "${taskId}" not found.` }] }
+    return fail(`Task "${taskId}" not found.`)
   }
 
   const rawLinks = await prisma.taskLink.findMany({ where: { taskId }, orderBy: { createdAt: "asc" } })
   if (!rawLinks.length) {
-    return { content: [{ type: "text" as const, text: `Task "${task.title}" has no links.` }] }
+    return fail(`Task "${task.title}" has no links.`)
   }
 
   const links = await formatLinks(prisma, rawLinks)
@@ -484,5 +484,13 @@ export async function listTaskLinks({ taskId }: { taskId: string }) {
     }
   }
 
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    items: links.map((l) => ({
+      id: l.id,
+      linkedType: l.linkedType,
+      linkedId: l.linkedId,
+      linkedTitle: l.linkedTitle,
+    })),
+    count: links.length,
+  })
 }

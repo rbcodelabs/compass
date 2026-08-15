@@ -9,6 +9,7 @@
  */
 
 import getPrisma from "@/lib/db"
+import { ok, fail } from "@/lib/mcp-output"
 import type { EvidenceSourceType, EvidenceConfidence } from "@/lib/types"
 
 type NodeTarget = {
@@ -68,18 +69,13 @@ export async function addEvidence({
   const target: NodeTarget = { opportunityId, solutionId, assumptionId }
   const targetCount = countTargets(target)
   if (targetCount !== 1) {
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Exactly one of opportunityId, solutionId, or assumptionId must be provided (got ${targetCount}).`,
-      }],
-    }
+    return fail(`Exactly one of opportunityId, solutionId, or assumptionId must be provided (got ${targetCount}).`)
   }
 
   const prisma = getPrisma()
   const { kind, id, node } = await findTargetNode(prisma, target)
   if (!node) {
-    return { content: [{ type: "text" as const, text: `${kind} "${id}" not found.` }] }
+    return fail(`${kind} "${id}" not found.`)
   }
 
   const created = await prisma.evidence.create({
@@ -95,12 +91,7 @@ export async function addEvidence({
     },
   })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text: `Created evidence (ID: ${created.id}) linked to ${kind} '${node.title}'.`,
-    }],
-  }
+  return ok(`Created evidence (ID: ${created.id}) linked to ${kind} '${node.title}'.`, created)
 }
 
 export async function linkEvidence({
@@ -117,12 +108,7 @@ export async function linkEvidence({
   const target: NodeTarget = { opportunityId, solutionId, assumptionId }
   const targetCount = countTargets(target)
   if (targetCount !== 1) {
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Exactly one of opportunityId, solutionId, or assumptionId must be provided (got ${targetCount}).`,
-      }],
-    }
+    return fail(`Exactly one of opportunityId, solutionId, or assumptionId must be provided (got ${targetCount}).`)
   }
 
   const prisma = getPrisma()
@@ -131,12 +117,12 @@ export async function linkEvidence({
     select: { id: true, excerpt: true, workspaceId: true },
   })
   if (!evidence) {
-    return { content: [{ type: "text" as const, text: `Evidence "${evidenceId}" not found.` }] }
+    return fail(`Evidence "${evidenceId}" not found.`)
   }
 
   const { kind, id, node } = await findTargetNode(prisma, target)
   if (!node) {
-    return { content: [{ type: "text" as const, text: `${kind} "${id}" not found.` }] }
+    return fail(`${kind} "${id}" not found.`)
   }
 
   await prisma.evidence.update({
@@ -149,12 +135,15 @@ export async function linkEvidence({
     },
   })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text: `Linked evidence '${evidence.excerpt.slice(0, 60)}${evidence.excerpt.length > 60 ? "…" : ""}' to ${kind} '${node.title}'.`,
-    }],
-  }
+  return ok(
+    `Linked evidence '${evidence.excerpt.slice(0, 60)}${evidence.excerpt.length > 60 ? "…" : ""}' to ${kind} '${node.title}'.`,
+    {
+      id: evidence.id,
+      opportunityId: opportunityId ?? null,
+      solutionId: solutionId ?? null,
+      assumptionId: assumptionId ?? null,
+    }
+  )
 }
 
 export async function listEvidence({
@@ -178,7 +167,7 @@ export async function listEvidence({
   })
 
   if (!items.length) {
-    return { content: [{ type: "text" as const, text: "No evidence found." }] }
+    return fail("No evidence found.")
   }
 
   const lines = items.map(e =>
@@ -189,5 +178,14 @@ export async function listEvidence({
     `  Created: ${e.createdAt.toISOString()}`
   )
 
-  return { content: [{ type: "text" as const, text: lines.join("\n\n") }] }
+  const projected = items.map(e => ({
+    id: e.id,
+    sourceType: e.sourceType,
+    excerpt: e.excerpt,
+    confidence: e.confidence,
+    sourceUrl: e.sourceUrl,
+    parent: { type: nodeType, id: nodeId },
+  }))
+
+  return ok(lines.join("\n\n"), { items: projected, count: items.length })
 }
