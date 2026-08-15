@@ -10,6 +10,7 @@
 import getPrisma from "@/lib/db"
 import type { LaunchTier } from "@/lib/types"
 import { setLaunchTierCore, updateChecklistItemCore } from "@/lib/launch-checklist"
+import { ok, fail } from "@/lib/mcp-output"
 
 interface ChecklistItemInput {
   label: string
@@ -34,7 +35,7 @@ export async function createChecklistTemplate({
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } })
   if (!workspace) {
-    return { content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }] }
+    return fail(`Workspace "${workspaceId}" not found.`)
   }
 
   const template = await prisma.checklistTemplate.create({
@@ -52,16 +53,18 @@ export async function createChecklistTemplate({
     })
   }
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Checklist template created:** ${template.name}\n` +
-        `Tier: ${tier}\n` +
-        `Items: ${items.length}\n` +
-        `ID: ${template.id}`,
-    }],
-  }
+  return ok(
+    `**Checklist template created:** ${template.name}\n` +
+      `Tier: ${tier}\n` +
+      `Items: ${items.length}\n` +
+      `ID: ${template.id}`,
+    {
+      id: template.id,
+      name: template.name,
+      tier,
+      items: items.map((item, i) => ({ label: item.label, description: item.description, order: i })),
+    },
+  )
 }
 
 // ─── list_checklist_templates ────────────────────────────────────────────────
@@ -76,7 +79,7 @@ export async function listChecklistTemplates({
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } })
   if (!workspace) {
-    return { content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }] }
+    return fail(`Workspace "${workspaceId}" not found.`)
   }
 
   const templates = await prisma.checklistTemplate.findMany({
@@ -86,7 +89,7 @@ export async function listChecklistTemplates({
   })
 
   if (!templates.length) {
-    return { content: [{ type: "text" as const, text: "No checklist templates found." }] }
+    return fail("No checklist templates found.")
   }
 
   const lines = templates.map((t) =>
@@ -94,7 +97,16 @@ export async function listChecklistTemplates({
       `  ID: ${t.id}` +
       (t.description ? `\n  ${t.description}` : "")
   )
-  return { content: [{ type: "text" as const, text: lines.join("\n\n") }] }
+  return ok(lines.join("\n\n"), {
+    items: templates.map((t) => ({
+      id: t.id,
+      name: t.name,
+      tier: t.tier,
+      status: t.status,
+      itemCount: t.items.length,
+    })),
+    count: templates.length,
+  })
 }
 
 // ─── set_launch_tier ──────────────────────────────────────────────────────────
@@ -115,16 +127,11 @@ export async function setLaunchTier({
     select: { id: true, title: true, workspaceId: true, horizon: true },
   })
   if (!item) {
-    return { content: [{ type: "text" as const, text: `Roadmap item "${itemId}" not found.` }] }
+    return fail(`Roadmap item "${itemId}" not found.`)
   }
 
   if (item.horizon === "LAUNCHING" || item.horizon === "LAUNCHED") {
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Roadmap item "${item.title}" is already ${item.horizon}. A new launch tier cannot be set on an item that has already started launching.`,
-      }],
-    }
+    return fail(`Roadmap item "${item.title}" is already ${item.horizon}. A new launch tier cannot be set on an item that has already started launching.`)
   }
 
   // Resolve the template: explicit templateId (tier-validated) or the
@@ -136,15 +143,10 @@ export async function setLaunchTier({
       include: { items: { orderBy: { order: "asc" } } },
     })
     if (!template) {
-      return { content: [{ type: "text" as const, text: `Checklist template "${templateId}" not found.` }] }
+      return fail(`Checklist template "${templateId}" not found.`)
     }
     if (template.tier !== tier) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Checklist template "${template.name}" is for tier ${template.tier}, not ${tier}. Pass a matching templateId or omit it to use the workspace's active ${tier} template.`,
-        }],
-      }
+      return fail(`Checklist template "${template.name}" is for tier ${template.tier}, not ${tier}. Pass a matching templateId or omit it to use the workspace's active ${tier} template.`)
     }
   } else {
     template = await prisma.checklistTemplate.findFirst({
@@ -153,14 +155,10 @@ export async function setLaunchTier({
       orderBy: { createdAt: "desc" },
     })
     if (!template) {
-      return {
-        content: [{
-          type: "text" as const,
-          text:
-            `No active checklist template found for tier ${tier} in this workspace. ` +
-            `Use create_checklist_template to create one, or pass an explicit templateId.`,
-        }],
-      }
+      return fail(
+        `No active checklist template found for tier ${tier} in this workspace. ` +
+          `Use create_checklist_template to create one, or pass an explicit templateId.`
+      )
     }
   }
 
@@ -171,17 +169,22 @@ export async function setLaunchTier({
     items: template.items.map((i) => ({ label: i.label, description: i.description, order: i.order })),
   })
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Launch tier set:** ${tier}\n` +
-        `Roadmap item: ${item.title}\n` +
-        `New horizon: LAUNCHING\n` +
-        `Checklist: ${template.name} (${template.items.length} item(s))\n` +
-        `ID: ${launchChecklistId}`,
-    }],
-  }
+  return ok(
+    `**Launch tier set:** ${tier}\n` +
+      `Roadmap item: ${item.title}\n` +
+      `New horizon: LAUNCHING\n` +
+      `Checklist: ${template.name} (${template.items.length} item(s))\n` +
+      `ID: ${launchChecklistId}`,
+    {
+      item: { id: item.id, title: item.title, tier, horizon: "LAUNCHING" as const },
+      checklist: {
+        id: launchChecklistId,
+        name: template.name,
+        tier: template.tier,
+        itemCount: template.items.length,
+      },
+    },
+  )
 }
 
 // ─── get_launch_checklist ─────────────────────────────────────────────────────
@@ -194,7 +197,7 @@ export async function getLaunchChecklist({ roadmapItemId }: { roadmapItemId: str
     select: { id: true, title: true },
   })
   if (!item) {
-    return { content: [{ type: "text" as const, text: `Roadmap item "${roadmapItemId}" not found.` }] }
+    return fail(`Roadmap item "${roadmapItemId}" not found.`)
   }
 
   const checklist = await prisma.launchChecklist.findUnique({
@@ -202,12 +205,7 @@ export async function getLaunchChecklist({ roadmapItemId }: { roadmapItemId: str
     include: { items: { orderBy: { order: "asc" } } },
   })
   if (!checklist) {
-    return {
-      content: [{
-        type: "text" as const,
-        text: `Roadmap item "${item.title}" has no launch checklist yet. Use set_launch_tier to create one.`,
-      }],
-    }
+    return fail(`Roadmap item "${item.title}" has no launch checklist yet. Use set_launch_tier to create one.`)
   }
 
   const done = checklist.items.filter((i) => i.status === "DONE").length
@@ -227,7 +225,10 @@ export async function getLaunchChecklist({ roadmapItemId }: { roadmapItemId: str
       `\n  ID: ${i.id}`
     ),
   ]
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), {
+    items: checklist.items.map((i) => ({ id: i.id, label: i.label, status: i.status })),
+    count: checklist.items.length,
+  })
 }
 
 // ─── update_launch_checklist_item ────────────────────────────────────────────
@@ -241,16 +242,13 @@ export async function updateLaunchChecklistItem({
 }) {
   const updated = await updateChecklistItemCore(itemId, status)
   if (!updated) {
-    return { content: [{ type: "text" as const, text: `Launch checklist item "${itemId}" not found.` }] }
+    return fail(`Launch checklist item "${itemId}" not found.`)
   }
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Checklist item updated:** ${updated.label}\n` +
-        `Status: ${updated.status}\n` +
-        `ID: ${updated.id}`,
-    }],
-  }
+  return ok(
+    `**Checklist item updated:** ${updated.label}\n` +
+      `Status: ${updated.status}\n` +
+      `ID: ${updated.id}`,
+    { id: updated.id, status: updated.status },
+  )
 }

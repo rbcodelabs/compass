@@ -5,6 +5,7 @@
  */
 
 import getPrisma from "@/lib/db"
+import { ok, fail } from "@/lib/mcp-output"
 
 // ── update_assumption ───────────────────────────────────────────────────────
 
@@ -26,9 +27,7 @@ export async function updateAssumption({
     select: { id: true, title: true },
   })
   if (!existing) {
-    return {
-      content: [{ type: "text" as const, text: `Assumption "${assumptionId}" not found.` }],
-    }
+    return fail(`Assumption "${assumptionId}" not found.`)
   }
 
   // Build update payload imperatively to satisfy Prisma's union type constraints
@@ -43,19 +42,19 @@ export async function updateAssumption({
     data: updateData,
   })
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text:
-          `**Assumption updated**\n` +
-          `ID: ${updated.id}\n` +
-          `Title: ${updated.title}\n` +
-          `Risk: ${updated.riskLevel}\n` +
-          `Status: ${updated.status}`,
-      },
-    ],
-  }
+  return ok(
+    `**Assumption updated**\n` +
+      `ID: ${updated.id}\n` +
+      `Title: ${updated.title}\n` +
+      `Risk: ${updated.riskLevel}\n` +
+      `Status: ${updated.status}`,
+    {
+      id: updated.id,
+      title: updated.title,
+      riskLevel: updated.riskLevel,
+      status: updated.status,
+    }
+  )
 }
 
 // ── delete_assumption ────────────────────────────────────────────────────────
@@ -68,9 +67,7 @@ export async function deleteAssumption({ assumptionId }: { assumptionId: string 
     select: { id: true, title: true },
   })
   if (!existing) {
-    return {
-      content: [{ type: "text" as const, text: `Assumption "${assumptionId}" not found.` }],
-    }
+    return fail(`Assumption "${assumptionId}" not found.`)
   }
 
   // Null out references before deleting — Aurora DSQL has relationMode = "prisma"
@@ -81,12 +78,8 @@ export async function deleteAssumption({ assumptionId }: { assumptionId: string 
 
   await prisma.assumption.delete({ where: { id: assumptionId } })
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: `**Assumption deleted**\nID: ${existing.id}\nTitle: ${existing.title}`,
-      },
-    ],
-  }
+  return ok(`**Assumption deleted**\nID: ${existing.id}\nTitle: ${existing.title}`, {
+    id: existing.id,
+    deleted: true,
+  })
 }

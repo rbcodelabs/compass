@@ -10,14 +10,13 @@
  */
 
 import { searchHelp as searchHelpDocs, getHelpTopic, getDocRaw } from "@/lib/docs"
+import { ok, fail } from "@/lib/mcp-output"
 
 export async function searchHelp({ query, limit }: { query: string; limit?: number }) {
   const results = searchHelpDocs(query, limit ?? 5)
 
   if (!results.length) {
-    return {
-      content: [{ type: "text" as const, text: `No help docs found matching "${query}".` }],
-    }
+    return fail(`No help docs found matching "${query}".`)
   }
 
   const lines = [`**${results.length} help doc match${results.length === 1 ? "" : "es"} for "${query}"**\n`]
@@ -30,7 +29,14 @@ export async function searchHelp({ query, limit }: { query: string; limit?: numb
     )
   }
 
-  return { content: [{ type: "text" as const, text: lines.join("\n\n") }] }
+  return ok(lines.join("\n\n"), {
+    items: results.map((r) => ({
+      path: `/help/${r.slug}${r.anchor ? `#${r.anchor}` : ""}`,
+      excerpt: r.excerpt,
+      title: r.title,
+    })),
+    count: results.length,
+  })
 }
 
 export async function getHelp({ topic }: { topic: string }) {
@@ -38,9 +44,7 @@ export async function getHelp({ topic }: { topic: string }) {
   const doc = meta ? getDocRaw(meta.slug) : null
 
   if (!doc) {
-    return {
-      content: [{ type: "text" as const, text: `No help doc found for topic "${topic}".` }],
-    }
+    return fail(`No help doc found for topic "${topic}".`)
   }
 
   const lines = [
@@ -51,5 +55,5 @@ export async function getHelp({ topic }: { topic: string }) {
     doc.content,
   ]
 
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  return ok(lines.join("\n"), doc)
 }

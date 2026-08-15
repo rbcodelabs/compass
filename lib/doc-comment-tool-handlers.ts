@@ -19,6 +19,7 @@
  */
 
 import getPrisma from "@/lib/db"
+import { ok, fail } from "@/lib/mcp-output"
 import {
   createDocCommentCore,
   listDocCommentsCore,
@@ -83,24 +84,19 @@ export async function addDocComment({
           : result.error === "PARENT_IS_REPLY"
             ? `Comment "${parentId}" is itself a reply — threads are only one level deep. Reply to the root comment instead.`
             : `Comment body must not be empty.`
-    return { content: [{ type: "text" as const, text: message }] }
+    return fail(message)
   }
 
   const c = result.comment
   const kind = c.parentId ? "Reply added" : c.anchorText ? "Anchored comment added" : "Comment added"
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text:
-          `**${kind}** on doc "${docId}"\n` +
-          `Author: ${c.authorName} (${c.authorType})\n` +
-          (c.anchorText ? `Anchored to: "${truncate(c.anchorText, 80)}"\n` : "") +
-          `Body: ${truncate(c.body, 120)}\n` +
-          `ID: ${c.id}`,
-      },
-    ],
-  }
+  return ok(
+    `**${kind}** on doc "${docId}"\n` +
+      `Author: ${c.authorName} (${c.authorType})\n` +
+      (c.anchorText ? `Anchored to: "${truncate(c.anchorText, 80)}"\n` : "") +
+      `Body: ${truncate(c.body, 120)}\n` +
+      `ID: ${c.id}`,
+    c
+  )
 }
 
 // ── list_doc_comments ───────────────────────────────────────────────────────
@@ -116,15 +112,13 @@ export async function listDocComments({
 
   const doc = await prisma.doc.findUnique({ where: { id: docId }, select: { id: true, title: true } })
   if (!doc) {
-    return { content: [{ type: "text" as const, text: `Doc "${docId}" not found.` }] }
+    return fail(`Doc "${docId}" not found.`)
   }
 
   const comments = await listDocCommentsCore(docId, status)
   if (comments.length === 0) {
     const scope = status ? `${status.toLowerCase()} ` : ""
-    return {
-      content: [{ type: "text" as const, text: `No ${scope}comments on doc "${doc.title}".` }],
-    }
+    return fail(`No ${scope}comments on doc "${doc.title}".`)
   }
 
   // Group into one-level-deep threads: roots (parentId null) with their replies.
@@ -154,16 +148,21 @@ export async function listDocComments({
     return [head, ...replies].join("\n")
   })
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text:
-          `Comments on doc "${doc.title}" (${roots.length} thread${roots.length === 1 ? "" : "s"}):\n\n` +
-          blocks.join("\n\n"),
-      },
-    ],
-  }
+  return ok(
+    `Comments on doc "${doc.title}" (${roots.length} thread${roots.length === 1 ? "" : "s"}):\n\n` +
+      blocks.join("\n\n"),
+    {
+      items: comments.map((c) => ({
+        id: c.id,
+        body: c.body,
+        authorName: c.authorName,
+        status: c.status,
+        anchor: c.anchorText,
+        parentId: c.parentId,
+      })),
+      count: comments.length,
+    }
+  )
 }
 
 // ── get_doc_comment ─────────────────────────────────────────────────────────
@@ -171,7 +170,7 @@ export async function listDocComments({
 export async function getDocComment({ commentId }: { commentId: string }) {
   const comment = await getDocCommentCore(commentId)
   if (!comment) {
-    return { content: [{ type: "text" as const, text: `Comment "${commentId}" not found.` }] }
+    return fail(`Comment "${commentId}" not found.`)
   }
 
   const lines: (string | null)[] = [
@@ -187,9 +186,7 @@ export async function getDocComment({ commentId }: { commentId: string }) {
     `ID: ${comment.id}`,
   ]
 
-  return {
-    content: [{ type: "text" as const, text: lines.filter((l): l is string => l !== null).join("\n") }],
-  }
+  return ok(lines.filter((l): l is string => l !== null).join("\n"), comment)
 }
 
 // ── update_doc_comment ──────────────────────────────────────────────────────
@@ -197,16 +194,12 @@ export async function getDocComment({ commentId }: { commentId: string }) {
 export async function updateDocComment({ commentId, body }: { commentId: string; body: string }) {
   const updated = await updateDocCommentBodyCore(commentId, body)
   if (!updated) {
-    return { content: [{ type: "text" as const, text: `Comment "${commentId}" not found.` }] }
+    return fail(`Comment "${commentId}" not found.`)
   }
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: `**Comment updated**\n` + `Body: ${truncate(updated.body, 120)}\n` + `ID: ${updated.id}`,
-      },
-    ],
-  }
+  return ok(
+    `**Comment updated**\n` + `Body: ${truncate(updated.body, 120)}\n` + `ID: ${updated.id}`,
+    updated
+  )
 }
 
 // ── delete_doc_comment ──────────────────────────────────────────────────────
@@ -215,18 +208,13 @@ export async function updateDocComment({ commentId, body }: { commentId: string;
 export async function deleteDocComment({ commentId }: { commentId: string }) {
   const result = await deleteDocCommentCore(commentId)
   if (!result) {
-    return { content: [{ type: "text" as const, text: `Comment "${commentId}" not found.` }] }
+    return fail(`Comment "${commentId}" not found.`)
   }
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text:
-          `**Comment deleted**${result.wasRoot ? ` (root — ${result.deletedReplies} repl${result.deletedReplies === 1 ? "y" : "ies"} also removed)` : ""}\n` +
-          `ID: ${result.id}`,
-      },
-    ],
-  }
+  return ok(
+    `**Comment deleted**${result.wasRoot ? ` (root — ${result.deletedReplies} repl${result.deletedReplies === 1 ? "y" : "ies"} also removed)` : ""}\n` +
+      `ID: ${result.id}`,
+    { id: result.id, deleted: true }
+  )
 }
 
 // ── resolve_doc_comment / reopen_doc_comment ────────────────────────────────
@@ -234,19 +222,14 @@ export async function deleteDocComment({ commentId }: { commentId: string }) {
 async function setStatus(commentId: string, status: CommentStatus) {
   const updated = await setDocCommentStatusCore(commentId, status)
   if (!updated) {
-    return { content: [{ type: "text" as const, text: `Comment "${commentId}" not found.` }] }
+    return fail(`Comment "${commentId}" not found.`)
   }
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text:
-          `**Comment ${status === "RESOLVED" ? "resolved" : "reopened"}**\n` +
-          `Status: ${updated.status}\n` +
-          `ID: ${updated.id}`,
-      },
-    ],
-  }
+  return ok(
+    `**Comment ${status === "RESOLVED" ? "resolved" : "reopened"}**\n` +
+      `Status: ${updated.status}\n` +
+      `ID: ${updated.id}`,
+    { id: updated.id, status: updated.status }
+  )
 }
 
 export async function resolveDocComment({ commentId }: { commentId: string }) {

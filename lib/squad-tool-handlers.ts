@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import getPrisma from "@/lib/db"
+import { ok, fail } from "@/lib/mcp-output"
 
 export async function createSquad({
   workspaceId,
@@ -18,7 +19,7 @@ export async function createSquad({
     select: { id: true, organization: { select: { slug: true } }, slug: true },
   })
   if (!workspace) {
-    return { content: [{ type: "text" as const, text: `No workspace found with id "${workspaceId}".` }] }
+    return fail(`No workspace found with id "${workspaceId}".`)
   }
 
   const squad = await prisma.squad.create({
@@ -32,16 +33,13 @@ export async function createSquad({
 
   revalidatePath(`/${workspace.organization.slug}/${workspace.slug}`, "layout")
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Squad created**\n` +
-        `ID: ${squad.id}\n` +
-        `Name: ${squad.name}\n` +
-        `Color: ${squad.color}`,
-    }],
-  }
+  return ok(
+    `**Squad created**\n` +
+      `ID: ${squad.id}\n` +
+      `Name: ${squad.name}\n` +
+      `Color: ${squad.color}`,
+    { id: squad.id, name: squad.name, color: squad.color },
+  )
 }
 
 export async function listSquads({ workspaceId }: { workspaceId: string }) {
@@ -51,10 +49,11 @@ export async function listSquads({ workspaceId }: { workspaceId: string }) {
     orderBy: { createdAt: "asc" },
   })
   if (!squads.length) {
-    return { content: [{ type: "text" as const, text: "No squads in this workspace." }] }
+    return fail("No squads in this workspace.")
   }
   const lines = squads.map((s) => `• **${s.name}** (${s.color}) — ID: ${s.id}`)
-  return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+  const items = squads.map((s) => ({ id: s.id, name: s.name, color: s.color }))
+  return ok(lines.join("\n"), { items, count: items.length })
 }
 
 export async function getSquad({ squadId }: { squadId: string }) {
@@ -64,18 +63,15 @@ export async function getSquad({ squadId }: { squadId: string }) {
     select: { id: true, workspaceId: true, name: true, color: true },
   })
   if (!squad) {
-    return { content: [{ type: "text" as const, text: `Squad "${squadId}" not found.` }] }
+    return fail(`Squad "${squadId}" not found.`)
   }
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Squad:** ${squad.name}\n` +
-        `ID: ${squad.id}\n` +
-        `Workspace ID: ${squad.workspaceId}\n` +
-        `Color: ${squad.color}`,
-    }],
-  }
+  return ok(
+    `**Squad:** ${squad.name}\n` +
+      `ID: ${squad.id}\n` +
+      `Workspace ID: ${squad.workspaceId}\n` +
+      `Color: ${squad.color}`,
+    squad,
+  )
 }
 
 export async function updateSquad({
@@ -96,7 +92,7 @@ export async function updateSquad({
     },
   })
   if (!existing) {
-    return { content: [{ type: "text" as const, text: `Squad "${squadId}" not found.` }] }
+    return fail(`Squad "${squadId}" not found.`)
   }
 
   const squad = await prisma.squad.update({
@@ -109,14 +105,11 @@ export async function updateSquad({
 
   revalidatePath(`/${existing.workspace.organization.slug}/${existing.workspace.slug}`, "layout")
 
-  return {
-    content: [{
-      type: "text" as const,
-      text:
-        `**Squad updated**\n` +
-        `ID: ${squad.id}\n` +
-        `Name: ${squad.name}\n` +
-        `Color: ${squad.color}`,
-    }],
-  }
+  return ok(
+    `**Squad updated**\n` +
+      `ID: ${squad.id}\n` +
+      `Name: ${squad.name}\n` +
+      `Color: ${squad.color}`,
+    { id: squad.id, name: squad.name, color: squad.color },
+  )
 }

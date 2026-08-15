@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { validateMcpAuth } from "@/lib/mcp-auth"
+import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
 import {
@@ -147,6 +148,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId }) => {
         const prisma = getPrisma()
@@ -166,7 +168,7 @@ const _handler = createMcpHandler(
           ])
 
         if (!workspace) {
-          return { content: [{ type: "text" as const, text: `No workspace found with id "${workspaceId}".` }] }
+          return fail(`No workspace found with id "${workspaceId}".`)
         }
 
         const cycleText = activeOKRCycle
@@ -174,19 +176,25 @@ const _handler = createMcpHandler(
           : "None"
         const squadText = squads.length ? squads.map(s => `${s.name} (${s.id})`).join(", ") : "None"
 
-        return {
-          content: [{
-            type: "text" as const,
-            text:
-              `**Workspace:** ${workspace.name}\n\n` +
-              `**Active OKR Cycle:** ${cycleText}\n` +
-              `**Opportunities (active):** ${opportunityCount}\n` +
-              `**Experiments:** ${experimentCount} (${activeExperiments} running)\n` +
-              `**Roadmap Items (active):** ${roadmapItemCount}\n` +
-              `**OKR Cycles total:** ${okrCycleCount}\n` +
-              `**Squads:** ${squadText}`,
-          }],
-        }
+        return ok(
+          `**Workspace:** ${workspace.name}\n\n` +
+            `**Active OKR Cycle:** ${cycleText}\n` +
+            `**Opportunities (active):** ${opportunityCount}\n` +
+            `**Experiments:** ${experimentCount} (${activeExperiments} running)\n` +
+            `**Roadmap Items (active):** ${roadmapItemCount}\n` +
+            `**OKR Cycles total:** ${okrCycleCount}\n` +
+            `**Squads:** ${squadText}`,
+          {
+            name: workspace.name,
+            activeOkrCycle: activeOKRCycle,
+            opportunityCount,
+            experimentCount,
+            activeExperiments,
+            roadmapItemCount,
+            okrCycleCount,
+            squads,
+          },
+        )
       }
     )
 
@@ -204,6 +212,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           orgSlug: z.string().min(1).describe("The organization slug (e.g. 'rbcodelabs')"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ orgSlug }) => {
         const actor = getMcpActor()
@@ -239,10 +248,10 @@ const _handler = createMcpHandler(
           },
         })
         if (!org) {
-          return { content: [{ type: "text" as const, text: `No organization found with slug "${orgSlug}".` }] }
+          return fail(`No organization found with slug "${orgSlug}".`)
         }
         if (!org.workspaces.length) {
-          return { content: [{ type: "text" as const, text: `Organization "${org.name}" has no workspaces yet.` }] }
+          return fail(`Organization "${org.name}" has no workspaces yet.`)
         }
         const lines = org.workspaces.map(w =>
           `• **${w.name}** (/${orgSlug}/${w.slug})\n` +
@@ -251,12 +260,22 @@ const _handler = createMcpHandler(
           `  ${w._count.opportunities} opportunities · ${w._count.experiments} experiments · ` +
           `${w._count.roadmapItems} roadmap items · ${w._count.okrCycles} OKR cycles`
         )
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**${org.name}** — ${org.workspaces.length} workspace(s)\n\n` + lines.join("\n\n"),
-          }],
-        }
+        return ok(
+          `**${org.name}** — ${org.workspaces.length} workspace(s)\n\n` + lines.join("\n\n"),
+          {
+            items: org.workspaces.map((w) => ({
+              id: w.id,
+              name: w.name,
+              slug: w.slug,
+              description: w.description,
+              opportunities: w._count.opportunities,
+              experiments: w._count.experiments,
+              roadmapItems: w._count.roadmapItems,
+              okrCycles: w._count.okrCycles,
+            })),
+            count: org.workspaces.length,
+          },
+        )
       }
     )
 
@@ -276,6 +295,7 @@ const _handler = createMcpHandler(
           orgSlug: z.string().min(1).describe("The organization slug (e.g. 'rbcodelabs')"),
           workspaceSlug: z.string().min(1).describe("The workspace slug (e.g. 'compass')"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ orgSlug, workspaceSlug }) => {
         const prisma = getPrisma()
@@ -284,26 +304,29 @@ const _handler = createMcpHandler(
           select: { id: true, name: true },
         })
         if (!org) {
-          return { content: [{ type: "text" as const, text: `No organization found with slug "${orgSlug}".` }] }
+          return fail(`No organization found with slug "${orgSlug}".`)
         }
         const workspace = await prisma.workspace.findFirst({
           where: { organizationId: org.id, slug: workspaceSlug },
           select: { id: true, name: true, slug: true, description: true },
         })
         if (!workspace) {
-          return { content: [{ type: "text" as const, text: `No workspace found with slug "${workspaceSlug}" in organization "${org.name}".` }] }
+          return fail(`No workspace found with slug "${workspaceSlug}" in organization "${org.name}".`)
         }
-        return {
-          content: [{
-            type: "text" as const,
-            text:
-              `**Workspace:** ${workspace.name}\n` +
-              `ID: ${workspace.id}\n` +
-              `Slug: ${workspace.slug}\n` +
-              (workspace.description ? `${workspace.description}\n` : "") +
-              `URL: /${orgSlug}/${workspace.slug}`,
-          }],
-        }
+        return ok(
+          `**Workspace:** ${workspace.name}\n` +
+            `ID: ${workspace.id}\n` +
+            `Slug: ${workspace.slug}\n` +
+            (workspace.description ? `${workspace.description}\n` : "") +
+            `URL: /${orgSlug}/${workspace.slug}`,
+          {
+            id: workspace.id,
+            name: workspace.name,
+            slug: workspace.slug,
+            description: workspace.description,
+            orgSlug,
+          },
+        )
       }
     )
 
@@ -324,6 +347,7 @@ const _handler = createMcpHandler(
             .describe("URL slug for the workspace (lowercase, alphanumeric + hyphens)"),
           description: z.string().optional().describe("Short description of the workspace"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ orgSlug, name, slug, description }) => {
         const prisma = getPrisma()
@@ -332,14 +356,14 @@ const _handler = createMcpHandler(
           select: { id: true, name: true },
         })
         if (!org) {
-          return { content: [{ type: "text" as const, text: `No organization found with slug "${orgSlug}".` }] }
+          return fail(`No organization found with slug "${orgSlug}".`)
         }
         const existing = await prisma.workspace.findFirst({
           where: { organizationId: org.id, slug },
           select: { id: true },
         })
         if (existing) {
-          return { content: [{ type: "text" as const, text: `A workspace with slug "${slug}" already exists in organization "${org.name}".` }] }
+          return fail(`A workspace with slug "${slug}" already exists in organization "${org.name}".`)
         }
         const workspace = await prisma.workspace.create({
           data: {
@@ -381,17 +405,20 @@ const _handler = createMcpHandler(
         revalidatePath("/dashboard")
         revalidatePath("/", "layout")
 
-        return {
-          content: [{
-            type: "text" as const,
-            text:
-              `**Workspace created**\n` +
-              `ID: ${workspace.id}\n` +
-              `Name: ${workspace.name}\n` +
-              `Slug: ${workspace.slug}\n` +
-              `URL: /${orgSlug}/${workspace.slug}`,
-          }],
-        }
+        return ok(
+          `**Workspace created**\n` +
+            `ID: ${workspace.id}\n` +
+            `Name: ${workspace.name}\n` +
+            `Slug: ${workspace.slug}\n` +
+            `URL: /${orgSlug}/${workspace.slug}`,
+          {
+            id: workspace.id,
+            name: workspace.name,
+            slug: workspace.slug,
+            description: workspace.description,
+            orgSlug,
+          },
+        )
       }
     )
 
@@ -407,6 +434,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId }) => {
         const prisma = getPrisma()
@@ -416,12 +444,22 @@ const _handler = createMcpHandler(
           select: { id: true, title: true, status: true, startDate: true, endDate: true, _count: { select: { objectives: true } } },
         })
         if (!cycles.length) {
-          return { content: [{ type: "text" as const, text: "No OKR cycles found for this workspace." }] }
+          return fail("No OKR cycles found for this workspace.")
         }
         const lines = cycles.map(c =>
           `• **${c.title}** [${c.status}] ${c.startDate.toLocaleDateString()} – ${c.endDate.toLocaleDateString()} — ${c._count.objectives} objectives — ID: ${c.id}`
         )
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+        return ok(lines.join("\n"), {
+          items: cycles.map((c) => ({
+            id: c.id,
+            title: c.title,
+            status: c.status,
+            startDate: c.startDate,
+            endDate: c.endDate,
+            objectives: c._count.objectives,
+          })),
+          count: cycles.length,
+        })
       }
     )
 
@@ -437,6 +475,7 @@ const _handler = createMcpHandler(
           endDate: z.string().describe("ISO date string for cycle end, e.g. '2026-09-30'"),
           status: z.enum(["DRAFT", "ACTIVE", "COMPLETED"]).optional().describe("Cycle status (default: ACTIVE)"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId, title, startDate, endDate, status }) => {
         const prisma = getPrisma()
@@ -449,12 +488,16 @@ const _handler = createMcpHandler(
             status: status ?? "ACTIVE",
           },
         })
-        return {
-          content: [{
-            type: "text" as const,
-            text: `OKR cycle created: **${cycle.title}** [${cycle.status}]\n${cycle.startDate.toLocaleDateString()} – ${cycle.endDate.toLocaleDateString()}\nCycle ID: ${cycle.id}`,
-          }],
-        }
+        return ok(
+          `OKR cycle created: **${cycle.title}** [${cycle.status}]\n${cycle.startDate.toLocaleDateString()} – ${cycle.endDate.toLocaleDateString()}\nCycle ID: ${cycle.id}`,
+          {
+            id: cycle.id,
+            title: cycle.title,
+            status: cycle.status,
+            startDate: cycle.startDate,
+            endDate: cycle.endDate,
+          },
+        )
       }
     )
 
@@ -466,6 +509,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           cycleId: z.string().uuid().describe("UUID of the OKR cycle"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ cycleId }) => {
         const prisma = getPrisma()
@@ -504,7 +548,7 @@ const _handler = createMcpHandler(
           },
         })
         if (!cycle) {
-          return { content: [{ type: "text" as const, text: `OKR cycle "${cycleId}" not found.` }] }
+          return fail(`OKR cycle "${cycleId}" not found.`)
         }
 
         const lines: string[] = [
@@ -534,7 +578,7 @@ const _handler = createMcpHandler(
           lines.push("")
         }
 
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+        return ok(lines.join("\n"), cycle)
       }
     )
 
@@ -552,28 +596,36 @@ const _handler = createMcpHandler(
           squadId: z.string().uuid().optional().describe("UUID of the squad this objective belongs to"),
           parentKeyResultId: z.string().uuid().optional().describe("UUID of a higher-level KR from a longer cycle in the same workspace"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId, cycleId, title, description, owner, squadId, parentKeyResultId }) => {
         const prisma = getPrisma()
         const cycle = await prisma.oKRCycle.findFirst({ where: { id: cycleId, workspaceId }, select: { id: true, title: true } })
         if (!cycle) {
-          return { content: [{ type: "text" as const, text: `OKR cycle "${cycleId}" not found in workspace.` }] }
+          return fail(`OKR cycle "${cycleId}" not found in workspace.`)
         }
         if (parentKeyResultId) {
           const eligible = await getEligibleParentKeyResults(workspaceId, cycleId)
           if (!eligible.some((kr) => kr.id === parentKeyResultId)) {
-            return { content: [{ type: "text" as const, text: "The parent KR must be in an open, longer-horizon cycle that contains this cycle." }] }
+            return fail("The parent KR must be in an open, longer-horizon cycle that contains this cycle.")
           }
         }
         const objective = await prisma.objective.create({
           data: { cycleId, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
         })
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**Objective created** in cycle "${cycle.title}"\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
-          }],
-        }
+        return ok(
+          `**Objective created** in cycle "${cycle.title}"\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
+          {
+            id: objective.id,
+            title: objective.title,
+            status: objective.status,
+            cycleId,
+            description: objective.description,
+            owner: objective.owner,
+            squadId: objective.squadId,
+            parentKeyResultId: objective.parentKeyResultId,
+          },
+        )
       }
     )
 
@@ -588,22 +640,28 @@ const _handler = createMcpHandler(
           target: z.number().describe("Numeric target value"),
           unit: z.string().optional().describe("Unit label, e.g. '%', 'users', 'NPS'"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ objectiveId, title, target, unit }) => {
         const prisma = getPrisma()
         const objective = await prisma.objective.findUnique({ where: { id: objectiveId }, select: { id: true, title: true } })
         if (!objective) {
-          return { content: [{ type: "text" as const, text: `Objective "${objectiveId}" not found.` }] }
+          return fail(`Objective "${objectiveId}" not found.`)
         }
         const keyResult = await prisma.keyResult.create({
           data: { objectiveId, title: title.trim(), target, unit: unit?.trim() },
         })
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**Key Result created** on "${objective.title}"\nID: ${keyResult.id}\nTitle: ${keyResult.title}\nTarget: ${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""}\nCurrent: 0`,
-          }],
-        }
+        return ok(
+          `**Key Result created** on "${objective.title}"\nID: ${keyResult.id}\nTitle: ${keyResult.title}\nTarget: ${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""}\nCurrent: 0`,
+          {
+            id: keyResult.id,
+            title: keyResult.title,
+            target: keyResult.target,
+            unit: keyResult.unit,
+            current: keyResult.current,
+            objectiveId,
+          },
+        )
       }
     )
 
@@ -617,24 +675,30 @@ const _handler = createMcpHandler(
           value: z.number().describe("New current value"),
           note: z.string().optional().describe("Context note about this check-in"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ keyResultId, value, note }) => {
         const prisma = getPrisma()
         const existing = await prisma.keyResult.findUnique({ where: { id: keyResultId }, select: { id: true, title: true, target: true, unit: true } })
         if (!existing) {
-          return { content: [{ type: "text" as const, text: `Key Result "${keyResultId}" not found.` }] }
+          return fail(`Key Result "${keyResultId}" not found.`)
         }
         await Promise.all([
           prisma.checkIn.create({ data: { keyResultId, value, note: note?.trim() } }),
           prisma.keyResult.update({ where: { id: keyResultId }, data: { current: value } }),
         ])
         const pct = existing.target > 0 ? ((value / existing.target) * 100).toFixed(1) : "N/A"
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**Check-in logged** for "${existing.title}"\nCurrent: ${value}${existing.unit ? " " + existing.unit : ""} / ${existing.target} (${pct}%)` + (note ? `\nNote: ${note}` : ""),
-          }],
-        }
+        return ok(
+          `**Check-in logged** for "${existing.title}"\nCurrent: ${value}${existing.unit ? " " + existing.unit : ""} / ${existing.target} (${pct}%)` + (note ? `\nNote: ${note}` : ""),
+          {
+            keyResultId,
+            title: existing.title,
+            current: value,
+            target: existing.target,
+            unit: existing.unit,
+            note: note ?? null,
+          },
+        )
       }
     )
 
@@ -647,6 +711,7 @@ const _handler = createMcpHandler(
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           cycleId: z.string().uuid().describe("UUID of the child OKR cycle"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listEligibleParentKeyResults
     )
@@ -660,6 +725,7 @@ const _handler = createMcpHandler(
           objectiveId: z.string().uuid().describe("UUID of the objective"),
           keyResultId: z.string().uuid().nullable().describe("UUID of the company KR to support, or null to clear"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ objectiveId, keyResultId }) => {
         const prisma = getPrisma()
@@ -668,7 +734,7 @@ const _handler = createMcpHandler(
           select: { cycle: { select: { workspaceId: true } } },
         })
         if (!objective) {
-          return { content: [{ type: "text" as const, text: `Objective "${objectiveId}" not found.` }] }
+          return fail(`Objective "${objectiveId}" not found.`)
         }
         try {
           await setObjectiveParentKeyResult({
@@ -677,16 +743,14 @@ const _handler = createMcpHandler(
             keyResultId,
           })
         } catch (error) {
-          return { content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Could not update OKR hierarchy." }] }
+          return fail(error instanceof Error ? error.message : "Could not update OKR hierarchy.")
         }
-        return {
-          content: [{
-            type: "text" as const,
-            text: keyResultId
-              ? `Objective ${objectiveId} now supports KR ${keyResultId}.`
-              : `Cleared parent KR from objective ${objectiveId}.`,
-          }],
-        }
+        return ok(
+          keyResultId
+            ? `Objective ${objectiveId} now supports KR ${keyResultId}.`
+            : `Cleared parent KR from objective ${objectiveId}.`,
+          { objectiveId, keyResultId },
+        )
       }
     )
 
@@ -704,6 +768,7 @@ const _handler = createMcpHandler(
           status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by status"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId, status, squadId }) => {
         const prisma = getPrisma()
@@ -717,14 +782,26 @@ const _handler = createMcpHandler(
           orderBy: { createdAt: "desc" },
         })
         if (!opportunities.length) {
-          return { content: [{ type: "text" as const, text: "No opportunities found." }] }
+          return fail("No opportunities found.")
         }
         const lines = opportunities.map(o =>
           `• **${o.title}** [${o.status}]${o.squad ? ` (${o.squad.name})` : ""} — ${o._count.solutions} solutions` +
           (o.linkedKeyResult ? ` — KR: ${o.linkedKeyResult.objective.title} / ${o.linkedKeyResult.title}` : "") +
           `\n  ID: ${o.id}`
         )
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+        return ok(lines.join("\n"), {
+          items: opportunities.map((o) => ({
+            id: o.id,
+            title: o.title,
+            status: o.status,
+            squad: o.squad?.name ?? null,
+            solutions: o._count.solutions,
+            linkedKeyResult: o.linkedKeyResult
+              ? { title: o.linkedKeyResult.title, objective: o.linkedKeyResult.objective.title }
+              : null,
+          })),
+          count: opportunities.length,
+        })
       }
     )
 
@@ -736,6 +813,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           opportunityId: z.string().uuid().describe("UUID of the opportunity"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ opportunityId }) => {
         const prisma = getPrisma()
@@ -765,7 +843,7 @@ const _handler = createMcpHandler(
           },
         })
         if (!opp) {
-          return { content: [{ type: "text" as const, text: `Opportunity "${opportunityId}" not found.` }] }
+          return fail(`Opportunity "${opportunityId}" not found.`)
         }
 
         const lines: string[] = [
@@ -796,7 +874,7 @@ const _handler = createMcpHandler(
           lines.push("")
         }
 
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+        return ok(lines.join("\n"), opp)
       }
     )
 
@@ -814,12 +892,13 @@ const _handler = createMcpHandler(
           keyResultId: z.string().uuid().optional().describe("UUID of a Key Result this opportunity is driving"),
           squadId: z.string().uuid().optional().describe("UUID of the owning squad"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId, title, description, customerSegment, status, keyResultId, squadId }) => {
         const prisma = getPrisma()
         const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
         if (!workspace) {
-          return { content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }] }
+          return fail(`Workspace "${workspaceId}" not found.`)
         }
         const opportunity = await prisma.opportunity.create({
           data: {
@@ -832,12 +911,18 @@ const _handler = createMcpHandler(
             squadId: squadId ?? null,
           },
         })
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
-          }],
-        }
+        return ok(
+          `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
+          {
+            id: opportunity.id,
+            title: opportunity.title,
+            status: opportunity.status,
+            workspaceId,
+            customerSegment: opportunity.customerSegment,
+            linkedKeyResultId: opportunity.linkedKeyResultId,
+            squadId: opportunity.squadId,
+          },
+        )
       }
     )
 
@@ -850,20 +935,19 @@ const _handler = createMcpHandler(
           opportunityId: z.string().uuid().describe("UUID of the opportunity"),
           status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).describe("New status"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ opportunityId, status }) => {
         const prisma = getPrisma()
         const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { title: true, status: true } })
         if (!opp) {
-          return { content: [{ type: "text" as const, text: `Opportunity "${opportunityId}" not found.` }] }
+          return fail(`Opportunity "${opportunityId}" not found.`)
         }
         await prisma.opportunity.update({ where: { id: opportunityId }, data: { status } })
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**"${opp.title}"** moved from ${opp.status} → ${status}`,
-          }],
-        }
+        return ok(
+          `**"${opp.title}"** moved from ${opp.status} → ${status}`,
+          { id: opportunityId, title: opp.title, status, previousStatus: opp.status },
+        )
       }
     )
 
@@ -876,22 +960,21 @@ const _handler = createMcpHandler(
           opportunityId: z.string().uuid().describe("UUID of the opportunity"),
           keyResultId: z.string().uuid().nullable().describe("UUID of the Key Result, or null to clear"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ opportunityId, keyResultId }) => {
         const prisma = getPrisma()
         const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { title: true } })
         if (!opp) {
-          return { content: [{ type: "text" as const, text: `Opportunity "${opportunityId}" not found.` }] }
+          return fail(`Opportunity "${opportunityId}" not found.`)
         }
         await prisma.opportunity.update({ where: { id: opportunityId }, data: { linkedKeyResultId: keyResultId } })
-        return {
-          content: [{
-            type: "text" as const,
-            text: keyResultId
-              ? `Linked opportunity "${opp.title}" to KR ${keyResultId}.`
-              : `Cleared KR link from opportunity "${opp.title}".`,
-          }],
-        }
+        return ok(
+          keyResultId
+            ? `Linked opportunity "${opp.title}" to KR ${keyResultId}.`
+            : `Cleared KR link from opportunity "${opp.title}".`,
+          { id: opportunityId, title: opp.title, linkedKeyResultId: keyResultId },
+        )
       }
     )
 
@@ -905,20 +988,24 @@ const _handler = createMcpHandler(
           title: z.string().min(1).describe("Title of the proposed solution"),
           description: z.string().optional().describe("How this solution addresses the opportunity"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ opportunityId, title, description }) => {
         const prisma = getPrisma()
         const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { id: true, title: true } })
         if (!opp) {
-          return { content: [{ type: "text" as const, text: `Opportunity "${opportunityId}" not found.` }] }
+          return fail(`Opportunity "${opportunityId}" not found.`)
         }
         const solution = await prisma.solution.create({ data: { opportunityId, title: title.trim(), description: description?.trim() } })
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**Solution created** for "${opp.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
-          }],
-        }
+        return ok(
+          `**Solution created** for "${opp.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
+          {
+            id: solution.id,
+            title: solution.title,
+            status: solution.status,
+            opportunityId,
+          },
+        )
       }
     )
 
@@ -932,20 +1019,25 @@ const _handler = createMcpHandler(
           title: z.string().min(1).describe("The assumption to be tested"),
           riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).default("MEDIUM").describe("How risky this assumption is if wrong"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ solutionId, title, riskLevel }) => {
         const prisma = getPrisma()
         const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true } })
         if (!solution) {
-          return { content: [{ type: "text" as const, text: `Solution "${solutionId}" not found.` }] }
+          return fail(`Solution "${solutionId}" not found.`)
         }
         const assumption = await prisma.assumption.create({ data: { solutionId, title: title.trim(), riskLevel, status: "UNTESTED" } })
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
-          }],
-        }
+        return ok(
+          `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
+          {
+            id: assumption.id,
+            title: assumption.title,
+            riskLevel: assumption.riskLevel,
+            status: assumption.status,
+            solutionId,
+          },
+        )
       }
     )
 
@@ -960,6 +1052,7 @@ const _handler = createMcpHandler(
           riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).optional().describe("New risk level"),
           status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]).optional().describe("New status"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateAssumption
     )
@@ -972,6 +1065,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           assumptionId: z.string().uuid().describe("UUID of the assumption to delete"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       deleteAssumption
     )
@@ -986,6 +1080,7 @@ const _handler = createMcpHandler(
           body: z.string().min(1).describe("The plan content"),
           authorName: z.string().min(1).describe("Name of the agent or person proposing this plan"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       addSolutionPlan
     )
@@ -1001,6 +1096,7 @@ const _handler = createMcpHandler(
           authorName: z.string().min(1).describe("Name of the agent or person posting this comment"),
           authorType: z.enum(["AGENT", "HUMAN"]).optional().describe("Who is posting this comment (defaults to AGENT)"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       addSolutionComment
     )
@@ -1013,6 +1109,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           solutionId: z.string().uuid().describe("UUID of the solution"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listSolutionComments
     )
@@ -1025,6 +1122,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           commentId: z.string().uuid().describe("UUID of the comment"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getSolutionComment
     )
@@ -1038,6 +1136,7 @@ const _handler = createMcpHandler(
           commentId: z.string().uuid().describe("UUID of the comment"),
           body: z.string().min(1).describe("New body content"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateSolutionComment
     )
@@ -1050,6 +1149,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           commentId: z.string().uuid().describe("UUID of the comment to delete"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       deleteSolutionComment
     )
@@ -1062,6 +1162,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           commentId: z.string().uuid().describe("UUID of the PLAN entry to approve"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       approveSolutionPlan
     )
@@ -1074,6 +1175,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           commentId: z.string().uuid().describe("UUID of the PLAN entry to reject"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       rejectSolutionPlan
     )
@@ -1089,6 +1191,7 @@ const _handler = createMcpHandler(
           horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]).describe("Which roadmap horizon to place this in"),
           isPrivate: z.boolean().optional().describe("Set to true to hide this item from the public portal roadmap and block voting on it"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ solutionId, workspaceId, horizon, isPrivate }) => {
         const prisma = getPrisma()
@@ -1097,7 +1200,7 @@ const _handler = createMcpHandler(
           include: { opportunity: { select: { id: true, title: true, squadId: true } } },
         })
         if (!solution) {
-          return { content: [{ type: "text" as const, text: `Solution "${solutionId}" not found.` }] }
+          return fail(`Solution "${solutionId}" not found.`)
         }
         const lastItem = await prisma.roadmapItem.findFirst({
           where: { workspaceId, horizon, status: "ACTIVE" },
@@ -1116,14 +1219,20 @@ const _handler = createMcpHandler(
             isPrivate: isPrivate ?? false,
           },
         })
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
-              (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-              `\nLinked Solution: ${solutionId}\nLinked Opportunity: ${solution.opportunity.title}`,
-          }],
-        }
+        return ok(
+          `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
+            (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
+            `\nLinked Solution: ${solutionId}\nLinked Opportunity: ${solution.opportunity.title}`,
+          {
+            id: item.id,
+            title: item.title,
+            horizon,
+            isPrivate: item.isPrivate,
+            solutionId,
+            opportunityId: solution.opportunity.id,
+            squadId: item.squadId,
+          },
+        )
       }
     )
 
@@ -1141,6 +1250,7 @@ const _handler = createMcpHandler(
           status: z.enum(["DESIGNING", "RUNNING", "COMPLETE", "KILLED"]).optional().describe("Filter by status"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId, status, squadId }) => {
         const prisma = getPrisma()
@@ -1153,14 +1263,24 @@ const _handler = createMcpHandler(
           orderBy: { createdAt: "desc" },
         })
         if (!experiments.length) {
-          return { content: [{ type: "text" as const, text: "No experiments found." }] }
+          return fail("No experiments found.")
         }
         const lines = experiments.map(e =>
           `• **${e.title}** [${e.status}${e.conclusion ? "/" + e.conclusion : ""}]${e.squad ? ` (${e.squad.name})` : ""}` +
           (e.assumption ? ` — testing: ${e.assumption.title}` : "") +
           `\n  ID: ${e.id}`
         )
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] }
+        return ok(lines.join("\n"), {
+          items: experiments.map((e) => ({
+            id: e.id,
+            title: e.title,
+            status: e.status,
+            conclusion: e.conclusion,
+            squad: e.squad?.name ?? null,
+            assumption: e.assumption?.title ?? null,
+          })),
+          count: experiments.length,
+        })
       }
     )
 
@@ -1174,6 +1294,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           experimentId: z.string().uuid().describe("UUID of the experiment"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ experimentId }) => {
         const prisma = getPrisma()
@@ -1186,7 +1307,7 @@ const _handler = createMcpHandler(
           },
         })
         if (!experiment) {
-          return { content: [{ type: "text" as const, text: `Experiment "${experimentId}" not found.` }] }
+          return fail(`Experiment "${experimentId}" not found.`)
         }
         const resultsText = experiment.results.length
           ? experiment.results.map((r, i) =>
@@ -1194,24 +1315,21 @@ const _handler = createMcpHandler(
               (r.metric ? ` [${r.metric}${r.value != null ? " = " + r.value : ""}]` : "")
             ).join("\n")
           : "  No results logged yet."
-        return {
-          content: [{
-            type: "text" as const,
-            text:
-              `**${experiment.title}**\n` +
-              `Status: ${experiment.status}${experiment.conclusion ? " / " + experiment.conclusion : ""}\n` +
-              (experiment.squad ? `Squad: ${experiment.squad.name}\n` : "") +
-              (experiment.startDate ? `Started: ${experiment.startDate.toLocaleDateString()}\n` : "") +
-              (experiment.endDate ? `Ended: ${experiment.endDate.toLocaleDateString()}\n` : "") +
-              `\n**Hypothesis:** ${experiment.hypothesis}\n` +
-              `**Method:** ${experiment.method}\n` +
-              `**Kill Condition:** ${experiment.killCondition}\n` +
-              (experiment.assumption
-                ? `\n**Linked Assumption:** ${experiment.assumption.title} [${experiment.assumption.status}]\n  ID: ${experiment.assumption.id}\n`
-                : "\n") +
-              `\n**Results (${experiment.results.length}):**\n${resultsText}`,
-          }],
-        }
+        return ok(
+          `**${experiment.title}**\n` +
+            `Status: ${experiment.status}${experiment.conclusion ? " / " + experiment.conclusion : ""}\n` +
+            (experiment.squad ? `Squad: ${experiment.squad.name}\n` : "") +
+            (experiment.startDate ? `Started: ${experiment.startDate.toLocaleDateString()}\n` : "") +
+            (experiment.endDate ? `Ended: ${experiment.endDate.toLocaleDateString()}\n` : "") +
+            `\n**Hypothesis:** ${experiment.hypothesis}\n` +
+            `**Method:** ${experiment.method}\n` +
+            `**Kill Condition:** ${experiment.killCondition}\n` +
+            (experiment.assumption
+              ? `\n**Linked Assumption:** ${experiment.assumption.title} [${experiment.assumption.status}]\n  ID: ${experiment.assumption.id}\n`
+              : "\n") +
+            `\n**Results (${experiment.results.length}):**\n${resultsText}`,
+          experiment,
+        )
       }
     )
 
@@ -1229,26 +1347,35 @@ const _handler = createMcpHandler(
           assumptionId: z.string().uuid().optional().describe("UUID of the Assumption this experiment tests"),
           squadId: z.string().uuid().optional().describe("UUID of the squad running this experiment"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId, title, hypothesis, method, killCondition, assumptionId, squadId }) => {
         const prisma = getPrisma()
         const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
         if (!workspace) {
-          return { content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }] }
+          return fail(`Workspace "${workspaceId}" not found.`)
         }
         if (assumptionId) {
           const a = await prisma.assumption.findUnique({ where: { id: assumptionId } })
-          if (!a) return { content: [{ type: "text" as const, text: `Assumption "${assumptionId}" not found.` }] }
+          if (!a) return fail(`Assumption "${assumptionId}" not found.`)
         }
         const experiment = await prisma.experiment.create({
           data: { workspaceId, title: title.trim(), hypothesis: hypothesis.trim(), method: method.trim(), killCondition: killCondition.trim(), assumptionId: assumptionId ?? null, squadId: squadId ?? null, status: "DESIGNING" },
         })
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**Experiment created**\nID: ${experiment.id}\nTitle: ${experiment.title}\nStatus: DESIGNING\nKill Condition: ${experiment.killCondition}`,
-          }],
-        }
+        return ok(
+          `**Experiment created**\nID: ${experiment.id}\nTitle: ${experiment.title}\nStatus: DESIGNING\nKill Condition: ${experiment.killCondition}`,
+          {
+            id: experiment.id,
+            title: experiment.title,
+            status: experiment.status,
+            hypothesis: experiment.hypothesis,
+            method: experiment.method,
+            killCondition: experiment.killCondition,
+            assumptionId: experiment.assumptionId,
+            squadId: experiment.squadId,
+            workspaceId,
+          },
+        )
       }
     )
 
@@ -1263,23 +1390,28 @@ const _handler = createMcpHandler(
           metric: z.string().optional().describe("Name of the metric (e.g. 'conversion rate')"),
           value: z.number().optional().describe("Numeric value for the metric"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ experimentId, note, metric, value }) => {
         const prisma = getPrisma()
         const experiment = await prisma.experiment.findUnique({ where: { id: experimentId }, select: { id: true, title: true } })
         if (!experiment) {
-          return { content: [{ type: "text" as const, text: `Experiment "${experimentId}" not found.` }] }
+          return fail(`Experiment "${experimentId}" not found.`)
         }
         const result = await prisma.experimentResult.create({
           data: { experimentId, note: note.trim(), metric: metric?.trim(), value: value ?? null },
         })
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**Result logged** for "${experiment.title}"\nID: ${result.id}\nNote: ${result.note}` +
-              (result.metric ? `\nMetric: ${result.metric}${result.value != null ? " = " + result.value : ""}` : ""),
-          }],
-        }
+        return ok(
+          `**Result logged** for "${experiment.title}"\nID: ${result.id}\nNote: ${result.note}` +
+            (result.metric ? `\nMetric: ${result.metric}${result.value != null ? " = " + result.value : ""}` : ""),
+          {
+            id: result.id,
+            experimentId,
+            note: result.note,
+            metric: result.metric,
+            value: result.value,
+          },
+        )
       }
     )
 
@@ -1292,6 +1424,7 @@ const _handler = createMcpHandler(
           experimentId: z.string().uuid().describe("UUID of the experiment"),
           conclusion: z.enum(["PROCEED", "KILL", "ITERATE"]).describe("The outcome of the experiment"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ experimentId, conclusion }) => {
         const prisma = getPrisma()
@@ -1300,10 +1433,10 @@ const _handler = createMcpHandler(
           select: { id: true, title: true, status: true, assumptionId: true },
         })
         if (!experiment) {
-          return { content: [{ type: "text" as const, text: `Experiment "${experimentId}" not found.` }] }
+          return fail(`Experiment "${experimentId}" not found.`)
         }
         if (experiment.status === "KILLED" || experiment.status === "COMPLETE") {
-          return { content: [{ type: "text" as const, text: `Experiment "${experiment.title}" is already concluded (${experiment.status}).` }] }
+          return fail(`Experiment "${experiment.title}" is already concluded (${experiment.status}).`)
         }
 
         const newStatus = conclusion === "KILL" ? "KILLED" : "COMPLETE"
@@ -1319,12 +1452,16 @@ const _handler = createMcpHandler(
           assumptionUpdate = `\nLinked assumption updated → ${assumptionStatus}`
         }
 
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**"${experiment.title}"** concluded as **${conclusion}**\nStatus: ${newStatus}${assumptionUpdate}`,
-          }],
-        }
+        return ok(
+          `**"${experiment.title}"** concluded as **${conclusion}**\nStatus: ${newStatus}${assumptionUpdate}`,
+          {
+            id: experimentId,
+            title: experiment.title,
+            status: newStatus,
+            conclusion,
+            assumptionId: experiment.assumptionId,
+          },
+        )
       }
     )
 
@@ -1344,6 +1481,7 @@ const _handler = createMcpHandler(
           horizon: z.enum(["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional().describe("Filter to a specific horizon (omit for all)"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId, horizon, squadId }) => {
         const prisma = getPrisma()
@@ -1363,7 +1501,7 @@ const _handler = createMcpHandler(
           orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }],
         })
         if (!items.length) {
-          return { content: [{ type: "text" as const, text: "No active roadmap items found." }] }
+          return fail("No active roadmap items found.")
         }
         const groups: Record<string, typeof items> = { NOW: [], NEXT: [], LATER: [], LAUNCHING: [], LAUNCHED: [] }
         for (const item of items) {
@@ -1385,7 +1523,21 @@ const _handler = createMcpHandler(
             )
             return `**${h}**\n${lines.join("\n")}`
           })
-        return { content: [{ type: "text" as const, text: sections.join("\n\n") }] }
+        return ok(sections.join("\n\n"), {
+          items: items.map((i) => ({
+            id: i.id,
+            title: i.title,
+            horizon: i.horizon,
+            isPrivate: i.isPrivate,
+            opportunity: i.opportunity?.title ?? null,
+            solution: i.solution?.title ?? null,
+            experiment: i.experiment?.title ?? null,
+            squad: i.squad?.name ?? null,
+            startDate: i.startDate,
+            endDate: i.endDate,
+          })),
+          count: items.length,
+        })
       }
     )
 
@@ -1407,28 +1559,19 @@ const _handler = createMcpHandler(
           endDate: z.string().optional().describe("ISO date string for the item's end date, e.g. '2026-09-30'"),
           isPrivate: z.boolean().optional().describe("Set to true to hide this item from the public portal roadmap and block voting on it"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ itemId, horizon, status, title, description, startDate, endDate, isPrivate }) => {
         if (horizon === "LAUNCHING") {
-          return {
-            content: [{
-              type: "text" as const,
-              text: `Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.`,
-            }],
-          }
+          return fail(`Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.`)
         }
         if (horizon === "LAUNCHED") {
-          return {
-            content: [{
-              type: "text" as const,
-              text: `Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`,
-            }],
-          }
+          return fail(`Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`)
         }
         const prisma = getPrisma()
         const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, title: true, horizon: true, status: true } })
         if (!item) {
-          return { content: [{ type: "text" as const, text: `Roadmap item "${itemId}" not found.` }] }
+          return fail(`Roadmap item "${itemId}" not found.`)
         }
         const updated = await prisma.roadmapItem.update({
           where: { id: itemId },
@@ -1443,18 +1586,23 @@ const _handler = createMcpHandler(
             updatedAt: new Date(),
           },
         })
-        return {
-          content: [{
-            type: "text" as const,
-            text:
-              `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
-              `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
-              (updated.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-              (updated.startDate || updated.endDate
-                ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
-                : ""),
-          }],
-        }
+        return ok(
+          `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
+            `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
+            (updated.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
+            (updated.startDate || updated.endDate
+              ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
+              : ""),
+          {
+            id: updated.id,
+            title: updated.title,
+            horizon: updated.horizon,
+            status: updated.status,
+            isPrivate: updated.isPrivate,
+            startDate: updated.startDate,
+            endDate: updated.endDate,
+          },
+        )
       }
     )
 
@@ -1476,12 +1624,13 @@ const _handler = createMcpHandler(
           endDate: z.string().optional().describe("ISO date string for the item's end date, e.g. '2026-09-30'"),
           isPrivate: z.boolean().optional().describe("Set to true to hide this item from the public portal roadmap and block voting on it (e.g. internal security work)"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId, startDate, endDate, isPrivate }) => {
         const prisma = getPrisma()
         const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
         if (!workspace) {
-          return { content: [{ type: "text" as const, text: `Workspace "${workspaceId}" not found.` }] }
+          return fail(`Workspace "${workspaceId}" not found.`)
         }
         const lastItem = await prisma.roadmapItem.findFirst({
           where: { workspaceId, horizon, status: "ACTIVE" },
@@ -1504,19 +1653,28 @@ const _handler = createMcpHandler(
             isPrivate: isPrivate ?? false,
           },
         })
-        return {
-          content: [{
-            type: "text" as const,
-            text: `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
-              (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-              (solutionId ? `\nLinked Solution: ${solutionId}` : "") +
-              (keyResultId ? `\nLinked KR: ${keyResultId}` : "") +
-              (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : "") +
-              (item.startDate || item.endDate
-                ? `\nDates: ${item.startDate ? formatUtcDate(item.startDate) : "?"} – ${item.endDate ? formatUtcDate(item.endDate) : "?"}`
-                : ""),
-          }],
-        }
+        return ok(
+          `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
+            (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
+            (solutionId ? `\nLinked Solution: ${solutionId}` : "") +
+            (keyResultId ? `\nLinked KR: ${keyResultId}` : "") +
+            (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : "") +
+            (item.startDate || item.endDate
+              ? `\nDates: ${item.startDate ? formatUtcDate(item.startDate) : "?"} – ${item.endDate ? formatUtcDate(item.endDate) : "?"}`
+              : ""),
+          {
+            id: item.id,
+            title: item.title,
+            horizon,
+            isPrivate: item.isPrivate,
+            solutionId: item.solutionId,
+            keyResultId: item.keyResultId,
+            opportunityId: item.opportunityId,
+            squadId: item.squadId,
+            startDate: item.startDate,
+            endDate: item.endDate,
+          },
+        )
       }
     )
 
@@ -1538,6 +1696,7 @@ const _handler = createMcpHandler(
             description: z.string().optional().describe("Optional item description"),
           })).describe("Ordered list of checklist items"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       createChecklistTemplate
     )
@@ -1551,6 +1710,7 @@ const _handler = createMcpHandler(
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]).optional().describe("Filter to a specific launch tier"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listChecklistTemplates
     )
@@ -1568,6 +1728,7 @@ const _handler = createMcpHandler(
           tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]).describe("Launch tier to set"),
           templateId: z.string().uuid().optional().describe("UUID of a specific checklist template to use (must match tier)"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       setLaunchTier
     )
@@ -1580,6 +1741,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           roadmapItemId: z.string().uuid().describe("UUID of the roadmap item"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getLaunchChecklist
     )
@@ -1593,6 +1755,7 @@ const _handler = createMcpHandler(
           itemId: z.string().uuid().describe("UUID of the launch checklist item"),
           status: z.enum(["PENDING", "DONE", "SKIPPED"]).describe("New status for the item"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateLaunchChecklistItem
     )
@@ -1615,6 +1778,7 @@ const _handler = createMcpHandler(
             .optional()
             .describe("Squad color as a six-digit hex value (defaults to #6366f1)"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       createSquad
     )
@@ -1627,6 +1791,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listSquads
     )
@@ -1639,6 +1804,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           squadId: z.string().uuid().describe("UUID of the squad"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getSquad
     )
@@ -1657,6 +1823,7 @@ const _handler = createMcpHandler(
             .optional()
             .describe("New squad color as a six-digit hex value"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateSquad
     )
@@ -1671,6 +1838,7 @@ const _handler = createMcpHandler(
           objectId: z.string().uuid().describe("UUID of the object"),
           squadId: z.string().uuid().nullable().describe("UUID of the squad, or null to clear"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ objectType, objectId, squadId }) => {
         const prisma = getPrisma()
@@ -1692,14 +1860,12 @@ const _handler = createMcpHandler(
             await prisma.task.update({ where: { id: objectId }, data: { ...data, updatedAt: new Date() } })
             break
         }
-        return {
-          content: [{
-            type: "text" as const,
-            text: squadId
-              ? `Squad ${squadId} assigned to ${objectType} ${objectId}.`
-              : `Squad cleared from ${objectType} ${objectId}.`,
-          }],
-        }
+        return ok(
+          squadId
+            ? `Squad ${squadId} assigned to ${objectType} ${objectId}.`
+            : `Squad cleared from ${objectType} ${objectId}.`,
+          { objectType, objectId, squadId },
+        )
       }
     )
 
@@ -1729,6 +1895,7 @@ const _handler = createMcpHandler(
           dueDate: z.string().optional().describe("Due date, ISO 8601"),
           iteration: z.string().optional().describe("Freeform sprint/iteration label, e.g. 'Sprint 24'"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       createTask
     )
@@ -1741,6 +1908,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           taskId: z.string().uuid().describe("UUID of the task"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getTask
     )
@@ -1764,6 +1932,7 @@ const _handler = createMcpHandler(
           linkedId: z.string().uuid().optional().describe("UUID of the linked object (pair with linkedType)"),
           includeSubtasks: z.boolean().optional().describe("Nest subtasks under their parent in the response"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listTasks
     )
@@ -1787,6 +1956,7 @@ const _handler = createMcpHandler(
           dueDate: z.string().nullable().optional().describe("New due date (ISO 8601), or null to clear"),
           iteration: z.string().nullable().optional().describe("New iteration label, or null to clear"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateTask
     )
@@ -1802,6 +1972,7 @@ const _handler = createMcpHandler(
           taskId: z.string().uuid().describe("UUID of the task"),
           status: z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE", "CANCELLED"]).describe("New status"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       moveTaskStatus
     )
@@ -1818,6 +1989,7 @@ const _handler = createMcpHandler(
           linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM"]).describe("Type of the object to link"),
           linkedId: z.string().uuid().describe("UUID of the object to link"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       linkTask
     )
@@ -1832,6 +2004,7 @@ const _handler = createMcpHandler(
           linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM"]).describe("Type of the linked object"),
           linkedId: z.string().uuid().describe("UUID of the linked object"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       unlinkTask
     )
@@ -1844,6 +2017,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           taskId: z.string().uuid().describe("UUID of the task"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listTaskLinks
     )
@@ -1869,6 +2043,7 @@ const _handler = createMcpHandler(
           submitterName: z.string().optional().describe("Name to attribute this feedback to"),
           submitterEmail: z.string().optional().describe("Email to attribute this feedback to"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       createFeedback
     )
@@ -1885,6 +2060,7 @@ const _handler = createMcpHandler(
           status: z.enum(["OPEN", "UNDER_REVIEW", "PLANNED", "CLOSED"]).optional().describe("Filter by status (omit for all)"),
           limit: z.number().int().min(1).max(100).optional().default(50).describe("Max items to return (default 50)"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId, status, limit }) => {
         const prisma = getPrisma()
@@ -1895,7 +2071,7 @@ const _handler = createMcpHandler(
           take: limit ?? 50,
         })
         if (!items.length) {
-          return { content: [{ type: "text" as const, text: "No feedback found." }] }
+          return fail("No feedback found.")
         }
         const lines = items.map(f =>
           `• [${f.type}] **${f.title}** [${f.status}] 👍 ${f.voteCount}\n` +
@@ -1904,7 +2080,19 @@ const _handler = createMcpHandler(
           (f.opportunity ? `  → Linked opportunity: ${f.opportunity.title}\n` : "") +
           (f.submitterName ? `  Submitted by: ${f.submitterName}` : "")
         )
-        return { content: [{ type: "text" as const, text: lines.join("\n\n") }] }
+        return ok(lines.join("\n\n"), {
+          items: items.map((f) => ({
+            id: f.id,
+            type: f.type,
+            title: f.title,
+            status: f.status,
+            voteCount: f.voteCount,
+            description: f.description,
+            opportunity: f.opportunity?.title ?? null,
+            submitterName: f.submitterName,
+          })),
+          count: items.length,
+        })
       }
     )
 
@@ -1917,6 +2105,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           feedbackId: z.string().uuid().describe("UUID of the feedback item"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getFeedbackItem
     )
@@ -1932,6 +2121,7 @@ const _handler = createMcpHandler(
           status: z.enum(["OPEN", "UNDER_REVIEW", "PLANNED", "CLOSED"]).describe("New status for the feedback item"),
           note: z.string().optional().describe("Optional reason for the status change"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateFeedbackStatus
     )
@@ -1947,6 +2137,7 @@ const _handler = createMcpHandler(
           feedbackId: z.string().uuid().describe("UUID of the feedback item"),
           opportunityId: z.string().uuid().describe("UUID of the opportunity to link to"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       linkFeedbackToOpportunity
     )
@@ -1963,6 +2154,7 @@ const _handler = createMcpHandler(
           feedbackId: z.string().uuid().describe("UUID of the feedback item"),
           type: z.enum(["BUG", "IDEA"]).describe("New type for the feedback item"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateFeedbackType
     )
@@ -1981,6 +2173,7 @@ const _handler = createMcpHandler(
           horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]).describe("Which roadmap horizon to place this in"),
           isPrivate: z.boolean().optional().describe("Set to true to hide this item from the public portal roadmap and block voting on it (e.g. a security-flagged bug)"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       promoteFeedbackToRoadmap
     )
@@ -2009,6 +2202,7 @@ const _handler = createMcpHandler(
           solutionId: z.string().uuid().optional().describe("UUID of the solution to attach to"),
           assumptionId: z.string().uuid().optional().describe("UUID of the assumption to attach to"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       addEvidence
     )
@@ -2026,6 +2220,7 @@ const _handler = createMcpHandler(
           solutionId: z.string().uuid().optional().describe("UUID of the solution to attach to"),
           assumptionId: z.string().uuid().optional().describe("UUID of the assumption to attach to"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       linkEvidence
     )
@@ -2041,6 +2236,7 @@ const _handler = createMcpHandler(
           nodeId: z.string().uuid().describe("UUID of the opportunity, solution, or assumption"),
           nodeType: z.enum(["opportunity", "solution", "assumption"]).describe("Type of the node identified by nodeId"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listEvidence
     )
@@ -2060,6 +2256,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listDocs
     )
@@ -2074,6 +2271,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           docId: z.string().uuid().describe("UUID of the doc"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getDoc
     )
@@ -2109,6 +2307,7 @@ const _handler = createMcpHandler(
             .optional()
             .describe("Doc type. GTM_POSITIONING_BRIEF auto-fills a starter template when content is omitted. Defaults to STANDARD."),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       createDoc
     )
@@ -2126,6 +2325,7 @@ const _handler = createMcpHandler(
           content: z.string().optional().describe("New markdown content (replaces existing)"),
           icon: z.string().optional().describe("New emoji or icon string"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateDoc
     )
@@ -2143,6 +2343,7 @@ const _handler = createMcpHandler(
           label: z.string().optional().describe("Optional label for this snapshot, e.g. 'Before big rewrite'"),
           authorName: z.string().min(1).describe("Name to attribute this snapshot to"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       createDocVersion
     )
@@ -2158,6 +2359,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           docId: z.string().uuid().describe("UUID of the doc"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listDocVersions
     )
@@ -2170,6 +2372,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           versionId: z.string().uuid().describe("UUID of the doc version"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getDocVersion
     )
@@ -2185,6 +2388,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           versionId: z.string().uuid().describe("UUID of the doc version to restore"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       restoreDocVersion
     )
@@ -2212,6 +2416,7 @@ const _handler = createMcpHandler(
           anchorStart: z.number().int().optional().describe("Start offset of the anchor in the doc's plain-text projection"),
           anchorEnd: z.number().int().optional().describe("End offset of the anchor in the doc's plain-text projection"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       addDocComment
     )
@@ -2227,6 +2432,7 @@ const _handler = createMcpHandler(
           docId: z.string().uuid().describe("UUID of the doc"),
           status: z.enum(["OPEN", "RESOLVED"]).optional().describe("Only return comments with this status"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listDocComments
     )
@@ -2239,6 +2445,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           commentId: z.string().uuid().describe("UUID of the comment"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getDocComment
     )
@@ -2252,6 +2459,7 @@ const _handler = createMcpHandler(
           commentId: z.string().uuid().describe("UUID of the comment to edit"),
           body: z.string().min(1).describe("The new comment text (replaces the existing body)"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateDocComment
     )
@@ -2266,6 +2474,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           commentId: z.string().uuid().describe("UUID of the comment to delete"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       deleteDocComment
     )
@@ -2280,6 +2489,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           commentId: z.string().uuid().describe("UUID of the comment to resolve"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       resolveDocComment
     )
@@ -2292,6 +2502,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           commentId: z.string().uuid().describe("UUID of the comment to reopen"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       reopenDocComment
     )
@@ -2318,6 +2529,7 @@ const _handler = createMcpHandler(
           query: z.string().min(1).describe("Search terms, e.g. 'how do I link feedback to an opportunity'"),
           limit: z.number().int().positive().optional().describe("Max results to return (default 5)"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       searchHelp
     )
@@ -2333,6 +2545,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           topic: z.string().min(1).describe("Topic to look up, e.g. 'roadmap' or 'mcp api'"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getHelp
     )
@@ -2362,6 +2575,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           orgSlug: z.string().describe("Slug of the organization"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listScoringModels
     )
@@ -2376,6 +2590,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           scoringModelId: z.string().uuid().describe("UUID of the scoring model"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getScoringModel
     )
@@ -2396,6 +2611,7 @@ const _handler = createMcpHandler(
           formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]).describe("Formula type"),
           metrics: z.array(metricInputSchema).describe("The model's metrics, in display order"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       createScoringModel
     )
@@ -2416,6 +2632,7 @@ const _handler = createMcpHandler(
           formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]).optional().describe("New formula type (only applied when metrics is also provided)"),
           metrics: z.array(metricInputSchema).optional().describe("Full replacement metric set (bumps version)"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateScoringModel
     )
@@ -2431,6 +2648,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           scoringModelId: z.string().uuid().describe("UUID of the scoring model to archive"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       archiveScoringModel
     )
@@ -2445,6 +2663,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getWorkspaceScoringModel
     )
@@ -2460,6 +2679,7 @@ const _handler = createMcpHandler(
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           scoringModelId: z.string().uuid().nullable().describe("UUID of the scoring model to activate, or null to clear"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       setWorkspaceScoringModel
     )
@@ -2478,6 +2698,7 @@ const _handler = createMcpHandler(
             .record(z.string(), z.number())
             .describe("Map of metric key -> raw input value, e.g. { \"reach\": 8, \"effort\": 2 }"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       scoreOpportunity
     )
@@ -2493,6 +2714,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           opportunityId: z.string().uuid().describe("UUID of the opportunity"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getOpportunityScore
     )
@@ -2510,6 +2732,7 @@ const _handler = createMcpHandler(
           orgSlug: z.string().optional().describe("Slug of the organization (cross-workspace view; omit workspaceId)"),
           limit: z.number().int().min(1).max(100).optional().describe("Max items to return (default 20)"),
         },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listTopOpportunities
     )
