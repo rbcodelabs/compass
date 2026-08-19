@@ -6,11 +6,10 @@ import getPrisma from "@/lib/db";
 import { TaskBoard } from "@/components/tasks/task-board";
 import { TaskListView } from "@/components/tasks/task-list-view";
 import { TasksViewToggle } from "@/components/tasks/tasks-view-toggle";
-import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
-import { AssigneeFilterBar, PriorityFilterBar } from "@/components/tasks/assignee-filter-bar";
+import { TasksFilters } from "@/components/tasks/tasks-filters";
 import type { TaskCardData } from "@/components/tasks/task-card";
 import type { TaskStatus, TaskPriority, SquadData, MemberData } from "@/lib/types";
-import { PageHeader } from "@/components/patterns/page-header";
+import { WorkspacePage } from "@/components/patterns/workspace-page";
 
 export const metadata = {
   title: "Tasks",
@@ -128,25 +127,20 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   }));
 
   return (
-    <div className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-h-0">
-      <PageHeader title="Tasks" description={view === "list" ? "A flat, filterable list — good for tracking a handful of high-priority initiatives." : "Drag tasks between columns to update status. Blocked is its own column."} actions={<Suspense><TasksViewToggle view={view} /></Suspense>} sticky />
-
-      <div className="shrink-0 flex flex-col gap-2">
+    <WorkspacePage
+      title="Tasks"
+      contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
+      actions={(
         <Suspense>
-          <SquadFilterBar squads={squads} />
+          <TasksFilters squads={squads} members={members} />
+          <TasksViewToggle view={view} />
         </Suspense>
-        <Suspense>
-          <AssigneeFilterBar members={members} />
-        </Suspense>
-        <Suspense>
-          <PriorityFilterBar />
-        </Suspense>
-      </div>
-
+      )}
+    >
       {view === "list" ? (
         <TaskListView tasks={tasks} orgSlug={orgSlug} workspaceSlug={workspaceSlug} members={members} />
       ) : (
-        <div className="overflow-x-auto min-w-0">
+        <div className="flex min-h-0 flex-1 flex-col">
           <TaskBoard
             initialTasks={tasks}
             workspaceId={workspace.id}
@@ -156,6 +150,6 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
           />
         </div>
       )}
-    </div>
+    </WorkspacePage>
   );
 }

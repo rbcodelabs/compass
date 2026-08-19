@@ -193,11 +193,11 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
   const cancelledCount = columns.CANCELLED.length;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
       {cancelledCount > 0 && (
         <button
           onClick={() => setShowCancelled((v) => !v)}
-          className="self-start flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+          className="mx-3 mt-3 self-start flex shrink-0 items-center gap-1.5 text-xs text-slate-400 transition-colors hover:text-slate-600 sm:mx-4"
         >
           {showCancelled ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
           {showCancelled ? "Hide" : "Show"} cancelled ({cancelledCount})
@@ -211,22 +211,30 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-        <Board label="Task board" className="items-start pb-6">
-          {visibleStatuses.map((status) => (
-            <TaskColumn
-              key={status}
-              status={status}
-              tasks={columns[status]}
-              workspaceId={workspaceId}
-              orgSlug={orgSlug}
-              workspaceSlug={workspaceSlug}
-              revalidatePathStr={revalidatePathStr}
-              members={members}
-              onTaskAdded={handleTaskAdded}
-              onCancel={handleCancel}
-              onUpdate={handleUpdate}
-            />
-          ))}
+        <Board
+          label="Task board"
+          className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
+        >
+          <div
+            data-slot="task-board-track"
+            className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
+          >
+            {visibleStatuses.map((status) => (
+              <TaskColumn
+                key={status}
+                status={status}
+                tasks={columns[status]}
+                workspaceId={workspaceId}
+                orgSlug={orgSlug}
+                workspaceSlug={workspaceSlug}
+                revalidatePathStr={revalidatePathStr}
+                members={members}
+                onTaskAdded={handleTaskAdded}
+                onCancel={handleCancel}
+                onUpdate={handleUpdate}
+              />
+            ))}
+          </div>
         </Board>
 
         <DragOverlay>

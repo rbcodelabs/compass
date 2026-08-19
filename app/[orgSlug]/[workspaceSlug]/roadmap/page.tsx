@@ -6,11 +6,11 @@ import getPrisma from "@/lib/db";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
 import { RoadmapGantt } from "@/components/roadmap/roadmap-gantt";
 import { RoadmapViewToggle } from "@/components/roadmap/roadmap-view-toggle";
-import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
+import { RoadmapFilters } from "@/components/roadmap/roadmap-filters";
 import type { Horizon, SquadData, TaskStatus } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import type { UnscheduledItem } from "@/components/roadmap/unscheduled-items-panel";
-import { PageHeader } from "@/components/patterns/page-header";
+import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { deriveRoadmapDeliveryStatus } from "@/lib/roadmap-delivery-status";
 
 export const metadata = {
@@ -239,27 +239,27 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   ];
 
   return (
-    <div className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-h-0">
-      <PageHeader
-        title="Roadmap"
-        description={view === "timeline" ? "See when items are planned to start and finish." : "Drag items between horizons to update your plan."}
-        actions={<Suspense><RoadmapViewToggle view={view} /></Suspense>}
-        sticky
-      />
-
-      <Suspense>
-        <SquadFilterBar squads={squads} />
-      </Suspense>
-
+    <WorkspacePage
+      title="Roadmap"
+      contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
+      actions={(
+        <Suspense>
+          <RoadmapFilters squads={squads} />
+          <RoadmapViewToggle view={view} />
+        </Suspense>
+      )}
+    >
       {view === "timeline" ? (
-        <RoadmapGantt
-          items={cardItems}
-          workspaceId={workspace.id}
-          unscheduledItems={unscheduledItems}
-          revalidatePathStr={`/${orgSlug}/${workspaceSlug}/roadmap`}
-        />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <RoadmapGantt
+            items={cardItems}
+            workspaceId={workspace.id}
+            unscheduledItems={unscheduledItems}
+            revalidatePathStr={`/${orgSlug}/${workspaceSlug}/roadmap`}
+          />
+        </div>
       ) : (
-        <div className="overflow-x-auto min-w-0">
+        <div className="flex min-h-0 flex-1 flex-col">
           <RoadmapBoard
             initialItems={cardItems}
             workspaceId={workspace.id}
@@ -274,6 +274,6 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
           />
         </div>
       )}
-    </div>
+    </WorkspacePage>
   );
 }

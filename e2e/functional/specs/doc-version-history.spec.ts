@@ -18,7 +18,6 @@ test.describe("Doc Version History", () => {
     "edit → save named version → edit again → restore reverts content",
     async ({ page, base }) => {
       const ts = Date.now();
-      const docTitle = `E2E Version History Doc ${ts}`;
       const originalContent = `E2E original content ${ts}`;
       const editedContent = `E2E edited content ${ts}`;
       const versionLabel = `E2E snapshot ${ts}`;
@@ -33,13 +32,7 @@ test.describe("Doc Version History", () => {
       const editor = page.locator(".ProseMirror");
       await expect(editor).toBeVisible({ timeout: 10_000 });
 
-      // ── 2. Set the title ─────────────────────────────────────────────────────
-      const titleInput = page.getByPlaceholder("Untitled");
-      await titleInput.fill(docTitle);
-      await titleInput.blur();
-      await expect(page.getByText("Saved")).toBeVisible({ timeout: 10_000 });
-
-      // ── 3. Write the original content and confirm it persisted ──────────────
+      // ── 2. Write the original content and confirm it persisted ──────────────
       // The "Saved" indicator is a transient (~2s) client-only flash shared
       // across every save path (title, content, icon) -- under the load of a
       // full sequential suite run it's easy to miss the exact window (or
@@ -55,7 +48,7 @@ test.describe("Doc Version History", () => {
       await page.waitForLoadState("networkidle");
       await expect(editor).toContainText(originalContent, { timeout: 15_000 });
 
-      // ── 4. Save a named version — deterministic, bypasses the 5-minute
+      // ── 3. Save a named version — deterministic, bypasses the 5-minute
       //       auto-snapshot coalescing window that would make this test slow
       //       and flaky if we instead relied on the automatic snapshot path.
       await page.getByTitle("Save named version").click();
@@ -64,7 +57,7 @@ test.describe("Doc Version History", () => {
       await labelInput.press("Enter");
       await expect(labelInput).not.toBeVisible({ timeout: 10_000 });
 
-      // ── 5. Edit the content again, so current != the saved version ──────────
+      // ── 4. Edit the content again, so current != the saved version ──────────
       await editor.click();
       await page.keyboard.press("ControlOrMeta+A");
       await page.keyboard.type(editedContent);
@@ -76,7 +69,7 @@ test.describe("Doc Version History", () => {
       await page.waitForLoadState("networkidle");
       await expect(editor).toContainText(editedContent, { timeout: 15_000 });
 
-      // ── 6. Open Version History and see the saved version listed ────────────
+      // ── 5. Open Version History and see the saved version listed ────────────
       await page.getByTitle("Version history").click();
       const panelHeading = page.getByRole("heading", { name: "Version History" });
       await expect(panelHeading).toBeVisible({ timeout: 10_000 });
@@ -85,7 +78,7 @@ test.describe("Doc Version History", () => {
         .filter({ hasText: versionLabel });
       await expect(versionRow).toBeVisible({ timeout: 10_000 });
 
-      // ── 7. Click it to view the diff against current content ────────────────
+      // ── 6. Click it to view the diff against current content ────────────────
       // diff_main renders delete and insert spans back-to-back rather than
       // as a full contiguous copy of each side (e.g. "original" and "edited"
       // sit adjacent with no space between, since only the differing word
@@ -97,14 +90,14 @@ test.describe("Doc Version History", () => {
       await expect(diff).toContainText("original");
       await expect(diff).toContainText("edited");
 
-      // ── 8. Restore — confirm() dialog must be accepted ───────────────────────
+      // ── 7. Restore — confirm() dialog must be accepted ───────────────────────
       page.once("dialog", (dialog) => dialog.accept());
       await page.getByRole("button", { name: "Restore this version" }).click();
 
       // Panel closes on successful restore.
       await expect(panelHeading).not.toBeVisible({ timeout: 10_000 });
 
-      // ── 9. Editor content reverted to the restored (original) version ───────
+      // ── 8. Editor content reverted to the restored (original) version ───────
       await expect(editor).toContainText(originalContent, { timeout: 10_000 });
       await expect(editor).not.toContainText(editedContent);
     }

@@ -83,11 +83,12 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
       await firstStatus.click();
       // base-ui renders the listbox in a portal the panel's Sheet stacks over,
       // so a pointer click on the option is intercepted by the overlay (the
-      // same reason detail-panel.spec avoids driving in-panel Selects). Drive
-      // the open Select via keyboard typeahead instead, which doesn't hit-test.
-      await page.getByRole("option", { name: "Done" }).waitFor({ state: "visible", timeout: 10_000 });
-      await page.keyboard.type("Done");
-      await page.keyboard.press("Enter");
+      // same reason detail-panel.spec avoids driving in-panel Selects). Activate
+      // the semantically named option by keyboard instead of relying on Select
+      // typeahead state, which can leave the current value unchanged.
+      const doneOption = page.getByRole("option", { name: "Done" });
+      await expect(doneOption).toBeVisible({ timeout: 10_000 });
+      await doneOption.press("Enter");
 
       await expect(panel.getByText(/1\/2 done/)).toBeVisible({ timeout: 15_000 });
 

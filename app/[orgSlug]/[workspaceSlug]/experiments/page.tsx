@@ -5,10 +5,10 @@ import getPrisma from "@/lib/db"
 import { getWorkspace } from "@/lib/workspace"
 import { ExperimentBoard } from "@/components/experiments/experiment-board"
 import { CreateExperimentForm } from "@/components/experiments/create-experiment-form"
-import { SquadFilterBar } from "@/components/squads/squad-filter-bar"
+import { ExperimentsFilters } from "@/components/experiments/experiments-filters"
 import type { AssumptionOptionData, ExperimentStatus, SquadData } from "@/lib/types"
 import type { ExperimentCardData } from "@/components/experiments/experiment-card"
-import { PageHeader } from "@/components/patterns/page-header"
+import { WorkspacePage } from "@/components/patterns/workspace-page"
 
 export const metadata = {
   title: "Experiments",
@@ -95,27 +95,30 @@ export default async function ExperimentsPage({
   }))
 
   return (
-    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
-      <PageHeader title="Experiments" description="Design, run, and conclude experiments to validate assumptions." actions={<CreateExperimentForm
-          workspaceId={workspace.id}
-          squads={squads}
-          assumptions={assumptions}
-          prefillAssumptionId={prefillAssumptionId ?? null}
-        />} sticky />
-
-      <Suspense>
-        <SquadFilterBar squads={squads} />
-      </Suspense>
-
-      <div className="overflow-x-auto min-w-0">
-        <ExperimentBoard
-          key={experiments.map((e) => e.id).join(",")}
-          experiments={experiments}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          workspaceId={workspace.id}
-        />
-      </div>
-    </main>
+    <WorkspacePage
+      title="Experiments"
+      contentClassName="p-0 sm:p-0 md:p-0"
+      actions={(
+        <>
+          <Suspense>
+            <ExperimentsFilters squads={squads} />
+          </Suspense>
+          <CreateExperimentForm
+            workspaceId={workspace.id}
+            squads={squads}
+            assumptions={assumptions}
+            prefillAssumptionId={prefillAssumptionId ?? null}
+          />
+        </>
+      )}
+    >
+      <ExperimentBoard
+        key={experiments.map((e) => e.id).join(",")}
+        experiments={experiments}
+        orgSlug={orgSlug}
+        workspaceSlug={workspaceSlug}
+        workspaceId={workspace.id}
+      />
+    </WorkspacePage>
   )
 }

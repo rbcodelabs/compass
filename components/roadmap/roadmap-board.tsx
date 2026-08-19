@@ -415,28 +415,40 @@ export function RoadmapBoard({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <Board label="Roadmap board" className="items-start pb-6">
-        {HORIZONS.map((horizon) => (
-          <RoadmapColumn
-            key={horizon}
-            horizon={horizon}
-            items={columns[horizon]}
-            workspaceId={workspaceId}
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-            revalidatePathStr={revalidatePathStr}
-            onItemAdded={handleItemAdded}
-            onArchive={handleArchive}
-            onUpdate={handleUpdate}
-            availableKRs={availableKRs}
-            availableSolutions={availableSolutions}
-            availableOpportunities={availableOpportunities}
-            availableExperiments={availableExperiments}
-          />
-        ))}
-      </Board>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto md:overflow-hidden">
+        <Board
+          label="Roadmap board"
+          className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
+        >
+          <div
+            data-slot="roadmap-board-track"
+            className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
+          >
+            {HORIZONS.map((horizon) => (
+              <RoadmapColumn
+                key={horizon}
+                horizon={horizon}
+                items={columns[horizon]}
+                workspaceId={workspaceId}
+                orgSlug={orgSlug}
+                workspaceSlug={workspaceSlug}
+                revalidatePathStr={revalidatePathStr}
+                onItemAdded={handleItemAdded}
+                onArchive={handleArchive}
+                onUpdate={handleUpdate}
+                availableKRs={availableKRs}
+                availableSolutions={availableSolutions}
+                availableOpportunities={availableOpportunities}
+                availableExperiments={availableExperiments}
+              />
+            ))}
+          </div>
+        </Board>
 
-      <UnscheduledItemsPanel items={unscheduled} onQuickAdd={handleQuickAdd} />
+        <div className="shrink-0">
+          <UnscheduledItemsPanel items={unscheduled} onQuickAdd={handleQuickAdd} />
+        </div>
+      </div>
 
       {/* DragOverlay renders the card being dragged at its cursor position */}
       <DragOverlay>
