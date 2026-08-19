@@ -18,6 +18,8 @@ import { HORIZON_META, SETTABLE_HORIZONS } from "@/lib/roadmap";
 import { LaunchTierPicker } from "./launch-tier-picker";
 import { LaunchChecklist, type LaunchChecklistItemData } from "./launch-checklist";
 import { PositioningBriefRow } from "./positioning-brief-row";
+import { RoadmapDeliveryTasks, type RoadmapDeliveryTaskData } from "./roadmap-delivery-tasks";
+import type { MemberData } from "@/lib/types";
 
 type RoadmapItemData = {
   id: string;
@@ -37,6 +39,9 @@ type RoadmapItemData = {
   feedback: { id: string; title: string } | null;
   launchChecklist: { id: string; tier: string; items: LaunchChecklistItemData[] } | null;
   positioningBrief: { id: string; title: string } | null;
+  deliveryTasks: RoadmapDeliveryTaskData[];
+  linkableTasks: Array<{ id: string; title: string }>;
+  members: MemberData[];
   _count: { votes: number };
 };
 
@@ -150,6 +155,18 @@ export function RoadmapItemPanel({
 
       <Section label="Linked to" count={linked.length}>
         <RelationList items={linked} empty="Not linked to any discovery item." />
+      </Section>
+
+      <Section label="Delivery tasks" count={data.deliveryTasks.length}>
+        <RoadmapDeliveryTasks
+          roadmapItemId={id}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          tasks={data.deliveryTasks}
+          linkableTasks={data.linkableTasks}
+          members={data.members}
+          onChanged={refresh}
+        />
       </Section>
     </PanelContainer>
   );

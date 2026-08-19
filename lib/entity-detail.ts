@@ -213,8 +213,9 @@ function fetchExperiment(id: string, workspaceId: string) {
   });
 }
 
-function fetchRoadmapItem(id: string, workspaceId: string) {
-  return getPrisma().roadmapItem.findFirst({
+async function fetchRoadmapItem(id: string, workspaceId: string) {
+  const prisma = getPrisma();
+  const item = await prisma.roadmapItem.findFirst({
     where: { id, workspaceId },
     include: {
       squad: { select: { id: true, name: true, color: true } },
@@ -230,6 +231,76 @@ function fetchRoadmapItem(id: string, workspaceId: string) {
       _count: { select: { votes: true } },
     },
   });
+  if (!item) return null;
+
+  const [deliveryTasks, linkableTasks, members] = await Promise.all([
+    prisma.task.findMany({
+      where: {
+        workspaceId,
+        status: { not: "CANCELLED" },
+        links: { some: { linkedType: "ROADMAP_ITEM", linkedId: id } },
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        priority: true,
+        assigneeUserId: true,
+        ownerName: true,
+        sortOrder: true,
+        createdAt: true,
+      },
+      orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    }),
+    prisma.task.findMany({
+      where: {
+        workspaceId,
+        status: { not: "CANCELLED" },
+        links: { none: { linkedType: "ROADMAP_ITEM", linkedId: id } },
+      },
+      select: { id: true, title: true },
+      orderBy: [{ title: "asc" }, { id: "asc" }],
+    }),
+    prisma.workspaceMember.findMany({
+      where: { workspaceId },
+      select: {
+        id: true,
+        userId: true,
+        role: true,
+        user: { select: { email: true, name: true } },
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    }),
+  ]);
+
+  const precedence: Record<string, number> = {
+    BLOCKED: 0,
+    IN_REVIEW: 1,
+    IN_PROGRESS: 2,
+    DONE: 3,
+    TODO: 4,
+    BACKLOG: 5,
+  };
+  deliveryTasks.sort(
+    (a, b) =>
+      (precedence[a.status] ?? 99) - (precedence[b.status] ?? 99) ||
+      a.sortOrder - b.sortOrder ||
+      a.createdAt.getTime() - b.createdAt.getTime() ||
+      a.id.localeCompare(b.id)
+  );
+
+  return {
+    ...item,
+    deliveryTasks,
+    linkableTasks,
+    members: members.map((member) => ({
+      id: member.id,
+      userId: member.userId,
+      role: member.role,
+      email: member.user.email,
+      name: member.user.name,
+    })),
+  };
 }
 
 function fetchFeedback(id: string, workspaceId: string) {

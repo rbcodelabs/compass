@@ -17,6 +17,8 @@ const models = {
   assumption: { findFirst: vi.fn() },
   experiment: { findFirst: vi.fn() },
   roadmapItem: { findFirst: vi.fn() },
+  task: { findMany: vi.fn() },
+  workspaceMember: { findMany: vi.fn() },
   feedbackItem: { findFirst: vi.fn() },
 };
 
@@ -36,7 +38,7 @@ const ID = "ent-1";
 // scopes it to a workspace (this is the IDOR defense — assert it precisely).
 const CASES: Array<{
   type: EntityType;
-  model: keyof typeof models;
+  model: Exclude<keyof typeof models, "task" | "workspaceMember">;
   where: Record<string, unknown>;
 }> = [
   { type: "objective", model: "objective", where: { id: ID, cycle: { workspaceId: WS } } },
@@ -59,6 +61,8 @@ const CASES: Array<{
 
 beforeEach(() => {
   vi.clearAllMocks();
+  models.task.findMany.mockResolvedValue([]);
+  models.workspaceMember.findMany.mockResolvedValue([]);
 });
 
 describe("isEntityType", () => {
@@ -99,6 +103,43 @@ describe("getEntityDetail — workspace scoping", () => {
 });
 
 describe("getEntityDetail — return shape", () => {
+  it("returns active roadmap delivery tasks and linkable workspace tasks in deterministic delivery order", async () => {
+    models.roadmapItem.findFirst.mockResolvedValue({ id: ID, workspaceId: WS });
+    models.task.findMany
+      .mockResolvedValueOnce([{ id: "blocked", status: "BLOCKED" }])
+      .mockResolvedValueOnce([{ id: "candidate", title: "Candidate" }]);
+    models.workspaceMember.findMany.mockResolvedValue([]);
+
+    const result = await getEntityDetail("roadmapItem", ID, WS);
+
+    expect(models.task.findMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        workspaceId: WS,
+        status: { not: "CANCELLED" },
+        links: { some: { linkedType: "ROADMAP_ITEM", linkedId: ID } },
+      },
+      select: expect.objectContaining({ id: true, title: true, status: true, priority: true }),
+      orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    });
+    expect(models.task.findMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        workspaceId: WS,
+        status: { not: "CANCELLED" },
+        links: { none: { linkedType: "ROADMAP_ITEM", linkedId: ID } },
+      },
+      select: { id: true, title: true },
+      orderBy: [{ title: "asc" }, { id: "asc" }],
+    });
+    expect(result).toEqual({
+      type: "roadmapItem",
+      data: expect.objectContaining({
+        deliveryTasks: [{ id: "blocked", status: "BLOCKED" }],
+        linkableTasks: [{ id: "candidate", title: "Candidate" }],
+        members: [],
+      }),
+    });
+  });
+
   it("wraps a hit as { type, data }", async () => {
     const row = { id: ID, title: "An opportunity" };
     models.opportunity.findFirst.mockResolvedValue(row);
@@ -117,7 +158,7 @@ describe("getEntityDetail — return shape", () => {
       vi.clearAllMocks();
       models[model].findFirst.mockResolvedValue({ id: ID });
       const result = await getEntityDetail(type, ID, WS);
-      expect(result).toEqual({ type, data: { id: ID } });
+      expect(result).toEqual({ type, data: expect.objectContaining({ id: ID }) });
       // no other model was touched
       for (const other of CASES) {
         if (other.model === model) continue;
