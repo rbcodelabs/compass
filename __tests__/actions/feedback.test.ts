@@ -65,7 +65,7 @@ describe("updateFeedbackStatus", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       updateFeedbackStatus("fb-1", "REVIEWED", "/path")
     ).rejects.toThrow("Unauthorized");
@@ -113,7 +113,7 @@ describe("linkFeedbackToOpportunity", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       linkFeedbackToOpportunity("fb-1", "opp-1", "/path")
     ).rejects.toThrow("Unauthorized");
@@ -148,7 +148,7 @@ describe("updateFeedbackType", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       updateFeedbackType("fb-1", "BUG", "/path")
     ).rejects.toThrow("Unauthorized");
@@ -225,7 +225,7 @@ describe("createFeedback", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       createFeedback("acme", "widgets", { title: "Idea", description: "", type: "IDEA" }, "/path")
     ).rejects.toThrow("Unauthorized");

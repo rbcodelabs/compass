@@ -386,7 +386,7 @@ describe("saveOpportunityScore", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       saveOpportunityScore("org", "ws", "opp-1", { reach: 5, effort: 1 }, "/path")
     ).rejects.toThrow("Unauthorized");

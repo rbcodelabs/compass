@@ -13,8 +13,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { archiveItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { EditItemDialog } from "./edit-item-dialog";
+import { DeliveryStatusBadge } from "./delivery-status-badge";
 
 import type { Horizon } from "@/lib/types";
+import type { RoadmapDeliveryStatus } from "@/lib/roadmap-delivery-status";
 import { isLaunchHorizon } from "@/lib/roadmap";
 
 export type RoadmapCardData = {
@@ -45,6 +47,7 @@ export type RoadmapCardData = {
   feedback: { id: string; title: string; type: string } | null;
   squad: { id: string; name: string; color: string } | null;
   launchChecklist: { tier: string; done: number; total: number } | null;
+  deliveryStatus: RoadmapDeliveryStatus;
 };
 
 // Compact "Mar 3 – Apr 10" style range formatter. Handles single-ended ranges too.
@@ -130,6 +133,7 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
         }
         title={
           <span className="flex flex-wrap items-center gap-1.5">
+            <DeliveryStatusBadge status={item.deliveryStatus} />
             {item.feedback?.type === "BUG" && (
               <StatusBadge status="danger" icon={<Bug />}>Bug</StatusBadge>
             )}

@@ -40,7 +40,7 @@ beforeEach(() => {
 
 describe("GET /api/panels/discovery-rail", () => {
   it("401s when there is no session", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
 
     const res = await GET(makeRequest("?orgSlug=acme&workspaceSlug=ws"));
 

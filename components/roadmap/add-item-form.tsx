@@ -121,6 +121,7 @@ export function AddItemForm({
         // items always start unassigned here, same as before this field existed.
         squad: null,
         launchChecklist: null,
+        deliveryStatus: "NOT_STARTED",
       });
       setOpen(false);
       reset();

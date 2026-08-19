@@ -96,7 +96,7 @@ describe("createDoc", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(createDoc("ws-1", null, "/path")).rejects.toThrow("Unauthorized");
   });
 
@@ -132,7 +132,7 @@ describe("updateDoc", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       updateDoc("doc-1", { title: "Hacked" }, "/path")
     ).rejects.toThrow("Unauthorized");
@@ -199,7 +199,7 @@ describe("createDocVersion", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(createDocVersion("doc-1", "Label", "/path")).rejects.toThrow("Unauthorized");
     expect(mockMaybeSnapshotDocVersion).not.toHaveBeenCalled();
   });
@@ -231,7 +231,7 @@ describe("getDocVersionContent", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(getDocVersionContent("version-1")).rejects.toThrow("Unauthorized");
   });
 });
@@ -255,7 +255,7 @@ describe("restoreDocVersion", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(restoreDocVersion("version-1", "/path")).rejects.toThrow("Unauthorized");
     expect(mockRestoreDocVersionCore).not.toHaveBeenCalled();
   });
@@ -288,7 +288,7 @@ describe("deleteDoc", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(deleteDoc("doc-1", "/path")).rejects.toThrow("Unauthorized");
     expect(mockDoc.delete).not.toHaveBeenCalled();
     expect(mockDocVersion.deleteMany).not.toHaveBeenCalled();

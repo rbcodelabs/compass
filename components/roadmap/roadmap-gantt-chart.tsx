@@ -29,6 +29,8 @@ import { ScheduleItemDialog } from "./schedule-item-dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HORIZON_META } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
+import { DeliveryStatusBadge } from "./delivery-status-badge";
+import type { RoadmapDeliveryStatus } from "@/lib/roadmap-delivery-status";
 
 // The Gantt library reads Date components with local-timezone getters
 // (getFullYear/getMonth/getDate) for its grid columns, chart axis, and bar
@@ -136,6 +138,7 @@ type GanttTask = {
   horizon: Horizon;
   hasDates: boolean;
   isPrivate: boolean;
+  deliveryStatus: RoadmapDeliveryStatus;
   parent?: string | number;
 };
 
@@ -243,6 +246,7 @@ function TaskBar({ data }: TaskTemplateProps) {
         }}
       >
         {privateIcon}
+        <span className="mr-1 shrink-0"><DeliveryStatusBadge status={data.deliveryStatus} /></span>
         {data.text}
         <span className="ml-1 shrink-0 opacity-70">(unscheduled)</span>
       </div>
@@ -252,6 +256,7 @@ function TaskBar({ data }: TaskTemplateProps) {
   return (
     <div style={{ ...BAR_BASE_STYLE, backgroundColor: color, color: "#fff" }}>
       {privateIcon}
+      <span className="mr-1 shrink-0"><DeliveryStatusBadge status={data.deliveryStatus} /></span>
       {data.text}
     </div>
   );
@@ -306,6 +311,7 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
           horizon: item.horizon,
           hasDates,
           isPrivate: item.isPrivate,
+          deliveryStatus: item.deliveryStatus,
         };
       }),
     [items, placeholderStart, placeholderEnd]

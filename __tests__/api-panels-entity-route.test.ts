@@ -41,7 +41,7 @@ beforeEach(() => {
 
 describe("GET /api/panels/entity/[type]/[id]", () => {
   it("401s when there is no session", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     const res = await call("opportunity", "opp-1");
     expect(res.status).toBe(401);
     expect(mockGetWorkspace).not.toHaveBeenCalled();

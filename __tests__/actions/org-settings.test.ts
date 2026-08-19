@@ -112,7 +112,7 @@ describe("createScoringModel", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       createScoringModel("org", { name: "RICE", formulaType: "WEIGHTED_SUM", metrics: [] })
     ).rejects.toThrow("Unauthorized");
@@ -150,7 +150,7 @@ describe("updateScoringModelDetails", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(updateScoringModelDetails("org", "model-1", { name: "X" })).rejects.toThrow(
       "Unauthorized"
     );
@@ -214,7 +214,7 @@ describe("updateScoringModelMetrics", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       updateScoringModelMetrics("org", "model-1", { metrics: weightedSumMetrics })
     ).rejects.toThrow("Unauthorized");
@@ -234,7 +234,7 @@ describe("archiveScoringModel", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(archiveScoringModel("org", "model-1")).rejects.toThrow("Unauthorized");
     expect(mockScoringModel.update).not.toHaveBeenCalled();
   });
