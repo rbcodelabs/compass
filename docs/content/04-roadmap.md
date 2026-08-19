@@ -42,7 +42,7 @@ The linked metadata appears as small icon badges on each card, giving stakeholde
 
 ## Timeline View
 
-Toggle between **Board** and **Timeline** at the top of the Roadmap page. Timeline renders every roadmap item as a bar on a Gantt-style chart, colored by horizon, so you can see what's planned to run concurrently and spot scheduling conflicts. Items that don't have a start and end date yet still appear — as a dashed, outlined bar starting today — so you can drag or resize them directly to set real dates instead of hunting for the Edit dialog. A count above the chart calls out how many items are still on placeholder dates.
+Toggle between **Board** and **Timeline** at the top of the Roadmap page. Use **Filters** beside the view control to focus either view on a squad. Timeline renders every roadmap item as a bar on a Gantt-style chart, colored by horizon, so you can see what's planned to run concurrently and spot scheduling conflicts. Items that don't have a start and end date yet still appear — as a dashed, outlined bar starting today — so you can drag or resize them directly to set real dates instead of hunting for the Edit dialog. A count above the chart calls out how many items are still on placeholder dates.
 
 Drag a bar to shift its dates, or resize it from either edge to change its start or end date — changes save immediately. The Timeline view is linkable: `?view=timeline` in the URL takes you straight there, and the squad filter carries over from the Board.
 

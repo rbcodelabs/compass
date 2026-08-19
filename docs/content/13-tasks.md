@@ -57,7 +57,7 @@ A task's owning **Squad** is not part of this link system — it's a first-class
 
 ## Filtering
 
-Filter the board or list by **Squad**, **Assignee**, or **Priority** using the pill bars above the board — these compose, so you can filter to a specific squad's Urgent tasks assigned to one person. Filtering by squad is strict (a task's own `squadId`, not anything it's linked to).
+Use **Filters** at the top of the page to filter the board or list by **Squad**, **Assignee**, or **Priority**. The facets compose, so you can filter to a specific squad's Urgent tasks assigned to one person, and **Clear all** removes every active filter at once. Filtering by squad is strict (a task's own `squadId`, not anything it's linked to).
 
 ## Custom Fields
 

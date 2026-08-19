@@ -23,6 +23,8 @@ Experiments move through these statuses:
 - **COMPLETE** — The experiment ran to completion and produced a conclusion.
 - **KILLED** — The experiment was stopped early (for ethical, business, or resource reasons) before reaching the planned end condition.
 
+Use **Filters** at the top of the page to focus the experiment board on a specific squad. Clear the selected squad from the same menu to return to the full board.
+
 ## Creating an Experiment
 
 Click **+ Add Experiment** on the Experiments page, or click **Test this assumption →** next to any untested assumption in Discovery's OST Tree view — that pre-fills the assumption picker below so you don't have to hunt for it. Fill in:

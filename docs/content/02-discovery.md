@@ -23,7 +23,7 @@ Opportunities move through four columns on the kanban board:
 - **PRIORITIZED** — Opportunities that have been validated and selected for investment. Your team is working on solutions.
 - **ACTIVE** — The opportunity your team is actively building toward right now. Typically only one or two opportunities are ACTIVE at a time.
 
-Drag cards between columns to update status. You can filter the board by squad using the filter bar at the top of the page.
+Drag cards between columns to update status. Use **Filters** at the top of the page to filter opportunities by squad, or switch between **Board** and **Tree** views using the view control.
 
 ## Discovery Rail
 
