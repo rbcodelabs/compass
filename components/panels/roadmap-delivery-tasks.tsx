@@ -7,7 +7,7 @@ import { addRoadmapDeliveryTask, linkRoadmapDeliveryTask } from "@/app/[orgSlug]
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { Combobox, ComboboxContent, ComboboxTrigger, ComboboxValue } from "@/components/ui/combobox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePanelContext } from "./panel-context";
@@ -22,14 +22,14 @@ export type RoadmapDeliveryTaskData = {
   ownerName: string | null;
 };
 
-const STATUS: Record<TaskStatus, { label: string; className: string }> = {
-  BLOCKED: { label: "Blocked", className: "bg-red-100 text-red-700" },
-  IN_REVIEW: { label: "In Review", className: "bg-amber-100 text-amber-700" },
-  IN_PROGRESS: { label: "In Development", className: "bg-blue-100 text-blue-700" },
-  DONE: { label: "Complete", className: "bg-emerald-100 text-emerald-700" },
-  TODO: { label: "Not Started", className: "bg-slate-100 text-slate-600" },
-  BACKLOG: { label: "Not Started", className: "bg-slate-100 text-slate-600" },
-  CANCELLED: { label: "Cancelled", className: "bg-slate-100 text-slate-500" },
+const STATUS: Record<TaskStatus, { label: string; variant: "neutral" | "info" | "warning" | "danger" | "success" }> = {
+  BLOCKED: { label: "Blocked", variant: "danger" },
+  IN_REVIEW: { label: "In Review", variant: "warning" },
+  IN_PROGRESS: { label: "In Development", variant: "info" },
+  DONE: { label: "Complete", variant: "success" },
+  TODO: { label: "Not Started", variant: "neutral" },
+  BACKLOG: { label: "Not Started", variant: "neutral" },
+  CANCELLED: { label: "Cancelled", variant: "neutral" },
 };
 
 type Props = {
@@ -108,7 +108,7 @@ export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, ta
                 <Link href={`/${orgSlug}/${workspaceSlug}/tasks/${task.id}`} className="block rounded-lg border p-2.5 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
                   <span className="block truncate text-sm font-medium">{task.title}</span>
                   <span className="mt-1 flex flex-wrap items-center gap-1.5">
-                    <Badge className={STATUS[task.status].className}>{STATUS[task.status].label}</Badge>
+                    <StatusBadge status={STATUS[task.status].variant}>{STATUS[task.status].label}</StatusBadge>
                     <span className="text-[11px] capitalize text-muted-foreground">{(task.priority ?? "MEDIUM").toLowerCase()}</span>
                     {assignee && <span className="max-w-32 truncate text-[11px] text-muted-foreground">{assignee}</span>}
                   </span>
