@@ -114,6 +114,7 @@ function cardDataFromPromotion(
     feedback: source.kind === "feedback" ? { id: source.id, title: source.title, type: "BUG" } : null,
     squad,
     launchChecklist: null,
+    deliveryStatus: "NOT_STARTED",
   };
 }
 

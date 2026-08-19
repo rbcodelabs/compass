@@ -63,7 +63,7 @@ beforeEach(() => {
 
 describe("createOrganizationAndWorkspace — auth boundary", () => {
   it("returns form error when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     const fd = makeFormData(VALID_FIELDS);
     const result = await createOrganizationAndWorkspace({}, fd);
     expect(result.errors?._form).toContain("You must be signed in to continue.");
