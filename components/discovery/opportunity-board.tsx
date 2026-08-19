@@ -91,8 +91,9 @@ function DiscoveryColumn({
       title={label}
       count={items.length}
       accent={accent}
+      className="min-w-[280px] flex-1 overflow-hidden md:h-full"
       bodyRef={setNodeRef}
-      bodyClassName={isOver ? "min-h-44 rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : "min-h-44"}
+      bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`}
       footer={<CreateOpportunityForm workspaceId={workspaceId} defaultStatus={status} squads={squads} />}
     >
         <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
@@ -251,40 +252,50 @@ export function OpportunityBoard({
   }
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
-    >
-      <Board label="Opportunity board" className="pb-4">
-        {COLUMNS.map(({ status, label, accent }) => (
-          <DiscoveryColumn
-            key={status}
-            status={status}
-            label={label}
-            accent={accent}
-            items={columns[status]}
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-            workspaceId={workspaceId}
-            squads={squads}
-          />
-        ))}
-      </Board>
-
-      <DragOverlay>
-        {activeItem ? (
-          <div className="rotate-1 scale-105">
-            <OpportunityCard
-              opportunity={activeItem}
-              orgSlug={orgSlug}
-              workspaceSlug={workspaceSlug}
-            />
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <Board
+          label="Opportunity board"
+          className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
+        >
+          <div
+            data-slot="opportunity-board-track"
+            className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
+          >
+            {COLUMNS.map(({ status, label, accent }) => (
+              <DiscoveryColumn
+                key={status}
+                status={status}
+                label={label}
+                accent={accent}
+                items={columns[status]}
+                orgSlug={orgSlug}
+                workspaceSlug={workspaceSlug}
+                workspaceId={workspaceId}
+                squads={squads}
+              />
+            ))}
           </div>
-        ) : null}
-      </DragOverlay>
-    </DndContext>
+        </Board>
+
+        <DragOverlay>
+          {activeItem ? (
+            <div className="rotate-1 scale-105">
+              <OpportunityCard
+                opportunity={activeItem}
+                orgSlug={orgSlug}
+                workspaceSlug={workspaceSlug}
+              />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    </div>
   );
 }

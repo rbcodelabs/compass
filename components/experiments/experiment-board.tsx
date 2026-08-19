@@ -78,7 +78,14 @@ function ExperimentColumn({
   });
 
   return (
-    <BoardColumn title={label} count={items.length} accent={accent} className="min-w-[280px] flex-1" bodyRef={setNodeRef} bodyClassName={isOver ? "min-h-44 rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : "min-h-44"}>
+    <BoardColumn
+      title={label}
+      count={items.length}
+      accent={accent}
+      className="min-w-[280px] flex-1 overflow-hidden md:h-full"
+      bodyRef={setNodeRef}
+      bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`}
+    >
         <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
           {items.length === 0 ? (
             <EmptyState compact icon={<FlaskConical className="size-4" />} title="No experiments yet" className={isOver ? "border-border-interactive" : undefined} />
@@ -230,36 +237,46 @@ export function ExperimentBoard({
   }
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
-    >
-      <Board label="Experiment board" className="items-start md:grid md:grid-cols-2 xl:grid-cols-4 md:overflow-visible">
-        {COLUMNS.map(({ status, label, accent }) => (
-          <ExperimentColumn
-            key={status}
-            status={status}
-            label={label}
-            accent={accent}
-            items={columns[status]}
-            revalidatePathStr={revalidatePathStr}
-          />
-        ))}
-      </Board>
-
-      <DragOverlay>
-        {activeItem ? (
-          <div className="rotate-1 scale-105">
-            <ExperimentCard
-              experiment={activeItem}
-              revalidatePathStr={revalidatePathStr}
-            />
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <Board
+          label="Experiment board"
+          className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
+        >
+          <div
+            data-slot="experiment-board-track"
+            className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
+          >
+            {COLUMNS.map(({ status, label, accent }) => (
+              <ExperimentColumn
+                key={status}
+                status={status}
+                label={label}
+                accent={accent}
+                items={columns[status]}
+                revalidatePathStr={revalidatePathStr}
+              />
+            ))}
           </div>
-        ) : null}
-      </DragOverlay>
-    </DndContext>
+        </Board>
+
+        <DragOverlay>
+          {activeItem ? (
+            <div className="rotate-1 scale-105">
+              <ExperimentCard
+                experiment={activeItem}
+                revalidatePathStr={revalidatePathStr}
+              />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    </div>
   );
 }

@@ -3,10 +3,10 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { OpportunityBoard } from "@/components/discovery/opportunity-board";
-import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
+import { DiscoveryFilters } from "@/components/discovery/discovery-filters";
 import type { OpportunityStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
-import { PageHeader } from "@/components/patterns/page-header";
+import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -130,36 +130,34 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   );
 
   return (
-    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 min-w-0">
-      <PageHeader
-        title="Discovery"
-        description={<>Opportunity Solution Tree for {workspace.name}</>}
-        sticky
+    <WorkspacePage
+      title="Discovery"
+      contentClassName="p-0 sm:p-0 md:p-0"
+      actions={(
+        <Suspense>
+          <DiscoveryFilters squads={squads} />
+        </Suspense>
+      )}
+    >
+      <OpportunityBoard
+        key={opportunities.map((o) => o.id).join(",")}
+        opportunitiesByStatus={opportunitiesByStatus}
+        orgSlug={orgSlug}
+        workspaceSlug={workspaceSlug}
+        workspaceId={workspace.id}
+        squads={squads}
       />
 
-      <Suspense>
-        <SquadFilterBar squads={squads} />
-      </Suspense>
-
-      <div className="overflow-x-auto min-w-0">
-        <OpportunityBoard
-          key={opportunities.map((o) => o.id).join(",")}
-          opportunitiesByStatus={opportunitiesByStatus}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          workspaceId={workspace.id}
-          squads={squads}
-        />
-      </div>
-
       {archivedOpportunities.length > 0 && (
-        <ArchivedSection
-          opportunities={archivedOpportunities.map(toCardData)}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-        />
+        <div className="shrink-0 px-3 pb-3 sm:px-4 sm:pb-4">
+          <ArchivedSection
+            opportunities={archivedOpportunities.map(toCardData)}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+          />
+        </div>
       )}
-    </main>
+    </WorkspacePage>
   );
 }
 
