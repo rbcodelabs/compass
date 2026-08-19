@@ -52,7 +52,7 @@ describe("resolveOrgAdmin", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
 
     await expect(resolveOrgAdmin("org")).rejects.toThrow("Unauthorized");
     expect(mockOrganizationMember.findFirst).not.toHaveBeenCalled();
@@ -103,7 +103,7 @@ describe("resolveWorkspaceAdmin", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
 
     await expect(resolveWorkspaceAdmin("org", "ws")).rejects.toThrow("Unauthorized");
     expect(mockWorkspace.findFirst).not.toHaveBeenCalled();

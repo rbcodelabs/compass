@@ -242,7 +242,7 @@ describe("createSquad", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       createSquad("org", "ws", { name: "Alpha", color: "#ff0000" })
     ).rejects.toThrow("Unauthorized");
@@ -292,7 +292,7 @@ describe("updateSquad", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       updateSquad("org", "ws", "squad-1", { name: "Beta" })
     ).rejects.toThrow("Unauthorized");
@@ -327,7 +327,7 @@ describe("deleteSquad", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(deleteSquad("org", "ws", "squad-1")).rejects.toThrow("Unauthorized");
     expect(mockSquad.delete).not.toHaveBeenCalled();
   });
@@ -347,7 +347,7 @@ describe("assignSquad", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       assignSquad("objective", "obj-1", "squad-1", "/path")
     ).rejects.toThrow("Unauthorized");
@@ -383,7 +383,7 @@ describe("createFieldDefinition", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       createFieldDefinition("org", "ws", {
         objectType: "OPPORTUNITY",
@@ -408,7 +408,7 @@ describe("deleteFieldDefinition", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       deleteFieldDefinition("org", "ws", "field-1")
     ).rejects.toThrow("Unauthorized");
@@ -456,7 +456,7 @@ describe("upsertFieldValue", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       upsertFieldValue("obj-1", "field-1", "value", "/path")
     ).rejects.toThrow("Unauthorized");
@@ -490,7 +490,7 @@ describe("createApiKey", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(createApiKey("org", "ws", "Key")).rejects.toThrow("Unauthorized");
     expect(mockApiKey.create).not.toHaveBeenCalled();
   });
@@ -517,7 +517,7 @@ describe("revokeApiKey", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(revokeApiKey("org", "ws", "key-1")).rejects.toThrow("Unauthorized");
     expect(mockApiKey.update).not.toHaveBeenCalled();
   });
@@ -552,7 +552,7 @@ describe("updatePortalSettings", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       updatePortalSettings("org", "ws", { feedbackEnabled: true })
     ).rejects.toThrow("Unauthorized");
@@ -673,7 +673,7 @@ describe("updateWorkspaceBranding", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       updateWorkspaceBranding("org", "ws", { primaryHex: "#4f3df2" })
     ).rejects.toThrow("Unauthorized");
@@ -695,7 +695,7 @@ describe("updateWorkspaceBranding", () => {
 
 describe("deleteWorkspace", () => {
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(deleteWorkspace("org", "ws")).rejects.toThrow("Unauthorized");
     expect(mockWorkspace.delete).not.toHaveBeenCalled();
   });
@@ -867,7 +867,7 @@ describe("addWorkspaceMember", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       addWorkspaceMember("org", "ws", { email: "new@example.com", role: "MEMBER" })
     ).rejects.toThrow("Unauthorized");
@@ -921,7 +921,7 @@ describe("updateWorkspaceMemberRole", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(
       updateWorkspaceMemberRole("org", "ws", "ws-member-1", "ADMIN")
     ).rejects.toThrow("Unauthorized");
@@ -989,7 +989,7 @@ describe("removeWorkspaceMember", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(removeWorkspaceMember("org", "ws", "ws-member-1")).rejects.toThrow(
       "Unauthorized"
     );
@@ -1035,7 +1035,7 @@ describe("setActiveScoringModel", () => {
   });
 
   it("throws Unauthorized when session is missing", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     await expect(setActiveScoringModel("org", "ws", "model-1")).rejects.toThrow("Unauthorized");
     expect(mockWorkspaceScoringConfig.upsert).not.toHaveBeenCalled();
   });

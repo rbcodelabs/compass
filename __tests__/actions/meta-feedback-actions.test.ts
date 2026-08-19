@@ -84,7 +84,7 @@ describe("sendCompassFeedback", () => {
   });
 
   it("returns an Unauthorized error (not a thrown exception) when there is no session", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as never);
     const result = await sendCompassFeedback({ title: "Idea", description: "", type: "IDEA" });
     expect(result).toEqual({ ok: false, error: "Unauthorized" });
     expect(mockFeedbackItem.create).not.toHaveBeenCalled();
