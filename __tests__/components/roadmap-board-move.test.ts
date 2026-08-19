@@ -25,6 +25,7 @@ function card(id: string, horizon: RoadmapCardData["horizon"], sortOrder = 0): R
     feedback: null,
     squad: null,
     launchChecklist: null,
+    deliveryStatus: "NOT_STARTED",
   };
 }
 

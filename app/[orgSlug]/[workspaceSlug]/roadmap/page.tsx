@@ -7,10 +7,11 @@ import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
 import { RoadmapGantt } from "@/components/roadmap/roadmap-gantt";
 import { RoadmapViewToggle } from "@/components/roadmap/roadmap-view-toggle";
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
-import type { Horizon, SquadData } from "@/lib/types";
+import type { Horizon, SquadData, TaskStatus } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import type { UnscheduledItem } from "@/components/roadmap/unscheduled-items-panel";
 import { PageHeader } from "@/components/patterns/page-header";
+import { deriveRoadmapDeliveryStatus } from "@/lib/roadmap-delivery-status";
 
 export const metadata = {
   title: "Roadmap",
@@ -141,6 +142,23 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     }),
   ]);
 
+  const taskLinks = items.length === 0
+    ? []
+    : await prisma.taskLink.findMany({
+        where: {
+          linkedType: "ROADMAP_ITEM",
+          linkedId: { in: items.map((item) => item.id) },
+          task: { workspaceId: workspace.id },
+        },
+        select: { linkedId: true, task: { select: { status: true } } },
+      });
+  const taskStatusesByRoadmapItem = new Map<string, TaskStatus[]>();
+  for (const link of taskLinks) {
+    const statuses = taskStatusesByRoadmapItem.get(link.linkedId) ?? [];
+    statuses.push(link.task.status as TaskStatus);
+    taskStatusesByRoadmapItem.set(link.linkedId, statuses);
+  }
+
   const squads: SquadData[] = rawSquads.map((s) => ({
     id: s.id,
     name: s.name,
@@ -201,6 +219,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
           total: item.launchChecklist.items.length,
         }
       : null,
+    deliveryStatus: deriveRoadmapDeliveryStatus(taskStatusesByRoadmapItem.get(item.id) ?? []),
   }));
 
   const unscheduledItems: UnscheduledItem[] = [
