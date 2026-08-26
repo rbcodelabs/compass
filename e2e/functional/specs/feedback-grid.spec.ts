@@ -120,6 +120,70 @@ function rowFor(page: Page, title: string) {
   return page.getByTestId("grid-row").filter({ hasText: title });
 }
 
+/** Column ids as currently rendered, left to right. */
+const DEFAULT_COLUMN_ORDER = ["feedback", "type", "votes", "status", "submitted", "action"];
+
+async function columnOrder(page: Page): Promise<string[]> {
+  return page.$$eval("[data-testid^='grid-head-']", (nodes) =>
+    nodes.map((n) => (n.getAttribute("data-testid") ?? "").replace("grid-head-", ""))
+  );
+}
+
+/**
+ * Perform a real pointer drag of one column header onto another.
+ *
+ * dnd-kit's PointerSensor only activates after the pointer has travelled its
+ * `activationConstraint.distance` (8px here), and it tracks movement across
+ * frames — so a single `mouse.move` to the destination is not enough. The
+ * gesture is therefore: press, nudge past the threshold, traverse in steps, and
+ * settle on the target for a frame before releasing.
+ */
+async function dragColumn(page: Page, fromId: string, toId: string): Promise<void> {
+  const from = page.getByTestId(`grid-head-${fromId}`);
+  const to = page.getByTestId(`grid-head-${toId}`);
+
+  const fromBox = (await from.boundingBox())!;
+  const toBox = (await to.boundingBox())!;
+
+  const startX = fromBox.x + fromBox.width / 2;
+  const startY = fromBox.y + fromBox.height / 2;
+  const endX = toBox.x + toBox.width / 2;
+  const endY = toBox.y + toBox.height / 2;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  // Clear the 8px activation constraint before travelling.
+  await page.mouse.move(startX + (endX > startX ? 12 : -12), startY, { steps: 3 });
+  await page.mouse.move(endX, endY, { steps: 12 });
+  // dnd-kit resolves the drop target from the last observed pointer position;
+  // one extra move on the spot guarantees it has seen it.
+  await page.mouse.move(endX, endY);
+  await page.mouse.up();
+}
+
+/**
+ * Reorder a column through the Columns menu — the pointer-free equivalent of
+ * `dragColumn`. The actions sit two submenus deep
+ * (Columns → "Reorder columns" → <column label> → Move up/Move down), so each
+ * trigger has to be opened in turn.
+ */
+async function moveColumn(
+  page: Page,
+  columnId: string,
+  columnLabel: string,
+  direction: "up" | "down"
+): Promise<void> {
+  await page.getByRole("button", { name: "Columns" }).click();
+  await page.getByRole("menuitem", { name: "Reorder columns" }).click();
+  await page.getByRole("menuitem", { name: columnLabel, exact: true }).click();
+
+  const item = page.getByTestId(`grid-column-move-${direction}-${columnId}`);
+  await expect(item).toBeVisible();
+  await item.click();
+
+  await page.keyboard.press("Escape");
+}
+
 test.describe("Feedback DataGrid", () => {
   test.beforeAll(async ({}, testInfo) => {
     // orgSlug/workspaceSlug are per-test fixtures; they are constants, so the
@@ -309,5 +373,122 @@ test.describe("Feedback DataGrid", () => {
     await page.goto(seededUrl(base, "&status=COMPLETED"));
     await page.waitForLoadState("networkidle");
     await expect(rowFor(page, title)).toHaveCount(1);
+  });
+
+  // ── Column reordering ──────────────────────────────────────────────────────
+  //
+  // These live here rather than in the jsdom unit tests because dnd-kit's
+  // PointerSensor is driven by real PointerEvents with real coordinates, and
+  // jsdom has neither a layout engine nor pointer capture — a "drag" there can
+  // only ever be a simulation of the handler, not of the gesture. The sensor is
+  // configured with `activationConstraint: { distance: 8 }` so that a plain
+  // click still reaches the sort button inside the header, which means a drag
+  // that moves less than 8px is *supposed* to do nothing. Only a real browser
+  // can tell those two cases apart.
+
+  test("dragging a column header reorders the grid and the order survives a reload", async ({
+    page,
+    base,
+  }) => {
+    await page.goto(seededUrl(base));
+    await page.waitForLoadState("networkidle");
+
+    expect(await columnOrder(page)).toEqual(DEFAULT_COLUMN_ORDER);
+
+    // Drag `votes` to the left, past `type`, so it lands directly after `feedback`.
+    await dragColumn(page, "votes", "type");
+
+    await expect
+      .poll(() => columnOrder(page))
+      .toEqual(["feedback", "votes", "type", "status", "submitted", "action"]);
+
+    // Preferences are persisted in localStorage, so the new order must outlive
+    // a full document reload.
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+
+    expect(await columnOrder(page)).toEqual([
+      "feedback",
+      "votes",
+      "type",
+      "status",
+      "submitted",
+      "action",
+    ]);
+  });
+
+  test("a drag shorter than the sensor's activation distance does not reorder", async ({
+    page,
+    base,
+  }) => {
+    await page.goto(seededUrl(base));
+    await page.waitForLoadState("networkidle");
+
+    expect(await columnOrder(page)).toEqual(DEFAULT_COLUMN_ORDER);
+
+    const head = page.getByTestId("grid-head-type");
+    const box = (await head.boundingBox())!;
+    const y = box.y + box.height / 2;
+
+    // 4px — deliberately under the 8px activation constraint.
+    await page.mouse.move(box.x + box.width / 2, y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 4, y, { steps: 4 });
+    await page.mouse.up();
+
+    expect(await columnOrder(page)).toEqual(DEFAULT_COLUMN_ORDER);
+  });
+
+  test("the pinned action column cannot be dragged out of last position", async ({
+    page,
+    base,
+  }) => {
+    await page.goto(seededUrl(base));
+    await page.waitForLoadState("networkidle");
+
+    // `action` is pinned (`hideable: false` at the last declared index). Try to
+    // haul it to the very front; it must refuse to move.
+    await dragColumn(page, "action", "feedback");
+
+    const order = await columnOrder(page);
+    expect(order.at(-1)).toBe("action");
+    expect(order).toEqual(DEFAULT_COLUMN_ORDER);
+  });
+
+  test("the Move up / Move down menu items reorder columns without a pointer drag", async ({
+    page,
+    base,
+  }) => {
+    await page.goto(seededUrl(base));
+    await page.waitForLoadState("networkidle");
+
+    expect(await columnOrder(page)).toEqual(DEFAULT_COLUMN_ORDER);
+
+    // The accessible fallback for the drag gesture above: anything achievable by
+    // dragging must be achievable from the keyboard/menu.
+    await moveColumn(page, "votes", "Votes", "up");
+
+    await expect
+      .poll(() => columnOrder(page))
+      .toEqual(["feedback", "votes", "type", "status", "submitted", "action"]);
+
+    // And it round-trips: moving it back down restores the default order.
+    await moveColumn(page, "votes", "Votes", "down");
+
+    await expect.poll(() => columnOrder(page)).toEqual(DEFAULT_COLUMN_ORDER);
+  });
+
+  test("Reset columns restores the default order after a drag", async ({ page, base }) => {
+    await page.goto(seededUrl(base));
+    await page.waitForLoadState("networkidle");
+
+    await dragColumn(page, "votes", "type");
+    await expect.poll(() => columnOrder(page)).not.toEqual(DEFAULT_COLUMN_ORDER);
+
+    await page.getByRole("button", { name: "Columns" }).click();
+    await page.getByTestId("grid-column-reset").click();
+    await page.keyboard.press("Escape");
+
+    await expect.poll(() => columnOrder(page)).toEqual(DEFAULT_COLUMN_ORDER);
   });
 });
