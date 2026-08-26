@@ -15,6 +15,11 @@ import {
   type RelationItem,
   type EditContext,
 } from "./panel-parts";
+import {
+  FEEDBACK_STATUSES,
+  FEEDBACK_STATUS_OPTIONS,
+  FEEDBACK_TYPE_OPTIONS,
+} from "@/lib/feedback-meta";
 
 type FeedbackData = {
   id: string;
@@ -35,21 +40,14 @@ type FeedbackData = {
   _count: { votes: number };
 };
 
-const TYPE: Record<string, { label: string; className: string }> = {
-  BUG: { label: "Bug", className: "bg-red-100 text-red-700" },
-  IDEA: { label: "Idea", className: "bg-violet-100 text-violet-700" },
-};
+// Labels and tones come from lib/feedback-meta, the single source shared with
+// the feedback grid. These used to be a local copy of the same maps whose red
+// and violet shades had drifted one step darker than the feedback board's.
+const TYPE: Record<string, { label: string; className: string }> = FEEDBACK_TYPE_OPTIONS;
 
-const STATUS: Record<string, { label: string; className: string }> = {
-  OPEN: { label: "Open", className: "bg-slate-100 text-slate-600" },
-  UNDER_REVIEW: { label: "Under review", className: "bg-yellow-100 text-yellow-700" },
-  PLANNED: { label: "Planned", className: "bg-blue-100 text-blue-700" },
-  IN_PROGRESS: { label: "In progress", className: "bg-indigo-100 text-indigo-700" },
-  COMPLETED: { label: "Completed", className: "bg-green-100 text-green-700" },
-  DECLINED: { label: "Declined", className: "bg-red-100 text-red-600" },
-};
+const STATUS: Record<string, { label: string; className: string }> = FEEDBACK_STATUS_OPTIONS;
 
-const STATUS_ORDER = ["OPEN", "UNDER_REVIEW", "PLANNED", "IN_PROGRESS", "COMPLETED", "DECLINED"] as const;
+const STATUS_ORDER = FEEDBACK_STATUSES;
 
 export function FeedbackPanel({
   id,

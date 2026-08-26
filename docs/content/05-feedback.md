@@ -74,13 +74,62 @@ Both flows attach your name and email automatically from your Compass login, so 
 
 ## Triaging Feedback Internally
 
-Inside Compass, the **Feedback** section shows all submitted feedback across your workspace. The internal view includes:
+Inside Compass, the **Feedback** section shows all submitted feedback across your workspace as a sortable, filterable table. Each row shows:
 
-- Vote count and submission date
-- The submitter's description
-- A **Link to Opportunity** button that connects the feedback item to an existing opportunity in Discovery
+- The title, description, any attachments, and who submitted it
+- **Type** — Idea or Bug
+- **Votes** — how many portal visitors upvoted it
+- **Status** — Open, Under review, Planned, In progress, Completed or Declined
+- **Submitted** — the date it arrived
+- **Action** — **Promote to roadmap** for bugs, or **Link opportunity** for ideas
 
 Linking feedback to opportunities is how you turn raw customer voice into prioritised discovery work. An opportunity with ten linked feedback items has much stronger justification for investment than one based on a single interview.
+
+### Sorting
+
+Click any column header — Feedback, Type, Votes, Status or Submitted — to sort by it. Clicking the same header again flips between ascending and descending. Each column starts in the direction that's usually most useful: Votes and Submitted sort highest/newest first, the text columns sort A→Z.
+
+Sorting runs on the server against the whole result set, not just the rows currently on screen, so "most-voted first" really does mean most-voted across every page.
+
+By default, feedback is ordered by vote count (highest first), then by newest.
+
+### Filtering and searching
+
+Three controls narrow the list, and they combine:
+
+- **All / Ideas / Bugs** — the quickest way to split the queue by type
+- **Filters** — pick a **Status** and/or a **Type**. **Clear all** removes them again
+- **Search** — free text matched against both the title and the description
+
+Like sorting, filtering happens on the server, so the result count and the page numbers always reflect the full filtered set.
+
+### Paging through results
+
+Feedback is paged, 25 rows at a time by default. The footer shows which rows you're looking at ("1–25 of 63 results"), lets you jump to the first, previous, next or last page, and lets you switch the page size to 50 or 100.
+
+Changing a filter, the search text, the sort or the page size always returns you to page 1 — page 3 of an old filter doesn't mean anything under a new one.
+
+### Sharing a filtered view
+
+**Every sort, filter, search term and page lives in the URL.** That means the address bar is a shareable link: narrow the board down to open bugs sorted by votes, copy the URL, and whoever you send it to sees exactly the same view. It also means the browser's back button steps back through your filters, and bookmarking a view you check often works as expected.
+
+### Showing and hiding columns
+
+Use the **Columns** menu to hide columns you don't care about, or to reorder them (you can also drag a column header). The Action column is always present and always last.
+
+Column choices are remembered in your browser, per grid — they're a personal preference, not part of the shareable URL, so hiding a column never changes what a link you share looks like for someone else. **Reset columns** puts everything back.
+
+### Editing a row in place
+
+Type and Status can be changed directly in the table without opening anything — pick a new value from the cell and it saves immediately.
+
+If a change means the row no longer matches your active filters (marking an item Completed while you're filtered to Open, say), **the row deliberately stays where it is** and a note appears above the table: *"1 item no longer matches your filters."* Click **Refresh** when you're ready to reconcile with the server. Rows aren't yanked out from under you mid-triage, and the counts and page offsets stay trustworthy.
+
+If a change fails to save, the cell reverts to its previous value and the reason appears above the table.
+
+### On a phone
+
+Below tablet width the table becomes a stack of cards — one per item, with the title, description, attachments, type, status, date and the promote/link action. Tap a title to open the full detail panel, where Type and Status can be edited.
 
 ## Keeping the Portal Fresh
 

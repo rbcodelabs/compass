@@ -12,6 +12,13 @@
  * verify-on-internal-board flow, extended to cover the new file upload path
  * (app/api/portal/[orgSlug]/[workspaceSlug]/feedback/upload/route.ts) and the
  * attachments read-path added to both the portal and internal feedback pages.
+ *
+ * REWRITTEN for the DataGrid migration — the **internal-board half only**. The
+ * portal half is untouched: `components/portal/feedback-portal-section.tsx` is
+ * explicitly out of scope for the grid work and renders exactly as before.
+ * `components/feedback/feedback-attachments.tsx` is reused verbatim as a cell
+ * renderer, so the same `<img>` thumbnail assertion still holds — it just needs
+ * a `grid-row` locator instead of the old nested-div guesswork.
  */
 import path from "path";
 import { test, expect } from "../fixtures/index";
@@ -69,9 +76,14 @@ test.describe("Feedback Attachments", () => {
       await page.goto(`${base}/feedback`);
       await page.waitForLoadState("networkidle");
 
-      await expect(page.getByText(ideaTitle)).toBeVisible({ timeout: 10_000 });
-      const row = page.locator("div").filter({ hasText: ideaTitle }).first();
-      await expect(row.locator("img")).toBeVisible({ timeout: 10_000 });
+      // `<tr>` cannot nest, so filtering grid rows by text resolves to exactly
+      // one element — no `.first()`/`.last()` guessing about which div in the
+      // chain happens to contain both the title and the attachments.
+      const row = page.getByTestId("grid-row").filter({ hasText: ideaTitle });
+      await expect(row).toHaveCount(1, { timeout: 10_000 });
+      await expect(
+        row.getByTestId("grid-cell-feedback").locator("img")
+      ).toBeVisible({ timeout: 10_000 });
     }
   );
 });

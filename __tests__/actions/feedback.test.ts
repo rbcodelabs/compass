@@ -24,6 +24,7 @@ vi.mock("@/auth", () => ({
   auth: vi.fn(),
 }));
 
+import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import {
   updateFeedbackStatus,
@@ -33,6 +34,7 @@ import {
 } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 
 const mockAuth = vi.mocked(auth);
+const mockRevalidatePath = vi.mocked(revalidatePath);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -54,36 +56,80 @@ beforeEach(() => {
 });
 
 // ─── updateFeedbackStatus ─────────────────────────────────────────────────────
+//
+// DELIBERATE TEST CHANGE (see PR body): these three actions used to be
+// `Promise<void>` that threw, and the tests below asserted `rejects.toThrow`.
+// They now resolve a discriminated `{ ok: true } | { ok: false; error }`.
+//
+// Why: a server action that throws surfaces in the browser as an *unhandled
+// rejection* with the message stripped in production, so the DataGrid's
+// optimistic overlay could never observe the failure and could never roll the
+// cell back. `rejects.toThrow` was therefore asserting the exact behaviour that
+// makes inline editing unrecoverable. The assertions are inverted, not deleted:
+// every former "throws X" case is now a "returns { ok: false } and does not
+// touch the DB" case, so the same conditions are still covered.
+//
+// Every write also now sets `updatedAt` explicitly — DSQL has no `@updatedAt`
+// trigger support, so the column is otherwise never bumped.
 
 describe("updateFeedbackStatus", () => {
-  it("updates the status field", async () => {
-    await updateFeedbackStatus("fb-1", "REVIEWED", "/path");
+  it("updates the status field and stamps updatedAt", async () => {
+    const result = await updateFeedbackStatus("fb-1", "REVIEWED", "/path");
+    expect(result).toEqual({ ok: true });
     expect(mockFeedbackItem.update).toHaveBeenCalledWith({
       where: { id: "fb-1" },
-      data: { status: "REVIEWED" },
+      data: { status: "REVIEWED", updatedAt: expect.any(Date) },
     });
   });
 
-  it("throws Unauthorized when session is missing", async () => {
+  it("returns an error result instead of throwing when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
     await expect(
       updateFeedbackStatus("fb-1", "REVIEWED", "/path")
-    ).rejects.toThrow("Unauthorized");
+    ).resolves.toEqual({ ok: false, error: "You are not signed in." });
     expect(mockFeedbackItem.update).not.toHaveBeenCalled();
   });
 
-  it("throws Unauthorized when user id is absent", async () => {
+  it("returns an error result when user id is absent", async () => {
     mockAuth.mockResolvedValue({ user: {} } as ReturnType<typeof auth> extends Promise<infer T> ? T : never);
     await expect(
       updateFeedbackStatus("fb-1", "REVIEWED", "/path")
-    ).rejects.toThrow("Unauthorized");
+    ).resolves.toEqual({ ok: false, error: "You are not signed in." });
+    expect(mockFeedbackItem.update).not.toHaveBeenCalled();
   });
 
-  it("propagates DB errors", async () => {
+  it("converts DB errors into an error result rather than rejecting", async () => {
     mockFeedbackItem.update.mockRejectedValue(new Error("not found"));
     await expect(
       updateFeedbackStatus("fb-999", "NEW", "/path")
-    ).rejects.toThrow("not found");
+    ).resolves.toEqual({ ok: false, error: "not found" });
+  });
+
+  it("never rejects, so the grid's rollback path always runs", async () => {
+    mockFeedbackItem.update.mockRejectedValue(new Error("boom"));
+    // If this ever rejects again, an inline edit becomes an unhandled rejection
+    // and the optimistic cell is stuck showing a value the server refused.
+    const result = await updateFeedbackStatus("fb-1", "OPEN", "/path").catch(
+      () => "REJECTED" as const
+    );
+    expect(result).not.toBe("REJECTED");
+  });
+
+  it("revalidates when given a path", async () => {
+    await updateFeedbackStatus("fb-1", "OPEN", "/acme/widgets/feedback");
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/acme/widgets/feedback");
+  });
+
+  it("skips revalidation entirely when the path is null", async () => {
+    // The DataGrid's inline edits pass null on purpose. A Server Action that
+    // revalidates *anything* makes Next re-deliver the calling route's RSC
+    // payload, which pulls the just-edited row out from under the user and
+    // destroys the grid's stay-and-mark behaviour. Verified in a real browser
+    // (see e2e/functional/specs/feedback-grid.spec.ts).
+    const result = await updateFeedbackStatus("fb-1", "OPEN", null);
+    expect(result).toEqual({ ok: true });
+    expect(mockFeedbackItem.update).toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
   it("accepts any status string (no Zod validation on this field)", async () => {
@@ -97,10 +143,11 @@ describe("updateFeedbackStatus", () => {
 
 describe("linkFeedbackToOpportunity", () => {
   it("links feedback to an opportunity", async () => {
-    await linkFeedbackToOpportunity("fb-1", "opp-1", "/path");
+    const result = await linkFeedbackToOpportunity("fb-1", "opp-1", "/path");
+    expect(result).toEqual({ ok: true });
     expect(mockFeedbackItem.update).toHaveBeenCalledWith({
       where: { id: "fb-1" },
-      data: { opportunityId: "opp-1" },
+      data: { opportunityId: "opp-1", updatedAt: expect.any(Date) },
     });
   });
 
@@ -108,23 +155,28 @@ describe("linkFeedbackToOpportunity", () => {
     await linkFeedbackToOpportunity("fb-1", null, "/path");
     expect(mockFeedbackItem.update).toHaveBeenCalledWith({
       where: { id: "fb-1" },
-      data: { opportunityId: null },
+      data: { opportunityId: null, updatedAt: expect.any(Date) },
     });
   });
 
-  it("throws Unauthorized when session is missing", async () => {
+  it("returns an error result instead of throwing when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
     await expect(
       linkFeedbackToOpportunity("fb-1", "opp-1", "/path")
-    ).rejects.toThrow("Unauthorized");
+    ).resolves.toEqual({ ok: false, error: "You are not signed in." });
     expect(mockFeedbackItem.update).not.toHaveBeenCalled();
   });
 
-  it("propagates DB errors", async () => {
+  it("converts DB errors into an error result rather than rejecting", async () => {
     mockFeedbackItem.update.mockRejectedValue(new Error("DB error"));
     await expect(
       linkFeedbackToOpportunity("fb-999", "opp-1", "/path")
-    ).rejects.toThrow("DB error");
+    ).resolves.toEqual({ ok: false, error: "DB error" });
+  });
+
+  it("skips revalidation entirely when the path is null", async () => {
+    await linkFeedbackToOpportunity("fb-1", "opp-1", null);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
 
@@ -132,10 +184,11 @@ describe("linkFeedbackToOpportunity", () => {
 
 describe("updateFeedbackType", () => {
   it("updates the type field to BUG", async () => {
-    await updateFeedbackType("fb-1", "BUG", "/path");
+    const result = await updateFeedbackType("fb-1", "BUG", "/path");
+    expect(result).toEqual({ ok: true });
     expect(mockFeedbackItem.update).toHaveBeenCalledWith({
       where: { id: "fb-1" },
-      data: { type: "BUG" },
+      data: { type: "BUG", updatedAt: expect.any(Date) },
     });
   });
 
@@ -143,23 +196,28 @@ describe("updateFeedbackType", () => {
     await updateFeedbackType("fb-1", "IDEA", "/path");
     expect(mockFeedbackItem.update).toHaveBeenCalledWith({
       where: { id: "fb-1" },
-      data: { type: "IDEA" },
+      data: { type: "IDEA", updatedAt: expect.any(Date) },
     });
   });
 
-  it("throws Unauthorized when session is missing", async () => {
+  it("returns an error result instead of throwing when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
     await expect(
       updateFeedbackType("fb-1", "BUG", "/path")
-    ).rejects.toThrow("Unauthorized");
+    ).resolves.toEqual({ ok: false, error: "You are not signed in." });
     expect(mockFeedbackItem.update).not.toHaveBeenCalled();
   });
 
-  it("propagates DB errors", async () => {
+  it("converts DB errors into an error result rather than rejecting", async () => {
     mockFeedbackItem.update.mockRejectedValue(new Error("not found"));
     await expect(
       updateFeedbackType("fb-999", "BUG", "/path")
-    ).rejects.toThrow("not found");
+    ).resolves.toEqual({ ok: false, error: "not found" });
+  });
+
+  it("skips revalidation entirely when the path is null", async () => {
+    await updateFeedbackType("fb-1", "BUG", null);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
 

@@ -186,7 +186,10 @@ export async function linkFeedbackToOpportunity({
   }
   await prisma.feedbackItem.update({
     where: { id: feedbackId },
-    data: { opportunityId },
+    // Explicit `updatedAt`: DSQL has no trigger support, so the schema uses
+    // `@default(now())` instead of `@updatedAt` and nothing bumps it for us.
+    // The sibling status/type handlers already do this; this one was missed.
+    data: { opportunityId, updatedAt: new Date() },
   })
   return ok(`Linked feedback '${feedback.title}' to opportunity '${opportunity.title}'.`, {
     id: feedback.id,

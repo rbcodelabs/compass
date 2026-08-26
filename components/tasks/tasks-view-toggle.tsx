@@ -1,24 +1,17 @@
 "use client";
 
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useUrlState } from "@/hooks/use-url-state";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type View = "board" | "list";
 
 export function TasksViewToggle({ view }: { view: View }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const { set } = useUrlState();
 
   function setView(next: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    if (next === "list") {
-      params.set("view", "list");
-    } else {
-      params.delete("view");
-    }
-    const query = params.toString();
-    router.push(query ? `${pathname}?${query}` : pathname);
+    // "board" is the default view, so it is represented by the absence of the
+    // param rather than `?view=board`.
+    set({ view: next === "list" ? "list" : null });
   }
 
   return (

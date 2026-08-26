@@ -755,6 +755,23 @@ model FeedbackItem {
   source          String               @default("UI") @map("source") @db.VarChar(20)
   attachments     FeedbackAttachment[]
 
+  // The Feedback grid runs sorting, filtering and pagination in Postgres, so
+  // every access path below is a real query shape, not speculation.
+  //
+  // DSQL note: `prisma db push` only (never `migrate dev`/`migrate deploy`), and
+  // an index created on a non-empty table is built ASYNCHRONOUSLY — `db push`
+  // returning does not mean the index is live. Nothing here may assume an index
+  // exists; these only make correct queries faster.
+  //
+  // No index on `title`/`description`: the search filter is `contains` →
+  // `ILIKE '%x%'`, which cannot use a btree.
+  @@index([workspaceId, voteCount(sort: Desc), createdAt(sort: Desc)])
+  @@index([workspaceId, status])
+  @@index([workspaceId, type])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  // relationMode = "prisma" means Prisma emits no FK constraint, so DSQL
+  // creates no backing index for this column either.
+  @@index([opportunityId])
   @@map("feedback")
 }
 
