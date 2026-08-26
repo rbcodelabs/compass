@@ -755,6 +755,31 @@ model FeedbackItem {
   source          String               @default("UI") @map("source") @db.VarChar(20)
   attachments     FeedbackAttachment[]
 
+  // The Feedback grid runs sorting, filtering and pagination in Postgres, so
+  // every access path below is a real query shape, not speculation.
+  //
+  // These are applied to DSQL by prisma/migrations/033_feedback_grid_indexes,
+  // run through /api/admin/migrate — NOT by `prisma db push`. DSQL builds
+  // indexes ASYNCHRONOUSLY (`CREATE INDEX ASYNC` returns a job_id immediately
+  // and the index is INVALID until the build finishes), so nothing here may
+  // assume an index exists; these only make already-correct queries faster.
+  //
+  // NO `sort: Desc` BELOW, DELIBERATELY. Aurora DSQL's CREATE INDEX grammar has
+  // no ASC/DESC per column — only `NULLS FIRST|LAST`. A `sort: Desc` here makes
+  // Prisma emit `("vote_count" DESC)`, which DSQL rejects outright. It costs us
+  // nothing: `workspaceId` is always pinned by an equality predicate, so the
+  // remaining key columns can be walked backwards by a reverse index scan to
+  // satisfy `ORDER BY vote_count DESC, created_at DESC`.
+  //
+  // No index on `title`/`description`: the search filter is `contains` →
+  // `ILIKE '%x%'`, which cannot use a btree.
+  @@index([workspaceId, voteCount, createdAt])
+  @@index([workspaceId, status])
+  @@index([workspaceId, type])
+  @@index([workspaceId, createdAt])
+  // relationMode = "prisma" means Prisma emits no FK constraint, so DSQL
+  // creates no backing index for this column either.
+  @@index([opportunityId])
   @@map("feedback")
 }
 

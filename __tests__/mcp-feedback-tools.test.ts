@@ -351,7 +351,7 @@ describe("linkFeedbackToOpportunity", () => {
     expect(text).toContain("'Improve visual accessibility'")
     expect(mockFeedbackItem.update).toHaveBeenCalledWith({
       where: { id: FEED_ID },
-      data: { opportunityId: OPP_ID },
+      data: { opportunityId: OPP_ID, updatedAt: expect.any(Date) },
     })
   })
 

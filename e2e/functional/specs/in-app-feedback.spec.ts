@@ -2,7 +2,7 @@
  * In-App Feedback Submission functional spec.
  *
  * Part A: workspace-scoped "New Feedback" creation directly on a workspace's
- *         own Feedback board (components/feedback/internal-feedback-board.tsx)
+ *         own Feedback board (components/feedback/feedback-grid.tsx)
  *         — previously this board was triage-only (view/status-change
  *         existing items), with no way to create a new item in-app.
  *
@@ -35,12 +35,21 @@ test.describe("In-App Feedback Submission", () => {
     await page.getByRole("button", { name: "New Feedback" }).click();
     await page.getByLabel("Title").fill(title);
     await page.getByLabel("Description (optional)").fill("Created via the New Feedback dialog.");
-    await page.getByRole("button", { name: "Submit" }).click();
+    // `exact: true` matters here: Playwright's `name` option is a
+    // case-insensitive SUBSTRING match by default, and the DataGrid's
+    // "Submitted" column header renders a sort button named "Sort by
+    // Submitted" — which contains "Submit". Without `exact`, this locator
+    // resolves to both the dialog's submit button and a column header.
+    await page.getByRole("button", { name: "Submit", exact: true }).click();
 
     // The dialog closes (no full page reload — the board updates from the
     // server action's response) and the new item appears in the board.
-    await expect(page.getByRole("button", { name: "Submit" })).not.toBeVisible();
-    await expect(page.getByText(title)).toBeVisible({ timeout: 10_000 });
+    await expect(
+      page.getByRole("button", { name: "Submit", exact: true })
+    ).toHaveCount(0);
+    await expect(
+      page.getByTestId("grid-row").filter({ hasText: title })
+    ).toHaveCount(1, { timeout: 10_000 });
   });
 
   test("send feedback about Compass from a different workspace lands in rbcodelabs/compass", async ({

@@ -101,7 +101,9 @@ export async function POST(
 
       const updated = await prisma.feedbackItem.update({
         where: { id: itemId },
-        data: { voteCount: { increment: 1 } },
+        // Explicit `updatedAt`: DSQL has no trigger support, so the schema uses
+        // `@default(now())` instead of `@updatedAt`.
+        data: { voteCount: { increment: 1 }, updatedAt: new Date() },
         select: { voteCount: true },
       });
       newVoteCount = updated.voteCount;

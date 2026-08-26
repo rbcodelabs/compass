@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useUrlState } from "@/hooks/use-url-state";
 import type { MemberData, TaskPriority } from "@/lib/types";
 
 interface AssigneeProps {
@@ -9,21 +9,13 @@ interface AssigneeProps {
 
 /** Filter pill bar by assignee, mirroring SquadFilterBar's pattern exactly. */
 export function AssigneeFilterBar({ members }: AssigneeProps) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const activeAssignee = searchParams.get("assignee");
+  const { params, set } = useUrlState();
+  const activeAssignee = params.get("assignee");
 
   if (members.length === 0) return null;
 
   function setFilter(userId: string | null) {
-    const params = new URLSearchParams(searchParams.toString());
-    if (userId) {
-      params.set("assignee", userId);
-    } else {
-      params.delete("assignee");
-    }
-    router.push(`${pathname}?${params.toString()}`);
+    set({ assignee: userId });
   }
 
   return (
@@ -58,19 +50,11 @@ const PRIORITIES: TaskPriority[] = ["URGENT", "HIGH", "MEDIUM", "LOW"];
 
 /** Filter pill bar by priority, same identical pattern as SquadFilterBar/AssigneeFilterBar. */
 export function PriorityFilterBar() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const activePriority = searchParams.get("priority");
+  const { params, set } = useUrlState();
+  const activePriority = params.get("priority");
 
   function setFilter(priority: string | null) {
-    const params = new URLSearchParams(searchParams.toString());
-    if (priority) {
-      params.set("priority", priority);
-    } else {
-      params.delete("priority");
-    }
-    router.push(`${pathname}?${params.toString()}`);
+    set({ priority });
   }
 
   return (

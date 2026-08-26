@@ -104,50 +104,127 @@ export async function createFeedback(
   };
 }
 
+/**
+ * The result shape every feedback mutation returns.
+ *
+ * These used to be `Promise<void>` functions that threw. A server action that
+ * throws surfaces in the client as an unhandled promise rejection in
+ * production (Next strips the message), so the DataGrid's optimistic overlay
+ * could never see the failure and could never roll back. Returning a
+ * discriminated result — matching the `CreateFeedbackResult` precedent above —
+ * makes failure a value the caller must handle.
+ *
+ * `updatedAt: new Date()` is set explicitly on every write: the schema uses
+ * `@default(now())` rather than `@updatedAt` because Aurora DSQL has no
+ * trigger support, so nothing updates the column for us.
+ */
+export type FeedbackMutationResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * `revalidatePathStr` accepts `null` to mean **do not revalidate anything**.
+ *
+ * This is not a micro-optimisation, it is load-bearing, and it was proven
+ * against a real browser rather than reasoned about:
+ *
+ *   A Server Action that revalidates *anything* causes Next to include a fresh
+ *   RSC payload **for the route the action was called from** in the action's
+ *   response. Measured in `feedback-grid.spec.ts`'s stale-row journey: after an
+ *   inline status edit under `?status=OPEN`, the "no longer matches your
+ *   filters" strip rendered and then vanished ~300ms later, with the row count
+ *   dropping 5 → 4. Re-running the same experiment with a completely unrelated
+ *   revalidate path produced byte-identical results, which rules out "it only
+ *   happens when you revalidate the current path".
+ *
+ *   So the DataGrid's stay-and-mark behaviour — an inline edit that pushes a
+ *   row out of the active filter leaves it in place, marked stale, until the
+ *   user clicks Refresh — is *incompatible* with revalidating from the edit.
+ *   Silently yanking the row would leave a 24-of-25 page and desync the total
+ *   and every later page's offset, which is the exact bug stay-and-mark exists
+ *   to prevent.
+ *
+ * The cost of skipping it is close to zero: `/portal/.../feedback` and
+ * `/{org}/{ws}/roadmap` are both **dynamic** routes (`ƒ` in `next build`), so
+ * they hold no full route cache, and the portal is browsed in a different,
+ * unauthenticated session whose router cache this process cannot touch anyway.
+ *
+ * Callers that are *not* holding an optimistic overlay (the detail panel, the
+ * create dialog) keep passing a path and keep the old behaviour.
+ */
+type RevalidateTarget = string | null;
+
+/** Turn a thrown error into a result object. Never rethrows. */
+function toFailure(error: unknown): { ok: false; error: string } {
+  if (error instanceof Error && error.message === "Unauthorized") {
+    return { ok: false, error: "You are not signed in." };
+  }
+  return {
+    ok: false,
+    error: error instanceof Error ? error.message : "Something went wrong.",
+  };
+}
+
 export async function updateFeedbackStatus(
   feedbackId: string,
   status: string,
-  revalidatePathStr: string
-) {
-  await requireAuth();
-  const prisma = getPrisma();
+  revalidatePathStr: RevalidateTarget
+): Promise<FeedbackMutationResult> {
+  try {
+    await requireAuth();
+    const prisma = getPrisma();
 
-  await prisma.feedbackItem.update({
-    where: { id: feedbackId },
-    data: { status },
-  });
+    await prisma.feedbackItem.update({
+      where: { id: feedbackId },
+      data: { status, updatedAt: new Date() },
+    });
 
-  revalidatePath(revalidatePathStr);
+    // `null` = the caller owns an optimistic overlay; see RevalidateTarget.
+    if (revalidatePathStr) revalidatePath(revalidatePathStr);
+    return { ok: true };
+  } catch (error) {
+    return toFailure(error);
+  }
 }
 
 export async function linkFeedbackToOpportunity(
   feedbackId: string,
   opportunityId: string | null,
-  revalidatePathStr: string
-) {
-  await requireAuth();
-  const prisma = getPrisma();
+  revalidatePathStr: RevalidateTarget
+): Promise<FeedbackMutationResult> {
+  try {
+    await requireAuth();
+    const prisma = getPrisma();
 
-  await prisma.feedbackItem.update({
-    where: { id: feedbackId },
-    data: { opportunityId },
-  });
+    await prisma.feedbackItem.update({
+      where: { id: feedbackId },
+      data: { opportunityId, updatedAt: new Date() },
+    });
 
-  revalidatePath(revalidatePathStr);
+    // `null` = the caller owns an optimistic overlay; see RevalidateTarget.
+    if (revalidatePathStr) revalidatePath(revalidatePathStr);
+    return { ok: true };
+  } catch (error) {
+    return toFailure(error);
+  }
 }
 
 export async function updateFeedbackType(
   feedbackId: string,
   type: string,
-  revalidatePathStr: string
-) {
-  await requireAuth();
-  const prisma = getPrisma();
+  revalidatePathStr: RevalidateTarget
+): Promise<FeedbackMutationResult> {
+  try {
+    await requireAuth();
+    const prisma = getPrisma();
 
-  await prisma.feedbackItem.update({
-    where: { id: feedbackId },
-    data: { type },
-  });
+    await prisma.feedbackItem.update({
+      where: { id: feedbackId },
+      data: { type, updatedAt: new Date() },
+    });
 
-  revalidatePath(revalidatePathStr);
+    // `null` = the caller owns an optimistic overlay; see RevalidateTarget.
+    if (revalidatePathStr) revalidatePath(revalidatePathStr);
+    return { ok: true };
+  } catch (error) {
+    return toFailure(error);
+  }
 }
