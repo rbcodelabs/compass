@@ -11,15 +11,15 @@ export const ARTIFACT_PREVIEW_READY_TIMEOUT_MS = 4_000
 
 export function ArtifactPreview({ title, html, externalUrl }: { title: string; html?: string; externalUrl?: string | null }) {
   if (externalUrl) {
-    return <div className="rounded-lg border border-slate-200 bg-white p-8 text-center">
-      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">External</div>
-      <a href={externalUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-indigo-600 hover:text-indigo-800 font-medium">
+    return <div className="rounded-lg border border-border-default bg-surface-panel p-8 text-center">
+      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-text-subtle">External</div>
+      <a href={externalUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-primary hover:text-primary/80 font-medium">
         Open external artifact <ExternalLink className="size-4" />
       </a>
-      <p className="mt-2 text-xs text-slate-500 break-all">{externalUrl}</p>
+      <p className="mt-2 text-xs text-text-subtle break-all">{externalUrl}</p>
     </div>
   }
-  if (!html) return <p className="text-sm text-slate-500">Preview content is unavailable.</p>
+  if (!html) return <p className="text-sm text-text-subtle">Preview content is unavailable.</p>
   return <GuardedArtifactFrame key={html} title={title} html={html} />
 }
 
@@ -68,7 +68,7 @@ function GuardedArtifactFrame({ title, html }: { title: string; html: string }) 
   }, [html, token])
 
   if (state === "navigating" || state === "timeout") {
-    return <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+    return <div role="alert" className="rounded-lg border border-status-warning bg-status-warning-surface p-4 text-sm text-status-warning">
       <p>{state === "navigating"
         ? "Preview navigation attempt blocked. The uploaded HTML was removed from the frame."
         : "Preview could not start safely because its trusted readiness check did not complete."}</p>
@@ -80,13 +80,13 @@ function GuardedArtifactFrame({ title, html }: { title: string; html: string }) 
   }
 
   return <div className="relative min-h-[520px]">
-    {state === "loading" && <div role="status" className="absolute inset-0 grid place-items-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-500">Loading preview…</div>}
+    {state === "loading" && <div role="status" className="absolute inset-0 grid place-items-center rounded-lg border border-border-default bg-surface-inset text-sm text-text-subtle">Loading preview…</div>}
     <iframe
       ref={frameRef}
       title={`${title} preview`}
       sandbox={ARTIFACT_IFRAME_SANDBOX}
       referrerPolicy="no-referrer"
-      className={`w-full min-h-[520px] rounded-lg border border-slate-200 bg-white transition-opacity ${state === "ready" ? "opacity-100" : "pointer-events-none opacity-0"}`}
+      className={`w-full min-h-[520px] rounded-lg border border-border-default bg-surface-panel transition-opacity ${state === "ready" ? "opacity-100" : "pointer-events-none opacity-0"}`}
     />
   </div>
 }

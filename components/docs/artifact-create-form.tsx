@@ -29,8 +29,8 @@ export function ArtifactCreateForm({ workspaceId, basePath }: { workspaceId: str
     <input type="hidden" name="sourceType" value={sourceType} />
     <label className="block text-sm font-medium">Title<Input name="title" required maxLength={255} className="mt-1" /></label>
     <label className="block text-sm font-medium">Description<Textarea name="description" className="mt-1" /></label>
-    {sourceType === "HTML_UPLOAD" ? <label className="block text-sm font-medium">Self-contained HTML file<Input name="file" type="file" accept=".html,text/html" required className="mt-1" /><span className="block mt-1 text-xs text-slate-500">One .html file, up to 2 MB. Network access is blocked in preview.</span></label> : <label className="block text-sm font-medium">External URL<Input name="url" type="url" required placeholder="https://…" className="mt-1" /></label>}
-    {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+    {sourceType === "HTML_UPLOAD" ? <label className="block text-sm font-medium">Self-contained HTML file<Input name="file" type="file" accept=".html,text/html" required className="mt-1" /><span className="block mt-1 text-xs text-text-subtle">One .html file, up to 2 MB. Network access is blocked in preview.</span></label> : <label className="block text-sm font-medium">External URL<Input name="url" type="url" required placeholder="https://…" className="mt-1" /></label>}
+    {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
     <Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create artifact"}</Button>
   </form>
 }
