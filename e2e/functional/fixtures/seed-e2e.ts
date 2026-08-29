@@ -6,6 +6,7 @@
  * safely delete it without touching real dev data.
  */
 import pg from "pg";
+import { orgNameForToken } from "./run-token";
 
 export const E2E_ORG_SLUG = "e2e-test-org";
 export const E2E_WORKSPACE_SLUG = "e2e-workspace";
@@ -32,7 +33,15 @@ export type SeedResult = {
   schema: string;
 };
 
-export async function seedE2E(pool: pg.Pool): Promise<SeedResult> {
+/**
+ * @param runToken Stamped into the seeded org's `name` so global-teardown can
+ *   prove the org it is about to delete belongs to *this* run. See
+ *   fixtures/run-token.ts for why. Omit to keep the plain legacy name.
+ */
+export async function seedE2E(
+  pool: pg.Pool,
+  runToken?: string
+): Promise<SeedResult> {
   // ── User ──────────────────────────────────────────────────────────────────
   const { rows: [user] } = await pool.query<{ id: string }>(`
     INSERT INTO "${S}".users (id, name, email, email_verified, created_at)
@@ -42,12 +51,16 @@ export async function seedE2E(pool: pg.Pool): Promise<SeedResult> {
   `, [E2E_USER_EMAIL]);
 
   // ── Organization ──────────────────────────────────────────────────────────
+  // The name doubles as this run's ownership stamp — the ON CONFLICT branch
+  // deliberately overwrites it, so the most recent run to seed is the one
+  // teardown will recognise as owner.
+  const orgName = runToken ? orgNameForToken(runToken) : "E2E Test Org";
   const { rows: [org] } = await pool.query<{ id: string }>(`
     INSERT INTO "${S}".organizations (id, slug, name, created_at)
-    VALUES (gen_random_uuid(), $1, 'E2E Test Org', NOW())
+    VALUES (gen_random_uuid(), $1, $2, NOW())
     ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
     RETURNING id
-  `, [E2E_ORG_SLUG]);
+  `, [E2E_ORG_SLUG, orgName]);
 
   await pool.query(`
     INSERT INTO "${S}".organization_members (id, organization_id, user_id, role, created_at)
