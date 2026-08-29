@@ -1,5 +1,10 @@
 "use client";
 
+import { useState, useTransition } from "react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { linkArtifact, unlinkArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+
 import {
   useEntityDetail,
   PanelSkeleton,
@@ -22,6 +27,8 @@ type SolutionData = {
   opportunity: { id: string; title: string; workspaceId: string } | null;
   assumptions: Array<{ id: string; title: string; riskLevel: string; status: string }>;
   roadmapItems: Array<{ id: string; title: string; horizon: string }>;
+  artifacts: Array<{ id: string; title: string; sourceType: string }>;
+  availableArtifacts: Array<{ id: string; title: string; sourceType: string }>;
 };
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -56,6 +63,8 @@ export function SolutionPanel({
     orgSlug,
     workspaceSlug
   );
+  const [artifactId, setArtifactId] = useState("");
+  const [pending, startTransition] = useTransition();
 
   if (error) return <PanelError label="solution" />;
   if (!data) return <PanelSkeleton />;
@@ -118,6 +127,13 @@ export function SolutionPanel({
 
       <Section label="Roadmap" count={data.roadmapItems.length}>
         <RelationList items={roadmapItems} empty="Not on the roadmap." />
+      </Section>
+
+      <Section label="Artifacts" count={data.artifacts.length}>
+        <div className="space-y-2">
+          {data.artifacts.length === 0 ? <p className="text-sm text-muted-foreground">No linked artifacts.</p> : data.artifacts.map((artifact) => <div key={artifact.id} className="flex items-center justify-between gap-2 text-sm"><Link className="text-indigo-600 hover:underline" href={`/${orgSlug}/${workspaceSlug}/docs/artifacts/${artifact.id}`}>{artifact.title}</Link><Button size="xs" variant="ghost" disabled={pending} onClick={() => startTransition(async () => { await unlinkArtifact(data.opportunity!.workspaceId, artifact.id, data.id, `/${orgSlug}/${workspaceSlug}/discovery`); mutate({ ...data, artifacts: data.artifacts.filter((item) => item.id !== artifact.id) }) })}>Unlink</Button></div>)}
+          {data.availableArtifacts.some((artifact) => !data.artifacts.some((linked) => linked.id === artifact.id)) && <div className="flex gap-2"><select aria-label="Artifact to link" className="h-8 flex-1 rounded border px-2 text-sm" value={artifactId} onChange={(event) => setArtifactId(event.target.value)}><option value="">Select artifact…</option>{data.availableArtifacts.filter((artifact) => !data.artifacts.some((linked) => linked.id === artifact.id)).map((artifact) => <option key={artifact.id} value={artifact.id}>{artifact.title}</option>)}</select><Button size="sm" disabled={!artifactId || pending} onClick={() => startTransition(async () => { const artifact = data.availableArtifacts.find((item) => item.id === artifactId); if (!artifact) return; await linkArtifact(data.opportunity!.workspaceId, artifact.id, data.id, `/${orgSlug}/${workspaceSlug}/discovery`); mutate({ ...data, artifacts: [...data.artifacts, artifact] }); setArtifactId("") })}>Link</Button></div>}
+        </div>
       </Section>
     </PanelContainer>
   );

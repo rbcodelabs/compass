@@ -25,6 +25,7 @@ type Props = {
   workspaceId: string;
   opportunityId: string;
   squadId: string | null;
+  availableArtifacts: Array<{ id: string; title: string; sourceType: string }>;
 };
 
 export function SolutionsList({
@@ -33,6 +34,7 @@ export function SolutionsList({
   workspaceId,
   opportunityId,
   squadId,
+  availableArtifacts,
 }: Props) {
   const [solutions, setSolutions] = useState(initialSolutions);
   const [, startTransition] = useTransition();
@@ -83,6 +85,7 @@ export function SolutionsList({
               workspaceId={workspaceId}
               opportunityId={opportunityId}
               squadId={squadId}
+              availableArtifacts={availableArtifacts}
             />
           ))}
         </div>

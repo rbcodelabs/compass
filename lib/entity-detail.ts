@@ -158,8 +158,9 @@ function fetchOpportunity(id: string, workspaceId: string) {
   });
 }
 
-function fetchSolution(id: string, workspaceId: string) {
-  return getPrisma().solution.findFirst({
+async function fetchSolution(id: string, workspaceId: string) {
+  const prisma = getPrisma()
+  const solution = await prisma.solution.findFirst({
     where: { id, opportunity: { workspaceId } },
     include: {
       opportunity: { select: { id: true, title: true, workspaceId: true } },
@@ -172,6 +173,13 @@ function fetchSolution(id: string, workspaceId: string) {
       roadmapItems: { select: { id: true, title: true, horizon: true } },
     },
   });
+  if (!solution) return null
+  const [links, availableArtifacts] = await Promise.all([
+    prisma.artifactLink.findMany({ where: { workspaceId, linkedType: "SOLUTION", linkedId: id }, select: { artifactId: true } }),
+    prisma.artifact.findMany({ where: { workspaceId, status: "ACTIVE" }, select: { id: true, title: true, sourceType: true }, orderBy: { title: "asc" } }),
+  ])
+  const linkedIds = new Set(links.map((link) => link.artifactId))
+  return { ...solution, artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts }
 }
 
 function fetchAssumption(id: string, workspaceId: string) {

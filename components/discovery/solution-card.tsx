@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { useState, useTransition, useRef } from "react";
-import { ChevronDownIcon, ChevronRightIcon, PlusIcon, CheckIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, PlusIcon, CheckIcon, XIcon, BoxIcon } from "lucide-react";
+import Link from "next/link";
 import { GripVertical } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -44,6 +45,7 @@ import {
   approveSolutionPlan,
   rejectSolutionPlan,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
+import { linkArtifact, unlinkArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
 import { CardMenu } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
@@ -83,6 +85,7 @@ export type SolutionCardData = {
   assumptions: AssumptionItemData[];
   comments: SolutionComment[];
   _count?: { evidence: number };
+  artifacts: Array<{ id: string; title: string; sourceType: string }>;
 };
 
 const COMMENT_TYPE_LABELS: Record<CommentType, string> = {
@@ -122,9 +125,10 @@ type Props = {
   workspaceId: string;
   opportunityId: string;
   squadId: string | null;
+  availableArtifacts: Array<{ id: string; title: string; sourceType: string }>;
 };
 
-export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportunityId, squadId }: Props) {
+export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportunityId, squadId, availableArtifacts }: Props) {
   const { openPanel } = usePanelContext();
   const [expanded, setExpanded] = useState(false);
   const [addingAssumption, setAddingAssumption] = useState(false);
@@ -144,6 +148,8 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
   // above is client state rather than reading solution.assumptions directly)
   // so we append the server action's returned row ourselves.
   const [comments, setComments] = useState(solution.comments);
+  const [artifacts, setArtifacts] = useState(solution.artifacts);
+  const [artifactId, setArtifactId] = useState("");
 
   // ─── Outer useSortable (for solutions list) ───────────────────────────────────
   const {
@@ -470,6 +476,12 @@ export function SolutionCard({ solution, revalidatePathStr, workspaceId, opportu
                 nodeId={solution.id}
                 revalidatePathStr={revalidatePathStr}
               />
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-border">
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">Artifacts ({artifacts.length})</p>
+              {artifacts.length === 0 ? <p className="text-xs text-muted-foreground">No linked artifacts.</p> : <ul className="space-y-1">{artifacts.map((artifact) => <li key={artifact.id} className="flex items-center justify-between gap-2 text-xs"><Link href={`${revalidatePathStr.replace(/\/discovery\/.+$/, "/docs")}/artifacts/${artifact.id}`} className="inline-flex items-center gap-1 text-indigo-600 hover:underline"><BoxIcon className="size-3" />{artifact.title}</Link><Button size="xs" variant="ghost" onClick={() => startTransition(async () => { await unlinkArtifact(workspaceId, artifact.id, solution.id, revalidatePathStr); setArtifacts((current) => current.filter((item) => item.id !== artifact.id)); })}>Unlink</Button></li>)}</ul>}
+              {availableArtifacts.some((artifact) => !artifacts.some((linked) => linked.id === artifact.id)) && <div className="flex items-center gap-2 mt-2"><select aria-label="Artifact to link" className="h-7 flex-1 rounded border bg-background px-2 text-xs" value={artifactId} onChange={(event) => setArtifactId(event.target.value)}><option value="">Select artifact…</option>{availableArtifacts.filter((artifact) => !artifacts.some((linked) => linked.id === artifact.id)).map((artifact) => <option key={artifact.id} value={artifact.id}>{artifact.title}</option>)}</select><Button size="xs" disabled={!artifactId || isPending} onClick={() => startTransition(async () => { const selected = availableArtifacts.find((artifact) => artifact.id === artifactId); if (!selected) return; await linkArtifact(workspaceId, selected.id, solution.id, revalidatePathStr); setArtifacts((current) => [...current, selected]); setArtifactId(""); })}>Link</Button></div>}
             </div>
 
             {canPromote && (

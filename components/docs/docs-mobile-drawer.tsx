@@ -10,12 +10,14 @@ import {
 } from "@/components/ui/sheet"
 import { DocTreeSidebar, type DocTreeItem } from "./doc-tree-sidebar"
 import { Button } from "@/components/ui/button"
+import { ArtifactNav, type ArtifactNavItem } from "./artifact-nav"
 
 interface DocsMobileDrawerProps {
   docs: DocTreeItem[]
   orgSlug: string
   workspaceSlug: string
   workspaceId: string
+  artifacts: ArtifactNavItem[]
 }
 
 export function DocsMobileDrawer({
@@ -23,6 +25,7 @@ export function DocsMobileDrawer({
   orgSlug,
   workspaceSlug,
   workspaceId,
+  artifacts,
 }: DocsMobileDrawerProps) {
   const [open, setOpen] = useState(false)
 
@@ -35,10 +38,10 @@ export function DocsMobileDrawer({
         size="sm"
         onClick={() => setOpen(true)}
         className="md:hidden text-slate-600 hover:text-slate-900"
-        aria-label="Open pages"
+        aria-label="Open docs navigation"
       >
         <PanelLeft className="w-4 h-4" />
-        <span className="font-medium">Pages</span>
+        <span className="font-medium">Docs</span>
       </Button>
 
       {/* Drawer */}
@@ -46,7 +49,7 @@ export function DocsMobileDrawer({
         <SheetContent side="left" className="w-72 p-0 flex flex-col">
           <SheetHeader className="px-4 pt-4 pb-2 border-b border-slate-100 shrink-0">
             <SheetTitle className="text-sm font-semibold text-slate-700">
-              Pages
+              Docs
             </SheetTitle>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto p-2">
@@ -56,6 +59,7 @@ export function DocsMobileDrawer({
               workspaceSlug={workspaceSlug}
               workspaceId={workspaceId}
             />
+            <ArtifactNav artifacts={artifacts} basePath={`/${orgSlug}/${workspaceSlug}/docs`} />
           </div>
         </SheetContent>
       </Sheet>

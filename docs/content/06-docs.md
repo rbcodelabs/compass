@@ -8,7 +8,7 @@ section: "Core Features"
 
 # Docs
 
-The Docs section provides a hierarchical rich-text editor for internal team documentation. Use it for PRDs, research notes, experiment write-ups, onboarding guides, or anything else your team writes together.
+The Docs section holds two durable kinds of knowledge: hierarchical Markdown **Pages** and executable or externally hosted **Artifacts**. Use Pages for PRDs and research notes; use Artifacts for prototypes and other solution deliverables.
 
 ![Docs editor](/screenshots/docs/docs-editor.png)
 
@@ -19,6 +19,19 @@ The Docs section provides a hierarchical rich-text editor for internal team docu
 Documents are organised as a tree. Each page can have child pages nested beneath it. The left sidebar in the Docs section shows your full tree. Click any page title to open it, or click the **+** icon next to a parent page to create a child page.
 
 Pages can be dragged to reorder them within their level of the hierarchy.
+
+## Artifacts
+
+Artifacts have stable identities and a separate section in the Docs navigator. They are not nested into the Page hierarchy. An Artifact can be linked to multiple Solutions, and a Solution can link to multiple Artifacts.
+
+Choose one source when creating an Artifact:
+
+- **Upload HTML** — one self-contained `.html` file up to 2 MB. CSS, images, fonts, and JavaScript must be embedded in the file.
+- **External link** — an `http` or `https` URL. Compass stores the link but never fetches or proxies the external page.
+
+Uploaded HTML runs inside a restricted preview sandbox. Inline scripts and styles work, while network connections, forms, popups, downloads, parent-page access, and top navigation are blocked. Files are stored privately. External links are clearly labeled and open in a new tab.
+
+Replacing an Artifact creates an immutable revision and advances the current preview without changing the Artifact ID or breaking its Solution links. The detail screen shows revision history and lets workspace members edit metadata, link or unlink Solutions, replace the current revision, or archive the Artifact. Archived Artifacts disappear from the default navigator while their history and links remain preserved.
 
 ## The Editor
 
