@@ -10,6 +10,8 @@ import { countWorkspaceAdmins, normalizeWorkspaceRole } from "@/lib/roles";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
 import { encrypt } from "@/lib/crypto-secrets";
 import { generateSsoSecret } from "@/lib/portal-sso";
+import { getArtifactStorage } from "@/lib/artifact-storage";
+import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import type {
   CustomFieldType,
   CustomFieldObjectType,
@@ -583,19 +585,22 @@ export async function deleteWorkspace(
     await prisma.oKRCycle.deleteMany({ where: { workspaceId } });
   }
 
-  // ── Step 15: Delete WorkspaceMembers ────────────────────────────────────────
+  // ── Step 15: Delete Artifacts and private blobs ─────────────────────────────
+  await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
+
+  // ── Step 16: Delete WorkspaceMembers ────────────────────────────────────────
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
 
-  // ── Step 16: Delete Squads ──────────────────────────────────────────────────
+  // ── Step 17: Delete Squads ──────────────────────────────────────────────────
   await prisma.squad.deleteMany({ where: { workspaceId } });
 
-  // ── Step 17: Delete Docs (self-referential; no DB FK so deleteMany is safe) ─
+  // ── Step 18: Delete Docs (self-referential; no DB FK so deleteMany is safe) ─
   await prisma.doc.deleteMany({ where: { workspaceId } });
 
-  // ── Step 18: Delete the Workspace itself ────────────────────────────────────
+  // ── Step 19: Delete the Workspace itself ────────────────────────────────────
   await prisma.workspace.delete({ where: { id: workspaceId } });
 
-  // ── Step 19: If the org has no remaining workspaces, delete it too ───────────
+  // ── Step 20: If the org has no remaining workspaces, delete it too ───────────
   const remainingWorkspaces = await prisma.workspace.findMany({
     where: { organizationId },
     select: { id: true, slug: true },

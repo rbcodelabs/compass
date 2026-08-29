@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { resolveOrgAdmin } from "@/lib/permissions";
 import { validateMetricsForFormula } from "@/lib/scoring";
 import type { ScoringFormulaType, MetricDirection } from "@/lib/types";
+import { getArtifactStorage } from "@/lib/artifact-storage";
+import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 
 export interface ScoringMetricInput {
   key: string;
@@ -332,11 +334,15 @@ async function deleteWorkspaceCascade(prisma: OrgPrisma, workspaceId: string) {
   }
   await prisma.oKRCycle.deleteMany({ where: { workspaceId } });
 
-  // 12. Workspace-scoped singletons (both Restrict toward Workspace).
+  // 12. Artifacts: links → current pointer → revisions → stable identity,
+  // followed by best-effort private Blob cleanup.
+  await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
+
+  // 13. Workspace-scoped singletons (both Restrict toward Workspace).
   await prisma.workspaceScoringConfig.deleteMany({ where: { workspaceId } });
   await prisma.canvasNodePosition.deleteMany({ where: { workspaceId } });
 
-  // 13. Members + squads + docs, then the workspace itself.
+  // 14. Members + squads + docs, then the workspace itself.
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
   await prisma.squad.deleteMany({ where: { workspaceId } });
   await prisma.doc.deleteMany({ where: { workspaceId } });

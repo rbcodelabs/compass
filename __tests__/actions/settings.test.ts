@@ -90,6 +90,9 @@ const mockWorkspaceMember = {
   count: vi.fn(),
 };
 const mockDoc = { deleteMany: vi.fn() };
+const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
+const mockArtifactRevision = { findMany: vi.fn(), deleteMany: vi.fn() };
+const mockArtifactLink = { deleteMany: vi.fn() };
 const mockWorkspaceScoringConfig = { upsert: vi.fn() };
 
 const mockPrisma = {
@@ -117,6 +120,9 @@ const mockPrisma = {
   solutionComment: mockSolutionComment,
   workspaceMember: mockWorkspaceMember,
   doc: mockDoc,
+  artifact: mockArtifact,
+  artifactRevision: mockArtifactRevision,
+  artifactLink: mockArtifactLink,
   workspaceScoringConfig: mockWorkspaceScoringConfig,
 };
 
@@ -178,6 +184,12 @@ beforeEach(() => {
   mockApiKey.findFirst.mockResolvedValue({ id: "key-1", keyHash: "hash", keyPrefix: "pref" });
   mockApiKey.update.mockResolvedValue({ id: "key-1" });
   mockWorkspaceScoringConfig.upsert.mockResolvedValue({ id: "config-1" });
+  mockArtifact.findMany.mockResolvedValue([]);
+  mockArtifactRevision.findMany.mockResolvedValue([]);
+  mockArtifact.updateMany.mockResolvedValue({ count: 0 });
+  mockArtifact.deleteMany.mockResolvedValue({ count: 0 });
+  mockArtifactRevision.deleteMany.mockResolvedValue({ count: 0 });
+  mockArtifactLink.deleteMany.mockResolvedValue({ count: 0 });
   mockWorkspaceMember.findMany.mockResolvedValue([{ role: "ADMIN" }, { role: "ADMIN" }]);
 
   // deleteWorkspace defaults. The members/organization selections are what
