@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const prisma = {
   workspace: { findUnique: vi.fn() },
-  artifact: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
+  artifact: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
   artifactRevision: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn() },
   artifactLink: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
+  artifactBlobCleanup: { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() },
   solution: { findFirst: vi.fn(), findMany: vi.fn() },
   $transaction: vi.fn(),
 }
@@ -18,6 +19,9 @@ import {
   createHtmlArtifact,
   deleteWorkspaceArtifacts,
   linkArtifactToSolution,
+  replaceHtmlArtifactRevision,
+  replaceExternalArtifactRevision,
+  toArtifactDetailDto,
   validateExternalUrl,
   validateHtmlUpload,
 } from "@/lib/artifacts"
@@ -94,7 +98,12 @@ describe("artifact validation", () => {
 })
 
 describe("artifact lifecycle", () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    prisma.$transaction.mockImplementation(async (callback) => callback(prisma))
+    prisma.artifactBlobCleanup.findMany.mockResolvedValue([])
+    prisma.artifactRevision.findFirst.mockResolvedValue(null)
+  })
 
   it("creates uploaded HTML with a private storage write and immutable revision", async () => {
     prisma.workspace.findUnique.mockResolvedValue({ id: "ws-1" })
@@ -134,6 +143,77 @@ describe("artifact lifecycle", () => {
     fetchSpy.mockRestore()
   })
 
+  it("rejects whitespace-only titles before writing", async () => {
+    prisma.workspace.findUnique.mockResolvedValue({ id: "ws-1" })
+    await expect(createExternalArtifact({ workspaceId: "ws-1", title: "   ", url: "https://example.com", source: "MCP" }))
+      .rejects.toThrow(/title/i)
+    expect(prisma.artifact.create).not.toHaveBeenCalled()
+  })
+
+  it("uses one transaction so external creation rolls back when the current pointer fails", async () => {
+    prisma.workspace.findUnique.mockResolvedValue({ id: "ws-1" })
+    prisma.artifact.create.mockResolvedValue({ id: "art-2" })
+    prisma.artifactRevision.create.mockResolvedValue({ id: "rev-2" })
+    prisma.artifact.update.mockRejectedValue(new Error("pointer failed"))
+    await expect(createExternalArtifact({ workspaceId: "ws-1", title: "Prototype", url: "https://example.com", source: "MCP" }))
+      .rejects.toThrow("pointer failed")
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+    expect(prisma.artifact.delete).not.toHaveBeenCalled()
+  })
+
+  it("deletes an uploaded Blob when transactional HTML creation fails", async () => {
+    prisma.workspace.findUnique.mockResolvedValue({ id: "ws-1" })
+    prisma.artifact.create.mockResolvedValue({ id: "art-1" })
+    prisma.artifactRevision.create.mockResolvedValue({ id: "rev-1" })
+    prisma.artifact.update.mockRejectedValue(new Error("pointer failed"))
+    const storage = { put: vi.fn().mockResolvedValue({ pathname: "artifacts/ws-1/rev-1.html" }), get: vi.fn(), del: vi.fn().mockResolvedValue(undefined) }
+    await expect(createHtmlArtifact({
+      workspaceId: "ws-1", title: "Prototype", filename: "prototype.html", mimeType: "text/html",
+      bytes: new TextEncoder().encode("<html></html>"), source: "UI",
+    }, storage)).rejects.toThrow("pointer failed")
+    expect(storage.del).toHaveBeenCalledWith("artifacts/ws-1/rev-1.html")
+  })
+
+  it("queues failed-write Blob cleanup when compensation cannot reach storage", async () => {
+    prisma.workspace.findUnique.mockResolvedValue({ id: "ws-1" })
+    prisma.artifact.create.mockResolvedValue({ id: "art-1" })
+    prisma.artifactRevision.create.mockResolvedValue({ id: "rev-1" })
+    prisma.artifact.update.mockRejectedValue(new Error("pointer failed"))
+    const storage = { put: vi.fn().mockResolvedValue({ pathname: "artifacts/ws-1/rev-orphan.html" }), get: vi.fn(), del: vi.fn().mockRejectedValue(new Error("Blob unavailable")) }
+    await expect(createHtmlArtifact({
+      workspaceId: "ws-1", title: "Prototype", filename: "prototype.html", mimeType: "text/html",
+      bytes: new TextEncoder().encode("<html></html>"), source: "UI",
+    }, storage)).rejects.toThrow("pointer failed")
+    expect(prisma.artifactBlobCleanup.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { blobPathname: "artifacts/ws-1/rev-orphan.html" },
+      create: expect.objectContaining({ reason: "FAILED_WRITE" }),
+    }))
+  })
+
+  it("deletes an uploaded Blob when transactional revision replacement fails", async () => {
+    prisma.artifact.findFirst.mockResolvedValue({ id: "art-1" })
+    prisma.artifactRevision.findFirst.mockResolvedValue({ revisionNumber: 1 })
+    prisma.artifactRevision.create.mockResolvedValue({ id: "rev-2" })
+    prisma.artifact.update.mockRejectedValue(new Error("pointer failed"))
+    const storage = { put: vi.fn().mockResolvedValue({ pathname: "artifacts/ws-1/rev-2.html" }), get: vi.fn(), del: vi.fn().mockResolvedValue(undefined) }
+    await expect(replaceHtmlArtifactRevision({
+      artifactId: "art-1", workspaceId: "ws-1", filename: "prototype.html", mimeType: "text/html",
+      bytes: new TextEncoder().encode("<html></html>"), source: "MCP",
+    }, storage)).rejects.toThrow("pointer failed")
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+    expect(storage.del).toHaveBeenCalledWith("artifacts/ws-1/rev-2.html")
+  })
+
+  it("rolls back an external revision when advancing the current pointer fails", async () => {
+    prisma.artifact.findFirst.mockResolvedValue({ id: "art-1" })
+    prisma.artifactRevision.create.mockResolvedValue({ id: "rev-2" })
+    prisma.artifact.update.mockRejectedValue(new Error("pointer failed"))
+    await expect(replaceExternalArtifactRevision({
+      artifactId: "art-1", workspaceId: "ws-1", url: "https://example.com/v2", source: "MCP",
+    })).rejects.toThrow("pointer failed")
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+  })
+
   it("rejects cross-workspace solution links", async () => {
     prisma.artifact.findFirst.mockResolvedValue({ id: "art-1", workspaceId: "ws-1" })
     prisma.solution.findFirst.mockResolvedValue(null)
@@ -151,9 +231,19 @@ describe("artifact lifecycle", () => {
     expect(prisma.artifactLink.create).not.toHaveBeenCalled()
   })
 
+  it("returns the winning link when concurrent creation hits the unique constraint", async () => {
+    prisma.artifact.findFirst.mockResolvedValue({ id: "art-1", workspaceId: "ws-1" })
+    prisma.solution.findFirst.mockResolvedValue({ id: "sol-1" })
+    prisma.artifactLink.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "link-winner" })
+    prisma.artifactLink.create.mockRejectedValue(Object.assign(new Error("unique"), { code: "P2002" }))
+    await expect(linkArtifactToSolution({ artifactId: "art-1", solutionId: "sol-1", workspaceId: "ws-1" }))
+      .resolves.toEqual(expect.objectContaining({ id: "link-winner", created: false }))
+  })
+
   it("deletes workspace artifacts in DSQL-safe order and removes private blobs", async () => {
     prisma.artifact.findMany.mockResolvedValue([{ id: "art-1" }])
     prisma.artifactRevision.findMany.mockResolvedValue([{ blobPathname: "artifacts/ws-1/art-1/rev.html" }])
+    prisma.artifactBlobCleanup.findMany.mockResolvedValue([{ id: "cleanup-1", blobPathname: "artifacts/ws-1/art-1/rev.html", attempts: 0 }])
     const storage = { put: vi.fn(), get: vi.fn(), del: vi.fn().mockResolvedValue(undefined) }
     await deleteWorkspaceArtifacts(prisma, "ws-1", storage)
     expect(prisma.artifactLink.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } })
@@ -163,5 +253,28 @@ describe("artifact lifecycle", () => {
     expect(storage.del).toHaveBeenCalledWith("artifacts/ws-1/art-1/rev.html")
     expect(prisma.artifactLink.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(prisma.artifactRevision.deleteMany.mock.invocationCallOrder[0])
     expect(prisma.artifactRevision.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(prisma.artifact.deleteMany.mock.invocationCallOrder[0])
+  })
+
+  it("retains a durable Blob cleanup row when storage deletion fails", async () => {
+    prisma.artifact.findMany.mockResolvedValue([{ id: "art-1" }])
+    prisma.artifactRevision.findMany.mockResolvedValue([{ blobPathname: "artifacts/ws-1/rev.html" }])
+    prisma.artifactBlobCleanup.findMany.mockResolvedValue([{ id: "cleanup-1", blobPathname: "artifacts/ws-1/rev.html", attempts: 0 }])
+    const storage = { put: vi.fn(), get: vi.fn(), del: vi.fn().mockRejectedValue(new Error("Blob unavailable")) }
+    await deleteWorkspaceArtifacts(prisma, "ws-1", storage)
+    expect(prisma.artifactBlobCleanup.upsert.mock.invocationCallOrder[0]).toBeLessThan(prisma.artifactRevision.deleteMany.mock.invocationCallOrder[0])
+    expect(prisma.artifactBlobCleanup.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "cleanup-1" }, data: expect.objectContaining({ attempts: 1 }),
+    }))
+    expect(prisma.artifactBlobCleanup.delete).not.toHaveBeenCalled()
+  })
+
+  it("safe-maps the Artifact detail DTO without private Blob pathnames", () => {
+    const dto = toArtifactDetailDto({
+      id: "art-1", title: "Prototype", description: null, sourceType: "HTML_UPLOAD", status: "ACTIVE",
+      currentRevision: { externalUrl: null, blobPathname: "private/current.html" },
+      revisions: [{ id: "rev-1", revisionNumber: 1, filename: "prototype.html", byteSize: 10, externalUrl: null, blobPathname: "private/rev.html", createdAt: new Date("2026-08-29T00:00:00Z") }],
+    })
+    expect(JSON.stringify(dto)).not.toContain("blobPathname")
+    expect(JSON.stringify(dto)).not.toContain("private/")
   })
 })

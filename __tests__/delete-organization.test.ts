@@ -38,8 +38,9 @@ const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
 const mockDoc = { deleteMany: vi.fn() };
 const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
-const mockArtifactRevision = { findMany: vi.fn(), deleteMany: vi.fn() };
+const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactLink = { deleteMany: vi.fn() };
+const mockArtifactBlobCleanup = { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() };
 const mockScoringModel = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockScoringModelMetric = { deleteMany: vi.fn() };
 
@@ -80,6 +81,7 @@ const mockPrisma = {
   artifact: mockArtifact,
   artifactRevision: mockArtifactRevision,
   artifactLink: mockArtifactLink,
+  artifactBlobCleanup: mockArtifactBlobCleanup,
   scoringModel: mockScoringModel,
   scoringModelMetric: mockScoringModelMetric,
 };
@@ -149,6 +151,7 @@ beforeEach(() => {
     mockScoringModel,
     mockArtifact,
     mockArtifactRevision,
+    mockArtifactBlobCleanup,
   ]) {
     m.findMany.mockResolvedValue([]);
   }
@@ -194,6 +197,9 @@ beforeEach(() => {
     mockArtifact.deleteMany,
     mockArtifactRevision.deleteMany,
     mockArtifactLink.deleteMany,
+    mockArtifactBlobCleanup.upsert,
+    mockArtifactBlobCleanup.update,
+    mockArtifactBlobCleanup.delete,
     mockScoringModel.deleteMany,
     mockScoringModelMetric.deleteMany,
   ]) {

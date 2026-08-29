@@ -1,6 +1,8 @@
 "use client"
 
 import { ExternalLink } from "lucide-react"
+import { useRef, useState } from "react"
+import { Button } from "@/components/ui/button"
 
 export const ARTIFACT_IFRAME_SANDBOX = "allow-scripts" as const
 
@@ -15,11 +17,32 @@ export function ArtifactPreview({ title, html, externalUrl }: { title: string; h
     </div>
   }
   if (!html) return <p className="text-sm text-slate-500">Preview content is unavailable.</p>
+  return <GuardedArtifactFrame key={html} title={title} html={html} />
+}
+
+function GuardedArtifactFrame({ title, html }: { title: string; html: string }) {
+  const initialLoadSeen = useRef(false)
+  const [navigationBlocked, setNavigationBlocked] = useState(false)
+
+  if (navigationBlocked) {
+    return <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+      <p>Preview navigation attempt blocked. The uploaded HTML was removed from the frame.</p>
+      <Button size="sm" variant="outline" className="mt-3" onClick={() => {
+        initialLoadSeen.current = false
+        setNavigationBlocked(false)
+      }}>Reload preview</Button>
+    </div>
+  }
+
   return <iframe
     title={`${title} preview`}
     sandbox={ARTIFACT_IFRAME_SANDBOX}
     referrerPolicy="no-referrer"
     srcDoc={html}
+    onLoad={() => {
+      if (initialLoadSeen.current) setNavigationBlocked(true)
+      else initialLoadSeen.current = true
+    }}
     className="w-full min-h-[520px] rounded-lg border border-slate-200 bg-white"
   />
 }

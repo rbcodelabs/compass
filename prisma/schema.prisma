@@ -972,6 +972,21 @@ model ArtifactLink {
   @@map("artifact_links")
 }
 
+/// Durable outbox for private Blob deletion. Rows are written before revision
+/// metadata is removed and deleted only after Blob deletion succeeds.
+model ArtifactBlobCleanup {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  blobPathname String   @unique @map("blob_pathname") @db.Text
+  reason       String   @db.VarChar(50)
+  attempts     Int      @default(0)
+  lastError    String?  @map("last_error") @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @map("updated_at")
+
+  @@index([createdAt])
+  @@map("artifact_blob_cleanups")
+}
+
 // ─── Canvas Viewer ────────────────────────────────────────────────────────────
 // Phase 1 (this model ships now, unpopulated — no drag-to-pin UI yet, see
 // Claude/compass-canvas-viewer-design-2026-07-21.md §8). A row only ever

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { describe, expect, it } from "vitest"
 import { ArtifactPreview, ARTIFACT_IFRAME_SANDBOX } from "@/components/docs/artifact-preview"
@@ -19,5 +19,14 @@ describe("ArtifactPreview", () => {
     const link = screen.getByRole("link", { name: /open external artifact/i })
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
     expect(link).toHaveAttribute("target", "_blank")
+  })
+
+  it("removes the iframe and warns when uploaded HTML self-navigates", () => {
+    const view = render(<ArtifactPreview title="Navigation Prototype" html="<html><a href='data:text/html,phish'>Go</a></html>" />)
+    const frame = view.getByTitle("Navigation Prototype preview")
+    fireEvent.load(frame)
+    fireEvent.load(frame)
+    expect(view.queryByTitle("Navigation Prototype preview")).not.toBeInTheDocument()
+    expect(view.getByRole("alert")).toHaveTextContent(/navigation attempt blocked/i)
   })
 })

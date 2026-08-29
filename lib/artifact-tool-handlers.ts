@@ -10,6 +10,9 @@ import {
   replaceHtmlArtifactRevision,
   unlinkArtifactFromSolution,
   updateArtifactMetadata,
+  validateArtifactTitle,
+  validateExternalUrl,
+  validateHtmlUpload,
 } from "@/lib/artifacts"
 
 export async function listArtifacts({ workspaceId, includeArchived = false }: { workspaceId: string; includeArchived?: boolean }) {
@@ -33,6 +36,13 @@ export async function getArtifact({ artifactId }: { artifactId: string }) {
 
 export async function createArtifact(input: { workspaceId: string; title: string; description?: string; sourceType: "HTML_UPLOAD" | "EXTERNAL_LINK"; html?: string; filename?: string; url?: string }) {
   try {
+    validateArtifactTitle(input.title)
+    if (input.sourceType === "HTML_UPLOAD" && (input.url !== undefined || input.html === undefined)) {
+      return fail("HTML_UPLOAD requires html and does not accept url.")
+    }
+    if (input.sourceType === "EXTERNAL_LINK" && (input.html !== undefined || input.filename !== undefined || input.url === undefined)) {
+      return fail("EXTERNAL_LINK requires url and does not accept html or filename.")
+    }
     const artifact = input.sourceType === "HTML_UPLOAD"
       ? await createHtmlArtifact({ workspaceId: input.workspaceId, title: input.title, description: input.description, filename: input.filename ?? "prototype.html", mimeType: "text/html", bytes: new TextEncoder().encode(input.html ?? ""), source: "MCP" }, getArtifactStorage())
       : await createExternalArtifact({ workspaceId: input.workspaceId, title: input.title, description: input.description, url: input.url ?? "", source: "MCP" })
@@ -42,13 +52,23 @@ export async function createArtifact(input: { workspaceId: string; title: string
 
 export async function updateArtifact(input: { artifactId: string; workspaceId: string; title?: string; description?: string | null; html?: string; filename?: string; url?: string }) {
   try {
+    if (input.html !== undefined && input.url !== undefined) return fail("Provide either html or url, not both.")
+    if (input.title !== undefined) validateArtifactTitle(input.title)
     const prisma = getPrisma()
     const existing = await prisma.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true, sourceType: true } })
     if (!existing) return fail(`Artifact "${input.artifactId}" not found.`)
-    if (input.title !== undefined || input.description !== undefined) await updateArtifactMetadata(input)
+    if (existing.sourceType === "HTML_UPLOAD" && input.url !== undefined) return fail("HTML_UPLOAD artifacts accept html revisions, not url.")
+    if (existing.sourceType === "EXTERNAL_LINK" && (input.html !== undefined || input.filename !== undefined)) return fail("EXTERNAL_LINK artifacts accept url revisions, not html or filename.")
+    if (input.filename !== undefined && input.html === undefined) return fail("filename requires html.")
+    if (input.html !== undefined) {
+      const validation = validateHtmlUpload({ filename: input.filename ?? "prototype.html", mimeType: "text/html", bytes: new TextEncoder().encode(input.html) })
+      if (!validation.ok) return fail(validation.error)
+    }
+    if (input.url !== undefined) validateExternalUrl(input.url)
     let revisionId: string | undefined
-    if (input.html !== undefined) revisionId = (await replaceHtmlArtifactRevision({ artifactId: input.artifactId, workspaceId: input.workspaceId, filename: input.filename ?? "prototype.html", mimeType: "text/html", bytes: new TextEncoder().encode(input.html), source: "MCP" }, getArtifactStorage())).id
-    if (input.url !== undefined) revisionId = (await replaceExternalArtifactRevision({ artifactId: input.artifactId, workspaceId: input.workspaceId, url: input.url, source: "MCP" })).id
+    if (input.html !== undefined) revisionId = (await replaceHtmlArtifactRevision({ artifactId: input.artifactId, workspaceId: input.workspaceId, filename: input.filename ?? "prototype.html", mimeType: "text/html", bytes: new TextEncoder().encode(input.html), title: input.title, description: input.description, source: "MCP" }, getArtifactStorage())).id
+    else if (input.url !== undefined) revisionId = (await replaceExternalArtifactRevision({ artifactId: input.artifactId, workspaceId: input.workspaceId, url: input.url, title: input.title, description: input.description, source: "MCP" })).id
+    else if (input.title !== undefined || input.description !== undefined) await updateArtifactMetadata(input)
     return ok(`Artifact updated.\nID: ${input.artifactId}`, { id: input.artifactId, revisionId })
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not update artifact") }
 }

@@ -176,6 +176,10 @@ export default async function globalTeardown() {
         `DELETE FROM "${S}".artifacts WHERE workspace_id = $1`,
         [wsId]
       );
+      await pool.query(
+        `DELETE FROM "${S}".artifact_blob_cleanups WHERE blob_pathname LIKE $1`,
+        [`artifacts/${wsId}/%`]
+      );
       await rm(path.join("/tmp", "compass-artifacts", "artifacts", wsId), { recursive: true, force: true });
 
       // solutions → opportunities

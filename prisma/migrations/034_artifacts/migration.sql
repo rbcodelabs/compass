@@ -51,6 +51,20 @@ CREATE TABLE IF NOT EXISTS "artifact_links" (
 COMMIT;
 
 BEGIN;
+CREATE TABLE IF NOT EXISTS "artifact_blob_cleanups" (
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "blob_pathname" TEXT NOT NULL,
+  "reason" VARCHAR(50) NOT NULL,
+  "attempts" INTEGER NOT NULL DEFAULT 0,
+  "last_error" TEXT,
+  "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "artifact_blob_cleanups_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "artifact_blob_cleanups_blob_pathname_key" UNIQUE ("blob_pathname")
+);
+COMMIT;
+
+BEGIN;
 CREATE INDEX ASYNC IF NOT EXISTS "artifacts_workspace_id_status_updated_at_idx" ON "artifacts"("workspace_id", "status", "updated_at");
 COMMIT;
 
@@ -60,4 +74,8 @@ COMMIT;
 
 BEGIN;
 CREATE INDEX ASYNC IF NOT EXISTS "artifact_links_workspace_id_linked_type_linked_id_idx" ON "artifact_links"("workspace_id", "linked_type", "linked_id");
+COMMIT;
+
+BEGIN;
+CREATE INDEX ASYNC IF NOT EXISTS "artifact_blob_cleanups_created_at_idx" ON "artifact_blob_cleanups"("created_at");
 COMMIT;

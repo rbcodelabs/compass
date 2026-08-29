@@ -29,7 +29,7 @@ Choose one source when creating an Artifact:
 - **Upload HTML** — one self-contained `.html` file up to 2 MB. CSS, images, fonts, and JavaScript must be embedded in the file.
 - **External link** — an `http` or `https` URL. Compass stores the link but never fetches or proxies the external page.
 
-Uploaded HTML runs inside a restricted preview sandbox. Inline scripts and styles work, while network connections, forms, popups, downloads, parent-page access, and top navigation are blocked. Files are stored privately. External links are clearly labeled and open in a new tab.
+Uploaded HTML runs in an opaque-origin preview with the exact `allow-scripts` sandbox permission. Its injected policy denies fetch/XHR/WebSocket connections, forms, embedded frames, workers, objects, parent-page access, popups, downloads, and top navigation. A self-navigation may start an iframe request before Compass can observe it; a second iframe load is treated as a navigation attempt, immediately removes the preview, and shows a warning. Files are stored privately. External links are clearly labeled and open in a new tab.
 
 Replacing an Artifact creates an immutable revision and advances the current preview without changing the Artifact ID or breaking its Solution links. The detail screen shows revision history and lets workspace members edit metadata, link or unlink Solutions, replace the current revision, or archive the Artifact. Archived Artifacts disappear from the default navigator while their history and links remain preserved.
 
