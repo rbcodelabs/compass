@@ -145,13 +145,11 @@ test.describe("Canvas", () => {
     await expect(solutionPanel).toBeVisible();
 
     await solutionPanel.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
-    // base-ui renders the listbox in a portal the panel's Sheet stacks over, so
-    // a pointer click on the option is intercepted by the overlay — activate by
-    // keyboard (same workaround as launch-tiers.spec). Note the panel's label is
-    // "In delivery" (lowercase d — see the STATUS map in solution-panel.tsx).
-    const inDeliveryOption = page.getByRole("option", { name: "In delivery" });
-    await expect(inDeliveryOption).toBeVisible({ timeout: 10_000 });
-    await inDeliveryOption.press("Enter");
+    // Note the panel's label is "In delivery" (lowercase d — see the STATUS map
+    // in solution-panel.tsx). A plain click is deliberate: it regression-tests
+    // the Select popup's z-[70] (select.tsx), without which the panel's z-[60]
+    // sheet painted over the listbox and swallowed the click.
+    await page.getByRole("option", { name: "In delivery" }).click();
     await expect(
       solutionPanel.locator('[role="combobox"]').filter({ hasText: "In delivery" })
     ).toBeVisible({ timeout: 15_000 });

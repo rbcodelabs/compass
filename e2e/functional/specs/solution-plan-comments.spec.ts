@@ -74,12 +74,10 @@ test.describe("Solution Plan & Discussion", () => {
         .locator('[role="combobox"]')
         .filter({ hasText: "Comment" })
         .click();
-      // base-ui renders the listbox in a portal the panel's Sheet stacks over,
-      // so a pointer click on the option is intercepted by the overlay (see
-      // launch-tiers.spec for the same workaround). Activate by keyboard.
-      const planUpdateOption = page.getByRole("option", { name: "Plan update" });
-      await expect(planUpdateOption).toBeVisible({ timeout: 10_000 });
-      await planUpdateOption.press("Enter");
+      // A plain click here is deliberate: it regression-tests the Select
+      // popup's z-[70] (select.tsx). Before that fix the panel's z-[60] sheet
+      // painted over the listbox and swallowed the click.
+      await page.getByRole("option", { name: "Plan update" }).click();
       await panel.getByRole("button", { name: "Post" }).click();
 
       // ── 8. Verify the plan is pinned as "Current Plan" and both entries

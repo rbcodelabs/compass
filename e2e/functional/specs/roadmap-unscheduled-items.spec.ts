@@ -70,12 +70,10 @@ async function createValidatedSolution(page: Page, base: string, title: string) 
   const panel = page.locator('[data-slot="sheet-content"]');
   await expect(panel).toBeVisible();
   await panel.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
-  // base-ui renders the listbox in a portal the panel's Sheet stacks over, so a
-  // pointer click on the option is intercepted by the overlay (see
-  // launch-tiers.spec for the same workaround). Activate by keyboard.
-  const validatedOption = page.getByRole("option", { name: "Validated" });
-  await expect(validatedOption).toBeVisible({ timeout: 10_000 });
-  await validatedOption.press("Enter");
+  // A plain click here is deliberate: it regression-tests the Select popup's
+  // z-[70] (select.tsx). Before that fix the panel's z-[60] sheet painted over
+  // the listbox and swallowed the click.
+  await page.getByRole("option", { name: "Validated" }).click();
 
   // The panel updates its own state in place from the PATCH response — no
   // reload needed, just wait for the label to land.

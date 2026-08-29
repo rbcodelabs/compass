@@ -60,12 +60,10 @@ test.describe("Discovery → Roadmap", () => {
       // The panel's status label is "In delivery" (lowercase d — see the
       // STATUS map in solution-panel.tsx), unlike the old card's "In Delivery".
       await panel.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
-      // base-ui renders the listbox in a portal the panel's Sheet stacks over,
-      // so a pointer click on the option is intercepted by the overlay (see
-      // launch-tiers.spec for the same workaround). Activate by keyboard.
-      const inDeliveryOption = page.getByRole("option", { name: "In delivery" });
-      await expect(inDeliveryOption).toBeVisible({ timeout: 10_000 });
-      await inDeliveryOption.press("Enter");
+      // A plain click here is deliberate: it regression-tests the Select
+      // popup's z-[70] (select.tsx). Before that fix the panel's z-[60] sheet
+      // painted over the listbox and swallowed the click.
+      await page.getByRole("option", { name: "In delivery" }).click();
 
       // The panel updates its own state in place from the PATCH response (no
       // reload needed) — just wait for the label to land.
