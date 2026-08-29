@@ -7,14 +7,19 @@ import getPrisma from "@/lib/db"
 // Returns the userId if a per-user key matched (null for service key), or false if invalid.
 export async function validateMcpAuth(
   request: Request
-): Promise<{ valid: true; userId: string | null } | { valid: false }> {
+): Promise<{
+  valid: true
+  userId: string | null
+  purpose: "SERVICE" | "USER" | "RESEARCH"
+  scopeWorkspaceId: string | null
+} | { valid: false }> {
   const authHeader = request.headers.get("authorization")
   if (!authHeader?.startsWith("Bearer ")) return { valid: false }
   const token = authHeader.slice(7)
 
   // Service-account fallback
   if (process.env.MCP_API_KEY && token === process.env.MCP_API_KEY) {
-    return { valid: true, userId: null }
+    return { valid: true, userId: null, purpose: "SERVICE", scopeWorkspaceId: null }
   }
 
   // Per-user key: format is cmp_<32 hex chars>
@@ -30,7 +35,7 @@ export async function validateMcpAuth(
       keyHash,
       revokedAt: null,
     },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, purpose: true, scopeWorkspaceId: true },
   })
 
   if (!apiKey) return { valid: false }
@@ -41,5 +46,10 @@ export async function validateMcpAuth(
     data: { lastUsedAt: new Date() },
   }).catch(() => {})
 
-  return { valid: true, userId: apiKey.userId }
+  return {
+    valid: true,
+    userId: apiKey.userId,
+    purpose: apiKey.purpose === "RESEARCH" ? "RESEARCH" : "USER",
+    scopeWorkspaceId: apiKey.scopeWorkspaceId,
+  }
 }

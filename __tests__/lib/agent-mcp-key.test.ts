@@ -4,7 +4,7 @@ import { createHash } from "node:crypto"
 const mockApiKey = { create: vi.fn(), update: vi.fn() }
 vi.mock("@/lib/db", () => ({ default: () => ({ apiKey: mockApiKey }) }))
 
-import { mintAgentMcpKey, revokeAgentMcpKey, withAgentMcpKey } from "@/lib/agent-mcp-key"
+import { mintAgentMcpKey, mintResearchAgentMcpKey, revokeAgentMcpKey, withAgentMcpKey } from "@/lib/agent-mcp-key"
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -31,6 +31,18 @@ describe("mintAgentMcpKey", () => {
     const a = await mintAgentMcpKey("u")
     const b = await mintAgentMcpKey("u")
     expect(a.token).not.toBe(b.token)
+  })
+
+  it("locks research-agent credentials to one workspace", async () => {
+    mockApiKey.create.mockResolvedValue({ id: "research-key" })
+    await mintResearchAgentMcpKey("user-1", "workspace-1")
+
+    expect(mockApiKey.create.mock.calls[0][0].data).toMatchObject({
+      userId: "user-1",
+      name: "research-interview (ephemeral)",
+      purpose: "RESEARCH",
+      scopeWorkspaceId: "workspace-1",
+    })
   })
 })
 

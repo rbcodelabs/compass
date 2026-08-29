@@ -2837,7 +2837,11 @@ async function withMcpAuth(req: Request): Promise<Response> {
   // Carry the acting identity (userId, or null for the shared service key)
   // into every tool via AsyncLocalStorage; the register() wrapper reads it to
   // run each tool's authorization gate before its handler.
-  return runWithMcpActor({ userId: auth.userId }, () => _handler(req))
+  return runWithMcpActor({
+    userId: auth.userId,
+    purpose: auth.purpose,
+    scopeWorkspaceId: auth.scopeWorkspaceId,
+  }, () => _handler(req))
 }
 
 export async function GET(req: Request) { return withMcpAuth(req) }

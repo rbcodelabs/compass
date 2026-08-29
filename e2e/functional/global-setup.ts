@@ -17,19 +17,21 @@ const schema = process.env.PGSCHEMA
   : "compass_dev";
 
 async function ensureResearchCaptureSchema(pool: pg.Pool) {
-  const migrationPath = path.resolve(
-    process.cwd(),
-    "prisma/migrations/034_research_capture/migration.sql"
-  );
-  const migration = (await fs.readFile(migrationPath, "utf8"))
-    .replaceAll("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ")
-    .replaceAll("CREATE UNIQUE INDEX ASYNC ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
-    .replaceAll("CREATE INDEX ASYNC ", "CREATE INDEX IF NOT EXISTS ");
+  const migrationPaths = [
+    "prisma/migrations/034_research_capture/migration.sql",
+    "prisma/migrations/035_research_agent_scope/migration.sql",
+  ];
 
   const client = await pool.connect();
   try {
     await client.query(`SET search_path TO "${schema}"`);
-    await client.query(migration);
+    for (const relativePath of migrationPaths) {
+      const migration = (await fs.readFile(path.resolve(process.cwd(), relativePath), "utf8"))
+        .replaceAll("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ")
+        .replaceAll("CREATE UNIQUE INDEX ASYNC ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
+        .replaceAll("CREATE INDEX ASYNC ", "CREATE INDEX IF NOT EXISTS ");
+      await client.query(migration);
+    }
   } finally {
     client.release();
   }
