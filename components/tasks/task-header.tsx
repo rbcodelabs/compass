@@ -9,6 +9,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { SquadPicker } from "@/components/squads/squad-picker";
+import { Markdown } from "@/components/agent/markdown";
 import { EditTaskDialog } from "./edit-task-dialog";
 import { moveTaskStatus } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import { STATUS_CONFIG } from "./task-column";
@@ -102,7 +103,9 @@ export function TaskHeader({ task: initialTask, workspaceId, squads, members, re
       <h1 className="text-2xl font-bold tracking-tight text-slate-900 leading-tight">{task.title}</h1>
 
       {task.description ? (
-        <p className="text-sm text-muted-foreground leading-relaxed max-w-2xl">{task.description}</p>
+        <div className="text-muted-foreground max-w-2xl">
+          <Markdown>{task.description}</Markdown>
+        </div>
       ) : (
         <p className="text-sm text-muted-foreground/50 italic">No description yet.</p>
       )}
