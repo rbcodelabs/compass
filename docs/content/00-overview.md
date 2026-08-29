@@ -36,6 +36,7 @@ The **OST Tree view** in Discovery lets you see the full tree at a glance: outco
 
 Beyond the core OST workflow, Compass includes:
 
+- **Capture** — Collect direct feedback and run shareable customer-interview studies without moving research into a separate product.
 - **Feedback Portal** — A public-facing page where customers can submit feedback and vote on requests. Internal teams triage incoming feedback by linking it to opportunities.
 - **Docs** — A rich-text editor for internal documentation. Pages live in a hierarchical tree and support inline screenshots.
 - **Squads** — Organise objects by team for filtered views across every section.

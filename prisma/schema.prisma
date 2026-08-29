@@ -143,9 +143,86 @@ model Workspace {
   checklistTemplates   ChecklistTemplate[]
   tasks                Task[]
   agentConversations   AgentConversation[]
+  researchStudies      ResearchStudy[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
+}
+
+// ─── Capture / Research Studies ──────────────────────────────────────────────
+
+model ResearchStudy {
+  id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String              @map("workspace_id") @db.Uuid
+  name           String              @db.VarChar(255)
+  goal           String              @db.Text
+  studyType      String              @default("CUSTOMER_INTERVIEW") @map("study_type") @db.VarChar(30)
+  guide          String              @db.Text
+  targetMinutes  Int                 @default(15) @map("target_minutes")
+  appUrl         String?             @map("app_url") @db.Text
+  shareTokenHash String?             @unique @map("share_token_hash") @db.VarChar(64)
+  shareExpiresAt DateTime?           @map("share_expires_at")
+  status         String              @default("DRAFT") @db.VarChar(20)
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @default(now()) @map("updated_at")
+  createdById    String?             @map("created_by_id") @db.Uuid
+  updatedById    String?             @map("updated_by_id") @db.Uuid
+  source         String              @default("UI") @db.VarChar(20)
+  workspace      Workspace           @relation(fields: [workspaceId], references: [id])
+  sessions       ResearchSession[]
+  syntheses      ResearchSynthesis[]
+
+  @@index([workspaceId, status])
+  @@map("research_studies")
+}
+
+model ResearchSession {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studyId          String         @map("study_id") @db.Uuid
+  modality         String         @default("CHAT") @db.VarChar(10)
+  status           String         @default("PENDING") @db.VarChar(20)
+  participantName  String?        @map("participant_name") @db.VarChar(255)
+  participantEmail String?        @map("participant_email") @db.VarChar(255)
+  summary          String?        @db.Text
+  audioUrl         String?        @map("audio_url") @db.Text
+  startedAt        DateTime?      @map("started_at")
+  completedAt      DateTime?      @map("completed_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @default(now()) @map("updated_at")
+  study            ResearchStudy  @relation(fields: [studyId], references: [id])
+  turns            ResearchTurn[]
+
+  @@index([studyId, status])
+  @@map("research_sessions")
+}
+
+model ResearchTurn {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId String          @map("session_id") @db.Uuid
+  role      String          @db.VarChar(20)
+  content   String          @db.Text
+  sequence  Int
+  createdAt DateTime        @default(now()) @map("created_at")
+  session   ResearchSession @relation(fields: [sessionId], references: [id])
+
+  @@unique([sessionId, sequence])
+  @@map("research_turns")
+}
+
+model ResearchSynthesis {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studyId       String        @map("study_id") @db.Uuid
+  kind          String        @default("CROSS_SESSION") @db.VarChar(30)
+  content       String        @db.Text
+  sessionCount  Int           @default(0) @map("session_count")
+  model         String?       @db.VarChar(100)
+  promptVersion String?       @map("prompt_version") @db.VarChar(50)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @default(now()) @map("updated_at")
+  study         ResearchStudy @relation(fields: [studyId], references: [id])
+
+  @@index([studyId, createdAt])
+  @@map("research_syntheses")
 }
 
 model WorkspaceMember {

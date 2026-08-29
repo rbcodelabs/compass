@@ -64,7 +64,7 @@ const navItems = [
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
   { label: "Tasks", path: "tasks", Icon: ListChecks },
-  { label: "Feedback", path: "feedback", Icon: MessageSquare },
+  { label: "Capture", path: "capture", Icon: MessageSquare },
   { label: "Docs", path: "docs", Icon: BookOpen },
   { label: "Canvas", path: "canvas", Icon: Waypoints },
   { label: "Agent", path: "agent", Icon: Sparkles },

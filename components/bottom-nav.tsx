@@ -16,7 +16,7 @@ const navItems = [
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
   { label: "Tasks", path: "tasks", Icon: ListChecks },
-  { label: "Feedback", path: "feedback", Icon: MessageSquare },
+  { label: "Capture", path: "capture", Icon: MessageSquare },
 ]
 
 export function BottomNav({ orgSlug, workspaceSlug }: BottomNavProps) {

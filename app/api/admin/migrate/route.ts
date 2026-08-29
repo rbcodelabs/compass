@@ -157,6 +157,15 @@ const MIGRATIONS = [
     name: "034_artifacts",
     filePath: path.join(process.cwd(), "prisma/migrations/034_artifacts/migration.sql"),
   },
+  {
+    // Numbered "034" on this branch too -- same independently-picked-next-number
+    // collision as 024 above. Different migration names (tracked by full
+    // string, not numeric prefix), so no functional collision -- just
+    // cosmetic. Not renumbering to keep parity with the migration folder
+    // name already shipped in prisma/migrations/034_research_capture.
+    name: "034_research_capture",
+    filePath: path.join(process.cwd(), "prisma/migrations/034_research_capture/migration.sql"),
+  },
 ];
 
 async function getPool(): Promise<Pool> {
