@@ -163,13 +163,24 @@ async function fetchSolution(id: string, workspaceId: string) {
   const solution = await prisma.solution.findFirst({
     where: { id, opportunity: { workspaceId } },
     include: {
-      opportunity: { select: { id: true, title: true, workspaceId: true } },
+      opportunity: { select: { id: true, title: true, workspaceId: true, squadId: true } },
       assumptions: {
-        select: { id: true, title: true, riskLevel: true, status: true },
+        select: {
+          id: true,
+          title: true,
+          riskLevel: true,
+          status: true,
+          sortOrder: true,
+          _count: { select: { evidence: true } },
+          experiments: { select: { id: true } },
+        },
         orderBy: { sortOrder: "asc" },
       },
       evidence: { orderBy: { createdAt: "desc" } },
-      comments: { orderBy: { createdAt: "desc" }, take: 20 },
+      // Chronological (oldest first) and unbounded — the panel's Plan &
+      // Discussion thread needs the full history, not just the latest 20, to
+      // reliably find the pinned "current plan" (last PLAN entry).
+      comments: { orderBy: { createdAt: "asc" } },
       roadmapItems: { select: { id: true, title: true, horizon: true } },
     },
   });

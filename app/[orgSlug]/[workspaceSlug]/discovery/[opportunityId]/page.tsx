@@ -31,9 +31,6 @@ import type {
   FormulaSnapshotMetric,
   EvidenceSourceType,
   EvidenceConfidence,
-  CommentType,
-  AuthorType,
-  PlanStatus,
 } from "@/lib/types";
 
 export async function generateMetadata({
@@ -125,25 +122,6 @@ export default async function OpportunityDetailPage({ params }: Props) {
   ]);
 
   if (!opportunity) notFound();
-
-  // One batched Artifact query + one batched link query for the whole
-  // opportunity; never query per Solution (avoids N+1 on the card list).
-  const [activeArtifacts, artifactLinks] = await Promise.all([
-    prisma.artifact.findMany({
-      where: { workspaceId: workspace.id, status: "ACTIVE" },
-      select: { id: true, title: true, sourceType: true },
-      orderBy: { title: "asc" },
-    }),
-    prisma.artifactLink.findMany({
-      where: { workspaceId: workspace.id, linkedType: "SOLUTION", linkedId: { in: opportunity.solutions.map((solution) => solution.id) } },
-      select: { artifactId: true, linkedId: true },
-    }),
-  ]);
-  const artifactIdsBySolution = new Map<string, Set<string>>();
-  for (const link of artifactLinks) {
-    if (!artifactIdsBySolution.has(link.linkedId)) artifactIdsBySolution.set(link.linkedId, new Set());
-    artifactIdsBySolution.get(link.linkedId)!.add(link.artifactId);
-  }
 
   const evidence = await prisma.evidence.findMany({
     where: { opportunityId },
@@ -320,31 +298,17 @@ export default async function OpportunityDetailPage({ params }: Props) {
             <SolutionsList
               key={opportunity.solutions.map((s) => s.id).join(",")}
               solutions={opportunity.solutions.map((solution) => ({
-                ...solution,
+                id: solution.id,
+                title: solution.title,
+                description: solution.description,
                 sortOrder: solution.sortOrder,
                 status: solution.status as SolutionStatus,
-                assumptions: solution.assumptions.map((a) => ({
-                  ...a,
-                  sortOrder: a.sortOrder,
-                  riskLevel: a.riskLevel as RiskLevel,
-                  status: a.status as AssumptionStatus,
-                })),
-                comments: solution.comments.map((c) => ({
-                  ...c,
-                  commentType: c.commentType as CommentType,
-                  authorType: c.authorType as AuthorType,
-                  source: c.source as "UI" | "MCP",
-                  planStatus: c.planStatus as PlanStatus,
-                  createdAt: c.createdAt.toISOString(),
-                  updatedAt: c.updatedAt.toISOString(),
-                })),
-                artifacts: activeArtifacts.filter((artifact) => artifactIdsBySolution.get(solution.id)?.has(artifact.id)),
+                _count: {
+                  assumptions: solution.assumptions.length,
+                  evidence: solution._count.evidence,
+                },
               }))}
-              availableArtifacts={activeArtifacts}
               revalidatePathStr={detailPath}
-              workspaceId={workspace.id}
-              opportunityId={opportunityId}
-              squadId={opportunity.squadId}
             />
             <AddSolutionForm
               opportunityId={opportunityId}

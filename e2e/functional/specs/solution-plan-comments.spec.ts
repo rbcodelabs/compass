@@ -2,10 +2,14 @@
  * Solution Plan & Discussion functional spec.
  *
  * Journey: Create opportunity → navigate to detail → add solution →
- *          expand solution card → post a Comment → post a Plan update →
- *          verify the Plan is pinned as "Current Plan" and both entries
- *          appear in the thread → approve the plan → reject it (a decision
- *          can be changed at any time).
+ *          open the solution's sidebar panel → post a Comment → post a Plan
+ *          update → verify the Plan is pinned as "Current Plan" and both
+ *          entries appear in the thread → approve the plan → reject it (a
+ *          decision can be changed at any time).
+ *
+ * Plan & Discussion lives in the Solution sidebar panel (not an expanding
+ * card) — the card in the Solutions tab is a compact summary row whose title
+ * opens this panel, matching every other entity's detail-panel pattern.
  */
 import { test, expect } from "../fixtures/index";
 
@@ -43,50 +47,55 @@ test.describe("Solution Plan & Discussion", () => {
 
       await expect(page.getByText(solTitle)).toBeVisible({ timeout: 10_000 });
 
-      // ── 5. Expand the solution card ────────────────────────────────────────
-      await page.getByRole("button", { name: "Expand" }).click();
+      // ── 5. Open the solution's sidebar panel ────────────────────────────────
+      await page.getByRole("button", { name: solTitle, exact: true }).click();
+      const panel = page.locator('[data-slot="sheet-content"]');
+      await expect(panel).toBeVisible();
 
       // Plan & Discussion section is present but empty.
-      await expect(page.getByText("Plan & Discussion")).toBeVisible();
-      await expect(page.getByText("No plan or comments yet.")).toBeVisible();
+      await expect(panel.getByText("Plan & Discussion")).toBeVisible();
+      await expect(panel.getByText("No plan or comments yet.")).toBeVisible();
 
       // ── 6. Post a regular comment (default type) ────────────────────────────
-      await page.getByRole("button", { name: "Add Comment" }).click();
-      await page.getByPlaceholder("Write a comment or plan update…").fill(commentBody);
-      await page.getByRole("button", { name: "Post" }).click();
+      await panel.getByRole("button", { name: "Add Comment" }).click();
+      await panel.getByPlaceholder("Write a comment or plan update…").fill(commentBody);
+      await panel.getByRole("button", { name: "Post" }).click();
 
       // Comment appears in the thread; empty-state message is gone.
-      await expect(page.getByText(commentBody)).toBeVisible({ timeout: 10_000 });
-      await expect(page.getByText("No plan or comments yet.")).not.toBeVisible();
+      await expect(panel.getByText(commentBody)).toBeVisible({ timeout: 10_000 });
+      await expect(panel.getByText("No plan or comments yet.")).not.toBeVisible();
       // No "Current Plan" pin yet — only a COMMENT has been posted.
-      await expect(page.getByText("Current Plan")).not.toBeVisible();
+      await expect(panel.getByText("Current Plan")).not.toBeVisible();
 
       // ── 7. Post a plan update ────────────────────────────────────────────────
-      await page.getByRole("button", { name: "Add Comment" }).click();
-      await page.getByPlaceholder("Write a comment or plan update…").fill(planBody);
-      await page
+      await panel.getByRole("button", { name: "Add Comment" }).click();
+      await panel.getByPlaceholder("Write a comment or plan update…").fill(planBody);
+      await panel
         .locator('[role="combobox"]')
         .filter({ hasText: "Comment" })
         .click();
+      // A plain click here is deliberate: it regression-tests the Select
+      // popup's z-[70] (select.tsx). Before that fix the panel's z-[60] sheet
+      // painted over the listbox and swallowed the click.
       await page.getByRole("option", { name: "Plan update" }).click();
-      await page.getByRole("button", { name: "Post" }).click();
+      await panel.getByRole("button", { name: "Post" }).click();
 
       // ── 8. Verify the plan is pinned as "Current Plan" and both entries
       //       remain visible in the thread below.
-      const pinnedPlan = page.getByTestId("current-plan");
+      const pinnedPlan = panel.getByTestId("current-plan");
       await expect(pinnedPlan).toBeVisible({ timeout: 10_000 });
       await expect(pinnedPlan).toContainText("Current Plan");
       await expect(pinnedPlan).toContainText(planBody);
 
       // Thread count reflects both posts.
-      await expect(page.getByText("(2)", { exact: true })).toBeVisible();
+      await expect(panel.getByText("(2)", { exact: true })).toBeVisible();
 
       // Both entries are still individually visible in the full thread.
-      await expect(page.getByText(commentBody)).toBeVisible();
-      await expect(page.getByText(planBody).first()).toBeVisible();
+      await expect(panel.getByText(commentBody)).toBeVisible();
+      await expect(panel.getByText(planBody).first()).toBeVisible();
 
       // ── 9. New plans start Pending ──────────────────────────────────────────
-      const planStatusBadge = page.getByTestId("plan-status-badge");
+      const planStatusBadge = panel.getByTestId("plan-status-badge");
       await expect(planStatusBadge).toHaveText("Pending");
 
       // ── 10. Approve the plan ────────────────────────────────────────────────

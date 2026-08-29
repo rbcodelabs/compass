@@ -1,10 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { linkArtifact, unlinkArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
-
 import {
   useEntityDetail,
   PanelSkeleton,
@@ -18,17 +14,35 @@ import {
   type RelationItem,
   type EditContext,
 } from "./panel-parts";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
+import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evidence-list";
+import type { AssumptionItemData } from "@/components/discovery/assumption-item";
+import { SolutionAssumptions } from "./solution-assumptions";
+import { SolutionPlanDiscussion } from "./solution-plan-discussion";
+import { SolutionArtifacts, type SolutionArtifact } from "./solution-artifacts";
+import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import type { SolutionComment, Horizon } from "@/lib/types";
 
 type SolutionData = {
   id: string;
   title: string;
   description: string | null;
   status: string;
-  opportunity: { id: string; title: string; workspaceId: string } | null;
-  assumptions: Array<{ id: string; title: string; riskLevel: string; status: string }>;
+  opportunity: { id: string; title: string; workspaceId: string; squadId: string | null } | null;
+  assumptions: AssumptionItemData[];
+  evidence: EvidenceListItem[];
+  comments: SolutionComment[];
   roadmapItems: Array<{ id: string; title: string; horizon: string }>;
-  artifacts: Array<{ id: string; title: string; sourceType: string }>;
-  availableArtifacts: Array<{ id: string; title: string; sourceType: string }>;
+  artifacts: SolutionArtifact[];
+  availableArtifacts: SolutionArtifact[];
 };
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -42,12 +56,6 @@ const STATUS: Record<string, { label: string; className: string }> = {
 
 const STATUS_ORDER = ["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"] as const;
 
-const RISK: Record<string, string> = {
-  HIGH: "bg-red-100 text-red-700",
-  MEDIUM: "bg-amber-100 text-amber-700",
-  LOW: "bg-green-100 text-green-700",
-};
-
 export function SolutionPanel({
   id,
   orgSlug,
@@ -57,14 +65,12 @@ export function SolutionPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error, mutate } = useEntityDetail<SolutionData>(
+  const { data, error, mutate, refresh } = useEntityDetail<SolutionData>(
     "solution",
     id,
     orgSlug,
     workspaceSlug
   );
-  const [artifactId, setArtifactId] = useState("");
-  const [pending, startTransition] = useTransition();
 
   if (error) return <PanelError label="solution" />;
   if (!data) return <PanelSkeleton />;
@@ -80,18 +86,20 @@ export function SolutionPanel({
   const oppItems: RelationItem[] = data.opportunity
     ? [{ type: "opportunity", id: data.opportunity.id, title: data.opportunity.title }]
     : [];
-  const assumptionItems: RelationItem[] = data.assumptions.map((a) => ({
-    type: "assumption",
-    id: a.id,
-    title: a.title,
-    badge: { label: a.riskLevel, className: RISK[a.riskLevel] ?? "bg-slate-100 text-slate-600" },
-  }));
   const roadmapItems: RelationItem[] = data.roadmapItems.map((r) => ({
     type: "roadmapItem",
     id: r.id,
     title: r.title,
     badge: { label: r.horizon, className: "bg-slate-100 text-slate-600" },
   }));
+
+  // Same fallback the old card used (revalidatePath just needs *a* path in
+  // this workspace) — the opportunity should always be present in practice.
+  const revalidatePathStr = data.opportunity
+    ? `/${orgSlug}/${workspaceSlug}/discovery/${data.opportunity.id}`
+    : `/${orgSlug}/${workspaceSlug}/discovery`;
+
+  const canPromote = data.status === "VALIDATED" || data.status === "IN_DELIVERY";
 
   return (
     <PanelContainer>
@@ -122,19 +130,150 @@ export function SolutionPanel({
       </Section>
 
       <Section label="Assumptions" count={data.assumptions.length}>
-        <RelationList items={assumptionItems} empty="No assumptions yet." />
+        {data.opportunity ? (
+          <SolutionAssumptions
+            // Remount when the assumption set actually changes (add/delete)
+            // so the component's local reorder state re-seeds from fresh
+            // server data instead of needing an effect to sync props in.
+            key={data.assumptions.map((a) => a.id).join(",")}
+            solutionId={data.id}
+            workspaceId={data.opportunity.workspaceId}
+            assumptions={data.assumptions}
+            revalidatePathStr={revalidatePathStr}
+            onChanged={refresh}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">No assumptions yet.</p>
+        )}
       </Section>
+
+      {data.opportunity && (
+        <Section label="Evidence" count={data.evidence.length}>
+          <div className="flex flex-col gap-2">
+            <AddEvidenceDialog
+              workspaceId={data.opportunity.workspaceId}
+              nodeType="solution"
+              nodeId={data.id}
+              revalidatePathStr={revalidatePathStr}
+              onMutated={refresh}
+            />
+            <EvidenceList evidence={data.evidence} revalidatePathStr={revalidatePathStr} />
+          </div>
+        </Section>
+      )}
 
       <Section label="Roadmap" count={data.roadmapItems.length}>
-        <RelationList items={roadmapItems} empty="Not on the roadmap." />
-      </Section>
-
-      <Section label="Artifacts" count={data.artifacts.length}>
-        <div className="space-y-2">
-          {data.artifacts.length === 0 ? <p className="text-sm text-muted-foreground">No linked artifacts.</p> : data.artifacts.map((artifact) => <div key={artifact.id} className="flex items-center justify-between gap-2 text-sm"><Link className="text-indigo-600 hover:underline" href={`/${orgSlug}/${workspaceSlug}/docs/artifacts/${artifact.id}`}>{artifact.title}</Link><Button size="xs" variant="ghost" disabled={pending} onClick={() => startTransition(async () => { await unlinkArtifact(data.opportunity!.workspaceId, artifact.id, data.id, `/${orgSlug}/${workspaceSlug}/discovery`); mutate({ ...data, artifacts: data.artifacts.filter((item) => item.id !== artifact.id) }) })}>Unlink</Button></div>)}
-          {data.availableArtifacts.some((artifact) => !data.artifacts.some((linked) => linked.id === artifact.id)) && <div className="flex gap-2"><select aria-label="Artifact to link" className="h-8 flex-1 rounded border px-2 text-sm" value={artifactId} onChange={(event) => setArtifactId(event.target.value)}><option value="">Select artifact…</option>{data.availableArtifacts.filter((artifact) => !data.artifacts.some((linked) => linked.id === artifact.id)).map((artifact) => <option key={artifact.id} value={artifact.id}>{artifact.title}</option>)}</select><Button size="sm" disabled={!artifactId || pending} onClick={() => startTransition(async () => { const artifact = data.availableArtifacts.find((item) => item.id === artifactId); if (!artifact) return; await linkArtifact(data.opportunity!.workspaceId, artifact.id, data.id, `/${orgSlug}/${workspaceSlug}/discovery`); mutate({ ...data, artifacts: [...data.artifacts, artifact] }); setArtifactId("") })}>Link</Button></div>}
+        <div className="flex flex-col gap-2">
+          <RelationList items={roadmapItems} empty="Not on the roadmap." />
+          {canPromote && data.opportunity && (
+            <PromoteToRoadmap
+              solutionId={data.id}
+              workspaceId={data.opportunity.workspaceId}
+              squadId={data.opportunity.squadId}
+              opportunityId={data.opportunity.id}
+              onDone={refresh}
+            />
+          )}
         </div>
       </Section>
+
+      <Section label="Plan & Discussion" count={data.comments.length}>
+        <SolutionPlanDiscussion
+          solutionId={data.id}
+          comments={data.comments}
+          revalidatePathStr={revalidatePathStr}
+          onChanged={refresh}
+        />
+      </Section>
+
+      {data.opportunity && (
+        <Section label="Artifacts" count={data.artifacts.length}>
+          <SolutionArtifacts
+            solutionId={data.id}
+            workspaceId={data.opportunity.workspaceId}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            artifacts={data.artifacts}
+            availableArtifacts={data.availableArtifacts}
+            revalidatePathStr={revalidatePathStr}
+            onChanged={refresh}
+          />
+        </Section>
+      )}
     </PanelContainer>
+  );
+}
+
+function PromoteToRoadmap({
+  solutionId,
+  workspaceId,
+  squadId,
+  opportunityId,
+  onDone,
+}: {
+  solutionId: string;
+  workspaceId: string;
+  squadId: string | null;
+  opportunityId: string;
+  onDone: () => void;
+}) {
+  const [promoting, setPromoting] = useState(false);
+  const [horizon, setHorizon] = useState<Horizon>("NOW");
+  const [isPending, startTransition] = useTransition();
+
+  function handlePromote(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    startTransition(async () => {
+      await promoteToRoadmap(solutionId, workspaceId, horizon, squadId, opportunityId);
+      setPromoting(false);
+      onDone();
+    });
+  }
+
+  if (!promoting) {
+    return (
+      <Button
+        variant="ghost"
+        size="xs"
+        className="text-muted-foreground w-fit"
+        onClick={() => setPromoting(true)}
+      >
+        → Promote to Roadmap
+      </Button>
+    );
+  }
+
+  return (
+    <form onSubmit={handlePromote} className="flex items-center gap-2">
+      <Select
+        value={horizon}
+        onValueChange={(v: string | null) => {
+          if (v) setHorizon(v as Horizon);
+        }}
+        disabled={isPending}
+      >
+        <SelectTrigger size="sm" className="w-24">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="NOW">Now</SelectItem>
+          <SelectItem value="NEXT">Next</SelectItem>
+          <SelectItem value="LATER">Later</SelectItem>
+          <SelectItem value="SHIPPED">Shipped</SelectItem>
+        </SelectContent>
+      </Select>
+      <Button type="submit" size="sm" disabled={isPending}>
+        {isPending ? "Adding..." : "→ Roadmap"}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={isPending}
+        onClick={() => setPromoting(false)}
+      >
+        Cancel
+      </Button>
+    </form>
   );
 }

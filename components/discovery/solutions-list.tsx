@@ -22,19 +22,11 @@ import { reorderSolution } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actio
 type Props = {
   solutions: SolutionCardData[];
   revalidatePathStr: string;
-  workspaceId: string;
-  opportunityId: string;
-  squadId: string | null;
-  availableArtifacts: Array<{ id: string; title: string; sourceType: string }>;
 };
 
 export function SolutionsList({
   solutions: initialSolutions,
   revalidatePathStr,
-  workspaceId,
-  opportunityId,
-  squadId,
-  availableArtifacts,
 }: Props) {
   const [solutions, setSolutions] = useState(initialSolutions);
   const [, startTransition] = useTransition();
@@ -82,10 +74,6 @@ export function SolutionsList({
               key={solution.id}
               solution={solution}
               revalidatePathStr={revalidatePathStr}
-              workspaceId={workspaceId}
-              opportunityId={opportunityId}
-              squadId={squadId}
-              availableArtifacts={availableArtifacts}
             />
           ))}
         </div>

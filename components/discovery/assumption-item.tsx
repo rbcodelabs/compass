@@ -56,9 +56,13 @@ type Props = {
   assumption: AssumptionItemData;
   revalidatePathStr: string;
   workspaceId: string;
+  /** Called after a status advance or delete completes — lets a client-fetched
+   * container (e.g. the solution sidebar panel) refetch, since revalidatePath
+   * alone only refreshes server-rendered pages, not panel data. */
+  onChanged?: () => void;
 };
 
-export function AssumptionItem({ assumption, revalidatePathStr, workspaceId }: Props) {
+export function AssumptionItem({ assumption, revalidatePathStr, workspaceId, onChanged }: Props) {
   const [isPending, startTransition] = useTransition();
   const currentIndex = STATUS_CYCLE.indexOf(assumption.status);
   const nextStatus = STATUS_CYCLE[(currentIndex + 1) % STATUS_CYCLE.length];
@@ -82,12 +86,14 @@ export function AssumptionItem({ assumption, revalidatePathStr, workspaceId }: P
   function advanceStatus() {
     startTransition(async () => {
       await updateAssumptionStatus(assumption.id, nextStatus, revalidatePathStr);
+      onChanged?.();
     });
   }
 
   function handleDelete() {
     startTransition(async () => {
       await deleteAssumption(assumption.id, revalidatePathStr);
+      onChanged?.();
     });
   }
 
@@ -109,44 +115,52 @@ export function AssumptionItem({ assumption, revalidatePathStr, workspaceId }: P
         <GripVertical className="size-3.5" />
       </button>
 
-      <span className="flex-1 text-sm leading-snug">{assumption.title}</span>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {!!assumption._count?.evidence && (
-          <span className="inline-flex h-5 items-center rounded-4xl px-2 text-xs font-medium bg-secondary text-secondary-foreground">
-            {assumption._count.evidence} {assumption._count.evidence === 1 ? "signal" : "signals"}
+      {/* Title above its controls, not beside them. This row now renders only
+          inside the ~380px-wide solution panel (solution-assumptions.tsx is its
+          sole consumer), where the old single-line layout gave the shrink-0
+          control cluster roughly two thirds of the width and wrapped a normal
+          assumption title into a 2-3-word ribbon. min-w-0 is required for the
+          title to wrap at all inside a flex child. */}
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <span className="text-sm leading-snug">{assumption.title}</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {!!assumption._count?.evidence && (
+            <span className="inline-flex h-5 items-center rounded-4xl px-2 text-xs font-medium bg-secondary text-secondary-foreground">
+              {assumption._count.evidence} {assumption._count.evidence === 1 ? "signal" : "signals"}
+            </span>
+          )}
+          <span
+            className={`inline-flex h-5 items-center rounded-4xl px-2 text-xs font-medium ${RISK_CLASSES[assumption.riskLevel]}`}
+          >
+            {assumption.riskLevel}
           </span>
-        )}
-        <span
-          className={`inline-flex h-5 items-center rounded-4xl px-2 text-xs font-medium ${RISK_CLASSES[assumption.riskLevel]}`}
-        >
-          {assumption.riskLevel}
-        </span>
-        <Button
-          variant="ghost"
-          size="xs"
-          disabled={isPending}
-          onClick={advanceStatus}
-          className={`h-5 px-2 text-xs font-medium rounded-4xl border-0 ${STATUS_CLASSES[assumption.status]}`}
-          title={`Advance to ${STATUS_LABELS[nextStatus]}`}
-        >
-          {STATUS_LABELS[assumption.status]}
-        </Button>
-        <AddEvidenceDialog
-          workspaceId={workspaceId}
-          nodeType="assumption"
-          nodeId={assumption.id}
-          revalidatePathStr={revalidatePathStr}
-          compact
-        />
-        <CardMenu
+          <Button
+            variant="ghost"
+            size="xs"
+            disabled={isPending}
+            onClick={advanceStatus}
+            className={`h-5 px-2 text-xs font-medium rounded-4xl border-0 ${STATUS_CLASSES[assumption.status]}`}
+            title={`Advance to ${STATUS_LABELS[nextStatus]}`}
+          >
+            {STATUS_LABELS[assumption.status]}
+          </Button>
+          <AddEvidenceDialog
+            workspaceId={workspaceId}
+            nodeType="assumption"
+            nodeId={assumption.id}
+            revalidatePathStr={revalidatePathStr}
+            compact
+          />
+          <CardMenu
           items={[
             {
               label: "Delete",
               onClick: () => handleDelete(),
               destructive: true,
             },
-          ]}
-        />
+            ]}
+          />
+        </div>
       </div>
     </div>
   );
