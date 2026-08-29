@@ -268,6 +268,8 @@ export default async function TaskDetailPage({ params }: Props) {
               initialLinks={taskCard.links}
               revalidatePathStr={detailPath}
               linkableTargets={linkableTargets}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
             />
           </TabsContent>
 
