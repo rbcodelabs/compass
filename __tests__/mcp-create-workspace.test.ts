@@ -118,6 +118,49 @@ describe("create_workspace MCP tool", () => {
         slug: "my-product",
       }),
     })
+
+    // The seeded membership must carry a WorkspaceRole. The org member above
+    // is an OWNER, which is not one.
+    expect(mockPrisma.workspaceMember.createMany).toHaveBeenCalledWith({
+      data: [{ workspaceId: "ws-uuid-1", userId: "user-1", role: "ADMIN" }],
+      skipDuplicates: true,
+    })
+  })
+
+  it("normalizes every org role when seeding workspace membership", async () => {
+    // Regression test. WorkspaceRole is "ADMIN" | "MEMBER"; OrgRole adds
+    // "OWNER". This handler used to copy the org role straight across, so an
+    // org OWNER ended up with WorkspaceMember.role = "OWNER" — a value outside
+    // the type — and was then denied by the strict ADMIN check in
+    // resolveWorkspaceAdmin, locking them out of the workspace they had just
+    // created. The original version of this test seeded an OWNER org member and
+    // asserted nothing about the createMany payload, which is why it shipped.
+    mockPrisma.organization.findUnique.mockResolvedValue({ id: "org-uuid-1", name: "RB Code Labs" })
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    mockPrisma.workspace.create.mockResolvedValue({ id: "ws-uuid-3", name: "Third", slug: "third" })
+    mockPrisma.organizationMember.findMany.mockResolvedValue([
+      { userId: "user-owner", role: "OWNER" },
+      { userId: "user-admin", role: "ADMIN" },
+      { userId: "user-member", role: "MEMBER" },
+      { userId: "user-legacy", role: "owner" },
+    ])
+    mockPrisma.workspaceMember.createMany.mockResolvedValue({ count: 4 })
+
+    const handler = getHandler("create_workspace")
+    await handler({ orgSlug: "rbcodelabs", name: "Third", slug: "third" })
+
+    expect(mockPrisma.workspaceMember.createMany).toHaveBeenCalledWith({
+      data: [
+        { workspaceId: "ws-uuid-3", userId: "user-owner", role: "ADMIN" },
+        { workspaceId: "ws-uuid-3", userId: "user-admin", role: "ADMIN" },
+        { workspaceId: "ws-uuid-3", userId: "user-member", role: "MEMBER" },
+        { workspaceId: "ws-uuid-3", userId: "user-legacy", role: "ADMIN" },
+      ],
+      skipDuplicates: true,
+    })
+
+    const seeded = mockPrisma.workspaceMember.createMany.mock.calls[0][0].data as Array<{ role: string }>
+    expect(seeded.map((d) => d.role)).not.toContain("OWNER")
   })
 
   it("revalidates the dashboard and root layout so the new workspace shows up without a hard reload", async () => {

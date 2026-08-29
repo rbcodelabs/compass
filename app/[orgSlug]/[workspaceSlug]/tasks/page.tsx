@@ -9,6 +9,7 @@ import { TasksViewToggle } from "@/components/tasks/tasks-view-toggle";
 import { TasksFilters } from "@/components/tasks/tasks-filters";
 import type { TaskCardData } from "@/components/tasks/task-card";
 import type { TaskStatus, TaskPriority, SquadData, MemberData } from "@/lib/types";
+import { normalizeWorkspaceRole } from "@/lib/roles";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
 
 export const metadata = {
@@ -64,7 +65,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
     userId: m.userId,
     email: m.user.email,
     name: m.user.name,
-    role: m.role as MemberData["role"],
+    role: normalizeWorkspaceRole(m.role),
   }));
 
   // Batch-resolve linked-object titles across all tasks on this page, grouped

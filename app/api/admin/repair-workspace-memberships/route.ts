@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import getPrisma from "@/lib/db"
+import { normalizeWorkspaceRole } from "@/lib/roles"
 
 export async function POST(req: NextRequest) {
   const repairSecret = process.env.REPAIR_SECRET
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest) {
       data: orgMembers.map((m) => ({
         workspaceId: ws.id,
         userId: m.userId,
-        role: m.role === "OWNER" ? "ADMIN" : m.role,
+        role: normalizeWorkspaceRole(m.role),
       })),
       skipDuplicates: true,
     })

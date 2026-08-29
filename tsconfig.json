@@ -9,6 +9,11 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // Scripts under scripts/ are executed directly by Node via
+    // --experimental-strip-types, whose ESM resolver requires a real file
+    // extension on relative imports. Without this flag those scripts cannot
+    // import shared code from lib/ and have to duplicate it instead.
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",

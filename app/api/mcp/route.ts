@@ -11,6 +11,7 @@ import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
+import { normalizeWorkspaceRole } from "@/lib/roles"
 import {
   createFeedback,
   getFeedbackItem,
@@ -386,7 +387,13 @@ const _handler = createMcpHandler(
             data: orgMembers.map((m) => ({
               workspaceId: workspace.id,
               userId: m.userId,
-              role: m.role,
+              // Org and workspace roles are different domains: OrgRole has an
+              // OWNER, WorkspaceRole does not. Copying m.role straight across
+              // wrote "OWNER" into WorkspaceMember.role, a value outside
+              // WorkspaceRole, which then failed resolveWorkspaceAdmin's strict
+              // ADMIN check and locked the org owner out of the workspace they
+              // had just created.
+              role: normalizeWorkspaceRole(m.role),
             })),
             skipDuplicates: true,
           })
