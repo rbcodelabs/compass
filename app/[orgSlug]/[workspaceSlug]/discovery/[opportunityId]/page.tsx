@@ -31,9 +31,6 @@ import type {
   FormulaSnapshotMetric,
   EvidenceSourceType,
   EvidenceConfidence,
-  CommentType,
-  AuthorType,
-  PlanStatus,
 } from "@/lib/types";
 
 export async function generateMetadata({
@@ -301,29 +298,17 @@ export default async function OpportunityDetailPage({ params }: Props) {
             <SolutionsList
               key={opportunity.solutions.map((s) => s.id).join(",")}
               solutions={opportunity.solutions.map((solution) => ({
-                ...solution,
+                id: solution.id,
+                title: solution.title,
+                description: solution.description,
                 sortOrder: solution.sortOrder,
                 status: solution.status as SolutionStatus,
-                assumptions: solution.assumptions.map((a) => ({
-                  ...a,
-                  sortOrder: a.sortOrder,
-                  riskLevel: a.riskLevel as RiskLevel,
-                  status: a.status as AssumptionStatus,
-                })),
-                comments: solution.comments.map((c) => ({
-                  ...c,
-                  commentType: c.commentType as CommentType,
-                  authorType: c.authorType as AuthorType,
-                  source: c.source as "UI" | "MCP",
-                  planStatus: c.planStatus as PlanStatus,
-                  createdAt: c.createdAt.toISOString(),
-                  updatedAt: c.updatedAt.toISOString(),
-                })),
+                _count: {
+                  assumptions: solution.assumptions.length,
+                  evidence: solution._count.evidence,
+                },
               }))}
               revalidatePathStr={detailPath}
-              workspaceId={workspace.id}
-              opportunityId={opportunityId}
-              squadId={opportunity.squadId}
             />
             <AddSolutionForm
               opportunityId={opportunityId}

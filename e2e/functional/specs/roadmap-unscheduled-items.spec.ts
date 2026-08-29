@@ -64,21 +64,21 @@ async function createValidatedSolution(page: Page, base: string, title: string) 
   await page.getByRole("button", { name: "Add Solution" }).last().click();
   await expect(page.getByText(title)).toBeVisible({ timeout: 10_000 });
 
-  await page.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
+  // Status changes live in the solution's sidebar panel (the card itself is
+  // just a compact summary row) — open it and flip status to Validated.
+  await page.getByRole("button", { name: title, exact: true }).click();
+  const panel = page.locator('[data-slot="sheet-content"]');
+  await expect(panel).toBeVisible();
+  await panel.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
+  // A plain click here is deliberate: it regression-tests the Select popup's
+  // z-[70] (select.tsx). Before that fix the panel's z-[60] sheet painted over
+  // the listbox and swallowed the click.
   await page.getByRole("option", { name: "Validated" }).click();
 
-  // Wait for the Select to close and the server action to finish (isPending
-  // -> false) before asserting the new label, same as discovery-roadmap.spec.ts.
+  // The panel updates its own state in place from the PATCH response — no
+  // reload needed, just wait for the label to land.
   await expect(
-    page.locator('[role="combobox"]').filter({ hasText: /Idea|Validated/ })
-  ).not.toBeDisabled({ timeout: 15_000 });
-
-  // Server actions + revalidatePath can lag in dev mode; reload to confirm
-  // the status change actually landed rather than trusting client-only state.
-  await page.reload();
-  await page.waitForLoadState("domcontentloaded");
-  await expect(
-    page.locator('[role="combobox"]').filter({ hasText: "Validated" })
+    panel.locator('[role="combobox"]').filter({ hasText: "Validated" })
   ).toBeVisible({ timeout: 10_000 });
 }
 

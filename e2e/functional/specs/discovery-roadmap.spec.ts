@@ -2,8 +2,8 @@
  * Discovery → Roadmap functional spec.
  *
  * Journey: Create opportunity (in EXPLORING column) → open detail panel →
- *          add solution → change solution status to IN_DELIVERY →
- *          expand solution card → promote to roadmap (NOW horizon) →
+ *          add solution → open the solution's sidebar panel → change status
+ *          to IN_DELIVERY → promote to roadmap (NOW horizon) →
  *          verify card appears in roadmap NOW column.
  *
  * Note: The "SHIPPED" horizon promote option is added in the feat/roadmap-shipped-state
@@ -49,43 +49,35 @@ test.describe("Discovery → Roadmap", () => {
       // Solution card appears
       await expect(page.getByText(solTitle)).toBeVisible({ timeout: 10_000 });
 
-      // ── 5. Change solution status to IN_DELIVERY ───────────────────────────
-      // Click the Radix Select trigger (role="combobox") that currently shows
-      // "Idea". Filter by text to avoid matching the Opportunity status
-      // combobox which shows "Exploring".
-      await page.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
-      await page.getByRole("option", { name: "In Delivery" }).click();
+      // ── 5. Open the solution's sidebar panel ────────────────────────────────
+      // Status changes and Promote-to-Roadmap both moved off the (now
+      // compact, non-expanding) solution card into the Solution panel.
+      await page.getByRole("button", { name: solTitle, exact: true }).click();
+      const panel = page.locator('[data-slot="sheet-content"]');
+      await expect(panel).toBeVisible();
 
-      // Wait for the Select to close (dropdown collapses after option picked)
-      // which signals onValueChange fired.  Then wait for the combobox to be
-      // re-enabled (isPending → false, meaning the server action completed).
+      // ── 6. Change solution status to IN_DELIVERY ────────────────────────────
+      // The panel's status label is "In delivery" (lowercase d — see the
+      // STATUS map in solution-panel.tsx), unlike the old card's "In Delivery".
+      await panel.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
+      // A plain click here is deliberate: it regression-tests the Select
+      // popup's z-[70] (select.tsx). Before that fix the panel's z-[60] sheet
+      // painted over the listbox and swallowed the click.
+      await page.getByRole("option", { name: "In delivery" }).click();
+
+      // The panel updates its own state in place from the PATCH response (no
+      // reload needed) — just wait for the label to land.
       await expect(
-        page.locator('[role="combobox"]').filter({ hasText: /Idea|In Delivery/ })
-      ).not.toBeDisabled({ timeout: 15_000 });
-
-      // Force a hard reload so the server-rendered component reflects the new
-      // status (same reason as the OKR reload: revalidatePath in dev mode is
-      // unreliable for in-place updates).  After reload, expanded resets to
-      // false, so we re-expand below.
-      await page.reload();
-      await page.waitForLoadState("domcontentloaded");
-
-      // Confirm the status update landed
-      await expect(
-        page.locator('[role="combobox"]').filter({ hasText: "In Delivery" })
+        panel.locator('[role="combobox"]').filter({ hasText: "In delivery" })
       ).toBeVisible({ timeout: 10_000 });
-
-      // ── 6. Expand the solution card ────────────────────────────────────────
-      // After reload, expanded = false (client state reset).  Click "Expand".
-      await page.getByRole("button", { name: "Expand" }).click();
 
       // ── 7. Promote to roadmap ─────────────────────────────────────────────
       // The "→ Promote to Roadmap" button appears when status is VALIDATED or IN_DELIVERY
-      await page.getByRole("button", { name: /Promote to Roadmap/i }).click();
+      await panel.getByRole("button", { name: /Promote to Roadmap/i }).click();
 
       // Promote form shows horizon Select (NOW/NEXT/LATER) and "→ Roadmap" button.
       // Default horizon is NOW — leave it and click "→ Roadmap"
-      await page.getByRole("button", { name: "→ Roadmap" }).click();
+      await panel.getByRole("button", { name: "→ Roadmap" }).click();
 
       // ── 8. Verify on roadmap ──────────────────────────────────────────────
       await page.goto(`${base}/roadmap`);
