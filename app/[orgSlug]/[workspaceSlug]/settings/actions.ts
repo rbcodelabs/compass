@@ -6,6 +6,7 @@ import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
 import { resolveWorkspaceAdmin } from "@/lib/permissions";
+import { countWorkspaceAdmins, normalizeWorkspaceRole } from "@/lib/roles";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
 import { encrypt } from "@/lib/crypto-secrets";
 import { generateSsoSecret } from "@/lib/portal-sso";
@@ -138,7 +139,7 @@ export async function addWorkspaceMember(
     throw new Error("A valid email address is required");
   }
 
-  const { prisma, workspaceId, organizationId } = await resolveWorkspace(orgSlug, workspaceSlug);
+  const { prisma, workspaceId, organizationId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
 
   // Bare upsert — invited users may not have signed in before. Mirrors the
   // dev-auth upsert pattern in auth.ts; no name/emailVerified needed here,
@@ -166,7 +167,7 @@ export async function addWorkspaceMember(
   }
 
   await prisma.workspaceMember.create({
-    data: { workspaceId, userId: user.id, role: input.role },
+    data: { workspaceId, userId: user.id, role: normalizeWorkspaceRole(input.role) },
   });
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
@@ -178,7 +179,7 @@ export async function updateWorkspaceMemberRole(
   memberId: string,
   role: WorkspaceRole
 ) {
-  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
 
   // Scope to this workspace so a memberId from another workspace can't be touched.
   const member = await prisma.workspaceMember.findFirst({
@@ -186,18 +187,22 @@ export async function updateWorkspaceMemberRole(
   });
   if (!member) throw new Error("Member not found");
 
-  if (member.role === "ADMIN" && role !== "ADMIN") {
-    const adminCount = await prisma.workspaceMember.count({
-      where: { workspaceId, role: "ADMIN" },
+  if (normalizeWorkspaceRole(member.role) === "ADMIN" && role !== "ADMIN") {
+    // Counted in application code through normalizeWorkspaceRole rather than
+    // with an exact SQL match on "ADMIN": a legacy row stored as "OWNER" is a
+    // real admin, and an exact match would miss it and let the last one go.
+    const roles = await prisma.workspaceMember.findMany({
+      where: { workspaceId },
+      select: { role: true },
     });
-    if (adminCount <= 1) {
+    if (countWorkspaceAdmins(roles.map((r) => r.role)) <= 1) {
       throw new Error("Cannot demote the last remaining admin — promote another member first");
     }
   }
 
   await prisma.workspaceMember.update({
     where: { id: memberId },
-    data: { role },
+    data: { role: normalizeWorkspaceRole(role) },
   });
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
@@ -208,7 +213,7 @@ export async function removeWorkspaceMember(
   workspaceSlug: string,
   memberId: string
 ) {
-  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
 
   // Scope to this workspace so a memberId from another workspace can't be touched.
   const member = await prisma.workspaceMember.findFirst({
@@ -221,11 +226,13 @@ export async function removeWorkspaceMember(
     throw new Error("Cannot remove the last member of a workspace");
   }
 
-  if (member.role === "ADMIN") {
-    const adminCount = await prisma.workspaceMember.count({
-      where: { workspaceId, role: "ADMIN" },
+  if (normalizeWorkspaceRole(member.role) === "ADMIN") {
+    // Same normalization reasoning as the demotion guard above.
+    const roles = await prisma.workspaceMember.findMany({
+      where: { workspaceId },
+      select: { role: true },
     });
-    if (adminCount <= 1) {
+    if (countWorkspaceAdmins(roles.map((r) => r.role)) <= 1) {
       throw new Error("Cannot remove the last remaining admin — promote another member first");
     }
   }

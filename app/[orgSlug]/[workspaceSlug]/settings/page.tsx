@@ -17,6 +17,7 @@ import type {
   SquadData,
   MemberData,
 } from "@/lib/types";
+import { normalizeWorkspaceRole } from "@/lib/roles";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
 
@@ -116,7 +117,7 @@ export default async function SettingsPage({ params }: Props) {
     userId: m.userId,
     email: m.user.email,
     name: m.user.name,
-    role: m.role as MemberData["role"],
+    role: normalizeWorkspaceRole(m.role),
   }));
 
   const currentUserMembershipId =

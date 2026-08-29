@@ -77,10 +77,10 @@ async function main() {
   );
   if (!existing) {
     await q(
-      `INSERT INTO "${S}".workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`,
+      `INSERT INTO "${S}".workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'ADMIN')`,
       [ws.id, user.id]
     );
-    console.log("✅ Added user as owner of compass workspace");
+    console.log("✅ Added user as ADMIN of compass workspace");
   } else {
     console.log("ℹ️  User already member");
   }

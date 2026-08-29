@@ -106,10 +106,10 @@ export async function POST(req: NextRequest) {
     );
     if (!memRes.rows[0]) {
       await client.query(
-        `INSERT INTO "${schema}".workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`,
+        `INSERT INTO "${schema}".workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'ADMIN')`,
         [wsId, userId]
       );
-      log.push(`Added user ${userEmail} as owner`);
+      log.push(`Added user ${userEmail} as workspace ADMIN`);
     }
 
     // Create API key (api_keys schema: id, user_id, name, key_hash, key_prefix, last_used_at, revoked_at, created_at)

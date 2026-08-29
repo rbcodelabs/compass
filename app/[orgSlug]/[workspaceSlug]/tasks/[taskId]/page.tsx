@@ -20,6 +20,7 @@ import type {
   CustomFieldType,
   CustomFieldValue,
 } from "@/lib/types";
+import { normalizeWorkspaceRole } from "@/lib/roles";
 
 export async function generateMetadata({
   params,
@@ -78,7 +79,7 @@ export default async function TaskDetailPage({ params }: Props) {
     userId: m.userId,
     email: m.user.email,
     name: m.user.name,
-    role: m.role as MemberData["role"],
+    role: normalizeWorkspaceRole(m.role),
   }));
 
   // Batch-resolve titles for this task's own links.

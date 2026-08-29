@@ -83,6 +83,7 @@ const mockSolutionComment = { deleteMany: vi.fn() };
 const mockWorkspaceMember = {
   deleteMany: vi.fn(),
   findFirst: vi.fn(),
+  findMany: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   delete: vi.fn(),
@@ -177,9 +178,17 @@ beforeEach(() => {
   mockApiKey.findFirst.mockResolvedValue({ id: "key-1", keyHash: "hash", keyPrefix: "pref" });
   mockApiKey.update.mockResolvedValue({ id: "key-1" });
   mockWorkspaceScoringConfig.upsert.mockResolvedValue({ id: "config-1" });
+  mockWorkspaceMember.findMany.mockResolvedValue([{ role: "ADMIN" }, { role: "ADMIN" }]);
 
-  // deleteWorkspace defaults
-  mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
+  // deleteWorkspace defaults. The members/organization selections are what
+  // resolveWorkspaceAdmin reads. Member management is now gated on workspace
+  // admin, so the default caller in these tests is a workspace ADMIN.
+  mockWorkspace.findFirst.mockResolvedValue({
+    id: "ws-1",
+    organizationId: "org-1",
+    members: [{ role: "ADMIN" }],
+    organization: { members: [{ role: "MEMBER" }] },
+  });
   mockWorkspace.delete.mockResolvedValue({ id: "ws-1" });
   // After deletion: one remaining workspace in the org
   mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
@@ -813,6 +822,20 @@ describe("deleteWorkspace", () => {
 
 // ─── addWorkspaceMember ────────────────────────────────────────────────────────
 
+/**
+ * Resolves the workspace with the caller holding the given workspace role and
+ * org role. addWorkspaceMember, updateWorkspaceMemberRole and
+ * removeWorkspaceMember are gated by resolveWorkspaceAdmin, which reads both.
+ */
+function mockCallerRoles(role = "ADMIN", orgRole = "MEMBER") {
+  mockWorkspace.findFirst.mockResolvedValue({
+    id: "ws-1",
+    organizationId: "org-1",
+    members: [{ role }],
+    organization: { members: [{ role: orgRole }] },
+  });
+}
+
 describe("addWorkspaceMember", () => {
   it("upserts the user by email, creates an org member, and creates a workspace member", async () => {
     mockUser.upsert.mockResolvedValue({ id: "user-2", email: "new@example.com" });
@@ -850,6 +873,39 @@ describe("addWorkspaceMember", () => {
       addWorkspaceMember("org", "ws", { email: "existing@example.com", role: "MEMBER" })
     ).rejects.toThrow("User is already a member of this workspace");
     expect(mockWorkspaceMember.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a workspace MEMBER", async () => {
+    mockCallerRoles("MEMBER");
+
+    await expect(
+      addWorkspaceMember("org", "ws", { email: "new@example.com", role: "ADMIN" })
+    ).rejects.toThrow("Forbidden: workspace admin required");
+    expect(mockWorkspaceMember.create).not.toHaveBeenCalled();
+    expect(mockUser.upsert).not.toHaveBeenCalled();
+  });
+
+  it("allows an org OWNER who is only a workspace MEMBER", async () => {
+    mockCallerRoles("MEMBER", "OWNER");
+    mockUser.upsert.mockResolvedValue({ id: "user-2", email: "new@example.com" });
+
+    await addWorkspaceMember("org", "ws", { email: "new@example.com", role: "MEMBER" });
+
+    expect(mockWorkspaceMember.create).toHaveBeenCalled();
+  });
+
+  it("normalizes an out-of-domain role before writing it", async () => {
+    mockUser.upsert.mockResolvedValue({ id: "user-2", email: "new@example.com" });
+
+    await addWorkspaceMember("org", "ws", {
+      email: "new@example.com",
+      // Server actions receive untrusted input at runtime, whatever the type says.
+      role: "OWNER" as unknown as "ADMIN",
+    });
+
+    expect(mockWorkspaceMember.create).toHaveBeenCalledWith({
+      data: { workspaceId: "ws-1", userId: "user-2", role: "ADMIN" },
+    });
   });
 
   it("rejects an invalid email", async () => {
@@ -900,7 +956,7 @@ describe("updateWorkspaceMemberRole", () => {
 
   it("blocks demoting the last remaining admin", async () => {
     mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "ADMIN" });
-    mockWorkspaceMember.count.mockResolvedValue(1);
+    mockWorkspaceMember.findMany.mockResolvedValue([{ role: "ADMIN" }, { role: "MEMBER" }]);
 
     await expect(
       updateWorkspaceMemberRole("org", "ws", "ws-member-1", "MEMBER")
@@ -910,7 +966,7 @@ describe("updateWorkspaceMemberRole", () => {
 
   it("allows demoting an admin when another admin remains", async () => {
     mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "ADMIN" });
-    mockWorkspaceMember.count.mockResolvedValue(2);
+    mockWorkspaceMember.findMany.mockResolvedValue([{ role: "ADMIN" }, { role: "ADMIN" }]);
 
     await updateWorkspaceMemberRole("org", "ws", "ws-member-1", "MEMBER");
 
@@ -918,6 +974,48 @@ describe("updateWorkspaceMemberRole", () => {
       where: { id: "ws-member-1" },
       data: { role: "MEMBER" },
     });
+  });
+
+  it("counts a legacy OWNER row as an admin when guarding the last admin", async () => {
+    // An exact SQL match on "ADMIN" would not see the OWNER row, would tally
+    // one admin instead of two, and would wrongly block this demotion.
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "ADMIN" });
+    mockWorkspaceMember.findMany.mockResolvedValue([{ role: "ADMIN" }, { role: "OWNER" }]);
+
+    await updateWorkspaceMemberRole("org", "ws", "ws-member-1", "MEMBER");
+
+    expect(mockWorkspaceMember.update).toHaveBeenCalled();
+  });
+
+  it("treats the member being demoted as an admin even when stored as OWNER", async () => {
+    // The inverse: the guard must fire for a legacy OWNER row too.
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "OWNER" });
+    mockWorkspaceMember.findMany.mockResolvedValue([{ role: "OWNER" }, { role: "MEMBER" }]);
+
+    await expect(
+      updateWorkspaceMemberRole("org", "ws", "ws-member-1", "MEMBER")
+    ).rejects.toThrow("Cannot demote the last remaining admin");
+    expect(mockWorkspaceMember.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a workspace MEMBER", async () => {
+    // Before this gate any member could promote themselves to ADMIN.
+    mockCallerRoles("MEMBER");
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "MEMBER" });
+
+    await expect(
+      updateWorkspaceMemberRole("org", "ws", "ws-member-1", "ADMIN")
+    ).rejects.toThrow("Forbidden: workspace admin required");
+    expect(mockWorkspaceMember.update).not.toHaveBeenCalled();
+  });
+
+  it("allows an org OWNER who is only a workspace MEMBER", async () => {
+    mockCallerRoles("MEMBER", "OWNER");
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "MEMBER" });
+
+    await updateWorkspaceMemberRole("org", "ws", "ws-member-1", "ADMIN");
+
+    expect(mockWorkspaceMember.update).toHaveBeenCalled();
   });
 
   it("throws Unauthorized when session is missing", async () => {
@@ -931,19 +1029,17 @@ describe("updateWorkspaceMemberRole", () => {
 // ─── removeWorkspaceMember ──────────────────────────────────────────────────────
 
 describe("removeWorkspaceMember", () => {
-  // count() is called twice in the ADMIN path (total, then admin-scoped) and
-  // once in the non-admin path (total only). Keying the mock off the `where`
-  // clause — rather than call order via mockResolvedValueOnce — keeps these
-  // tests independent of one another regardless of execution order.
-  function mockCounts(total: number, admins: number) {
-    mockWorkspaceMember.count.mockImplementation(({ where }: { where: { role?: string } }) =>
-      Promise.resolve(where.role === "ADMIN" ? admins : total)
-    );
+  // count() now only answers the total-members question. The admin tally is
+  // computed in application code from findMany(), so that a legacy "OWNER" row
+  // is counted as the administrator it actually is.
+  function mockCounts(total: number, roles: string[] = ["ADMIN", "ADMIN"]) {
+    mockWorkspaceMember.count.mockResolvedValue(total);
+    mockWorkspaceMember.findMany.mockResolvedValue(roles.map((role) => ({ role })));
   }
 
   it("removes the member", async () => {
     mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "MEMBER" });
-    mockCounts(2, 1);
+    mockCounts(2, ["ADMIN", "MEMBER"]);
 
     await removeWorkspaceMember("org", "ws", "ws-member-1");
 
@@ -961,7 +1057,7 @@ describe("removeWorkspaceMember", () => {
 
   it("blocks removing the last member of a workspace", async () => {
     mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "MEMBER" });
-    mockCounts(1, 0);
+    mockCounts(1, ["MEMBER"]);
 
     await expect(removeWorkspaceMember("org", "ws", "ws-member-1")).rejects.toThrow(
       "Cannot remove the last member of a workspace"
@@ -971,7 +1067,7 @@ describe("removeWorkspaceMember", () => {
 
   it("blocks removing the last remaining admin", async () => {
     mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "ADMIN" });
-    mockCounts(2, 1);
+    mockCounts(2, ["ADMIN", "MEMBER"]);
 
     await expect(removeWorkspaceMember("org", "ws", "ws-member-1")).rejects.toThrow(
       "Cannot remove the last remaining admin"
@@ -981,11 +1077,41 @@ describe("removeWorkspaceMember", () => {
 
   it("allows removing an admin when another admin remains", async () => {
     mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "ADMIN" });
-    mockCounts(3, 2);
+    mockCounts(3, ["ADMIN", "ADMIN", "MEMBER"]);
 
     await removeWorkspaceMember("org", "ws", "ws-member-1");
 
     expect(mockWorkspaceMember.delete).toHaveBeenCalledWith({ where: { id: "ws-member-1" } });
+  });
+
+  it("counts a legacy OWNER row as an admin when guarding the last admin", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "ADMIN" });
+    mockCounts(3, ["ADMIN", "OWNER", "MEMBER"]);
+
+    await removeWorkspaceMember("org", "ws", "ws-member-1");
+
+    expect(mockWorkspaceMember.delete).toHaveBeenCalled();
+  });
+
+  it("rejects a workspace MEMBER", async () => {
+    mockCallerRoles("MEMBER");
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "MEMBER" });
+    mockCounts(3, ["ADMIN", "ADMIN"]);
+
+    await expect(removeWorkspaceMember("org", "ws", "ws-member-1")).rejects.toThrow(
+      "Forbidden: workspace admin required"
+    );
+    expect(mockWorkspaceMember.delete).not.toHaveBeenCalled();
+  });
+
+  it("allows an org OWNER who is only a workspace MEMBER", async () => {
+    mockCallerRoles("MEMBER", "OWNER");
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "MEMBER" });
+    mockCounts(3, ["ADMIN", "ADMIN"]);
+
+    await removeWorkspaceMember("org", "ws", "ws-member-1");
+
+    expect(mockWorkspaceMember.delete).toHaveBeenCalled();
   });
 
   it("throws Unauthorized when session is missing", async () => {
@@ -1002,11 +1128,19 @@ describe("removeWorkspaceMember", () => {
 // includes the caller's own membership role.
 
 describe("setActiveScoringModel", () => {
-  function mockAdminWorkspace(role: "ADMIN" | "MEMBER" = "ADMIN") {
+  // The stored role is a bare VarChar with no DB enum, so the fixture has to be
+  // able to express values outside WorkspaceRole -- that is exactly the bug
+  // being guarded against here. orgRole covers the separate rule that an org
+  // OWNER/ADMIN is a workspace admin everywhere in their org.
+  function mockAdminWorkspace(
+    role: "OWNER" | "ADMIN" | "MEMBER" | "owner" = "ADMIN",
+    orgRole: "OWNER" | "ADMIN" | "MEMBER" = "MEMBER"
+  ) {
     mockWorkspace.findFirst.mockResolvedValue({
       id: "ws-1",
       organizationId: "org-1",
       members: [{ role }],
+      organization: { members: [{ role: orgRole }] },
     });
   }
 
@@ -1032,6 +1166,38 @@ describe("setActiveScoringModel", () => {
       create: { workspaceId: "ws-1", scoringModelId: null },
       update: { scoringModelId: null, updatedAt: expect.any(Date) },
     });
+  });
+
+  it("lets a member stored with the invalid OWNER workspace role set the model", async () => {
+    // This is the reported failure. Workspaces created through the MCP
+    // create_workspace tool stored their creator as "OWNER", which is an
+    // OrgRole and not a WorkspaceRole, and setActiveScoringModel then threw
+    // "Forbidden: workspace admin required" at the person who owned the org.
+    mockAdminWorkspace("OWNER");
+
+    await setActiveScoringModel("org", "ws", "model-1");
+
+    expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-1" },
+      create: { workspaceId: "ws-1", scoringModelId: "model-1" },
+      update: { scoringModelId: "model-1", updatedAt: expect.any(Date) },
+    });
+  });
+
+  it("lets a member stored with a lowercase owner workspace role set the model", async () => {
+    mockAdminWorkspace("owner");
+
+    await setActiveScoringModel("org", "ws", "model-1");
+
+    expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalled();
+  });
+
+  it("lets an org OWNER who is only a workspace MEMBER set the model", async () => {
+    mockAdminWorkspace("MEMBER", "OWNER");
+
+    await setActiveScoringModel("org", "ws", "model-1");
+
+    expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalled();
   });
 
   it("throws Unauthorized when session is missing", async () => {
