@@ -10,6 +10,7 @@ import { EntityCard } from "@/components/patterns/entity-card";
 import { EvidenceBadge } from "@/components/discovery/evidence-badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { SOLUTION_STATUS } from "@/lib/solution-status";
 import {
   updateSolutionStatus,
   archiveSolution,
@@ -21,21 +22,11 @@ import type { SolutionStatus } from "@/lib/types";
 // OpportunityCard uses between STATUS_ORDER moves and its Archive action.
 const STATUS_ORDER: SolutionStatus[] = ["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED"];
 
-const STATUS_BADGE_CLASSES: Record<SolutionStatus, string> = {
-  IDEA: "bg-secondary text-secondary-foreground",
-  VALIDATED: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-  IN_DELIVERY: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-  SHIPPED: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-  KILLED: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-};
-
-const STATUS_LABELS: Record<SolutionStatus, string> = {
-  IDEA: "Idea",
-  VALIDATED: "Validated",
-  IN_DELIVERY: "In Delivery",
-  SHIPPED: "Shipped",
-  KILLED: "Killed",
-};
+// Badge classes and labels now come from lib/solution-status.ts (used directly
+// at the call sites below) so the card, the solution panel, and the opportunity
+// panel can't drift apart again. Note this changes the card's IN_DELIVERY label
+// from "In Delivery" to "In delivery", matching the panels — which is what the
+// e2e specs already assert on.
 
 /**
  * Leaner than before: assumptions/comments/evidence are no longer read in
@@ -118,16 +109,16 @@ export function SolutionCard({ solution, revalidatePathStr }: Props) {
         }
         status={
           <span
-            className={`inline-flex h-5 items-center rounded px-1.5 text-xs font-medium ${STATUS_BADGE_CLASSES[solution.status]}`}
+            className={`inline-flex h-5 items-center rounded px-1.5 text-xs font-medium ${SOLUTION_STATUS[solution.status].className}`}
           >
-            {STATUS_LABELS[solution.status]}
+            {SOLUTION_STATUS[solution.status].label}
           </span>
         }
         actions={
           <CardMenu
             items={[
               ...STATUS_ORDER.filter((s) => s !== solution.status).map((s) => ({
-                label: `Move to ${STATUS_LABELS[s]}`,
+                label: `Move to ${SOLUTION_STATUS[s].label}`,
                 onClick: () => moveStatus(s),
                 disabled: isPending,
               })),

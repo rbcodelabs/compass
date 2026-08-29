@@ -30,6 +30,11 @@ import { SolutionPlanDiscussion } from "./solution-plan-discussion";
 import { SolutionArtifacts, type SolutionArtifact } from "./solution-artifacts";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { SolutionComment, Horizon } from "@/lib/types";
+import {
+  SOLUTION_STATUS,
+  SOLUTION_STATUS_ORDER,
+  solutionStatusBadge,
+} from "@/lib/solution-status";
 
 type SolutionData = {
   id: string;
@@ -45,16 +50,11 @@ type SolutionData = {
   availableArtifacts: SolutionArtifact[];
 };
 
-const STATUS: Record<string, { label: string; className: string }> = {
-  IDEA: { label: "Idea", className: "bg-slate-100 text-slate-600" },
-  VALIDATED: { label: "Validated", className: "bg-green-100 text-green-700" },
-  IN_DELIVERY: { label: "In delivery", className: "bg-blue-100 text-blue-700" },
-  SHIPPED: { label: "Shipped", className: "bg-green-100 text-green-700" },
-  KILLED: { label: "Killed", className: "bg-red-100 text-red-700" },
-  SELECTED: { label: "Selected", className: "bg-blue-100 text-blue-700" },
-};
-
-const STATUS_ORDER = ["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"] as const;
+// Presentation lives in lib/solution-status.ts — see the note there on the
+// three drifted copies this replaced (this one had SHIPPED and VALIDATED
+// rendering the same green, and no dark-mode variants at all).
+const STATUS = SOLUTION_STATUS;
+const STATUS_ORDER = SOLUTION_STATUS_ORDER;
 
 export function SolutionPanel({
   id,
@@ -111,7 +111,7 @@ export function SolutionPanel({
 
       <PanelTitle
         title={data.title}
-        status={{ value: data.status, ...(STATUS[data.status] ?? { label: data.status }) }}
+        status={{ value: data.status, ...solutionStatusBadge(data.status) }}
         edit={edit}
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
       />
