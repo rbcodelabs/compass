@@ -262,7 +262,10 @@ export function RelationList({
           key={`${item.type}:${item.id}`}
           type="button"
           onClick={() => openPanel(item.type, item.id)}
-          className="group flex items-center gap-2 rounded-md -mx-2 px-2 py-1.5 text-left hover:bg-muted transition-colors"
+          /* items-start, not items-center: relation titles routinely wrap to
+             two or three lines at panel width, and centering left the badge
+             and chevron floating against the middle of the text block. */
+          className="group flex items-start gap-2 rounded-md -mx-2 px-2 py-1.5 text-left hover:bg-muted transition-colors"
         >
           {item.badge && (
             <Badge
@@ -271,7 +274,9 @@ export function RelationList({
               {item.badge.label}
             </Badge>
           )}
-          <span className="text-sm leading-snug flex-1">{item.title}</span>
+          {/* min-w-0 so a long title wraps inside the flex row instead of
+              forcing the row wider than the panel. */}
+          <span className="min-w-0 flex-1 text-sm leading-snug">{item.title}</span>
           <ChevronRightIcon className="size-4 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0" />
         </button>
       ))}
