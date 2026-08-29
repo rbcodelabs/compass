@@ -46,21 +46,34 @@ test.describe("Assumption ↔ Experiment linking", () => {
       await page.getByRole("button", { name: "Add Solution" }).last().click();
       await expect(page.getByText(solTitle)).toBeVisible({ timeout: 10_000 });
 
-      // ── 3. Expand the solution card and add an assumption ─────────────────
-      await page.getByRole("button", { name: "Expand" }).click();
-      await page.getByRole("button", { name: "Add Assumption" }).click();
-      await page.getByPlaceholder("Assumption title").fill(assumptionTitle);
-      await page.getByRole("button", { name: "Add", exact: true }).click();
+      // ── 3. Open the solution's sidebar panel and add an assumption ─────────
+      // Assumption management moved off the (now-compact, non-expanding)
+      // solution card into the Solution panel — see solution-panel.tsx.
+      await page.getByRole("button", { name: solTitle, exact: true }).click();
+      const panel = page.locator('[data-slot="sheet-content"]');
+      await expect(panel).toBeVisible();
+      await panel.getByRole("button", { name: "Add Assumption" }).click();
+      await panel.getByPlaceholder("Assumption title").fill(assumptionTitle);
+      await panel.getByRole("button", { name: "Add", exact: true }).click();
 
-      // revalidatePath doesn't reliably refresh in-place client state in dev
-      // mode (same caveat as discovery-roadmap.spec.ts) — hard reload to see
-      // the server-rendered assumption, then re-expand (expanded state resets).
-      await page.reload();
-      await page.waitForLoadState("networkidle");
-      await page.getByRole("button", { name: "Expand" }).click();
-      await expect(page.getByText(assumptionTitle).first()).toBeVisible({ timeout: 10_000 });
+      // The panel refetches its own data after adding (no reload needed), so
+      // the new assumption shows up in place.
+      await expect(panel.getByText(assumptionTitle).first()).toBeVisible({ timeout: 10_000 });
 
       // ── 4. Switch to the OST Tree tab ──────────────────────────────────────
+      // The OST Tree tab reads page-level (server-rendered) data captured at
+      // the initial page load, not the panel's client-fetched data — reload
+      // so it reflects the assumption just added via the panel.
+      // Close the panel FIRST: panel-context.tsx makes the URL the single
+      // source of truth for what's open, so reloading with the panel param
+      // still on the URL just reopens the (modal) sheet, which then covers
+      // the tabs underneath. Esc closes via router.replace(), dropping the
+      // param, so the subsequent reload comes back with no panel open.
+      await page.keyboard.press("Escape");
+      await expect(panel).not.toBeVisible({ timeout: 10_000 });
+
+      await page.reload();
+      await page.waitForLoadState("networkidle");
       await page.getByRole("tab", { name: "OST Tree" }).click();
       await expect(page.getByLabel("OST Tree").getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
 

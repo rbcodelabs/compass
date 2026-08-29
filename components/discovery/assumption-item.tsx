@@ -56,9 +56,13 @@ type Props = {
   assumption: AssumptionItemData;
   revalidatePathStr: string;
   workspaceId: string;
+  /** Called after a status advance or delete completes — lets a client-fetched
+   * container (e.g. the solution sidebar panel) refetch, since revalidatePath
+   * alone only refreshes server-rendered pages, not panel data. */
+  onChanged?: () => void;
 };
 
-export function AssumptionItem({ assumption, revalidatePathStr, workspaceId }: Props) {
+export function AssumptionItem({ assumption, revalidatePathStr, workspaceId, onChanged }: Props) {
   const [isPending, startTransition] = useTransition();
   const currentIndex = STATUS_CYCLE.indexOf(assumption.status);
   const nextStatus = STATUS_CYCLE[(currentIndex + 1) % STATUS_CYCLE.length];
@@ -82,12 +86,14 @@ export function AssumptionItem({ assumption, revalidatePathStr, workspaceId }: P
   function advanceStatus() {
     startTransition(async () => {
       await updateAssumptionStatus(assumption.id, nextStatus, revalidatePathStr);
+      onChanged?.();
     });
   }
 
   function handleDelete() {
     startTransition(async () => {
       await deleteAssumption(assumption.id, revalidatePathStr);
+      onChanged?.();
     });
   }
 

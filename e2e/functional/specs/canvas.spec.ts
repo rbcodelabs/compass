@@ -138,28 +138,40 @@ test.describe("Canvas", () => {
     await page.getByRole("button", { name: "Add Solution" }).last().click();
     await expect(page.getByText(solTitle)).toBeVisible({ timeout: 10_000 });
 
-    await page.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
-    await page.getByRole("option", { name: "In Delivery" }).click();
-    await expect(
-      page.locator('[role="combobox"]').filter({ hasText: /Idea|In Delivery/ })
-    ).not.toBeDisabled({ timeout: 15_000 });
+    // Status lives in the solution's sidebar panel now — the Solutions-tab card
+    // is a compact, non-expanding summary row whose title opens the panel.
+    await page.getByRole("button", { name: solTitle, exact: true }).click();
+    const solutionPanel = page.locator('[data-slot="sheet-content"]');
+    await expect(solutionPanel).toBeVisible();
 
-    await page.reload();
-    await page.waitForLoadState("domcontentloaded");
+    await solutionPanel.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
+    // base-ui renders the listbox in a portal the panel's Sheet stacks over, so
+    // a pointer click on the option is intercepted by the overlay — activate by
+    // keyboard (same workaround as launch-tiers.spec). Note the panel's label is
+    // "In delivery" (lowercase d — see the STATUS map in solution-panel.tsx).
+    const inDeliveryOption = page.getByRole("option", { name: "In delivery" });
+    await expect(inDeliveryOption).toBeVisible({ timeout: 10_000 });
+    await inDeliveryOption.press("Enter");
     await expect(
-      page.locator('[role="combobox"]').filter({ hasText: "In Delivery" })
-    ).toBeVisible({ timeout: 10_000 });
+      solutionPanel.locator('[role="combobox"]').filter({ hasText: "In delivery" })
+    ).toBeVisible({ timeout: 15_000 });
 
-    // ── 5. Expand the solution, add an Assumption ────────────────────────────
-    await page.getByRole("button", { name: "Expand" }).click();
-    await page.getByRole("button", { name: "Add Assumption" }).click();
-    await page.getByPlaceholder("Assumption title").fill(assumptionTitle);
-    await page.getByRole("button", { name: "Add", exact: true }).click();
+    // ── 5. Add an Assumption (also panel-resident now) ───────────────────────
+    await solutionPanel.getByRole("button", { name: "Add Assumption" }).click();
+    await solutionPanel.getByPlaceholder("Assumption title").fill(assumptionTitle);
+    await solutionPanel.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(solutionPanel.getByText(assumptionTitle).first()).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // Close the panel before reloading: panel-context.tsx makes the URL the
+    // single source of truth for what's open, so reloading with the panel param
+    // still set just reopens the (modal) sheet over the tabs underneath.
+    await page.keyboard.press("Escape");
+    await expect(solutionPanel).not.toBeVisible({ timeout: 10_000 });
 
     await page.reload();
     await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: "Expand" }).click();
-    await expect(page.getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
 
     // ── 6. Create an Experiment via the OST tree's "Test this assumption" CTA ─
     // Scoped to the "OST Tree" tab panel specifically: Base UI's Tabs keeps
@@ -191,12 +203,21 @@ test.describe("Canvas", () => {
     await page.getByRole("button", { name: oppTitle, exact: true }).click();
     await page.getByRole("link", { name: "Open full page" }).click();
     await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: "Expand" }).click();
-    await page.getByRole("button", { name: /Promote to Roadmap/i }).click();
-    await page.getByRole("button", { name: "→ Roadmap" }).click();
-    await expect(page.getByRole("button", { name: /Promote to Roadmap/i })).not.toBeVisible({
-      timeout: 15_000,
-    });
+    // Promote-to-roadmap moved into the solution's sidebar panel along with
+    // status (see solution-panel.tsx) — open the panel rather than expanding
+    // the now-compact card.
+    await page.getByRole("button", { name: solTitle, exact: true }).click();
+    const promotePanel = page.locator('[data-slot="sheet-content"]');
+    await expect(promotePanel).toBeVisible();
+    await promotePanel.getByRole("button", { name: /Promote to Roadmap/i }).click();
+    await promotePanel.getByRole("button", { name: "→ Roadmap" }).click();
+    await expect(
+      promotePanel.getByRole("button", { name: /Promote to Roadmap/i })
+    ).not.toBeVisible({ timeout: 15_000 });
+
+    // Close the panel so it doesn't cover the Canvas navigation below.
+    await page.keyboard.press("Escape");
+    await expect(promotePanel).not.toBeVisible({ timeout: 10_000 });
 
     // ── 8. Navigate to Canvas ─────────────────────────────────────────────────
     await page.goto(`${base}/canvas`);
