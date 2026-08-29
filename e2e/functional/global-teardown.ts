@@ -108,6 +108,36 @@ export default async function globalTeardown() {
     for (const { id: wsId } of wsRows) {
       // ── Delete in strict dependency order (no DB-level cascades) ──────────
 
+      // research_turns → research_sessions / research_syntheses → research_studies
+      await pool.query(
+        `DELETE FROM "${S}".research_turns
+         WHERE session_id IN (
+           SELECT id FROM "${S}".research_sessions
+           WHERE study_id IN (
+             SELECT id FROM "${S}".research_studies WHERE workspace_id = $1
+           )
+         )`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".research_sessions
+         WHERE study_id IN (
+           SELECT id FROM "${S}".research_studies WHERE workspace_id = $1
+         )`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".research_syntheses
+         WHERE study_id IN (
+           SELECT id FROM "${S}".research_studies WHERE workspace_id = $1
+         )`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".research_studies WHERE workspace_id = $1`,
+        [wsId]
+      );
+
       // check_ins → key_results → objectives → okr_cycles
       await pool.query(
         `DELETE FROM "${S}".check_ins
