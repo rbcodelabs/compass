@@ -11,8 +11,9 @@ export function createResearchToken() {
   return { token, tokenHash: hashResearchToken(token) }
 }
 
-export function parseResearchGuide(value: string): ResearchGuideItem[] {
-  return value.split("\n").map((text) => text.trim()).filter(Boolean).map((text, index) => ({ id: String(index + 1), text }))
+export function parseResearchGuide(value: string | string[]): ResearchGuideItem[] {
+  const values = Array.isArray(value) ? value : [value]
+  return values.flatMap((entry) => entry.split("\n")).map((text) => text.trim()).filter(Boolean).map((text, index) => ({ id: String(index + 1), text }))
 }
 
 export function buildResearchPrompt(guide: ResearchGuideItem[], targetMinutes: number) {

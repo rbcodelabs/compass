@@ -6,7 +6,9 @@ test.describe("Capture — research study", () => {
     await page.goto(`${base}/capture/new`)
     await page.getByLabel("Study name").fill(`E2E interview ${Date.now()}`)
     await page.getByLabel("What are you trying to learn?").fill("How customers currently plan their work")
-    await page.getByLabel("Discussion guide").fill("Tell me about the last time you planned your week.\nWhat was difficult?")
+    await page.getByRole("textbox", { name: "Question 1", exact: true }).fill("Tell me about the last time you planned your week.")
+    await page.getByRole("button", { name: "Add question" }).click()
+    await page.getByRole("textbox", { name: "Question 2", exact: true }).fill("What was difficult?")
     await page.getByRole("button", { name: "Create study" }).click()
 
     await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)

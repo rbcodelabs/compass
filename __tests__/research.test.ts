@@ -18,6 +18,13 @@ describe("research capture helpers", () => {
     ])
   })
 
+  it("preserves the order of individually submitted guide questions", () => {
+    expect(parseResearchGuide([" First question ", "Second question"])).toEqual([
+      { id: "1", text: "First question" },
+      { id: "2", text: "Second question" },
+    ])
+  })
+
   it("builds a neutral one-question-at-a-time interview prompt", () => {
     const prompt = buildResearchPrompt([{ id: "1", text: "Tell me about the last time." }], 15)
     expect(prompt).toContain("Tell me about the last time.")

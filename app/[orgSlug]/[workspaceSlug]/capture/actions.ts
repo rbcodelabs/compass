@@ -13,7 +13,7 @@ export async function createResearchStudy(orgSlug: string, workspaceSlug: string
   if (!workspace) throw new Error("Workspace not found")
   const name = String(formData.get("name") ?? "").trim()
   const goal = String(formData.get("goal") ?? "").trim()
-  const guide = parseResearchGuide(String(formData.get("guide") ?? ""))
+  const guide = parseResearchGuide(formData.getAll("guide").map(String))
   if (!name || !goal || guide.length === 0) throw new Error("Name, goal, and at least one question are required")
   const { token, tokenHash } = createResearchToken()
   const study = await prisma.researchStudy.create({ data: { workspaceId: workspace.id, name, goal, guide: JSON.stringify(guide), targetMinutes: 15, status: "ACTIVE", shareTokenHash: tokenHash, shareExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), createdById: session.user.id, updatedById: session.user.id } })
