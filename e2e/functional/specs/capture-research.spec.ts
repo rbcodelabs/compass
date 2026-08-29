@@ -18,10 +18,21 @@ test.describe("Capture — research study", () => {
     const anonymous = await browser.newContext({ storageState: undefined })
     const participant = await anonymous.newPage()
     await participant.setViewportSize({ width: 390, height: 844 })
+    await participant.route("**/api/research/respond", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ message: "What made that difficult for you?" }),
+      })
+    })
     await participant.goto(shareUrl.replace(/^https?:\/\/[^/]+/, baseURL!))
     await expect(participant.getByRole("heading", { name: /E2E interview/ })).toBeVisible()
     await participant.getByRole("button", { name: "Start interview" }).click()
     await expect(participant.getByText("Tell me about the last time you planned your week.")).toBeVisible()
+    await participant.getByRole("textbox", { name: "Your response" }).fill("I use a spreadsheet every Monday.")
+    await participant.getByRole("button", { name: "Send" }).click()
+    await expect(participant.getByText("Compass is listening…")).toBeVisible()
+    await expect(participant.getByText("What made that difficult for you?")).toBeVisible()
     expect(await participant.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await anonymous.close()
   })

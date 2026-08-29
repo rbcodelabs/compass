@@ -26,9 +26,16 @@ describe("research capture helpers", () => {
   })
 
   it("builds a neutral one-question-at-a-time interview prompt", () => {
-    const prompt = buildResearchPrompt([{ id: "1", text: "Tell me about the last time." }], 15)
+    const prompt = buildResearchPrompt(
+      [{ id: "1", text: "Tell me about the last time." }],
+      15,
+      "Understand planning habits",
+      14 * 60,
+    )
     expect(prompt).toContain("Tell me about the last time.")
-    expect(prompt).toContain("Ask one question at a time")
+    expect(prompt).toContain("Ask exactly one question at a time")
+    expect(prompt).toContain("Understand planning habits")
+    expect(prompt).toContain("About 1 minute remain")
     expect(prompt).not.toContain("Helio")
   })
 })
