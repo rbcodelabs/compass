@@ -1,24 +1,9 @@
 import { createHash, randomUUID } from "node:crypto"
 import getPrisma from "@/lib/db"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
+export { ARTIFACT_CSP, buildSandboxedHtml } from "@/lib/artifact-preview-html"
 
 export const MAX_ARTIFACT_HTML_BYTES = 2 * 1024 * 1024
-export const ARTIFACT_CSP = [
-  "default-src 'none'",
-  "script-src 'unsafe-inline' blob:",
-  "style-src 'unsafe-inline'",
-  "img-src data: blob:",
-  "font-src data: blob:",
-  "media-src data: blob:",
-  "connect-src 'none'",
-  "form-action 'none'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "frame-src 'none'",
-  "worker-src 'none'",
-  "manifest-src 'none'",
-].join("; ")
-
 type Source = "UI" | "MCP"
 
 export function validateArtifactTitle(value: string): string {
@@ -56,11 +41,6 @@ export function validateExternalUrl(value: string): string {
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("External artifact URL must use http or https")
   if (url.username || url.password) throw new Error("External artifact URL must not contain credentials")
   return url.toString().replace(/\/$/, value.endsWith("/") ? "/" : "")
-}
-
-export function buildSandboxedHtml(html: string): string {
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}"><meta name="referrer" content="no-referrer">`
-  return `${meta}${html}`
 }
 
 function safeFilename(filename: string): string {
