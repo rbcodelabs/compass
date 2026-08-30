@@ -16,6 +16,7 @@ import {
   COMPASS_META_ORG_SLUG,
   COMPASS_META_WORKSPACE_SLUG,
 } from "./fixtures/seed-e2e";
+import { readRunToken, clearRunToken, orgNameForToken } from "./fixtures/run-token";
 
 const S = process.env.PGSCHEMA
   ? `${process.env.PGSCHEMA}_dev`
@@ -41,6 +42,35 @@ export default async function globalTeardown() {
 
   const pool = new pg.Pool({ connectionString });
   try {
+    // ── Ownership check ───────────────────────────────────────────────────
+    // Everything below deletes by slug (the e2e org) or by an `E2E %` title
+    // prefix (the meta workspace's feedback rows). Neither is specific to this
+    // run, so a teardown belonging to an interrupted run would happily destroy
+    // a *live* run's data — which is exactly what happened three times during
+    // #120/#121. Bail out unless the org still carries this run's stamp.
+    const runToken = readRunToken();
+    if (runToken) {
+      const { rows: ownerRows } = await pool.query<{ name: string }>(
+        `SELECT name FROM "${S}".organizations WHERE slug = $1`,
+        [E2E_ORG_SLUG]
+      );
+      const actual = ownerRows[0]?.name;
+      const expected = orgNameForToken(runToken);
+      if (actual && actual !== expected) {
+        console.warn(
+          `[e2e teardown] Refusing to clean up: the e2e org is stamped ` +
+            `"${actual}" but this run holds "${expected}". Another run has ` +
+            `claimed it since — deleting now would destroy live data.`
+        );
+        return;
+      }
+    } else {
+      console.warn(
+        "[e2e teardown] No run token found — cleaning up by slug (legacy " +
+          "behaviour). If a concurrent run is active this may delete its data."
+      );
+    }
+
     // The "Send Feedback about Compass" target workspace (rbcodelabs/compass)
     // persists across runs like its production counterpart — only the test
     // feedback rows the global-feedback spec creates are cleaned up here
@@ -65,6 +95,7 @@ export default async function globalTeardown() {
     );
     if (!rows[0]) {
       console.log("[e2e teardown] e2e org not found — nothing to clean");
+      clearRunToken();
       return;
     }
     const orgId = rows[0].id;
@@ -248,6 +279,7 @@ export default async function globalTeardown() {
       [orgId]
     );
 
+    clearRunToken();
     console.log("[e2e teardown] Cleaned up e2e test data ✓");
   } finally {
     await pool.end();

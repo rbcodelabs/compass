@@ -6,8 +6,10 @@
  * tests have a stable, isolated starting point.
  */
 import path from "path";
+import crypto from "node:crypto";
 import pg from "pg";
 import { seedE2E } from "./fixtures/seed-e2e";
+import { setRunToken } from "./fixtures/run-token";
 
 export default async function globalSetup() {
   // Load .env.local so DATABASE_URL is available to globalSetup
@@ -26,10 +28,16 @@ export default async function globalSetup() {
     );
   }
 
+  // Claim the shared e2e org for this run. The seed is upsert-only, so an
+  // overlapping run reuses the same row — stamping it here is what lets
+  // teardown tell "my data" from "someone else's live data".
+  const runToken = crypto.randomUUID().slice(0, 8);
+  setRunToken(runToken);
+
   const pool = new pg.Pool({ connectionString });
   try {
-    await seedE2E(pool);
-    console.log("[e2e globalSetup] Seed complete ✓");
+    await seedE2E(pool, runToken);
+    console.log(`[e2e globalSetup] Seed complete ✓ (run ${runToken})`);
   } finally {
     await pool.end();
   }
