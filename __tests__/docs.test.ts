@@ -23,5 +23,21 @@ describe("getDoc", () => {
     expect(doc).not.toBeNull();
     expect(doc!.html).toContain("Accept: application/json, text/event-stream");
     expect(doc!.html).toContain("Content-Type: application/json");
+    expect(doc!.html).toContain("Every <strong>POST</strong> request");
+    expect(doc!.html).toContain("returns HTTP 406");
+    expect(doc!.html).toContain("returns HTTP 415");
+    expect(doc!.html).toContain("protocolVersion");
+    expect(doc!.html).toContain("2025-11-25");
+  });
+
+  it("configures mcp-remote to send the workspace API key", async () => {
+    const doc = await getDoc("09-mcp-api");
+    expect(doc).not.toBeNull();
+    expect(doc!.html).toContain('"--header"');
+    expect(doc!.html).toContain("Authorization:${MCP_AUTH_HEADER}");
+    expect(doc!.html).toContain('"MCP_AUTH_HEADER": "Bearer compass_your_api_key"');
+    expect(doc!.html).not.toContain(
+      '"MCP_AUTH_HEADER": "Authorization: Bearer compass_your_api_key"',
+    );
   });
 });
