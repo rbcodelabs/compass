@@ -17,4 +17,11 @@ describe("getDoc", () => {
     expect(doc!.html).toContain("add_to_roadmap");
     expect(doc!.html).toContain("list_roadmap_items");
   });
+
+  it("documents the required Streamable HTTP Accept header", async () => {
+    const doc = await getDoc("09-mcp-api");
+    expect(doc).not.toBeNull();
+    expect(doc!.html).toContain("Accept: application/json, text/event-stream");
+    expect(doc!.html).toContain("Content-Type: application/json");
+  });
 });
