@@ -19,6 +19,8 @@ const models = {
   roadmapItem: { findFirst: vi.fn() },
   task: { findMany: vi.fn() },
   workspaceMember: { findMany: vi.fn() },
+  artifactLink: { findMany: vi.fn() },
+  artifact: { findMany: vi.fn() },
   feedbackItem: { findFirst: vi.fn() },
 };
 
@@ -38,7 +40,7 @@ const ID = "ent-1";
 // scopes it to a workspace (this is the IDOR defense — assert it precisely).
 const CASES: Array<{
   type: EntityType;
-  model: Exclude<keyof typeof models, "task" | "workspaceMember">;
+  model: Exclude<keyof typeof models, "task" | "workspaceMember" | "artifact" | "artifactLink">;
   where: Record<string, unknown>;
 }> = [
   { type: "objective", model: "objective", where: { id: ID, cycle: { workspaceId: WS } } },
@@ -63,6 +65,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   models.task.findMany.mockResolvedValue([]);
   models.workspaceMember.findMany.mockResolvedValue([]);
+  models.artifactLink.findMany.mockResolvedValue([]);
+  models.artifact.findMany.mockResolvedValue([]);
 });
 
 describe("isEntityType", () => {

@@ -27,6 +27,7 @@ import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evid
 import type { AssumptionItemData } from "@/components/discovery/assumption-item";
 import { SolutionAssumptions } from "./solution-assumptions";
 import { SolutionPlanDiscussion } from "./solution-plan-discussion";
+import { SolutionArtifacts, type SolutionArtifact } from "./solution-artifacts";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { SolutionComment, Horizon } from "@/lib/types";
 import {
@@ -45,6 +46,8 @@ type SolutionData = {
   evidence: EvidenceListItem[];
   comments: SolutionComment[];
   roadmapItems: Array<{ id: string; title: string; horizon: string }>;
+  artifacts: SolutionArtifact[];
+  availableArtifacts: SolutionArtifact[];
 };
 
 // Presentation lives in lib/solution-status.ts — see the note there on the
@@ -182,6 +185,21 @@ export function SolutionPanel({
           onChanged={refresh}
         />
       </Section>
+
+      {data.opportunity && (
+        <Section label="Artifacts" count={data.artifacts.length}>
+          <SolutionArtifacts
+            solutionId={data.id}
+            workspaceId={data.opportunity.workspaceId}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            artifacts={data.artifacts}
+            availableArtifacts={data.availableArtifacts}
+            revalidatePathStr={revalidatePathStr}
+            onChanged={refresh}
+          />
+        </Section>
+      )}
     </PanelContainer>
   );
 }

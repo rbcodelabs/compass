@@ -10,6 +10,95 @@ import {
   setDocCommentStatusCore,
   deleteDocCommentCore,
 } from "@/lib/doc-comments";
+import { getArtifactStorage } from "@/lib/artifact-storage";
+import {
+  archiveArtifact as archiveArtifactCore,
+  createExternalArtifact,
+  createHtmlArtifact,
+  linkArtifactToSolution,
+  replaceExternalArtifactRevision,
+  replaceHtmlArtifactRevision,
+  unlinkArtifactFromSolution,
+  updateArtifactMetadata,
+  MAX_ARTIFACT_HTML_BYTES,
+} from "@/lib/artifacts";
+
+async function requireWorkspaceMember(workspaceId: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const workspace = await getPrisma().workspace.findFirst({
+    where: { id: workspaceId, members: { some: { userId: session.user.id } } },
+    select: { id: true },
+  });
+  if (!workspace) throw new Error("Workspace not found or access denied");
+  return session.user;
+}
+
+export async function createArtifact(workspaceId: string, formData: FormData, revalidatePathStr: string) {
+  const user = await requireWorkspaceMember(workspaceId);
+  const title = String(formData.get("title") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim() || null;
+  const sourceType = String(formData.get("sourceType") ?? "");
+  if (!title) throw new Error("Title is required");
+  const common = { workspaceId, title, description, createdById: user.id, source: "UI" as const };
+  const artifact = sourceType === "EXTERNAL_LINK"
+    ? await createExternalArtifact({ ...common, url: String(formData.get("url") ?? "") })
+    : await (async () => {
+        const file = formData.get("file");
+        if (!(file instanceof File)) throw new Error("HTML file is required");
+        if (file.size > MAX_ARTIFACT_HTML_BYTES) throw new Error("HTML file exceeds the 2 MB size limit");
+        return createHtmlArtifact({
+          ...common, filename: file.name, mimeType: file.type,
+          bytes: new Uint8Array(await file.arrayBuffer()),
+        }, getArtifactStorage());
+      })();
+  revalidatePath(revalidatePathStr);
+  return { id: artifact.id };
+}
+
+export async function updateArtifact(
+  workspaceId: string,
+  artifactId: string,
+  data: { title?: string; description?: string | null },
+  revalidatePathStr: string
+) {
+  const user = await requireWorkspaceMember(workspaceId);
+  await updateArtifactMetadata({ workspaceId, artifactId, ...data, updatedById: user.id });
+  revalidatePath(revalidatePathStr);
+}
+
+export async function replaceArtifactRevision(workspaceId: string, artifactId: string, sourceType: string, formData: FormData, revalidatePathStr: string) {
+  const user = await requireWorkspaceMember(workspaceId);
+  if (sourceType === "EXTERNAL_LINK") {
+    await replaceExternalArtifactRevision({ artifactId, workspaceId, url: String(formData.get("url") ?? ""), createdById: user.id, source: "UI" });
+  } else {
+    const file = formData.get("file");
+    if (!(file instanceof File)) throw new Error("HTML file is required");
+    if (file.size > MAX_ARTIFACT_HTML_BYTES) throw new Error("HTML file exceeds the 2 MB size limit");
+    await replaceHtmlArtifactRevision({ artifactId, workspaceId, filename: file.name, mimeType: file.type, bytes: new Uint8Array(await file.arrayBuffer()), createdById: user.id, source: "UI" }, getArtifactStorage());
+  }
+  revalidatePath(revalidatePathStr);
+}
+
+export async function archiveArtifact(workspaceId: string, artifactId: string, revalidatePathStr: string) {
+  const user = await requireWorkspaceMember(workspaceId);
+  await archiveArtifactCore({ workspaceId, artifactId, updatedById: user.id });
+  revalidatePath(revalidatePathStr);
+}
+
+export async function linkArtifact(workspaceId: string, artifactId: string, solutionId: string, revalidatePathStr: string) {
+  const user = await requireWorkspaceMember(workspaceId);
+  const result = await linkArtifactToSolution({ workspaceId, artifactId, solutionId, createdById: user.id, source: "UI" });
+  revalidatePath(revalidatePathStr);
+  return result;
+}
+
+export async function unlinkArtifact(workspaceId: string, artifactId: string, solutionId: string, revalidatePathStr: string) {
+  await requireWorkspaceMember(workspaceId);
+  const result = await unlinkArtifactFromSolution({ workspaceId, artifactId, solutionId });
+  revalidatePath(revalidatePathStr);
+  return result;
+}
 
 export async function createDoc(
   workspaceId: string,

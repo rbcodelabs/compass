@@ -204,6 +204,8 @@ export type WorkspaceEntityType =
   | "doc"
   | "docVersion"
   | "docComment"
+  | "artifact"
+  | "artifactRevision"
   | "evidence"
   | "opportunityScore"
   | "workspaceScoringConfig"
@@ -265,6 +267,11 @@ const WORKSPACE_ENTITY_RESOLVERS: Record<
   docComment: async (p, id) =>
     (await p.docComment.findUnique({ where: { id }, select: { doc: { select: { workspaceId: true } } } }))
       ?.doc?.workspaceId ?? null,
+  artifact: async (p, id) =>
+    (await p.artifact.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
+  artifactRevision: async (p, id) =>
+    (await p.artifactRevision.findUnique({ where: { id }, select: { artifact: { select: { workspaceId: true } } } }))
+      ?.artifact?.workspaceId ?? null,
   evidence: async (p, id) =>
     (await p.evidence.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   opportunityScore: async (p, id) =>

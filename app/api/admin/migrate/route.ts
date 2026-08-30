@@ -153,9 +153,18 @@ const MIGRATIONS = [
     name: "033_feedback_grid_indexes",
     filePath: path.join(process.cwd(), "prisma/migrations/033_feedback_grid_indexes/migration.sql"),
   },
+  {
+    name: "034_artifacts",
+    filePath: path.join(process.cwd(), "prisma/migrations/034_artifacts/migration.sql"),
+  },
 ];
 
 async function getPool(): Promise<Pool> {
+  // worktree-bootstrap provides a local Postgres URL. Keep local verification
+  // on the exact same migration runner/search_path as DSQL deployments.
+  if (process.env.DATABASE_URL) {
+    return new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+  }
   const host = process.env.PGHOST!;
   const signer = new DsqlSigner({
     credentials: awsCredentialsProvider({
@@ -287,8 +296,13 @@ export async function POST(req: NextRequest) {
 
       for (const stmt of statements) {
         try {
-          await client.query(stmt);
-          const label = stmt.slice(0, 60).replace(/\s+/g, " ");
+          // ASYNC is mandatory on DSQL and unsupported by local PostgreSQL.
+          // DATABASE_URL is the worktree-bootstrap local-mode signal.
+          const executableStmt = process.env.DATABASE_URL
+            ? stmt.replace(/\bINDEX ASYNC\b/gi, "INDEX")
+            : stmt;
+          await client.query(executableStmt);
+          const label = executableStmt.slice(0, 60).replace(/\s+/g, " ");
           log.push(`  ✓ ${label}…`);
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e);

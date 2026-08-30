@@ -8,7 +8,7 @@ section: "Core Features"
 
 # Docs
 
-The Docs section provides a hierarchical rich-text editor for internal team documentation. Use it for PRDs, research notes, experiment write-ups, onboarding guides, or anything else your team writes together.
+The Docs section holds two durable kinds of knowledge: hierarchical Markdown **Pages** and executable or externally hosted **Artifacts**. Use Pages for PRDs and research notes; use Artifacts for prototypes and other solution deliverables.
 
 ![Docs editor](/screenshots/docs/docs-editor.png)
 
@@ -19,6 +19,19 @@ The Docs section provides a hierarchical rich-text editor for internal team docu
 Documents are organised as a tree. Each page can have child pages nested beneath it. The left sidebar in the Docs section shows your full tree. Click any page title to open it, or click the **+** icon next to a parent page to create a child page.
 
 Pages can be dragged to reorder them within their level of the hierarchy.
+
+## Artifacts
+
+Artifacts have stable identities and a separate section in the Docs navigator. They are not nested into the Page hierarchy. An Artifact can be linked to multiple Solutions, and a Solution can link to multiple Artifacts.
+
+Choose one source when creating an Artifact:
+
+- **Upload HTML** — one self-contained `.html` file up to 2 MB. CSS, images, fonts, and JavaScript must be embedded in the file.
+- **External link** — an `http` or `https` URL. Compass stores the link but never fetches or proxies the external page.
+
+Uploaded HTML runs in an opaque-origin preview with the exact `allow-scripts` sandbox permission. Its injected policy denies fetch/XHR/WebSocket connections, forms, embedded frames, workers, objects, parent-page access, popups, downloads, and top navigation. Before any uploaded byte runs, a non-privileged trusted bootstrap establishes an authenticated readiness and navigation signal with Compass. The iframe stays hidden until readiness is verified; navigation signals or a missing handshake replace the frame with a warning, including parse-time redirects and zero-delay meta refreshes. The bootstrap token grants no parent capability and its script removes itself before uploaded code runs. Files are stored privately. External links are clearly labeled and open in a new tab.
+
+Replacing an Artifact creates an immutable revision and advances the current preview without changing the Artifact ID or breaking its Solution links. The detail screen shows revision history and lets workspace members edit metadata, link or unlink Solutions, replace the current revision, or archive the Artifact. Archived Artifacts disappear from the default navigator while their history and links remain preserved.
 
 ## The Editor
 

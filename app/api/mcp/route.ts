@@ -32,6 +32,15 @@ import {
   updateDoc,
 } from "@/lib/doc-tool-handlers"
 import {
+  archiveArtifact,
+  createArtifact,
+  getArtifact,
+  linkArtifact,
+  listArtifacts,
+  unlinkArtifact,
+  updateArtifact,
+} from "@/lib/artifact-tool-handlers"
+import {
   createDocVersion,
   listDocVersions,
   getDocVersion,
@@ -2336,6 +2345,35 @@ const _handler = createMcpHandler(
       },
       updateDoc
     )
+
+    register("list_artifacts", {
+      title: "List Artifacts", description: "Lists HTML prototypes and external artifacts in a workspace.",
+      inputSchema: { workspaceId: z.string().uuid(), includeArchived: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, listArtifacts)
+    register("get_artifact", {
+      title: "Get Artifact", description: "Returns artifact metadata, immutable revision history, and linked Solutions without exposing private storage keys or HTML content.",
+      inputSchema: { artifactId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, getArtifact)
+    register("create_artifact", {
+      title: "Create Artifact", description: "Creates a first-class Artifact from self-contained HTML or an external http/https URL.",
+      inputSchema: { workspaceId: z.string().uuid(), title: z.string().min(1), description: z.string().optional(), sourceType: z.enum(["HTML_UPLOAD", "EXTERNAL_LINK"]), html: z.string().optional(), filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, createArtifact)
+    register("update_artifact", {
+      title: "Update Artifact", description: "Updates Artifact metadata and optionally creates a new immutable HTML or URL revision.",
+      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), title: z.string().min(1).optional(), description: z.string().nullable().optional(), html: z.string().optional(), filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, updateArtifact)
+    register("link_artifact_to_solution", {
+      title: "Link Artifact to Solution", description: "Idempotently links an Artifact to a Solution in the same workspace.",
+      inputSchema: { artifactId: z.string().uuid(), solutionId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, linkArtifact)
+    register("unlink_artifact_from_solution", {
+      title: "Unlink Artifact from Solution", description: "Removes an Artifact-to-Solution link.",
+      inputSchema: { artifactId: z.string().uuid(), solutionId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, unlinkArtifact)
+    register("archive_artifact", {
+      title: "Archive Artifact", description: "Archives an Artifact while preserving its links and immutable revision history.",
+      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, archiveArtifact)
 
     register(
       "create_doc_version",

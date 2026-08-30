@@ -9,6 +9,7 @@
  * so you can inspect the DB state and re-run individual tests.
  */
 import path from "path";
+import { rm } from "node:fs/promises";
 import pg from "pg";
 import {
   E2E_ORG_SLUG,
@@ -157,6 +158,29 @@ export default async function globalTeardown() {
          )`,
         [wsId]
       );
+
+      // solutions → opportunities
+      await pool.query(
+        `DELETE FROM "${S}".artifact_links WHERE workspace_id = $1`,
+        [wsId]
+      );
+      await pool.query(
+        `UPDATE "${S}".artifacts SET current_revision_id = NULL WHERE workspace_id = $1`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".artifact_revisions WHERE artifact_id IN (SELECT id FROM "${S}".artifacts WHERE workspace_id = $1)`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".artifacts WHERE workspace_id = $1`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".artifact_blob_cleanups WHERE blob_pathname LIKE $1`,
+        [`artifacts/${wsId}/%`]
+      );
+      await rm(path.join("/tmp", "compass-artifacts", "artifacts", wsId), { recursive: true, force: true });
 
       // solutions → opportunities
       await pool.query(

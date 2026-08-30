@@ -37,6 +37,10 @@ const mockCanvasNodePosition = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
 const mockDoc = { deleteMany: vi.fn() };
+const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
+const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
+const mockArtifactLink = { deleteMany: vi.fn() };
+const mockArtifactBlobCleanup = { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() };
 const mockScoringModel = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockScoringModelMetric = { deleteMany: vi.fn() };
 
@@ -74,6 +78,10 @@ const mockPrisma = {
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,
   doc: mockDoc,
+  artifact: mockArtifact,
+  artifactRevision: mockArtifactRevision,
+  artifactLink: mockArtifactLink,
+  artifactBlobCleanup: mockArtifactBlobCleanup,
   scoringModel: mockScoringModel,
   scoringModelMetric: mockScoringModelMetric,
 };
@@ -110,6 +118,8 @@ function seedNonEmptyFindMany() {
   mockObjective.findMany.mockResolvedValue([{ id: "obj-1" }]);
   mockKeyResult.findMany.mockResolvedValue([{ id: "kr-1" }]);
   mockScoringModel.findMany.mockResolvedValue([{ id: "sm-1" }]);
+  mockArtifact.findMany.mockResolvedValue([{ id: "art-1" }]);
+  mockArtifactRevision.findMany.mockResolvedValue([{ blobPathname: null }]);
 }
 
 beforeEach(() => {
@@ -139,6 +149,9 @@ beforeEach(() => {
     mockObjective,
     mockKeyResult,
     mockScoringModel,
+    mockArtifact,
+    mockArtifactRevision,
+    mockArtifactBlobCleanup,
   ]) {
     m.findMany.mockResolvedValue([]);
   }
@@ -180,6 +193,13 @@ beforeEach(() => {
     mockWorkspaceMember.deleteMany,
     mockSquad.deleteMany,
     mockDoc.deleteMany,
+    mockArtifact.updateMany,
+    mockArtifact.deleteMany,
+    mockArtifactRevision.deleteMany,
+    mockArtifactLink.deleteMany,
+    mockArtifactBlobCleanup.upsert,
+    mockArtifactBlobCleanup.update,
+    mockArtifactBlobCleanup.delete,
     mockScoringModel.deleteMany,
     mockScoringModelMetric.deleteMany,
   ]) {
@@ -247,6 +267,15 @@ describe("deleteOrganization", () => {
       where: { workspaceId: "ws-1" },
       data: { assumptionId: null },
     });
+    expect(mockArtifactLink.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockArtifact.updateMany).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-1" },
+      data: { currentRevisionId: null, updatedAt: expect.any(Date) },
+    });
+    expect(mockArtifactRevision.deleteMany).toHaveBeenCalledWith({
+      where: { artifactId: { in: ["art-1"] } },
+    });
+    expect(mockArtifact.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
 
     // ── Tasks / TaskLinks ──
     expect(mockTaskLink.deleteMany).toHaveBeenCalledWith({ where: { taskId: { in: ["task-1"] } } });

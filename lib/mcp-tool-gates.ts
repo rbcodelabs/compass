@@ -239,6 +239,21 @@ export const TOOL_GATES: Record<string, Gate> = {
   resolve_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
   reopen_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
 
+  // Artifacts ---------------------------------------------------------------
+  list_artifacts: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_artifact: async (a, x) => void (await assertEntityAccess(a, "artifact", x.artifactId)),
+  create_artifact: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  update_artifact: (a, x) => assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId),
+  link_artifact_to_solution: async (a, x) => {
+    await assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId)
+    await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId)
+  },
+  unlink_artifact_from_solution: async (a, x) => {
+    await assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId)
+    await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId)
+  },
+  archive_artifact: (a, x) => assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId),
+
   // Help ----------------------------------------------------------------
   // search_help / get_help read Compass's own static product documentation
   // (docs/content/*.md) -- not workspace- or org-scoped data, so there is

@@ -136,6 +136,7 @@ model Workspace {
   squads               Squad[]
   feedback             FeedbackItem[]
   docs                 Doc[]
+  artifacts            Artifact[]
   scoringConfig        WorkspaceScoringConfig?
   evidence             Evidence[]
   canvasNodePositions  CanvasNodePosition[]
@@ -285,6 +286,9 @@ model Solution {
 
   @@map("solutions")
 }
+
+// Artifact links are resolved in application code because ArtifactLink is a
+// deliberately polymorphic link table (SOLUTION is the only MVP target).
 
 model SolutionComment {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -900,6 +904,87 @@ model DocVersion {
 
   @@index([docId, createdAt])
   @@map("doc_versions")
+}
+
+/// Stable identity for a prototype or external deliverable. Content lives in
+/// immutable ArtifactRevision rows; currentRevisionId advances explicitly.
+model Artifact {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String             @map("workspace_id") @db.Uuid
+  title             String             @db.VarChar(255)
+  description       String?            @db.Text
+  /// HTML_UPLOAD | EXTERNAL_LINK
+  sourceType        String             @map("source_type") @db.VarChar(30)
+  /// ACTIVE | ARCHIVED
+  status            String             @default("ACTIVE") @db.VarChar(20)
+  currentRevisionId String?            @map("current_revision_id") @db.Uuid
+  createdById       String?            @map("created_by_id") @db.Uuid
+  updatedById       String?            @map("updated_by_id") @db.Uuid
+  source            String             @default("UI") @db.VarChar(20)
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @default(now()) @map("updated_at")
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id])
+  revisions         ArtifactRevision[] @relation("ArtifactRevisions")
+  currentRevision   ArtifactRevision?  @relation("CurrentArtifactRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  links             ArtifactLink[]
+
+  @@index([workspaceId, status, updatedAt])
+  @@map("artifacts")
+}
+
+/// Insert-only Artifact content revision. Exactly one of blobPathname or
+/// externalUrl is populated according to the parent Artifact.sourceType.
+model ArtifactRevision {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  artifactId     String    @map("artifact_id") @db.Uuid
+  revisionNumber Int       @map("revision_number")
+  blobPathname   String?   @map("blob_pathname") @db.Text
+  filename       String?   @db.VarChar(255)
+  mimeType       String?   @map("mime_type") @db.VarChar(100)
+  byteSize       Int?      @map("byte_size")
+  sha256         String?   @db.VarChar(64)
+  externalUrl    String?   @map("external_url") @db.Text
+  createdById    String?   @map("created_by_id") @db.Uuid
+  source         String    @default("UI") @db.VarChar(20)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  artifact       Artifact  @relation("ArtifactRevisions", fields: [artifactId], references: [id])
+  currentFor     Artifact[] @relation("CurrentArtifactRevision")
+
+  @@unique([artifactId, revisionNumber])
+  @@index([artifactId, createdAt])
+  @@map("artifact_revisions")
+}
+
+model ArtifactLink {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  artifactId  String   @map("artifact_id") @db.Uuid
+  /// SOLUTION in the MVP.
+  linkedType  String   @map("linked_type") @db.VarChar(30)
+  linkedId    String   @map("linked_id") @db.Uuid
+  createdById String?  @map("created_by_id") @db.Uuid
+  source      String   @default("UI") @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at")
+  artifact    Artifact @relation(fields: [artifactId], references: [id])
+
+  @@unique([artifactId, linkedType, linkedId])
+  @@index([workspaceId, linkedType, linkedId])
+  @@map("artifact_links")
+}
+
+/// Durable outbox for private Blob deletion. Rows are written before revision
+/// metadata is removed and deleted only after Blob deletion succeeds.
+model ArtifactBlobCleanup {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  blobPathname String   @unique @map("blob_pathname") @db.Text
+  reason       String   @db.VarChar(50)
+  attempts     Int      @default(0)
+  lastError    String?  @map("last_error") @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @map("updated_at")
+
+  @@index([createdAt])
+  @@map("artifact_blob_cleanups")
 }
 
 // ─── Canvas Viewer ────────────────────────────────────────────────────────────

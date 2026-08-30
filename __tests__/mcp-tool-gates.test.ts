@@ -19,6 +19,7 @@ const mockPrisma = {
   organizationMember: { findFirst: vi.fn() },
   opportunity: { findUnique: vi.fn() },
   solution: { findUnique: vi.fn() },
+  artifact: { findUnique: vi.fn() },
   feedbackItem: { findUnique: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
@@ -101,6 +102,15 @@ describe("applyToolGate", () => {
     await expect(
       applyToolGate("promote_to_roadmap", MEMBER, { solutionId: "sol-1", workspaceId: "ws-2" })
     ).rejects.toThrow(/does not belong to workspace/)
+  })
+
+  it("link_artifact_to_solution: rejects cross-workspace targets", async () => {
+    mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-2" } })
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    await expect(applyToolGate("link_artifact_to_solution", MEMBER, {
+      artifactId: "art-1", solutionId: "sol-1", workspaceId: "ws-1",
+    })).rejects.toThrow(/does not belong to workspace/)
   })
 })
 

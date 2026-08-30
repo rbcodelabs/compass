@@ -160,6 +160,20 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 
 Every `update_doc` call also automatically snapshots the doc's pre-change state before applying the new values (coalesced to one snapshot per 5-minute window per author, so an agent making several quick edits in a row doesn't flood the history) — you don't need to call `create_doc_version` yourself unless you want a deliberately named checkpoint.
 
+### Artifacts
+
+Artifacts are first-class solution deliverables, separate from Markdown Docs. HTML content creates private immutable revisions; external URLs are stored but never server-fetched. Every mutation returns the stable Artifact identifier on a plain `ID: <uuid>` line.
+
+| Tool | Description |
+|---|---|
+| `list_artifacts` | List active Artifacts in a workspace; pass `includeArchived: true` to include archived records |
+| `get_artifact` | Return Artifact metadata, revision history, and linked Solutions without exposing private blob paths or uploaded HTML |
+| `create_artifact` | Create `HTML_UPLOAD` from `html` plus an optional `.html` filename, or `EXTERNAL_LINK` from an `http`/`https` `url` |
+| `update_artifact` | Update title/description and optionally create a new immutable HTML or URL revision |
+| `link_artifact_to_solution` | Idempotently link an Artifact and Solution in the same workspace |
+| `unlink_artifact_from_solution` | Remove an Artifact-to-Solution link |
+| `archive_artifact` | Archive an Artifact while preserving its revision history and links |
+
 ### Doc inline comments
 
 Google-Docs-style comments anchored to a span of a doc's text (or left as a general, doc-level note). Threads are one level deep: a root comment optionally carries an anchor; replies attach to a root and never carry their own anchor. Anchors are stored separately and never embedded in the doc's markdown.

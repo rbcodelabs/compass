@@ -3,6 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { DocTreeSidebar, type DocTreeItem } from "@/components/docs/doc-tree-sidebar";
 import { DocsMobileDrawer } from "@/components/docs/docs-mobile-drawer";
+import { ArtifactNav } from "@/components/docs/artifact-nav";
 
 interface DocsLayoutProps {
   children: React.ReactNode;
@@ -59,7 +60,7 @@ export default async function DocsLayout({
 
   if (!workspace) notFound();
 
-  const rawDocs = await prisma.doc.findMany({
+  const [rawDocs, artifacts] = await Promise.all([prisma.doc.findMany({
     where: { workspaceId: workspace.id },
     select: {
       id: true,
@@ -69,7 +70,11 @@ export default async function DocsLayout({
       sortOrder: true,
     },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-  });
+  }), prisma.artifact.findMany({
+    where: { workspaceId: workspace.id, status: "ACTIVE" },
+    select: { id: true, title: true, sourceType: true },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+  })]);
 
   const tree = buildDocTree(rawDocs);
 
@@ -82,6 +87,7 @@ export default async function DocsLayout({
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           workspaceId={workspace.id}
+          artifacts={artifacts}
         />
       </div>
 
@@ -94,6 +100,7 @@ export default async function DocsLayout({
             workspaceSlug={workspaceSlug}
             workspaceId={workspace.id}
           />
+          <ArtifactNav artifacts={artifacts} basePath={`/${orgSlug}/${workspaceSlug}/docs`} />
         </div>
         <div className="flex-1 overflow-y-auto min-w-0">{children}</div>
       </div>
