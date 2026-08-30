@@ -75,6 +75,7 @@ import {
   approveSolutionPlan,
   rejectSolutionPlan,
 } from "@/lib/solution-comment-tool-handlers"
+import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
 import {
   listScoringModels,
   getScoringModel,
@@ -1101,6 +1102,20 @@ const _handler = createMcpHandler(
           },
         )
       }
+    )
+
+    register(
+      "update_solution_status",
+      {
+        title: "Update Solution Status",
+        description: "Updates a Solution's lifecycle status. Any valid status may transition directly to any other valid status.",
+        inputSchema: {
+          solutionId: z.string().uuid().describe("UUID of the solution"),
+          status: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).describe("New lifecycle status"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      updateSolutionStatus
     )
 
     register(
