@@ -108,6 +108,38 @@ describe("research interviewer response", () => {
     }))
   })
 
+  it("forwards private attachment bytes from session handling into the paid interviewer", async () => {
+    const attachments = [{
+      mimeType: "image/png" as const,
+      originalName: "study-create.png",
+      bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    }, {
+      mimeType: "application/pdf" as const,
+      originalName: "study-notes.pdf",
+      bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]),
+    }]
+    runResearchInterviewAgent.mockResolvedValue("What on this screen felt unclear?")
+    respondToResearchSession.mockImplementation(async ({ runAgent }: {
+      runAgent: (input: { prompt: string; baseUrl: string; attachments: typeof attachments }) => Promise<string>
+    }) => ({
+      message: await runAgent({
+        prompt: "moderate the next turn",
+        baseUrl: "https://compass.test",
+        attachments,
+      }),
+      replayed: false,
+    }))
+
+    const response = await POST(request())
+
+    expect(response.status).toBe(200)
+    expect(runResearchInterviewAgent).toHaveBeenCalledWith({
+      prompt: "moderate the next turn",
+      baseUrl: "https://compass.test",
+      attachments,
+    })
+  })
+
   it("uses a deterministic no-cost agent only for local functional E2E", async () => {
     vi.stubEnv("NODE_ENV", "development")
     vi.stubEnv("E2E_FUNCTIONAL", "1")

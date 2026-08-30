@@ -36,7 +36,7 @@ export async function POST(request: Request) {
           await new Promise((resolve) => setTimeout(resolve, 1_000))
           return "What made that difficult for you?"
         }
-      : ({ prompt, baseUrl }: { prompt: string; baseUrl: string }) => runResearchInterviewAgent({ prompt, baseUrl })
+      : (input: Parameters<typeof runResearchInterviewAgent>[0]) => runResearchInterviewAgent(input)
     const result = await respondToResearchSession({
       context: resolved,
       sessionId: body.sessionId,
