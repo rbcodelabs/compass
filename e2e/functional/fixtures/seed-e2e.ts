@@ -6,7 +6,12 @@
  * safely delete it without touching real dev data.
  */
 import pg from "pg";
+import { createHash } from "node:crypto";
 import { orgNameForToken } from "./run-token";
+import {
+  GUIDED_UX_SCREENSHOT_STUDY,
+  GUIDED_UX_SCREENSHOT_TOKEN,
+} from "../../screenshot-cases";
 
 export const E2E_ORG_SLUG = "e2e-test-org";
 export const E2E_WORKSPACE_SLUG = "e2e-workspace";
@@ -82,6 +87,50 @@ export async function seedE2E(
     VALUES (gen_random_uuid(), $1, $2, 'ADMIN', NOW())
     ON CONFLICT (workspace_id, user_id) DO NOTHING
   `, [ws.id, user.id]);
+
+  // ── Deterministic guided UX screenshot fixture ──────────────────────────
+  // This public token exists only in the disposable functional workspace.
+  // Screenshot tests choose Chat but never start a session, so no paid model
+  // or realtime provider is contacted.
+  const screenshotTokenHash = createHash("sha256").update(GUIDED_UX_SCREENSHOT_TOKEN).digest("hex");
+  const screenshotGuide = JSON.stringify([
+    { id: "1", text: "Find the plan you would choose for a growing team." },
+    { id: "2", text: "Compare the two plans that seem most relevant." },
+    { id: "3", text: "Find out whether you can change plans later." },
+    { id: "4", text: "Locate help for a question you still have." },
+    { id: "5", text: "Explain what you would do next." },
+  ]);
+  const { rows: [screenshotStudy] } = await pool.query<{ id: string }>(`
+    INSERT INTO "${S}".research_studies
+      (id, workspace_id, name, goal, study_type, guide, target_minutes, app_url,
+       share_token_hash, share_expires_at, status, created_at, updated_at, created_by_id, source)
+    VALUES
+      (gen_random_uuid(), $1, $2,
+       'Where people hesitate while choosing a plan for their team',
+       'USABILITY_TEST', $3, 20, 'https://example.com/', $4, '2099-01-01',
+       'ACTIVE', NOW(), NOW(), $5, 'UI')
+    ON CONFLICT (share_token_hash) DO UPDATE SET
+      workspace_id = EXCLUDED.workspace_id,
+      name = EXCLUDED.name,
+      goal = EXCLUDED.goal,
+      study_type = EXCLUDED.study_type,
+      guide = EXCLUDED.guide,
+      target_minutes = EXCLUDED.target_minutes,
+      app_url = EXCLUDED.app_url,
+      share_expires_at = EXCLUDED.share_expires_at,
+      status = EXCLUDED.status,
+      updated_at = NOW()
+    RETURNING id
+  `, [ws.id, GUIDED_UX_SCREENSHOT_STUDY, screenshotGuide, screenshotTokenHash, user.id]);
+  await pool.query(`
+    INSERT INTO "${S}".research_participant_tokens
+      (id, study_id, token_hash, kind, expires_at, created_at, created_by_id)
+    VALUES (gen_random_uuid(), $1, $2, 'PRIMARY', '2099-01-01', NOW(), $3)
+    ON CONFLICT (token_hash) DO UPDATE SET
+      study_id = EXCLUDED.study_id,
+      expires_at = EXCLUDED.expires_at,
+      revoked_at = NULL
+  `, [screenshotStudy.id, screenshotTokenHash, user.id]);
 
   // ── Baseline OKR cycle (tests create their own cycles on top) ─────────────
   await pool.query(`

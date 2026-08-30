@@ -132,5 +132,8 @@ Do not refresh the baseline simply to make a pull request pass. Use `pnpm ui:col
 - `pnpm ui:primitives` rejects custom generic controls where a governed shadcn primitive exists.
 - `pnpm test:e2e:functional` exercises authenticated workflows against a local seeded database.
 - `DOCS_BASE_URL=<preview-url> pnpm test:e2e` captures the registry and critical workflow screenshots from an eligible preview deployment.
+- `E2E_FUNCTIONAL=1 pnpm exec playwright test --project=screenshots --grep guided` seeds and captures the guided study builder plus deterministic desktop/mobile participant states against isolated local Postgres. It selects Chat but does not start a session or call a paid model/provider.
 
 The CI workflow always runs lint, unit tests, and the color guard. It also captures and uploads the critical screenshots when the repository variable `COMPASS_SCREENSHOT_BASE_URL` points to a preview or staging deployment and `COMPASS_SCREENSHOT_SESSION_BASE64` contains a base64-encoded Playwright storage-state file for the curated workspace.
+
+Guided screenshots remain explicit on remote targets: set `DOCS_GUIDED_UX_SCREENSHOTS=1` to add the authenticated builder capture and provide `DOCS_RESEARCH_TOKEN` for an active guided study to add the public desktop/mobile participant captures. Without an explicit token the harness deliberately omits participant cases rather than assuming a reusable public credential exists in production.

@@ -66,6 +66,7 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       env: {
         PORT: String(FUNCTIONAL_PORT),
+        COMPASS_RESEARCH_CAPTURE_ENABLED: "1",
         // Deterministic test-only key; production must provide its own secret.
         SSO_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
       },
@@ -111,10 +112,11 @@ export default defineConfig({
     {
       name: "screenshots",
       testMatch: "e2e/screenshots.spec.ts",
+      ...(functional && { dependencies: ["functional-setup"] }),
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1440, height: 900 },
-        baseURL: process.env.DOCS_BASE_URL || "https://compass.rbcodelabs.com",
+        baseURL: process.env.DOCS_BASE_URL || (functional ? FUNCTIONAL_BASE_URL : "https://compass.rbcodelabs.com"),
         ...(VERCEL_AUTOMATION_BYPASS_SECRET && {
           extraHTTPHeaders: {
             "x-vercel-protection-bypass": VERCEL_AUTOMATION_BYPASS_SECRET,

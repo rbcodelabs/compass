@@ -19,9 +19,11 @@ function readEntryScript(): string {
 
 export async function runResearchInterviewAgent({
   prompt,
+  attachments = [],
 }: {
   prompt: string
   baseUrl: string
+  attachments?: Array<{ mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf"; originalName: string; bytes: Uint8Array }>
 }): Promise<string> {
   const snapshotId = await getGoldenSnapshotId()
   if (!snapshotId) {
@@ -35,13 +37,26 @@ export async function runResearchInterviewAgent({
   let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>> | undefined
   try {
     sandbox = await bootSandboxFromSnapshot(snapshotId)
-    await sandbox.writeFiles([{ path: "entry.ts", content: readEntryScript() }])
+    if (attachments.length > 3 || attachments.reduce((sum, item) => sum + item.bytes.byteLength, 0) > 15 * 1024 * 1024) {
+      throw new Error("Research multimodal input exceeded its bounded attachment limit")
+    }
+    const payload = {
+      prompt,
+      attachments: attachments.map((attachment) => ({
+        mimeType: attachment.mimeType,
+        originalName: attachment.originalName,
+        data: Buffer.from(attachment.bytes).toString("base64"),
+      })),
+    }
+    await sandbox.writeFiles([
+      { path: "entry.ts", content: readEntryScript() },
+      { path: "prompt.json", content: JSON.stringify(payload) },
+    ])
     const run = await sandbox.runCommand({
       cmd: "node",
       args: ["entry.ts"],
       env: {
         ANTHROPIC_API_KEY: anthropicApiKey,
-        AGENT_PROMPT: prompt,
       },
       detached: true,
       timeoutMs: 2 * 60_000,

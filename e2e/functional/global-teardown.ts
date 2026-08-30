@@ -108,8 +108,26 @@ export default async function globalTeardown() {
     for (const { id: wsId } of wsRows) {
       // ── Delete in strict dependency order (no DB-level cascades) ──────────
 
-      // research_requests → research_turns → research_sessions /
+      // research_blob_cleanups / research_attachments / research_voice_events / research_requests → research_turns → research_sessions /
       // research_participant_tokens / research_syntheses → research_studies
+      await pool.query(
+        `DELETE FROM "${S}".research_blob_cleanups WHERE workspace_id = $1`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".research_attachments WHERE workspace_id = $1`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".research_voice_events
+         WHERE session_id IN (
+           SELECT id FROM "${S}".research_sessions
+           WHERE study_id IN (
+             SELECT id FROM "${S}".research_studies WHERE workspace_id = $1
+           )
+         )`,
+        [wsId]
+      );
       await pool.query(
         `DELETE FROM "${S}".research_requests
          WHERE session_id IN (

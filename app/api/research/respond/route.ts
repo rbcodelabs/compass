@@ -3,6 +3,7 @@ import { ResearchAgentUnavailableError, runResearchInterviewAgent } from "@/lib/
 import { resolveActiveResearchStudy } from "@/lib/research-access"
 import { ResearchSessionError, respondToResearchSession } from "@/lib/research-session"
 import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
+import { getArtifactStorage } from "@/lib/artifact-storage"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -18,7 +19,9 @@ export async function POST(request: Request) {
   if (
     !body || typeof body.token !== "string" || typeof body.sessionId !== "string" ||
     typeof body.resumeToken !== "string" || typeof body.idempotencyKey !== "string" ||
-    typeof body.answer !== "string" || "messages" in body || "elapsedSeconds" in body
+    typeof body.answer !== "string" ||
+    Object.keys(body).some((key) => !["token", "sessionId", "resumeToken", "idempotencyKey", "answer", "attachmentIds"].includes(key)) ||
+    (body.attachmentIds !== undefined && !Array.isArray(body.attachmentIds))
   ) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 })
   }
@@ -33,13 +36,15 @@ export async function POST(request: Request) {
           await new Promise((resolve) => setTimeout(resolve, 1_000))
           return "What made that difficult for you?"
         }
-      : ({ prompt, baseUrl }: { prompt: string; baseUrl: string }) => runResearchInterviewAgent({ prompt, baseUrl })
+      : (input: Parameters<typeof runResearchInterviewAgent>[0]) => runResearchInterviewAgent(input)
     const result = await respondToResearchSession({
       context: resolved,
       sessionId: body.sessionId,
       resumeToken: body.resumeToken,
       idempotencyKey: body.idempotencyKey,
       answer: body.answer,
+      attachmentIds: body.attachmentIds ?? [],
+      loadAttachmentBytes: (pathname: string) => getArtifactStorage().get(pathname),
       baseUrl: new URL(request.url).origin,
       runAgent: functionalAgent,
     })

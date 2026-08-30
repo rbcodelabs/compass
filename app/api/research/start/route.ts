@@ -14,6 +14,13 @@ export async function POST(request: Request) {
   if (!body || typeof body.token !== "string" || !body.token) {
     return NextResponse.json({ error: "Token required" }, { status: 400 })
   }
+  if (Object.keys(body).some((key) => !["token", "sessionId", "resumeToken", "modality"].includes(key))) {
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 })
+  }
+  const modality = body.modality ?? "CHAT"
+  if (modality !== "CHAT" && modality !== "VOICE") {
+    return NextResponse.json({ error: "Invalid modality" }, { status: 400 })
+  }
   const hasResume = body.sessionId !== undefined || body.resumeToken !== undefined
   if (hasResume && (typeof body.sessionId !== "string" || typeof body.resumeToken !== "string")) {
     return NextResponse.json({ error: "Both session and resume token are required" }, { status: 400 })
@@ -24,6 +31,7 @@ export async function POST(request: Request) {
     const result = await startOrResumeResearchSession(
       resolved,
       hasResume ? { sessionId: body.sessionId as string, resumeToken: body.resumeToken as string } : undefined,
+      modality,
     )
     return NextResponse.json(result)
   } catch (error) {

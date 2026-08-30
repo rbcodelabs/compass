@@ -1,0 +1,40 @@
+import { describe, expect, it } from "vitest"
+import {
+  MAX_RESEARCH_ATTACHMENT_BYTES,
+  buildResearchAttachmentPathname,
+  validateResearchAttachmentUpload,
+} from "@/lib/research-attachments"
+
+const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])
+const pdf = new TextEncoder().encode("%PDF-1.7\ncontent")
+
+describe("research attachment validation", () => {
+  it("accepts matching bounded image and PDF signatures", () => {
+    expect(validateResearchAttachmentUpload({ bytes: png, mimeType: "image/png", originalName: "screen.png" }))
+      .toMatchObject({ kind: "SCREENSHOT", extension: "png", sizeBytes: png.length, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) })
+    expect(validateResearchAttachmentUpload({ bytes: pdf, mimeType: "application/pdf", originalName: "notes.pdf" }))
+      .toMatchObject({ kind: "DOCUMENT", extension: "pdf" })
+  })
+
+  it.each([
+    { bytes: new Uint8Array(), mimeType: "image/png", originalName: "empty.png" },
+    { bytes: pdf, mimeType: "image/png", originalName: "spoofed.png" },
+    { bytes: png, mimeType: "text/html", originalName: "screen.html" },
+    { bytes: png, mimeType: "image/png", originalName: "../screen.png" },
+    { bytes: new Uint8Array(MAX_RESEARCH_ATTACHMENT_BYTES + 1), mimeType: "image/png", originalName: "large.png" },
+  ])("rejects empty, spoofed, unsupported, unsafe, or oversized input", (input) => {
+    expect(() => validateResearchAttachmentUpload(input)).toThrow()
+  })
+
+  it("builds an unguessable tenant-scoped private pathname without the original name", () => {
+    const pathname = buildResearchAttachmentPathname({
+      workspaceId: "workspace-1",
+      studyId: "study-1",
+      sessionId: "session-1",
+      attachmentId: "attachment-1",
+      extension: "png",
+    })
+    expect(pathname).toMatch(/^research\/workspace-1\/study-1\/session-1\/attachment-1-[a-f0-9]{32}\.png$/)
+    expect(pathname).not.toContain("screen")
+  })
+})
