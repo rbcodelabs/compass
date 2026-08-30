@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
+import {
+  type FeedbackAttachmentMetadata,
+  validateFeedbackAttachmentMetadata,
+} from "@/lib/feedback-attachments";
 
 type Params = { orgSlug: string; workspaceSlug: string };
-
-type AttachmentInput = {
-  url: string;
-  filename: string;
-  fileType: string;
-  fileSize: number;
-};
 
 /**
  * A submitted attachment is only trusted if its URL is an https:// URL on
@@ -17,26 +14,7 @@ type AttachmentInput = {
  * pointing at internal services or unrelated hosts) from being injected
  * into feedback records via the JSON body.
  */
-function isValidBlobAttachment(value: unknown): value is AttachmentInput {
-  if (!value || typeof value !== "object") return false;
-  const { url, filename, fileType, fileSize } = value as Record<string, unknown>;
-
-  if (typeof url !== "string" || typeof filename !== "string" || typeof fileType !== "string") {
-    return false;
-  }
-  if (typeof fileSize !== "number" || !Number.isFinite(fileSize)) {
-    return false;
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-
-  return parsed.protocol === "https:" && parsed.hostname.endsWith(".public.blob.vercel-storage.com");
-}
+const isValidBlobAttachment = validateFeedbackAttachmentMetadata;
 
 export async function GET(
   req: NextRequest,
@@ -147,12 +125,7 @@ export async function POST(
   if (!rawAttachments.every(isValidBlobAttachment)) {
     return NextResponse.json({ error: "Invalid attachment URL" }, { status: 422 });
   }
-  const validatedAttachments = rawAttachments as {
-    url: string;
-    filename: string;
-    fileType: string;
-    fileSize: number;
-  }[];
+  const validatedAttachments = rawAttachments as FeedbackAttachmentMetadata[];
 
   const prisma = getPrisma();
 

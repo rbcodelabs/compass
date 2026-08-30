@@ -112,6 +112,19 @@ describe("applyToolGate", () => {
       artifactId: "art-1", solutionId: "sol-1", workspaceId: "ws-1",
     })).rejects.toThrow(/does not belong to workspace/)
   })
+
+  it("prepare_feedback_attachment_upload denies a non-member", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("prepare_feedback_attachment_upload", MEMBER, { workspaceId: "ws-1" }))
+      .rejects.toThrow(/not found or access denied/)
+  })
+
+  it.each(["update_feedback", "add_feedback_attachment"])("%s denies access to another workspace's feedback", async (tool) => {
+    mockPrisma.feedbackItem.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate(tool, MEMBER, { feedbackId: "feedback-1" }))
+      .rejects.toThrow(/not found or access denied/)
+  })
 })
 
 // End-to-end through the ACTUAL route wiring: the register() wrapper must run

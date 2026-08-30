@@ -14,12 +14,18 @@ import { applyToolGate } from "@/lib/mcp-tool-gates"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import {
   createFeedback,
+  addFeedbackAttachment,
   getFeedbackItem,
+  listFeedback,
+  prepareFeedbackAttachmentUploadTool,
+  updateFeedback,
   updateFeedbackStatus,
   linkFeedbackToOpportunity,
   updateFeedbackType,
   promoteFeedbackToRoadmap,
 } from "@/lib/feedback-tool-handlers"
+import { FEEDBACK_STATUSES } from "@/lib/feedback-meta"
+import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES } from "@/lib/feedback-attachments"
 import {
   addEvidence,
   linkEvidence,
@@ -125,6 +131,13 @@ function formatUtcDate(date: Date): string {
 
 const _handler = createMcpHandler(
   (server) => {
+
+    const inlineFeedbackAttachmentSchema = z.object({
+      filename: z.string().min(1).max(255).describe("Original filename shown in Compass"),
+      data: z.string().min(1).describe("Raw base64 (requires fileType) or a base64 data URL"),
+      fileType: z.enum(FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES).optional().describe("Required for raw base64; inferred from data URLs"),
+    })
+    const feedbackStatusSchema = z.enum([...FEEDBACK_STATUSES, "CLOSED"] as const)
 
     // Register every tool THROUGH this wrapper so its authorization gate
     // (lib/mcp-tool-gates.ts) runs before the handler. Fail-closed: a tool
@@ -2058,6 +2071,9 @@ const _handler = createMcpHandler(
           type: z.enum(["BUG", "IDEA"]).optional().describe("Feedback type (default IDEA)"),
           submitterName: z.string().optional().describe("Name to attribute this feedback to"),
           submitterEmail: z.string().optional().describe("Email to attribute this feedback to"),
+          attachments: z.array(inlineFeedbackAttachmentSchema).min(1).max(5).optional().describe(
+            "One to five inline attachments. The combined decoded data must be at most 3 MiB; use the direct-upload tools for larger files."
+          ),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -2073,43 +2089,12 @@ const _handler = createMcpHandler(
           "Returns feedback with vote counts, linked opportunities, and status.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          status: z.enum(["OPEN", "UNDER_REVIEW", "PLANNED", "CLOSED"]).optional().describe("Filter by status (omit for all)"),
+          status: feedbackStatusSchema.optional().describe("Filter by status. CLOSED is deprecated but temporarily accepted."),
           limit: z.number().int().min(1).max(100).optional().default(50).describe("Max items to return (default 50)"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, status, limit }) => {
-        const prisma = getPrisma()
-        const items = await prisma.feedbackItem.findMany({
-          where: { workspaceId, ...(status ? { status } : {}) },
-          include: { opportunity: { select: { title: true } } },
-          orderBy: [{ voteCount: "desc" }, { createdAt: "desc" }],
-          take: limit ?? 50,
-        })
-        if (!items.length) {
-          return fail("No feedback found.")
-        }
-        const lines = items.map(f =>
-          `• [${f.type}] **${f.title}** [${f.status}] 👍 ${f.voteCount}\n` +
-          `  ID: ${f.id}\n` +
-          (f.description ? `  ${f.description.slice(0, 100)}${f.description.length > 100 ? "…" : ""}\n` : "") +
-          (f.opportunity ? `  → Linked opportunity: ${f.opportunity.title}\n` : "") +
-          (f.submitterName ? `  Submitted by: ${f.submitterName}` : "")
-        )
-        return ok(lines.join("\n\n"), {
-          items: items.map((f) => ({
-            id: f.id,
-            type: f.type,
-            title: f.title,
-            status: f.status,
-            voteCount: f.voteCount,
-            description: f.description,
-            opportunity: f.opportunity?.title ?? null,
-            submitterName: f.submitterName,
-          })),
-          count: items.length,
-        })
-      }
+      listFeedback
     )
 
     register(
@@ -2127,6 +2112,21 @@ const _handler = createMcpHandler(
     )
 
     register(
+      "update_feedback",
+      {
+        title: "Update Feedback",
+        description: "Updates a feedback item's title and/or description. Pass description: null to clear it; status and type use their dedicated tools.",
+        inputSchema: {
+          feedbackId: z.string().uuid().describe("UUID of the feedback item"),
+          title: z.string().min(1).max(255).optional().describe("Replacement title"),
+          description: z.string().max(5000).nullable().optional().describe("Replacement description, or null to clear"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      updateFeedback
+    )
+
+    register(
       "update_feedback_status",
       {
         title: "Update Feedback Status",
@@ -2134,7 +2134,7 @@ const _handler = createMcpHandler(
           "Updates the status of a feedback item. Optionally include a note explaining the reason for the status change.",
         inputSchema: {
           feedbackId: z.string().uuid().describe("UUID of the feedback item"),
-          status: z.enum(["OPEN", "UNDER_REVIEW", "PLANNED", "CLOSED"]).describe("New status for the feedback item"),
+          status: feedbackStatusSchema.describe("New status. CLOSED is deprecated but temporarily accepted and is not remapped."),
           note: z.string().optional().describe("Optional reason for the status change"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
@@ -2173,6 +2173,44 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateFeedbackType
+    )
+
+    register(
+      "prepare_feedback_attachment_upload",
+      {
+        title: "Prepare Feedback Attachment Upload",
+        description:
+          "Prepares a short-lived direct-to-Vercel-Blob upload for a feedback attachment up to 10 MiB. " +
+          "Upload with the returned client token, then call add_feedback_attachment with the Blob URL and signed receipt.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace that will own the attachment"),
+          filename: z.string().min(1).max(255).describe("Original filename shown in Compass"),
+          fileType: z.enum(FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES).describe("Attachment MIME type"),
+          fileSize: z.number().int().min(1).max(10 * 1024 * 1024).describe("Exact file size in bytes"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      prepareFeedbackAttachmentUploadTool
+    )
+
+    register(
+      "add_feedback_attachment",
+      {
+        title: "Add Feedback Attachment",
+        description:
+          "Adds one attachment to an existing feedback item. Provide exactly one inline attachment (up to the 3 MiB MCP aggregate cap) " +
+          "or a completed direct upload's Blob URL and signed receipt.",
+        inputSchema: {
+          feedbackId: z.string().uuid().describe("UUID of the feedback item"),
+          inline: inlineFeedbackAttachmentSchema.optional().describe("Small inline attachment"),
+          uploaded: z.object({
+            url: z.string().url().describe("Blob URL returned after the direct upload"),
+            receipt: z.string().min(1).describe("Signed receipt returned by prepare_feedback_attachment_upload"),
+          }).optional().describe("Completed direct upload"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      addFeedbackAttachment
     )
 
     register(

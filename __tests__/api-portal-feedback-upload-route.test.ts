@@ -85,6 +85,20 @@ describe("POST /api/portal/[orgSlug]/[workspaceSlug]/feedback/upload", () => {
     expect(mockPut).not.toHaveBeenCalled();
   });
 
+  it("rejects a zero-byte file before uploading", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", feedbackEnabled: true, portalAuthRequired: false });
+    const res = await POST(makeRequest(new File([], "empty.png", { type: "image/png" })), { params });
+    expect(res.status).toBe(400);
+    expect(mockPut).not.toHaveBeenCalled();
+  });
+
+  it("rejects a filename longer than 255 characters before uploading", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", feedbackEnabled: true, portalAuthRequired: false });
+    const res = await POST(makeRequest(new File(["x"], `${"a".repeat(252)}.png`, { type: "image/png" })), { params });
+    expect(res.status).toBe(400);
+    expect(mockPut).not.toHaveBeenCalled();
+  });
+
   it("403s when feedback is not enabled for the workspace", async () => {
     mockWorkspace.findFirst.mockResolvedValue({
       id: "ws-1",
