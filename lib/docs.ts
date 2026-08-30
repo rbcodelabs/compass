@@ -139,10 +139,56 @@ function splitIntoSections(body: string): DocSection[] {
   return sections;
 }
 
-function countMatches(haystack: string, needle: string): number {
-  if (!needle) return 0;
-  const lower = haystack.toLowerCase();
-  return lower.split(needle).length - 1;
+const HELP_SEARCH_STOPWORDS = new Set([
+  "a",
+  "about",
+  "an",
+  "and",
+  "are",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "for",
+  "from",
+  "how",
+  "i",
+  "in",
+  "is",
+  "me",
+  "might",
+  "must",
+  "my",
+  "of",
+  "on",
+  "or",
+  "our",
+  "please",
+  "should",
+  "tell",
+  "the",
+  "to",
+  "us",
+  "was",
+  "we",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "will",
+  "with",
+  "would",
+  "you",
+  "your",
+]);
+
+function getSearchTerms(query: string): string[] {
+  const tokens = query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  return [...new Set(tokens.filter((term) => term.length > 1 && !HELP_SEARCH_STOPWORDS.has(term)))];
 }
 
 /** Short context window around the first query-term hit, or a leading snippet if none found. */
@@ -171,10 +217,12 @@ function buildExcerpt(text: string, terms: string[], contextChars = 100): string
  * section per doc so results can deep-link to a specific #anchor.
  */
 export function searchHelp(query: string, limit = 5): HelpSearchResult[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  const terms = q.split(/\s+/).filter(Boolean);
-  const scoreText = (text: string) => terms.reduce((sum, term) => sum + countMatches(text, term), 0);
+  const terms = getSearchTerms(query);
+  if (terms.length === 0) return [];
+  const scoreText = (text: string) => {
+    const lower = text.toLowerCase();
+    return terms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0);
+  };
 
   const results: HelpSearchResult[] = [];
 
