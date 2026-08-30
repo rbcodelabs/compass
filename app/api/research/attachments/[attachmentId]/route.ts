@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getArtifactStorage } from "@/lib/artifact-storage"
+import { getResearchArtifactStorage } from "@/lib/artifact-storage"
 import { resolveActiveResearchStudy } from "@/lib/research-access"
 import { getParticipantResearchAttachment, ResearchAttachmentError } from "@/lib/research-attachment-service"
 import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
@@ -29,7 +29,7 @@ export async function POST(
       resumeToken: body.resumeToken,
       attachmentId,
     })
-    const bytes = await getArtifactStorage().get(attachment.blobPathname)
+    const bytes = await getResearchArtifactStorage().get(attachment.blobPathname)
     if (!bytes) return NextResponse.json({ error: "Attachment not found" }, { status: 404 })
     const safeName = attachment.originalName.replace(/["\r\n]/g, "_")
     return new Response(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, {

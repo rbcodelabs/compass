@@ -11,7 +11,7 @@ vi.mock("@/lib/research-attachment-service", () => ({
   createParticipantResearchAttachment,
   getParticipantResearchAttachment,
 }))
-vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: () => storage }))
+vi.mock("@/lib/artifact-storage", () => ({ getResearchArtifactStorage: () => storage }))
 
 import { POST as upload } from "@/app/api/research/attachments/route"
 import { POST as download } from "@/app/api/research/attachments/[attachmentId]/route"

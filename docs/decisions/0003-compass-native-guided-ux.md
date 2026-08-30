@@ -17,6 +17,8 @@ Private uploads use a normalized `ResearchAttachment` record containing redundan
 
 Failed blob compensation is owned by the same bounded context. A standalone `ResearchBlobCleanup` queue records workspace, study, session, attachment, and private-path provenance, then retries deletion only when every path segment matches that provenance. This deliberately does not reuse `ArtifactBlobCleanup`: guided research can be deployed and migrated without requiring the separate artifact subsystem, while cleanup remains durable rather than best-effort.
 
+Deployed research attachments use a dedicated private Blob store credential via `RESEARCH_BLOB_READ_WRITE_TOKEN`. Research upload, authorized download, model retrieval, and cleanup pass that token explicitly; the existing `BLOB_READ_WRITE_TOKEN` remains the implicit credential for public documentation, branding, feedback, and artifact callers. Local database-backed development continues to use isolated filesystem storage.
+
 Voice uses a short-lived OpenAI Realtime client secret minted only after participant-token and session-resume authorization. Server-authored, tool-free instructions select the study, task guide, app URL, model, and voice. Only finalized provider events enter the canonical transcript, keyed idempotently by provider event/item ID. A short database lease permits one active voice connection per session. Disconnects preserve the session for reconnection; raw audio is not retained.
 
 The participant experience uses a restrictive iframe (`allow-scripts allow-forms allow-popups`, `referrerPolicy="no-referrer"`) and a persistent external link with `noopener,noreferrer`. The external action is the guaranteed fallback when embedding is blocked.

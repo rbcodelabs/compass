@@ -3,7 +3,7 @@ import { ResearchAgentUnavailableError, runResearchInterviewAgent } from "@/lib/
 import { resolveActiveResearchStudy } from "@/lib/research-access"
 import { ResearchSessionError, respondToResearchSession } from "@/lib/research-session"
 import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
-import { getArtifactStorage } from "@/lib/artifact-storage"
+import { getResearchArtifactStorage } from "@/lib/artifact-storage"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
       idempotencyKey: body.idempotencyKey,
       answer: body.answer,
       attachmentIds: body.attachmentIds ?? [],
-      loadAttachmentBytes: (pathname: string) => getArtifactStorage().get(pathname),
+      loadAttachmentBytes: (pathname: string) => getResearchArtifactStorage().get(pathname),
       baseUrl: new URL(request.url).origin,
       runAgent: functionalAgent,
     })

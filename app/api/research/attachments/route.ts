@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getArtifactStorage } from "@/lib/artifact-storage"
+import { getResearchArtifactStorage } from "@/lib/artifact-storage"
 import { resolveActiveResearchStudy } from "@/lib/research-access"
 import { createParticipantResearchAttachment, ResearchAttachmentError } from "@/lib/research-attachment-service"
 import { MAX_RESEARCH_ATTACHMENT_BYTES } from "@/lib/research-attachments"
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     const bytes = new Uint8Array(await file.arrayBuffer())
     const attachment = await createParticipantResearchAttachment({
       context: resolved,
-      storage: getArtifactStorage(),
+      storage: getResearchArtifactStorage(),
       sessionId,
       resumeToken,
       idempotencyKey,
