@@ -5,6 +5,9 @@ const mockRoadmapItem = {
   update: vi.fn(),
   findFirst: vi.fn(),
 };
+const mockOpportunity = {
+  findFirst: vi.fn(),
+};
 const mockSolution = {
   findUnique: vi.fn(),
 };
@@ -14,9 +17,12 @@ const mockFeedbackItem = {
 
 const mockPrisma = {
   roadmapItem: mockRoadmapItem,
+  opportunity: mockOpportunity,
   solution: mockSolution,
   feedbackItem: mockFeedbackItem,
 };
+
+vi.mock("@/auth", () => ({ auth: vi.fn() }));
 
 vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),
@@ -32,13 +38,21 @@ import {
   promoteFeedbackToRoadmap,
   updateSortOrder,
   updateRoadmapItem,
+  updateRoadmapItemOpportunity,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import { auth } from "@/auth";
+
+const mockAuth = vi.mocked(auth);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAuth.mockResolvedValue(
+    { user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T> ? T : never,
+  );
   mockRoadmapItem.create.mockResolvedValue({ id: "item-1", title: "Test Item" });
   mockRoadmapItem.update.mockResolvedValue({ id: "item-1" });
   mockRoadmapItem.findFirst.mockResolvedValue(null);
+  mockOpportunity.findFirst.mockResolvedValue(null);
   mockSolution.findUnique.mockResolvedValue({ title: "My Solution" });
   mockFeedbackItem.findUnique.mockResolvedValue({ title: "Login button is broken" });
 });
@@ -382,5 +396,88 @@ describe("updateRoadmapItem", () => {
     await updateRoadmapItem("item-1", { isPrivate: false }, "/path");
     const call = mockRoadmapItem.update.mock.calls[0][0];
     expect(call.data.isPrivate).toBe(false);
+  });
+});
+
+// ─── updateRoadmapItemOpportunity ────────────────────────────────────────
+
+describe("updateRoadmapItemOpportunity", () => {
+  it("rejects an unauthenticated caller before querying roadmap data", async () => {
+    mockAuth.mockResolvedValue(null as never);
+
+    await expect(
+      updateRoadmapItemOpportunity("item-1", "opp-1", "/path")
+    ).rejects.toThrow("Unauthorized");
+
+    expect(mockRoadmapItem.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("does not reveal whether an item exists to a caller outside its workspace", async () => {
+    mockRoadmapItem.findFirst.mockResolvedValue(null);
+
+    await expect(
+      updateRoadmapItemOpportunity("item-secret", "opp-1", "/path")
+    ).rejects.toThrow("Roadmap item not found or access denied");
+
+    expect(mockRoadmapItem.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "item-secret",
+        workspace: { members: { some: { userId: "user-1" } } },
+      },
+      select: { id: true, workspaceId: true },
+    });
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", "opp-missing"],
+    ["foreign-workspace", "opp-foreign"],
+  ])("rejects a %s opportunity without changing the item", async (_scenario, opportunityId) => {
+    mockRoadmapItem.findFirst.mockResolvedValue({ id: "item-1", workspaceId: "ws-1" });
+    mockOpportunity.findFirst.mockResolvedValue(null);
+
+    await expect(
+      updateRoadmapItemOpportunity("item-1", opportunityId, "/path")
+    ).rejects.toThrow("Opportunity not found or access denied");
+
+    expect(mockOpportunity.findFirst).toHaveBeenCalledWith({
+      where: { id: opportunityId, workspaceId: "ws-1" },
+      select: { id: true, title: true },
+    });
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("links or changes an opportunity while leaving every other relation untouched", async () => {
+    mockRoadmapItem.findFirst.mockResolvedValue({ id: "item-1", workspaceId: "ws-1" });
+    mockOpportunity.findFirst.mockResolvedValue({ id: "opp-2", title: "Retention friction" });
+
+    const result = await updateRoadmapItemOpportunity("item-1", "opp-2", "/path");
+
+    const call = mockRoadmapItem.update.mock.calls[0][0];
+    expect(call.where).toEqual({ id: "item-1" });
+    expect(call.data.opportunityId).toBe("opp-2");
+    expect(call.data.updatedAt).toBeInstanceOf(Date);
+    expect(call.data).not.toHaveProperty("solutionId");
+    expect(call.data).not.toHaveProperty("experimentId");
+    expect(call.data).not.toHaveProperty("keyResultId");
+    expect(call.data).not.toHaveProperty("feedbackId");
+    expect(result).toEqual({
+      opportunityId: "opp-2",
+      opportunity: { id: "opp-2", title: "Retention friction" },
+    });
+  });
+
+  it("clears an opportunity without requiring an opportunity lookup", async () => {
+    mockRoadmapItem.findFirst.mockResolvedValue({ id: "item-1", workspaceId: "ws-1" });
+
+    const result = await updateRoadmapItemOpportunity("item-1", null, "/path");
+
+    expect(mockOpportunity.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.update).toHaveBeenCalledWith({
+      where: { id: "item-1" },
+      data: { opportunityId: null, updatedAt: expect.any(Date) },
+    });
+    expect(result).toEqual({ opportunityId: null, opportunity: null });
   });
 });

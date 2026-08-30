@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// RoadmapBoard imports its server-action module, which now includes an
+// authenticated relation mutation. Keep this pure state-helper test out of
+// next-auth's server-only module graph.
+vi.mock("@/auth", () => ({ auth: vi.fn() }));
 import { moveCardToHorizon, buildColumnMap } from "@/components/roadmap/roadmap-board";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 

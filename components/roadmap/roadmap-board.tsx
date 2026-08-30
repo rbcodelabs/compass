@@ -460,6 +460,7 @@ export function RoadmapBoard({
               onArchive={() => {}}
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
+              availableOpportunities={availableOpportunities}
             />
           </div>
         ) : activeUnscheduledItem ? (

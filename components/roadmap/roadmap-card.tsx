@@ -73,9 +73,18 @@ type Props = {
   onUpdate?: (item: RoadmapCardData) => void;
   orgSlug: string;
   workspaceSlug: string;
+  availableOpportunities?: Array<{ id: string; title: string }>;
 };
 
-export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgSlug, workspaceSlug }: Props) {
+export function RoadmapCard({
+  item,
+  revalidatePathStr,
+  onArchive,
+  onUpdate,
+  orgSlug,
+  workspaceSlug,
+  availableOpportunities,
+}: Props) {
   const [isArchiving, startArchiveTransition] = useTransition();
   const [editOpen, setEditOpen] = useState(false);
   const { openPanel } = usePanelContext();
@@ -309,6 +318,7 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
         onOpenChange={setEditOpen}
         revalidatePathStr={revalidatePathStr}
         onSaved={(updated) => onUpdate?.(updated)}
+        availableOpportunities={availableOpportunities}
       />
     </div>
   );

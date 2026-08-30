@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import type { Horizon } from "@/lib/types";
 import { isLaunchHorizon } from "@/lib/roadmap";
@@ -92,6 +93,53 @@ export async function updateRoadmapItem(
 
   revalidatePath(revalidatePathStr);
   return item;
+}
+
+/**
+ * Link, change, or clear a roadmap item's opportunity from the edit dialog.
+ *
+ * This is intentionally separate from updateRoadmapItem: that legacy action is
+ * also used by the timeline and only addresses item fields by id. Relation
+ * changes need their own authenticated, workspace-scoped boundary so a caller
+ * cannot attach an item to an opportunity from another workspace.
+ */
+export async function updateRoadmapItemOpportunity(
+  itemId: string,
+  opportunityId: string | null,
+  revalidatePathStr: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const prisma = getPrisma();
+  const item = await prisma.roadmapItem.findFirst({
+    where: {
+      id: itemId,
+      workspace: { members: { some: { userId: session.user.id } } },
+    },
+    select: { id: true, workspaceId: true },
+  });
+  if (!item) throw new Error("Roadmap item not found or access denied");
+
+  const opportunity = opportunityId
+    ? await prisma.opportunity.findFirst({
+        where: { id: opportunityId, workspaceId: item.workspaceId },
+        select: { id: true, title: true },
+      })
+    : null;
+  // The same response covers a nonexistent id and an id owned by a different
+  // workspace, so callers cannot use this action to enumerate opportunities.
+  if (opportunityId && !opportunity) {
+    throw new Error("Opportunity not found or access denied");
+  }
+
+  await prisma.roadmapItem.update({
+    where: { id: item.id },
+    data: { opportunityId, updatedAt: new Date() },
+  });
+
+  revalidatePath(revalidatePathStr);
+  return { opportunityId, opportunity };
 }
 
 // ─── Move Item (change horizon) ───────────────────────────────────────────────

@@ -79,6 +79,7 @@ export function RoadmapColumn({
                 onUpdate={onUpdate}
                 orgSlug={orgSlug}
                 workspaceSlug={workspaceSlug}
+                availableOpportunities={availableOpportunities}
               />
             ))
           )}
