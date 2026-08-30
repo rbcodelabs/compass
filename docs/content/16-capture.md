@@ -16,7 +16,13 @@ Open **Capture** and choose **New study** to create either a customer interview 
 
 After creating the study, Compass shows a secure participant link. Share that link with participants so they can complete the interview without a Compass account. Links expire after 30 days and Compass stores only a secure hash, so save the displayed link when it is created. You can rotate the link, which immediately revokes the previous link, or revoke all active links without creating a replacement.
 
+![Guided usability study creation](/screenshots/docs/guided-study-create.png)
+
 For guided usability tests, the participant first chooses Chat or Voice. On desktop the live product appears beside the neutral moderator; on smaller screens it uses a constrained stacked layout. An **Open product** action is always available when a site blocks embedding. The moderator presents one task at a time, asks the participant to think aloud, and probes expectations without identifying controls or rescuing them.
+
+![Guided participant experience on desktop](/screenshots/docs/guided-participant-desktop.png)
+
+![Guided participant experience on mobile](/screenshots/docs/guided-participant-mobile.png)
 
 Participants can share a screenshot or PDF as research evidence. Files are signature-checked, bounded, stored privately, and delivered only through an authorized session or workspace-member request. Chat sends bounded file bytes to the isolated interviewer. Voice can share an image directly with the realtime moderator; PDFs are represented only by a safe, untrusted description. Raw voice audio is not retained.
 
