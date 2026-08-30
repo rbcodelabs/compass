@@ -2,9 +2,9 @@ import NextAuth from "next-auth";
 import Resend from "next-auth/providers/resend";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import getPrisma from "@/lib/db";
 import { authConfig } from "@/auth.config";
+import { createLazyPrismaAuthAdapter } from "@/lib/lazy-prisma-auth-adapter";
 
 /**
  * Auth.js setup — two distinct configurations:
@@ -90,5 +90,5 @@ export const { handlers, auth, signIn, signOut } = isDev
           allowDangerousEmailAccountLinking: true,
         }),
       ],
-      adapter: PrismaAdapter(getPrisma()),
+      adapter: createLazyPrismaAuthAdapter(),
     });
