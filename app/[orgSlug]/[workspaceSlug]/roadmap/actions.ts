@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import type { Horizon } from "@/lib/types";
 import { isLaunchHorizon } from "@/lib/roadmap";
@@ -202,10 +203,17 @@ export async function promoteFeedbackToRoadmap(
   dates?: { startDate?: Date; endDate?: Date },
   isPrivate?: boolean
 ) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
   const prisma = getPrisma();
 
-  const feedback = await prisma.feedbackItem.findUnique({
-    where: { id: feedbackId },
+  const feedback = await prisma.feedbackItem.findFirst({
+    where: {
+      id: feedbackId,
+      workspaceId,
+      workspace: { members: { some: { userId: session.user.id } } },
+    },
     select: { title: true },
   });
   if (!feedback) throw new Error("Feedback item not found");
