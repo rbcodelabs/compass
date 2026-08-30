@@ -1,0 +1,637 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto"
+import type { PrismaClient, ResearchParticipantToken, ResearchStudy } from "@prisma/client"
+import { buildResearchAgentTurnPrompt, type ResearchGuideItem } from "@/lib/research"
+
+export const MAX_RESEARCH_MESSAGE_CHARS = 4_000
+export const MAX_RESEARCH_INTERVIEWER_CHARS = 4_000
+export const MAX_RESEARCH_TURNS = 50
+export const MAX_RESEARCH_TRANSCRIPT_CHARS = 60_000
+export const MAX_RESEARCH_SESSION_MS = 2 * 60 * 60 * 1000
+export const MAX_RESEARCH_STARTS_PER_MINUTE = 5
+export const MAX_RESEARCH_RESPONSES_PER_MINUTE = 12
+export const MAX_RESEARCH_TOKEN_RESPONSES_PER_MINUTE = 60
+export const MAX_RESEARCH_AGENT_CALLS_PER_DAY = 200
+// The public route supports a five-minute lifecycle. Keep the database lease
+// longer than that so a second request cannot steal a legitimately slow turn.
+export const RESEARCH_REQUEST_LEASE_MS = 6 * 60 * 1000
+
+type ResearchContext = {
+  prisma: PrismaClient
+  study: ResearchStudy
+  participantToken: ResearchParticipantToken
+}
+
+type CanonicalTurn = { id: string; role: string; content: string; sequence: number }
+
+export class ResearchSessionError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = "ResearchSessionError"
+  }
+}
+
+export function hashResearchResumeToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex")
+}
+
+function createResumeToken() {
+  const token = randomBytes(32).toString("base64url")
+  return { token, tokenHash: hashResearchResumeToken(token) }
+}
+
+export function assertResearchAnswer(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new ResearchSessionError("A non-empty participant answer is required", 400)
+  }
+  const answer = value.trim()
+  if (answer.length > MAX_RESEARCH_MESSAGE_CHARS) {
+    throw new ResearchSessionError("Participant answer is too long", 413)
+  }
+  return answer
+}
+
+export function assertIdempotencyKey(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(value)) {
+    throw new ResearchSessionError("A valid idempotency key is required", 400)
+  }
+  return value
+}
+
+export function assertResearchInterviewerReply(value: unknown, transcriptChars: number): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new ResearchSessionError("Research agent returned an empty response", 502)
+  }
+  const reply = value.trim()
+  if (
+    reply.length > MAX_RESEARCH_INTERVIEWER_CHARS ||
+    transcriptChars + reply.length > MAX_RESEARCH_TRANSCRIPT_CHARS
+  ) {
+    throw new ResearchSessionError("Research agent response exceeded the interview limit", 502)
+  }
+  return reply
+}
+
+export function getServerElapsedSeconds(startedAt: Date, now = new Date()): number {
+  return Math.max(0, Math.round((now.getTime() - startedAt.getTime()) / 1000))
+}
+
+function errorCode(error: unknown): string | undefined {
+  return (error as { code?: string }).code
+}
+
+async function retryDsql<T>(
+  operation: () => Promise<T>,
+  attempts = 3,
+  retryCodes = new Set(["P2034"]),
+): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      if (!retryCodes.has(errorCode(error) ?? "") || attempt === attempts - 1) throw error
+    }
+  }
+  throw lastError
+}
+
+async function consumeParticipantRate(
+  prisma: PrismaClient,
+  tokenId: string,
+  kind: "START" | "RESPONSE",
+) {
+  await retryDsql(() => prisma.$transaction(async (tx) => {
+    const token = await tx.researchParticipantToken.findUnique({
+      where: { id: tokenId },
+      select: {
+        startWindowAt: true,
+        startCount: true,
+        responseWindowAt: true,
+        responseCount: true,
+        agentWindowAt: true,
+        agentCallCount: true,
+      },
+    })
+    if (!token) throw new ResearchSessionError("Study not found", 404)
+    const now = new Date()
+    if (kind === "START") {
+      const active = Boolean(token.startWindowAt && now.getTime() - token.startWindowAt.getTime() < 60_000)
+      const count = active ? (token.startCount ?? 0) : 0
+      if (count >= MAX_RESEARCH_STARTS_PER_MINUTE) {
+        throw new ResearchSessionError("Too many interview starts. Please wait and try again.", 429)
+      }
+      const updated = await tx.researchParticipantToken.updateMany({
+        where: { id: tokenId, startWindowAt: token.startWindowAt, startCount: token.startCount },
+        data: active
+          ? { startCount: count + 1 }
+          : { startWindowAt: now, startCount: 1 },
+      })
+      if (updated.count !== 1) throw Object.assign(new Error("Concurrent research start quota update"), { code: "P2034" })
+      return
+    }
+
+    const minuteActive = Boolean(token.responseWindowAt && now.getTime() - token.responseWindowAt.getTime() < 60_000)
+    const minuteCount = minuteActive ? (token.responseCount ?? 0) : 0
+    const dayActive = Boolean(token.agentWindowAt && now.getTime() - token.agentWindowAt.getTime() < 24 * 60 * 60 * 1000)
+    const dayCount = dayActive ? (token.agentCallCount ?? 0) : 0
+    if (minuteCount >= MAX_RESEARCH_TOKEN_RESPONSES_PER_MINUTE) {
+      throw new ResearchSessionError("This participant link is temporarily rate limited.", 429)
+    }
+    if (dayCount >= MAX_RESEARCH_AGENT_CALLS_PER_DAY) {
+      throw new ResearchSessionError("This participant link has reached its daily interview limit.", 429)
+    }
+    const updated = await tx.researchParticipantToken.updateMany({
+      where: {
+        id: tokenId,
+        responseWindowAt: token.responseWindowAt,
+        responseCount: token.responseCount,
+        agentWindowAt: token.agentWindowAt,
+        agentCallCount: token.agentCallCount,
+      },
+      data: {
+        ...(minuteActive
+          ? { responseCount: minuteCount + 1 }
+          : { responseWindowAt: now, responseCount: 1 }),
+        ...(dayActive
+          ? { agentCallCount: dayCount + 1 }
+          : { agentWindowAt: now, agentCallCount: 1 }),
+      },
+    })
+    if (updated.count !== 1) throw Object.assign(new Error("Concurrent research response quota update"), { code: "P2034" })
+  }))
+}
+
+function initialInterviewerMessage(study: ResearchStudy): string {
+  const guide = JSON.parse(study.guide) as ResearchGuideItem[]
+  return `Thanks for taking part. This should take about ${study.targetMinutes} minutes. ${guide[0]?.text ?? "Tell me about your experience."}`
+}
+
+function publicTurns(turns: CanonicalTurn[]) {
+  return turns.map(({ id, role, content, sequence }) => ({ id, role, content, sequence }))
+}
+
+function assertCanonicalCapacity(turns: CanonicalTurn[], missingTurns: number, missingContentChars: number) {
+  if (turns.length + missingTurns > MAX_RESEARCH_TURNS) {
+    throw new ResearchSessionError("This interview has reached its turn limit", 409)
+  }
+  const projectedTranscriptChars = turns.reduce(
+    (total, turn) => total + turn.content.length,
+    missingContentChars,
+  )
+  if (projectedTranscriptChars > MAX_RESEARCH_TRANSCRIPT_CHARS) {
+    throw new ResearchSessionError("This interview has reached its transcript limit", 409)
+  }
+}
+
+async function markAbandoned(prisma: PrismaClient, sessionId: string, now: Date) {
+  await prisma.researchSession.updateMany({
+    where: { id: sessionId, status: "IN_PROGRESS" },
+    data: {
+      status: "ABANDONED",
+      endedReason: "TIME_LIMIT",
+      completedAt: now,
+      lastActiveAt: now,
+      updatedAt: now,
+      activeRequestId: null,
+      activeRequestExpiresAt: null,
+    },
+  })
+}
+
+export async function reconcileAbandonedResearchSessions(
+  prisma: PrismaClient,
+  studyId: string,
+  now = new Date(),
+) {
+  const cutoff = new Date(now.getTime() - MAX_RESEARCH_SESSION_MS)
+  return prisma.researchSession.updateMany({
+    where: {
+      studyId,
+      status: "IN_PROGRESS",
+      OR: [
+        { lastActiveAt: { lte: cutoff } },
+        { lastActiveAt: null, startedAt: { lte: cutoff } },
+      ],
+    },
+    data: {
+      status: "ABANDONED",
+      endedReason: "INACTIVITY_TIMEOUT",
+      completedAt: now,
+      updatedAt: now,
+      activeRequestId: null,
+      activeRequestExpiresAt: null,
+    },
+  })
+}
+
+async function loadParticipantSession(
+  context: ResearchContext,
+  sessionId: string,
+  resumeToken: string,
+  options: { allowCompleted?: boolean } = {},
+) {
+  const session = await context.prisma.researchSession.findFirst({
+    where: {
+      id: sessionId,
+      studyId: context.study.id,
+      participantTokenId: context.participantToken.id,
+      resumeTokenHash: hashResearchResumeToken(resumeToken),
+    },
+    include: { turns: { orderBy: { sequence: "asc" } } },
+  })
+  if (!session) throw new ResearchSessionError("Session not found", 404)
+  if (session.status === "ABANDONED") throw new ResearchSessionError("Session has ended", 409)
+  if (session.status === "COMPLETED" && !options.allowCompleted) {
+    throw new ResearchSessionError("Session is already complete", 409)
+  }
+  const now = new Date()
+  if (
+    session.status === "IN_PROGRESS" && session.startedAt &&
+    now.getTime() - session.startedAt.getTime() >= MAX_RESEARCH_SESSION_MS
+  ) {
+    await markAbandoned(context.prisma, session.id, now)
+    throw new ResearchSessionError("Session has ended", 409)
+  }
+  return session
+}
+
+export async function startOrResumeResearchSession(
+  context: ResearchContext,
+  resume?: { sessionId: string; resumeToken: string },
+) {
+  if (resume) {
+    const session = await loadParticipantSession(context, resume.sessionId, resume.resumeToken, {
+      allowCompleted: true,
+    })
+    return {
+      sessionId: session.id,
+      resumeToken: resume.resumeToken,
+      status: session.status,
+      turns: session.status === "COMPLETED" ? [] : publicTurns(session.turns as CanonicalTurn[]),
+      startedAt: session.startedAt,
+    }
+  }
+
+  const now = new Date()
+  await consumeParticipantRate(context.prisma, context.participantToken.id, "START")
+
+  const sessionId = randomUUID()
+  const openingTurnId = randomUUID()
+  const resumeSecret = createResumeToken()
+  const message = initialInterviewerMessage(context.study)
+  await retryDsql(() => context.prisma.$transaction([
+    context.prisma.researchSession.create({
+      data: {
+        id: sessionId,
+        studyId: context.study.id,
+        participantTokenId: context.participantToken.id,
+        resumeTokenHash: resumeSecret.tokenHash,
+        modality: "CHAT",
+        status: "IN_PROGRESS",
+        startedAt: now,
+        lastActiveAt: now,
+        nextSequence: 1,
+        updatedAt: now,
+      },
+    }),
+    context.prisma.researchTurn.create({
+      data: { id: openingTurnId, sessionId, role: "INTERVIEWER", content: message, sequence: 0 },
+    }),
+  ]))
+  return {
+    sessionId,
+    resumeToken: resumeSecret.token,
+    status: "IN_PROGRESS",
+    turns: [{ id: openingTurnId, role: "INTERVIEWER", content: message, sequence: 0 }],
+    startedAt: now,
+  }
+}
+
+async function appendParticipantTurnAndLinkRequest(
+  prisma: PrismaClient,
+  sessionId: string,
+  requestId: string,
+  turn: { id: string; role: "PARTICIPANT" | "INTERVIEWER"; content: string },
+) {
+  return retryDsql(async () => {
+    return prisma.$transaction(async (tx) => {
+      const session = await tx.researchSession.findUnique({
+        where: { id: sessionId },
+        select: {
+          status: true,
+          nextSequence: true,
+          activeRequestId: true,
+          activeRequestExpiresAt: true,
+          updatedAt: true,
+        },
+      })
+      if (!session) throw new ResearchSessionError("Session not found", 404)
+      const now = new Date()
+      const otherLeaseIsFresh = Boolean(
+        session.activeRequestId &&
+        session.activeRequestId !== requestId &&
+        session.activeRequestExpiresAt &&
+        session.activeRequestExpiresAt.getTime() > now.getTime(),
+      )
+      if (session.status !== "IN_PROGRESS" || otherLeaseIsFresh) {
+        throw new ResearchSessionError("Another answer is being processed", 409)
+      }
+      const currentTurns = await tx.researchTurn.findMany({
+        where: { sessionId },
+        orderBy: { sequence: "asc" },
+        select: { id: true, role: true, content: true, sequence: true },
+      }) as CanonicalTurn[]
+      assertCanonicalCapacity(currentTurns, 2, turn.content.length)
+      const sequence = session.nextSequence ?? 0
+      const updated = await tx.researchSession.updateMany({
+        where: {
+          id: sessionId,
+          status: "IN_PROGRESS",
+          nextSequence: session.nextSequence,
+          activeRequestId: session.activeRequestId,
+          activeRequestExpiresAt: session.activeRequestExpiresAt,
+          updatedAt: session.updatedAt,
+        },
+        data: {
+          nextSequence: sequence + 1,
+          activeRequestId: requestId,
+          activeRequestExpiresAt: new Date(now.getTime() + RESEARCH_REQUEST_LEASE_MS),
+          lastActiveAt: now,
+          updatedAt: now,
+        },
+      })
+      if (updated.count !== 1) {
+        throw Object.assign(new Error("Concurrent research turn sequence update"), { code: "P2034" })
+      }
+      const created = await tx.researchTurn.create({ data: { ...turn, sessionId, sequence } })
+      const requestUpdated = await tx.researchRequest.updateMany({
+        where: { id: requestId, sessionId, status: "PROCESSING", participantTurnId: null },
+        data: { participantTurnId: created.id, updatedAt: now },
+      })
+      if (requestUpdated.count !== 1) {
+        throw Object.assign(new Error("Research participant turn linkage conflict"), { code: "P2034" })
+      }
+      return created
+    })
+  }, 3, new Set(["P2034", "P2002"]))
+}
+
+async function appendInterviewerTurnAndCompleteRequest(
+  prisma: PrismaClient,
+  sessionId: string,
+  requestId: string,
+  content: string,
+) {
+  const turnId = randomUUID()
+  return retryDsql(() => prisma.$transaction(async (tx) => {
+    const session = await tx.researchSession.findUnique({
+      where: { id: sessionId },
+      select: { nextSequence: true },
+    })
+    if (!session) throw new ResearchSessionError("Session not found", 404)
+    const sequence = session.nextSequence ?? 0
+    const now = new Date()
+    const sessionUpdated = await tx.researchSession.updateMany({
+      where: { id: sessionId, status: "IN_PROGRESS", nextSequence: session.nextSequence, activeRequestId: requestId },
+      data: { nextSequence: sequence + 1, lastActiveAt: now, updatedAt: now },
+    })
+    if (sessionUpdated.count !== 1) {
+      throw Object.assign(new Error("Concurrent interviewer turn sequence update"), { code: "P2034" })
+    }
+    const turn = await tx.researchTurn.create({
+      data: { id: turnId, sessionId, role: "INTERVIEWER", content, sequence },
+    })
+    const requestUpdated = await tx.researchRequest.updateMany({
+      where: { id: requestId, sessionId, status: "PROCESSING" },
+      data: { status: "COMPLETED", interviewerTurnId: turn.id, updatedAt: now },
+    })
+    if (requestUpdated.count !== 1) {
+      throw Object.assign(new Error("Research request completion conflict"), { code: "P2034" })
+    }
+    return turn
+  }))
+}
+
+async function loadCompletedReply(
+  prisma: PrismaClient,
+  request: { participantTurnId: string | null; interviewerTurnId: string | null },
+  answer: string,
+) {
+  if (!request.participantTurnId) throw new ResearchSessionError("Stored participant answer is unavailable", 502)
+  const participantTurn = await prisma.researchTurn.findUnique({ where: { id: request.participantTurnId } })
+  if (!participantTurn) throw new ResearchSessionError("Stored participant answer is unavailable", 502)
+  if (participantTurn.content !== answer) {
+    throw new ResearchSessionError("Idempotency key was already used for a different answer", 409)
+  }
+  if (!request.interviewerTurnId) throw new ResearchSessionError("Stored reply is unavailable", 502)
+  const turn = await prisma.researchTurn.findUnique({ where: { id: request.interviewerTurnId } })
+  if (!turn) throw new ResearchSessionError("Stored reply is unavailable", 502)
+  return { message: turn.content, turn: publicTurns([turn as CanonicalTurn])[0], replayed: true }
+}
+
+async function acquireRequestLease(prisma: PrismaClient, sessionId: string, requestId: string, now: Date) {
+  await retryDsql(() => prisma.$transaction(async (tx) => {
+    const session = await tx.researchSession.findUnique({
+      where: { id: sessionId },
+      select: { status: true, activeRequestId: true, activeRequestExpiresAt: true, updatedAt: true },
+    })
+    if (!session || session.status !== "IN_PROGRESS") {
+      throw new ResearchSessionError("Session has ended", 409)
+    }
+    const otherLeaseIsFresh = Boolean(
+      session.activeRequestId &&
+      session.activeRequestId !== requestId &&
+      session.activeRequestExpiresAt &&
+      session.activeRequestExpiresAt.getTime() > now.getTime(),
+    )
+    if (otherLeaseIsFresh) throw new ResearchSessionError("Another answer is being processed", 409)
+    const acquired = await tx.researchSession.updateMany({
+      where: {
+        id: sessionId,
+        status: "IN_PROGRESS",
+        activeRequestId: session.activeRequestId,
+        activeRequestExpiresAt: session.activeRequestExpiresAt,
+        updatedAt: session.updatedAt,
+      },
+      data: {
+        activeRequestId: requestId,
+        activeRequestExpiresAt: new Date(now.getTime() + RESEARCH_REQUEST_LEASE_MS),
+        lastActiveAt: now,
+        updatedAt: now,
+      },
+    })
+    if (acquired.count !== 1) {
+      throw Object.assign(new Error("Concurrent research request lease update"), { code: "P2034" })
+    }
+  }))
+}
+
+async function releaseRequestLease(prisma: PrismaClient, sessionId: string, requestId: string) {
+  await prisma.researchSession.updateMany({
+    where: { id: sessionId, activeRequestId: requestId },
+    data: { activeRequestId: null, activeRequestExpiresAt: null, updatedAt: new Date() },
+  }).catch(() => undefined)
+}
+
+export async function respondToResearchSession({
+  context, sessionId, resumeToken, idempotencyKey: idempotencyValue,
+  answer: answerValue, runAgent, baseUrl,
+}: {
+  context: ResearchContext
+  sessionId: string
+  resumeToken: string
+  idempotencyKey: unknown
+  answer: unknown
+  runAgent: (input: { prompt: string; baseUrl: string }) => Promise<string>
+  baseUrl: string
+}) {
+  const answer = assertResearchAnswer(answerValue)
+  const idempotencyKey = assertIdempotencyKey(idempotencyValue)
+  const session = await loadParticipantSession(context, sessionId, resumeToken)
+  const prisma = context.prisma
+  let existing = await prisma.researchRequest.findUnique({
+    where: { sessionId_idempotencyKey: { sessionId, idempotencyKey } },
+  })
+  if (existing?.status === "COMPLETED") return loadCompletedReply(prisma, existing, answer)
+  if (existing?.status === "PROCESSING") {
+    const now = new Date()
+    const ownLeaseIsFresh = session.activeRequestId === existing.id && Boolean(
+      session.activeRequestExpiresAt && session.activeRequestExpiresAt.getTime() > now.getTime(),
+    )
+    const requestStale = existing.updatedAt.getTime() <= now.getTime() - RESEARCH_REQUEST_LEASE_MS
+    if (ownLeaseIsFresh || !requestStale) {
+      throw new ResearchSessionError("This answer is already being processed", 409)
+    }
+    const recovered = await prisma.researchRequest.updateMany({
+      where: { id: existing.id, status: "PROCESSING" },
+      data: { status: "FAILED", errorCode: "STALE_REQUEST", updatedAt: now },
+    })
+    if (recovered.count !== 1) throw new ResearchSessionError("This answer is already being processed", 409)
+    existing = { ...existing, status: "FAILED", errorCode: "STALE_REQUEST", updatedAt: now }
+  }
+
+  assertCanonicalCapacity(
+    session.turns as CanonicalTurn[],
+    existing?.participantTurnId ? 1 : 2,
+    existing?.participantTurnId ? 0 : answer.length,
+  )
+
+  const now = new Date()
+  const recentRequests = await prisma.researchRequest.count({
+    where: { sessionId, createdAt: { gte: new Date(now.getTime() - 60_000) } },
+  })
+  if (recentRequests >= MAX_RESEARCH_RESPONSES_PER_MINUTE) {
+    throw new ResearchSessionError("Too many answers. Please wait and try again.", 429)
+  }
+  await consumeParticipantRate(prisma, context.participantToken.id, "RESPONSE")
+
+  let request = existing
+  if (request?.status === "FAILED") {
+    const claimed = await prisma.researchRequest.updateMany({
+      where: { id: request.id, status: "FAILED" },
+      data: { status: "PROCESSING", errorCode: null, updatedAt: now },
+    })
+    if (claimed.count !== 1) throw new ResearchSessionError("This answer is already being processed", 409)
+  } else {
+    try {
+      request = await prisma.researchRequest.create({
+        data: { sessionId, idempotencyKey, status: "PROCESSING", updatedAt: now },
+      })
+    } catch (error) {
+      if (errorCode(error) !== "P2002") throw error
+      const winner = await prisma.researchRequest.findUnique({
+        where: { sessionId_idempotencyKey: { sessionId, idempotencyKey } },
+      })
+      if (winner?.status === "COMPLETED") return loadCompletedReply(prisma, winner, answer)
+      throw new ResearchSessionError("This answer is already being processed", 409)
+    }
+  }
+  if (!request) throw new ResearchSessionError("Unable to process answer", 502)
+
+  try {
+    let participantTurn: CanonicalTurn | null = null
+    if (request.participantTurnId) {
+      await acquireRequestLease(prisma, sessionId, request.id, now)
+      participantTurn = await prisma.researchTurn.findUnique({ where: { id: request.participantTurnId } }) as CanonicalTurn | null
+      const freshTurns = await prisma.researchTurn.findMany({
+        where: { sessionId }, orderBy: { sequence: "asc" },
+        select: { id: true, role: true, content: true, sequence: true },
+      }) as CanonicalTurn[]
+      assertCanonicalCapacity(freshTurns, 1, 0)
+    } else {
+      participantTurn = await appendParticipantTurnAndLinkRequest(prisma, sessionId, request.id, {
+        id: randomUUID(), role: "PARTICIPANT", content: answer,
+      })
+    }
+    if (!participantTurn) throw new ResearchSessionError("Stored participant answer is unavailable", 502)
+    if (participantTurn.content !== answer) {
+      throw new ResearchSessionError("Idempotency key was already used for a different answer", 409)
+    }
+
+    const canonicalTurns = await prisma.researchTurn.findMany({
+      where: { sessionId }, orderBy: { sequence: "asc" },
+      select: { id: true, role: true, content: true, sequence: true },
+    }) as CanonicalTurn[]
+    const guide = JSON.parse(context.study.guide) as ResearchGuideItem[]
+    const prompt = buildResearchAgentTurnPrompt({
+      guide,
+      targetMinutes: context.study.targetMinutes,
+      goal: context.study.goal,
+      elapsedSeconds: getServerElapsedSeconds(session.startedAt ?? session.createdAt),
+      messages: canonicalTurns.map((turn) => ({
+        role: turn.role as "INTERVIEWER" | "PARTICIPANT", content: turn.content,
+      })),
+    })
+    const canonicalTranscriptChars = canonicalTurns.reduce((total, turn) => total + turn.content.length, 0)
+    const message = assertResearchInterviewerReply(
+      await runAgent({ prompt, baseUrl }),
+      canonicalTranscriptChars,
+    )
+    const interviewerTurn = await appendInterviewerTurnAndCompleteRequest(
+      prisma, sessionId, request.id, message,
+    )
+    return { message, turn: publicTurns([interviewerTurn])[0], replayed: false }
+  } catch (error) {
+    await prisma.researchRequest.updateMany({
+      where: { id: request.id, status: "PROCESSING" },
+      data: {
+        status: "FAILED",
+        errorCode: error instanceof ResearchSessionError ? "REJECTED" : "AGENT_FAILED",
+        updatedAt: new Date(),
+      },
+    }).catch(() => undefined)
+    throw error
+  } finally {
+    await releaseRequestLease(prisma, sessionId, request.id)
+  }
+}
+
+export async function completeResearchSession(
+  context: ResearchContext,
+  sessionId: string,
+  resumeToken: string,
+) {
+  const session = await loadParticipantSession(context, sessionId, resumeToken, {
+    allowCompleted: true,
+  })
+  if (session.status === "COMPLETED") {
+    return { ok: true, status: "COMPLETED" }
+  }
+  const now = new Date()
+  if (session.activeRequestId) {
+    if (!session.activeRequestExpiresAt || session.activeRequestExpiresAt.getTime() > now.getTime()) {
+      throw new ResearchSessionError("An answer is still being processed", 409)
+    }
+    await context.prisma.researchSession.updateMany({
+      where: { id: session.id, activeRequestId: session.activeRequestId, activeRequestExpiresAt: { lte: now } },
+      data: { activeRequestId: null, activeRequestExpiresAt: null, updatedAt: now },
+    })
+  }
+  const updated = await context.prisma.researchSession.updateMany({
+    where: { id: session.id, status: "IN_PROGRESS", activeRequestId: null },
+    data: { status: "COMPLETED", completedAt: now, lastActiveAt: now, updatedAt: now },
+  })
+  if (updated.count !== 1) throw new ResearchSessionError("Session state changed; try again", 409)
+  return { ok: true, status: "COMPLETED" }
+}

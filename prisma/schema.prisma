@@ -171,9 +171,33 @@ model ResearchStudy {
   workspace      Workspace           @relation(fields: [workspaceId], references: [id])
   sessions       ResearchSession[]
   syntheses      ResearchSynthesis[]
+  participantTokens ResearchParticipantToken[]
 
   @@index([workspaceId, status])
   @@map("research_studies")
+}
+
+model ResearchParticipantToken {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studyId     String    @map("study_id") @db.Uuid
+  tokenHash   String    @unique(map: "idx_research_participant_tokens_hash") @map("token_hash") @db.VarChar(64)
+  kind        String    @default("PRIMARY") @db.VarChar(30)
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  createdById String?   @map("created_by_id") @db.Uuid
+  startWindowAt DateTime? @map("start_window_at")
+  startCount    Int?      @map("start_count")
+  responseWindowAt DateTime? @map("response_window_at")
+  responseCount Int?      @map("response_count")
+  agentWindowAt DateTime? @map("agent_window_at")
+  agentCallCount Int?     @map("agent_call_count")
+  study       ResearchStudy @relation(fields: [studyId], references: [id])
+  sessions    ResearchSession[]
+
+  @@index([studyId, kind, revokedAt], map: "idx_research_participant_tokens_study_kind")
+  @@map("research_participant_tokens")
 }
 
 model ResearchSession {
@@ -181,18 +205,28 @@ model ResearchSession {
   studyId          String         @map("study_id") @db.Uuid
   modality         String         @default("CHAT") @db.VarChar(10)
   status           String         @default("PENDING") @db.VarChar(20)
+  participantTokenId String?      @map("participant_token_id") @db.Uuid
+  resumeTokenHash  String?        @unique(map: "idx_research_sessions_resume_token") @map("resume_token_hash") @db.VarChar(64)
   participantName  String?        @map("participant_name") @db.VarChar(255)
   participantEmail String?        @map("participant_email") @db.VarChar(255)
   summary          String?        @db.Text
   audioUrl         String?        @map("audio_url") @db.Text
   startedAt        DateTime?      @map("started_at")
+  lastActiveAt     DateTime?      @map("last_active_at")
   completedAt      DateTime?      @map("completed_at")
+  endedReason      String?        @map("ended_reason") @db.VarChar(50)
+  nextSequence     Int?           @map("next_sequence")
+  activeRequestId  String?        @map("active_request_id") @db.Uuid
+  activeRequestExpiresAt DateTime? @map("active_request_expires_at")
   createdAt        DateTime       @default(now()) @map("created_at")
   updatedAt        DateTime       @default(now()) @map("updated_at")
   study            ResearchStudy  @relation(fields: [studyId], references: [id])
+  participantToken ResearchParticipantToken? @relation(fields: [participantTokenId], references: [id])
   turns            ResearchTurn[]
+  requests         ResearchRequest[]
 
   @@index([studyId, status])
+  @@index([participantTokenId, status], map: "idx_research_sessions_participant_token")
   @@map("research_sessions")
 }
 
@@ -205,8 +239,25 @@ model ResearchTurn {
   createdAt DateTime        @default(now()) @map("created_at")
   session   ResearchSession @relation(fields: [sessionId], references: [id])
 
-  @@unique([sessionId, sequence])
+  @@unique([sessionId, sequence], map: "idx_research_turns_session_sequence")
   @@map("research_turns")
+}
+
+model ResearchRequest {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId         String          @map("session_id") @db.Uuid
+  idempotencyKey    String          @map("idempotency_key") @db.VarChar(128)
+  participantTurnId String?         @map("participant_turn_id") @db.Uuid
+  interviewerTurnId String?         @map("interviewer_turn_id") @db.Uuid
+  status            String          @default("PROCESSING") @db.VarChar(20)
+  errorCode         String?         @map("error_code") @db.VarChar(50)
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @default(now()) @map("updated_at")
+  session           ResearchSession @relation(fields: [sessionId], references: [id])
+
+  @@unique([sessionId, idempotencyKey], map: "idx_research_requests_session_key")
+  @@index([sessionId, createdAt], map: "idx_research_requests_session_created")
+  @@map("research_requests")
 }
 
 model ResearchSynthesis {
@@ -755,6 +806,7 @@ model ApiKey {
   keyPrefix        String    @map("key_prefix") @db.VarChar(8)
   purpose          String?   @db.VarChar(30)
   scopeWorkspaceId String?   @map("scope_workspace_id") @db.Uuid
+  expiresAt        DateTime? @map("expires_at")
   lastUsedAt       DateTime? @map("last_used_at")
   revokedAt        DateTime? @map("revoked_at")
   createdAt        DateTime  @default(now()) @map("created_at")

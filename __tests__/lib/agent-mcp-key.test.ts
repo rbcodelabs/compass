@@ -42,7 +42,9 @@ describe("mintAgentMcpKey", () => {
       name: "research-interview (ephemeral)",
       purpose: "RESEARCH",
       scopeWorkspaceId: "workspace-1",
+      expiresAt: expect.any(Date),
     })
+    expect(mockApiKey.create.mock.calls[0][0].data.expiresAt.getTime()).toBeGreaterThan(Date.now())
   })
 })
 

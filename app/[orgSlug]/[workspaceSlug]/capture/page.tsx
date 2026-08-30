@@ -4,16 +4,18 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { PageHeader } from "@/components/patterns/page-header"
 import { Button } from "@/components/ui/button"
+import { isResearchCaptureEnabled } from "@/lib/research-feature"
 
 export const metadata = { title: "Capture" }
 
 export default async function CapturePage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string }> }) {
+  if (!isResearchCaptureEnabled()) notFound()
   const session = await auth(); if (!session?.user?.id) redirect("/login")
   const { orgSlug, workspaceSlug } = await params
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findFirst({ where: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } }, select: { id: true, name: true } })
   if (!workspace) notFound()
-  const studies = await prisma.researchStudy.findMany({ where: { workspaceId: workspace.id, status: { not: "ARCHIVED" } }, orderBy: { createdAt: "desc" }, include: { _count: { select: { sessions: true } } } })
+  const studies = await prisma.researchStudy.findMany({ where: { workspaceId: workspace.id, status: { not: "ARCHIVED" } }, orderBy: { createdAt: "desc" }, take: 100, include: { _count: { select: { sessions: true } } } })
   return <main className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8">
     <PageHeader title="Capture" description={<>Feedback, ideas, and research for {workspace.name}</>} actions={<Button render={<Link href={`/${orgSlug}/${workspaceSlug}/capture/new`} />}>New study</Button>} />
     <div className="flex gap-4 border-b border-border"><Link className="border-b-2 border-primary px-1 pb-3 text-sm font-medium" href={`/${orgSlug}/${workspaceSlug}/capture`}>Studies</Link><Link className="px-1 pb-3 text-sm text-text-subtle" href={`/${orgSlug}/${workspaceSlug}/feedback`}>Inbox</Link></div>

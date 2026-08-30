@@ -20,6 +20,7 @@ async function ensureResearchCaptureSchema(pool: pg.Pool) {
   const migrationPaths = [
     "prisma/migrations/034_research_capture/migration.sql",
     "prisma/migrations/035_research_agent_scope/migration.sql",
+    "prisma/migrations/036_research_capture_hardening/migration.sql",
   ];
 
   const client = await pool.connect();

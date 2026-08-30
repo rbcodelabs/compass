@@ -1,17 +1,7 @@
-// Public research-interview agent entry point. Runs inside the same warm
-// Vercel Sandbox runtime as Compass's in-app agent, but receives a short-lived
-// workspace-scoped MCP credential and an exact read-only tool allowlist.
+// Public research-interview agent entry point. Public participant text is sent
+// to the model with no Compass MCP server or workspace credential attached.
 
 import { query } from "@anthropic-ai/claude-agent-sdk"
-
-const READ_ONLY_RESEARCH_TOOLS = [
-  "mcp__compass__get_workspace_summary",
-  "mcp__compass__list_feedback",
-  "mcp__compass__list_docs",
-  "mcp__compass__get_doc",
-  "mcp__compass__list_opportunities",
-  "mcp__compass__get_opportunity",
-]
 
 function emit(kind: "AGENT_RESULT" | "AGENT_ERROR", payload: unknown): void {
   process.stdout.write(`${kind} ${JSON.stringify(payload)}\n`)
@@ -24,15 +14,8 @@ function requireEnv(name: string): string {
 }
 
 async function main(): Promise<void> {
-  const baseUrl = requireEnv("MCP_BASE_URL")
-  const token = requireEnv("MCP_TOKEN")
   const prompt = requireEnv("AGENT_PROMPT")
   requireEnv("ANTHROPIC_API_KEY")
-
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
-  if (process.env.MCP_BYPASS_SECRET) {
-    headers["x-vercel-protection-bypass"] = process.env.MCP_BYPASS_SECRET
-  }
 
   let finalText: string | undefined
   let usage: unknown
@@ -40,18 +23,8 @@ async function main(): Promise<void> {
     prompt,
     options: {
       model: "claude-sonnet-5",
-      mcpServers: {
-        compass: {
-          type: "http",
-          url: new URL("/api/mcp", baseUrl).toString(),
-          headers,
-          alwaysLoad: true,
-        },
-      },
-      allowedTools: READ_ONLY_RESEARCH_TOOLS,
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      maxTurns: 8,
+      tools: [],
+      maxTurns: 1,
     },
   })) {
     if (message.type !== "result") continue

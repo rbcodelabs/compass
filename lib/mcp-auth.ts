@@ -34,11 +34,16 @@ export async function validateMcpAuth(
       keyPrefix,
       keyHash,
       revokedAt: null,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
-    select: { id: true, userId: true, purpose: true, scopeWorkspaceId: true },
+    select: { id: true, userId: true, purpose: true, scopeWorkspaceId: true, expiresAt: true },
   })
 
   if (!apiKey) return { valid: false }
+  if (
+    apiKey.purpose === "RESEARCH" &&
+    (!apiKey.expiresAt || apiKey.expiresAt.getTime() <= Date.now())
+  ) return { valid: false }
 
   // Update lastUsedAt asynchronously (don't await — don't block the request)
   prisma.apiKey.update({

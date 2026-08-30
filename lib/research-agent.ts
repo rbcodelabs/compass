@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
-import { mintResearchAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 
 export class ResearchAgentUnavailableError extends Error {
   constructor(message: string) {
@@ -19,13 +18,8 @@ function readEntryScript(): string {
 }
 
 export async function runResearchInterviewAgent({
-  userId,
-  workspaceId,
   prompt,
-  baseUrl,
 }: {
-  userId: string
-  workspaceId: string
   prompt: string
   baseUrl: string
 }): Promise<string> {
@@ -38,7 +32,6 @@ export async function runResearchInterviewAgent({
     throw new ResearchAgentUnavailableError("ANTHROPIC_API_KEY is not configured")
   }
 
-  const { token, apiKeyId } = await mintResearchAgentMcpKey(userId, workspaceId)
   let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>> | undefined
   try {
     sandbox = await bootSandboxFromSnapshot(snapshotId)
@@ -48,12 +41,7 @@ export async function runResearchInterviewAgent({
       args: ["entry.ts"],
       env: {
         ANTHROPIC_API_KEY: anthropicApiKey,
-        MCP_BASE_URL: baseUrl,
-        MCP_TOKEN: token,
         AGENT_PROMPT: prompt,
-        ...(process.env.MCP_BYPASS_SECRET
-          ? { MCP_BYPASS_SECRET: process.env.MCP_BYPASS_SECRET }
-          : {}),
       },
       detached: true,
       timeoutMs: 2 * 60_000,
@@ -91,9 +79,8 @@ export async function runResearchInterviewAgent({
       try {
         await sandbox.stop()
       } catch {
-        // Best-effort cleanup; the MCP credential is still revoked below.
+        // Best-effort sandbox cleanup; this public path carries no MCP credential.
       }
     }
-    await revokeAgentMcpKey(apiKeyId)
   }
 }

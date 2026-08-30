@@ -66,8 +66,8 @@ describe("TOOL_GATES completeness", () => {
 })
 
 describe("applyToolGate", () => {
-  it("keeps the public research catalog read-only", () => {
-    expect([...RESEARCH_TOOL_ALLOWLIST]).not.toContainEqual(expect.stringMatching(/^(create|update|delete|add|set|log|move|link|unlink|promote|approve|reject|restore|resolve|reopen)_/))
+  it("gives public research credentials no internal workspace tools", () => {
+    expect([...RESEARCH_TOOL_ALLOWLIST]).toEqual([])
   })
 
   it("short-circuits (no gate, no query) for the service key", async () => {
@@ -79,9 +79,10 @@ describe("applyToolGate", () => {
     await expect(applyToolGate("totally_new_tool", MEMBER, {})).rejects.toThrow(/No authorization policy/)
   })
 
-  it("research credentials allow only the explicit read-only catalog", async () => {
-    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
-    await expect(applyToolGate("list_feedback", RESEARCH, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+  it("research credentials deny both read and write workspace tools", async () => {
+    await expect(applyToolGate("list_feedback", RESEARCH, { workspaceId: "ws-1" })).rejects.toThrow(
+      /not available to research interviews/
+    )
     await expect(applyToolGate("create_feedback", RESEARCH, { workspaceId: "ws-1" })).rejects.toThrow(
       /not available to research interviews/
     )

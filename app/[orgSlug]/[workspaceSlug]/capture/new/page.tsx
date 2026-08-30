@@ -5,9 +5,22 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { createResearchStudy } from "../actions"
+import { notFound, redirect } from "next/navigation"
+import { auth } from "@/auth"
+import getPrisma from "@/lib/db"
+import { isResearchCaptureEnabled } from "@/lib/research-feature"
 
 export default async function NewStudyPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string }> }) {
+  if (!isResearchCaptureEnabled()) notFound()
+  const session = await auth()
+  if (!session?.user?.id) redirect("/login")
   const { orgSlug, workspaceSlug } = await params
+  const prisma = getPrisma()
+  const workspace = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } },
+    select: { id: true },
+  })
+  if (!workspace) notFound()
   const action = createResearchStudy.bind(null, orgSlug, workspaceSlug)
 
   return (

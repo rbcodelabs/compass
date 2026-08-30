@@ -2,11 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const resolveActiveResearchStudy = vi.hoisted(() => vi.fn())
 const runResearchInterviewAgent = vi.hoisted(() => vi.fn())
+const respondToResearchSession = vi.hoisted(() => vi.fn())
 
 vi.mock("@/lib/research-access", () => ({ resolveActiveResearchStudy }))
 vi.mock("@/lib/research-agent", () => ({
   ResearchAgentUnavailableError: class ResearchAgentUnavailableError extends Error {},
   runResearchInterviewAgent,
+}))
+vi.mock("@/lib/research-session", () => ({
+  ResearchSessionError: class ResearchSessionError extends Error {
+    constructor(message: string, readonly status: number) { super(message) }
+  },
+  respondToResearchSession,
 }))
 
 import { POST } from "@/app/api/research/respond/route"
@@ -19,11 +26,9 @@ function request() {
     body: JSON.stringify({
       token: "study-token",
       sessionId: "session-1",
-      elapsedSeconds: 30,
-      messages: [
-        { role: "INTERVIEWER", content: "Tell me about the last time." },
-        { role: "PARTICIPANT", content: "Yesterday I used a spreadsheet." },
-      ],
+      resumeToken: "resume-secret",
+      idempotencyKey: "clientturnid0001",
+      answer: "Yesterday I used a spreadsheet.",
     }),
   })
 }
@@ -54,7 +59,7 @@ describe("research interviewer response", () => {
   })
 
   it("reports a missing model credential instead of silently failing", async () => {
-    runResearchInterviewAgent.mockRejectedValue(
+    respondToResearchSession.mockRejectedValue(
       new ResearchAgentUnavailableError("ANTHROPIC_API_KEY is not configured"),
     )
 
@@ -65,18 +70,51 @@ describe("research interviewer response", () => {
   })
 
   it("returns the adaptive interviewer reply", async () => {
-    runResearchInterviewAgent.mockResolvedValue("What made the spreadsheet difficult to use?")
+    respondToResearchSession.mockResolvedValue({
+      message: "What made the spreadsheet difficult to use?",
+      replayed: false,
+    })
 
     const response = await POST(request())
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
       message: "What made the spreadsheet difficult to use?",
+      replayed: false,
     })
-    expect(runResearchInterviewAgent).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "user-1",
-      workspaceId: "workspace-1",
-      prompt: expect.stringContaining("Understand planning habits"),
+    expect(respondToResearchSession).toHaveBeenCalledWith(expect.objectContaining({
+      answer: "Yesterday I used a spreadsheet.",
+      idempotencyKey: "clientturnid0001",
+      resumeToken: "resume-secret",
     }))
+  })
+
+  it("uses a deterministic no-cost agent only for local functional E2E", async () => {
+    vi.stubEnv("NODE_ENV", "development")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
+    respondToResearchSession.mockImplementation(async ({ runAgent }: { runAgent: (input: { prompt: string; baseUrl: string }) => Promise<string> }) => ({
+      message: await runAgent({ prompt: "prompt", baseUrl: "http://localhost" }),
+      replayed: false,
+    }))
+
+    const response = await POST(request())
+
+    await expect(response.json()).resolves.toMatchObject({ message: "What made that difficult for you?" })
+    expect(runResearchInterviewAgent).not.toHaveBeenCalled()
+  })
+
+  it("cannot bypass the real agent in production even when the E2E flag is present", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
+    runResearchInterviewAgent.mockResolvedValue("Production model reply")
+    respondToResearchSession.mockImplementation(async ({ runAgent }: { runAgent: (input: { prompt: string; baseUrl: string }) => Promise<string> }) => ({
+      message: await runAgent({ prompt: "prompt", baseUrl: "https://compass.test" }),
+      replayed: false,
+    }))
+
+    const response = await POST(request())
+
+    await expect(response.json()).resolves.toMatchObject({ message: "Production model reply" })
+    expect(runResearchInterviewAgent).toHaveBeenCalledOnce()
   })
 })

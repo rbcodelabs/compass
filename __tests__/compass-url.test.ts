@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-import { feedbackItemUrl } from "@/lib/compass-url"
+import { feedbackItemUrl, researchParticipantUrl } from "@/lib/compass-url"
 
 const KEYS = [
   "VERCEL_ENV",
@@ -53,6 +53,12 @@ describe("feedbackItemUrl deployment origins", () => {
 
   it("encodes slugs and the detail value", () => {
     expect(url()).toBe("http://localhost:3000/Acme%20Org/PM%2FTools/feedback?detail=feedback%3Aitem%3A1")
+  })
+
+  it("builds participant links from the trusted origin and encodes the token", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3001"
+    expect(researchParticipantUrl("secret/token"))
+      .toBe("http://localhost:3001/research/secret%2Ftoken")
   })
 
   it.each([

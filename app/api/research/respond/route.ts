@@ -1,54 +1,53 @@
 import { NextResponse } from "next/server"
-import { buildResearchAgentTurnPrompt, type ResearchGuideItem } from "@/lib/research"
 import { ResearchAgentUnavailableError, runResearchInterviewAgent } from "@/lib/research-agent"
 import { resolveActiveResearchStudy } from "@/lib/research-access"
+import { ResearchSessionError, respondToResearchSession } from "@/lib/research-session"
+import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
 
-type Message = { role: "INTERVIEWER" | "PARTICIPANT"; content: string }
-
 export async function POST(request: Request) {
-  const { token, sessionId, messages, elapsedSeconds } = await request.json() as {
-    token?: string
-    sessionId?: string
-    messages?: Message[]
-    elapsedSeconds?: number
+  let body: Record<string, unknown>
+  try {
+    body = await readBoundedResearchJson(request)
+  } catch (error) {
+    const status = error instanceof ResearchRequestBodyError ? error.status : 400
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid request" }, { status })
   }
-  if (!token || !sessionId || !messages?.length) {
+  if (
+    !body || typeof body.token !== "string" || typeof body.sessionId !== "string" ||
+    typeof body.resumeToken !== "string" || typeof body.idempotencyKey !== "string" ||
+    typeof body.answer !== "string" || "messages" in body || "elapsedSeconds" in body
+  ) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 })
   }
-
-  const resolved = await resolveActiveResearchStudy(token)
+  const resolved = await resolveActiveResearchStudy(body.token)
   if (!resolved) return NextResponse.json({ error: "Study not found" }, { status: 404 })
-  const session = await resolved.prisma.researchSession.findFirst({
-    where: { id: sessionId, studyId: resolved.study.id, status: "IN_PROGRESS" },
-    select: { id: true },
-  })
-  if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 })
-  if (!resolved.study.createdById) {
-    return NextResponse.json({ error: "Interviewer is not configured" }, { status: 503 })
-  }
-
-  const guide = JSON.parse(resolved.study.guide) as ResearchGuideItem[]
-  const prompt = buildResearchAgentTurnPrompt({
-    guide,
-    targetMinutes: resolved.study.targetMinutes,
-    goal: resolved.study.goal,
-    elapsedSeconds,
-    workspaceId: resolved.study.workspaceId,
-    messages,
-  })
-
   try {
-    const message = await runResearchInterviewAgent({
-      userId: resolved.study.createdById,
-      workspaceId: resolved.study.workspaceId,
-      prompt,
+    // Functional browser tests exercise the real persistence path without making
+    // a paid model call. Production can never enter this branch.
+    const functionalAgent = process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1"
+      ? async () => {
+          // Guarantee overlap for the real-Postgres single-flight probe.
+          await new Promise((resolve) => setTimeout(resolve, 1_000))
+          return "What made that difficult for you?"
+        }
+      : ({ prompt, baseUrl }: { prompt: string; baseUrl: string }) => runResearchInterviewAgent({ prompt, baseUrl })
+    const result = await respondToResearchSession({
+      context: resolved,
+      sessionId: body.sessionId,
+      resumeToken: body.resumeToken,
+      idempotencyKey: body.idempotencyKey,
+      answer: body.answer,
       baseUrl: new URL(request.url).origin,
+      runAgent: functionalAgent,
     })
-    return NextResponse.json({ message })
+    return NextResponse.json(result)
   } catch (error) {
+    if (error instanceof ResearchSessionError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     if (error instanceof ResearchAgentUnavailableError) {
       console.error("Research agent is not configured", error.message)
       return NextResponse.json({ error: "Interviewer is not configured" }, { status: 503 })

@@ -24,11 +24,13 @@ async function mintScopedMcpKey({
   name,
   purpose,
   scopeWorkspaceId,
+  expiresAt,
 }: {
   userId: string
   name: string
   purpose?: "RESEARCH"
   scopeWorkspaceId?: string
+  expiresAt?: Date
 }): Promise<MintedAgentKey> {
   const randomPart = randomBytes(16).toString("hex")
   const token = `cmp_${randomPart}`
@@ -37,7 +39,7 @@ async function mintScopedMcpKey({
 
   const prisma = getPrisma()
   const row = await prisma.apiKey.create({
-    data: { userId, name, keyHash, keyPrefix, purpose, scopeWorkspaceId },
+    data: { userId, name, keyHash, keyPrefix, purpose, scopeWorkspaceId, expiresAt },
     select: { id: true },
   })
   return { token, apiKeyId: row.id }
@@ -59,6 +61,7 @@ export async function mintResearchAgentMcpKey(
     name: "research-interview (ephemeral)",
     purpose: "RESEARCH",
     scopeWorkspaceId: workspaceId,
+    expiresAt: new Date(Date.now() + 5 * 60 * 1000),
   })
 }
 

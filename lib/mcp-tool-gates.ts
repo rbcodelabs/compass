@@ -37,14 +37,7 @@ import {
 type Args = Record<string, any> // runtime-validated by each tool's zod inputSchema
 type Gate = (actor: McpActor, args: Args) => Promise<void>
 
-export const RESEARCH_TOOL_ALLOWLIST = new Set([
-  "get_workspace_summary",
-  "list_feedback",
-  "list_docs",
-  "get_doc",
-  "list_opportunities",
-  "get_opportunity",
-])
+export const RESEARCH_TOOL_ALLOWLIST = new Set<string>()
 
 // ── Polymorphic target maps (values are WorkspaceEntityType) ────────────────
 

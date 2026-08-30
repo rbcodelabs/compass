@@ -146,6 +146,45 @@ describe("feedback grid indexes (033)", () => {
   });
 });
 
+describe("research capture hardening migration (036)", () => {
+  const sql = sqlFor("036_research_capture_hardening");
+
+  it("is registered and creates the additive token, request, session, and credential fields", () => {
+    expect(registered).toContain("036_research_capture_hardening");
+    expect(sql).toContain("CREATE TABLE research_participant_tokens")
+    expect(sql).toContain("CREATE TABLE research_requests")
+    expect(sql).toContain("ALTER TABLE research_sessions ADD COLUMN IF NOT EXISTS resume_token_hash")
+    expect(sql).toContain("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS expires_at")
+  });
+
+  it("backfills participant tokens before creating the unique token index", () => {
+    const backfill = sql.indexOf("INSERT INTO research_participant_tokens")
+    const uniqueIndex = sql.indexOf("CREATE UNIQUE INDEX ASYNC idx_research_participant_tokens_hash")
+    expect(backfill).toBeGreaterThan(-1)
+    expect(uniqueIndex).toBeGreaterThan(backfill)
+    expect(sql).toContain("NOT EXISTS")
+    expect(sql).not.toContain("ON CONFLICT")
+  });
+
+  it("keeps additive sequence state nullable without a DSQL-incompatible default change", () => {
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS next_sequence INTEGER")
+    expect(sql).not.toMatch(/ALTER COLUMN next_sequence SET (?:DEFAULT|NOT NULL)/i)
+  });
+
+  it("uses index names mapped by the Prisma schema", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    for (const name of [
+      "idx_research_participant_tokens_hash",
+      "idx_research_sessions_resume_token",
+      "idx_research_sessions_participant_token",
+      "idx_research_requests_session_key",
+    ]) {
+      expect(sql).toContain(name)
+      expect(schema).toContain(`map: "${name}"`)
+    }
+  });
+});
+
 describe("schema.prisma stays DSQL-compatible", () => {
   it("declares no sort: Desc on any @@index", () => {
     // Prisma turns `sort: Desc` into `("col" DESC)`, which DSQL rejects.

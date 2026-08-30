@@ -1,15 +1,31 @@
 import { NextResponse } from "next/server"
 import { resolveActiveResearchStudy } from "@/lib/research-access"
-
-type Message = { role: "INTERVIEWER" | "PARTICIPANT"; content: string }
+import { completeResearchSession, ResearchSessionError } from "@/lib/research-session"
+import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
 
 export async function POST(request: Request) {
-  const { token, sessionId, messages } = await request.json() as { token?: string; sessionId?: string; messages?: Message[] }
-  if (!token || !sessionId || !messages?.length) return NextResponse.json({ error: "Invalid request" }, { status: 400 })
-  const resolved = await resolveActiveResearchStudy(token)
+  let body: Record<string, unknown>
+  try {
+    body = await readBoundedResearchJson(request)
+  } catch (error) {
+    const status = error instanceof ResearchRequestBodyError ? error.status : 400
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid request" }, { status })
+  }
+  if (
+    !body || typeof body.token !== "string" || typeof body.sessionId !== "string" ||
+    typeof body.resumeToken !== "string" || "messages" in body
+  ) {
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 })
+  }
+  const resolved = await resolveActiveResearchStudy(body.token)
   if (!resolved) return NextResponse.json({ error: "Study not found" }, { status: 404 })
-  const session = await resolved.prisma.researchSession.findFirst({ where: { id: sessionId, studyId: resolved.study.id, status: "IN_PROGRESS" }, select: { id: true } })
-  if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 })
-  await resolved.prisma.$transaction([resolved.prisma.researchTurn.deleteMany({ where: { sessionId } }), ...messages.map((message, sequence) => resolved.prisma.researchTurn.create({ data: { sessionId, role: message.role, content: message.content.trim(), sequence } })), resolved.prisma.researchSession.update({ where: { id: sessionId }, data: { status: "COMPLETED", completedAt: new Date(), updatedAt: new Date() } })])
-  return NextResponse.json({ ok: true })
+  try {
+    return NextResponse.json(await completeResearchSession(resolved, body.sessionId, body.resumeToken))
+  } catch (error) {
+    if (error instanceof ResearchSessionError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
+    console.error("Research session completion failed", error)
+    return NextResponse.json({ error: "Interview unavailable" }, { status: 502 })
+  }
 }
