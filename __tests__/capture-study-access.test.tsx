@@ -71,11 +71,15 @@ describe("researcher study access", () => {
       id: "study-1",
       name: "Planning interviews",
       goal: "Understand planning",
+      studyType: "USABILITY_TEST",
+      appUrl: "https://example.com/pricing",
+      targetMinutes: 15,
       participantTokens: [],
       sessions: [{
         id: "session-1",
-        modality: "CHAT",
+        modality: "VOICE",
         status: "COMPLETED",
+        attachments: [{ id: "attachment-1", originalName: "pricing.png", mimeType: "image/png", sizeBytes: 2048, turnId: "turn-2" }],
         turns: [
           { id: "turn-1", role: "INTERVIEWER", content: "Canonical question" },
           { id: "turn-2", role: "PARTICIPANT", content: "Canonical answer" },
@@ -88,12 +92,20 @@ describe("researcher study access", () => {
 
     expect(screen.getByText("Canonical question")).toBeVisible()
     expect(screen.getByText("Canonical answer")).toBeVisible()
+    expect(screen.getByText("Guided usability test")).toBeVisible()
+    expect(screen.getByRole("link", { name: "https://example.com/pricing" })).toHaveAttribute("rel", "noopener noreferrer")
+    expect(screen.getByText("15 minutes")).toBeVisible()
+    expect(screen.getByText("Voice session")).toBeVisible()
+    expect(screen.getByRole("link", { name: "pricing.png" })).toHaveAttribute("href", "/api/research/member-attachments/attachment-1")
     expect(reconcileAbandonedResearchSessions).toHaveBeenCalledWith(expect.anything(), "study-1")
     expect(researchStudy.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({
         sessions: expect.objectContaining({
           take: 50,
-          include: { turns: { orderBy: { sequence: "asc" }, take: 200 } },
+          include: {
+            turns: { orderBy: { sequence: "asc" }, take: 200 },
+            attachments: { where: { status: "READY" }, orderBy: { createdAt: "asc" }, take: 100 },
+          },
         }),
       }),
     }))

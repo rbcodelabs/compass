@@ -12,13 +12,17 @@ Capture is the starting point for customer feedback, ideas, and research. It kee
 
 ## Studies
 
-Open **Capture** and choose **New study** to create a customer interview. Give the study a clear learning goal and enter one open-ended discussion question per line.
+Open **Capture** and choose **New study** to create either a customer interview or a guided usability test. Customer interviews use open-ended discussion questions. Guided usability tests add an HTTPS product URL, a 10, 15, 20, or 30 minute target, and five to eight editable participant tasks. Compass can draft realistic tasks from the research goal and product URL; review, edit, add, or remove them before creating the study.
 
 After creating the study, Compass shows a secure participant link. Share that link with participants so they can complete the interview without a Compass account. Links expire after 30 days and Compass stores only a secure hash, so save the displayed link when it is created. You can rotate the link, which immediately revokes the previous link, or revoke all active links without creating a replacement.
 
-Compass saves each participant and interviewer turn as the interview progresses. If a participant reloads or briefly closes the tab, the same browser can safely resume its own in-progress session. Finishing removes that browser's resume credential. Completed and abandoned sessions and their canonical transcripts remain attached to the study and its workspace for member review.
+For guided usability tests, the participant first chooses Chat or Voice. On desktop the live product appears beside the neutral moderator; on smaller screens it uses a constrained stacked layout. An **Open product** action is always available when a site blocks embedding. The moderator presents one task at a time, asks the participant to think aloud, and probes expectations without identifying controls or rescuing them.
 
-Public interviews have bounded message size, duration, turn count, and request rate. A participant link grants no access to workspace feedback, documents, opportunities, or other internal tools.
+Participants can share a screenshot or PDF as research evidence. Files are signature-checked, bounded, stored privately, and delivered only through an authorized session or workspace-member request. Chat sends bounded file bytes to the isolated interviewer. Voice can share an image directly with the realtime moderator; PDFs are represented only by a safe, untrusted description. Raw voice audio is not retained.
+
+Compass saves each finalized participant and interviewer turn as the session progresses. If a participant reloads or briefly closes the tab, the same browser can safely resume its own in-progress Chat or Voice session. Finishing removes that browser's resume credential. Completed and abandoned sessions, their canonical transcripts, modality, and authorized attachments remain attached to the study and its workspace for member review.
+
+Public sessions have bounded message size, duration, turn count, attachment size/count/rate, and request rate. A participant link grants no access to workspace feedback, documents, opportunities, or other internal tools. Both Chat and Voice use server-authored prompts and models with no Compass tools or workspace credentials.
 
 ## Inbox
 

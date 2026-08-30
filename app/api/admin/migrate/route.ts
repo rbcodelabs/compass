@@ -174,6 +174,10 @@ const MIGRATIONS = [
     name: "036_research_capture_hardening",
     filePath: path.join(process.cwd(), "prisma/migrations/036_research_capture_hardening/migration.sql"),
   },
+  {
+    name: "037_research_guided_ux",
+    filePath: path.join(process.cwd(), "prisma/migrations/037_research_guided_ux/migration.sql"),
+  },
 ];
 
 const DSQL_WRITE_LIMITS = {
@@ -188,6 +192,16 @@ const RESEARCH_CAPTURE_INDEXES = [
   "idx_research_sessions_participant_token",
   "idx_research_requests_session_key",
   "idx_research_requests_session_created",
+] as const;
+
+const RESEARCH_GUIDED_UX_INDEXES = [
+  "idx_research_attachments_blob_pathname",
+  "idx_research_attachments_session_key",
+  "idx_research_attachments_session_created",
+  "idx_research_attachments_turn_created",
+  "idx_research_attachments_workspace_status",
+  "idx_research_voice_events_session_provider",
+  "idx_research_voice_events_session_created",
 ] as const;
 
 type BackfillPreflight = {
@@ -315,6 +329,43 @@ async function getResearchCaptureIndexStatus(client: PoolClient, schema: string)
   };
 }
 
+async function getNamedIndexStatus(
+  client: PoolClient,
+  schema: string,
+  expected: readonly string[],
+) {
+  const { rows } = await client.query<{ name: string; valid: boolean }>(
+    `SELECT c.relname AS name, i.indisvalid AS valid
+     FROM pg_index i
+     JOIN pg_class c ON c.oid = i.indexrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = $1
+       AND c.relname = ANY($2::text[])`,
+    [schema, [...expected]],
+  )
+  const validity = new Map(rows.map((row) => [row.name, row.valid]))
+  const indexes = expected.map((name) => ({
+    name,
+    present: validity.has(name),
+    valid: validity.get(name) === true,
+  }))
+  return { indexes, indexesValid: indexes.every((index) => index.valid) }
+}
+
+async function getResearchGuidedUxReport(client: PoolClient, schema: string, asyncIndexJobIds: string[] = []) {
+  const indexStatus = await getNamedIndexStatus(client, schema, RESEARCH_GUIDED_UX_INDEXES)
+  const asyncIndexJobs = await getAsyncIndexJobStatus(client, asyncIndexJobIds)
+  return {
+    preflight: {
+      passed: true,
+      writesExistingRows: false,
+      reason: "Migration 037 adds nullable columns and new empty tables; it performs no backfill.",
+    },
+    ...indexStatus,
+    asyncIndexJobs,
+  }
+}
+
 async function getAsyncIndexJobStatus(client: PoolClient, jobIds: string[]) {
   if (jobIds.length === 0) {
     return {
@@ -426,13 +477,17 @@ export async function GET(req: NextRequest) {
       FROM "${schema}"._prisma_migrations
       ORDER BY finished_at ASC
     `).catch(() => ({ rows: [] as { name: string }[] }));
-    const researchCaptureHardening = await getResearchCaptureHardeningReport(client, schema);
+    const [researchCaptureHardening, researchGuidedUx] = await Promise.all([
+      getResearchCaptureHardeningReport(client, schema),
+      getResearchGuidedUxReport(client, schema),
+    ]);
 
     return NextResponse.json({
       schema,
       appliedMigrations: rows.map((r) => r.name),
       manifest: MIGRATIONS.map((m) => m.name),
       researchCaptureHardening,
+      researchGuidedUx,
     });
   } finally {
     client.release();
@@ -453,7 +508,8 @@ export async function POST(req: NextRequest) {
   const pool = await getPool();
   const client = await pool.connect();
   const log: string[] = [`Using schema: ${schema}`];
-  const asyncIndexJobIds: string[] = [];
+  const researchCaptureAsyncIndexJobIds: string[] = [];
+  const researchGuidedUxAsyncIndexJobIds: string[] = [];
 
   try {
     // Ensure schema exists
@@ -481,11 +537,15 @@ export async function POST(req: NextRequest) {
     );
 
     if (toRun.length === 0) {
-      const researchCaptureHardening = await getResearchCaptureHardeningReport(client, schema);
+      const [researchCaptureHardening, researchGuidedUx] = await Promise.all([
+        getResearchCaptureHardeningReport(client, schema),
+        getResearchGuidedUxReport(client, schema),
+      ]);
       return NextResponse.json({
         message: "Nothing to apply. All migrations up to date.",
         schema,
         researchCaptureHardening,
+        researchGuidedUx,
       });
     }
 
@@ -552,7 +612,11 @@ export async function POST(req: NextRequest) {
           const result = await client.query<{ job_id?: string }>(executableStmt);
           if (!process.env.DATABASE_URL && /CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC/i.test(stmt)) {
             const jobId = result.rows[0]?.job_id;
-            if (jobId) asyncIndexJobIds.push(jobId);
+            if (jobId && migration.name === "036_research_capture_hardening") {
+              researchCaptureAsyncIndexJobIds.push(jobId);
+            } else if (jobId && migration.name === "037_research_guided_ux") {
+              researchGuidedUxAsyncIndexJobIds.push(jobId);
+            }
           }
           const label = executableStmt.slice(0, 60).replace(/\s+/g, " ");
           log.push(`  ✓ ${label}…`);
@@ -579,9 +643,10 @@ export async function POST(req: NextRequest) {
     const researchCaptureHardening = await getResearchCaptureHardeningReport(
       client,
       schema,
-      asyncIndexJobIds
+      researchCaptureAsyncIndexJobIds
     );
-    return NextResponse.json({ message: log.join("\n"), schema, researchCaptureHardening });
+    const researchGuidedUx = await getResearchGuidedUxReport(client, schema, researchGuidedUxAsyncIndexJobIds);
+    return NextResponse.json({ message: log.join("\n"), schema, researchCaptureHardening, researchGuidedUx });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: msg, log: log.join("\n"), schema }, { status: 500 });

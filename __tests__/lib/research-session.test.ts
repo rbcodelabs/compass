@@ -58,6 +58,10 @@ function context(overrides: Record<string, unknown> = {}) {
       update: vi.fn(),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    researchAttachment: {
+      findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
     $transaction: vi.fn(),
     ...overrides,
   // The test double intentionally spans several generated Prisma delegate shapes.
@@ -161,6 +165,21 @@ describe("canonical research persistence", () => {
     })
     expect(JSON.stringify(fixture.prisma.researchSession.create.mock.calls[0][0].data))
       .not.toContain(result.resumeToken)
+  })
+
+  it("creates a voice session over the same canonical domain for guided UX only", async () => {
+    const fixture = context()
+    const guidedStudy = (fixture.value as unknown as { study: { studyType: string; appUrl: string | null } }).study
+    guidedStudy.studyType = "USABILITY_TEST"
+    guidedStudy.appUrl = "https://example.com"
+
+    const result = await startOrResumeResearchSession(fixture.value, undefined, "VOICE")
+
+    expect(fixture.prisma.researchSession.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ id: result.sessionId, modality: "VOICE" }),
+    })
+    expect(fixture.prisma.researchTurn.create).not.toHaveBeenCalled()
+    expect(result.turns).toEqual([])
   })
 
   it("accepts the final start in a token window and rejects the next one", async () => {
@@ -309,6 +328,40 @@ describe("canonical research persistence", () => {
       .toBeGreaterThanOrEqual(RESEARCH_REQUEST_LEASE_MS)
   })
 
+  it("atomically links authorized READY attachments to the answer and sends private bytes to the tool-free model", async () => {
+    const fixture = context()
+    const now = new Date()
+    fixture.prisma.researchSession.findFirst.mockResolvedValue({
+      id: "session-1", studyId: "study-1", participantTokenId: "participant-token-1",
+      resumeTokenHash: hashResearchResumeToken("resume-secret"), status: "IN_PROGRESS",
+      startedAt: now, createdAt: now, activeRequestId: null, activeRequestExpiresAt: null, turns: [],
+    })
+    fixture.prisma.researchRequest.findUnique.mockResolvedValue(null)
+    fixture.prisma.researchRequest.create.mockResolvedValue({ id: "request-1", sessionId: "session-1", status: "PROCESSING", participantTurnId: null, updatedAt: now })
+    fixture.prisma.researchSession.findUnique
+      .mockResolvedValueOnce({ status: "IN_PROGRESS", activeRequestId: null, activeRequestExpiresAt: null, nextSequence: 0, updatedAt: now })
+      .mockResolvedValueOnce({ nextSequence: 1 })
+    fixture.prisma.researchTurn.findMany.mockResolvedValue([{ id: "participant-turn", role: "PARTICIPANT", content: "This screen confused me.", sequence: 0 }])
+    const attachmentId = "00000000-0000-4000-8000-000000000001"
+    const attachment = { id: attachmentId, status: "READY", turnId: null, workspaceId: "workspace-1", studyId: "study-1", sessionId: "session-1", blobPathname: "private/path", originalName: "screen.png", mimeType: "image/png", sizeBytes: 3 }
+    fixture.prisma.researchAttachment.findMany.mockResolvedValue([attachment])
+    const loadAttachmentBytes = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]))
+    const runAgent = vi.fn().mockResolvedValue("What did you expect to happen?")
+
+    await respondToResearchSession({
+      context: fixture.value, sessionId: "session-1", resumeToken: "resume-secret",
+      idempotencyKey: "clientturnid0001", answer: "This screen confused me.", baseUrl: "https://compass.test",
+      attachmentIds: [attachmentId], loadAttachmentBytes, runAgent,
+    })
+
+    expect(fixture.prisma.researchAttachment.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [attachmentId] }, sessionId: "session-1", status: "READY", turnId: null },
+      data: { turnId: expect.any(String) },
+    })
+    expect(runAgent).toHaveBeenCalledWith(expect.objectContaining({ attachments: [{ mimeType: "image/png", originalName: "screen.png", bytes: expect.any(Uint8Array) }] }))
+    expect(runAgent.mock.calls[0][0]).not.toHaveProperty("blobPathname")
+  })
+
   it("replays a completed idempotent request without invoking the agent", async () => {
     const fixture = context()
     const now = new Date()
@@ -360,6 +413,34 @@ describe("canonical research persistence", () => {
       resumeToken: "resume-secret",
       idempotencyKey: "clientturnid0001",
       answer: "Different answer",
+      baseUrl: "https://compass.test",
+      runAgent: vi.fn(),
+    })).rejects.toMatchObject({ status: 409 })
+  })
+
+  it("rejects reuse of a completed idempotency key with different attachments", async () => {
+    const fixture = context()
+    const now = new Date()
+    fixture.prisma.researchSession.findFirst.mockResolvedValue({
+      id: "session-1", status: "IN_PROGRESS", startedAt: now, createdAt: now,
+      activeRequestId: null, activeRequestExpiresAt: null, turns: [],
+    })
+    fixture.prisma.researchRequest.findUnique.mockResolvedValue({
+      id: "request-1", status: "COMPLETED", participantTurnId: "turn-1", interviewerTurnId: "turn-2",
+    })
+    fixture.prisma.researchTurn.findUnique.mockResolvedValue({
+      id: "turn-1", role: "PARTICIPANT", content: "Same answer", sequence: 1,
+    })
+    fixture.prisma.researchAttachment.findMany.mockResolvedValue([{ id: "00000000-0000-4000-8000-000000000001" }])
+
+    await expect(respondToResearchSession({
+      context: fixture.value,
+      sessionId: "session-1",
+      resumeToken: "resume-secret",
+      idempotencyKey: "clientturnid0001",
+      answer: "Same answer",
+      attachmentIds: ["00000000-0000-4000-8000-000000000002"],
+      loadAttachmentBytes: vi.fn(),
       baseUrl: "https://compass.test",
       runAgent: vi.fn(),
     })).rejects.toMatchObject({ status: 409 })

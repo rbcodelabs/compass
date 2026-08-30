@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const resolveActiveResearchStudy = vi.hoisted(() => vi.fn())
 const runResearchInterviewAgent = vi.hoisted(() => vi.fn())
 const respondToResearchSession = vi.hoisted(() => vi.fn())
+const storage = vi.hoisted(() => ({ get: vi.fn() }))
 
 vi.mock("@/lib/research-access", () => ({ resolveActiveResearchStudy }))
 vi.mock("@/lib/research-agent", () => ({
@@ -15,6 +16,7 @@ vi.mock("@/lib/research-session", () => ({
   },
   respondToResearchSession,
 }))
+vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: () => storage }))
 
 import { POST } from "@/app/api/research/respond/route"
 import { ResearchAgentUnavailableError } from "@/lib/research-agent"
@@ -86,6 +88,23 @@ describe("research interviewer response", () => {
       answer: "Yesterday I used a spreadsheet.",
       idempotencyKey: "clientturnid0001",
       resumeToken: "resume-secret",
+    }))
+  })
+
+  it("forwards only attachment IDs and a private byte loader to canonical session handling", async () => {
+    respondToResearchSession.mockResolvedValue({ message: "What did you expect?", replayed: false })
+    const body = {
+      token: "study-token", sessionId: "session-1", resumeToken: "resume-secret",
+      idempotencyKey: "clientturnid0001", answer: "This was confusing.",
+      attachmentIds: ["00000000-0000-4000-8000-000000000001"],
+    }
+    const response = await POST(new Request("http://localhost/api/research/respond", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }))
+    expect(response.status).toBe(200)
+    expect(respondToResearchSession).toHaveBeenCalledWith(expect.objectContaining({
+      attachmentIds: body.attachmentIds,
+      loadAttachmentBytes: expect.any(Function),
     }))
   })
 

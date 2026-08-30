@@ -1,7 +1,8 @@
 // Public research-interview agent entry point. Public participant text is sent
 // to the model with no Compass MCP server or workspace credential attached.
 
-import { query } from "@anthropic-ai/claude-agent-sdk"
+import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
+import { readFileSync } from "node:fs"
 
 function emit(kind: "AGENT_RESULT" | "AGENT_ERROR", payload: unknown): void {
   process.stdout.write(`${kind} ${JSON.stringify(payload)}\n`)
@@ -14,13 +15,39 @@ function requireEnv(name: string): string {
 }
 
 async function main(): Promise<void> {
-  const prompt = requireEnv("AGENT_PROMPT")
   requireEnv("ANTHROPIC_API_KEY")
+  const input = JSON.parse(readFileSync("prompt.json", "utf8")) as {
+    prompt: string
+    attachments: Array<{ mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf"; originalName: string; data: string }>
+  }
+  const content: Exclude<SDKUserMessage["message"]["content"], string> = [{ type: "text", text: input.prompt }]
+  for (const attachment of input.attachments) {
+    if (attachment.mimeType === "application/pdf") {
+      content.push({
+        type: "document",
+        title: attachment.originalName,
+        citations: { enabled: false },
+        source: { type: "base64", media_type: "application/pdf", data: attachment.data },
+      })
+    } else {
+      content.push({
+        type: "image",
+        source: { type: "base64", media_type: attachment.mimeType, data: attachment.data },
+      })
+    }
+  }
+  async function* promptStream(): AsyncGenerator<SDKUserMessage> {
+    yield {
+      type: "user" as const,
+      message: { role: "user" as const, content },
+      parent_tool_use_id: null,
+    }
+  }
 
   let finalText: string | undefined
   let usage: unknown
   for await (const message of query({
-    prompt,
+    prompt: input.attachments.length > 0 ? promptStream() : input.prompt,
     options: {
       model: "claude-sonnet-5",
       tools: [],

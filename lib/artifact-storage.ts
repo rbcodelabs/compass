@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 export interface ArtifactStorage {
-  put(pathname: string, bytes: Uint8Array): Promise<{ pathname: string }>
+  put(pathname: string, bytes: Uint8Array, contentType?: string): Promise<{ pathname: string }>
   get(pathname: string): Promise<Uint8Array | null>
   del(pathname: string): Promise<void>
 }
@@ -37,10 +37,10 @@ const localStorage: ArtifactStorage = {
 }
 
 const vercelBlobStorage: ArtifactStorage = {
-  async put(pathname, bytes) {
+  async put(pathname, bytes, contentType = "text/html; charset=utf-8") {
     const result = await put(pathname, Buffer.from(bytes), {
       access: "private",
-      contentType: "text/html; charset=utf-8",
+      contentType,
       addRandomSuffix: false,
     })
     return { pathname: result.pathname }

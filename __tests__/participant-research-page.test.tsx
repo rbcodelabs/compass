@@ -9,8 +9,8 @@ const notFound = vi.hoisted(() => vi.fn(() => { throw new Error("NEXT_NOT_FOUND"
 
 vi.mock("@/lib/research-access", () => ({ resolveActiveResearchStudy }))
 vi.mock("next/navigation", () => ({ notFound }))
-vi.mock("@/components/research/research-chat", () => ({
-  ResearchChat: ({ token }: { token: string }) => <div data-testid="research-chat">{token}</div>,
+vi.mock("@/components/research/research-experience", () => ({
+  ResearchExperience: ({ token, studyType }: { token: string; studyType: string }) => <div data-testid="research-experience">{token}:{studyType}</div>,
 }))
 
 import ParticipantResearchPage from "@/app/research/[token]/page"
@@ -21,7 +21,7 @@ describe("participant research page", () => {
 
   it("uses the centralized first-class participant-token resolver", async () => {
     resolveActiveResearchStudy.mockResolvedValue({
-      study: { name: "Planning study", goal: "Understand planning", targetMinutes: 15 },
+      study: { name: "Planning study", goal: "Understand planning", targetMinutes: 15, studyType: "CUSTOMER_INTERVIEW", appUrl: null },
       participantToken: { id: "token-row-1" },
     })
 
@@ -29,7 +29,7 @@ describe("participant research page", () => {
 
     expect(resolveActiveResearchStudy).toHaveBeenCalledWith("new-raw-token")
     expect(screen.getByRole("heading", { name: "Planning study" })).toBeVisible()
-    expect(screen.getByTestId("research-chat")).toHaveTextContent("new-raw-token")
+    expect(screen.getByTestId("research-experience")).toHaveTextContent("new-raw-token:CUSTOMER_INTERVIEW")
   })
 
   it("returns not found uniformly for an invalid, expired, or revoked token", async () => {

@@ -24,6 +24,11 @@ describe("research participant API validation", () => {
     expect(response.status).toBe(400)
   })
 
+  it("rejects an unsupported participant modality", async () => {
+    const response = await start(request({ token: "token", modality: "SCREEN_RECORDING" }))
+    expect(response.status).toBe(400)
+  })
+
   it("requires token, session, and transcript context to respond", async () => {
     const response = await respond(request({ token: "token" }))
     expect(response.status).toBe(400)

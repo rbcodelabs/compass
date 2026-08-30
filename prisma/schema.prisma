@@ -144,6 +144,7 @@ model Workspace {
   tasks                Task[]
   agentConversations   AgentConversation[]
   researchStudies      ResearchStudy[]
+  researchAttachments  ResearchAttachment[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -172,6 +173,7 @@ model ResearchStudy {
   sessions       ResearchSession[]
   syntheses      ResearchSynthesis[]
   participantTokens ResearchParticipantToken[]
+  attachments      ResearchAttachment[]
 
   @@index([workspaceId, status])
   @@map("research_studies")
@@ -224,6 +226,10 @@ model ResearchSession {
   participantToken ResearchParticipantToken? @relation(fields: [participantTokenId], references: [id])
   turns            ResearchTurn[]
   requests         ResearchRequest[]
+  attachments      ResearchAttachment[]
+  voiceEvents      ResearchVoiceEvent[]
+  voiceLeaseId     String?        @map("voice_lease_id") @db.Uuid
+  voiceLeaseExpiresAt DateTime?    @map("voice_lease_expires_at")
 
   @@index([studyId, status])
   @@index([participantTokenId, status], map: "idx_research_sessions_participant_token")
@@ -238,6 +244,7 @@ model ResearchTurn {
   sequence  Int
   createdAt DateTime        @default(now()) @map("created_at")
   session   ResearchSession @relation(fields: [sessionId], references: [id])
+  attachments ResearchAttachment[]
 
   @@unique([sessionId, sequence], map: "idx_research_turns_session_sequence")
   @@map("research_turns")
@@ -258,6 +265,51 @@ model ResearchRequest {
   @@unique([sessionId, idempotencyKey], map: "idx_research_requests_session_key")
   @@index([sessionId, createdAt], map: "idx_research_requests_session_created")
   @@map("research_requests")
+}
+
+model ResearchAttachment {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String          @map("workspace_id") @db.Uuid
+  studyId        String          @map("study_id") @db.Uuid
+  sessionId      String          @map("session_id") @db.Uuid
+  turnId         String?         @map("turn_id") @db.Uuid
+  kind           String          @db.VarChar(20)
+  status         String          @default("PENDING") @db.VarChar(20)
+  blobPathname   String          @unique(map: "idx_research_attachments_blob_pathname") @map("blob_pathname") @db.Text
+  originalName   String          @map("original_name") @db.VarChar(255)
+  mimeType       String          @map("mime_type") @db.VarChar(100)
+  sizeBytes      Int             @map("size_bytes")
+  sha256         String          @db.VarChar(64)
+  idempotencyKey String          @map("idempotency_key") @db.VarChar(128)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  readyAt        DateTime?       @map("ready_at")
+  deletedAt      DateTime?       @map("deleted_at")
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id])
+  study          ResearchStudy   @relation(fields: [studyId], references: [id])
+  session        ResearchSession @relation(fields: [sessionId], references: [id])
+  turn           ResearchTurn?   @relation(fields: [turnId], references: [id])
+
+  @@unique([sessionId, idempotencyKey], map: "idx_research_attachments_session_key")
+  @@index([sessionId, createdAt], map: "idx_research_attachments_session_created")
+  @@index([turnId, createdAt], map: "idx_research_attachments_turn_created")
+  @@index([workspaceId, status, createdAt], map: "idx_research_attachments_workspace_status")
+  @@map("research_attachments")
+}
+
+model ResearchVoiceEvent {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId       String          @map("session_id") @db.Uuid
+  providerEventId String          @map("provider_event_id") @db.VarChar(255)
+  turnId          String?         @map("turn_id") @db.Uuid
+  role            String          @db.VarChar(20)
+  content         String          @db.Text
+  status          String          @default("FINAL") @db.VarChar(20)
+  createdAt       DateTime        @default(now()) @map("created_at")
+  session         ResearchSession @relation(fields: [sessionId], references: [id])
+
+  @@unique([sessionId, providerEventId], map: "idx_research_voice_events_session_provider")
+  @@index([sessionId, createdAt], map: "idx_research_voice_events_session_created")
+  @@map("research_voice_events")
 }
 
 model ResearchSynthesis {

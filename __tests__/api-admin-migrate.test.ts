@@ -45,6 +45,15 @@ const INDEX_NAMES = [
   "idx_research_requests_session_key",
   "idx_research_requests_session_created",
 ]
+const GUIDED_INDEX_NAMES = [
+  "idx_research_attachments_blob_pathname",
+  "idx_research_attachments_session_key",
+  "idx_research_attachments_session_created",
+  "idx_research_attachments_turn_created",
+  "idx_research_attachments_workspace_status",
+  "idx_research_voice_events_session_provider",
+  "idx_research_voice_events_session_created",
+]
 
 function request(method: "GET" | "POST", body?: unknown, secret = "test-secret") {
   return new NextRequest("http://localhost/api/admin/migrate", {
@@ -104,7 +113,7 @@ function installQueryResponses({
     }
     if (sql.includes("sys.jobs")) {
       return {
-        rows: INDEX_NAMES.map((name) => ({
+        rows: [...INDEX_NAMES, ...GUIDED_INDEX_NAMES].map((name) => ({
           job_id: `job-${name}`,
           status: "submitted",
           details: null,
@@ -175,6 +184,11 @@ describe("/api/admin/migrate rollout observability", () => {
         },
         indexesValid: true,
       },
+    })
+    expect(result.manifest).toContain("037_research_guided_ux")
+    expect(result.researchGuidedUx).toMatchObject({
+      preflight: { passed: true, writesExistingRows: false },
+      indexesValid: false,
     })
   })
 
@@ -310,5 +324,21 @@ describe("/api/admin/migrate rollout observability", () => {
     })
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("sys.jobs"))).toBe(true)
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("sys.wait_for_job"))).toBe(false)
+  })
+
+  it("attributes migration 037 async jobs to the guided UX report", async () => {
+    delete process.env.DATABASE_URL
+    installQueryResponses({ returnAsyncJobIds: true })
+
+    const response = await POST(request("POST", { script: "037_research_guided_ux" }))
+    const result = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(result.researchGuidedUx.asyncIndexJobs).toMatchObject({
+      waited: false,
+      jobIds: GUIDED_INDEX_NAMES.map((name) => `job-${name}`),
+      jobs: GUIDED_INDEX_NAMES.map((name) => ({ jobId: `job-${name}`, status: "submitted" })),
+    })
+    expect(result.researchCaptureHardening.asyncIndexJobs.jobIds).toEqual([])
   })
 })
