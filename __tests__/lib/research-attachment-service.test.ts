@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
-import { createParticipantResearchAttachment, ResearchAttachmentError } from "@/lib/research-attachment-service"
+import {
+  createParticipantResearchAttachment,
+  ResearchAttachmentError,
+  retryResearchBlobCleanups,
+} from "@/lib/research-attachment-service"
 import { hashResearchResumeToken } from "@/lib/research-session"
 import { validateResearchAttachmentUpload } from "@/lib/research-attachments"
 
@@ -15,7 +19,11 @@ function fixture() {
       create: vi.fn().mockImplementation(async ({ data }) => ({ ...data, createdAt: new Date() })),
       update: vi.fn().mockImplementation(async ({ data }) => data),
     },
-    artifactBlobCleanup: { upsert: vi.fn() },
+    researchBlobCleanup: {
+      upsert: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn(),
+    },
   }
   const storage = { put: vi.fn().mockImplementation(async (pathname: string) => ({ pathname })), get: vi.fn(), del: vi.fn() }
   const context = {
@@ -63,5 +71,106 @@ describe("participant research attachment persistence", () => {
       idempotencyKey: "attachment-key-0001", originalName: "screen.png", mimeType: "image/png", bytes,
     })).rejects.toMatchObject({ status: 429 } satisfies Partial<ResearchAttachmentError>)
     expect(storage.put).not.toHaveBeenCalled()
+  })
+
+  it("records failed blob compensation in the research-owned cleanup queue", async () => {
+    const { prisma, storage, context } = fixture()
+    storage.put.mockRejectedValue(new Error("private storage unavailable"))
+    storage.del.mockRejectedValue(new Error("delete unavailable"))
+
+    await expect(createParticipantResearchAttachment({
+      context: context as never, storage, sessionId: "session-1", resumeToken: "resume-secret",
+      idempotencyKey: "attachment-key-0001", originalName: "screen.png", mimeType: "image/png", bytes,
+    })).rejects.toMatchObject({
+      message: "Attachment storage failed",
+      status: 502,
+    } satisfies Partial<ResearchAttachmentError>)
+
+    expect(prisma.researchBlobCleanup.upsert).toHaveBeenCalledWith({
+      where: { blobPathname: expect.stringMatching(/^research\/workspace-1\/study-1\/session-1\//) },
+      create: expect.objectContaining({
+        workspaceId: "workspace-1",
+        studyId: "study-1",
+        sessionId: "session-1",
+        attachmentId: expect.any(String),
+        blobPathname: expect.stringMatching(/^research\/workspace-1\/study-1\/session-1\//),
+        status: "PENDING",
+      }),
+      update: expect.objectContaining({ status: "PENDING" }),
+    })
+    expect(context.prisma).not.toHaveProperty("artifactBlobCleanup")
+  })
+
+  it("retries only tenant-owned research paths and completes successful cleanup", async () => {
+    const { prisma, storage, context } = fixture()
+    prisma.researchBlobCleanup.findMany.mockResolvedValue([{
+      id: "cleanup-1",
+      workspaceId: "workspace-1",
+      studyId: "study-1",
+      sessionId: "session-1",
+      attachmentId: "attachment-1",
+      blobPathname: "research/workspace-1/study-1/session-1/attachment-1-0123456789abcdef0123456789abcdef.png",
+      attempts: 1,
+    }])
+
+    await retryResearchBlobCleanups({ context: context as never, storage })
+
+    expect(prisma.researchBlobCleanup.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ workspaceId: "workspace-1", status: "PENDING" }),
+      take: 5,
+    }))
+    expect(storage.del).toHaveBeenCalledWith(
+      "research/workspace-1/study-1/session-1/attachment-1-0123456789abcdef0123456789abcdef.png",
+    )
+    expect(prisma.researchBlobCleanup.update).toHaveBeenCalledWith({
+      where: { id: "cleanup-1" },
+      data: expect.objectContaining({ status: "COMPLETED", completedAt: expect.any(Date) }),
+    })
+  })
+
+  it("rejects a queued pathname that does not match its tenant provenance", async () => {
+    const { prisma, storage, context } = fixture()
+    prisma.researchBlobCleanup.findMany.mockResolvedValue([{
+      id: "cleanup-1",
+      workspaceId: "workspace-1",
+      studyId: "study-1",
+      sessionId: "session-1",
+      attachmentId: "attachment-1",
+      blobPathname: "research/workspace-2/study-1/session-1/attachment-1-0123456789abcdef0123456789abcdef.png",
+      attempts: 0,
+    }])
+
+    await retryResearchBlobCleanups({ context: context as never, storage })
+
+    expect(storage.del).not.toHaveBeenCalled()
+    expect(prisma.researchBlobCleanup.update).toHaveBeenCalledWith({
+      where: { id: "cleanup-1" },
+      data: expect.objectContaining({ status: "REJECTED", attempts: 1 }),
+    })
+  })
+
+  it("keeps failed cleanup durable and schedules another retry", async () => {
+    const { prisma, storage, context } = fixture()
+    prisma.researchBlobCleanup.findMany.mockResolvedValue([{
+      id: "cleanup-1",
+      workspaceId: "workspace-1",
+      studyId: "study-1",
+      sessionId: "session-1",
+      attachmentId: "attachment-1",
+      blobPathname: "research/workspace-1/study-1/session-1/attachment-1-0123456789abcdef0123456789abcdef.png",
+      attempts: 2,
+    }])
+    storage.del.mockRejectedValue(new Error("delete still unavailable"))
+
+    await retryResearchBlobCleanups({ context: context as never, storage })
+
+    expect(prisma.researchBlobCleanup.update).toHaveBeenCalledWith({
+      where: { id: "cleanup-1" },
+      data: expect.objectContaining({
+        attempts: 3,
+        nextAttemptAt: expect.any(Date),
+        updatedAt: expect.any(Date),
+      }),
+    })
   })
 })

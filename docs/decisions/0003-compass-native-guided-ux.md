@@ -15,6 +15,8 @@ Guided UX uses the existing `ResearchStudy → ResearchSession → ResearchTurn`
 
 Private uploads use a normalized `ResearchAttachment` record containing redundant workspace, study, session, and optional turn provenance. Blob pathnames are private and never returned directly; participant-session and workspace-member authorization protect delivery. Images and PDFs are signature-validated, bounded, and treated as untrusted participant evidence.
 
+Failed blob compensation is owned by the same bounded context. A standalone `ResearchBlobCleanup` queue records workspace, study, session, attachment, and private-path provenance, then retries deletion only when every path segment matches that provenance. This deliberately does not reuse `ArtifactBlobCleanup`: guided research can be deployed and migrated without requiring the separate artifact subsystem, while cleanup remains durable rather than best-effort.
+
 Voice uses a short-lived OpenAI Realtime client secret minted only after participant-token and session-resume authorization. Server-authored, tool-free instructions select the study, task guide, app URL, model, and voice. Only finalized provider events enter the canonical transcript, keyed idempotently by provider event/item ID. A short database lease permits one active voice connection per session. Disconnects preserve the session for reconnection; raw audio is not retained.
 
 The participant experience uses a restrictive iframe (`allow-scripts allow-forms allow-popups`, `referrerPolicy="no-referrer"`) and a persistent external link with `noopener,noreferrer`. The external action is the guaranteed fallback when embedding is blocked.
@@ -29,7 +31,7 @@ The participant experience uses a restrictive iframe (`allow-scripts allow-forms
 
 ## Consequences
 
-Guided studies reuse Capture lifecycle, rate limits, revocation, completion, and researcher review. Chat and voice can reconnect without transcript replacement. Attachments have auditable tenant provenance and can be deleted independently of turns.
+Guided studies reuse Capture lifecycle, rate limits, revocation, completion, and researcher review. Chat and voice can reconnect without transcript replacement. Attachments have auditable tenant provenance and can be deleted independently of turns. Failed private-blob deletion is retried from a research-owned tenant queue, adding a small amount of persistent operational state in exchange for keeping Capture deployable independently of Artifacts.
 
 Voice requires an OpenAI API key and a browser WebRTC connection. Cross-origin embed success remains unknowable, so the external link is first-class rather than an error-only escape hatch. Browser control, click telemetry, screen recording, and raw-audio retention are deliberately excluded.
 

@@ -33,6 +33,28 @@ describe("research attachment APIs", () => {
     expect(JSON.stringify(await response.json())).not.toContain("blobPathname")
   })
 
+  it("keeps private pathname and storage details out of upload failure responses", async () => {
+    resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1" }, prisma: {} })
+    const { ResearchAttachmentError } = await import("@/lib/research-attachment-service")
+    createParticipantResearchAttachment.mockRejectedValue(
+      new ResearchAttachmentError("Attachment storage failed", 502),
+    )
+    const form = new FormData()
+    form.set("token", "study-token")
+    form.set("sessionId", "session-1")
+    form.set("resumeToken", "resume-secret")
+    form.set("idempotencyKey", "attachment-key-0001")
+    form.set("file", new File([new Uint8Array([1, 2, 3])], "screen.png", { type: "image/png" }))
+
+    const response = await upload(new Request("http://localhost/api/research/attachments", { method: "POST", body: form }))
+    const body = await response.json()
+
+    expect(response.status).toBe(502)
+    expect(body).toEqual({ error: "Attachment storage failed" })
+    expect(JSON.stringify(body)).not.toContain("research/workspace-1")
+    expect(JSON.stringify(body)).not.toContain("private storage unavailable")
+  })
+
   it("serves private bytes only after participant session authorization", async () => {
     resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1" }, prisma: {} })
     getParticipantResearchAttachment.mockResolvedValue({ blobPathname: "private/path", mimeType: "image/png", originalName: "screen.png" })

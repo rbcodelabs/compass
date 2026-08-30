@@ -296,6 +296,24 @@ model ResearchAttachment {
   @@map("research_attachments")
 }
 
+model ResearchBlobCleanup {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  studyId       String    @map("study_id") @db.Uuid
+  sessionId     String    @map("session_id") @db.Uuid
+  attachmentId  String    @map("attachment_id") @db.Uuid
+  blobPathname  String    @unique(map: "idx_research_blob_cleanups_pathname") @map("blob_pathname") @db.Text
+  status        String    @default("PENDING") @db.VarChar(20)
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @map("updated_at")
+  completedAt   DateTime? @map("completed_at")
+
+  @@index([workspaceId, status, nextAttemptAt], map: "idx_research_blob_cleanups_workspace_retry")
+  @@map("research_blob_cleanups")
+}
+
 model ResearchVoiceEvent {
   id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   sessionId       String          @map("session_id") @db.Uuid

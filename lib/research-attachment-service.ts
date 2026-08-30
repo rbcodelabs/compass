@@ -10,6 +10,8 @@ import {
 import { hashResearchResumeToken } from "@/lib/research-session"
 
 const MAX_ATTACHMENTS_PER_MINUTE = 5
+const RESEARCH_CLEANUP_RETRY_LIMIT = 5
+const RESEARCH_CLEANUP_RETRY_DELAY_MS = 60_000
 
 type AttachmentContext = {
   prisma: PrismaClient
@@ -61,6 +63,73 @@ async function authorizeSession(
   return session
 }
 
+function ownsResearchBlobPath(cleanup: {
+  workspaceId: string
+  studyId: string
+  sessionId: string
+  attachmentId: string
+  blobPathname: string
+}) {
+  const prefix = [
+    "research",
+    cleanup.workspaceId,
+    cleanup.studyId,
+    cleanup.sessionId,
+    `${cleanup.attachmentId}-`,
+  ].join("/")
+  const suffix = cleanup.blobPathname.slice(prefix.length)
+  return cleanup.blobPathname.startsWith(prefix) && /^[a-f0-9]{32}\.(?:png|jpg|webp|pdf)$/.test(suffix)
+}
+
+export async function retryResearchBlobCleanups({
+  context,
+  storage,
+  limit = RESEARCH_CLEANUP_RETRY_LIMIT,
+}: {
+  context: AttachmentContext
+  storage: ArtifactStorage
+  limit?: number
+}) {
+  const now = new Date()
+  const rows = await context.prisma.researchBlobCleanup.findMany({
+    where: {
+      workspaceId: context.study.workspaceId,
+      status: "PENDING",
+      nextAttemptAt: { lte: now },
+    },
+    orderBy: { createdAt: "asc" },
+    take: Math.min(Math.max(limit, 1), RESEARCH_CLEANUP_RETRY_LIMIT),
+  })
+
+  for (const row of rows) {
+    if (!ownsResearchBlobPath(row)) {
+      await context.prisma.researchBlobCleanup.update({
+        where: { id: row.id },
+        data: { status: "REJECTED", attempts: row.attempts + 1, updatedAt: new Date() },
+      })
+      continue
+    }
+    try {
+      await storage.del(row.blobPathname)
+      const completedAt = new Date()
+      await context.prisma.researchBlobCleanup.update({
+        where: { id: row.id },
+        data: { status: "COMPLETED", completedAt, updatedAt: completedAt },
+      })
+    } catch {
+      const attempts = row.attempts + 1
+      await context.prisma.researchBlobCleanup.update({
+        where: { id: row.id },
+        data: {
+          attempts,
+          nextAttemptAt: new Date(Date.now() + RESEARCH_CLEANUP_RETRY_DELAY_MS * Math.min(attempts, 60)),
+          updatedAt: new Date(),
+        },
+      })
+    }
+  }
+}
+
 export async function createParticipantResearchAttachment({
   context,
   storage,
@@ -84,6 +153,7 @@ export async function createParticipantResearchAttachment({
     throw new ResearchAttachmentError("A valid idempotency key is required", 400)
   }
   await authorizeSession(context, sessionId, resumeToken)
+  await retryResearchBlobCleanups({ context, storage }).catch(() => undefined)
   let validated: ReturnType<typeof validateResearchAttachmentUpload>
   try {
     validated = validateResearchAttachmentUpload({ bytes, mimeType, originalName })
@@ -159,10 +229,22 @@ export async function createParticipantResearchAttachment({
     try {
       await storage.del(blobPathname)
     } catch {
-      await context.prisma.artifactBlobCleanup.upsert({
+      await context.prisma.researchBlobCleanup.upsert({
         where: { blobPathname },
-        create: { blobPathname, reason: "FAILED_RESEARCH_ATTACHMENT" },
-        update: { reason: "FAILED_RESEARCH_ATTACHMENT", updatedAt: new Date() },
+        create: {
+          workspaceId: context.study.workspaceId,
+          studyId: context.study.id,
+          sessionId,
+          attachmentId: pending.id,
+          blobPathname,
+          status: "PENDING",
+        },
+        update: {
+          status: "PENDING",
+          nextAttemptAt: new Date(),
+          completedAt: null,
+          updatedAt: new Date(),
+        },
       })
     }
     throw new ResearchAttachmentError("Attachment storage failed", 502)

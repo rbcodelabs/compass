@@ -178,6 +178,10 @@ const MIGRATIONS = [
     name: "037_research_guided_ux",
     filePath: path.join(process.cwd(), "prisma/migrations/037_research_guided_ux/migration.sql"),
   },
+  {
+    name: "038_research_blob_cleanup",
+    filePath: path.join(process.cwd(), "prisma/migrations/038_research_blob_cleanup/migration.sql"),
+  },
 ];
 
 const DSQL_WRITE_LIMITS = {
@@ -202,6 +206,11 @@ const RESEARCH_GUIDED_UX_INDEXES = [
   "idx_research_attachments_workspace_status",
   "idx_research_voice_events_session_provider",
   "idx_research_voice_events_session_created",
+] as const;
+
+const RESEARCH_BLOB_CLEANUP_INDEXES = [
+  "idx_research_blob_cleanups_pathname",
+  "idx_research_blob_cleanups_workspace_retry",
 ] as const;
 
 type BackfillPreflight = {
@@ -366,6 +375,20 @@ async function getResearchGuidedUxReport(client: PoolClient, schema: string, asy
   }
 }
 
+async function getResearchBlobCleanupReport(client: PoolClient, schema: string, asyncIndexJobIds: string[] = []) {
+  const indexStatus = await getNamedIndexStatus(client, schema, RESEARCH_BLOB_CLEANUP_INDEXES)
+  const asyncIndexJobs = await getAsyncIndexJobStatus(client, asyncIndexJobIds)
+  return {
+    preflight: {
+      passed: true,
+      writesExistingRows: false,
+      reason: "Migration 038 creates a new empty table and performs no backfill.",
+    },
+    ...indexStatus,
+    asyncIndexJobs,
+  }
+}
+
 async function getAsyncIndexJobStatus(client: PoolClient, jobIds: string[]) {
   if (jobIds.length === 0) {
     return {
@@ -477,9 +500,10 @@ export async function GET(req: NextRequest) {
       FROM "${schema}"._prisma_migrations
       ORDER BY finished_at ASC
     `).catch(() => ({ rows: [] as { name: string }[] }));
-    const [researchCaptureHardening, researchGuidedUx] = await Promise.all([
+    const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup] = await Promise.all([
       getResearchCaptureHardeningReport(client, schema),
       getResearchGuidedUxReport(client, schema),
+      getResearchBlobCleanupReport(client, schema),
     ]);
 
     return NextResponse.json({
@@ -488,6 +512,7 @@ export async function GET(req: NextRequest) {
       manifest: MIGRATIONS.map((m) => m.name),
       researchCaptureHardening,
       researchGuidedUx,
+      researchBlobCleanup,
     });
   } finally {
     client.release();
@@ -510,6 +535,7 @@ export async function POST(req: NextRequest) {
   const log: string[] = [`Using schema: ${schema}`];
   const researchCaptureAsyncIndexJobIds: string[] = [];
   const researchGuidedUxAsyncIndexJobIds: string[] = [];
+  const researchBlobCleanupAsyncIndexJobIds: string[] = [];
 
   try {
     // Ensure schema exists
@@ -537,15 +563,17 @@ export async function POST(req: NextRequest) {
     );
 
     if (toRun.length === 0) {
-      const [researchCaptureHardening, researchGuidedUx] = await Promise.all([
+      const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup] = await Promise.all([
         getResearchCaptureHardeningReport(client, schema),
         getResearchGuidedUxReport(client, schema),
+        getResearchBlobCleanupReport(client, schema),
       ]);
       return NextResponse.json({
         message: "Nothing to apply. All migrations up to date.",
         schema,
         researchCaptureHardening,
         researchGuidedUx,
+        researchBlobCleanup,
       });
     }
 
@@ -616,6 +644,8 @@ export async function POST(req: NextRequest) {
               researchCaptureAsyncIndexJobIds.push(jobId);
             } else if (jobId && migration.name === "037_research_guided_ux") {
               researchGuidedUxAsyncIndexJobIds.push(jobId);
+            } else if (jobId && migration.name === "038_research_blob_cleanup") {
+              researchBlobCleanupAsyncIndexJobIds.push(jobId);
             }
           }
           const label = executableStmt.slice(0, 60).replace(/\s+/g, " ");
@@ -646,7 +676,8 @@ export async function POST(req: NextRequest) {
       researchCaptureAsyncIndexJobIds
     );
     const researchGuidedUx = await getResearchGuidedUxReport(client, schema, researchGuidedUxAsyncIndexJobIds);
-    return NextResponse.json({ message: log.join("\n"), schema, researchCaptureHardening, researchGuidedUx });
+    const researchBlobCleanup = await getResearchBlobCleanupReport(client, schema, researchBlobCleanupAsyncIndexJobIds);
+    return NextResponse.json({ message: log.join("\n"), schema, researchCaptureHardening, researchGuidedUx, researchBlobCleanup });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: msg, log: log.join("\n"), schema }, { status: 500 });

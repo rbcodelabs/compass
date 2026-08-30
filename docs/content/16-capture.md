@@ -24,7 +24,7 @@ For guided usability tests, the participant first chooses Chat or Voice. On desk
 
 ![Guided participant experience on mobile](/screenshots/docs/guided-participant-mobile.png)
 
-Participants can share a screenshot or PDF as research evidence. Files are signature-checked, bounded, stored privately, and delivered only through an authorized session or workspace-member request. Chat sends bounded file bytes to the isolated interviewer. Voice can share an image directly with the realtime moderator; PDFs are represented only by a safe, untrusted description. Raw voice audio is not retained.
+Participants can share a screenshot or PDF as research evidence. Files are signature-checked, bounded, stored privately, and delivered only through an authorized session or workspace-member request. If private storage fails partway through an upload, Compass records cleanup in a research-owned retry queue without exposing the private pathname. Chat sends bounded file bytes to the isolated interviewer. Voice can share an image directly with the realtime moderator; PDFs are represented only by a safe, untrusted description. Raw voice audio is not retained.
 
 Compass saves each finalized participant and interviewer turn as the session progresses. If a participant reloads or briefly closes the tab, the same browser can safely resume its own in-progress Chat or Voice session. Finishing removes that browser's resume credential. Completed and abandoned sessions, their canonical transcripts, modality, and authorized attachments remain attached to the study and its workspace for member review.
 
