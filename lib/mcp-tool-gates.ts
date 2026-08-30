@@ -23,6 +23,7 @@ import {
   McpAuthzError,
   type WorkspaceEntityType,
   isServiceActor,
+  isResearchActor,
   assertWorkspaceMember,
   assertWorkspaceAdmin,
   assertWorkspaceBySlug,
@@ -35,6 +36,8 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Args = Record<string, any> // runtime-validated by each tool's zod inputSchema
 type Gate = (actor: McpActor, args: Args) => Promise<void>
+
+export const RESEARCH_TOOL_ALLOWLIST = new Set<string>()
 
 // ── Polymorphic target maps (values are WorkspaceEntityType) ────────────────
 
@@ -309,6 +312,9 @@ export async function applyToolGate(toolName: string, actor: McpActor, args: Arg
   // (and fail-closed denial of unmapped tools) apply only to per-user keys,
   // which is exactly the untrusted surface we're protecting.
   if (isServiceActor(actor)) return
+  if (isResearchActor(actor) && !RESEARCH_TOOL_ALLOWLIST.has(toolName)) {
+    throw new McpAuthzError(`Tool is not available to research interviews: ${toolName}`)
+  }
   const gate = TOOL_GATES[toolName]
   if (!gate) {
     throw new McpAuthzError(`No authorization policy registered for tool "${toolName}".`)

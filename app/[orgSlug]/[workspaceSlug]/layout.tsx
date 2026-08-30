@@ -12,6 +12,7 @@ import { resolveWorkspaceBranding } from "@/lib/branding"
 import { cookies } from "next/headers"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { isResearchCaptureEnabled } from "@/lib/research-feature"
 
 interface WorkspaceLayoutProps {
   children: React.ReactNode
@@ -44,6 +45,7 @@ export default async function WorkspaceLayout({
   const isOrgAdmin = orgMembership?.role === "OWNER" || orgMembership?.role === "ADMIN"
   const cookieStore = await cookies()
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false"
+  const researchCaptureEnabled = isResearchCaptureEnabled()
 
   return (
     <>
@@ -78,6 +80,7 @@ export default async function WorkspaceLayout({
               userImage={session.user.image ?? undefined}
               workspaces={workspaces}
               isOrgAdmin={isOrgAdmin}
+              researchCaptureEnabled={researchCaptureEnabled}
             />
 
             {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}
@@ -88,7 +91,7 @@ export default async function WorkspaceLayout({
         </TooltipProvider>
 
         {/* Mobile bottom nav — shown on small screens only */}
-        <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
+        <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} researchCaptureEnabled={researchCaptureEnabled} />
 
         <PanelShell />
       </PanelProvider>

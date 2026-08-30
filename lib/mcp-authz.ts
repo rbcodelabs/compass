@@ -34,7 +34,11 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import getPrisma from "@/lib/db"
 
-export type McpActor = { userId: string | null }
+export type McpActor = {
+  userId: string | null
+  purpose?: "SERVICE" | "USER" | "RESEARCH"
+  scopeWorkspaceId?: string | null
+}
 
 export class McpAuthzError extends Error {
   constructor(message: string) {
@@ -74,6 +78,16 @@ export function isServiceActor(actor: McpActor): boolean {
   return isService(actor)
 }
 
+export function isResearchActor(actor: McpActor): boolean {
+  return actor.purpose === "RESEARCH"
+}
+
+function assertActorWorkspaceScope(actor: McpActor, workspaceId: string): void {
+  if (isResearchActor(actor) && actor.scopeWorkspaceId !== workspaceId) {
+    throw new McpAuthzError(`Workspace not found or access denied: ${workspaceId}`)
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Workspace-scoped (pattern b): tools that take a workspaceId directly.
 // ──────────────────────────────────────────────────────────────────────────
@@ -81,6 +95,7 @@ export function isServiceActor(actor: McpActor): boolean {
 /** Assert the actor may act within `workspaceId` (any member). */
 export async function assertWorkspaceMember(actor: McpActor, workspaceId: string): Promise<void> {
   if (isService(actor)) return
+  assertActorWorkspaceScope(actor, workspaceId)
   const prisma = getPrisma()
   const ws = await prisma.workspace.findFirst({
     where: { id: workspaceId, members: { some: { userId: actor.userId! } } },
@@ -94,6 +109,7 @@ export async function assertWorkspaceMember(actor: McpActor, workspaceId: string
 /** Assert the actor is a workspace ADMIN of `workspaceId`. */
 export async function assertWorkspaceAdmin(actor: McpActor, workspaceId: string): Promise<void> {
   if (isService(actor)) return
+  assertActorWorkspaceScope(actor, workspaceId)
   const prisma = getPrisma()
   const member = await prisma.workspaceMember.findFirst({
     where: { workspaceId, userId: actor.userId! },
@@ -298,6 +314,7 @@ export async function assertEntityAccess(
     throw new McpAuthzError(`${entityType} not found or access denied: ${entityId}`)
   }
   if (!isService(actor)) {
+    assertActorWorkspaceScope(actor, workspaceId)
     const ws = await prisma.workspace.findFirst({
       where: { id: workspaceId, members: { some: { userId: actor.userId! } } },
       select: { id: true },

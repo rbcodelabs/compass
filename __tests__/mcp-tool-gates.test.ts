@@ -35,11 +35,12 @@ vi.mock("mcp-handler", () => ({
 vi.mock("@/lib/mcp-auth", () => ({ validateMcpAuth: vi.fn().mockResolvedValue({ valid: true, userId: "u1" }) }))
 
 await import("@/app/api/mcp/route")
-import { TOOL_GATES, applyToolGate } from "@/lib/mcp-tool-gates"
+import { RESEARCH_TOOL_ALLOWLIST, TOOL_GATES, applyToolGate } from "@/lib/mcp-tool-gates"
 import { runWithMcpActor } from "@/lib/mcp-authz"
 
 const MEMBER = { userId: "user-1" }
 const SERVICE = { userId: null }
+const RESEARCH = { userId: "user-1", purpose: "RESEARCH" as const, scopeWorkspaceId: "ws-1" }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const callTool = (name: string, actor: { userId: string | null }, args: any) =>
@@ -65,6 +66,10 @@ describe("TOOL_GATES completeness", () => {
 })
 
 describe("applyToolGate", () => {
+  it("gives public research credentials no internal workspace tools", () => {
+    expect([...RESEARCH_TOOL_ALLOWLIST]).toEqual([])
+  })
+
   it("short-circuits (no gate, no query) for the service key", async () => {
     await expect(applyToolGate("get_opportunity", SERVICE, { opportunityId: "x" })).resolves.toBeUndefined()
     expect(mockPrisma.opportunity.findUnique).not.toHaveBeenCalled()
@@ -72,6 +77,15 @@ describe("applyToolGate", () => {
 
   it("denies an unmapped tool for a per-user caller (fail-closed)", async () => {
     await expect(applyToolGate("totally_new_tool", MEMBER, {})).rejects.toThrow(/No authorization policy/)
+  })
+
+  it("research credentials deny both read and write workspace tools", async () => {
+    await expect(applyToolGate("list_feedback", RESEARCH, { workspaceId: "ws-1" })).rejects.toThrow(
+      /not available to research interviews/
+    )
+    await expect(applyToolGate("create_feedback", RESEARCH, { workspaceId: "ws-1" })).rejects.toThrow(
+      /not available to research interviews/
+    )
   })
 
   it("get_opportunity: denies a non-member", async () => {

@@ -36,6 +36,7 @@ import {
 
 const SERVICE = { userId: null }
 const USER = { userId: "user-1" }
+const RESEARCH = { userId: "user-1", purpose: "RESEARCH" as const, scopeWorkspaceId: "ws-1" }
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -70,6 +71,11 @@ describe("assertWorkspaceMember", () => {
   it("non-member is denied", async () => {
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
     await expect(assertWorkspaceMember(USER, "ws-1")).rejects.toThrow(/not found or access denied/)
+  })
+
+  it("research credentials cannot cross their workspace boundary", async () => {
+    await expect(assertWorkspaceMember(RESEARCH, "ws-2")).rejects.toThrow(/not found or access denied/)
+    expect(mockPrisma.workspace.findFirst).not.toHaveBeenCalled()
   })
 })
 
@@ -140,6 +146,12 @@ describe("assertEntityAccess", () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-9" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
     await expect(assertEntityAccess(USER, "opportunity", "opp-1")).rejects.toThrow(/not found or access denied/)
+  })
+
+  it("research credentials cannot read an entity from another workspace", async () => {
+    mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
+    await expect(assertEntityAccess(RESEARCH, "opportunity", "opp-1")).rejects.toThrow(/not found or access denied/)
+    expect(mockPrisma.workspace.findFirst).not.toHaveBeenCalled()
   })
 
   it("service key skips the membership query", async () => {

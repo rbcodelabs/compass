@@ -11,6 +11,7 @@ const TOP_LEVEL_SECTIONS = new Set([
   "experiments",
   "roadmap",
   "feedback",
+  "capture",
   "docs",
   "settings",
 ]);

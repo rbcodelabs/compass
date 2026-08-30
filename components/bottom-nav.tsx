@@ -8,20 +8,26 @@ import { cn } from "@/lib/utils"
 interface BottomNavProps {
   orgSlug: string
   workspaceSlug: string
+  researchCaptureEnabled?: boolean
 }
 
-const navItems = [
+const baseNavItems = [
   { label: "OKRs", path: "okrs", Icon: Target },
   { label: "Discovery", path: "discovery", Icon: Lightbulb },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
   { label: "Tasks", path: "tasks", Icon: ListChecks },
-  { label: "Feedback", path: "feedback", Icon: MessageSquare },
 ]
 
-export function BottomNav({ orgSlug, workspaceSlug }: BottomNavProps) {
+export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = true }: BottomNavProps) {
   const pathname = usePathname()
   const base = `/${orgSlug}/${workspaceSlug}`
+  const navItems = [
+    ...baseNavItems,
+    researchCaptureEnabled
+      ? { label: "Capture", path: "capture", Icon: MessageSquare }
+      : { label: "Feedback", path: "feedback", Icon: MessageSquare },
+  ]
 
   return (
     <nav

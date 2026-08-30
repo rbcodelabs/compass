@@ -7,9 +7,36 @@
  */
 import path from "path";
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
 import pg from "pg";
 import { seedE2E } from "./fixtures/seed-e2e";
 import { setRunToken } from "./fixtures/run-token";
+
+const schema = process.env.PGSCHEMA
+  ? `${process.env.PGSCHEMA}_dev`
+  : "compass_dev";
+
+async function ensureResearchCaptureSchema(pool: pg.Pool) {
+  const migrationPaths = [
+    "prisma/migrations/034_research_capture/migration.sql",
+    "prisma/migrations/035_research_agent_scope/migration.sql",
+    "prisma/migrations/036_research_capture_hardening/migration.sql",
+  ];
+
+  const client = await pool.connect();
+  try {
+    await client.query(`SET search_path TO "${schema}"`);
+    for (const relativePath of migrationPaths) {
+      const migration = (await fs.readFile(path.resolve(process.cwd(), relativePath), "utf8"))
+        .replaceAll("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ")
+        .replaceAll("CREATE UNIQUE INDEX ASYNC ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
+        .replaceAll("CREATE INDEX ASYNC ", "CREATE INDEX IF NOT EXISTS ");
+      await client.query(migration);
+    }
+  } finally {
+    client.release();
+  }
+}
 
 export default async function globalSetup() {
   // Load .env.local so DATABASE_URL is available to globalSetup
@@ -36,6 +63,7 @@ export default async function globalSetup() {
 
   const pool = new pg.Pool({ connectionString });
   try {
+    await ensureResearchCaptureSchema(pool);
     await seedE2E(pool, runToken);
     console.log(`[e2e globalSetup] Seed complete ✓ (run ${runToken})`);
   } finally {

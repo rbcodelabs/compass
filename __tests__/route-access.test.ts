@@ -24,6 +24,13 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/portal/rbcodelabs/compass/feedback")).toBe(true);
   });
 
+  it("allows token-authenticated participant research routes", () => {
+    expect(isPublicPath("/research/opaque-participant-token")).toBe(true);
+    expect(isPublicPath("/api/research/start")).toBe(true);
+    expect(isPublicPath("/api/research/respond")).toBe(true);
+    expect(isPublicPath("/api/research/complete")).toBe(true);
+  });
+
   it("allows docs API routes (session auth handled internally)", () => {
     expect(isPublicPath("/api/docs/some-doc-id")).toBe(true);
   });

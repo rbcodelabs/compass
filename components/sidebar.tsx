@@ -56,15 +56,15 @@ interface SidebarProps {
   workspaces: { id: string; name: string; slug: string; orgSlug: string }[]
   /** Org admins/owners see an "Org Settings" link in the account menu. */
   isOrgAdmin?: boolean
+  researchCaptureEnabled?: boolean
 }
 
-const navItems = [
+const baseNavItems = [
   { label: "OKRs", path: "okrs", Icon: Target },
   { label: "Discovery", path: "discovery", Icon: Lightbulb },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
   { label: "Tasks", path: "tasks", Icon: ListChecks },
-  { label: "Feedback", path: "feedback", Icon: MessageSquare },
   { label: "Docs", path: "docs", Icon: BookOpen },
   { label: "Canvas", path: "canvas", Icon: Waypoints },
   { label: "Agent", path: "agent", Icon: Sparkles },
@@ -88,10 +88,18 @@ export function Sidebar({
   userImage,
   workspaces,
   isOrgAdmin = false,
+  researchCaptureEnabled = true,
 }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const base = `/${orgSlug}/${workspaceSlug}`
+  const navItems = [
+    ...baseNavItems.slice(0, 5),
+    researchCaptureEnabled
+      ? { label: "Capture", path: "capture", Icon: MessageSquare }
+      : { label: "Feedback", path: "feedback", Icon: MessageSquare },
+    ...baseNavItems.slice(5),
+  ]
 
   const otherWorkspaces = workspaces.filter(
     (workspace) =>

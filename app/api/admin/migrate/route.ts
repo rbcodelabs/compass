@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Pool } from "pg";
+import { Pool, PoolClient } from "pg";
 import { DsqlSigner } from "@aws-sdk/dsql-signer";
 import { awsCredentialsProvider } from "@vercel/functions/oidc";
 import { readFileSync } from "fs";
@@ -157,7 +157,223 @@ const MIGRATIONS = [
     name: "034_artifacts",
     filePath: path.join(process.cwd(), "prisma/migrations/034_artifacts/migration.sql"),
   },
+  {
+    // Numbered "034" on this branch too -- same independently-picked-next-number
+    // collision as 024 above. Different migration names (tracked by full
+    // string, not numeric prefix), so no functional collision -- just
+    // cosmetic. Not renumbering to keep parity with the migration folder
+    // name already shipped in prisma/migrations/034_research_capture.
+    name: "034_research_capture",
+    filePath: path.join(process.cwd(), "prisma/migrations/034_research_capture/migration.sql"),
+  },
+  {
+    name: "035_research_agent_scope",
+    filePath: path.join(process.cwd(), "prisma/migrations/035_research_agent_scope/migration.sql"),
+  },
+  {
+    name: "036_research_capture_hardening",
+    filePath: path.join(process.cwd(), "prisma/migrations/036_research_capture_hardening/migration.sql"),
+  },
 ];
+
+const DSQL_WRITE_LIMITS = {
+  maxRows: 3_000,
+  maxBytes: 10 * 1024 * 1024,
+} as const;
+
+const RESEARCH_CAPTURE_INDEXES = [
+  "idx_research_participant_tokens_hash",
+  "idx_research_participant_tokens_study_kind",
+  "idx_research_sessions_resume_token",
+  "idx_research_sessions_participant_token",
+  "idx_research_requests_session_key",
+  "idx_research_requests_session_created",
+] as const;
+
+type BackfillPreflight = {
+  rowCount: number;
+  estimatedBytes: number;
+  estimateBasis: "conservative full source-row bytes";
+  available: boolean;
+  passed: boolean;
+};
+
+type ResearchCapturePreflight = {
+  limits: typeof DSQL_WRITE_LIMITS;
+  tokenBackfill: BackfillPreflight;
+  nextSequenceBackfill: BackfillPreflight;
+  passed: boolean;
+};
+
+function toSafeNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : Number.MAX_SAFE_INTEGER;
+}
+
+function backfillResult(
+  row: { row_count?: unknown; estimated_bytes?: unknown } | undefined,
+  available: boolean
+): BackfillPreflight {
+  const rowCount = available ? toSafeNumber(row?.row_count) : 0;
+  const estimatedBytes = available ? toSafeNumber(row?.estimated_bytes) : 0;
+  return {
+    rowCount,
+    estimatedBytes,
+    estimateBasis: "conservative full source-row bytes",
+    available,
+    passed:
+      available &&
+      rowCount <= DSQL_WRITE_LIMITS.maxRows &&
+      estimatedBytes <= DSQL_WRITE_LIMITS.maxBytes,
+  };
+}
+
+async function getResearchCapturePreflight(
+  client: PoolClient,
+  schema: string
+): Promise<ResearchCapturePreflight> {
+  const { rows: tableRows } = await client.query<{ table_name: string }>(
+    `SELECT table_name
+     FROM information_schema.tables
+     WHERE table_schema = $1
+       AND table_name IN ('research_studies', 'research_sessions')`,
+    [schema]
+  );
+  const tables = new Set(tableRows.map((row) => row.table_name));
+
+  const tokenRows = tables.has("research_studies")
+    ? (
+        await client.query<{ row_count: string; estimated_bytes: string }>(`
+          SELECT
+            COUNT(*)::bigint AS row_count,
+            COALESCE(SUM(pg_column_size(rs)), 0)::bigint AS estimated_bytes
+          FROM "${schema}".research_studies rs
+          WHERE share_token_hash IS NOT NULL
+            AND share_expires_at IS NOT NULL
+        `)
+      ).rows
+    : [];
+
+  let sequenceRows: { row_count: string; estimated_bytes: string }[] = [];
+  if (tables.has("research_sessions")) {
+    const { rows: columnRows } = await client.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM information_schema.columns
+         WHERE table_schema = $1
+           AND table_name = 'research_sessions'
+           AND column_name = 'next_sequence'
+       ) AS exists`,
+      [schema]
+    );
+    const onlyMissing = columnRows[0]?.exists ? "WHERE next_sequence IS NULL" : "";
+    sequenceRows = (
+      await client.query<{ row_count: string; estimated_bytes: string }>(`
+        SELECT
+          COUNT(*)::bigint AS row_count,
+          COALESCE(SUM(pg_column_size(rs)), 0)::bigint AS estimated_bytes
+        FROM "${schema}".research_sessions rs
+        ${onlyMissing}
+      `)
+    ).rows;
+  }
+
+  const tokenBackfill = backfillResult(tokenRows[0], tables.has("research_studies"));
+  const nextSequenceBackfill = backfillResult(
+    sequenceRows[0],
+    tables.has("research_sessions")
+  );
+
+  return {
+    limits: DSQL_WRITE_LIMITS,
+    tokenBackfill,
+    nextSequenceBackfill,
+    passed: tokenBackfill.passed && nextSequenceBackfill.passed,
+  };
+}
+
+async function getResearchCaptureIndexStatus(client: PoolClient, schema: string) {
+  const { rows } = await client.query<{ name: string; valid: boolean }>(
+    `SELECT c.relname AS name, i.indisvalid AS valid
+     FROM pg_index i
+     JOIN pg_class c ON c.oid = i.indexrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = $1
+       AND c.relname = ANY($2::text[])`,
+    [schema, [...RESEARCH_CAPTURE_INDEXES]]
+  );
+  const validity = new Map(rows.map((row) => [row.name, row.valid]));
+  const indexes = RESEARCH_CAPTURE_INDEXES.map((name) => ({
+    name,
+    present: validity.has(name),
+    valid: validity.get(name) === true,
+  }));
+
+  return {
+    indexes,
+    indexesValid: indexes.every((index) => index.valid),
+  };
+}
+
+async function getAsyncIndexJobStatus(client: PoolClient, jobIds: string[]) {
+  if (jobIds.length === 0) {
+    return {
+      waited: false,
+      jobIds,
+      jobs: [] as { jobId: string; status: string; details: string | null; objectName: string | null }[],
+      reason:
+        "No CREATE INDEX ASYNC job IDs were created by this request. Poll this authenticated GET until indexesValid is true before enabling the feature.",
+    };
+  }
+
+  const { rows } = await client.query<{
+    job_id: string;
+    status: string;
+    details: string | null;
+    object_name: string | null;
+  }>(
+    `SELECT job_id, status, details, object_name
+     FROM sys.jobs
+     WHERE job_id = ANY($1::text[])`,
+    [jobIds]
+  );
+  const jobsById = new Map(rows.map((row) => [row.job_id, row]));
+  const jobs = jobIds.map((jobId) => {
+    const job = jobsById.get(jobId);
+    return {
+      jobId,
+      status: job?.status ?? "unknown",
+      details: job?.details ?? null,
+      objectName: job?.object_name ?? null,
+    };
+  });
+
+  return {
+    waited: false,
+    jobIds,
+    jobs,
+    reason:
+      "The route has a 60-second execution limit, while an async index build may run longer. Poll this authenticated GET until indexesValid is true before enabling the feature.",
+  };
+}
+
+async function getResearchCaptureHardeningReport(
+  client: PoolClient,
+  schema: string,
+  asyncIndexJobIds: string[] = []
+) {
+  const [preflight, indexStatus] = await Promise.all([
+    getResearchCapturePreflight(client, schema),
+    getResearchCaptureIndexStatus(client, schema),
+  ]);
+  const asyncIndexJobs = await getAsyncIndexJobStatus(client, asyncIndexJobIds);
+
+  return {
+    preflight,
+    ...indexStatus,
+    asyncIndexJobs,
+  };
+}
 
 async function getPool(): Promise<Pool> {
   // worktree-bootstrap provides a local Postgres URL. Keep local verification
@@ -210,11 +426,13 @@ export async function GET(req: NextRequest) {
       FROM "${schema}"._prisma_migrations
       ORDER BY finished_at ASC
     `).catch(() => ({ rows: [] as { name: string }[] }));
+    const researchCaptureHardening = await getResearchCaptureHardeningReport(client, schema);
 
     return NextResponse.json({
       schema,
       appliedMigrations: rows.map((r) => r.name),
       manifest: MIGRATIONS.map((m) => m.name),
+      researchCaptureHardening,
     });
   } finally {
     client.release();
@@ -235,6 +453,7 @@ export async function POST(req: NextRequest) {
   const pool = await getPool();
   const client = await pool.connect();
   const log: string[] = [`Using schema: ${schema}`];
+  const asyncIndexJobIds: string[] = [];
 
   try {
     // Ensure schema exists
@@ -262,11 +481,40 @@ export async function POST(req: NextRequest) {
     );
 
     if (toRun.length === 0) {
-      return NextResponse.json({ message: "Nothing to apply. All migrations up to date.", schema });
+      const researchCaptureHardening = await getResearchCaptureHardeningReport(client, schema);
+      return NextResponse.json({
+        message: "Nothing to apply. All migrations up to date.",
+        schema,
+        researchCaptureHardening,
+      });
     }
 
     for (const migration of toRun) {
       log.push(`\nApplying: ${migration.name}`);
+
+      if (migration.name === "036_research_capture_hardening") {
+        const preflight = await getResearchCapturePreflight(client, schema);
+        if (!preflight.passed) {
+          const indexStatus = await getResearchCaptureIndexStatus(client, schema);
+          return NextResponse.json(
+            {
+              error:
+                "Migration 036 preflight failed Aurora DSQL's 3,000-row or 10 MiB write-transaction limit.",
+              schema,
+              researchCaptureHardening: {
+                preflight,
+                ...indexStatus,
+                asyncIndexJobs: {
+                  waited: false,
+                  jobIds: [] as string[],
+                  reason: "Migration 036 was not started, so there are no async index jobs.",
+                },
+              },
+            },
+            { status: 409 }
+          );
+        }
+      }
 
       // Record start
       await client.query(
@@ -301,7 +549,11 @@ export async function POST(req: NextRequest) {
           const executableStmt = process.env.DATABASE_URL
             ? stmt.replace(/\bINDEX ASYNC\b/gi, "INDEX")
             : stmt;
-          await client.query(executableStmt);
+          const result = await client.query<{ job_id?: string }>(executableStmt);
+          if (!process.env.DATABASE_URL && /CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC/i.test(stmt)) {
+            const jobId = result.rows[0]?.job_id;
+            if (jobId) asyncIndexJobIds.push(jobId);
+          }
           const label = executableStmt.slice(0, 60).replace(/\s+/g, " ");
           log.push(`  ✓ ${label}…`);
         } catch (e: unknown) {
@@ -324,7 +576,12 @@ export async function POST(req: NextRequest) {
       log.push(`  ✅ ${migration.name} applied`);
     }
 
-    return NextResponse.json({ message: log.join("\n"), schema });
+    const researchCaptureHardening = await getResearchCaptureHardeningReport(
+      client,
+      schema,
+      asyncIndexJobIds
+    );
+    return NextResponse.json({ message: log.join("\n"), schema, researchCaptureHardening });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: msg, log: log.join("\n"), schema }, { status: 500 });

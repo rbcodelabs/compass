@@ -45,3 +45,7 @@ export function feedbackItemUrl(input: {
   url.searchParams.set("detail", `feedback:${input.feedbackId}`)
   return url.toString()
 }
+
+export function researchParticipantUrl(token: string): string {
+  return new URL(`/research/${encodeURIComponent(token)}`, trustedCompassBaseUrl()).toString()
+}

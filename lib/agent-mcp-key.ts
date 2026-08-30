@@ -19,20 +19,50 @@ import getPrisma from "@/lib/db"
 
 export type MintedAgentKey = { token: string; apiKeyId: string }
 
-/** Mint an ephemeral per-user MCP key. Returns the raw token (only chance to
- *  read it) and the row id for later revocation. */
-export async function mintAgentMcpKey(userId: string): Promise<MintedAgentKey> {
-  const randomPart = randomBytes(16).toString("hex") // 32 hex chars
+async function mintScopedMcpKey({
+  userId,
+  name,
+  purpose,
+  scopeWorkspaceId,
+  expiresAt,
+}: {
+  userId: string
+  name: string
+  purpose?: "RESEARCH"
+  scopeWorkspaceId?: string
+  expiresAt?: Date
+}): Promise<MintedAgentKey> {
+  const randomPart = randomBytes(16).toString("hex")
   const token = `cmp_${randomPart}`
   const keyPrefix = randomPart.slice(0, 8)
   const keyHash = createHash("sha256").update(token).digest("hex")
 
   const prisma = getPrisma()
   const row = await prisma.apiKey.create({
-    data: { userId, name: "agent-turn (ephemeral)", keyHash, keyPrefix },
+    data: { userId, name, keyHash, keyPrefix, purpose, scopeWorkspaceId, expiresAt },
     select: { id: true },
   })
   return { token, apiKeyId: row.id }
+}
+
+/** Mint an ephemeral per-user MCP key. Returns the raw token (only chance to
+ *  read it) and the row id for later revocation. */
+export async function mintAgentMcpKey(userId: string): Promise<MintedAgentKey> {
+  return mintScopedMcpKey({ userId, name: "agent-turn (ephemeral)" })
+}
+
+/** Mint a read-only research-agent key locked to exactly one workspace. */
+export async function mintResearchAgentMcpKey(
+  userId: string,
+  workspaceId: string,
+): Promise<MintedAgentKey> {
+  return mintScopedMcpKey({
+    userId,
+    name: "research-interview (ephemeral)",
+    purpose: "RESEARCH",
+    scopeWorkspaceId: workspaceId,
+    expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+  })
 }
 
 /** Revoke a minted key. Safe to call in a finally block; never throws. */

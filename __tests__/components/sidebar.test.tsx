@@ -31,11 +31,11 @@ const baseProps = {
   ],
 };
 
-function renderSidebar(isOrgAdmin: boolean) {
+function renderSidebar(isOrgAdmin: boolean, researchCaptureEnabled = true) {
   return render(
     <TooltipProvider>
       <SidebarProvider>
-        <Sidebar {...baseProps} isOrgAdmin={isOrgAdmin} />
+        <Sidebar {...baseProps} isOrgAdmin={isOrgAdmin} researchCaptureEnabled={researchCaptureEnabled} />
       </SidebarProvider>
     </TooltipProvider>
   );
@@ -118,4 +118,12 @@ describe("Sidebar", () => {
 
     expect(sidebar).toHaveAttribute("data-state", "collapsed");
   });
+
+  it("keeps legacy Feedback navigation when research capture is gated off", () => {
+    renderSidebar(true, false)
+    const mainNav = screen.getByRole("navigation", { name: "Main navigation" })
+    expect(within(mainNav).getByRole("link", { name: "Feedback" }))
+      .toHaveAttribute("href", "/rbcodelabs/compass/feedback")
+    expect(within(mainNav).queryByRole("link", { name: "Capture" })).not.toBeInTheDocument()
+  })
 });

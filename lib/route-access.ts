@@ -18,6 +18,10 @@ export function isPublicPath(pathname: string): boolean {
     // Public portal routes — no auth, workspace settings control access
     pathname.startsWith("/portal/") ||
     pathname.startsWith("/api/portal/") ||
+    // Participant research routes use a hashed, expiring study token. Their
+    // API handlers validate the token and session-to-study scope themselves.
+    pathname.startsWith("/research/") ||
+    pathname.startsWith("/api/research/") ||
     // Docs API routes use session auth internally — let them handle 401 themselves
     pathname.startsWith("/api/docs/") ||
     // Agent turn route uses session auth internally (returns 401, not a 302)
