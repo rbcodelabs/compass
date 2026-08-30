@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const { mockAuth } = vi.hoisted(() => ({ mockAuth: vi.fn() }));
+
 const mockRoadmapItem = {
   create: vi.fn(),
   update: vi.fn(),
@@ -9,7 +11,7 @@ const mockSolution = {
   findUnique: vi.fn(),
 };
 const mockFeedbackItem = {
-  findUnique: vi.fn(),
+  findFirst: vi.fn(),
 };
 
 const mockPrisma = {
@@ -21,6 +23,8 @@ const mockPrisma = {
 vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),
 }));
+
+vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -40,7 +44,8 @@ beforeEach(() => {
   mockRoadmapItem.update.mockResolvedValue({ id: "item-1" });
   mockRoadmapItem.findFirst.mockResolvedValue(null);
   mockSolution.findUnique.mockResolvedValue({ title: "My Solution" });
-  mockFeedbackItem.findUnique.mockResolvedValue({ title: "Login button is broken" });
+  mockAuth.mockResolvedValue({ user: { id: "user-1" } });
+  mockFeedbackItem.findFirst.mockResolvedValue({ title: "Login button is broken" });
 });
 
 // ─── addRoadmapItem ───────────────────────────────────────────────────────────
@@ -239,8 +244,54 @@ describe("promoteToRoadmap", () => {
 // ─── promoteFeedbackToRoadmap ─────────────────────────────────────────────────
 
 describe("promoteFeedbackToRoadmap", () => {
-  it("creates a roadmap item using the feedback title", async () => {
-    mockFeedbackItem.findUnique.mockResolvedValue({ title: "Login button is broken" });
+  it("rejects an unauthenticated caller without writing", async () => {
+    mockAuth.mockResolvedValue(null);
+
+    await expect(
+      promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path")
+    ).rejects.toThrow("Unauthorized");
+
+    expect(mockFeedbackItem.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-member without writing", async () => {
+    mockFeedbackItem.findFirst.mockResolvedValue(null);
+
+    await expect(
+      promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path")
+    ).rejects.toThrow("Feedback item not found");
+
+    expect(mockFeedbackItem.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "fb-1",
+        workspaceId: "ws-1",
+        workspace: { members: { some: { userId: "user-1" } } },
+      },
+      select: { title: true },
+    });
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects feedback from another workspace without writing", async () => {
+    mockFeedbackItem.findFirst.mockResolvedValue(null);
+
+    await expect(
+      promoteFeedbackToRoadmap("fb-other", "ws-1", "NOW", "/path")
+    ).rejects.toThrow("Feedback item not found");
+
+    expect(mockFeedbackItem.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "fb-other",
+        workspaceId: "ws-1",
+        workspace: { members: { some: { userId: "user-1" } } },
+      },
+      select: { title: true },
+    });
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled();
+  });
+
+  it("creates a roadmap item for an authorized same-workspace member", async () => {
     const result = await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path");
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.title).toBe("Login button is broken");
@@ -250,8 +301,27 @@ describe("promoteFeedbackToRoadmap", () => {
     expect(result).toMatchObject({ id: "item-1" });
   });
 
+  it("uses the authorized workspace for roadmap creation", async () => {
+    await promoteFeedbackToRoadmap("fb-1", "ws-authorized", "NEXT", "/path");
+
+    expect(mockFeedbackItem.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "fb-1",
+        workspaceId: "ws-authorized",
+        workspace: { members: { some: { userId: "user-1" } } },
+      },
+      select: { title: true },
+    });
+    expect(mockRoadmapItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        workspaceId: "ws-authorized",
+        feedbackId: "fb-1",
+      }),
+    });
+  });
+
   it("throws when feedback item is not found", async () => {
-    mockFeedbackItem.findUnique.mockResolvedValue(null);
+    mockFeedbackItem.findFirst.mockResolvedValue(null);
     await expect(
       promoteFeedbackToRoadmap("fb-999", "ws-1", "NOW", "/path")
     ).rejects.toThrow("Feedback item not found");
