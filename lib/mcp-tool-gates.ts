@@ -196,12 +196,15 @@ export const TOOL_GATES: Record<string, Gate> = {
   create_feedback: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   list_feedback: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_feedback_item: async (a, x) => void (await assertEntityAccess(a, "feedbackItem", x.feedbackId)),
+  update_feedback: async (a, x) => void (await assertEntityAccess(a, "feedbackItem", x.feedbackId)),
   update_feedback_status: async (a, x) => void (await assertEntityAccess(a, "feedbackItem", x.feedbackId)),
   link_feedback_to_opportunity: async (a, x) => {
     const { workspaceId } = await assertEntityAccess(a, "feedbackItem", x.feedbackId)
     await assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, workspaceId)
   },
   update_feedback_type: async (a, x) => void (await assertEntityAccess(a, "feedbackItem", x.feedbackId)),
+  prepare_feedback_attachment_upload: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  add_feedback_attachment: async (a, x) => void (await assertEntityAccess(a, "feedbackItem", x.feedbackId)),
   promote_feedback_to_roadmap: (a, x) => assertChildInDeclaredWorkspace(a, "feedbackItem", x.feedbackId, x.workspaceId),
 
   // Evidence ----------------------------------------------------------------

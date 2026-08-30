@@ -129,13 +129,28 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 
 | Tool | Description |
 |---|---|
-| `create_feedback` | Create a new feedback item directly via MCP — the internal/agent-facing counterpart to the public portal submission endpoint, which requires a browser session. Defaults to type IDEA |
-| `list_feedback` | Fetch customer feedback items for a workspace, with vote counts, type (BUG/IDEA), and status |
-| `get_feedback_item` | Fetch full details for a single feedback item, including its linked opportunity if present |
-| `update_feedback_status` | Update a feedback item's status (OPEN, UNDER_REVIEW, PLANNED, CLOSED), with an optional note |
+| `create_feedback` | Create a new feedback item directly via MCP. Accepts 1–5 optional inline attachments with a combined decoded limit of 3 MiB; defaults to type IDEA |
+| `list_feedback` | Fetch customer feedback items for a workspace, with vote counts, type, status, and canonical Compass URLs |
+| `get_feedback_item` | Fetch full details for a single feedback item, including attachments, its linked opportunity, and its canonical Compass URL |
+| `update_feedback` | Update a feedback item's title and/or description; pass `description: null` to clear it |
+| `update_feedback_status` | Update a feedback item's status (OPEN, UNDER_REVIEW, PLANNED, IN_PROGRESS, COMPLETED, DECLINED), with an optional note. Legacy CLOSED remains temporarily accepted but is deprecated |
 | `update_feedback_type` | Reclassify a feedback item as a BUG or an IDEA |
 | `link_feedback_to_opportunity` | Link a feedback item (typically an IDEA) to an existing opportunity, connecting it to the discovery flow |
+| `prepare_feedback_attachment_upload` | Prepare a signed, short-lived direct-to-Vercel-Blob upload for an attachment up to 10 MiB |
+| `add_feedback_attachment` | Add one inline attachment to existing feedback, or complete a prepared direct upload using its Blob URL and signed receipt |
 | `promote_feedback_to_roadmap` | Promote a feedback item (typically a BUG) directly to the roadmap, skipping discovery entirely. Accepts an optional `isPrivate` flag (e.g. for a security-flagged bug) |
+
+Feedback create, read, list, update, status, type, link, and attachment responses include absolute canonical URLs that agents can give directly to users. Preview MCP responses point to the active Vercel branch/deployment URL, while production uses the configured Compass custom domain. Every feedback mutation also includes its affected entity ID on a plain `ID: <uuid>` line.
+
+For screenshots and other small files, pass a base64 data URL (or raw base64 plus `fileType`) directly to `create_feedback` or `add_feedback_attachment`. Compass validates the encoded length before decoding and rejects the entire create request if any attachment cannot be uploaded; it never silently creates text-only feedback.
+
+For files larger than the 3 MiB inline aggregate limit, use the two-step direct upload flow:
+
+1. Call `prepare_feedback_attachment_upload` with the workspace, filename, MIME type, and exact file size (maximum 10 MiB).
+2. Upload the file directly with `put(pathname, file, { access: "public", token: clientToken, contentType: fileType })` from `@vercel/blob/client`, using the returned pathname and client token.
+3. Call `add_feedback_attachment` with the target feedback ID, returned Blob URL, and signed receipt.
+
+The receipt expires after ten minutes and is scoped to the workspace, prepared attachment ID, pathname, MIME type, and byte size. Compass verifies the receipt, configured Blob store, and Blob metadata before creating the attachment row. The prepared ID makes concurrent completion idempotent; an ID already committed to another feedback item is rejected. Each feedback item accepts at most five attachments, enforced transactionally.
 
 ### Evidence
 
