@@ -62,7 +62,7 @@ The MCP server exposes tools that agents can call, grouped below by area.
 
 | Tool | Description |
 |---|---|
-| `list_opportunities` | Fetch all opportunities in the workspace |
+| `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result |
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
 | `create_opportunity` | Create a new opportunity with title, description, status |
 | `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
