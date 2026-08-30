@@ -36,27 +36,44 @@ const localStorage: ArtifactStorage = {
   },
 }
 
-const vercelBlobStorage: ArtifactStorage = {
-  async put(pathname, bytes, contentType = "text/html; charset=utf-8") {
-    const result = await put(pathname, Buffer.from(bytes), {
-      access: "private",
-      contentType,
-      addRandomSuffix: false,
-    })
-    return { pathname: result.pathname }
-  },
-  async get(pathname) {
-    const result = await get(pathname, { access: "private", useCache: false })
-    if (!result || result.statusCode !== 200) return null
-    return new Uint8Array(await new Response(result.stream).arrayBuffer())
-  },
-  async del(pathname) {
-    await del(pathname)
-  },
+function createVercelBlobStorage(token?: string): ArtifactStorage {
+  const tokenOptions = token ? { token } : {}
+  return {
+    async put(pathname, bytes, contentType = "text/html; charset=utf-8") {
+      const result = await put(pathname, Buffer.from(bytes), {
+        access: "private",
+        contentType,
+        addRandomSuffix: false,
+        ...tokenOptions,
+      })
+      return { pathname: result.pathname }
+    },
+    async get(pathname) {
+      const result = await get(pathname, { access: "private", useCache: false, ...tokenOptions })
+      if (!result || result.statusCode !== 200) return null
+      return new Uint8Array(await new Response(result.stream).arrayBuffer())
+    },
+    async del(pathname) {
+      if (token) {
+        await del(pathname, tokenOptions)
+        return
+      }
+      await del(pathname)
+    },
+  }
 }
+
+const vercelBlobStorage = createVercelBlobStorage()
 
 /** Local development uses private filesystem storage; deployed environments
  * use authenticated private Vercel Blob. The interface is injected in tests. */
 export function getArtifactStorage(): ArtifactStorage {
   return process.env.DATABASE_URL ? localStorage : vercelBlobStorage
+}
+
+export function getResearchArtifactStorage(): ArtifactStorage {
+  if (process.env.DATABASE_URL) return localStorage
+  const token = process.env.RESEARCH_BLOB_READ_WRITE_TOKEN?.trim()
+  if (!token) throw new Error("Research Blob storage is not configured")
+  return createVercelBlobStorage(token)
 }

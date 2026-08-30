@@ -6,7 +6,7 @@ const get = vi.hoisted(() => vi.fn())
 
 vi.mock("@/auth", () => ({ auth }))
 vi.mock("@/lib/db", () => ({ default: () => ({ researchAttachment: { findFirst } }) }))
-vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: () => ({ get }) }))
+vi.mock("@/lib/artifact-storage", () => ({ getResearchArtifactStorage: () => ({ get }) }))
 
 import { GET } from "@/app/api/research/member-attachments/[attachmentId]/route"
 

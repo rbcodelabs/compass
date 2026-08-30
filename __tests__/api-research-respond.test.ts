@@ -16,7 +16,7 @@ vi.mock("@/lib/research-session", () => ({
   },
   respondToResearchSession,
 }))
-vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: () => storage }))
+vi.mock("@/lib/artifact-storage", () => ({ getResearchArtifactStorage: () => storage }))
 
 import { POST } from "@/app/api/research/respond/route"
 import { ResearchAgentUnavailableError } from "@/lib/research-agent"
