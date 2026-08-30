@@ -28,6 +28,28 @@ Authorization: Bearer compass_your_api_key_here
 
 API keys are workspace-scoped. A key can read and write all data in the workspace it was created for. Treat API keys like passwords — rotate them in Settings if one is compromised.
 
+## Required Request Headers
+
+Every **POST** request must include these headers:
+
+```http
+Authorization: Bearer compass_your_api_key_here
+Content-Type: application/json
+Accept: application/json, text/event-stream
+```
+
+The Streamable HTTP transport can respond with either JSON or a server-sent event stream, so the `Accept` header must include **both** media types. A POST request missing either `application/json` or `text/event-stream` from `Accept` returns HTTP 406; a POST request without a JSON `Content-Type` returns HTTP 415. Standard MCP clients, including `mcp-remote`, set the transport headers automatically; add them yourself only when calling the endpoint directly.
+
+For example, this raw request sends an MCP initialize request:
+
+```bash
+curl https://your-compass-url.vercel.app/api/mcp \
+  --header "Authorization: Bearer compass_your_api_key_here" \
+  --header "Content-Type: application/json" \
+  --header "Accept: application/json, text/event-stream" \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl-example","version":"1.0.0"}}}'
+```
+
 ## What Agents Can Do
 
 The MCP server exposes tools that agents can call, grouped below by area.
@@ -241,14 +263,22 @@ Add this to your Claude Desktop `claude_desktop_config.json`:
   "mcpServers": {
     "compass": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://your-compass-url.vercel.app/api/mcp"],
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://your-compass-url.vercel.app/api/mcp",
+        "--header",
+        "Authorization:${MCP_AUTH_HEADER}"
+      ],
       "env": {
-        "MCP_AUTH_HEADER": "Authorization: Bearer compass_your_api_key"
+        "MCP_AUTH_HEADER": "Bearer compass_your_api_key"
       }
     }
   }
 }
 ```
+
+`mcp-remote` supplies the Streamable HTTP transport headers, but callers must configure the `Authorization` header as shown above. Keeping the header value in `env` also avoids argument parsing problems with spaces in some MCP clients.
 
 ## Use Cases
 
