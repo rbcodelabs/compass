@@ -118,7 +118,13 @@ import {
   getEligibleParentKeyResults,
   setObjectiveParentKeyResult,
 } from "@/lib/okr-hierarchy"
-import { listEligibleParentKeyResults } from "@/lib/okr-tool-handlers"
+import {
+  deleteKeyResult,
+  deleteObjective,
+  listEligibleParentKeyResults,
+  updateKeyResult,
+  updateObjective,
+} from "@/lib/okr-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -659,6 +665,35 @@ const _handler = createMcpHandler(
     )
 
     register(
+      "update_objective",
+      {
+        title: "Update Objective",
+        description: "Partially updates an Objective's title, description, or health status.",
+        inputSchema: {
+          objectiveId: z.string().uuid().describe("UUID of the objective"),
+          title: z.string().min(1).optional().describe("New title for the objective"),
+          description: z.string().nullable().optional().describe("New description, or null to clear it"),
+          status: z.enum(["ON_TRACK", "AT_RISK", "OFF_TRACK", "COMPLETE"]).optional().describe("New health status"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      updateObjective
+    )
+
+    register(
+      "delete_objective",
+      {
+        title: "Delete Objective",
+        description: "Permanently deletes a childless Objective and removes its Task links and entity metadata. Refuses the delete when child Key Results exist; delete them explicitly first.",
+        inputSchema: {
+          objectiveId: z.string().uuid().describe("UUID of the objective to delete"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      deleteObjective
+    )
+
+    register(
       "add_key_result",
       {
         title: "Add Key Result",
@@ -692,6 +727,36 @@ const _handler = createMcpHandler(
           },
         )
       }
+    )
+
+    register(
+      "update_key_result",
+      {
+        title: "Update Key Result",
+        description: "Partially updates a Key Result's title, target, unit, or current value.",
+        inputSchema: {
+          keyResultId: z.string().uuid().describe("UUID of the key result"),
+          title: z.string().min(1).optional().describe("New title for the key result"),
+          target: z.number().optional().describe("New numeric target value"),
+          unit: z.string().nullable().optional().describe("New unit label, or null to clear it"),
+          current: z.number().optional().describe("New current value"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      updateKeyResult
+    )
+
+    register(
+      "delete_key_result",
+      {
+        title: "Delete Key Result",
+        description: "Permanently deletes a Key Result. Unlinks Opportunities, supporting Objectives, Roadmap Items, and Tasks that reference it; dependent Check-Ins and entity metadata are deleted. All cleanup is atomic.",
+        inputSchema: {
+          keyResultId: z.string().uuid().describe("UUID of the key result to delete"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      deleteKeyResult
     )
 
     register(
