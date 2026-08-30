@@ -60,12 +60,12 @@ describe("list_opportunities MCP tool", () => {
     vi.clearAllMocks()
   })
 
-  it("includes non-empty descriptions in text and structured output while preserving list metadata", async () => {
+  it("groups multiline descriptions under each item and preserves structured list metadata", async () => {
     mockPrisma.opportunity.findMany.mockResolvedValue([
       {
         id: "opportunity-1",
         title: "Understand failed onboarding",
-        description: "New admins cannot tell which setup step failed.",
+        description: "  New admins cannot tell which setup step failed.\n- Check permissions\n\nRetry after inviting a teammate.  ",
         status: "VALIDATING",
         squad: { name: "Activation" },
         linkedKeyResult: {
@@ -73,6 +73,15 @@ describe("list_opportunities MCP tool", () => {
           objective: { title: "Improve onboarding" },
         },
         _count: { solutions: 2 },
+      },
+      {
+        id: "opportunity-2",
+        title: "Whitespace has no meaning",
+        description: "  \n  ",
+        status: "EXPLORING",
+        squad: null,
+        linkedKeyResult: null,
+        _count: { solutions: 0 },
       },
     ])
 
@@ -82,13 +91,22 @@ describe("list_opportunities MCP tool", () => {
       squadId: "squad-1",
     })
 
-    expect(result.content[0].text).toContain("New admins cannot tell which setup step failed.")
+    expect(result.content[0].text).toBe(
+      "• **Understand failed onboarding** [VALIDATING] (Activation) — 2 solutions — KR: Improve onboarding / Increase activated workspaces\n" +
+      "  Description: New admins cannot tell which setup step failed.\n" +
+      "    - Check permissions\n" +
+      "    \n" +
+      "    Retry after inviting a teammate.\n" +
+      "  ID: opportunity-1\n" +
+      "• **Whitespace has no meaning** [EXPLORING] — 0 solutions\n" +
+      "  ID: opportunity-2",
+    )
     expect(result.structuredContent.data).toEqual({
       items: [
         {
           id: "opportunity-1",
           title: "Understand failed onboarding",
-          description: "New admins cannot tell which setup step failed.",
+          description: "  New admins cannot tell which setup step failed.\n- Check permissions\n\nRetry after inviting a teammate.  ",
           status: "VALIDATING",
           squad: "Activation",
           solutions: 2,
@@ -97,8 +115,17 @@ describe("list_opportunities MCP tool", () => {
             objective: "Improve onboarding",
           },
         },
+        {
+          id: "opportunity-2",
+          title: "Whitespace has no meaning",
+          description: "  \n  ",
+          status: "EXPLORING",
+          squad: null,
+          solutions: 0,
+          linkedKeyResult: null,
+        },
       ],
-      count: 1,
+      count: 2,
     })
     expect(mockPrisma.opportunity.findMany).toHaveBeenCalledWith({
       where: {

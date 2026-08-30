@@ -878,12 +878,15 @@ const _handler = createMcpHandler(
         if (!opportunities.length) {
           return fail("No opportunities found.")
         }
-        const lines = opportunities.map(o =>
-          `• **${o.title}** [${o.status}]${o.squad ? ` (${o.squad.name})` : ""} — ${o._count.solutions} solutions` +
-          (o.linkedKeyResult ? ` — KR: ${o.linkedKeyResult.objective.title} / ${o.linkedKeyResult.title}` : "") +
-          (o.description?.trim() ? `\n  ${o.description.trim()}` : "") +
-          `\n  ID: ${o.id}`
-        )
+        const lines = opportunities.map(o => {
+          const description = o.description?.trim().replace(/\r\n?/g, "\n")
+          return (
+            `• **${o.title}** [${o.status}]${o.squad ? ` (${o.squad.name})` : ""} — ${o._count.solutions} solutions` +
+            (o.linkedKeyResult ? ` — KR: ${o.linkedKeyResult.objective.title} / ${o.linkedKeyResult.title}` : "") +
+            (description ? `\n  Description: ${description.replace(/\n/g, "\n    ")}` : "") +
+            `\n  ID: ${o.id}`
+          )
+        })
         return ok(lines.join("\n"), {
           items: opportunities.map((o) => ({
             id: o.id,
