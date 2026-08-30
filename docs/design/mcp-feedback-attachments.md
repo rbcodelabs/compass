@@ -19,7 +19,7 @@
 - Inside that transaction, completion checks both the deterministic receipt ID and verified Blob URL, preserving ownership of portal/legacy rows. The deterministic ID closes concurrent MCP receipt replay; portal writes do not participate in the parent-touch protocol, so a simultaneous portal/MCP arbitrary-metadata race remains advisory without a schema uniqueness constraint.
 - Feedback and attachment UUIDs are generated before writes. On an ambiguous database error, Compass reads by that UUID before deciding whether the write committed; Blob cleanup happens only after confirming no row references it.
 - `update_feedback` changes title and/or description. At least one field is required; `description: null` clears it.
-- Feedback responses include an absolute canonical URL using authorized organization/workspace slugs and a base URL derived from trusted deployment configuration.
+- Feedback responses include an absolute canonical URL using authorized organization/workspace slugs and a base URL derived from trusted deployment configuration. Preview deployments prefer `VERCEL_BRANCH_URL`, then `VERCEL_URL`, so records written to preview databases link back to that preview; production continues to use the configured custom domain/production host.
 - The current shared feedback statuses are authoritative. Legacy `CLOSED` remains temporarily accepted and is written unchanged for backward compatibility.
 
 **Riskiest assumption:** Agents that need files larger than the inline limit can perform the direct HTTP upload using the returned client token before calling the completion tool.
