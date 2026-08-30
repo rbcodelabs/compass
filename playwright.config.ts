@@ -44,6 +44,8 @@ const FUNCTIONAL_PORT = process.env.E2E_PORT
     ? functionalPort()
     : 3002;
 const FUNCTIONAL_BASE_URL = `http://localhost:${FUNCTIONAL_PORT}`;
+const VERCEL_AUTOMATION_BYPASS_SECRET =
+  process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 
 export default defineConfig({
   // 90-second per-test timeout for functional specs — server actions + router
@@ -103,9 +105,9 @@ export default defineConfig({
     // The previous default pointed at a long-merged feature branch's preview
     // deployment, which no longer resolves — `pnpm test:e2e` would hang for
     // ~20 minutes and then fail with no useful output. Override via
-    // DOCS_BASE_URL to point at a preview deployment instead (the bypass
-    // secret below is registered at the project level, so it works across
-    // every branch's preview, not just the one it was first added for).
+    // DOCS_BASE_URL to point at a preview deployment instead. Protected
+    // deployments also require VERCEL_AUTOMATION_BYPASS_SECRET in the test
+    // environment; public/local targets continue to work without it.
     {
       name: "screenshots",
       testMatch: "e2e/screenshots.spec.ts",
@@ -113,9 +115,11 @@ export default defineConfig({
         ...devices["Desktop Chrome"],
         viewport: { width: 1440, height: 900 },
         baseURL: process.env.DOCS_BASE_URL || "https://compass.rbcodelabs.com",
-        extraHTTPHeaders: {
-          "x-vercel-protection-bypass": "bRUAfVUcOw3PVvAza4eaZFXPRttko2zW",
-        },
+        ...(VERCEL_AUTOMATION_BYPASS_SECRET && {
+          extraHTTPHeaders: {
+            "x-vercel-protection-bypass": VERCEL_AUTOMATION_BYPASS_SECRET,
+          },
+        }),
       },
     },
   ],
