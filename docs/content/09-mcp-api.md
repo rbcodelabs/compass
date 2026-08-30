@@ -49,7 +49,11 @@ The MCP server exposes tools that agents can call, grouped below by area.
 | `create_okr_cycle` | Create a new OKR cycle for a workspace (defaults to DRAFT status) |
 | `get_okr_cycle` | Return a full OKR cycle with Objective/KR progress, higher-level parent links, and supporting Objectives |
 | `create_objective` | Create an Objective; optionally assign a squad or link to an eligible KR in a longer-horizon cycle |
+| `update_objective` | Partially update an Objective's title, description, or status (ON_TRACK/AT_RISK/OFF_TRACK/COMPLETE) |
+| `delete_objective` | Permanently delete a childless Objective and its Task links/entity metadata; refuses deletion while child Key Results exist |
 | `add_key_result` | Add a Key Result to an existing Objective |
+| `update_key_result` | Partially update a Key Result's title, target, unit, or current value |
+| `delete_key_result` | Permanently delete a Key Result; atomically unlinks Opportunities, supporting Objectives, Roadmap Items, and Tasks, then deletes dependent Check-Ins/entity metadata |
 | `log_checkin` | Record a progress check-in for a Key Result and update its current value |
 | `list_eligible_parent_key_results` | List open, longer-horizon KRs whose cycle contains the specified child cycle |
 | `set_objective_parent_kr` | Link an Objective to an eligible higher-level KR it supports, or clear the link |

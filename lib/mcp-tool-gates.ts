@@ -102,7 +102,11 @@ export const TOOL_GATES: Record<string, Gate> = {
   create_okr_cycle: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_okr_cycle: async (a, x) => void (await assertEntityAccess(a, "okrCycle", x.cycleId)),
   create_objective: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  update_objective: async (a, x) => void (await assertEntityAccess(a, "objective", x.objectiveId)),
+  delete_objective: async (a, x) => void (await assertEntityAccess(a, "objective", x.objectiveId)),
   add_key_result: async (a, x) => void (await assertEntityAccess(a, "objective", x.objectiveId)),
+  update_key_result: async (a, x) => void (await assertEntityAccess(a, "keyResult", x.keyResultId)),
+  delete_key_result: async (a, x) => void (await assertEntityAccess(a, "keyResult", x.keyResultId)),
   log_checkin: async (a, x) => void (await assertEntityAccess(a, "keyResult", x.keyResultId)),
   set_objective_parent_kr: async (a, x) => {
     await assertEntityAccess(a, "objective", x.objectiveId)
