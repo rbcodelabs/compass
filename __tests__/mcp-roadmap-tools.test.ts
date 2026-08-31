@@ -41,7 +41,9 @@ const mockPrisma = {
     findUnique: vi.fn(),
     update: vi.fn(),
   },
-  $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+  portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
+  portfolioCapacityPlan: { updateMany: vi.fn() },
+  $transaction: vi.fn(),
 }
 
 vi.mock("@/lib/db", () => ({
@@ -84,6 +86,11 @@ function textOf(result: { content: Array<{ type: string; text: string }> }): str
   return result.content[0].text
 }
 
+beforeEach(() => {
+  mockPrisma.portfolioCapacityReservation.findUnique.mockResolvedValue(null)
+  mockPrisma.$transaction.mockImplementation((operation: Promise<unknown>[] | ((database: typeof mockPrisma) => unknown)) => Array.isArray(operation) ? Promise.all(operation) : operation(mockPrisma))
+})
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("add_to_roadmap MCP tool — dates", () => {
@@ -91,6 +98,8 @@ describe("add_to_roadmap MCP tool — dates", () => {
     vi.clearAllMocks()
     mockPrisma.workspace.findUnique.mockResolvedValue({ name: "My Product" })
     mockPrisma.roadmapItem.findFirst.mockResolvedValue(null)
+    mockPrisma.portfolioCapacityReservation.findUnique.mockResolvedValue(null)
+    mockPrisma.$transaction.mockImplementation((operation: Promise<unknown>[] | ((database: typeof mockPrisma) => unknown)) => Array.isArray(operation) ? Promise.all(operation) : operation(mockPrisma))
   })
 
   it("creates an item with startDate/endDate parsed to Date and returns them", async () => {
