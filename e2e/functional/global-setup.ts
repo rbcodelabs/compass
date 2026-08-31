@@ -17,13 +17,16 @@ const schema = process.env.PGSCHEMA
   ? `${process.env.PGSCHEMA}_dev`
   : "compass_dev";
 
-async function ensureResearchCaptureSchema(pool: pg.Pool) {
+async function ensureFunctionalSchema(pool: pg.Pool) {
   const migrationPaths = [
     "prisma/migrations/034_research_capture/migration.sql",
     "prisma/migrations/035_research_agent_scope/migration.sql",
     "prisma/migrations/036_research_capture_hardening/migration.sql",
     "prisma/migrations/037_research_guided_ux/migration.sql",
     "prisma/migrations/038_research_blob_cleanup/migration.sql",
+    "prisma/migrations/039_native_decision_gates/migration.sql",
+    "prisma/migrations/040_release_authorization/migration.sql",
+    "prisma/migrations/041_portfolio_capacity_ledger/migration.sql",
   ];
 
   const client = await pool.connect();
@@ -31,7 +34,9 @@ async function ensureResearchCaptureSchema(pool: pg.Pool) {
     await client.query(`SET search_path TO "${schema}"`);
     for (const relativePath of migrationPaths) {
       const migration = (await fs.readFile(path.resolve(process.cwd(), relativePath), "utf8"))
-        .replaceAll("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ")
+        .replace(/CREATE TABLE (?!IF NOT EXISTS )/g, "CREATE TABLE IF NOT EXISTS ")
+        .replaceAll("CREATE UNIQUE INDEX ASYNC IF NOT EXISTS ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
+        .replaceAll("CREATE INDEX ASYNC IF NOT EXISTS ", "CREATE INDEX IF NOT EXISTS ")
         .replaceAll("CREATE UNIQUE INDEX ASYNC ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
         .replaceAll("CREATE INDEX ASYNC ", "CREATE INDEX IF NOT EXISTS ");
       await client.query(migration);
@@ -70,8 +75,11 @@ export default async function globalSetup() {
 
   const pool = new pg.Pool({ connectionString });
   try {
-    await ensureResearchCaptureSchema(pool);
-    await seedE2E(pool, runToken);
+    await ensureFunctionalSchema(pool);
+    const seed = await seedE2E(pool, runToken);
+    const policyPath = path.resolve(process.cwd(), "test-results/e2e-now-commitment-policy.json");
+    await fs.mkdir(path.dirname(policyPath), { recursive: true });
+    await fs.writeFile(policyPath, `${JSON.stringify(seed.nowCommitmentPolicy, null, 2)}\n`, "utf8");
     console.log(`[e2e globalSetup] Seed complete ✓ (run ${runToken})`);
   } finally {
     await pool.end();

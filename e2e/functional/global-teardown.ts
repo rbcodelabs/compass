@@ -214,6 +214,49 @@ export default async function globalTeardown() {
         [wsId]
       );
 
+      // Immutable decision ledger and capacity reservations must be removed
+      // before their roadmap-item and workspace subjects.
+      await pool.query(
+        `DELETE FROM "${S}".portfolio_capacity_reservations
+         WHERE plan_id IN (SELECT id FROM "${S}".portfolio_capacity_plans WHERE workspace_id = $1)`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".portfolio_capacity_plans WHERE workspace_id = $1`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".decision_applications
+         WHERE decision_id IN (SELECT id FROM "${S}".decision_records WHERE workspace_id = $1)`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".decision_records WHERE workspace_id = $1`,
+        [wsId]
+      );
+      await pool.query(
+        `UPDATE "${S}".review_requests SET current_revision_id = NULL WHERE workspace_id = $1`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".review_options
+         WHERE revision_id IN (
+           SELECT rr.id FROM "${S}".review_revisions rr
+           JOIN "${S}".review_requests rq ON rq.id = rr.request_id
+           WHERE rq.workspace_id = $1
+         )`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".review_revisions
+         WHERE request_id IN (SELECT id FROM "${S}".review_requests WHERE workspace_id = $1)`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".review_requests WHERE workspace_id = $1`,
+        [wsId]
+      );
+
       // roadmap_items
       await pool.query(
         `DELETE FROM "${S}".roadmap_items WHERE workspace_id = $1`,

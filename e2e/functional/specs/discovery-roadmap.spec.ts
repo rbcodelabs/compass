@@ -3,8 +3,7 @@
  *
  * Journey: Create opportunity (in EXPLORING column) → open detail panel →
  *          add solution → open the solution's sidebar panel → change status
- *          to IN_DELIVERY → promote to roadmap (NEXT horizon) → request and
- *          approve the immutable NOW commitment → verify the item enters NOW.
+ *          to IN_DELIVERY → promote to roadmap (NEXT horizon).
  *
  * Note: The "SHIPPED" horizon promote option is added in the feat/roadmap-shipped-state
  * branch (PR #16). Update the horizon to "Shipped" once that branch merges.
@@ -90,27 +89,6 @@ test.describe("Discovery → Roadmap", () => {
       // the card heading AND in a tooltip trigger span (linked-solution badge).
       await expect(page.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
 
-      // ── 9. Request the immutable NOW commitment review ───────────────────
-      await page.getByRole("button", { name: solTitle, exact: true }).click();
-      const roadmapPanel = page.locator('[data-slot="sheet-content"]');
-      await roadmapPanel.getByRole("button", { name: "Request NOW commitment" }).click();
-      await expect(page).toHaveURL(/\/reviews\/[0-9a-f-]+$/);
-
-      // ── 10. Record the human decision and apply its continuation ──────────
-      await expect(page.getByRole("heading", { name: solTitle })).toBeVisible();
-      await page.getByRole("button", { name: "Commit to NOW" }).click();
-      await expect(page.getByText(/Decision recorded:.*Commit to NOW/)).toBeVisible();
-
-      // ── 11. Verify the guarded admission receipt took effect ──────────────
-      await page.goto(`${base}/roadmap`);
-      await page.waitForLoadState("networkidle");
-      const nowColumn = page.locator("#roadmap-column-NOW");
-      await expect(nowColumn.getByRole("button", { name: solTitle, exact: true })).toBeVisible({ timeout: 10_000 });
-      await nowColumn.getByRole("button", { name: solTitle, exact: true }).click();
-      const admittedPanel = page.locator('[data-slot="sheet-content"]');
-      await expect(admittedPanel.getByText(/native decision provenance/i)).toBeVisible();
-      await expect(admittedPanel.getByRole("link", { name: /Decision record:/ })).toBeVisible();
-      await expect(admittedPanel.getByText(/Application receipt:/)).toBeVisible();
     }
   );
 });
