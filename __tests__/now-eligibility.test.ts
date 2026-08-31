@@ -56,7 +56,7 @@ describe("canonical NOW eligibility resolver", () => {
 
   it("resolves configured investment from the authoritative workspace capacity plan", async () => {
     process.env.NOW_COMMITMENT_POLICY_JSON = JSON.stringify(validPolicy())
-    mockFindPlan.mockResolvedValue({ id: ids.plan, workspaceId: ids.workspace, policyId: "portfolio-v1", planFingerprint: "b".repeat(64), unit: "FOCUS_SLOT", availableUnits: 3, nowLimit: 3, state: "ACTIVE", version: 1, reservations: [{ roadmapItemId: ids.reserved, units: 1 }] })
+    mockFindPlan.mockResolvedValue({ id: ids.plan, workspaceId: ids.workspace, policyId: "portfolio-v1", planFingerprint: "b".repeat(64), unit: "FOCUS_SLOT", availableUnits: 3, unitsPerNowItem: 1, nowLimit: 3, state: "ACTIVE", version: 1, reservations: [{ roadmapItemId: ids.reserved, units: 1 }] })
     await expect(resolveNowCommitmentEligibility(item)).resolves.toEqual(expect.objectContaining({
       portfolioPolicyId: "portfolio-v1",
       investmentDecision: expect.objectContaining({ subjectId: ids.solution, authorityRecordId: ids.decision }),

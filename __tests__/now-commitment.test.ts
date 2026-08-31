@@ -19,7 +19,7 @@ const item = { id: "item-1", workspaceId: "ws-1", title: "Ship it", description:
 const eligibility = {
   portfolioPolicyId: "portfolio-policy:v1:test",
   investmentDecision: { authorityProvider: "OBSIDIAN" as const, authorityRecordId: "DEC-1", authorityChecksum: "a".repeat(64), subjectId: "sol-1", decisionOutcome: "APPROVE_BUILDING" as const, applicationStatus: "APPLIED" as const, applicationReceiptId: "receipt-1" },
-  capacity: { planId: "plan-1", planFingerprint: "b".repeat(64), unit: "CONFIGURED_UNIT", availableUnits: 3, requestedUnits: 1, reservedUnits: 1, reservedRoadmapItemIds: ["now-1"], nowLimit: 3, planVersion: 1 },
+  capacity: { planId: "plan-1", planFingerprint: "b".repeat(64), unit: "CONFIGURED_UNIT", availableUnits: 3, requestedUnits: 1, unitsPerNowItem: 1, reservedUnits: 1, reservedRoadmapItemIds: ["now-1"], nowLimit: 3, planVersion: 1 },
 }
 const configuredIds = {
   item: "00000000-0000-4000-8000-000000000011", workspace: "00000000-0000-4000-8000-000000000012",
@@ -66,7 +66,7 @@ describe("NOW commitment", () => {
     tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
       id: eligibility.capacity.planId, workspaceId: item.workspaceId, policyId: eligibility.portfolioPolicyId,
       planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit,
-      availableUnits: eligibility.capacity.availableUnits, nowLimit: eligibility.capacity.nowLimit,
+      availableUnits: eligibility.capacity.availableUnits, unitsPerNowItem: eligibility.capacity.unitsPerNowItem, nowLimit: eligibility.capacity.nowLimit,
       version: eligibility.capacity.planVersion, state: "ACTIVE",
       reservations: [{ id: "reservation-now-1", roadmapItemId: "now-1", units: 1 }],
     })
@@ -100,7 +100,7 @@ describe("NOW commitment", () => {
     tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
       id: configuredIds.plan, workspaceId: configuredIds.workspace, policyId: configuredEligibility.portfolioPolicyId,
       planFingerprint: configuredEligibility.capacity.planFingerprint, unit: configuredEligibility.capacity.unit,
-      availableUnits: 3, nowLimit: 3, state: "ACTIVE", version: 1,
+      availableUnits: 3, unitsPerNowItem: 1, nowLimit: 3, state: "ACTIVE", version: 1,
       reservations: [{ roadmapItemId: configuredIds.reserved, units: 1 }],
     })
     tx.reviewRequest.findFirst.mockResolvedValue(null)
@@ -274,7 +274,7 @@ describe("NOW commitment", () => {
     tx.decisionApplication.findUnique.mockResolvedValue(null)
     tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
       id: eligibility.capacity.planId, workspaceId: item.workspaceId, policyId: eligibility.portfolioPolicyId,
-      planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit, availableUnits: 1, nowLimit: 1,
+      planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit, availableUnits: 1, unitsPerNowItem: 1, nowLimit: 1,
       version: eligibility.capacity.planVersion, state: "ACTIVE",
       reservations: [{ id: "reservation-now-1", roadmapItemId: "now-1", units: 1 }],
     })
@@ -293,7 +293,7 @@ describe("NOW commitment", () => {
     tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
       id: configuredIds.plan, workspaceId: configuredIds.workspace, policyId: configuredEligibility.portfolioPolicyId,
       planFingerprint: configuredEligibility.capacity.planFingerprint, unit: configuredEligibility.capacity.unit,
-      availableUnits: 3, nowLimit: 3, state: "ACTIVE", version: 1,
+      availableUnits: 3, unitsPerNowItem: 1, nowLimit: 3, state: "ACTIVE", version: 1,
       reservations: [{ id: "reservation-configured", roadmapItemId: configuredIds.reserved, units: 1 }],
     })
     tx.decisionRecord.findUnique.mockResolvedValue(configuredNativeDecision)

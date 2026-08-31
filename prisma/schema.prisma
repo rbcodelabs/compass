@@ -851,6 +851,7 @@ model PortfolioCapacityPlan {
   planFingerprint String                         @map("plan_fingerprint") @db.Char(64)
   unit            String                         @db.VarChar(80)
   availableUnits  Int                            @map("available_units")
+  unitsPerNowItem Int                            @map("units_per_now_item")
   nowLimit        Int                            @map("now_limit")
   state           String                         @default("ACTIVE") @db.VarChar(30)
   version         Int                            @default(0)

@@ -148,7 +148,8 @@ export async function resolveNowCommitmentEligibility(
   })
   if (!plan || plan.workspaceId !== item.workspaceId || plan.policyId !== policy.portfolioPolicyId
     || plan.planFingerprint !== capacity.planFingerprint || plan.unit !== capacity.unit
-    || plan.availableUnits !== capacity.availableUnits || plan.nowLimit !== capacity.nowLimit || plan.state !== "ACTIVE") {
+    || plan.availableUnits !== capacity.availableUnits || plan.unitsPerNowItem !== capacity.unitsPerNowItem
+    || plan.nowLimit !== capacity.nowLimit || plan.state !== "ACTIVE") {
     throw new NowEligibilityError("POLICY_CONFIGURATION_REQUIRED", "The configured capacity policy does not match an active authoritative workspace plan.")
   }
   return {
@@ -160,6 +161,7 @@ export async function resolveNowCommitmentEligibility(
       unit: capacity.unit,
       availableUnits: capacity.availableUnits,
       requestedUnits: capacity.requestedUnits,
+      unitsPerNowItem: capacity.unitsPerNowItem,
       reservedUnits: plan.reservations.reduce((sum, reservation) => sum + reservation.units, 0),
       reservedRoadmapItemIds: plan.reservations.map(({ roadmapItemId }) => roadmapItemId),
       nowLimit: capacity.nowLimit,

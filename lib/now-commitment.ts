@@ -46,6 +46,7 @@ export type NowCommitmentEligibilityInputs = {
     unit: string
     availableUnits: number
     requestedUnits: number
+    unitsPerNowItem: number
     reservedUnits: number
     reservedRoadmapItemIds: string[]
     nowLimit: number
@@ -88,7 +89,7 @@ function assertEligibilityConfigured(item: FingerprintItem, eligibility: NowComm
     throw new NowCommitmentError("NO_APPLIED_INVESTMENT_DECISION", "An applied Building investment decision for the exact Solution is required.")
   }
   const capacity = eligibility.capacity
-  if (!eligibility.portfolioPolicyId || !capacity.planId || !capacity.planFingerprint || capacity.availableUnits <= 0 || capacity.requestedUnits <= 0 || capacity.nowLimit <= 0 || !Number.isSafeInteger(capacity.planVersion) || capacity.planVersion < 0) {
+  if (!eligibility.portfolioPolicyId || !capacity.planId || !capacity.planFingerprint || capacity.availableUnits <= 0 || capacity.requestedUnits <= 0 || capacity.unitsPerNowItem <= 0 || capacity.nowLimit <= 0 || !Number.isSafeInteger(capacity.planVersion) || capacity.planVersion < 0) {
     throw new NowCommitmentError("NO_CAPACITY_PLAN", "A complete explicit capacity plan is required.")
   }
   const effectiveLimit = Math.min(capacity.availableUnits, capacity.nowLimit)
@@ -313,6 +314,7 @@ export async function admitRoadmapItemToNow(
       if (!plan || plan.workspaceId !== item.workspaceId || plan.policyId !== eligibility.portfolioPolicyId
         || plan.planFingerprint !== eligibility.capacity.planFingerprint || plan.version !== eligibility.capacity.planVersion
         || plan.unit !== eligibility.capacity.unit || plan.availableUnits !== eligibility.capacity.availableUnits
+        || plan.unitsPerNowItem !== eligibility.capacity.unitsPerNowItem
         || plan.nowLimit !== eligibility.capacity.nowLimit
         || plan.state !== "ACTIVE") {
         throw new NowCommitmentError("CAPACITY_CONFLICT", "The authoritative workspace capacity plan changed after review.")

@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS "portfolio_capacity_plans" (
   "plan_fingerprint" CHAR(64) NOT NULL,
   "unit" VARCHAR(80) NOT NULL,
   "available_units" INTEGER NOT NULL,
+  "units_per_now_item" INTEGER NOT NULL,
   "now_limit" INTEGER NOT NULL,
   "state" VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
   "version" INTEGER NOT NULL DEFAULT 0,

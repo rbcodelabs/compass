@@ -19,9 +19,9 @@ describe("workspace capacity ledger", () => {
 
   it("initializes reservations for legacy NOW items before activating a plan", async () => {
     tx.portfolioCapacityPlan.findUnique
-      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 0 })
-      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 0 })
-      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 1 })
+      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 0, unitsPerNowItem: 2 })
+      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 0, unitsPerNowItem: 2 })
+      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 1, unitsPerNowItem: 2 })
     tx.roadmapItem.findMany.mockResolvedValue([{ id: "legacy-now-1" }])
     tx.roadmapItem.count.mockResolvedValue(1)
     tx.portfolioCapacityReservation.count.mockResolvedValue(1)
@@ -30,7 +30,7 @@ describe("workspace capacity ledger", () => {
     await expect(reconcileAndActivateCapacityPlan("plan-1")).resolves.toEqual({ reserved: 1 })
 
     expect(tx.portfolioCapacityReservation.createMany).toHaveBeenCalledWith({
-      data: [{ planId: "plan-1", roadmapItemId: "legacy-now-1", decisionRecordId: null, units: 1, state: "ACTIVE" }],
+      data: [{ planId: "plan-1", roadmapItemId: "legacy-now-1", decisionRecordId: null, units: 2, state: "ACTIVE" }],
       skipDuplicates: true,
     })
     expect(tx.portfolioCapacityPlan.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ state: "ACTIVE" }) }))

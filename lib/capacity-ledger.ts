@@ -60,7 +60,7 @@ export async function reconcileAndActivateCapacityPlan(planId: string): Promise<
       const current = await tx.portfolioCapacityPlan.findUnique({ where: { id: planId } })
       if (!current || current.state !== "DRAFT" || current.version !== plan.version) throw new CapacityLedgerError("CAPACITY_CONFLICT", "Capacity plan changed during reconciliation.")
       await tx.portfolioCapacityReservation.createMany({
-        data: batch.map((row) => ({ planId, roadmapItemId: row.id, decisionRecordId: null, units: 1, state: "ACTIVE" })),
+        data: batch.map((row) => ({ planId, roadmapItemId: row.id, decisionRecordId: null, units: plan.unitsPerNowItem, state: "ACTIVE" })),
         skipDuplicates: true,
       })
       const claimed = await tx.portfolioCapacityPlan.updateMany({ where: { id: planId, version: plan.version, state: "DRAFT" }, data: { version: plan.version + 1, updatedAt: new Date() } })
