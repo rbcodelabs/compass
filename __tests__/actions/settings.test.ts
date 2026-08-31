@@ -789,6 +789,9 @@ describe("deleteWorkspace", () => {
     expect(mockPortfolioCapacityReservation.deleteMany).toHaveBeenCalled();
     expect(mockPortfolioCapacityPlan.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockReleaseRun.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockDecisionRecord.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockDecisionApplication.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockDecisionRecord.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockReviewRequest.updateMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRequest.deleteMany.mock.invocationCallOrder[0]);
     expect(mockPortfolioCapacityReservation.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockRoadmapItem.deleteMany.mock.invocationCallOrder[0]);
 
     // Workspace deleted
