@@ -146,6 +146,7 @@ model Workspace {
   researchStudies      ResearchStudy[]
   researchAttachments  ResearchAttachment[]
   reviewRequests       ReviewRequest[]
+  releaseRuns          ReleaseRun[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -738,6 +739,10 @@ model ReviewRequest {
   state              String           @default("DRAFT") @db.VarChar(30)
   currentRevisionId  String?          @unique(map: "idx_review_requests_current_revision") @map("current_revision_id") @db.Uuid
   revisionCount      Int              @default(0) @map("revision_count")
+  decisionCycle      Int              @default(1) @map("decision_cycle")
+  reopenReason       String?          @map("reopen_reason") @db.Text
+  reopenedById       String?          @map("reopened_by_id") @db.Uuid
+  reconsidersDecisionId String?       @map("reconsiders_decision_id") @db.Uuid
   requestedById      String?          @map("requested_by_id") @db.Uuid
   assignedToId       String?          @map("assigned_to_id") @db.Uuid
   dueAt               DateTime?        @map("due_at")
@@ -758,6 +763,7 @@ model ReviewRevision {
   id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   requestId       String          @map("request_id") @db.Uuid
   revisionNumber  Int             @map("revision_number")
+  sourceFingerprint String?       @map("source_fingerprint") @db.VarChar(64)
   fingerprint     String          @db.VarChar(64)
   title           String          @db.VarChar(255)
   summary         String?         @db.Text
@@ -773,6 +779,7 @@ model ReviewRevision {
 
   @@unique([requestId, revisionNumber], map: "idx_review_revisions_request_number")
   @@unique([requestId, fingerprint], map: "idx_review_revisions_request_fingerprint")
+  @@index([requestId, sourceFingerprint], map: "idx_review_revisions_request_source")
   @@map("review_revisions")
 }
 
@@ -808,6 +815,8 @@ model DecisionRecord {
   revision        ReviewRevision        @relation(fields: [revisionId], references: [id])
   option          ReviewOption          @relation(fields: [optionId], references: [id])
   applications    DecisionApplication[]
+  authorizedReleaseRun ReleaseRun?       @relation("ReleaseAuthorizationDecision")
+  releaseDispatches    ReleaseDispatch[]
 
   @@index([workspaceId, decidedAt], map: "idx_decision_records_workspace_decided")
   @@map("decision_records")
@@ -831,6 +840,79 @@ model DecisionApplication {
   @@unique([decisionId, continuationKey], map: "idx_decision_applications_decision_continuation")
   @@index([targetType, targetId], map: "idx_decision_applications_target")
   @@map("decision_applications")
+}
+
+// ─── Release authorization ledger ──────────────────────────────────────────
+// This is the normalized authorization/outbox slice from ADR-0005. Provider
+// evidence and merge/deploy/verification state are intentionally deferred;
+// creating a ReleaseDispatch never invokes external release automation.
+
+model ReleaseRun {
+  id                            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId                   String            @map("workspace_id") @db.Uuid
+  provider                      String            @default("GITHUB") @db.VarChar(30)
+  repositoryOwner               String            @map("repository_owner") @db.VarChar(255)
+  repositoryName                String            @map("repository_name") @db.VarChar(255)
+  pullRequestNumber             Int               @map("pull_request_number")
+  baseRef                       String            @map("base_ref") @db.VarChar(255)
+  headSha                       String            @map("head_sha") @db.Char(40)
+  targetEnvironment             String            @default("PRODUCTION") @map("target_environment") @db.VarChar(30)
+  releasePolicyId               String            @map("release_policy_id") @db.VarChar(160)
+  sourceFingerprint             String            @map("source_fingerprint") @db.Char(64)
+  state                         String            @default("PREPARING") @db.VarChar(30)
+  authorizationDecisionRecordId String?           @unique(map: "idx_release_runs_authorization_decision") @map("authorization_decision_record_id") @db.Uuid
+  version                       Int               @default(0)
+  lastErrorCode                 String?           @map("last_error_code") @db.VarChar(100)
+  lastError                     String?           @map("last_error") @db.Text
+  createdById                   String?           @map("created_by_id") @db.Uuid
+  createdAt                     DateTime          @default(now()) @map("created_at")
+  updatedAt                     DateTime          @default(now()) @map("updated_at")
+  workspace                     Workspace         @relation(fields: [workspaceId], references: [id])
+  authorizationDecisionRecord   DecisionRecord?   @relation("ReleaseAuthorizationDecision", fields: [authorizationDecisionRecordId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tasks                         ReleaseRunTask[]
+  dispatches                    ReleaseDispatch[]
+
+  @@unique([workspaceId, provider, repositoryOwner, repositoryName, pullRequestNumber, sourceFingerprint], map: "idx_release_runs_scope_fingerprint")
+  @@index([workspaceId, state, updatedAt], map: "idx_release_runs_workspace_state")
+  @@index([provider, repositoryOwner, repositoryName, pullRequestNumber], map: "idx_release_runs_repository_pr")
+  @@map("release_runs")
+}
+
+model ReleaseRunTask {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  releaseRunId String     @map("release_run_id") @db.Uuid
+  taskId       String     @map("task_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at")
+  releaseRun   ReleaseRun @relation(fields: [releaseRunId], references: [id])
+  task         Task       @relation(fields: [taskId], references: [id])
+
+  @@unique([releaseRunId, taskId], map: "idx_release_run_tasks_run_task")
+  @@index([taskId, releaseRunId], map: "idx_release_run_tasks_task_run")
+  @@map("release_run_tasks")
+}
+
+model ReleaseDispatch {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  releaseRunId     String         @map("release_run_id") @db.Uuid
+  decisionRecordId String         @map("decision_record_id") @db.Uuid
+  continuationKey  String         @default("DISPATCH_RELEASE_RUN") @map("continuation_key") @db.VarChar(80)
+  status           String         @default("PENDING") @db.VarChar(30)
+  idempotencyKey   String         @unique(map: "idx_release_dispatches_idempotency") @map("idempotency_key") @db.VarChar(255)
+  claimedBy        String?        @map("claimed_by") @db.VarChar(255)
+  claimExpiresAt   DateTime?      @map("claim_expires_at")
+  attemptCount     Int            @default(0) @map("attempt_count")
+  runtimeRunId     String?        @map("runtime_run_id") @db.VarChar(255)
+  lastError        String?        @map("last_error") @db.Text
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @default(now()) @map("updated_at")
+  completedAt      DateTime?      @map("completed_at")
+  releaseRun       ReleaseRun     @relation(fields: [releaseRunId], references: [id])
+  decisionRecord   DecisionRecord @relation(fields: [decisionRecordId], references: [id])
+
+  @@unique([decisionRecordId, continuationKey], map: "idx_release_dispatches_decision_continuation")
+  @@index([status, claimExpiresAt, createdAt], map: "idx_release_dispatches_claim")
+  @@index([releaseRunId, status], map: "idx_release_dispatches_run_status")
+  @@map("release_dispatches")
 }
 
 // ─── Launch Tiers & Checklists ──────────────────────────────────────────────
@@ -1414,6 +1496,7 @@ model Task {
   parentTask Task?      @relation("TaskParent", fields: [parentTaskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   subtasks   Task[]     @relation("TaskParent")
   links      TaskLink[]
+  releaseRunTasks ReleaseRunTask[]
 
   createdById String? @map("created_by_id") @db.Uuid
   updatedById String? @map("updated_by_id") @db.Uuid

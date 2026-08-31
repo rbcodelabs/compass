@@ -187,6 +187,10 @@ const MIGRATIONS = [
     name: "039_native_decision_gates",
     filePath: path.join(process.cwd(), "prisma/migrations/039_native_decision_gates/migration.sql"),
   },
+  {
+    name: "040_release_authorization",
+    filePath: path.join(process.cwd(), "prisma/migrations/040_release_authorization/migration.sql"),
+  },
 ];
 
 const DSQL_WRITE_LIMITS = {
