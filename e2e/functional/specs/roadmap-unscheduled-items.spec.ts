@@ -35,8 +35,8 @@ async function dragTo(page: Page, source: ReturnType<Page["locator"]>, targetBox
   await page.mouse.move(startX, startY);
   await page.mouse.down();
   // Small initial move past dnd-kit's PointerSensor activation distance (8px).
-  await page.mouse.move(startX + 15, startY + 15, { steps: 5 });
-  await page.mouse.move(endX, endY, { steps: 15 });
+  await page.mouse.move(startX + 15, startY + 15, { steps: 10 });
+  await page.mouse.move(endX, endY, { steps: 40 });
   await page.mouse.up();
 }
 
@@ -173,8 +173,11 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // PointerSensor activation can be lost when the browser is busy laying
       // out the newly selected timeline. Recompute layout and retry the same
       // user gesture only while the expected dialog state is absent.
-      for (let attempt = 0; attempt < 3 && !(await scheduleHeading.isVisible()); attempt += 1) {
-        const dropZoneBox = await page.locator("#gantt-drop-zone").boundingBox();
+      for (let attempt = 0; attempt < 5 && !(await scheduleHeading.isVisible()); attempt += 1) {
+        const dropZone = page.locator("#gantt-drop-zone");
+        await sol2UnscheduledCard.scrollIntoViewIfNeeded();
+        await dropZone.scrollIntoViewIfNeeded();
+        const dropZoneBox = await dropZone.boundingBox();
         if (!dropZoneBox) throw new Error("Gantt drop zone not found");
         await dragTo(page, sol2UnscheduledCard.getByLabel("Drag to schedule"), dropZoneBox);
         await scheduleHeading
