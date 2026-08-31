@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const tx = {
-  roadmapItem: { findUnique: vi.fn(), update: vi.fn() },
-  reviewRequest: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+  roadmapItem: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+  reviewRequest: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   reviewRevision: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   decisionRecord: { findUnique: vi.fn() },
   decisionApplication: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
@@ -11,6 +11,7 @@ const mockPrisma = { ...tx, $transaction: vi.fn((fn: (value: typeof tx) => unkno
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
 import { NowCommitmentError, admitRoadmapItemToNow, ensureNowCommitmentRevisionFresh, nowCommitmentFingerprint, prepareNowCommitment, startNewNowCommitmentDecisionCycle } from "@/lib/now-commitment"
+import { resolveNowCommitmentEligibility } from "@/lib/now-eligibility"
 
 const item = { id: "item-1", workspaceId: "ws-1", title: "Ship it", description: "Scope", horizon: "NEXT", status: "ACTIVE", solutionId: "sol-1", opportunityId: "opp-1", squadId: "squad-1", startDate: null, endDate: null, isPrivate: false, sortOrder: 2, updatedAt: new Date("2026-08-31T12:00:00Z"), nowCommitmentProvenance: "LEGACY_UNGATED" }
 const eligibility = {
@@ -18,11 +19,21 @@ const eligibility = {
   investmentDecision: { authorityProvider: "OBSIDIAN" as const, authorityRecordId: "DEC-1", authorityChecksum: "a".repeat(64), subjectId: "sol-1", decisionOutcome: "APPROVE_BUILDING" as const, applicationStatus: "APPLIED" as const, applicationReceiptId: "receipt-1" },
   capacity: { planId: "plan-1", planFingerprint: "b".repeat(64), unit: "CONFIGURED_UNIT", availableUnits: 3, requestedUnits: 1, reservedUnits: 1, reservedRoadmapItemIds: ["now-1"], nowLimit: 3 },
 }
+const eligibilityResolver = { resolve: vi.fn(async () => eligibility) }
+const reviewedSourceFingerprint = nowCommitmentFingerprint(item, eligibility)
+const approvedDecision = (overrides: Record<string, unknown> = {}) => ({
+  id: "decision-1",
+  fingerprint: "review-fp",
+  revision: { fingerprint: "review-fp", sourceFingerprint: reviewedSourceFingerprint, supersededAt: null, request: { workspaceId: "ws-1", subjectId: "item-1", gateType: "NOW_COMMITMENT" } },
+  option: { outcomeClass: "APPROVE", continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW" },
+  ...overrides,
+})
 
 describe("NOW commitment", () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockPrisma.$transaction.mockImplementation((fn: (value: typeof tx) => unknown) => fn(tx))
+    delete process.env.NOW_COMMITMENT_POLICY_JSON
   })
 
   it("prepares an immutable revision with explicit approve and reject options", async () => {
@@ -42,6 +53,21 @@ describe("NOW commitment", () => {
     await expect(prepareNowCommitment("item-1", { requestedById: "user-1" }))
       .rejects.toEqual(expect.objectContaining({ code: "POLICY_CONFIGURATION_REQUIRED" }))
     expect(tx.reviewRequest.create).not.toHaveBeenCalled()
+  })
+
+  it("prepares through the canonical configured resolver without caller-supplied eligibility", async () => {
+    process.env.NOW_COMMITMENT_POLICY_JSON = JSON.stringify({ version: 1, workspaces: { "ws-1": {
+      portfolioPolicyId: eligibility.portfolioPolicyId,
+      capacity: { planId: eligibility.capacity.planId, planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit, availableUnits: 3, requestedUnits: 1, unitsPerNowItem: 1, nowLimit: 3 },
+      investmentDecisions: { "sol-1": { ...eligibility.investmentDecision, subjectId: undefined } },
+    } } })
+    tx.roadmapItem.findUnique.mockResolvedValue(item)
+    tx.roadmapItem.findMany.mockResolvedValue([{ id: "now-1" }])
+    tx.reviewRequest.findFirst.mockResolvedValue(null)
+    tx.reviewRequest.create.mockResolvedValue({ id: "request-1" })
+    tx.reviewRevision.create.mockResolvedValue({ id: "rev-1", fingerprint: "fp-1" })
+
+    await expect(prepareNowCommitment("item-1", { requestedById: "user-1" })).resolves.toEqual(expect.objectContaining({ id: "rev-1" }))
   })
 
   it("fingerprints current horizon and every material roadmap field", () => {
@@ -64,6 +90,29 @@ describe("NOW commitment", () => {
       .rejects.toEqual(expect.objectContaining({ code: "DECISION_CYCLE_REQUIRED" }))
     expect(tx.reviewRevision.update).not.toHaveBeenCalled()
     expect(tx.reviewRevision.create).not.toHaveBeenCalled()
+  })
+
+  it("reloads the identical winner after a concurrent preparation conflict", async () => {
+    const sourceFingerprint = nowCommitmentFingerprint(item, eligibility)
+    const winner = { id: "rev-winner", sourceFingerprint, fingerprint: "review-winner" }
+    tx.roadmapItem.findUnique.mockResolvedValue(item)
+    tx.reviewRequest.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ state: "PENDING", currentRevision: winner })
+    tx.reviewRequest.create.mockRejectedValue({ code: "P2002" })
+
+    await expect(prepareNowCommitment("item-1", { requestedById: "user-1", eligibility })).resolves.toBe(winner)
+  })
+
+  it("rejects a concurrent preparation winner with different material inputs", async () => {
+    tx.roadmapItem.findUnique.mockResolvedValue(item)
+    tx.reviewRequest.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ state: "PENDING", currentRevision: { id: "rev-other", sourceFingerprint: "different" } })
+    tx.reviewRequest.create.mockRejectedValue({ code: "P2002" })
+
+    await expect(prepareNowCommitment("item-1", { requestedById: "user-1", eligibility }))
+      .rejects.toEqual(expect.objectContaining({ code: "PREPARATION_CONFLICT" }))
   })
 
   it("starts a new immutable cycle to reconsider a rejected same-source decision", async () => {
@@ -89,7 +138,7 @@ describe("NOW commitment", () => {
     tx.reviewRevision.update.mockResolvedValue({})
     tx.reviewRequest.update.mockResolvedValue({})
 
-    await expect(ensureNowCommitmentRevisionFresh("rev-1")).resolves.toEqual(expect.objectContaining({ stale: true }))
+    await expect(ensureNowCommitmentRevisionFresh("rev-1", { eligibilityResolver })).resolves.toEqual(expect.objectContaining({ stale: true }))
     expect(tx.reviewRevision.update).toHaveBeenCalledWith({ where: { id: "rev-1" }, data: { supersededAt: expect.any(Date) } })
     expect(tx.reviewRequest.update).toHaveBeenCalledWith({ where: { id: "request-1" }, data: expect.objectContaining({ state: "SUPERSEDED" }) })
   })
@@ -111,7 +160,7 @@ describe("NOW commitment", () => {
       option: { outcomeClass: "APPROVE", continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW" },
     })
 
-    await expect(admitRoadmapItemToNow("item-1", "decision-other-workspace", { fingerprint: () => "fp-current" }))
+    await expect(admitRoadmapItemToNow("item-1", "decision-other-workspace", { eligibilityResolver }))
       .rejects.toEqual(expect.objectContaining({ code: "DECISION_MISMATCH" }))
     expect(tx.roadmapItem.update).not.toHaveBeenCalled()
   })
@@ -126,7 +175,7 @@ describe("NOW commitment", () => {
       option: { outcomeClass: "APPROVE", continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW" },
     })
 
-    await expect(admitRoadmapItemToNow("item-1", "decision-1", { fingerprint: () => "fp-current" }))
+    await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver }))
       .rejects.toEqual(expect.objectContaining({ code: "STALE_DECISION" }))
     expect(tx.roadmapItem.update).not.toHaveBeenCalled()
   })
@@ -141,19 +190,38 @@ describe("NOW commitment", () => {
       option: { outcomeClass: "REJECT", continuationKey: "NO_ACTION" },
     })
 
-    await expect(admitRoadmapItemToNow("item-1", "decision-reject", { fingerprint: () => "fp-current" }))
+    await expect(admitRoadmapItemToNow("item-1", "decision-reject", { eligibilityResolver }))
       .rejects.toEqual(expect.objectContaining({ code: "NOT_APPROVED" }))
     expect(tx.roadmapItem.update).not.toHaveBeenCalled()
   })
 
   it("applies an approved matching decision once and returns its receipt", async () => {
     tx.roadmapItem.findUnique.mockResolvedValue(item)
-    tx.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", fingerprint: "fp-current", revision: { fingerprint: "fp-current", supersededAt: null, request: { workspaceId: "ws-1", subjectId: "item-1", gateType: "NOW_COMMITMENT" } }, option: { outcomeClass: "APPROVE", continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW" } })
+    tx.decisionRecord.findUnique.mockResolvedValue(approvedDecision())
     tx.decisionApplication.findUnique.mockResolvedValue(null)
     tx.roadmapItem.update.mockResolvedValue({ ...item, horizon: "NOW" })
     tx.decisionApplication.create.mockResolvedValue({ id: "receipt-1", status: "APPLIED" })
-    await expect(admitRoadmapItemToNow("item-1", "decision-1", { fingerprint: () => "fp-current" })).resolves.toEqual({ id: "receipt-1", status: "APPLIED" })
+    await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver })).resolves.toEqual({ id: "receipt-1", status: "APPLIED" })
     expect(tx.roadmapItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ horizon: "NOW", nowCommitmentProvenance: "NATIVE_DECISION", nowDecisionRecordId: "decision-1" }) }))
+  })
+
+  it("revalidates configured authoritative eligibility during application", async () => {
+    process.env.NOW_COMMITMENT_POLICY_JSON = JSON.stringify({ version: 1, workspaces: { "ws-1": {
+      portfolioPolicyId: eligibility.portfolioPolicyId,
+      capacity: { planId: eligibility.capacity.planId, planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit, availableUnits: 3, requestedUnits: 1, unitsPerNowItem: 1, nowLimit: 3 },
+      investmentDecisions: { "sol-1": { ...eligibility.investmentDecision, subjectId: undefined } },
+    } } })
+    tx.roadmapItem.findUnique.mockResolvedValue(item)
+    tx.roadmapItem.findMany.mockResolvedValue([{ id: "now-1" }])
+    const currentEligibility = await resolveNowCommitmentEligibility(item)
+    tx.decisionRecord.findUnique.mockResolvedValue(approvedDecision({
+      revision: { fingerprint: "review-fp", sourceFingerprint: nowCommitmentFingerprint(item, currentEligibility), supersededAt: null, request: { workspaceId: "ws-1", subjectId: "item-1", gateType: "NOW_COMMITMENT" } },
+    }))
+    tx.decisionApplication.findUnique.mockResolvedValue(null)
+    tx.roadmapItem.update.mockResolvedValue({ ...item, horizon: "NOW" })
+    tx.decisionApplication.create.mockResolvedValue({ id: "receipt-real", status: "APPLIED" })
+
+    await expect(admitRoadmapItemToNow("item-1", "decision-1")).resolves.toEqual({ id: "receipt-real", status: "APPLIED" })
   })
 
   it("returns an existing receipt without repeating the roadmap mutation", async () => {
@@ -170,11 +238,11 @@ describe("NOW commitment", () => {
     const winner = { id: "receipt-winner", status: "APPLIED", receiptKey: "now-commitment:item-1:decision-1:v1" }
     tx.decisionApplication.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(winner)
     tx.roadmapItem.findUnique.mockResolvedValue(item)
-    tx.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", fingerprint: "fp-current", revision: { fingerprint: "fp-current", supersededAt: null, request: { workspaceId: "ws-1", subjectId: "item-1", gateType: "NOW_COMMITMENT" } }, option: { outcomeClass: "APPROVE", continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW" } })
+    tx.decisionRecord.findUnique.mockResolvedValue(approvedDecision())
     tx.roadmapItem.update.mockResolvedValue({ ...item, horizon: "NOW" })
     tx.decisionApplication.create.mockRejectedValue({ code: "P2002" })
 
-    await expect(admitRoadmapItemToNow("item-1", "decision-1", { fingerprint: () => "fp-current" })).resolves.toBe(winner)
+    await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver })).resolves.toBe(winner)
   })
 
   it("persists a blocked receipt when application validation fails", async () => {
@@ -191,11 +259,11 @@ describe("NOW commitment", () => {
     const blocked = { id: "receipt-blocked", status: "BLOCKED", receiptKey: "now-commitment:item-1:decision-1:v1", attemptCount: 1 }
     tx.decisionApplication.findUnique.mockResolvedValue(blocked)
     tx.roadmapItem.findUnique.mockResolvedValue(item)
-    tx.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", fingerprint: "fp-current", revision: { fingerprint: "fp-current", supersededAt: null, request: { workspaceId: "ws-1", subjectId: "item-1", gateType: "NOW_COMMITMENT" } }, option: { outcomeClass: "APPROVE", continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW" } })
+    tx.decisionRecord.findUnique.mockResolvedValue(approvedDecision())
     tx.roadmapItem.update.mockResolvedValue({ ...item, horizon: "NOW" })
     tx.decisionApplication.update.mockResolvedValue({ ...blocked, status: "APPLIED", attemptCount: 2 })
 
-    await expect(admitRoadmapItemToNow("item-1", "decision-1", { fingerprint: () => "fp-current" })).resolves.toEqual(expect.objectContaining({ id: "receipt-blocked", status: "APPLIED" }))
+    await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver })).resolves.toEqual(expect.objectContaining({ id: "receipt-blocked", status: "APPLIED" }))
     expect(tx.decisionApplication.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "receipt-blocked" }, data: expect.objectContaining({ status: "APPLIED", attemptCount: { increment: 1 } }) }))
   })
 })

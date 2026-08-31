@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import getPrisma from "@/lib/db"
+import { defaultNowEligibilityResolver, type NowEligibilityResolver } from "@/lib/now-eligibility"
 
 const POLICY_VERSION = "now-commitment-v1"
 
@@ -117,16 +118,20 @@ const itemSelect = {
   nowCommitmentProvenance: true,
 } as const
 
-export async function prepareNowCommitment(itemId: string, input: { requestedById?: string | null; eligibility?: NowCommitmentEligibilityInputs } = {}) {
+export async function prepareNowCommitment(itemId: string, input: { requestedById?: string | null; eligibility?: NowCommitmentEligibilityInputs; eligibilityResolver?: NowEligibilityResolver } = {}) {
   const prisma = getPrisma()
-  return prisma.$transaction(async (tx) => {
+  let expected: { workspaceId: string; sourceFingerprint: string } | undefined
+  try {
+    return await prisma.$transaction(async (tx) => {
     const item = await tx.roadmapItem.findUnique({ where: { id: itemId }, select: itemSelect })
     if (!item) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
     if (item.horizon === "NOW" && item.nowCommitmentProvenance !== "NATIVE_DECISION") {
       throw new NowCommitmentError("LEGACY_NOW", "Legacy NOW items cannot be retroactively approved.")
     }
-    assertEligibilityConfigured(item, input.eligibility)
-    const sourceFingerprint = nowCommitmentFingerprint(item, input.eligibility)
+    const eligibility = input.eligibility ?? await (input.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item)
+    assertEligibilityConfigured(item, eligibility)
+    const sourceFingerprint = nowCommitmentFingerprint(item, eligibility)
+    expected = { workspaceId: item.workspaceId, sourceFingerprint }
     const existing = await tx.reviewRequest.findFirst({
       where: { workspaceId: item.workspaceId, gateType: "NOW_COMMITMENT", subjectType: "ROADMAP_ITEM", subjectId: item.id },
       include: { currentRevision: true },
@@ -162,7 +167,7 @@ export async function prepareNowCommitment(itemId: string, input: { requestedByI
         fingerprint,
         title: `Commit ${item.title} to NOW`,
         summary: "Authorize this roadmap item to consume current delivery capacity.",
-        packetJson: JSON.stringify({ policyVersion: POLICY_VERSION, sourceFingerprint, portfolioPolicyId: input.eligibility.portfolioPolicyId, investmentDecision: input.eligibility.investmentDecision, capacity: input.eligibility.capacity, displacement: input.eligibility.displacement ?? null, roadmapItem: item, requestedHorizon: "NOW" }),
+        packetJson: JSON.stringify({ policyVersion: POLICY_VERSION, sourceFingerprint, portfolioPolicyId: eligibility.portfolioPolicyId, investmentDecision: eligibility.investmentDecision, capacity: eligibility.capacity, displacement: eligibility.displacement ?? null, roadmapItem: item, requestedHorizon: "NOW" }),
         requiredRole: "ADMIN",
         options: {
           create: [
@@ -173,17 +178,35 @@ export async function prepareNowCommitment(itemId: string, input: { requestedByI
         },
       },
     })
-    await tx.reviewRequest.update({
-      where: { id: request.id },
-      data: { currentRevisionId: revision.id, state: "PENDING", revisionCount: existing ? existing.revisionCount + 1 : 1, updatedAt: new Date() },
-    })
+    const requestData = { currentRevisionId: revision.id, state: "PENDING", revisionCount: revisionNumber, updatedAt: new Date() }
+    if (existing) {
+      const advanced = await tx.reviewRequest.updateMany({
+        where: { id: request.id, revisionCount: existing.revisionCount, currentRevisionId: existing.currentRevisionId },
+        data: requestData,
+      })
+      if (advanced.count !== 1) throw new NowCommitmentError("PREPARATION_RACE", "Another NOW review preparation won the optimistic concurrency race.")
+    } else {
+      await tx.reviewRequest.update({ where: { id: request.id }, data: requestData })
+    }
     return revision
-  })
+    })
+  } catch (error) {
+    const code = (error as { code?: string }).code
+    if (expected && (code === "P2002" || code === "P2034" || code === "PREPARATION_RACE")) {
+      const winner = await prisma.reviewRequest.findFirst({
+        where: { workspaceId: expected.workspaceId, gateType: "NOW_COMMITMENT", subjectType: "ROADMAP_ITEM", subjectId: itemId },
+        include: { currentRevision: true },
+      })
+      if (winner?.state === "PENDING" && winner.currentRevision?.sourceFingerprint === expected.sourceFingerprint) return winner.currentRevision
+      throw new NowCommitmentError("PREPARATION_CONFLICT", "A concurrent NOW preparation used different material inputs.")
+    }
+    throw error
+  }
 }
 
 export async function startNewNowCommitmentDecisionCycle(
   itemId: string,
-  input: { reason: string; actorUserId: string; expectedTerminalDecisionId: string; eligibility?: NowCommitmentEligibilityInputs },
+  input: { reason: string; actorUserId: string; expectedTerminalDecisionId: string; eligibility?: NowCommitmentEligibilityInputs; eligibilityResolver?: NowEligibilityResolver },
 ) {
   const reason = input.reason.trim()
   if (!reason) throw new NowCommitmentError("REOPEN_REASON_REQUIRED", "A reason is required to start a new decision cycle.")
@@ -191,7 +214,8 @@ export async function startNewNowCommitmentDecisionCycle(
   return prisma.$transaction(async (tx) => {
     const item = await tx.roadmapItem.findUnique({ where: { id: itemId }, select: itemSelect })
     if (!item) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
-    assertEligibilityConfigured(item, input.eligibility)
+    const eligibility = input.eligibility ?? await (input.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item)
+    assertEligibilityConfigured(item, eligibility)
     const request = await tx.reviewRequest.findFirst({
       where: { workspaceId: item.workspaceId, gateType: "NOW_COMMITMENT", subjectType: "ROADMAP_ITEM", subjectId: item.id },
       include: { currentRevision: { include: { decisions: { include: { option: true } } } } },
@@ -203,7 +227,7 @@ export async function startNewNowCommitmentDecisionCycle(
     if (terminal.option.outcomeClass === "APPROVE") {
       throw new NowCommitmentError("APPROVAL_REQUIRES_REVOCATION", "An approval cannot be silently reopened; record an explicit revocation or correction.")
     }
-    const sourceFingerprint = nowCommitmentFingerprint(item, input.eligibility)
+    const sourceFingerprint = nowCommitmentFingerprint(item, eligibility)
     const decisionCycle = request.decisionCycle + 1
     const revisionNumber = request.revisionCount + 1
     const fingerprint = decisionReviewFingerprint(request.id, decisionCycle, revisionNumber, sourceFingerprint)
@@ -212,7 +236,7 @@ export async function startNewNowCommitmentDecisionCycle(
       data: {
         requestId: request.id, revisionNumber, sourceFingerprint, fingerprint,
         title: `Commit ${item.title} to NOW`, summary: "Reconsider this roadmap item's authorization to consume current delivery capacity.",
-        packetJson: JSON.stringify({ policyVersion: POLICY_VERSION, sourceFingerprint, portfolioPolicyId: input.eligibility.portfolioPolicyId, investmentDecision: input.eligibility.investmentDecision, capacity: input.eligibility.capacity, displacement: input.eligibility.displacement ?? null, roadmapItem: item, requestedHorizon: "NOW", reconsidersDecisionId: terminal.id, reopenReason: reason }),
+        packetJson: JSON.stringify({ policyVersion: POLICY_VERSION, sourceFingerprint, portfolioPolicyId: eligibility.portfolioPolicyId, investmentDecision: eligibility.investmentDecision, capacity: eligibility.capacity, displacement: eligibility.displacement ?? null, roadmapItem: item, requestedHorizon: "NOW", reconsidersDecisionId: terminal.id, reopenReason: reason }),
         requiredRole: "ADMIN",
         options: { create: [
           { actionKey: "APPROVE_NOW", label: "Commit to NOW", outcomeClass: "APPROVE", continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW", sortOrder: 0 },
@@ -229,7 +253,7 @@ export async function startNewNowCommitmentDecisionCycle(
   })
 }
 
-export async function ensureNowCommitmentRevisionFresh(revisionId: string) {
+export async function ensureNowCommitmentRevisionFresh(revisionId: string, dependencies: { eligibilityResolver?: NowEligibilityResolver } = {}) {
   const prisma = getPrisma()
   return prisma.$transaction(async (tx) => {
     const revision = await tx.reviewRevision.findUnique({ where: { id: revisionId }, include: { request: true } })
@@ -237,15 +261,8 @@ export async function ensureNowCommitmentRevisionFresh(revisionId: string) {
     if (revision.supersededAt) return { stale: true, sourceFingerprint: revision.sourceFingerprint ?? revision.fingerprint }
     const item = await tx.roadmapItem.findUnique({ where: { id: revision.request.subjectId }, select: itemSelect })
     if (!item) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
-    const packet = JSON.parse(revision.packetJson) as {
-      portfolioPolicyId?: string
-      investmentDecision?: NowCommitmentEligibilityInputs["investmentDecision"]
-      capacity?: NowCommitmentEligibilityInputs["capacity"]
-      displacement?: NowCommitmentEligibilityInputs["displacement"] | null
-    }
-    const eligibility = packet.portfolioPolicyId && packet.investmentDecision && packet.capacity
-      ? { portfolioPolicyId: packet.portfolioPolicyId, investmentDecision: packet.investmentDecision, capacity: packet.capacity, displacement: packet.displacement ?? undefined }
-      : undefined
+    const eligibility = await (dependencies.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item)
+    assertEligibilityConfigured(item, eligibility)
     const currentSourceFingerprint = nowCommitmentFingerprint(item, eligibility)
     const reviewedSourceFingerprint = revision.sourceFingerprint ?? revision.fingerprint
     if (currentSourceFingerprint === reviewedSourceFingerprint) return { stale: false, sourceFingerprint: currentSourceFingerprint }
@@ -261,7 +278,7 @@ export async function ensureNowCommitmentRevisionFresh(revisionId: string) {
 export async function admitRoadmapItemToNow(
   itemId: string,
   decisionId: string,
-  dependencies: { fingerprint?: (item: FingerprintItem) => string } = {},
+  dependencies: { eligibilityResolver?: NowEligibilityResolver } = {},
 ) {
   const prisma = getPrisma()
   const receiptKey = `now-commitment:${itemId}:${decisionId}:v1`
@@ -281,7 +298,9 @@ export async function admitRoadmapItemToNow(
       if (decision.option.outcomeClass !== "APPROVE" || decision.option.continuationKey !== "ADMIT_ROADMAP_ITEM_TO_NOW") {
         throw new NowCommitmentError("NOT_APPROVED", "This decision does not authorize NOW admission.")
       }
-      const currentFingerprint = (dependencies.fingerprint ?? nowCommitmentFingerprint)(item)
+      const eligibility = await (dependencies.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item)
+      assertEligibilityConfigured(item, eligibility)
+      const currentFingerprint = nowCommitmentFingerprint(item, eligibility)
       const reviewedSourceFingerprint = decision.revision.sourceFingerprint ?? decision.revision.fingerprint
       if (decision.fingerprint !== decision.revision.fingerprint || reviewedSourceFingerprint !== currentFingerprint || decision.revision.supersededAt) {
         throw new NowCommitmentError("STALE_DECISION", "The roadmap commitment inputs changed after review.")
