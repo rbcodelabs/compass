@@ -5,6 +5,7 @@ import { awsCredentialsProvider } from "@vercel/functions/oidc";
 import { readFileSync } from "fs";
 import path from "path";
 import { getActiveSchema } from "@/lib/schema";
+import { planDsqlWriteBatch } from "@/lib/dsql-backfill";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -192,6 +193,42 @@ const DSQL_WRITE_LIMITS = {
   maxRows: 3_000,
   maxBytes: 10 * 1024 * 1024,
 } as const;
+
+async function backfillRoadmapCommitmentProvenance(client: PoolClient, schema: string, log: string[]) {
+  let totalUpdated = 0;
+  for (;;) {
+    const { rows } = await client.query<{ id: string; estimated_bytes: string }>(`
+      SELECT id, pg_column_size(ri)::bigint AS estimated_bytes
+      FROM "${schema}".roadmap_items ri
+      WHERE now_commitment_provenance IS NULL
+      ORDER BY id
+      LIMIT ${DSQL_WRITE_LIMITS.maxRows}
+    `);
+    if (rows.length === 0) break;
+    const batch = planDsqlWriteBatch(
+      rows.map((row) => ({ id: row.id, estimatedBytes: toSafeNumber(row.estimated_bytes) })),
+      DSQL_WRITE_LIMITS,
+    );
+    if (batch.length === 0) throw new Error("Migration 039 could not plan a safe provenance backfill batch.");
+    await client.query("BEGIN");
+    try {
+      const result = await client.query(
+        `UPDATE "${schema}".roadmap_items
+         SET now_commitment_provenance = 'LEGACY_UNGATED'
+         WHERE id = ANY($1::uuid[])
+           AND now_commitment_provenance IS NULL`,
+        [batch.map((row) => row.id)],
+      );
+      await client.query("COMMIT");
+      totalUpdated += result.rowCount ?? 0;
+      log.push(`  ✓ provenance backfill batch: ${result.rowCount ?? 0} rows`);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+  }
+  return totalUpdated;
+}
 
 const RESEARCH_CAPTURE_INDEXES = [
   "idx_research_participant_tokens_hash",
@@ -642,6 +679,12 @@ export async function POST(req: NextRequest) {
             ? stmt.replace(/\bINDEX ASYNC\b/gi, "INDEX")
             : stmt;
           const result = await client.query<{ job_id?: string }>(executableStmt);
+          if (
+            migration.name === "039_native_decision_gates" &&
+            /ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+"?now_commitment_provenance"?/i.test(executableStmt)
+          ) {
+            await backfillRoadmapCommitmentProvenance(client, schema, log);
+          }
           if (!process.env.DATABASE_URL && /CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC/i.test(stmt)) {
             const jobId = result.rows[0]?.job_id;
             if (jobId && migration.name === "036_research_capture_hardening") {

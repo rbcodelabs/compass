@@ -39,8 +39,9 @@ export async function recordDecision(input: {
   if (input.actor.kind !== "USER") {
     throw new DecisionError("HUMAN_ACTOR_REQUIRED", "An authenticated human must take this decision.")
   }
+  const actorUserId = input.actor.userId
   const prisma = getPrisma()
-  const expectedIdentity = { actorUserId: input.actor.userId, revisionId: input.revisionId, optionId: input.optionId, fingerprint: input.fingerprint }
+  const expectedIdentity = { actorUserId, revisionId: input.revisionId, optionId: input.optionId, fingerprint: input.fingerprint }
   try {
     return await prisma.$transaction(async (tx) => {
       const replay = await tx.decisionRecord.findUnique({ where: { idempotencyKey: input.idempotencyKey } })
@@ -68,8 +69,8 @@ export async function recordDecision(input: {
       if (!option) throw new DecisionError("OPTION_MISMATCH", "The selected option is not part of this revision.")
 
       const [workspaceMember, orgMember] = await Promise.all([
-        tx.workspaceMember.findFirst({ where: { workspaceId: revision.request.workspaceId, userId: input.actor.userId }, select: { role: true } }),
-        tx.organizationMember.findFirst({ where: { userId: input.actor.userId, organization: { workspaces: { some: { id: revision.request.workspaceId } } } }, select: { role: true } }),
+        tx.workspaceMember.findFirst({ where: { workspaceId: revision.request.workspaceId, userId: actorUserId }, select: { role: true } }),
+        tx.organizationMember.findFirst({ where: { userId: actorUserId, organization: { workspaces: { some: { id: revision.request.workspaceId } } } }, select: { role: true } }),
       ])
       const actorRole = isOrgAdminRole(orgMember?.role) ? "ADMIN" : normalizeWorkspaceRole(workspaceMember?.role)
       if (!workspaceMember && !orgMember) throw new DecisionError("ACCESS_DENIED", "Workspace not found or access denied.")
@@ -81,7 +82,7 @@ export async function recordDecision(input: {
       const decision = await tx.decisionRecord.create({
         data: {
           workspaceId: revision.request.workspaceId, requestId: revision.requestId, revisionId: revision.id,
-          optionId: option.id, fingerprint: revision.fingerprint, actorUserId: input.actor.userId, actorRole,
+          optionId: option.id, fingerprint: revision.fingerprint, actorUserId, actorRole,
           rationale: input.rationale?.trim() || null, idempotencyKey: input.idempotencyKey,
         },
       })

@@ -98,12 +98,6 @@ ALTER TABLE "roadmap_items" ADD COLUMN IF NOT EXISTS "now_commitment_provenance"
 COMMIT;
 
 BEGIN;
-UPDATE "roadmap_items"
-SET "now_commitment_provenance" = 'LEGACY_UNGATED'
-WHERE "now_commitment_provenance" IS NULL;
-COMMIT;
-
-BEGIN;
 ALTER TABLE "roadmap_items" ALTER COLUMN "now_commitment_provenance" SET DEFAULT 'LEGACY_UNGATED';
 COMMIT;
 
