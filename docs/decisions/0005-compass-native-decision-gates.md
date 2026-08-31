@@ -191,6 +191,360 @@ The ADR-0004 action remains explicitly named **Approve & release**. It must not
 be rendered as a generic “Approve” button merely because the persistence layer
 is shared.
 
+## Structured contracts required before implementation
+
+The following contracts resolve details that cannot safely be left to handler
+code. Each subsection records alternatives and the recommended minimum.
+
+### A. Referencing an applied investment decision during the Obsidian cutover
+
+| Option | Contract | Tradeoff |
+|---|---|---|
+| Copy the Obsidian decision into a native `DecisionRecord` | Import before preparing the NOW review | Creates two records that appear authoritative and can diverge |
+| Store the Markdown path in the review packet only | The applicator trusts a string in JSON | Easy, but does not prove outcome, application, subject, or file integrity |
+| **Typed external evidence reference (recommended)** | The revision cites the one configured authority and a content-addressed external record | Preserves one authority and gives Compass a stable, verifiable dependency |
+
+Add an immutable `DecisionEvidenceRef` associated with a `ReviewRevision`:
+
+```text
+DecisionEvidenceRef
+  id                    UUID
+  reviewRevisionId      UUID
+  evidenceType          BUILDING_INVESTMENT_DECISION
+  authorityProvider     OBSIDIAN | COMPASS
+  authorityRecordId     string       # e.g. DEC-...
+  authorityLocator      text         # vault-relative path, or native record URI
+  authorityChecksum     char(64)     # SHA-256 of canonical decision payload
+  subjectType           SOLUTION
+  subjectId             UUID
+  decisionOutcome       APPROVE_BUILDING
+  decisionSourceVersion string
+  applicationStatus     APPLIED
+  appliedAt             timestamp
+  applicationReceiptId  string
+  verifiedAt            timestamp
+  verifierVersion       string
+  createdAt             timestamp
+
+  unique(reviewRevisionId, evidenceType, authorityRecordId)
+  index(subjectType, subjectId, evidenceType)
+```
+
+The Obsidian adapter must parse the configured immutable decision-record format,
+require a stable record ID, verify that the decision covers the exact Solution,
+require `application_status: applied` plus a non-empty receipt/result and
+`applied_at`, canonicalize the semantic fields, and calculate the checksum. A
+Task completion or prose assertion is not accepted as investment evidence.
+
+After cutover, `authorityProvider = COMPASS`, `authorityRecordId` is the native
+`DecisionRecord.id`, and `authorityChecksum` is calculated from that immutable
+record. A revision contains references from exactly one authority provider—the
+provider resolved when the revision is published. Existing Obsidian records
+remain external evidence forever; they are not reissued as native decisions.
+If `pm-config.md` changes providers, pending revisions are superseded and
+reprepared. This makes the cutover explicit and prevents dual authority.
+
+### B. Canonical capacity source and snapshot semantics
+
+| Option | Meaning | Tradeoff |
+|---|---|---|
+| Hours or story points per period | Sum estimates against team availability | False precision, mixed estimation scales, and substantial UI/setup for a solo team |
+| Derive capacity only from `portfolio_policy.now_limit` | Every NOW item consumes one slot | Very small, but “capacity data” becomes indistinguishable from a policy limit |
+| **Explicit focus-slot plan plus live reservations (recommended)** | Admin declares concurrent focus slots for a period; every NOW item initially reserves one | Understandable for solo/small teams, auditable, and does not require estimation theater |
+
+Use one active `PortfolioCapacityPlan` per workspace and time period:
+
+```text
+PortfolioCapacityPlan
+  id              UUID
+  workspaceId     UUID
+  periodStart     date
+  periodEnd       date
+  unit            FOCUS_SLOT
+  availableUnits  integer > 0
+  source           MANUAL
+  createdById     UUID
+  createdAt       timestamp
+  supersedesId    UUID nullable
+
+  unique(workspaceId, periodStart, periodEnd)
+  index(workspaceId, periodStart, periodEnd)
+```
+
+Plans are append-only. At review preparation, the NOW policy creates an
+immutable capacity snapshot inside normalized revision fields (and duplicates
+it in packet JSON for display):
+
+```text
+capacityPlanId
+capacityPlanFingerprint
+periodStart / periodEnd
+unit = FOCUS_SLOT
+availableUnits
+requestedUnits = 1
+reservedUnits = count(active NOW items excluding declared displacements)
+reservedRoadmapItemIds = sorted IDs
+effectiveLimit = min(availableUnits, portfolioPolicy.nowLimit)
+remainingUnitsAfter = effectiveLimit - reservedUnits - requestedUnits
+```
+
+The canonical live reservations are active Roadmap Items whose horizon is
+`NOW`, not a mutable counter. `availableUnits` is explicit human capacity;
+`nowLimit` is the portfolio WIP safety cap. Preparation blocks if no capacity
+plan covers the requested commitment date, rather than inventing availability.
+Overlapping active plan periods are rejected by the service (DSQL cannot express
+an exclusion constraint here); a replacement references `supersedesId`, and the
+superseded plan remains valid only for historical revision verification.
+For v1, every item consumes exactly one focus slot and capacity is workspace
+scoped; squads and variable weights are deferred.
+
+**Product choice for Rick:** accept focus slots (one per NOW item) as the v1
+meaning of capacity, and choose the first explicit `availableUnits` value for
+the Compass workspace. The architecture recommends this over hours/points but
+cannot truthfully choose Rick's real capacity.
+
+### C. Stable portfolio-policy identity
+
+| Option | Identity | Tradeoff |
+|---|---|---|
+| File path plus modification time | `pm-config.md@updatedAt` | Unstable across copies and changes for irrelevant whitespace |
+| Incrementing version entered by a human | `portfolio-policy-v7` | Readable but can be forgotten or reused accidentally |
+| **Schema-versioned content hash (recommended)** | Hash canonical semantic policy JSON | Deterministic across providers and changes whenever behavior changes |
+
+Define the identity as:
+
+```text
+portfolioPolicyId = "portfolio-policy:v1:sha256:" + SHA256(canonicalJson)
+```
+
+`canonicalJson` includes every behavior-affecting key with defaults expanded,
+keys sorted, arrays normalized where order is not semantic, and integers kept as
+integers: `now_limit`, `next_limit`, `concurrent_validation_limit`,
+`require_validated_solution_for_next`, `require_displacement_when_full`,
+`require_owner_for_now`, and `require_capacity_data_for_now`. It excludes file
+path, comments, timestamps, and unrelated PM config. The parser/canonicalizer
+has an explicit schema version (`v1`) and test vectors. The full canonical JSON
+is stored in the revision packet; the ID is stored in a queryable column and
+participates in the NOW fingerprint.
+
+When policy authority later moves into Compass, the same canonicalizer is used.
+A semantic policy change supersedes every pending NOW revision prepared under
+the prior ID.
+
+### D. Displacement target and atomic move semantics
+
+| Option | Effect when NOW is full | Tradeoff |
+|---|---|---|
+| Reject until a user manually frees capacity | Two actions and a race between them | Simple backend, poor approval packet, not atomic |
+| Move the displaced item to `LATER` | Strong decommitment | May overstate the decision; loses near-term intent |
+| **Explicitly move one named item to `NEXT` in the same transaction (recommended)** | Swap one focus slot | Matches “committed next” semantics and is reviewable/all-or-none |
+
+For v1, a NOW request contains either no displacement or exactly one
+`displacementRoadmapItemId`. It is required when
+`reservedUnits + requestedUnits > effectiveLimit`, and forbidden otherwise.
+The displaced item must be an active `NOW` item in the same workspace, must not
+be the candidate, and must not be in `LAUNCHING`/`LAUNCHED`. The revision packet
+captures its ID, title, source fingerprint, and destination `NEXT`.
+
+The NOW source fingerprint includes the ordered current NOW set, candidate ID,
+capacity snapshot, policy ID, and displacement tuple
+`(itemId, sourceHorizon=NOW, destinationHorizon=NEXT)`. Application performs one
+DSQL interactive transaction:
+
+1. Reload candidate, displacement, capacity plan, policy, and current NOW IDs.
+2. Recompute and compare the exact fingerprint.
+3. Verify the approved Decision Record and absence of an application receipt.
+4. Move the displacement to the end of `NEXT` using current max `sortOrder`.
+5. Move the candidate to the freed `NOW` position (the displaced item's former
+   `sortOrder`, avoiding an unnecessary reorder of the remaining NOW column).
+6. Insert the `DecisionApplication` receipt.
+
+Any mismatch aborts the transaction and supersedes/reprepares the review; no
+partial move is legal. DSQL does not enforce foreign keys, so every row is
+revalidated for workspace ownership inside the transaction. The service uses a
+bounded transaction retry for serialization conflicts and the receipt key for
+ambiguous post-commit recovery.
+
+**Product choice for Rick:** confirm that a displaced NOW item lands in `NEXT`.
+If displacement means cancellation in the intended product language, choose
+`LATER` instead; the destination must be visible in and fingerprinted by the
+approval packet, never inferred during apply.
+
+### E. Reopening or correcting a terminal review with the same source
+fingerprint
+
+| Option | Behavior | Tradeoff |
+|---|---|---|
+| Reopen the terminal revision | Clear/change its terminal state | Violates append-only audit semantics |
+| Forbid reconsideration until source data changes | Same fingerprint can never be reviewed twice | Blocks correction of a mistaken reject/defer |
+| **Create a new decision cycle and revision (recommended)** | Preserve source fingerprint; change review identity | Slightly more records, complete audit |
+
+`ReviewRequest` gains monotonically increasing `decisionCycle`. A revision has
+both `sourceFingerprint` (domain inputs) and `reviewFingerprint`:
+
+```text
+reviewFingerprint = SHA256(
+  requestId + decisionCycle + revisionNumber + sourceFingerprint
+)
+```
+
+A terminal `REJECT`, `DEFER`, expired, or cancelled review may be reopened only
+by `startNewDecisionCycle(requestId, reason, expectedTerminalDecisionId)`.
+This increments the cycle and publishes a new revision even when the source
+fingerprint is identical. The prior Decision Record remains terminal and linked
+as `reconsidersDecisionId`; the new request records `reopenReason` and actor.
+There is never more than one pending revision for a request.
+
+An approved but unapplied decision is not silently reopened. The domain must
+record a named revocation/correction decision in a new cycle, and the applicator
+checks it immediately before action. Once applied, correction is a new domain
+action (for NOW, move out through an explicit correction flow; for release,
+rollback/revert if still possible), never deletion or mutation of the receipt.
+Repeated submission in the same cycle remains idempotent and returns the
+existing terminal decision.
+
+### F. Minimal release schema for shared-ledger integration
+
+Three approaches were considered: store release scope only in review JSON
+(insufficient for correlation and state), implement ADR-0004's entire event and
+deployment model before authorization (safe but delays the first useful slice),
+or add the minimal normalized run/scope/outbox now and extend evidence tables in
+the release slice. Use the third approach.
+
+The minimum additive DSQL-compatible contract is:
+
+```text
+ReleaseRun
+  id                            UUID
+  workspaceId                   UUID
+  provider                      GITHUB
+  repositoryOwner               varchar(255)
+  repositoryName                varchar(255)
+  pullRequestNumber             integer
+  baseRef                       varchar(255)
+  headSha                       char(40)
+  targetEnvironment             PRODUCTION
+  releasePolicyId               varchar(160)
+  sourceFingerprint             char(64)
+  state                         PREPARING | READY_FOR_APPROVAL |
+                                DECISION_RECORDING | DISPATCH_QUEUED |
+                                DISPATCH_CLAIMED | BLOCKED | SUPERSEDED |
+                                CANCELLED
+  authorizationDecisionRecordId UUID nullable
+  version                       integer default 0
+  lastErrorCode                 varchar(100) nullable
+  lastError                     text nullable
+  createdById                   UUID nullable
+  createdAt                     timestamp
+  updatedAt                     timestamp
+
+  unique(workspaceId, provider, repositoryOwner, repositoryName,
+         pullRequestNumber, sourceFingerprint)
+  unique(authorizationDecisionRecordId) # nullable; one decision authorizes one run
+  index(workspaceId, state, updatedAt)
+  index(provider, repositoryOwner, repositoryName, pullRequestNumber)
+
+ReleaseRunTask
+  id            UUID
+  releaseRunId  UUID
+  taskId        UUID
+  createdAt     timestamp
+
+  unique(releaseRunId, taskId)
+  index(taskId, releaseRunId)
+
+ReleaseDispatch
+  id                      UUID
+  releaseRunId            UUID
+  decisionRecordId        UUID
+  continuationKey         DISPATCH_RELEASE_RUN
+  status                  PENDING | CLAIMED | SUCCEEDED | FAILED | CANCELLED
+  idempotencyKey          varchar(255)
+  claimedBy               varchar(255) nullable
+  claimExpiresAt          timestamp nullable
+  attemptCount            integer default 0
+  runtimeRunId            varchar(255) nullable
+  lastError               text nullable
+  createdAt               timestamp
+  updatedAt               timestamp
+  completedAt             timestamp nullable
+
+  unique(decisionRecordId, continuationKey)
+  unique(idempotencyKey)
+  index(status, claimExpiresAt, createdAt)
+  index(releaseRunId, status)
+```
+
+`ReleaseRunTask` and all decision/run references are validated in application
+code because DSQL migrations do not add foreign keys. `ReleaseRun.version` is a
+compare-and-swap token. The authorization transaction reloads the PR scope,
+matches the shared Decision Record and exact fingerprint, sets
+`authorizationDecisionRecordId`, advances to `DISPATCH_QUEUED`, creates one
+`DecisionApplication` with continuation `DISPATCH_RELEASE_RUN`, and creates one
+`ReleaseDispatch`; retries recover via the two unique keys.
+
+This minimum intentionally stops at dispatch. ADR-0004's append-only
+`ReleaseEvent`, merge/deployment/verification evidence, external-merge
+provenance, and final states (`MERGING` through `RELEASED`) are required before
+the dispatcher may actually merge or Tasks may become `DONE`. They are not
+smuggled into mutable JSON fields on `ReleaseRun`.
+
+### Required service results and failure codes
+
+The domain boundary returns typed results rather than freeform errors so UI,
+MCP, and automation implement the same behavior:
+
+```text
+prepareNowCommitment(itemId, displacementItemId?, expectedPolicyId?)
+  -> READY { requestId, revisionId, sourceFingerprint, reviewFingerprint }
+   | BLOCKED { code:
+       NO_APPLIED_INVESTMENT_DECISION |
+       INVESTMENT_AUTHORITY_MISMATCH |
+       NO_CAPACITY_PLAN |
+       OWNER_REQUIRED |
+       SOLUTION_NOT_VALIDATED |
+       DISPLACEMENT_REQUIRED |
+       INVALID_DISPLACEMENT |
+       POLICY_CHANGED }
+
+recordDecision(revisionId, expectedReviewFingerprint, optionId,
+               rationale?, idempotencyKey)
+  -> RECORDED { decisionRecordId }
+   | EXISTING { decisionRecordId }
+   | STALE_REVISION
+   | TERMINAL_CONFLICT
+   | FORBIDDEN_HUMAN_ROLE
+   | SERVICE_ACTOR_FORBIDDEN
+
+applyNowCommitment(decisionRecordId)
+  -> APPLIED { applicationId, admittedItemId, displacedItemId? }
+   | EXISTING { applicationId }
+   | STALE_SOURCE
+   | REVOKED
+   | POLICY_OR_CAPACITY_CHANGED
+   | RETRYABLE_CONFLICT
+
+prepareReleaseRun(scope)
+  -> READY { releaseRunId, requestId, revisionId, sourceFingerprint }
+   | BLOCKED { code: INVALID_TASK_SCOPE | PR_NOT_READY | CHECKS_FAILED |
+               POLICY_CHANGED }
+
+queueAuthorizedRelease(releaseRunId, decisionRecordId,
+                       expectedSourceFingerprint)
+  -> QUEUED { dispatchId }
+   | EXISTING { dispatchId }
+   | STALE_SOURCE
+   | REVOKED
+   | DECISION_SCOPE_MISMATCH
+```
+
+Every mutation accepts an explicit idempotency key at the transport boundary,
+executes its invariant reads and writes in one transaction where they share a
+database, and performs ambiguous-commit recovery by reading the unique receipt
+key before retrying. Provider reads (Obsidian/GitHub) occur before the database
+transaction; their canonical checksums/identifiers are rechecked against the
+published revision inside it.
+
 ```mermaid
 flowchart LR
     T[Task review inbox] --> Q[ReviewRequest]
