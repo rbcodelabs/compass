@@ -31,17 +31,6 @@ test.describe("Entity detail panel", () => {
       if (msg.type() !== "error") return;
       const text = msg.text();
       if (KNOWN.some((s) => text.includes(s))) return;
-      // A fresh deep link intentionally opens Radix Sheet during hydration;
-      // its accessibility guard adds aria-hidden to the background before
-      // React finishes comparing the server tree. Keep filtering narrowly to
-      // that known background-only mismatch so panel errors still fail.
-      if (
-        text.includes("hydrated but some attributes") &&
-        text.includes("SquadFilterBar") &&
-        text.includes('aria-hidden="true"')
-      ) {
-        return;
-      }
       consoleErrors.push(text);
     });
     page.on("pageerror", (err) => consoleErrors.push(err.message));
