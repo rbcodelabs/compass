@@ -33,17 +33,18 @@ test.describe("Doc Version History", () => {
       await expect(editor).toBeVisible({ timeout: 10_000 });
 
       // ── 2. Write the original content and confirm it persisted ──────────────
-      // The "Saved" indicator is a transient (~2s) client-only flash shared
-      // across every save path (title, content, icon) -- under the load of a
-      // full sequential suite run it's easy to miss the exact window (or
-      // catch title's leftover flash instead of THIS edit's own debounced
-      // save). Reload and read the content straight from the server instead:
-      // slower, but verifies real persistence rather than racing a UI blip.
+      // Wait for this edit's server action response. A fixed delay only waits
+      // for the debounce; under full-suite load the database write may still
+      // be in flight when reload cancels the request.
+      const originalSave = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.request().headers()["next-action"] !== undefined &&
+          response.ok()
+      );
       await editor.click();
       await page.keyboard.type(originalContent);
-      // Past the editor's known 1200ms autosave debounce (see
-      // components/docs/doc-editor.tsx) before reloading.
-      await page.waitForTimeout(2000);
+      await originalSave;
       await page.reload();
       await page.waitForLoadState("networkidle");
       await expect(editor).toContainText(originalContent, { timeout: 15_000 });
@@ -60,8 +61,14 @@ test.describe("Doc Version History", () => {
       // ── 4. Edit the content again, so current != the saved version ──────────
       await editor.click();
       await page.keyboard.press("ControlOrMeta+A");
+      const editedSave = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.request().headers()["next-action"] !== undefined &&
+          response.ok()
+      );
       await page.keyboard.type(editedContent);
-      await page.waitForTimeout(2000);
+      await editedSave;
       // Reload also gives the doc page's server component a chance to
       // re-fetch its `versions` prop with the named snapshot from step 4 --
       // needed for the panel to list it in step 6.
