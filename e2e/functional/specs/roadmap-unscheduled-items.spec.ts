@@ -6,7 +6,7 @@
  *      portal — neither is on the roadmap yet.
  *   2. On the roadmap Board, confirm both appear in the "Not yet on the
  *      roadmap" panel.
- *   3. Drag the Solution card onto the NOW column — confirm it lands there
+ *   3. Drag the Solution card onto the LATER column — confirm it lands there
  *      and disappears from the unscheduled panel.
  *   4. Use the Bug card's quick-add menu (no drag) to add it to NEXT —
  *      confirm it lands there too.
@@ -138,18 +138,18 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await expect(solutionUnscheduledCard).toBeVisible();
       await expect(bugUnscheduledCard).toBeVisible();
 
-      // ── 3. Drag the solution onto the NOW column ────────────────────────────
+      // ── 3. Drag the solution onto LATER (NOW is decision-gated) ─────────────
       const dragHandle = solutionUnscheduledCard.getByLabel("Drag to schedule");
-      const nowColumnBox = await page.locator("#roadmap-column-NOW").boundingBox();
-      if (!nowColumnBox) throw new Error("NOW column not found");
-      await dragTo(page, dragHandle, nowColumnBox);
+      const laterColumnBox = await page.locator("#roadmap-column-LATER").boundingBox();
+      if (!laterColumnBox) throw new Error("LATER column not found");
+      await dragTo(page, dragHandle, laterColumnBox);
 
       await expect(solutionUnscheduledCard).not.toBeVisible({ timeout: 10_000 });
-      const nowColumn = page.locator("#roadmap-column-NOW");
+      const laterColumn = page.locator("#roadmap-column-LATER");
       // .first() — the promoted item's own title AND its "Solution" link
       // chip both show the same solution title, so this text appears twice
       // on the card; either occurrence confirms it landed here.
-      await expect(nowColumn.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
+      await expect(laterColumn.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
 
       // ── 4. Quick-add the bug to NEXT via its card menu (no drag) ────────────
       await bugUnscheduledCard.hover();
@@ -180,6 +180,10 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // point (it's only removed from state once scheduling succeeds), so
       // scope to the dialog to avoid matching both.
       await expect(dialog.getByText(sol2Title)).toBeVisible();
+      // NOW scheduling requires a human decision; this scheduling-specific
+      // journey uses NEXT and the dedicated decision-gate spec covers NOW.
+      await dialog.getByLabel("Horizon").click();
+      await page.getByRole("option", { name: "Next" }).click();
       // Dates are pre-filled with sensible defaults (today -> +14 days); just submit.
       await dialog.getByRole("button", { name: "Schedule" }).click();
 

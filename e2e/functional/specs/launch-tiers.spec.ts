@@ -43,11 +43,11 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
 
       const panel = page.locator('[data-slot="sheet-content"]');
 
-      // ── 1. Add a roadmap item in the NOW column ────────────────────────────
+      // ── 1. Add a roadmap item in NEXT (NOW is decision-gated) ──────────────
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
 
-      await page.getByRole("button", { name: "Add item" }).first().click();
+      await page.getByRole("button", { name: "Add item" }).nth(1).click();
       await page.getByLabel("Title").fill(itemTitle);
       // exact — otherwise this also matches the still-collapsed "Add item"
       // triggers in the other columns (substring, case-insensitive by default).
