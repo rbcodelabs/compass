@@ -6,6 +6,8 @@ const tx = {
   reviewRevision: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   decisionRecord: { findUnique: vi.fn() },
   decisionApplication: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+  portfolioCapacityPlan: { findUnique: vi.fn(), updateMany: vi.fn() },
+  portfolioCapacityReservation: { upsert: vi.fn(), update: vi.fn() },
 }
 const mockPrisma = { ...tx, $transaction: vi.fn((fn: (value: typeof tx) => unknown) => fn(tx)) }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
@@ -17,7 +19,25 @@ const item = { id: "item-1", workspaceId: "ws-1", title: "Ship it", description:
 const eligibility = {
   portfolioPolicyId: "portfolio-policy:v1:test",
   investmentDecision: { authorityProvider: "OBSIDIAN" as const, authorityRecordId: "DEC-1", authorityChecksum: "a".repeat(64), subjectId: "sol-1", decisionOutcome: "APPROVE_BUILDING" as const, applicationStatus: "APPLIED" as const, applicationReceiptId: "receipt-1" },
-  capacity: { planId: "plan-1", planFingerprint: "b".repeat(64), unit: "CONFIGURED_UNIT", availableUnits: 3, requestedUnits: 1, reservedUnits: 1, reservedRoadmapItemIds: ["now-1"], nowLimit: 3 },
+  capacity: { planId: "plan-1", planFingerprint: "b".repeat(64), unit: "CONFIGURED_UNIT", availableUnits: 3, requestedUnits: 1, reservedUnits: 1, reservedRoadmapItemIds: ["now-1"], nowLimit: 3, planVersion: 1 },
+}
+const configuredIds = {
+  item: "00000000-0000-4000-8000-000000000011", workspace: "00000000-0000-4000-8000-000000000012",
+  solution: "00000000-0000-4000-8000-000000000013", squad: "00000000-0000-4000-8000-000000000014",
+  plan: "00000000-0000-4000-8000-000000000015", reserved: "00000000-0000-4000-8000-000000000016",
+}
+const configuredItem = { ...item, id: configuredIds.item, workspaceId: configuredIds.workspace, solutionId: configuredIds.solution, squadId: configuredIds.squad }
+const configuredEligibility = {
+  ...eligibility,
+  investmentDecision: { ...eligibility.investmentDecision, subjectId: configuredIds.solution },
+  capacity: { ...eligibility.capacity, planId: configuredIds.plan, reservedRoadmapItemIds: [configuredIds.reserved] },
+}
+function configuredPolicyJson() {
+  return JSON.stringify({ version: 1, workspaces: { [configuredIds.workspace]: {
+    portfolioPolicyId: configuredEligibility.portfolioPolicyId,
+    capacity: { planId: configuredIds.plan, planFingerprint: configuredEligibility.capacity.planFingerprint, unit: configuredEligibility.capacity.unit, availableUnits: 3, requestedUnits: 1, unitsPerNowItem: 1, nowLimit: 3 },
+    investmentDecisions: { [configuredIds.solution]: { ...configuredEligibility.investmentDecision, subjectId: undefined } },
+  } } })
 }
 const eligibilityResolver = { resolve: vi.fn(async () => eligibility) }
 const reviewedSourceFingerprint = nowCommitmentFingerprint(item, eligibility)
@@ -34,6 +54,15 @@ describe("NOW commitment", () => {
     vi.resetAllMocks()
     mockPrisma.$transaction.mockImplementation((fn: (value: typeof tx) => unknown) => fn(tx))
     delete process.env.NOW_COMMITMENT_POLICY_JSON
+    tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
+      id: eligibility.capacity.planId, workspaceId: item.workspaceId, policyId: eligibility.portfolioPolicyId,
+      planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit,
+      availableUnits: eligibility.capacity.availableUnits, nowLimit: eligibility.capacity.nowLimit,
+      version: eligibility.capacity.planVersion, state: "ACTIVE",
+      reservations: [{ id: "reservation-now-1", roadmapItemId: "now-1", units: 1 }],
+    })
+    tx.portfolioCapacityPlan.updateMany.mockResolvedValue({ count: 1 })
+    tx.portfolioCapacityReservation.upsert.mockResolvedValue({})
   })
 
   it("prepares an immutable revision with explicit approve and reject options", async () => {
@@ -56,13 +85,14 @@ describe("NOW commitment", () => {
   })
 
   it("prepares through the canonical configured resolver without caller-supplied eligibility", async () => {
-    process.env.NOW_COMMITMENT_POLICY_JSON = JSON.stringify({ version: 1, workspaces: { "ws-1": {
-      portfolioPolicyId: eligibility.portfolioPolicyId,
-      capacity: { planId: eligibility.capacity.planId, planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit, availableUnits: 3, requestedUnits: 1, unitsPerNowItem: 1, nowLimit: 3 },
-      investmentDecisions: { "sol-1": { ...eligibility.investmentDecision, subjectId: undefined } },
-    } } })
-    tx.roadmapItem.findUnique.mockResolvedValue(item)
-    tx.roadmapItem.findMany.mockResolvedValue([{ id: "now-1" }])
+    process.env.NOW_COMMITMENT_POLICY_JSON = configuredPolicyJson()
+    tx.roadmapItem.findUnique.mockResolvedValue(configuredItem)
+    tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
+      id: configuredIds.plan, workspaceId: configuredIds.workspace, policyId: configuredEligibility.portfolioPolicyId,
+      planFingerprint: configuredEligibility.capacity.planFingerprint, unit: configuredEligibility.capacity.unit,
+      availableUnits: 3, nowLimit: 3, state: "ACTIVE", version: 1,
+      reservations: [{ roadmapItemId: configuredIds.reserved, units: 1 }],
+    })
     tx.reviewRequest.findFirst.mockResolvedValue(null)
     tx.reviewRequest.create.mockResolvedValue({ id: "request-1" })
     tx.reviewRevision.create.mockResolvedValue({ id: "rev-1", fingerprint: "fp-1" })
@@ -205,23 +235,68 @@ describe("NOW commitment", () => {
     expect(tx.roadmapItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ horizon: "NOW", nowCommitmentProvenance: "NATIVE_DECISION", nowDecisionRecordId: "decision-1" }) }))
   })
 
-  it("revalidates configured authoritative eligibility during application", async () => {
-    process.env.NOW_COMMITMENT_POLICY_JSON = JSON.stringify({ version: 1, workspaces: { "ws-1": {
-      portfolioPolicyId: eligibility.portfolioPolicyId,
-      capacity: { planId: eligibility.capacity.planId, planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit, availableUnits: 3, requestedUnits: 1, unitsPerNowItem: 1, nowLimit: 3 },
-      investmentDecisions: { "sol-1": { ...eligibility.investmentDecision, subjectId: undefined } },
-    } } })
+  it("uses plan CAS so a concurrent different admission cannot oversubscribe workspace capacity", async () => {
     tx.roadmapItem.findUnique.mockResolvedValue(item)
-    tx.roadmapItem.findMany.mockResolvedValue([{ id: "now-1" }])
-    const currentEligibility = await resolveNowCommitmentEligibility(item)
+    tx.decisionRecord.findUnique.mockResolvedValue(approvedDecision())
+    tx.decisionApplication.findUnique.mockResolvedValue(null)
+    tx.portfolioCapacityPlan.updateMany.mockResolvedValue({ count: 0 })
+    tx.decisionApplication.create.mockResolvedValue({ id: "blocked", status: "BLOCKED" })
+
+    await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver }))
+      .rejects.toEqual(expect.objectContaining({ code: "CAPACITY_CONFLICT" }))
+    expect(tx.portfolioCapacityReservation.upsert).not.toHaveBeenCalled()
+    expect(tx.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("atomically displaces an active same-workspace reservation before admitting the candidate", async () => {
+    const displacementEligibility = {
+      ...eligibility,
+      capacity: { ...eligibility.capacity, availableUnits: 1, nowLimit: 1 },
+      displacement: { itemId: "now-1", destination: "NEXT" as const },
+    }
+    const displacementResolver = { resolve: vi.fn(async () => displacementEligibility) }
+    const displacementSource = nowCommitmentFingerprint(item, displacementEligibility)
+    const displaced = { ...item, id: "now-1", horizon: "NOW" }
+    tx.roadmapItem.findUnique.mockResolvedValueOnce(item).mockResolvedValueOnce(displaced)
     tx.decisionRecord.findUnique.mockResolvedValue(approvedDecision({
-      revision: { fingerprint: "review-fp", sourceFingerprint: nowCommitmentFingerprint(item, currentEligibility), supersededAt: null, request: { workspaceId: "ws-1", subjectId: "item-1", gateType: "NOW_COMMITMENT" } },
+      revision: { fingerprint: "review-fp", sourceFingerprint: displacementSource, supersededAt: null, request: { workspaceId: "ws-1", subjectId: "item-1", gateType: "NOW_COMMITMENT" } },
     }))
+    tx.decisionApplication.findUnique.mockResolvedValue(null)
+    tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
+      id: eligibility.capacity.planId, workspaceId: item.workspaceId, policyId: eligibility.portfolioPolicyId,
+      planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit, availableUnits: 1, nowLimit: 1,
+      version: eligibility.capacity.planVersion, state: "ACTIVE",
+      reservations: [{ id: "reservation-now-1", roadmapItemId: "now-1", units: 1 }],
+    })
+    tx.decisionApplication.create.mockResolvedValue({ id: "receipt-1", status: "APPLIED" })
+
+    await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver: displacementResolver })).resolves.toEqual({ id: "receipt-1", status: "APPLIED" })
+    expect(tx.roadmapItem.update).toHaveBeenNthCalledWith(1, expect.objectContaining({ where: { id: "now-1" }, data: expect.objectContaining({ horizon: "NEXT" }) }))
+    expect(tx.portfolioCapacityReservation.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "reservation-now-1" }, data: expect.objectContaining({ state: "RELEASED" }) }))
+    expect(tx.portfolioCapacityReservation.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ roadmapItemId: "item-1", state: "ACTIVE" }) }))
+    expect(tx.roadmapItem.update).toHaveBeenNthCalledWith(2, expect.objectContaining({ where: { id: "item-1" }, data: expect.objectContaining({ horizon: "NOW" }) }))
+  })
+
+  it("revalidates configured authoritative eligibility during application", async () => {
+    process.env.NOW_COMMITMENT_POLICY_JSON = configuredPolicyJson()
+    tx.roadmapItem.findUnique.mockResolvedValue(configuredItem)
+    tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
+      id: configuredIds.plan, workspaceId: configuredIds.workspace, policyId: configuredEligibility.portfolioPolicyId,
+      planFingerprint: configuredEligibility.capacity.planFingerprint, unit: configuredEligibility.capacity.unit,
+      availableUnits: 3, nowLimit: 3, state: "ACTIVE", version: 1,
+      reservations: [{ id: "reservation-configured", roadmapItemId: configuredIds.reserved, units: 1 }],
+    })
+    const currentEligibility = await resolveNowCommitmentEligibility(configuredItem, mockPrisma as never)
+    tx.decisionRecord.findUnique.mockResolvedValue({
+      id: "decision-1", fingerprint: "review-fp",
+      revision: { fingerprint: "review-fp", sourceFingerprint: nowCommitmentFingerprint(configuredItem, currentEligibility), supersededAt: null, request: { workspaceId: configuredIds.workspace, subjectId: configuredIds.item, gateType: "NOW_COMMITMENT" } },
+      option: { outcomeClass: "APPROVE", continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW" },
+    })
     tx.decisionApplication.findUnique.mockResolvedValue(null)
     tx.roadmapItem.update.mockResolvedValue({ ...item, horizon: "NOW" })
     tx.decisionApplication.create.mockResolvedValue({ id: "receipt-real", status: "APPLIED" })
 
-    await expect(admitRoadmapItemToNow("item-1", "decision-1")).resolves.toEqual({ id: "receipt-real", status: "APPLIED" })
+    await expect(admitRoadmapItemToNow(configuredIds.item, "decision-1")).resolves.toEqual({ id: "receipt-real", status: "APPLIED" })
   })
 
   it("returns an existing receipt without repeating the roadmap mutation", async () => {

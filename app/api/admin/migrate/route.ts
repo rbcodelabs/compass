@@ -191,6 +191,10 @@ const MIGRATIONS = [
     name: "040_release_authorization",
     filePath: path.join(process.cwd(), "prisma/migrations/040_release_authorization/migration.sql"),
   },
+  {
+    name: "041_portfolio_capacity_ledger",
+    filePath: path.join(process.cwd(), "prisma/migrations/041_portfolio_capacity_ledger/migration.sql"),
+  },
 ];
 
 const DSQL_WRITE_LIMITS = {

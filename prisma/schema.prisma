@@ -147,6 +147,7 @@ model Workspace {
   researchAttachments  ResearchAttachment[]
   reviewRequests       ReviewRequest[]
   releaseRuns          ReleaseRun[]
+  portfolioCapacityPlans PortfolioCapacityPlan[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -840,6 +841,43 @@ model DecisionApplication {
   @@unique([decisionId, continuationKey], map: "idx_decision_applications_decision_continuation")
   @@index([targetType, targetId], map: "idx_decision_applications_target")
   @@map("decision_applications")
+}
+
+model PortfolioCapacityPlan {
+  id              String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String                         @map("workspace_id") @db.Uuid
+  policyId        String                         @map("policy_id") @db.VarChar(160)
+  planFingerprint String                         @map("plan_fingerprint") @db.Char(64)
+  unit            String                         @db.VarChar(80)
+  availableUnits  Int                            @map("available_units")
+  nowLimit        Int                            @map("now_limit")
+  state           String                         @default("ACTIVE") @db.VarChar(30)
+  version         Int                            @default(0)
+  createdAt       DateTime                       @default(now()) @map("created_at")
+  updatedAt       DateTime                       @default(now()) @map("updated_at")
+  workspace       Workspace                      @relation(fields: [workspaceId], references: [id])
+  reservations    PortfolioCapacityReservation[]
+
+  @@unique([workspaceId, policyId], map: "idx_capacity_plans_workspace_policy")
+  @@index([workspaceId, state], map: "idx_capacity_plans_workspace_state")
+  @@map("portfolio_capacity_plans")
+}
+
+model PortfolioCapacityReservation {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  planId          String                @map("plan_id") @db.Uuid
+  roadmapItemId   String                @unique(map: "idx_capacity_reservations_item") @map("roadmap_item_id") @db.Uuid
+  decisionRecordId String               @map("decision_record_id") @db.Uuid
+  units           Int
+  state           String                @default("ACTIVE") @db.VarChar(30)
+  releasedAt      DateTime?             @map("released_at")
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @default(now()) @map("updated_at")
+  plan            PortfolioCapacityPlan @relation(fields: [planId], references: [id])
+
+  @@index([planId, state], map: "idx_capacity_reservations_plan_state")
+  @@index([decisionRecordId], map: "idx_capacity_reservations_decision")
+  @@map("portfolio_capacity_reservations")
 }
 
 // ─── Release authorization ledger ──────────────────────────────────────────

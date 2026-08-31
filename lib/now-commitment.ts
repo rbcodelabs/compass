@@ -49,6 +49,7 @@ export type NowCommitmentEligibilityInputs = {
     reservedUnits: number
     reservedRoadmapItemIds: string[]
     nowLimit: number
+    planVersion: number
   }
   displacement?: { itemId: string; destination: "NEXT" | "LATER" }
 }
@@ -87,7 +88,7 @@ function assertEligibilityConfigured(item: FingerprintItem, eligibility: NowComm
     throw new NowCommitmentError("NO_APPLIED_INVESTMENT_DECISION", "An applied Building investment decision for the exact Solution is required.")
   }
   const capacity = eligibility.capacity
-  if (!eligibility.portfolioPolicyId || !capacity.planId || !capacity.planFingerprint || capacity.availableUnits <= 0 || capacity.requestedUnits <= 0 || capacity.nowLimit <= 0) {
+  if (!eligibility.portfolioPolicyId || !capacity.planId || !capacity.planFingerprint || capacity.availableUnits <= 0 || capacity.requestedUnits <= 0 || capacity.nowLimit <= 0 || !Number.isSafeInteger(capacity.planVersion) || capacity.planVersion < 0) {
     throw new NowCommitmentError("NO_CAPACITY_PLAN", "A complete explicit capacity plan is required.")
   }
   const effectiveLimit = Math.min(capacity.availableUnits, capacity.nowLimit)
@@ -128,7 +129,7 @@ export async function prepareNowCommitment(itemId: string, input: { requestedByI
     if (item.horizon === "NOW" && item.nowCommitmentProvenance !== "NATIVE_DECISION") {
       throw new NowCommitmentError("LEGACY_NOW", "Legacy NOW items cannot be retroactively approved.")
     }
-    const eligibility = input.eligibility ?? await (input.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item)
+    const eligibility = input.eligibility ?? await (input.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item, tx as ReturnType<typeof getPrisma>)
     assertEligibilityConfigured(item, eligibility)
     const sourceFingerprint = nowCommitmentFingerprint(item, eligibility)
     expected = { workspaceId: item.workspaceId, sourceFingerprint }
@@ -214,7 +215,7 @@ export async function startNewNowCommitmentDecisionCycle(
   return prisma.$transaction(async (tx) => {
     const item = await tx.roadmapItem.findUnique({ where: { id: itemId }, select: itemSelect })
     if (!item) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
-    const eligibility = input.eligibility ?? await (input.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item)
+    const eligibility = input.eligibility ?? await (input.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item, tx as ReturnType<typeof getPrisma>)
     assertEligibilityConfigured(item, eligibility)
     const request = await tx.reviewRequest.findFirst({
       where: { workspaceId: item.workspaceId, gateType: "NOW_COMMITMENT", subjectType: "ROADMAP_ITEM", subjectId: item.id },
@@ -261,7 +262,7 @@ export async function ensureNowCommitmentRevisionFresh(revisionId: string, depen
     if (revision.supersededAt) return { stale: true, sourceFingerprint: revision.sourceFingerprint ?? revision.fingerprint }
     const item = await tx.roadmapItem.findUnique({ where: { id: revision.request.subjectId }, select: itemSelect })
     if (!item) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
-    const eligibility = await (dependencies.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item)
+    const eligibility = await (dependencies.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item, tx as ReturnType<typeof getPrisma>)
     assertEligibilityConfigured(item, eligibility)
     const currentSourceFingerprint = nowCommitmentFingerprint(item, eligibility)
     const reviewedSourceFingerprint = revision.sourceFingerprint ?? revision.fingerprint
@@ -298,13 +299,55 @@ export async function admitRoadmapItemToNow(
       if (decision.option.outcomeClass !== "APPROVE" || decision.option.continuationKey !== "ADMIT_ROADMAP_ITEM_TO_NOW") {
         throw new NowCommitmentError("NOT_APPROVED", "This decision does not authorize NOW admission.")
       }
-      const eligibility = await (dependencies.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item)
+      const eligibility = await (dependencies.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item, tx as ReturnType<typeof getPrisma>)
       assertEligibilityConfigured(item, eligibility)
       const currentFingerprint = nowCommitmentFingerprint(item, eligibility)
       const reviewedSourceFingerprint = decision.revision.sourceFingerprint ?? decision.revision.fingerprint
       if (decision.fingerprint !== decision.revision.fingerprint || reviewedSourceFingerprint !== currentFingerprint || decision.revision.supersededAt) {
         throw new NowCommitmentError("STALE_DECISION", "The roadmap commitment inputs changed after review.")
       }
+      const plan = await tx.portfolioCapacityPlan.findUnique({
+        where: { id: eligibility.capacity.planId },
+        include: { reservations: { where: { state: "ACTIVE" }, select: { id: true, roadmapItemId: true, units: true } } },
+      })
+      if (!plan || plan.workspaceId !== item.workspaceId || plan.policyId !== eligibility.portfolioPolicyId
+        || plan.planFingerprint !== eligibility.capacity.planFingerprint || plan.version !== eligibility.capacity.planVersion
+        || plan.unit !== eligibility.capacity.unit || plan.availableUnits !== eligibility.capacity.availableUnits
+        || plan.nowLimit !== eligibility.capacity.nowLimit
+        || plan.state !== "ACTIVE") {
+        throw new NowCommitmentError("CAPACITY_CONFLICT", "The authoritative workspace capacity plan changed after review.")
+      }
+      const activeUnits = plan.reservations.reduce((sum, reservation) => sum + reservation.units, 0)
+      let displacedReservation: (typeof plan.reservations)[number] | undefined
+      if (eligibility.displacement) {
+        if (eligibility.displacement.itemId === item.id) throw new NowCommitmentError("INVALID_DISPLACEMENT", "A commitment cannot displace itself.")
+        const displacedItem = await tx.roadmapItem.findUnique({ where: { id: eligibility.displacement.itemId }, select: itemSelect })
+        displacedReservation = plan.reservations.find((reservation) => reservation.roadmapItemId === eligibility.displacement!.itemId)
+        if (!displacedItem || displacedItem.workspaceId !== item.workspaceId || displacedItem.horizon !== "NOW" || !displacedReservation) {
+          throw new NowCommitmentError("INVALID_DISPLACEMENT", "The displaced item must be an actively reserved NOW item in the same workspace.")
+        }
+        await tx.roadmapItem.update({
+          where: { id: displacedItem.id },
+          data: { horizon: eligibility.displacement.destination, updatedAt: new Date() },
+        })
+        await tx.portfolioCapacityReservation.update({
+          where: { id: displacedReservation.id },
+          data: { state: "RELEASED", releasedAt: new Date(), updatedAt: new Date() },
+        })
+      }
+      const resultingUnits = activeUnits - (displacedReservation?.units ?? 0) + eligibility.capacity.requestedUnits
+      const effectiveLimit = Math.min(plan.availableUnits, plan.nowLimit)
+      if (resultingUnits > effectiveLimit) throw new NowCommitmentError("CAPACITY_EXCEEDED", "Workspace NOW capacity is no longer available.")
+      const capacityClaim = await tx.portfolioCapacityPlan.updateMany({
+        where: { id: plan.id, version: plan.version, state: "ACTIVE" },
+        data: { version: plan.version + 1, updatedAt: new Date() },
+      })
+      if (capacityClaim.count !== 1) throw new NowCommitmentError("CAPACITY_CONFLICT", "Another NOW admission changed capacity; retry against a fresh review.")
+      await tx.portfolioCapacityReservation.upsert({
+        where: { roadmapItemId: item.id },
+        create: { planId: plan.id, roadmapItemId: item.id, decisionRecordId: decision.id, units: eligibility.capacity.requestedUnits, state: "ACTIVE" },
+        update: { planId: plan.id, decisionRecordId: decision.id, units: eligibility.capacity.requestedUnits, state: "ACTIVE", releasedAt: null, updatedAt: new Date() },
+      })
       await tx.roadmapItem.update({
         where: { id: item.id },
         data: { horizon: "NOW", nowCommitmentProvenance: "NATIVE_DECISION", nowDecisionRecordId: decision.id, updatedAt: new Date() },
