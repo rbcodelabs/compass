@@ -110,34 +110,61 @@ export async function admitRoadmapItemToNow(
   dependencies: { fingerprint?: (item: FingerprintItem) => string } = {},
 ) {
   const prisma = getPrisma()
-  return prisma.$transaction(async (tx) => {
-    const receiptKey = `now-commitment:${itemId}:${decisionId}:v1`
-    const replay = await tx.decisionApplication.findUnique({ where: { receiptKey } })
-    if (replay) return replay
-    const item = await tx.roadmapItem.findUnique({ where: { id: itemId }, select: itemSelect })
-    if (!item) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
-    const decision = await tx.decisionRecord.findUnique({
-      where: { id: decisionId },
-      include: { revision: { include: { request: true } }, option: true },
+  const receiptKey = `now-commitment:${itemId}:${decisionId}:v1`
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const receipt = await tx.decisionApplication.findUnique({ where: { receiptKey } })
+      if (receipt?.status === "APPLIED") return receipt
+      const item = await tx.roadmapItem.findUnique({ where: { id: itemId }, select: itemSelect })
+      if (!item) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
+      const decision = await tx.decisionRecord.findUnique({
+        where: { id: decisionId },
+        include: { revision: { include: { request: true } }, option: true },
+      })
+      if (!decision || decision.revision.request.gateType !== "NOW_COMMITMENT" || decision.revision.request.subjectId !== item.id || decision.revision.request.workspaceId !== item.workspaceId) {
+        throw new NowCommitmentError("DECISION_MISMATCH", "A matching NOW commitment decision is required.")
+      }
+      if (decision.option.outcomeClass !== "APPROVE" || decision.option.continuationKey !== "ADMIT_ROADMAP_ITEM_TO_NOW") {
+        throw new NowCommitmentError("NOT_APPROVED", "This decision does not authorize NOW admission.")
+      }
+      const currentFingerprint = (dependencies.fingerprint ?? nowCommitmentFingerprint)(item)
+      if (decision.fingerprint !== currentFingerprint || decision.revision.fingerprint !== currentFingerprint || decision.revision.supersededAt) {
+        throw new NowCommitmentError("STALE_DECISION", "The roadmap commitment inputs changed after review.")
+      }
+      await tx.roadmapItem.update({
+        where: { id: item.id },
+        data: { horizon: "NOW", nowCommitmentProvenance: "NATIVE_DECISION", nowDecisionRecordId: decision.id, updatedAt: new Date() },
+      })
+      const applied = { status: "APPLIED", lastError: null, appliedAt: new Date(), updatedAt: new Date() }
+      return receipt
+        ? tx.decisionApplication.update({ where: { id: receipt.id }, data: { ...applied, attemptCount: { increment: 1 } } })
+        : tx.decisionApplication.create({
+            data: { decisionId: decision.id, continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW", targetType: "ROADMAP_ITEM", targetId: item.id, ...applied, receiptKey, attemptCount: 1 },
+          })
     })
-    if (!decision || decision.revision.request.gateType !== "NOW_COMMITMENT" || decision.revision.request.subjectId !== item.id || decision.revision.request.workspaceId !== item.workspaceId) {
-      throw new NowCommitmentError("DECISION_MISMATCH", "A matching NOW commitment decision is required.")
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") {
+      const winner = await prisma.decisionApplication.findUnique({ where: { receiptKey } })
+      if (winner) return winner
     }
-    if (decision.option.outcomeClass !== "APPROVE" || decision.option.continuationKey !== "ADMIT_ROADMAP_ITEM_TO_NOW") {
-      throw new NowCommitmentError("NOT_APPROVED", "This decision does not authorize NOW admission.")
+    if (error instanceof NowCommitmentError) {
+      await prisma.$transaction(async (tx) => {
+        const existing = await tx.decisionApplication.findUnique({ where: { receiptKey } })
+        if (existing?.status === "APPLIED") return existing
+        const blocked = { status: "BLOCKED", lastError: error.message, updatedAt: new Date() }
+        if (existing) return tx.decisionApplication.update({ where: { id: existing.id }, data: { ...blocked, attemptCount: { increment: 1 } } })
+        try {
+          return await tx.decisionApplication.create({
+            data: { decisionId, continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW", targetType: "ROADMAP_ITEM", targetId: itemId, ...blocked, receiptKey, attemptCount: 1 },
+          })
+        } catch (receiptError) {
+          if ((receiptError as { code?: string }).code !== "P2002") throw receiptError
+          return tx.decisionApplication.findUnique({ where: { receiptKey } })
+        }
+      })
     }
-    const currentFingerprint = (dependencies.fingerprint ?? nowCommitmentFingerprint)(item)
-    if (decision.fingerprint !== currentFingerprint || decision.revision.fingerprint !== currentFingerprint || decision.revision.supersededAt) {
-      throw new NowCommitmentError("STALE_DECISION", "The roadmap commitment inputs changed after review.")
-    }
-    await tx.roadmapItem.update({
-      where: { id: item.id },
-      data: { horizon: "NOW", nowCommitmentProvenance: "NATIVE_DECISION", nowDecisionRecordId: decision.id, updatedAt: new Date() },
-    })
-    return tx.decisionApplication.create({
-      data: { decisionId: decision.id, continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW", targetType: "ROADMAP_ITEM", targetId: item.id, status: "APPLIED", receiptKey, attemptCount: 1, appliedAt: new Date() },
-    })
-  })
+    throw error
+  }
 }
 
 export function assertDirectNowWriteBlocked(currentHorizon: string | null | undefined, requestedHorizon: string): void {
