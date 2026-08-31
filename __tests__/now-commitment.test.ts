@@ -183,6 +183,17 @@ describe("NOW commitment", () => {
     expect(tx.reviewRequest.update).toHaveBeenCalledWith({ where: { id: "request-1" }, data: expect.objectContaining({ state: "SUPERSEDED" }) })
   })
 
+  it("preserves a terminal decision revision after its authorized admission changes live capacity", async () => {
+    tx.reviewRevision.findUnique.mockResolvedValue({
+      id: "rev-1", sourceFingerprint: reviewedSourceFingerprint, supersededAt: null,
+      request: { id: "request-1", state: "DECIDED", currentRevisionId: "rev-1", subjectId: "item-1", gateType: "NOW_COMMITMENT" },
+    })
+
+    await expect(ensureNowCommitmentRevisionFresh("rev-1", { eligibilityResolver })).resolves.toEqual({ stale: false, sourceFingerprint: reviewedSourceFingerprint })
+    expect(tx.roadmapItem.findUnique).not.toHaveBeenCalled()
+    expect(tx.reviewRevision.update).not.toHaveBeenCalled()
+  })
+
   it("refuses admission without a matching approved decision", async () => {
     tx.roadmapItem.findUnique.mockResolvedValue(item)
     tx.decisionRecord.findUnique.mockResolvedValue(null)

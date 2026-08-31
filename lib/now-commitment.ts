@@ -261,6 +261,11 @@ export async function ensureNowCommitmentRevisionFresh(revisionId: string, depen
     const revision = await tx.reviewRevision.findUnique({ where: { id: revisionId }, include: { request: true } })
     if (!revision || revision.request.gateType !== "NOW_COMMITMENT") throw new NowCommitmentError("REVISION_NOT_FOUND", "NOW commitment revision not found.")
     if (revision.supersededAt) return { stale: true, sourceFingerprint: revision.sourceFingerprint ?? revision.fingerprint }
+    // A terminal decision remains an immutable historical authorization. Its
+    // continuation intentionally changes the roadmap item and capacity plan,
+    // so re-running pending-review freshness after application would otherwise
+    // supersede the very decision the reviewer just took.
+    if (revision.request.state === "DECIDED") return { stale: false, sourceFingerprint: revision.sourceFingerprint ?? revision.fingerprint }
     const item = await tx.roadmapItem.findUnique({ where: { id: revision.request.subjectId }, select: itemSelect })
     if (!item) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
     const eligibility = await (dependencies.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item, tx as ReturnType<typeof getPrisma>)
