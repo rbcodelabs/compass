@@ -11,8 +11,8 @@
  *   4. Use the Bug card's quick-add menu (no drag) to add it to NEXT —
  *      confirm it lands there too.
  *   5. Create a second Solution, switch to Timeline view, confirm it's
- *      listed as unscheduled there too, quick-add it to NEXT, and confirm it
- *      now renders on the Timeline.
+ *      listed as unscheduled there too, then drag it onto the Gantt chart,
+ *      choose its horizon and dates, and confirm it renders on the Timeline.
  *
  * dnd-kit's PointerSensor needs real mouse movement (not a single jump) to
  * activate past its 8px activation-distance threshold, so drags here are
@@ -83,7 +83,7 @@ async function createValidatedSolution(page: Page, base: string, title: string) 
 
 test.describe("Roadmap — not yet on the roadmap", () => {
   test(
-    "drag a solution onto a horizon and quick-add items from board and timeline",
+    "preserves board drag and schedules a timeline drop with explicit dates",
     async ({ page, base, orgSlug, workspaceSlug }) => {
       const ts = Date.now();
       const solTitle = `E2E Board Solution ${ts}`;
@@ -159,7 +159,7 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       const nextColumn = page.locator("#roadmap-column-NEXT");
       await expect(nextColumn.getByText(bugTitle)).toBeVisible({ timeout: 10_000 });
 
-      // ── 5. Timeline: quick-add the second solution to NEXT ─────────────────
+      // ── 5. Timeline: drop the second solution and submit its schedule ──────
       await page.getByRole("tab", { name: "Timeline" }).click();
       await expect(page).toHaveURL(/view=timeline/);
       await page.waitForLoadState("networkidle");
@@ -167,14 +167,32 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       const sol2UnscheduledCard = unscheduledPanel.locator('[data-slot="card"]').filter({ hasText: sol2Title });
       await expect(sol2UnscheduledCard).toBeVisible({ timeout: 10_000 });
 
-      await sol2UnscheduledCard.hover();
-      await sol2UnscheduledCard.getByLabel("Card actions").click();
-      await page.getByRole("menuitem", { name: "Add to Next" }).click();
+      const dialog = page.getByRole("dialog");
+      const scheduleHeading = dialog.getByRole("heading", { name: "Schedule on the roadmap" });
+      const dropZone = page.locator("#gantt-drop-zone");
+      await sol2UnscheduledCard.scrollIntoViewIfNeeded();
+      const dropZoneBox = await dropZone.boundingBox();
+      if (!dropZoneBox) throw new Error("Gantt drop zone not found");
+      await dragTo(page, sol2UnscheduledCard.getByLabel("Drag to schedule"), dropZoneBox);
+
+      await expect(scheduleHeading).toBeVisible({ timeout: 10_000 });
+      await expect(dialog.getByText(sol2Title)).toBeVisible();
+      // NOW is decision-gated; this test isolates timeline scheduling in NEXT.
+      await dialog.getByLabel("Horizon").click();
+      await page.getByRole("option", { name: "Next" }).click();
+      await dialog.getByLabel("Start date").fill("2026-10-05");
+      await dialog.getByLabel("End date").fill("2026-10-23");
+      await dialog.getByRole("button", { name: "Schedule" }).click();
+
+      await expect(scheduleHeading).not.toBeVisible({ timeout: 10_000 });
       await expect(sol2UnscheduledCard).not.toBeVisible({ timeout: 10_000 });
       // The Gantt library renders the task name in both its own grid table
       // and our custom bar template, so scope to .first() to avoid a
       // strict-mode violation — either occurrence confirms it rendered.
       await expect(page.getByText(sol2Title).first()).toBeVisible({ timeout: 10_000 });
+      await page.getByRole("tab", { name: "Board" }).click();
+      const scheduledCard = page.locator('[data-slot="card"]').filter({ hasText: sol2Title });
+      await expect(scheduledCard.getByText(/Oct/)).toBeVisible({ timeout: 10_000 });
     }
   );
 });
