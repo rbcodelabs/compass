@@ -56,7 +56,7 @@ UUID, and any explicit displacement required when capacity is full:
       },
       "investmentDecisions": {
         "<solution-uuid>": {
-          "authorityProvider": "COMPASS",
+          "authorityProvider": "COMPASS_NATIVE",
           "authorityRecordId": "<decision-record-id>",
           "authorityChecksum": "<64-character-sha256>",
           "decisionOutcome": "APPROVE_BUILDING",

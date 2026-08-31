@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import getPrisma from "@/lib/db"
 import type { NowCommitmentEligibilityInputs } from "@/lib/now-commitment"
 
@@ -17,6 +18,37 @@ export type NowEligibilitySubject = {
 
 export interface NowEligibilityResolver {
   resolve(item: NowEligibilitySubject, database?: ReturnType<typeof getPrisma>): Promise<NowCommitmentEligibilityInputs>
+}
+
+export interface ObsidianInvestmentVerifier {
+  verify(input: { workspaceId: string; solutionId: string; reference: Omit<NowCommitmentEligibilityInputs["investmentDecision"], "subjectId"> }): Promise<boolean>
+}
+
+type NativeDecisionEvidence = {
+  id: string
+  workspaceId: string
+  revisionId: string
+  optionId: string
+  fingerprint: string
+  decidedAt: Date
+  revision: { fingerprint: string; supersededAt: Date | null; request: { gateType: string; subjectType: string; subjectId: string; workspaceId: string } }
+  option: { outcomeClass: string; continuationKey: string }
+  applications: Array<{ id: string; status: string; continuationKey: string; targetType: string; targetId: string }>
+}
+
+export function investmentAuthorityChecksum(evidence: NativeDecisionEvidence, applicationId: string): string {
+  return createHash("sha256").update(JSON.stringify({
+    authority: "COMPASS_NATIVE",
+    decisionId: evidence.id,
+    workspaceId: evidence.workspaceId,
+    solutionId: evidence.revision.request.subjectId,
+    revisionId: evidence.revisionId,
+    optionId: evidence.optionId,
+    fingerprint: evidence.fingerprint,
+    decidedAt: evidence.decidedAt.toISOString(),
+    applicationId,
+    continuationKey: "AUTHORIZE_BUILDING_INVESTMENT",
+  })).digest("hex")
 }
 
 type WorkspacePolicy = {
@@ -54,10 +86,11 @@ function assertPolicyDocument(value: unknown): asserts value is PolicyDocument {
       || !positiveInteger(capacity.unitsPerNowItem) || !positiveInteger(capacity.nowLimit)) throw new Error("invalid capacity")
     if (!policy.investmentDecisions || typeof policy.investmentDecisions !== "object" || Array.isArray(policy.investmentDecisions)) throw new Error("invalid investment mappings")
     for (const [solutionId, decision] of Object.entries(policy.investmentDecisions)) {
-      if (!UUID.test(solutionId) || !decision || !["OBSIDIAN", "COMPASS"].includes(decision.authorityProvider)
+      if (!UUID.test(solutionId) || !decision || !["OBSIDIAN", "COMPASS_NATIVE"].includes(decision.authorityProvider)
         || !nonempty(decision.authorityRecordId) || !SHA256.test(decision.authorityChecksum)
         || decision.decisionOutcome !== "APPROVE_BUILDING" || decision.applicationStatus !== "APPLIED"
-        || !nonempty(decision.applicationReceiptId)) throw new Error("invalid investment decision")
+        || !nonempty(decision.applicationReceiptId)
+        || (decision.authorityProvider === "COMPASS_NATIVE" && (!UUID.test(decision.authorityRecordId) || !UUID.test(decision.applicationReceiptId)))) throw new Error("invalid investment decision")
     }
     for (const [candidateId, displacement] of Object.entries(policy.displacementByRoadmapItemId ?? {})) {
       if (!UUID.test(candidateId) || !displacement || !UUID.test(displacement.itemId)
@@ -78,12 +111,36 @@ function configuredPolicy(): PolicyDocument {
   }
 }
 
-export async function resolveNowCommitmentEligibility(item: NowEligibilitySubject, database: ReturnType<typeof getPrisma> = getPrisma()): Promise<NowCommitmentEligibilityInputs> {
+export async function resolveNowCommitmentEligibility(
+  item: NowEligibilitySubject,
+  database: ReturnType<typeof getPrisma> = getPrisma(),
+  adapters: { obsidianVerifier?: ObsidianInvestmentVerifier } = {},
+): Promise<NowCommitmentEligibilityInputs> {
   const policy = configuredPolicy().workspaces[item.workspaceId]
   if (!policy) throw new NowEligibilityError("POLICY_CONFIGURATION_REQUIRED", "No NOW commitment policy is configured for this workspace.")
   if (!item.solutionId) throw new NowEligibilityError("NO_APPLIED_INVESTMENT_DECISION", "A linked Solution with an applied investment decision is required.")
   const investmentDecision = policy.investmentDecisions?.[item.solutionId]
   if (!investmentDecision) throw new NowEligibilityError("NO_APPLIED_INVESTMENT_DECISION", "No applied Building investment decision is configured for this Solution.")
+  if (investmentDecision.authorityProvider === "OBSIDIAN") {
+    if (!adapters.obsidianVerifier || !await adapters.obsidianVerifier.verify({ workspaceId: item.workspaceId, solutionId: item.solutionId, reference: investmentDecision })) {
+      throw new NowEligibilityError("NO_APPLIED_INVESTMENT_DECISION", "Obsidian investment authority is unavailable or did not verify this reference.")
+    }
+  } else {
+    const decision = await database.decisionRecord.findUnique({
+      where: { id: investmentDecision.authorityRecordId },
+      include: { revision: { include: { request: true } }, option: true, applications: true },
+    }) as NativeDecisionEvidence | null
+    const application = decision?.applications.find((candidate) => candidate.id === investmentDecision.applicationReceiptId)
+    if (!decision || decision.workspaceId !== item.workspaceId || decision.revision.request.workspaceId !== item.workspaceId
+      || decision.revision.request.gateType !== "BUILDING_INVESTMENT" || decision.revision.request.subjectType !== "SOLUTION"
+      || decision.revision.request.subjectId !== item.solutionId || decision.option.outcomeClass !== "APPROVE"
+      || decision.option.continuationKey !== "AUTHORIZE_BUILDING_INVESTMENT" || decision.revision.supersededAt
+      || decision.fingerprint !== decision.revision.fingerprint || !application || application.status !== "APPLIED"
+      || application.continuationKey !== "AUTHORIZE_BUILDING_INVESTMENT" || application.targetType !== "SOLUTION"
+      || application.targetId !== item.solutionId || investmentAuthorityChecksum(decision, application.id) !== investmentDecision.authorityChecksum) {
+      throw new NowEligibilityError("NO_APPLIED_INVESTMENT_DECISION", "Compass could not verify the configured Building investment authority.")
+    }
+  }
   const capacity = policy.capacity
   const plan = await database.portfolioCapacityPlan.findUnique({
     where: { id: capacity.planId },

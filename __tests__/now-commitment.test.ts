@@ -13,7 +13,7 @@ const mockPrisma = { ...tx, $transaction: vi.fn((fn: (value: typeof tx) => unkno
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
 import { NowCommitmentError, admitRoadmapItemToNow, ensureNowCommitmentRevisionFresh, nowCommitmentFingerprint, prepareNowCommitment, startNewNowCommitmentDecisionCycle } from "@/lib/now-commitment"
-import { resolveNowCommitmentEligibility } from "@/lib/now-eligibility"
+import { investmentAuthorityChecksum, resolveNowCommitmentEligibility } from "@/lib/now-eligibility"
 
 const item = { id: "item-1", workspaceId: "ws-1", title: "Ship it", description: "Scope", horizon: "NEXT", status: "ACTIVE", solutionId: "sol-1", opportunityId: "opp-1", squadId: "squad-1", startDate: null, endDate: null, isPrivate: false, sortOrder: 2, updatedAt: new Date("2026-08-31T12:00:00Z"), nowCommitmentProvenance: "LEGACY_UNGATED" }
 const eligibility = {
@@ -25,11 +25,20 @@ const configuredIds = {
   item: "00000000-0000-4000-8000-000000000011", workspace: "00000000-0000-4000-8000-000000000012",
   solution: "00000000-0000-4000-8000-000000000013", squad: "00000000-0000-4000-8000-000000000014",
   plan: "00000000-0000-4000-8000-000000000015", reserved: "00000000-0000-4000-8000-000000000016",
+  investmentDecision: "00000000-0000-4000-8000-000000000017", investmentRevision: "00000000-0000-4000-8000-000000000018",
+  investmentOption: "00000000-0000-4000-8000-000000000019", investmentReceipt: "00000000-0000-4000-8000-00000000001a",
 }
 const configuredItem = { ...item, id: configuredIds.item, workspaceId: configuredIds.workspace, solutionId: configuredIds.solution, squadId: configuredIds.squad }
+const configuredNativeDecision = {
+  id: configuredIds.investmentDecision, workspaceId: configuredIds.workspace, revisionId: configuredIds.investmentRevision,
+  optionId: configuredIds.investmentOption, fingerprint: "d".repeat(64), decidedAt: new Date("2026-08-31T12:00:00Z"),
+  revision: { fingerprint: "d".repeat(64), supersededAt: null, request: { gateType: "BUILDING_INVESTMENT", subjectType: "SOLUTION", subjectId: configuredIds.solution, workspaceId: configuredIds.workspace } },
+  option: { outcomeClass: "APPROVE", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT" },
+  applications: [{ id: configuredIds.investmentReceipt, status: "APPLIED", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: configuredIds.solution }],
+}
 const configuredEligibility = {
   ...eligibility,
-  investmentDecision: { ...eligibility.investmentDecision, subjectId: configuredIds.solution },
+  investmentDecision: { ...eligibility.investmentDecision, authorityProvider: "COMPASS_NATIVE" as const, authorityRecordId: configuredIds.investmentDecision, authorityChecksum: investmentAuthorityChecksum(configuredNativeDecision, configuredIds.investmentReceipt), applicationReceiptId: configuredIds.investmentReceipt, subjectId: configuredIds.solution },
   capacity: { ...eligibility.capacity, planId: configuredIds.plan, reservedRoadmapItemIds: [configuredIds.reserved] },
 }
 function configuredPolicyJson() {
@@ -87,6 +96,7 @@ describe("NOW commitment", () => {
   it("prepares through the canonical configured resolver without caller-supplied eligibility", async () => {
     process.env.NOW_COMMITMENT_POLICY_JSON = configuredPolicyJson()
     tx.roadmapItem.findUnique.mockResolvedValue(configuredItem)
+    tx.decisionRecord.findUnique.mockResolvedValue(configuredNativeDecision)
     tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
       id: configuredIds.plan, workspaceId: configuredIds.workspace, policyId: configuredEligibility.portfolioPolicyId,
       planFingerprint: configuredEligibility.capacity.planFingerprint, unit: configuredEligibility.capacity.unit,
@@ -286,12 +296,15 @@ describe("NOW commitment", () => {
       availableUnits: 3, nowLimit: 3, state: "ACTIVE", version: 1,
       reservations: [{ id: "reservation-configured", roadmapItemId: configuredIds.reserved, units: 1 }],
     })
+    tx.decisionRecord.findUnique.mockResolvedValue(configuredNativeDecision)
     const currentEligibility = await resolveNowCommitmentEligibility(configuredItem, mockPrisma as never)
-    tx.decisionRecord.findUnique.mockResolvedValue({
+    const approval = {
       id: "decision-1", fingerprint: "review-fp",
       revision: { fingerprint: "review-fp", sourceFingerprint: nowCommitmentFingerprint(configuredItem, currentEligibility), supersededAt: null, request: { workspaceId: configuredIds.workspace, subjectId: configuredIds.item, gateType: "NOW_COMMITMENT" } },
       option: { outcomeClass: "APPROVE", continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW" },
-    })
+    }
+    tx.decisionRecord.findUnique.mockReset()
+    tx.decisionRecord.findUnique.mockResolvedValueOnce(approval).mockResolvedValue(configuredNativeDecision)
     tx.decisionApplication.findUnique.mockResolvedValue(null)
     tx.roadmapItem.update.mockResolvedValue({ ...item, horizon: "NOW" })
     tx.decisionApplication.create.mockResolvedValue({ id: "receipt-real", status: "APPLIED" })

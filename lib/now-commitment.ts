@@ -32,7 +32,7 @@ type FingerprintItem = {
 export type NowCommitmentEligibilityInputs = {
   portfolioPolicyId: string
   investmentDecision: {
-    authorityProvider: "OBSIDIAN" | "COMPASS"
+    authorityProvider: "OBSIDIAN" | "COMPASS_NATIVE"
     authorityRecordId: string
     authorityChecksum: string
     subjectId: string

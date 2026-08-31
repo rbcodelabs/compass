@@ -211,7 +211,7 @@ DecisionEvidenceRef
   id                    UUID
   reviewRevisionId      UUID
   evidenceType          BUILDING_INVESTMENT_DECISION
-  authorityProvider     OBSIDIAN | COMPASS
+  authorityProvider     OBSIDIAN | COMPASS_NATIVE
   authorityRecordId     string       # e.g. DEC-...
   authorityLocator      text         # vault-relative path, or native record URI
   authorityChecksum     char(64)     # SHA-256 of canonical decision payload
@@ -236,7 +236,7 @@ require `application_status: applied` plus a non-empty receipt/result and
 `applied_at`, canonicalize the semantic fields, and calculate the checksum. A
 Task completion or prose assertion is not accepted as investment evidence.
 
-After cutover, `authorityProvider = COMPASS`, `authorityRecordId` is the native
+After cutover, `authorityProvider = COMPASS_NATIVE`, `authorityRecordId` is the native
 `DecisionRecord.id`, and `authorityChecksum` is calculated from that immutable
 record. A revision contains references from exactly one authority provider—the
 provider resolved when the revision is published. Existing Obsidian records
