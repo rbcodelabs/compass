@@ -31,6 +31,14 @@ test.describe("Native NOW decision gate", () => {
     await expect(
       page.getByRole("heading", { name: E2E_NOW_CANDIDATE_TITLE })
     ).toBeVisible();
+    const qaScreenshotDir = process.env.NOW_GATE_QA_SCREENSHOT_DIR;
+    if (qaScreenshotDir) {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.screenshot({ path: `${qaScreenshotDir}/desktop.png`, fullPage: true });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.screenshot({ path: `${qaScreenshotDir}/mobile.png`, fullPage: true });
+      await page.setViewportSize({ width: 1280, height: 800 });
+    }
     await page.getByRole("button", { name: "Commit to NOW" }).click();
     await expect(
       page.getByText(/Decision recorded:.*Commit to NOW/)
