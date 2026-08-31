@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const tx = {
   portfolioCapacityPlan: { findUnique: vi.fn(), updateMany: vi.fn() },
-  portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn(), createMany: vi.fn(), count: vi.fn(), findFirst: vi.fn() },
+  portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn(), createMany: vi.fn(), count: vi.fn(), findFirst: vi.fn(), aggregate: vi.fn() },
   roadmapItem: { findUnique: vi.fn(), findMany: vi.fn(), count: vi.fn(), update: vi.fn() },
 }
 const prisma = { ...tx, $transaction: vi.fn((fn: (database: typeof tx) => unknown) => fn(tx)) }
@@ -15,6 +15,7 @@ describe("workspace capacity ledger", () => {
     vi.resetAllMocks()
     prisma.$transaction.mockImplementation((fn: (database: typeof tx) => unknown) => fn(tx))
     tx.portfolioCapacityPlan.updateMany.mockResolvedValue({ count: 1 })
+    tx.portfolioCapacityReservation.aggregate.mockResolvedValue({ _sum: { units: 0 } })
   })
 
   it("initializes reservations for legacy NOW items before activating a plan", async () => {
@@ -26,6 +27,7 @@ describe("workspace capacity ledger", () => {
     tx.roadmapItem.count.mockResolvedValue(1)
     tx.portfolioCapacityReservation.count.mockResolvedValue(1)
     tx.portfolioCapacityReservation.findFirst.mockResolvedValue(null)
+    tx.portfolioCapacityReservation.aggregate.mockResolvedValue({ _sum: { units: 2 } })
 
     await expect(reconcileAndActivateCapacityPlan("plan-1")).resolves.toEqual({ reserved: 1 })
 
@@ -46,6 +48,62 @@ describe("workspace capacity ledger", () => {
     tx.portfolioCapacityReservation.findFirst.mockResolvedValue(null)
 
     await expect(reconcileAndActivateCapacityPlan("plan-1")).rejects.toEqual(expect.objectContaining({ code: "CAPACITY_DRIFT" }))
+  })
+
+  it("keeps a plan DRAFT when legacy NOW count exceeds the configured limit", async () => {
+    tx.portfolioCapacityPlan.findUnique
+      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 0, nowLimit: 3, availableUnits: 10 })
+      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 0, nowLimit: 3, availableUnits: 10 })
+    tx.roadmapItem.findMany.mockResolvedValue([])
+    tx.roadmapItem.count.mockResolvedValue(5)
+    tx.portfolioCapacityReservation.count.mockResolvedValue(5)
+    tx.portfolioCapacityReservation.findFirst.mockResolvedValue(null)
+    tx.portfolioCapacityReservation.aggregate.mockResolvedValue({ _sum: { units: 5 } })
+
+    await expect(reconcileAndActivateCapacityPlan("plan-1")).rejects.toEqual(expect.objectContaining({ code: "CAPACITY_EXCEEDED" }))
+    expect(tx.portfolioCapacityPlan.updateMany).not.toHaveBeenCalled()
+  })
+
+  it("keeps a plan DRAFT when reconciled units exceed available capacity", async () => {
+    tx.portfolioCapacityPlan.findUnique
+      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 0, nowLimit: 3, availableUnits: 3 })
+      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 0, nowLimit: 3, availableUnits: 3 })
+    tx.roadmapItem.findMany.mockResolvedValue([])
+    tx.roadmapItem.count.mockResolvedValue(2)
+    tx.portfolioCapacityReservation.count.mockResolvedValue(2)
+    tx.portfolioCapacityReservation.findFirst.mockResolvedValue(null)
+    tx.portfolioCapacityReservation.aggregate.mockResolvedValue({ _sum: { units: 4 } })
+
+    await expect(reconcileAndActivateCapacityPlan("plan-1")).rejects.toEqual(expect.objectContaining({ code: "CAPACITY_EXCEEDED" }))
+    expect(tx.portfolioCapacityPlan.updateMany).not.toHaveBeenCalled()
+  })
+
+  it("activates when legacy count and units are exactly at both boundaries", async () => {
+    tx.portfolioCapacityPlan.findUnique
+      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 4, nowLimit: 3, availableUnits: 6 })
+      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 4, nowLimit: 3, availableUnits: 6 })
+    tx.roadmapItem.findMany.mockResolvedValue([])
+    tx.roadmapItem.count.mockResolvedValue(3)
+    tx.portfolioCapacityReservation.count.mockResolvedValue(3)
+    tx.portfolioCapacityReservation.findFirst.mockResolvedValue(null)
+    tx.portfolioCapacityReservation.aggregate.mockResolvedValue({ _sum: { units: 6 } })
+
+    await expect(reconcileAndActivateCapacityPlan("plan-1")).resolves.toEqual({ reserved: 0 })
+    expect(tx.portfolioCapacityPlan.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ version: 4, state: "DRAFT" }), data: expect.objectContaining({ state: "ACTIVE", version: 5 }) }))
+  })
+
+  it("keeps a plan DRAFT when activation loses its OCC claim", async () => {
+    tx.portfolioCapacityPlan.findUnique
+      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 4, nowLimit: 3, availableUnits: 6 })
+      .mockResolvedValueOnce({ id: "plan-1", workspaceId: "ws-1", state: "DRAFT", version: 4, nowLimit: 3, availableUnits: 6 })
+    tx.roadmapItem.findMany.mockResolvedValue([])
+    tx.roadmapItem.count.mockResolvedValue(3)
+    tx.portfolioCapacityReservation.count.mockResolvedValue(3)
+    tx.portfolioCapacityReservation.findFirst.mockResolvedValue(null)
+    tx.portfolioCapacityReservation.aggregate.mockResolvedValue({ _sum: { units: 6 } })
+    tx.portfolioCapacityPlan.updateMany.mockResolvedValue({ count: 0 })
+
+    await expect(reconcileAndActivateCapacityPlan("plan-1")).rejects.toEqual(expect.objectContaining({ code: "CAPACITY_CONFLICT" }))
   })
 
   it("atomically releases the active reservation when an item exits NOW", async () => {

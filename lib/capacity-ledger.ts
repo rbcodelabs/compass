@@ -74,12 +74,16 @@ export async function reconcileAndActivateCapacityPlan(planId: string): Promise<
   await prisma.$transaction(async (tx) => {
     const plan = await tx.portfolioCapacityPlan.findUnique({ where: { id: planId } })
     if (!plan || plan.state !== "DRAFT") throw new CapacityLedgerError("PLAN_NOT_DRAFT", "Capacity plan is not activatable.")
-    const [nowCount, activeCount, drift] = await Promise.all([
+    const [nowCount, activeCount, activeUnits, drift] = await Promise.all([
       tx.roadmapItem.count({ where: { workspaceId: plan.workspaceId, horizon: "NOW" } }),
       tx.portfolioCapacityReservation.count({ where: { planId, state: "ACTIVE" } }),
+      tx.portfolioCapacityReservation.aggregate({ where: { planId, state: "ACTIVE" }, _sum: { units: true } }),
       tx.portfolioCapacityReservation.findFirst({ where: { planId, state: "ACTIVE", roadmapItem: { is: { horizon: { not: "NOW" } } } } }),
     ])
     if (nowCount !== activeCount || drift) throw new CapacityLedgerError("CAPACITY_DRIFT", "Every existing NOW item must have exactly one active reservation before activation.")
+    if (activeCount > plan.nowLimit || (activeUnits._sum.units ?? 0) > plan.availableUnits) {
+      throw new CapacityLedgerError("CAPACITY_EXCEEDED", "Existing NOW commitments exceed the configured workspace capacity.")
+    }
     const activated = await tx.portfolioCapacityPlan.updateMany({ where: { id: planId, version: plan.version, state: "DRAFT" }, data: { state: "ACTIVE", version: plan.version + 1, updatedAt: new Date() } })
     if (activated.count !== 1) throw new CapacityLedgerError("CAPACITY_CONFLICT", "Capacity plan activation lost its CAS.")
   })
