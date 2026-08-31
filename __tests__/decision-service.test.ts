@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mockPrisma = {
   reviewRevision: { findUnique: vi.fn() },
   decisionRecord: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
-  reviewRequest: { update: vi.fn() },
+  reviewRequest: { findUnique: vi.fn(), update: vi.fn() },
   workspaceMember: { findFirst: vi.fn() },
   organizationMember: { findFirst: vi.fn() },
   $transaction: vi.fn(),
@@ -85,8 +85,19 @@ describe("recordDecision", () => {
   it("returns the original decision for a repeated idempotency key", async () => {
     const existing = { id: "decision-1", idempotencyKey: "key-1", actorUserId: "user-1", revisionId: "rev-1", optionId: "option-1", fingerprint: "fp-1", requestId: "request-1" }
     mockPrisma.decisionRecord.findUnique.mockResolvedValue(existing)
+    mockPrisma.reviewRequest.findUnique.mockResolvedValue({ currentRevisionId: "rev-1", state: "PENDING" })
     await expect(recordDecision({ actor: { kind: "USER", userId: "user-1" }, revisionId: "rev-1", fingerprint: "fp-1", optionId: "option-1", idempotencyKey: "key-1" })).resolves.toBe(existing)
     expect(mockPrisma.reviewRequest.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "request-1" }, data: expect.objectContaining({ state: "DECIDED" }) }))
+  })
+
+  it("does not repair an old idempotent decision over a newer decision cycle", async () => {
+    const existing = { id: "decision-old", idempotencyKey: "key-old", actorUserId: "user-1", revisionId: "rev-1", optionId: "option-1", fingerprint: "fp-1", requestId: "request-1" }
+    mockPrisma.decisionRecord.findUnique.mockResolvedValue(existing)
+    mockPrisma.reviewRequest.findUnique.mockResolvedValue({ currentRevisionId: "rev-2", state: "PENDING" })
+
+    await expect(recordDecision({ actor: { kind: "USER", userId: "user-1" }, revisionId: "rev-1", fingerprint: "fp-1", optionId: "option-1", idempotencyKey: "key-old" })).resolves.toBe(existing)
+
+    expect(mockPrisma.reviewRequest.update).not.toHaveBeenCalled()
   })
 
   it("rejects reuse of an idempotency key for a different decision identity", async () => {

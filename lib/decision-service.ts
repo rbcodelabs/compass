@@ -28,6 +28,13 @@ function assertIdempotentIdentity(existing: DecisionIdentity, expected: Decision
   }
 }
 
+async function repairRequestStateIfRevisionIsCurrent(tx: ReturnType<typeof getPrisma>, replay: DecisionIdentity & { requestId: string }): Promise<void> {
+  const request = await tx.reviewRequest.findUnique({ where: { id: replay.requestId }, select: { currentRevisionId: true, state: true } })
+  if (request?.currentRevisionId === replay.revisionId && request.state !== "DECIDED") {
+    await tx.reviewRequest.update({ where: { id: replay.requestId }, data: { state: "DECIDED", updatedAt: new Date() } })
+  }
+}
+
 export async function recordDecision(input: {
   actor: DecisionActor
   revisionId: string
@@ -47,7 +54,7 @@ export async function recordDecision(input: {
       const replay = await tx.decisionRecord.findUnique({ where: { idempotencyKey: input.idempotencyKey } })
       if (replay) {
         assertIdempotentIdentity(replay, expectedIdentity)
-        await tx.reviewRequest.update({ where: { id: replay.requestId }, data: { state: "DECIDED", updatedAt: new Date() } })
+        await repairRequestStateIfRevisionIsCurrent(tx as ReturnType<typeof getPrisma>, replay)
         return replay
       }
 
@@ -94,7 +101,7 @@ export async function recordDecision(input: {
       const replay = await prisma.decisionRecord.findUnique({ where: { idempotencyKey: input.idempotencyKey } })
       if (replay) {
         assertIdempotentIdentity(replay, expectedIdentity)
-        await prisma.$transaction((tx) => tx.reviewRequest.update({ where: { id: replay.requestId }, data: { state: "DECIDED", updatedAt: new Date() } }))
+        await prisma.$transaction((tx) => repairRequestStateIfRevisionIsCurrent(tx as ReturnType<typeof getPrisma>, replay))
         return replay
       }
       const winner = await prisma.decisionRecord.findFirst({ where: { revisionId: input.revisionId } })
