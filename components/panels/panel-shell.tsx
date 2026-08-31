@@ -42,11 +42,28 @@ export function PanelShell() {
   // Keep the controlled Sheet closed for the identical server/first-client
   // render, then honor the URL immediately after hydration.
   useEffect(() => {
-    // Passive effects for this layout can run while a streamed page Suspense
-    // subtree is still hydrating. Give that work a paint boundary before the
-    // modal applies aria-hidden to its background siblings.
-    const frame = requestAnimationFrame(() => setHydrated(true));
-    return () => cancelAnimationFrame(frame);
+    // Parent layout effects can run while a streamed page Suspense subtree is
+    // still hydrating. Wait for the document load boundary and the browser's
+    // next idle period before the modal applies aria-hidden to its siblings.
+    // This is tied to hydration-relevant browser state, not a timing guess.
+    let idleId: number | undefined;
+    let frameId: number | undefined;
+    const activateWhenIdle = () => {
+      if ("requestIdleCallback" in window) {
+        idleId = window.requestIdleCallback(() => setHydrated(true));
+      } else {
+        frameId = window.requestAnimationFrame(() => setHydrated(true));
+      }
+    };
+
+    if (document.readyState === "complete") activateWhenIdle();
+    else window.addEventListener("load", activateWhenIdle, { once: true });
+
+    return () => {
+      window.removeEventListener("load", activateWhenIdle);
+      if (idleId !== undefined) window.cancelIdleCallback(idleId);
+      if (frameId !== undefined) window.cancelAnimationFrame(frameId);
+    };
   }, []);
 
   return (
