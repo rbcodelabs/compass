@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS "portfolio_capacity_plans" (
   "available_units" INTEGER NOT NULL,
   "units_per_now_item" INTEGER NOT NULL,
   "now_limit" INTEGER NOT NULL,
-  "state" VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
+  "state" VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
   "version" INTEGER NOT NULL DEFAULT 0,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,

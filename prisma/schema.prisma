@@ -853,7 +853,7 @@ model PortfolioCapacityPlan {
   availableUnits  Int                            @map("available_units")
   unitsPerNowItem Int                            @map("units_per_now_item")
   nowLimit        Int                            @map("now_limit")
-  state           String                         @default("ACTIVE") @db.VarChar(30)
+  state           String                         @default("DRAFT") @db.VarChar(30)
   version         Int                            @default(0)
   createdAt       DateTime                       @default(now()) @map("created_at")
   updatedAt       DateTime                       @default(now()) @map("updated_at")
