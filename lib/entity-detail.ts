@@ -252,7 +252,7 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
   });
   if (!item) return null;
 
-  const [deliveryTasks, linkableTasks, members] = await Promise.all([
+  const [deliveryTasks, linkableTasks, members, nowReview] = await Promise.all([
     prisma.task.findMany({
       where: {
         workspaceId,
@@ -290,6 +290,10 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
       },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     }),
+    prisma.reviewRequest.findFirst({
+      where: { workspaceId, gateType: "NOW_COMMITMENT", subjectType: "ROADMAP_ITEM", subjectId: id },
+      select: { id: true, state: true, currentRevision: { select: { fingerprint: true } } },
+    }),
   ]);
 
   const precedence: Record<string, number> = {
@@ -312,6 +316,7 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
     ...item,
     deliveryTasks,
     linkableTasks,
+    nowReview,
     members: members.map((member) => ({
       id: member.id,
       userId: member.userId,

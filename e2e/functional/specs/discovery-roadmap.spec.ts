@@ -3,8 +3,8 @@
  *
  * Journey: Create opportunity (in EXPLORING column) → open detail panel →
  *          add solution → open the solution's sidebar panel → change status
- *          to IN_DELIVERY → promote to roadmap (NOW horizon) →
- *          verify card appears in roadmap NOW column.
+ *          to IN_DELIVERY → promote to roadmap (NEXT horizon) → request and
+ *          approve the immutable NOW commitment → verify the item enters NOW.
  *
  * Note: The "SHIPPED" horizon promote option is added in the feat/roadmap-shipped-state
  * branch (PR #16). Update the horizon to "Shipped" once that branch merges.
@@ -75,8 +75,10 @@ test.describe("Discovery → Roadmap", () => {
       // The "→ Promote to Roadmap" button appears when status is VALIDATED or IN_DELIVERY
       await panel.getByRole("button", { name: /Promote to Roadmap/i }).click();
 
-      // Promote form shows horizon Select (NOW/NEXT/LATER) and "→ Roadmap" button.
-      // Default horizon is NOW — leave it and click "→ Roadmap"
+      // Direct creation in NOW is intentionally guarded. Create the delivery
+      // candidate in NEXT, then exercise the explicit human decision flow.
+      await panel.getByRole("combobox").filter({ hasText: "Now" }).click();
+      await page.getByRole("option", { name: "Next" }).click();
       await panel.getByRole("button", { name: "→ Roadmap" }).click();
 
       // ── 8. Verify on roadmap ──────────────────────────────────────────────
@@ -84,9 +86,24 @@ test.describe("Discovery → Roadmap", () => {
       await page.waitForLoadState("networkidle");
 
       // The solution should appear as a roadmap card.
-      // The NOW column is the first column (visible without scrolling at 1440px).
       // Use .first() because the roadmap card shows the solution title in both
       // the card heading AND in a tooltip trigger span (linked-solution badge).
+      await expect(page.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
+
+      // ── 9. Request the immutable NOW commitment review ───────────────────
+      await page.getByRole("button", { name: solTitle, exact: true }).click();
+      const roadmapPanel = page.locator('[data-slot="sheet-content"]');
+      await roadmapPanel.getByRole("button", { name: "Request NOW commitment" }).click();
+      await expect(page).toHaveURL(/\/reviews\/[0-9a-f-]+$/);
+
+      // ── 10. Record the human decision and apply its continuation ──────────
+      await expect(page.getByRole("heading", { name: solTitle })).toBeVisible();
+      await page.getByRole("button", { name: "Commit to NOW" }).click();
+      await expect(page.getByText(/Decision recorded:.*Commit to NOW/)).toBeVisible();
+
+      // ── 11. Verify the guarded admission receipt took effect ──────────────
+      await page.goto(`${base}/roadmap`);
+      await page.waitForLoadState("networkidle");
       await expect(page.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
     }
   );
