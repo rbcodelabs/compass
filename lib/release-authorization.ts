@@ -37,8 +37,13 @@ export type QueueReleaseResult =
 export type ReleaseSourceBlockCode = "PR_NOT_READY" | "CHECKS_FAILED" | "POLICY_CHANGED"
 
 export type ReleaseSourceRevalidation =
-  | { status: "VALID"; scope: ReleaseScope }
+  | { status: "VALID"; snapshot: ReleaseSourceSnapshot }
   | { status: "BLOCKED"; code: ReleaseSourceBlockCode; detail?: string }
+
+export type ReleaseSourceSnapshot = {
+  scope: ReleaseScope
+  fingerprint: string
+}
 
 export interface ReleaseSourceRevalidator {
   revalidate(scope: ReleaseScope): Promise<ReleaseSourceRevalidation>
@@ -71,6 +76,41 @@ function sameReleaseScope(left: ReleaseScope, right: ReleaseScope): boolean {
     && left.targetEnvironment === right.targetEnvironment
     && left.releasePolicyId === right.releasePolicyId
     && JSON.stringify(sortedTaskIds(left.taskIds)) === JSON.stringify(sortedTaskIds(right.taskIds))
+}
+
+function releaseScopeFromRun(releaseRun: {
+  workspaceId: string
+  provider: string
+  repositoryOwner: string
+  repositoryName: string
+  pullRequestNumber: number
+  baseRef: string
+  headSha: string
+  targetEnvironment: string
+  releasePolicyId: string
+  tasks: { taskId: string }[]
+}): ReleaseScope {
+  return {
+    workspaceId: releaseRun.workspaceId,
+    provider: releaseRun.provider as ReleaseScope["provider"],
+    repositoryOwner: releaseRun.repositoryOwner,
+    repositoryName: releaseRun.repositoryName,
+    pullRequestNumber: releaseRun.pullRequestNumber,
+    baseRef: releaseRun.baseRef,
+    headSha: releaseRun.headSha,
+    targetEnvironment: releaseRun.targetEnvironment as ReleaseScope["targetEnvironment"],
+    releasePolicyId: releaseRun.releasePolicyId,
+    taskIds: sortedTaskIds(releaseRun.tasks.map((task) => task.taskId)),
+  }
+}
+
+function canonicalReleaseSnapshot(scope: ReleaseScope): ReleaseSourceSnapshot {
+  const canonicalScope = { ...scope, taskIds: sortedTaskIds(scope.taskIds) }
+  return { scope: canonicalScope, fingerprint: releaseSourceFingerprint(canonicalScope) }
+}
+
+function mismatchCode(expected: ReleaseScope, actual: ReleaseScope): ReleaseSourceBlockCode {
+  return expected.releasePolicyId !== actual.releasePolicyId ? "POLICY_CHANGED" : "PR_NOT_READY"
 }
 
 export function releaseSourceFingerprint(scope: ReleaseScope): string {
@@ -333,6 +373,37 @@ export async function queueAuthorizedRelease(
   const prisma = getPrisma()
   const idempotencyKey = dispatchIdempotencyKey(releaseRunId, decisionRecordId)
 
+  // Provider reads can be slow or fail. DSQL transactions must contain only the
+  // short compare-and-swap that binds the validated snapshot to the outbox row.
+  const candidate = await prisma.releaseRun.findUnique({
+    where: { id: releaseRunId },
+    include: { tasks: { select: { taskId: true } } },
+  })
+  if (!candidate) return { status: "BLOCKED", code: "DECISION_SCOPE_MISMATCH" }
+  if (candidate.state === "SUPERSEDED" || candidate.state === "CANCELLED") return { status: "BLOCKED", code: "REVOKED" }
+  if (candidate.state !== "READY_FOR_APPROVAL" && candidate.state !== "DECISION_RECORDING") {
+    return { status: "BLOCKED", code: "STALE_SOURCE" }
+  }
+  const candidateSnapshot = canonicalReleaseSnapshot(releaseScopeFromRun(candidate))
+  if (candidate.sourceFingerprint !== expectedSourceFingerprint
+    || candidateSnapshot.fingerprint !== expectedSourceFingerprint) {
+    return { status: "BLOCKED", code: "STALE_SOURCE" }
+  }
+
+  let validation: ReleaseSourceRevalidation
+  try {
+    validation = await revalidator.revalidate(candidateSnapshot.scope)
+  } catch {
+    return { status: "BLOCKED", code: "PR_NOT_READY" }
+  }
+  if (validation.status === "VALID") {
+    const canonicalProviderSnapshot = canonicalReleaseSnapshot(validation.snapshot.scope)
+    if (validation.snapshot.fingerprint !== canonicalProviderSnapshot.fingerprint
+      || canonicalProviderSnapshot.fingerprint !== expectedSourceFingerprint) {
+      return { status: "BLOCKED", code: mismatchCode(candidateSnapshot.scope, canonicalProviderSnapshot.scope) }
+    }
+  }
+
   try {
     return await prisma.$transaction(async (tx): Promise<QueueReleaseResult> => {
       const existingDispatch = await tx.releaseDispatch.findUnique({ where: { idempotencyKey } })
@@ -354,20 +425,12 @@ export async function queueAuthorizedRelease(
         return { status: "BLOCKED", code: "STALE_SOURCE" }
       }
 
-      const currentSourceFingerprint = releaseSourceFingerprint({
-        workspaceId: releaseRun.workspaceId,
-        provider: releaseRun.provider as ReleaseScope["provider"],
-        repositoryOwner: releaseRun.repositoryOwner,
-        repositoryName: releaseRun.repositoryName,
-        pullRequestNumber: releaseRun.pullRequestNumber,
-        baseRef: releaseRun.baseRef,
-        headSha: releaseRun.headSha,
-        targetEnvironment: releaseRun.targetEnvironment as ReleaseScope["targetEnvironment"],
-        releasePolicyId: releaseRun.releasePolicyId,
-        taskIds: releaseRun.tasks.map((task) => task.taskId),
-      })
+      const currentSnapshot = canonicalReleaseSnapshot(releaseScopeFromRun(releaseRun))
+      const currentSourceFingerprint = currentSnapshot.fingerprint
       if (releaseRun.sourceFingerprint !== expectedSourceFingerprint
-        || currentSourceFingerprint !== expectedSourceFingerprint) {
+        || currentSourceFingerprint !== expectedSourceFingerprint
+        || releaseRun.version !== candidate.version
+        || !sameReleaseScope(currentSnapshot.scope, candidateSnapshot.scope)) {
         return { status: "BLOCKED", code: "STALE_SOURCE" }
       }
 
@@ -393,31 +456,6 @@ export async function queueAuthorizedRelease(
         return { status: "BLOCKED", code: "DECISION_SCOPE_MISMATCH" }
       }
 
-      let validation: ReleaseSourceRevalidation
-      try {
-        validation = await revalidator.revalidate({
-          workspaceId: releaseRun.workspaceId,
-          provider: releaseRun.provider as ReleaseScope["provider"],
-          repositoryOwner: releaseRun.repositoryOwner,
-          repositoryName: releaseRun.repositoryName,
-          pullRequestNumber: releaseRun.pullRequestNumber,
-          baseRef: releaseRun.baseRef,
-          headSha: releaseRun.headSha,
-          targetEnvironment: releaseRun.targetEnvironment as ReleaseScope["targetEnvironment"],
-          releasePolicyId: releaseRun.releasePolicyId,
-          taskIds: releaseRun.tasks.map((task) => task.taskId),
-        })
-      } catch {
-        validation = { status: "BLOCKED", code: "PR_NOT_READY", detail: "Authoritative release-source validation failed." }
-      }
-      if (validation.status === "VALID"
-        && releaseSourceFingerprint(validation.scope) !== expectedSourceFingerprint) {
-        validation = {
-          status: "BLOCKED",
-          code: validation.scope.releasePolicyId !== releaseRun.releasePolicyId ? "POLICY_CHANGED" : "PR_NOT_READY",
-          detail: "The authoritative release source no longer matches the reviewed scope.",
-        }
-      }
       if (validation.status === "BLOCKED") {
         const now = new Date()
         const request = await tx.reviewRequest.findFirst({
@@ -501,4 +539,68 @@ export async function queueAuthorizedRelease(
     if ((error as { code?: string }).code === "P2002") return { status: "BLOCKED", code: "RETRYABLE_CONFLICT" }
     throw error
   }
+}
+
+export type ClaimReleaseDispatchResult =
+  | { status: "CLAIMED"; dispatchId: string }
+  | { status: "BLOCKED"; code: "NOT_PENDING" | "RETRYABLE_CONFLICT" | ReleaseSourceBlockCode }
+
+/**
+ * Claims a queued dispatch but deliberately performs no merge or deployment.
+ * A future worker must cross this second provider boundary immediately before
+ * it invokes any external release automation.
+ */
+export async function claimReleaseDispatch(
+  dispatchId: string,
+  workerId: string,
+  revalidator: ReleaseSourceRevalidator,
+  now = new Date(),
+): Promise<ClaimReleaseDispatchResult> {
+  const prisma = getPrisma()
+  const candidate = await prisma.releaseDispatch.findUnique({
+    where: { id: dispatchId },
+    include: { releaseRun: { include: { tasks: { select: { taskId: true } } } } },
+  })
+  if (!candidate || candidate.status !== "PENDING") return { status: "BLOCKED", code: "NOT_PENDING" }
+  const expectedSnapshot = canonicalReleaseSnapshot(releaseScopeFromRun(candidate.releaseRun))
+
+  let validation: ReleaseSourceRevalidation
+  try {
+    validation = await revalidator.revalidate(expectedSnapshot.scope)
+  } catch {
+    return { status: "BLOCKED", code: "PR_NOT_READY" }
+  }
+  if (validation.status === "BLOCKED") return { status: "BLOCKED", code: validation.code }
+  const providerSnapshot = canonicalReleaseSnapshot(validation.snapshot.scope)
+  if (validation.snapshot.fingerprint !== providerSnapshot.fingerprint
+    || providerSnapshot.fingerprint !== expectedSnapshot.fingerprint) {
+    return { status: "BLOCKED", code: mismatchCode(expectedSnapshot.scope, providerSnapshot.scope) }
+  }
+
+  return prisma.$transaction(async (tx): Promise<ClaimReleaseDispatchResult> => {
+    const current = await tx.releaseDispatch.findUnique({
+      where: { id: dispatchId },
+      include: { releaseRun: { include: { tasks: { select: { taskId: true } } } } },
+    })
+    if (!current || current.status !== "PENDING") return { status: "BLOCKED", code: "NOT_PENDING" }
+    const currentSnapshot = canonicalReleaseSnapshot(releaseScopeFromRun(current.releaseRun))
+    if (currentSnapshot.fingerprint !== expectedSnapshot.fingerprint
+      || current.releaseRun.sourceFingerprint !== expectedSnapshot.fingerprint) {
+      return { status: "BLOCKED", code: "PR_NOT_READY" }
+    }
+    const claimExpiresAt = new Date(now.getTime() + 5 * 60_000)
+    const claimed = await tx.releaseDispatch.updateMany({
+      where: { id: dispatchId, status: "PENDING" },
+      data: {
+        status: "CLAIMED",
+        claimedBy: workerId,
+        claimExpiresAt,
+        attemptCount: (current.attemptCount ?? 0) + 1,
+        updatedAt: now,
+      },
+    })
+    return claimed.count === 1
+      ? { status: "CLAIMED", dispatchId }
+      : { status: "BLOCKED", code: "RETRYABLE_CONFLICT" }
+  })
 }

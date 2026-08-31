@@ -122,6 +122,7 @@ The MCP server exposes tools that agents can call, grouped below by area.
 | `add_to_roadmap` | Create a roadmap item in NEXT/LATER/SHIPPED, optionally with a start date and end date for the Timeline view, and an `isPrivate` flag to hide it from the public portal roadmap and block voting on it. NOW requires a recorded commitment decision |
 | `update_roadmap_item` | Update a roadmap item's horizon, status, title, description, start/end dates, or `isPrivate` flag. Direct moves to NOW and LAUNCHING/LAUNCHED are rejected; use the decision and launch operations instead |
 | `request_now_commitment` | Prepare or refresh the immutable review packet for admitting an existing Roadmap Item to NOW. This operation never takes the human decision |
+| `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. This operation never takes the human decision or invokes release automation |
 | `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
 | `list_review_requests` | List review requests for a workspace, optionally filtered by state |
 | `apply_recorded_decision` | Idempotently apply the authorized continuation from a recorded decision and return its application receipt |
@@ -134,6 +135,15 @@ The MCP server exposes tools that agents can call, grouped below by area.
 Decision-taking is deliberately absent from MCP. A signed-in human reviewer opens
 the stable Compass review URL and chooses one option. Agents may prepare and read
 packets, then apply a recorded decision; they cannot impersonate the reviewer.
+
+`apply_recorded_decision` is queue-only for release authorization. It validates
+the authoritative provider snapshot outside the database transaction, then a
+short transaction binds the unchanged snapshot and human decision to a durable
+dispatch row. Compass does not merge, deploy, or otherwise invoke external
+release automation in this implementation. Provider validation is unconfigured
+by default and therefore fails closed (`PR_NOT_READY`); a dispatch worker must
+use a configured provider and repeat the same head/check/policy revalidation at
+the dispatch-claim boundary before any future external side effect.
 
 ### Squads
 

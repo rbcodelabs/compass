@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => {
     reviewRevision: { create: vi.fn(), update: vi.fn() },
     decisionRecord: { findUnique: vi.fn() },
     decisionApplication: { findUnique: vi.fn(), create: vi.fn() },
-    releaseDispatch: { findUnique: vi.fn(), create: vi.fn() },
+    releaseDispatch: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
   }
   return {
     tx,
@@ -24,6 +24,7 @@ vi.mock("@/lib/decision-service", () => ({ recordDecision: mocks.recordDecision 
 
 import {
   prepareReleaseRun,
+  claimReleaseDispatch,
   queueAuthorizedRelease,
   recordReleaseDecision,
   releaseSourceFingerprint,
@@ -48,8 +49,9 @@ const scope: ReleaseScope = {
 }
 
 const sourceFingerprint = releaseSourceFingerprint(scope)
+const sourceSnapshot = { scope: { ...scope, taskIds: [...scope.taskIds].sort() }, fingerprint: sourceFingerprint }
 const validSource: ReleaseSourceRevalidator = {
-  revalidate: vi.fn().mockResolvedValue({ status: "VALID", scope }),
+  revalidate: vi.fn().mockResolvedValue({ status: "VALID", snapshot: sourceSnapshot }),
 }
 const run = {
   id: "00000000-0000-4000-8000-000000000010",
@@ -78,7 +80,7 @@ describe("release authorization", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.prisma.$transaction.mockImplementation((fn: (value: typeof mocks.tx) => unknown) => fn(mocks.tx))
-    vi.mocked(validSource.revalidate).mockResolvedValue({ status: "VALID", scope })
+    vi.mocked(validSource.revalidate).mockResolvedValue({ status: "VALID", snapshot: sourceSnapshot })
   })
 
   it("recovers the identical winner when concurrent preparation hits P2002", async () => {
@@ -221,6 +223,7 @@ describe("release authorization", () => {
   })
 
   it("queues one durable dispatch and application in the same transaction", async () => {
+    mocks.prisma.releaseRun.findUnique.mockResolvedValue(run)
     mocks.tx.releaseDispatch.findUnique.mockResolvedValue(null)
     mocks.tx.releaseRun.findUnique.mockResolvedValue(run)
     mocks.tx.decisionRecord.findUnique.mockResolvedValue(approvingDecision)
@@ -256,7 +259,88 @@ describe("release authorization", () => {
     })
   })
 
+  it("finishes the authoritative provider read before opening the queue transaction", async () => {
+    mocks.prisma.releaseRun.findUnique.mockResolvedValue(run)
+    mocks.tx.releaseDispatch.findUnique.mockResolvedValue(null)
+    mocks.tx.releaseRun.findUnique.mockResolvedValue(run)
+    mocks.tx.decisionRecord.findUnique.mockResolvedValue(approvingDecision)
+    mocks.tx.decisionApplication.findUnique.mockResolvedValue(null)
+    mocks.tx.releaseRun.updateMany.mockResolvedValue({ count: 1 })
+    mocks.tx.decisionApplication.create.mockResolvedValue({ id: "application-1" })
+    mocks.tx.releaseDispatch.create.mockResolvedValue({ id: "dispatch-1" })
+    const revalidate = vi.fn(async () => {
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      return { status: "VALID" as const, snapshot: sourceSnapshot }
+    })
+
+    await queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint, { revalidate })
+
+    expect(revalidate).toHaveBeenCalledOnce()
+    expect(mocks.prisma.$transaction).toHaveBeenCalledOnce()
+  })
+
+  it("fails closed on provider failure without opening a queue transaction", async () => {
+    mocks.prisma.releaseRun.findUnique.mockResolvedValue(run)
+    const revalidator: ReleaseSourceRevalidator = { revalidate: vi.fn().mockRejectedValue(new Error("provider unavailable")) }
+
+    await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint, revalidator))
+      .resolves.toEqual({ status: "BLOCKED", code: "PR_NOT_READY" })
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [{ ...scope, headSha: "f".repeat(40) }, "PR_NOT_READY"],
+    [{ ...scope, releasePolicyId: "release-policy:v2" }, "POLICY_CHANGED"],
+  ] as const)("blocks a provider snapshot with a changed reviewed identity", async (changedScope, code) => {
+    mocks.prisma.releaseRun.findUnique.mockResolvedValue(run)
+    const snapshot = { scope: changedScope, fingerprint: releaseSourceFingerprint(changedScope) }
+    const revalidator: ReleaseSourceRevalidator = { revalidate: vi.fn().mockResolvedValue({ status: "VALID", snapshot }) }
+
+    await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint, revalidator))
+      .resolves.toEqual({ status: "BLOCKED", code })
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it("rejects a stale database snapshot in the short queue transaction", async () => {
+    mocks.prisma.releaseRun.findUnique.mockResolvedValueOnce(run).mockResolvedValueOnce({ ...run, version: 1, headSha: "f".repeat(40) })
+    mocks.tx.releaseDispatch.findUnique.mockResolvedValue(null)
+
+    await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint, validSource))
+      .resolves.toEqual({ status: "BLOCKED", code: "STALE_SOURCE" })
+    expect(mocks.tx.releaseDispatch.create).not.toHaveBeenCalled()
+  })
+
+  it("revalidates the same canonical snapshot again before claiming a queued dispatch", async () => {
+    const dispatch = { id: "dispatch-1", releaseRunId: run.id, decisionRecordId: "decision-1", status: "PENDING", claimExpiresAt: null, releaseRun: run }
+    mocks.prisma.releaseDispatch.findUnique.mockResolvedValue(dispatch)
+    mocks.tx.releaseDispatch.findUnique.mockResolvedValue(dispatch)
+    mocks.tx.releaseDispatch.updateMany.mockResolvedValue({ count: 1 })
+
+    await expect(claimReleaseDispatch("dispatch-1", "worker-1", validSource, new Date("2026-08-31T12:00:00Z")))
+      .resolves.toEqual({ status: "CLAIMED", dispatchId: "dispatch-1" })
+    expect(validSource.revalidate).toHaveBeenCalledWith(expect.objectContaining({ headSha: scope.headSha, releasePolicyId: scope.releasePolicyId }))
+    expect(mocks.tx.releaseDispatch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: "dispatch-1", status: "PENDING" }),
+      data: expect.objectContaining({ status: "CLAIMED", claimedBy: "worker-1", attemptCount: 1 }),
+    }))
+  })
+
+  it("does not claim when dispatch-boundary revalidation is stale", async () => {
+    const dispatch = { id: "dispatch-1", releaseRunId: run.id, decisionRecordId: "decision-1", status: "PENDING", claimExpiresAt: null, releaseRun: run }
+    mocks.prisma.releaseDispatch.findUnique.mockResolvedValue(dispatch)
+    const changed = { ...scope, headSha: "f".repeat(40) }
+    const revalidator: ReleaseSourceRevalidator = {
+      revalidate: vi.fn().mockResolvedValue({ status: "VALID", snapshot: { scope: changed, fingerprint: releaseSourceFingerprint(changed) } }),
+    }
+
+    await expect(claimReleaseDispatch("dispatch-1", "worker-1", revalidator))
+      .resolves.toEqual({ status: "BLOCKED", code: "PR_NOT_READY" })
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.tx.releaseDispatch.updateMany).not.toHaveBeenCalled()
+  })
+
   it("rejects changed release scope before creating an outbox row", async () => {
+    mocks.prisma.releaseRun.findUnique.mockResolvedValue({ ...run, headSha: "1123456789abcdef0123456789abcdef01234567" })
     mocks.tx.releaseDispatch.findUnique.mockResolvedValue(null)
     mocks.tx.releaseRun.findUnique.mockResolvedValue({ ...run, headSha: "1123456789abcdef0123456789abcdef01234567" })
 
@@ -267,6 +351,7 @@ describe("release authorization", () => {
   })
 
   it("does not authorize a run that is no longer ready for approval", async () => {
+    mocks.prisma.releaseRun.findUnique.mockResolvedValue({ ...run, state: "BLOCKED" })
     mocks.tx.releaseDispatch.findUnique.mockResolvedValue(null)
     mocks.tx.releaseRun.findUnique.mockResolvedValue({ ...run, state: "BLOCKED" })
 
@@ -277,6 +362,7 @@ describe("release authorization", () => {
   })
 
   it("returns the existing dispatch without repeating authorization writes", async () => {
+    mocks.prisma.releaseRun.findUnique.mockResolvedValue(run)
     mocks.tx.releaseDispatch.findUnique.mockResolvedValue({
       id: "dispatch-existing",
       releaseRunId: run.id,
@@ -285,7 +371,7 @@ describe("release authorization", () => {
 
     await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint, validSource))
       .resolves.toEqual({ status: "EXISTING", dispatchId: "dispatch-existing" })
-    expect(mocks.tx.releaseRun.findUnique).not.toHaveBeenCalled()
+    expect(mocks.tx.releaseRun.findUnique).toHaveBeenCalledOnce()
     expect(mocks.tx.releaseRun.updateMany).not.toHaveBeenCalled()
     expect(mocks.tx.decisionApplication.create).not.toHaveBeenCalled()
     expect(mocks.tx.releaseDispatch.create).not.toHaveBeenCalled()
@@ -296,6 +382,7 @@ describe("release authorization", () => {
       const revalidator: ReleaseSourceRevalidator = {
         revalidate: vi.fn().mockResolvedValue({ status: "BLOCKED", code }),
       }
+      mocks.prisma.releaseRun.findUnique.mockResolvedValue(run)
       mocks.tx.releaseDispatch.findUnique.mockResolvedValue(null)
       mocks.tx.releaseRun.findUnique.mockResolvedValue(run)
       mocks.tx.decisionRecord.findUnique.mockResolvedValue(approvingDecision)
