@@ -6,7 +6,7 @@ import getPrisma from "@/lib/db"
 import { recordDecision } from "@/lib/decision-service"
 import { admitRoadmapItemToNow, prepareNowCommitment } from "@/lib/now-commitment"
 import { isOrgAdminRole } from "@/lib/roles"
-import { queueAuthorizedRelease } from "@/lib/release-authorization"
+import { queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator } from "@/lib/release-authorization"
 
 async function requireWorkspaceMember(workspaceId: string) {
   const session = await auth()
@@ -59,7 +59,12 @@ export async function decideReviewAction(input: {
   }
   if (selected?.continuationKey === "DISPATCH_RELEASE_RUN" && selected.outcomeClass === "APPROVE") {
     if (!revision.sourceFingerprint) throw new Error("Release review is missing its immutable source fingerprint")
-    const dispatch = await queueAuthorizedRelease(revision.request.subjectId, decision.id, revision.sourceFingerprint)
+    const dispatch = await queueAuthorizedRelease(
+      revision.request.subjectId,
+      decision.id,
+      revision.sourceFingerprint,
+      unconfiguredReleaseSourceRevalidator,
+    )
     if (dispatch.status === "BLOCKED") throw new Error(`Release dispatch blocked: ${dispatch.code}`)
   }
   revalidatePath("/", "layout")

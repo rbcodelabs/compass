@@ -13,7 +13,10 @@ vi.mock("@/auth", () => ({ auth: mockAuth }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 vi.mock("@/lib/now-commitment", () => ({ prepareNowCommitment: mockPrepare, admitRoadmapItemToNow: mockAdmit }))
 vi.mock("@/lib/decision-service", () => ({ recordDecision: mockRecord }))
-vi.mock("@/lib/release-authorization", () => ({ queueAuthorizedRelease: mockQueueRelease }))
+vi.mock("@/lib/release-authorization", () => ({
+  queueAuthorizedRelease: mockQueueRelease,
+  unconfiguredReleaseSourceRevalidator: { revalidate: vi.fn() },
+}))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
 import { decideReviewAction, requestNowCommitmentAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
@@ -55,6 +58,11 @@ describe("review actions ownership", () => {
 
     await decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "fp", optionId: "option-1" })
 
-    expect(mockQueueRelease).toHaveBeenCalledWith("release-1", "decision-1", "source-fp")
+    expect(mockQueueRelease).toHaveBeenCalledWith(
+      "release-1",
+      "decision-1",
+      "source-fp",
+      expect.objectContaining({ revalidate: expect.any(Function) }),
+    )
   })
 })

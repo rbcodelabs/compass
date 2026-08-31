@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => {
     releaseRun: { findFirst: vi.fn(), create: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
     releaseRunTask: { createMany: vi.fn() },
     reviewRequest: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
-    reviewRevision: { create: vi.fn() },
+    reviewRevision: { create: vi.fn(), update: vi.fn() },
     decisionRecord: { findUnique: vi.fn() },
     decisionApplication: { findUnique: vi.fn(), create: vi.fn() },
     releaseDispatch: { findUnique: vi.fn(), create: vi.fn() },
@@ -28,6 +28,7 @@ import {
   recordReleaseDecision,
   releaseSourceFingerprint,
   type ReleaseScope,
+  type ReleaseSourceRevalidator,
 } from "@/lib/release-authorization"
 
 const scope: ReleaseScope = {
@@ -47,6 +48,9 @@ const scope: ReleaseScope = {
 }
 
 const sourceFingerprint = releaseSourceFingerprint(scope)
+const validSource: ReleaseSourceRevalidator = {
+  revalidate: vi.fn().mockResolvedValue({ status: "VALID", scope }),
+}
 const run = {
   id: "00000000-0000-4000-8000-000000000010",
   ...scope,
@@ -57,11 +61,52 @@ const run = {
   version: 0,
   tasks: scope.taskIds.map((taskId) => ({ taskId })),
 }
+const approvingDecision = {
+  id: "decision-1",
+  workspaceId: scope.workspaceId,
+  fingerprint: "review-fingerprint",
+  revision: {
+    fingerprint: "review-fingerprint",
+    sourceFingerprint,
+    supersededAt: null,
+    request: { workspaceId: scope.workspaceId, subjectType: "RELEASE_RUN", subjectId: run.id, gateType: "RELEASE_AUTHORIZATION" },
+  },
+  option: { outcomeClass: "APPROVE", continuationKey: "DISPATCH_RELEASE_RUN" },
+}
 
 describe("release authorization", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.prisma.$transaction.mockImplementation((fn: (value: typeof mocks.tx) => unknown) => fn(mocks.tx))
+    vi.mocked(validSource.revalidate).mockResolvedValue({ status: "VALID", scope })
+  })
+
+  it("recovers the identical winner when concurrent preparation hits P2002", async () => {
+    const winner = { ...run, tasks: scope.taskIds.map((taskId) => ({ taskId })) }
+    const winnerRequest = {
+      id: "request-winner",
+      state: "PENDING",
+      currentRevision: { id: "revision-winner", sourceFingerprint, fingerprint: "review-winner" },
+    }
+    mocks.prisma.$transaction.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002" }))
+    mocks.prisma.releaseRun.findFirst.mockResolvedValue(winner)
+    mocks.prisma.reviewRequest.findFirst.mockResolvedValue(winnerRequest)
+
+    await expect(prepareReleaseRun(scope)).resolves.toEqual({
+      status: "READY",
+      releaseRunId: run.id,
+      requestId: "request-winner",
+      revisionId: "revision-winner",
+      sourceFingerprint,
+      reviewFingerprint: "review-winner",
+    })
+  })
+
+  it("does not recover a P2002 winner with a different immutable identity", async () => {
+    mocks.prisma.$transaction.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002" }))
+    mocks.prisma.releaseRun.findFirst.mockResolvedValue({ ...run, headSha: "f".repeat(40), tasks: run.tasks })
+
+    await expect(prepareReleaseRun(scope)).rejects.toThrow("different release identity")
   })
 
   it("hashes the exact release source scope with Task IDs sorted", () => {
@@ -162,24 +207,13 @@ describe("release authorization", () => {
   it("queues one durable dispatch and application in the same transaction", async () => {
     mocks.tx.releaseDispatch.findUnique.mockResolvedValue(null)
     mocks.tx.releaseRun.findUnique.mockResolvedValue(run)
-    mocks.tx.decisionRecord.findUnique.mockResolvedValue({
-      id: "decision-1",
-      workspaceId: scope.workspaceId,
-      fingerprint: "review-fingerprint",
-      revision: {
-        fingerprint: "review-fingerprint",
-        sourceFingerprint,
-        supersededAt: null,
-        request: { workspaceId: scope.workspaceId, subjectType: "RELEASE_RUN", subjectId: run.id, gateType: "RELEASE_AUTHORIZATION" },
-      },
-      option: { outcomeClass: "APPROVE", continuationKey: "DISPATCH_RELEASE_RUN" },
-    })
+    mocks.tx.decisionRecord.findUnique.mockResolvedValue(approvingDecision)
     mocks.tx.decisionApplication.findUnique.mockResolvedValue(null)
     mocks.tx.releaseRun.updateMany.mockResolvedValue({ count: 1 })
     mocks.tx.decisionApplication.create.mockResolvedValue({ id: "application-1" })
     mocks.tx.releaseDispatch.create.mockResolvedValue({ id: "dispatch-1", status: "PENDING" })
 
-    await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint))
+    await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint, validSource))
       .resolves.toEqual({ status: "QUEUED", dispatchId: "dispatch-1" })
 
     expect(mocks.prisma.$transaction).toHaveBeenCalledOnce()
@@ -210,7 +244,7 @@ describe("release authorization", () => {
     mocks.tx.releaseDispatch.findUnique.mockResolvedValue(null)
     mocks.tx.releaseRun.findUnique.mockResolvedValue({ ...run, headSha: "1123456789abcdef0123456789abcdef01234567" })
 
-    await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint))
+    await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint, validSource))
       .resolves.toEqual({ status: "BLOCKED", code: "STALE_SOURCE" })
     expect(mocks.tx.decisionApplication.create).not.toHaveBeenCalled()
     expect(mocks.tx.releaseDispatch.create).not.toHaveBeenCalled()
@@ -220,7 +254,7 @@ describe("release authorization", () => {
     mocks.tx.releaseDispatch.findUnique.mockResolvedValue(null)
     mocks.tx.releaseRun.findUnique.mockResolvedValue({ ...run, state: "BLOCKED" })
 
-    await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint))
+    await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint, validSource))
       .resolves.toEqual({ status: "BLOCKED", code: "STALE_SOURCE" })
     expect(mocks.tx.decisionRecord.findUnique).not.toHaveBeenCalled()
     expect(mocks.tx.releaseDispatch.create).not.toHaveBeenCalled()
@@ -233,11 +267,41 @@ describe("release authorization", () => {
       decisionRecordId: "decision-1",
     })
 
-    await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint))
+    await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint, validSource))
       .resolves.toEqual({ status: "EXISTING", dispatchId: "dispatch-existing" })
     expect(mocks.tx.releaseRun.findUnique).not.toHaveBeenCalled()
     expect(mocks.tx.releaseRun.updateMany).not.toHaveBeenCalled()
     expect(mocks.tx.decisionApplication.create).not.toHaveBeenCalled()
     expect(mocks.tx.releaseDispatch.create).not.toHaveBeenCalled()
   })
+
+  for (const code of ["PR_NOT_READY", "CHECKS_FAILED", "POLICY_CHANGED"] as const) {
+    it(`fails closed and supersedes the stale authorization when revalidation reports ${code}`, async () => {
+      const revalidator: ReleaseSourceRevalidator = {
+        revalidate: vi.fn().mockResolvedValue({ status: "BLOCKED", code }),
+      }
+      mocks.tx.releaseDispatch.findUnique.mockResolvedValue(null)
+      mocks.tx.releaseRun.findUnique.mockResolvedValue(run)
+      mocks.tx.decisionRecord.findUnique.mockResolvedValue(approvingDecision)
+      mocks.tx.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", currentRevisionId: "revision-1" })
+      mocks.tx.reviewRevision.update.mockResolvedValue({})
+      mocks.tx.reviewRequest.update.mockResolvedValue({})
+      mocks.tx.releaseRun.updateMany.mockResolvedValue({ count: 1 })
+
+      await expect(queueAuthorizedRelease(run.id, "decision-1", sourceFingerprint, revalidator))
+        .resolves.toEqual({ status: "BLOCKED", code })
+
+      expect(mocks.tx.reviewRevision.update).toHaveBeenCalledWith({
+        where: { id: "revision-1" }, data: { supersededAt: expect.any(Date) },
+      })
+      expect(mocks.tx.reviewRequest.update).toHaveBeenCalledWith({
+        where: { id: "request-1" }, data: { state: "SUPERSEDED", updatedAt: expect.any(Date) },
+      })
+      expect(mocks.tx.releaseRun.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: run.id, version: run.version },
+        data: expect.objectContaining({ state: "SUPERSEDED", lastErrorCode: code }),
+      }))
+      expect(mocks.tx.releaseDispatch.create).not.toHaveBeenCalled()
+    })
+  }
 })

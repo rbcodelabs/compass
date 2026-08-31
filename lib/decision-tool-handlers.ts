@@ -2,7 +2,7 @@ import getPrisma from "@/lib/db"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { admitRoadmapItemToNow, prepareNowCommitment } from "@/lib/now-commitment"
-import { prepareReleaseRun, queueAuthorizedRelease, type ReleaseScope } from "@/lib/release-authorization"
+import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
 
 export async function requestNowCommitment({ itemId }: { itemId: string }) {
   const actor = getMcpActor()
@@ -60,6 +60,7 @@ export async function applyRecordedDecision({ decisionId }: { decisionId: string
         decision.revision.request.subjectId,
         decision.id,
         decision.revision.sourceFingerprint,
+        unconfiguredReleaseSourceRevalidator,
       )
       if (dispatch.status === "BLOCKED") return fail(`Release dispatch blocked: ${dispatch.code}`)
       return ok(`Release dispatch recorded.\nID: ${dispatch.dispatchId}\nStatus: ${dispatch.status}`, dispatch)

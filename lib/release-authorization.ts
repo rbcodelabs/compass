@@ -32,7 +32,25 @@ export type PrepareReleaseResult =
 
 export type QueueReleaseResult =
   | { status: "QUEUED" | "EXISTING"; dispatchId: string }
-  | { status: "BLOCKED"; code: "STALE_SOURCE" | "REVOKED" | "DECISION_SCOPE_MISMATCH" | "RETRYABLE_CONFLICT" }
+  | { status: "BLOCKED"; code: "STALE_SOURCE" | "REVOKED" | "DECISION_SCOPE_MISMATCH" | "RETRYABLE_CONFLICT" | ReleaseSourceBlockCode }
+
+export type ReleaseSourceBlockCode = "PR_NOT_READY" | "CHECKS_FAILED" | "POLICY_CHANGED"
+
+export type ReleaseSourceRevalidation =
+  | { status: "VALID"; scope: ReleaseScope }
+  | { status: "BLOCKED"; code: ReleaseSourceBlockCode; detail?: string }
+
+export interface ReleaseSourceRevalidator {
+  revalidate(scope: ReleaseScope): Promise<ReleaseSourceRevalidation>
+}
+
+// Until a provider-backed implementation is wired, production callers must
+// explicitly choose the fail-closed behavior. It never performs external I/O.
+export const unconfiguredReleaseSourceRevalidator: ReleaseSourceRevalidator = {
+  async revalidate() {
+    return { status: "BLOCKED", code: "PR_NOT_READY", detail: "Authoritative release-source validation is not configured." }
+  },
+}
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex")
@@ -40,6 +58,19 @@ function sha256(value: string): string {
 
 function sortedTaskIds(taskIds: readonly string[]): string[] {
   return [...taskIds].sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+}
+
+function sameReleaseScope(left: ReleaseScope, right: ReleaseScope): boolean {
+  return left.workspaceId === right.workspaceId
+    && left.provider === right.provider
+    && left.repositoryOwner === right.repositoryOwner
+    && left.repositoryName === right.repositoryName
+    && left.pullRequestNumber === right.pullRequestNumber
+    && left.baseRef === right.baseRef
+    && left.headSha === right.headSha
+    && left.targetEnvironment === right.targetEnvironment
+    && left.releasePolicyId === right.releasePolicyId
+    && JSON.stringify(sortedTaskIds(left.taskIds)) === JSON.stringify(sortedTaskIds(right.taskIds))
 }
 
 export function releaseSourceFingerprint(scope: ReleaseScope): string {
@@ -92,7 +123,8 @@ export async function prepareReleaseRun(input: PrepareReleaseInput): Promise<Pre
   const taskIds = sortedTaskIds(input.taskIds)
   const sourceFingerprint = releaseSourceFingerprint({ ...input, taskIds })
 
-  return prisma.$transaction(async (tx): Promise<PrepareReleaseResult> => {
+  try {
+    return await prisma.$transaction(async (tx): Promise<PrepareReleaseResult> => {
     const coveredTasks = await tx.task.findMany({
       where: { workspaceId: input.workspaceId, id: { in: taskIds } },
       select: { id: true },
@@ -223,7 +255,59 @@ export async function prepareReleaseRun(input: PrepareReleaseInput): Promise<Pre
       sourceFingerprint,
       reviewFingerprint,
     }
-  })
+    })
+  } catch (error) {
+    if ((error as { code?: string }).code !== "P2002") throw error
+
+    const winner = await prisma.releaseRun.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        provider: input.provider,
+        repositoryOwner: input.repositoryOwner,
+        repositoryName: input.repositoryName,
+        pullRequestNumber: input.pullRequestNumber,
+        sourceFingerprint,
+      },
+      include: { tasks: { select: { taskId: true } } },
+      orderBy: { createdAt: "desc" },
+    })
+    const winnerScope = winner ? {
+      workspaceId: winner.workspaceId,
+      provider: winner.provider as ReleaseScope["provider"],
+      repositoryOwner: winner.repositoryOwner,
+      repositoryName: winner.repositoryName,
+      pullRequestNumber: winner.pullRequestNumber,
+      baseRef: winner.baseRef,
+      headSha: winner.headSha,
+      targetEnvironment: winner.targetEnvironment as ReleaseScope["targetEnvironment"],
+      releasePolicyId: winner.releasePolicyId,
+      taskIds: winner.tasks.map((task) => task.taskId),
+    } satisfies ReleaseScope : null
+    if (!winner || !winnerScope || !sameReleaseScope(winnerScope, { ...input, taskIds })) {
+      throw new Error("Concurrent preparation produced a different release identity.", { cause: error })
+    }
+    const winnerRequest = await prisma.reviewRequest.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        gateType: "RELEASE_AUTHORIZATION",
+        subjectType: "RELEASE_RUN",
+        subjectId: winner.id,
+      },
+      include: { currentRevision: true },
+    })
+    if (winnerRequest?.state !== "PENDING"
+      || winnerRequest.currentRevision?.sourceFingerprint !== sourceFingerprint) {
+      throw new Error("Concurrent preparation winner is not an identical pending release review.", { cause: error })
+    }
+    return {
+      status: "READY",
+      releaseRunId: winner.id,
+      requestId: winnerRequest.id,
+      revisionId: winnerRequest.currentRevision.id,
+      sourceFingerprint,
+      reviewFingerprint: winnerRequest.currentRevision.fingerprint,
+    }
+  }
 }
 
 export async function recordReleaseDecision(input: Parameters<typeof recordDecision>[0]) {
@@ -242,6 +326,7 @@ export async function queueAuthorizedRelease(
   releaseRunId: string,
   decisionRecordId: string,
   expectedSourceFingerprint: string,
+  revalidator: ReleaseSourceRevalidator,
 ): Promise<QueueReleaseResult> {
   const prisma = getPrisma()
   const idempotencyKey = dispatchIdempotencyKey(releaseRunId, decisionRecordId)
@@ -306,6 +391,59 @@ export async function queueAuthorizedRelease(
         return { status: "BLOCKED", code: "DECISION_SCOPE_MISMATCH" }
       }
 
+      let validation: ReleaseSourceRevalidation
+      try {
+        validation = await revalidator.revalidate({
+          workspaceId: releaseRun.workspaceId,
+          provider: releaseRun.provider as ReleaseScope["provider"],
+          repositoryOwner: releaseRun.repositoryOwner,
+          repositoryName: releaseRun.repositoryName,
+          pullRequestNumber: releaseRun.pullRequestNumber,
+          baseRef: releaseRun.baseRef,
+          headSha: releaseRun.headSha,
+          targetEnvironment: releaseRun.targetEnvironment as ReleaseScope["targetEnvironment"],
+          releasePolicyId: releaseRun.releasePolicyId,
+          taskIds: releaseRun.tasks.map((task) => task.taskId),
+        })
+      } catch {
+        validation = { status: "BLOCKED", code: "PR_NOT_READY", detail: "Authoritative release-source validation failed." }
+      }
+      if (validation.status === "VALID"
+        && releaseSourceFingerprint(validation.scope) !== expectedSourceFingerprint) {
+        validation = {
+          status: "BLOCKED",
+          code: validation.scope.releasePolicyId !== releaseRun.releasePolicyId ? "POLICY_CHANGED" : "PR_NOT_READY",
+          detail: "The authoritative release source no longer matches the reviewed scope.",
+        }
+      }
+      if (validation.status === "BLOCKED") {
+        const now = new Date()
+        const request = await tx.reviewRequest.findFirst({
+          where: {
+            workspaceId: releaseRun.workspaceId,
+            gateType: "RELEASE_AUTHORIZATION",
+            subjectType: "RELEASE_RUN",
+            subjectId: releaseRun.id,
+          },
+        })
+        if (request?.currentRevisionId) {
+          await tx.reviewRevision.update({ where: { id: request.currentRevisionId }, data: { supersededAt: now } })
+          await tx.reviewRequest.update({ where: { id: request.id }, data: { state: "SUPERSEDED", updatedAt: now } })
+        }
+        const superseded = await tx.releaseRun.updateMany({
+          where: { id: releaseRun.id, version: releaseRun.version },
+          data: {
+            state: "SUPERSEDED",
+            version: releaseRun.version + 1,
+            lastErrorCode: validation.code,
+            lastError: validation.detail ?? null,
+            updatedAt: now,
+          },
+        })
+        return superseded.count === 1
+          ? { status: "BLOCKED", code: validation.code }
+          : { status: "BLOCKED", code: "RETRYABLE_CONFLICT" }
+      }
       const receiptKey = applicationReceiptKey(releaseRunId, decisionRecordId)
       const existingApplication = await tx.decisionApplication.findUnique({ where: { receiptKey } })
       if (existingApplication) {

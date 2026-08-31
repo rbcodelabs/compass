@@ -9,7 +9,11 @@ const { mockPrepare, mockPrepareRelease, mockAdmit, mockQueueRelease, mockFindRe
   mockListRequests: vi.fn(),
   mockFindDecision: vi.fn(),
 }))
-vi.mock("@/lib/release-authorization", () => ({ prepareReleaseRun: mockPrepareRelease, queueAuthorizedRelease: mockQueueRelease }))
+vi.mock("@/lib/release-authorization", () => ({
+  prepareReleaseRun: mockPrepareRelease,
+  queueAuthorizedRelease: mockQueueRelease,
+  unconfiguredReleaseSourceRevalidator: { revalidate: vi.fn() },
+}))
 
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ kind: "USER", userId: "user-1" }) }))
 vi.mock("@/lib/now-commitment", () => ({
@@ -95,6 +99,11 @@ describe("decision MCP handlers", () => {
 
     expect(result.structuredContent.ok).toBe(true)
     expect(result.content[0].text).toContain("dispatch-1")
-    expect(mockQueueRelease).toHaveBeenCalledWith("release-1", "decision-1", "source-fp")
+    expect(mockQueueRelease).toHaveBeenCalledWith(
+      "release-1",
+      "decision-1",
+      "source-fp",
+      expect.objectContaining({ revalidate: expect.any(Function) }),
+    )
   })
 })
