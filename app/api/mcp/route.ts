@@ -1774,7 +1774,7 @@ const _handler = createMcpHandler(
       "add_to_roadmap",
       {
         title: "Add to Roadmap",
-        description: "Creates a Roadmap Item in the NOW, NEXT, or LATER horizon. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
+        description: "Creates a Roadmap Item in NEXT, LATER, or SHIPPED. NOW requires request_now_commitment and a recorded human decision. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Title of the roadmap item"),

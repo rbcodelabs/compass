@@ -7,7 +7,7 @@ export async function requestNowCommitment({ itemId }: { itemId: string }) {
   const actor = getMcpActor()
   try {
     const revision = await prepareNowCommitment(itemId, { requestedById: actor.userId })
-    return ok(`NOW commitment review prepared.\nRevision ID: ${revision.id}\nFingerprint: ${revision.fingerprint}`, revision)
+    return ok(`NOW commitment review prepared.\nID: ${revision.requestId}\nRevision ID: ${revision.id}\nFingerprint: ${revision.fingerprint}`, revision)
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Could not prepare NOW commitment review.")
   }
@@ -40,7 +40,7 @@ export async function applyRecordedDecision({ decisionId }: { decisionId: string
   }
   try {
     const receipt = await admitRoadmapItemToNow(decision.revision.request.subjectId, decision.id)
-    return ok(`Decision applied.\nReceipt: ${receipt.receiptKey}\nStatus: ${receipt.status}`, receipt)
+    return ok(`Decision applied.\nID: ${receipt.id}\nReceipt: ${receipt.receiptKey}\nStatus: ${receipt.status}`, receipt)
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Could not apply decision.")
   }
