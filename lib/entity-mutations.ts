@@ -13,6 +13,7 @@
 import getPrisma from "@/lib/db";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
 import { SETTABLE_HORIZONS } from "@/lib/roadmap";
+import { assertDirectNowWriteBlocked } from "@/lib/now-commitment";
 
 type EnumFieldConfig = { field: "status" | "horizon"; options: readonly string[] };
 
@@ -106,6 +107,19 @@ export async function updateEntityField(
     }
     if (typeof value !== "string" || !config.enum.options.includes(value)) {
       return { ok: false, status: 400, error: `Invalid ${field}` };
+    }
+    if (type === "roadmapItem" && field === "horizon" && value === "NOW") {
+      const prisma = getPrisma();
+      const current = await prisma.roadmapItem.findFirst({
+        where: entityScopeWhere(type, id, workspaceId),
+        select: { horizon: true },
+      });
+      if (!current) return { ok: false, status: 404, error: "Not found" };
+      try {
+        assertDirectNowWriteBlocked(current.horizon, value);
+      } catch (error) {
+        return { ok: false, status: 400, error: error instanceof Error ? error.message : "NOW commitment decision required" };
+      }
     }
     data = { [field]: value };
   } else {

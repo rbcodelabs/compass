@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import type { Horizon } from "@/lib/types";
 import { isLaunchHorizon } from "@/lib/roadmap";
+import { assertDirectNowWriteBlocked } from "@/lib/now-commitment";
 
 // ─── Add Roadmap Item ─────────────────────────────────────────────────────────
 
@@ -24,6 +25,7 @@ export async function addRoadmapItem(
   },
   revalidatePathStr: string
 ) {
+  assertDirectNowWriteBlocked(null, data.horizon);
   const prisma = getPrisma();
 
   // Place new item at the end of its column by finding the current max sortOrder.
@@ -70,7 +72,6 @@ export async function updateRoadmapItem(
   revalidatePathStr: string
 ) {
   const prisma = getPrisma();
-
   const updateData: {
     title?: string;
     description?: string;
@@ -114,6 +115,14 @@ export async function moveItem(
   }
 
   const prisma = getPrisma();
+  if (horizon === "NOW") {
+    const current = await prisma.roadmapItem.findFirst({
+      where: { id: itemId, workspaceId },
+      select: { horizon: true },
+    });
+    if (!current) throw new Error("Roadmap item not found");
+    assertDirectNowWriteBlocked(current.horizon, horizon);
+  }
 
   // Place the moved item at the end of the destination column.
   const lastItem = await prisma.roadmapItem.findFirst({
@@ -159,6 +168,7 @@ export async function promoteToRoadmap(
   dates?: { startDate?: Date; endDate?: Date },
   isPrivate?: boolean
 ) {
+  assertDirectNowWriteBlocked(null, horizon);
   const prisma = getPrisma();
 
   const solution = await prisma.solution.findUnique({
@@ -203,6 +213,7 @@ export async function promoteFeedbackToRoadmap(
   dates?: { startDate?: Date; endDate?: Date },
   isPrivate?: boolean
 ) {
+  assertDirectNowWriteBlocked(null, horizon);
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 

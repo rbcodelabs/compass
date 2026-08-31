@@ -225,6 +225,8 @@ export type WorkspaceEntityType =
   | "evidence"
   | "opportunityScore"
   | "workspaceScoringConfig"
+  | "reviewRequest"
+  | "decisionRecord"
 
 // Each resolver walks the FK chain to the owning workspaceId in one query.
 // Relation/field names verified against prisma/schema.prisma.
@@ -295,6 +297,10 @@ const WORKSPACE_ENTITY_RESOLVERS: Record<
       ?.opportunity?.workspaceId ?? null,
   workspaceScoringConfig: async (p, id) =>
     (await p.workspaceScoringConfig.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
+  reviewRequest: async (p, id) =>
+    (await p.reviewRequest.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
+  decisionRecord: async (p, id) =>
+    (await p.decisionRecord.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
 }
 
 /**

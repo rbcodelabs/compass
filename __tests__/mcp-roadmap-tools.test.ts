@@ -105,7 +105,7 @@ describe("add_to_roadmap MCP tool — dates", () => {
     const result = await handler({
       workspaceId: "ws-1",
       title: "Ship payments",
-      horizon: "NOW",
+      horizon: "NEXT",
       startDate: "2026-07-01",
       endDate: "2026-09-30",
     })
@@ -157,7 +157,7 @@ describe("add_to_roadmap MCP tool — isPrivate", () => {
     })
 
     const handler = getHandler("add_to_roadmap")
-    const result = await handler({ workspaceId: "ws-1", title: "Public item", horizon: "NOW" })
+    const result = await handler({ workspaceId: "ws-1", title: "Public item", horizon: "NEXT" })
 
     const createArgs = mockPrisma.roadmapItem.create.mock.calls[0][0]
     expect(createArgs.data.isPrivate).toBe(false)
@@ -175,7 +175,7 @@ describe("add_to_roadmap MCP tool — isPrivate", () => {
     const result = await handler({
       workspaceId: "ws-1",
       title: "Security fix",
-      horizon: "NOW",
+      horizon: "NEXT",
       isPrivate: true,
     })
 
