@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS "release_dispatches" (
   "claimed_by" VARCHAR(255),
   "claim_expires_at" TIMESTAMP(3),
   "attempt_count" INTEGER NOT NULL DEFAULT 0,
+  "version" INTEGER NOT NULL DEFAULT 0,
   "runtime_run_id" VARCHAR(255),
   "last_error" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -68,10 +68,18 @@ const approvingDecision = {
   workspaceId: scope.workspaceId,
   fingerprint: "review-fingerprint",
   revision: {
+    id: "revision-1",
     fingerprint: "review-fingerprint",
     sourceFingerprint,
     supersededAt: null,
-    request: { workspaceId: scope.workspaceId, subjectType: "RELEASE_RUN", subjectId: run.id, gateType: "RELEASE_AUTHORIZATION" },
+    request: {
+      workspaceId: scope.workspaceId,
+      subjectType: "RELEASE_RUN",
+      subjectId: run.id,
+      gateType: "RELEASE_AUTHORIZATION",
+      state: "DECIDED",
+      currentRevisionId: "revision-1",
+    },
   },
   option: { outcomeClass: "APPROVE", continuationKey: "DISPATCH_RELEASE_RUN" },
 }
@@ -311,22 +319,102 @@ describe("release authorization", () => {
   })
 
   it("revalidates the same canonical snapshot again before claiming a queued dispatch", async () => {
-    const dispatch = { id: "dispatch-1", releaseRunId: run.id, decisionRecordId: "decision-1", status: "PENDING", claimExpiresAt: null, releaseRun: run }
+    const queuedRun = { ...run, state: "DISPATCH_QUEUED", authorizationDecisionRecordId: "decision-1", version: 1 }
+    const dispatch = { id: "dispatch-1", releaseRunId: run.id, decisionRecordId: "decision-1", status: "PENDING", version: 0, claimExpiresAt: null, attemptCount: 0, releaseRun: queuedRun }
     mocks.prisma.releaseDispatch.findUnique.mockResolvedValue(dispatch)
     mocks.tx.releaseDispatch.findUnique.mockResolvedValue(dispatch)
+    mocks.tx.decisionRecord.findUnique.mockResolvedValue(approvingDecision)
+    mocks.tx.releaseRun.updateMany.mockResolvedValue({ count: 1 })
     mocks.tx.releaseDispatch.updateMany.mockResolvedValue({ count: 1 })
 
     await expect(claimReleaseDispatch("dispatch-1", "worker-1", validSource, new Date("2026-08-31T12:00:00Z")))
       .resolves.toEqual({ status: "CLAIMED", dispatchId: "dispatch-1" })
     expect(validSource.revalidate).toHaveBeenCalledWith(expect.objectContaining({ headSha: scope.headSha, releasePolicyId: scope.releasePolicyId }))
     expect(mocks.tx.releaseDispatch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ id: "dispatch-1", status: "PENDING" }),
-      data: expect.objectContaining({ status: "CLAIMED", claimedBy: "worker-1", attemptCount: 1 }),
+      where: expect.objectContaining({ id: "dispatch-1", status: "PENDING", version: 0 }),
+      data: expect.objectContaining({ status: "CLAIMED", claimedBy: "worker-1", attemptCount: 1, version: 1 }),
     }))
+    expect(mocks.tx.releaseRun.updateMany).toHaveBeenCalledWith({
+      where: { id: run.id, state: "DISPATCH_QUEUED", authorizationDecisionRecordId: "decision-1", version: 1 },
+      data: { version: 2, updatedAt: expect.any(Date) },
+    })
+  })
+
+  it.each(["CANCELLED", "SUPERSEDED", "BLOCKED"])("does not claim a dispatch for a %s run", async (state) => {
+    const dispatch = {
+      id: "dispatch-1", releaseRunId: run.id, decisionRecordId: "decision-1", status: "PENDING", version: 0,
+      releaseRun: { ...run, state, authorizationDecisionRecordId: "decision-1", version: 1 },
+    }
+    mocks.prisma.releaseDispatch.findUnique.mockResolvedValue(dispatch)
+
+    await expect(claimReleaseDispatch("dispatch-1", "worker-1", validSource))
+      .resolves.toEqual({ status: "BLOCKED", code: "NOT_PENDING" })
+    expect(validSource.revalidate).not.toHaveBeenCalled()
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it("does not claim when the run authorization changed after the dispatch was queued", async () => {
+    const dispatch = {
+      id: "dispatch-1", releaseRunId: run.id, decisionRecordId: "decision-1", status: "PENDING", version: 0,
+      releaseRun: { ...run, state: "DISPATCH_QUEUED", authorizationDecisionRecordId: "decision-2", version: 1 },
+    }
+    mocks.prisma.releaseDispatch.findUnique.mockResolvedValue(dispatch)
+
+    await expect(claimReleaseDispatch("dispatch-1", "worker-1", validSource))
+      .resolves.toEqual({ status: "BLOCKED", code: "NOT_PENDING" })
+    expect(validSource.revalidate).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["superseded revision", { ...approvingDecision, revision: { ...approvingDecision.revision, supersededAt: new Date() } }],
+    ["replaced current revision", { ...approvingDecision, revision: { ...approvingDecision.revision, request: { ...approvingDecision.revision.request, state: "DECIDED", currentRevisionId: "revision-2" }, id: "revision-1" } }],
+    ["revoked request", { ...approvingDecision, revision: { ...approvingDecision.revision, request: { ...approvingDecision.revision.request, state: "CANCELLED", currentRevisionId: "revision-1" }, id: "revision-1" } }],
+  ])("does not claim a decision with a %s", async (_scenario, decision) => {
+    const queuedRun = { ...run, state: "DISPATCH_QUEUED", authorizationDecisionRecordId: "decision-1", version: 1 }
+    const dispatch = { id: "dispatch-1", releaseRunId: run.id, decisionRecordId: "decision-1", status: "PENDING", version: 0, releaseRun: queuedRun }
+    mocks.prisma.releaseDispatch.findUnique.mockResolvedValue(dispatch)
+    mocks.tx.releaseDispatch.findUnique.mockResolvedValue(dispatch)
+    mocks.tx.decisionRecord.findUnique.mockResolvedValue(decision)
+
+    await expect(claimReleaseDispatch("dispatch-1", "worker-1", validSource))
+      .resolves.toEqual({ status: "BLOCKED", code: "NOT_PENDING" })
+    expect(mocks.tx.releaseRun.updateMany).not.toHaveBeenCalled()
+    expect(mocks.tx.releaseDispatch.updateMany).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["run", { runCount: 0, dispatchCount: 1 }],
+    ["dispatch", { runCount: 1, dispatchCount: 0 }],
+  ])("returns a retryable conflict when the %s version compare-and-swap loses", async (_row, counts) => {
+    const queuedRun = { ...run, state: "DISPATCH_QUEUED", authorizationDecisionRecordId: "decision-1", version: 1 }
+    const dispatch = { id: "dispatch-1", releaseRunId: run.id, decisionRecordId: "decision-1", status: "PENDING", version: 4, attemptCount: 0, releaseRun: queuedRun }
+    mocks.prisma.releaseDispatch.findUnique.mockResolvedValue(dispatch)
+    mocks.tx.releaseDispatch.findUnique.mockResolvedValue(dispatch)
+    mocks.tx.decisionRecord.findUnique.mockResolvedValue({
+      ...approvingDecision,
+      revision: {
+        ...approvingDecision.revision,
+        id: "revision-1",
+        request: { ...approvingDecision.revision.request, state: "DECIDED", currentRevisionId: "revision-1" },
+      },
+    })
+    mocks.tx.releaseRun.updateMany.mockResolvedValue({ count: counts.runCount })
+    mocks.tx.releaseDispatch.updateMany.mockResolvedValue({ count: counts.dispatchCount })
+
+    await expect(claimReleaseDispatch("dispatch-1", "worker-1", validSource))
+      .resolves.toEqual({ status: "BLOCKED", code: "RETRYABLE_CONFLICT" })
   })
 
   it("does not claim when dispatch-boundary revalidation is stale", async () => {
-    const dispatch = { id: "dispatch-1", releaseRunId: run.id, decisionRecordId: "decision-1", status: "PENDING", claimExpiresAt: null, releaseRun: run }
+    const dispatch = {
+      id: "dispatch-1",
+      releaseRunId: run.id,
+      decisionRecordId: "decision-1",
+      status: "PENDING",
+      version: 0,
+      claimExpiresAt: null,
+      releaseRun: { ...run, state: "DISPATCH_QUEUED", authorizationDecisionRecordId: "decision-1", version: 1 },
+    }
     mocks.prisma.releaseDispatch.findUnique.mockResolvedValue(dispatch)
     const changed = { ...scope, headSha: "f".repeat(40) }
     const revalidator: ReleaseSourceRevalidator = {

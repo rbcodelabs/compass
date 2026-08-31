@@ -561,7 +561,12 @@ export async function claimReleaseDispatch(
     where: { id: dispatchId },
     include: { releaseRun: { include: { tasks: { select: { taskId: true } } } } },
   })
-  if (!candidate || candidate.status !== "PENDING") return { status: "BLOCKED", code: "NOT_PENDING" }
+  if (!candidate
+    || candidate.status !== "PENDING"
+    || candidate.releaseRun.state !== "DISPATCH_QUEUED"
+    || candidate.releaseRun.authorizationDecisionRecordId !== candidate.decisionRecordId) {
+    return { status: "BLOCKED", code: "NOT_PENDING" }
+  }
   const expectedSnapshot = canonicalReleaseSnapshot(releaseScopeFromRun(candidate.releaseRun))
 
   let validation: ReleaseSourceRevalidation
@@ -577,30 +582,76 @@ export async function claimReleaseDispatch(
     return { status: "BLOCKED", code: mismatchCode(expectedSnapshot.scope, providerSnapshot.scope) }
   }
 
-  return prisma.$transaction(async (tx): Promise<ClaimReleaseDispatchResult> => {
+  try {
+    return await prisma.$transaction(async (tx): Promise<ClaimReleaseDispatchResult> => {
     const current = await tx.releaseDispatch.findUnique({
       where: { id: dispatchId },
       include: { releaseRun: { include: { tasks: { select: { taskId: true } } } } },
     })
-    if (!current || current.status !== "PENDING") return { status: "BLOCKED", code: "NOT_PENDING" }
+    if (!current
+      || current.status !== "PENDING"
+      || current.releaseRun.state !== "DISPATCH_QUEUED"
+      || current.releaseRun.authorizationDecisionRecordId !== current.decisionRecordId) {
+      return { status: "BLOCKED", code: "NOT_PENDING" }
+    }
     const currentSnapshot = canonicalReleaseSnapshot(releaseScopeFromRun(current.releaseRun))
     if (currentSnapshot.fingerprint !== expectedSnapshot.fingerprint
       || current.releaseRun.sourceFingerprint !== expectedSnapshot.fingerprint) {
       return { status: "BLOCKED", code: "PR_NOT_READY" }
     }
+
+    const decision = await tx.decisionRecord.findUnique({
+      where: { id: current.decisionRecordId },
+      include: {
+        revision: { include: { request: true } },
+        option: true,
+      },
+    })
+    if (!decision
+      || decision.workspaceId !== current.releaseRun.workspaceId
+      || decision.fingerprint !== decision.revision.fingerprint
+      || decision.revision.sourceFingerprint !== current.releaseRun.sourceFingerprint
+      || decision.revision.supersededAt
+      || decision.revision.request.state !== "DECIDED"
+      || decision.revision.request.currentRevisionId !== decision.revision.id
+      || decision.revision.request.gateType !== "RELEASE_AUTHORIZATION"
+      || decision.revision.request.subjectType !== "RELEASE_RUN"
+      || decision.revision.request.subjectId !== current.releaseRun.id
+      || decision.option.outcomeClass !== "APPROVE"
+      || decision.option.continuationKey !== RELEASE_CONTINUATION) {
+      return { status: "BLOCKED", code: "NOT_PENDING" }
+    }
+
     const claimExpiresAt = new Date(now.getTime() + 5 * 60_000)
+    const runClaimed = await tx.releaseRun.updateMany({
+      where: {
+        id: current.releaseRun.id,
+        state: "DISPATCH_QUEUED",
+        authorizationDecisionRecordId: current.decisionRecordId,
+        version: current.releaseRun.version,
+      },
+      data: { version: current.releaseRun.version + 1, updatedAt: now },
+    })
+    if (runClaimed.count !== 1) throw Object.assign(new Error("Release run claim compare-and-swap lost"), { code: "RELEASE_CLAIM_RACE" })
+
     const claimed = await tx.releaseDispatch.updateMany({
-      where: { id: dispatchId, status: "PENDING" },
+      where: { id: dispatchId, status: "PENDING", version: current.version },
       data: {
         status: "CLAIMED",
         claimedBy: workerId,
         claimExpiresAt,
         attemptCount: (current.attemptCount ?? 0) + 1,
+        version: current.version + 1,
         updatedAt: now,
       },
     })
-    return claimed.count === 1
-      ? { status: "CLAIMED", dispatchId }
-      : { status: "BLOCKED", code: "RETRYABLE_CONFLICT" }
-  })
+    if (claimed.count !== 1) throw Object.assign(new Error("Release dispatch claim compare-and-swap lost"), { code: "RELEASE_CLAIM_RACE" })
+    return { status: "CLAIMED", dispatchId }
+    })
+  } catch (error) {
+    if ((error as { code?: string }).code === "RELEASE_CLAIM_RACE") {
+      return { status: "BLOCKED", code: "RETRYABLE_CONFLICT" }
+    }
+    throw error
+  }
 }

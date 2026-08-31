@@ -939,6 +939,7 @@ model ReleaseDispatch {
   claimedBy        String?        @map("claimed_by") @db.VarChar(255)
   claimExpiresAt   DateTime?      @map("claim_expires_at")
   attemptCount     Int            @default(0) @map("attempt_count")
+  version          Int            @default(0)
   runtimeRunId     String?        @map("runtime_run_id") @db.VarChar(255)
   lastError        String?        @map("last_error") @db.Text
   createdAt        DateTime       @default(now()) @map("created_at")
