@@ -5,22 +5,22 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { recordDecision } from "@/lib/decision-service"
 import { admitRoadmapItemToNow, prepareNowCommitment } from "@/lib/now-commitment"
+import { isOrgAdminRole } from "@/lib/roles"
+import { queueAuthorizedRelease } from "@/lib/release-authorization"
 
 async function requireWorkspaceMember(workspaceId: string) {
   const session = await auth()
   if (!session?.user?.id) throw new Error("Unauthorized")
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findFirst({
-    where: {
-      id: workspaceId,
-      OR: [
-        { members: { some: { userId: session.user.id } } },
-        { organization: { members: { some: { userId: session.user.id, role: { in: ["OWNER", "ADMIN", "owner", "admin"] } } } } },
-      ],
+    where: { id: workspaceId },
+    select: {
+      id: true,
+      members: { where: { userId: session.user.id }, select: { id: true } },
+      organization: { select: { members: { where: { userId: session.user.id }, select: { role: true } } } },
     },
-    select: { id: true },
   })
-  if (!workspace) throw new Error("Workspace not found")
+  if (!workspace || (workspace.members.length === 0 && !isOrgAdminRole(workspace.organization.members[0]?.role))) throw new Error("Workspace not found")
   return session.user.id
 }
 
@@ -56,6 +56,11 @@ export async function decideReviewAction(input: {
   const selected = await prisma.reviewOption.findUnique({ where: { id: input.optionId } })
   if (selected?.continuationKey === "ADMIT_ROADMAP_ITEM_TO_NOW" && selected.outcomeClass === "APPROVE") {
     await admitRoadmapItemToNow(revision.request.subjectId, decision.id)
+  }
+  if (selected?.continuationKey === "DISPATCH_RELEASE_RUN" && selected.outcomeClass === "APPROVE") {
+    if (!revision.sourceFingerprint) throw new Error("Release review is missing its immutable source fingerprint")
+    const dispatch = await queueAuthorizedRelease(revision.request.subjectId, decision.id, revision.sourceFingerprint)
+    if (dispatch.status === "BLOCKED") throw new Error(`Release dispatch blocked: ${dispatch.code}`)
   }
   revalidatePath("/", "layout")
 }

@@ -44,6 +44,9 @@ type RoadmapItemData = {
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
   nowReview: { id: string; state: string } | null;
+  nowCommitmentProvenance: string;
+  nowDecisionRecordId: string | null;
+  nowApplication: { id: string; status: string; receiptKey: string } | null;
   _count: { votes: number };
 };
 
@@ -135,6 +138,9 @@ export function RoadmapItemPanel({
           workspaceSlug={workspaceSlug}
           horizon={data.horizon}
           review={data.nowReview}
+          provenance={data.nowCommitmentProvenance}
+          decisionRecordId={data.nowDecisionRecordId}
+          application={data.nowApplication}
         />
       </Section>
 

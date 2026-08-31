@@ -20,6 +20,7 @@ const models = {
   task: { findMany: vi.fn() },
   workspaceMember: { findMany: vi.fn() },
   reviewRequest: { findFirst: vi.fn() },
+  decisionApplication: { findFirst: vi.fn() },
   artifactLink: { findMany: vi.fn() },
   artifact: { findMany: vi.fn() },
   feedbackItem: { findFirst: vi.fn() },
@@ -41,7 +42,7 @@ const ID = "ent-1";
 // scopes it to a workspace (this is the IDOR defense — assert it precisely).
 const CASES: Array<{
   type: EntityType;
-  model: Exclude<keyof typeof models, "task" | "workspaceMember" | "reviewRequest" | "artifact" | "artifactLink">;
+  model: Exclude<keyof typeof models, "task" | "workspaceMember" | "reviewRequest" | "decisionApplication" | "artifact" | "artifactLink">;
   where: Record<string, unknown>;
 }> = [
   { type: "objective", model: "objective", where: { id: ID, cycle: { workspaceId: WS } } },

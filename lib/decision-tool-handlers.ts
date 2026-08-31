@@ -2,6 +2,7 @@ import getPrisma from "@/lib/db"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { admitRoadmapItemToNow, prepareNowCommitment } from "@/lib/now-commitment"
+import { queueAuthorizedRelease } from "@/lib/release-authorization"
 
 export async function requestNowCommitment({ itemId }: { itemId: string }) {
   const actor = getMcpActor()
@@ -35,12 +36,21 @@ export async function applyRecordedDecision({ decisionId }: { decisionId: string
   const prisma = getPrisma()
   const decision = await prisma.decisionRecord.findUnique({ where: { id: decisionId }, include: { revision: { include: { request: true } } } })
   if (!decision) return fail(`Decision "${decisionId}" not found.`)
-  if (decision.revision.request.gateType !== "NOW_COMMITMENT") {
-    return fail("This decision gate does not yet have an MCP applicator. RELEASE_AUTHORIZATION remains owned by the ADR-0004 release lifecycle.")
-  }
   try {
-    const receipt = await admitRoadmapItemToNow(decision.revision.request.subjectId, decision.id)
-    return ok(`Decision applied.\nID: ${receipt.id}\nReceipt: ${receipt.receiptKey}\nStatus: ${receipt.status}`, receipt)
+    if (decision.revision.request.gateType === "NOW_COMMITMENT") {
+      const receipt = await admitRoadmapItemToNow(decision.revision.request.subjectId, decision.id)
+      return ok(`Decision applied.\nID: ${receipt.id}\nReceipt: ${receipt.receiptKey}\nStatus: ${receipt.status}`, receipt)
+    }
+    if (decision.revision.request.gateType === "RELEASE_AUTHORIZATION" && decision.revision.sourceFingerprint) {
+      const dispatch = await queueAuthorizedRelease(
+        decision.revision.request.subjectId,
+        decision.id,
+        decision.revision.sourceFingerprint,
+      )
+      if (dispatch.status === "BLOCKED") return fail(`Release dispatch blocked: ${dispatch.code}`)
+      return ok(`Release dispatch recorded.\nID: ${dispatch.dispatchId}\nStatus: ${dispatch.status}`, dispatch)
+    }
+    return fail(`Decision gate "${decision.revision.request.gateType}" does not have an applicator.`)
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Could not apply decision.")
   }

@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockPrepare, mockAdmit, mockFindRequest, mockListRequests, mockFindDecision } = vi.hoisted(() => ({
+const { mockPrepare, mockAdmit, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision } = vi.hoisted(() => ({
   mockPrepare: vi.fn(),
   mockAdmit: vi.fn(),
+  mockQueueRelease: vi.fn(),
   mockFindRequest: vi.fn(),
   mockListRequests: vi.fn(),
   mockFindDecision: vi.fn(),
 }))
+vi.mock("@/lib/release-authorization", () => ({ queueAuthorizedRelease: mockQueueRelease }))
 
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ kind: "USER", userId: "user-1" }) }))
 vi.mock("@/lib/now-commitment", () => ({
@@ -60,5 +62,22 @@ describe("decision MCP handlers", () => {
 
     expect(result.content[0].text).toContain("ID: receipt-1")
     expect(mockAdmit).toHaveBeenCalledWith("item-1", "decision-1")
+  })
+
+  it("queues an authorized release through the durable outbox", async () => {
+    mockFindDecision.mockResolvedValue({
+      id: "decision-1",
+      revision: {
+        sourceFingerprint: "source-fp",
+        request: { gateType: "RELEASE_AUTHORIZATION", subjectId: "release-1" },
+      },
+    })
+    mockQueueRelease.mockResolvedValue({ status: "QUEUED", dispatchId: "dispatch-1" })
+
+    const result = await applyRecordedDecision({ decisionId: "decision-1" })
+
+    expect(result.structuredContent.ok).toBe(true)
+    expect(result.content[0].text).toContain("dispatch-1")
+    expect(mockQueueRelease).toHaveBeenCalledWith("release-1", "decision-1", "source-fp")
   })
 })

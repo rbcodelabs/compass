@@ -104,7 +104,13 @@ test.describe("Discovery → Roadmap", () => {
       // ── 11. Verify the guarded admission receipt took effect ──────────────
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
-      await expect(page.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
+      const nowColumn = page.locator("#roadmap-column-NOW");
+      await expect(nowColumn.getByRole("button", { name: solTitle, exact: true })).toBeVisible({ timeout: 10_000 });
+      await nowColumn.getByRole("button", { name: solTitle, exact: true }).click();
+      const admittedPanel = page.locator('[data-slot="sheet-content"]');
+      await expect(admittedPanel.getByText(/native decision provenance/i)).toBeVisible();
+      await expect(admittedPanel.getByRole("link", { name: /Decision record:/ })).toBeVisible();
+      await expect(admittedPanel.getByText(/Application receipt:/)).toBeVisible();
     }
   );
 });
