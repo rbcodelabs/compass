@@ -168,21 +168,18 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       const sol2UnscheduledCard = unscheduledPanel.locator('[data-slot="card"]').filter({ hasText: sol2Title });
       await expect(sol2UnscheduledCard).toBeVisible({ timeout: 10_000 });
 
-      const dropZoneBox = await page.locator("#gantt-drop-zone").boundingBox();
-      if (!dropZoneBox) throw new Error("Gantt drop zone not found");
-      await dragTo(page, sol2UnscheduledCard.getByLabel("Drag to schedule"), dropZoneBox);
-
       const dialog = page.getByRole("dialog");
       const scheduleHeading = dialog.getByRole("heading", { name: "Schedule on the roadmap" });
       // PointerSensor activation can be lost when the browser is busy laying
-      // out the newly selected timeline. Retry the same user gesture only if
-      // the expected dialog state did not materialize.
-      const firstGestureOpenedDialog = await scheduleHeading
-        .waitFor({ state: "visible", timeout: 3_000 })
-        .then(() => true)
-        .catch(() => false);
-      if (!firstGestureOpenedDialog) {
+      // out the newly selected timeline. Recompute layout and retry the same
+      // user gesture only while the expected dialog state is absent.
+      for (let attempt = 0; attempt < 3 && !(await scheduleHeading.isVisible()); attempt += 1) {
+        const dropZoneBox = await page.locator("#gantt-drop-zone").boundingBox();
+        if (!dropZoneBox) throw new Error("Gantt drop zone not found");
         await dragTo(page, sol2UnscheduledCard.getByLabel("Drag to schedule"), dropZoneBox);
+        await scheduleHeading
+          .waitFor({ state: "visible", timeout: 3_000 })
+          .catch(() => undefined);
       }
       await expect(scheduleHeading).toBeVisible({
         timeout: 10_000,

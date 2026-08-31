@@ -31,6 +31,10 @@ test.describe("Doc Version History", () => {
 
       const editor = page.locator(".ProseMirror");
       await expect(editor).toBeVisible({ timeout: 10_000 });
+      // The URL can commit before the streamed editor swaps from the prior
+      // document. Wait for the newly created blank document, otherwise the
+      // following keystrokes and autosave can target stale editor state.
+      await expect(editor).toBeEmpty({ timeout: 10_000 });
 
       // ── 2. Write the original content and confirm it persisted ──────────────
       // Wait for this edit's server action response. A fixed delay only waits
