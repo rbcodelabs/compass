@@ -295,8 +295,14 @@ plan covers the requested commitment date, rather than inventing availability.
 Overlapping active plan periods are rejected by the service (DSQL cannot express
 an exclusion constraint here); a replacement references `supersedesId`, and the
 superseded plan remains valid only for historical revision verification.
-For v1, every item consumes exactly one focus slot and capacity is workspace
-scoped; squads and variable weights are deferred.
+For v1, the Compass workspace has three available `FOCUS_SLOT` units, every
+item consumes exactly one focus slot, and capacity is workspace scoped. When
+the reviewer explicitly displaces a named NOW item, that item returns to
+`NEXT`. Squads, variable weights, alternate limits, and `LATER` displacement
+are deferred. Runtime policy configuration references the authoritative plan
+and native investment evidence; mutable DecisionRecord and receipt IDs are
+injected through deployment JSON (or a generated policy file), never embedded
+in application source.
 
 **Product choice for Rick:** accept focus slots (one per NOW item) as the v1
 meaning of capacity, and choose the first explicit `availableUnits` value for

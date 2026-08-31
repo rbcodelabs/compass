@@ -39,7 +39,7 @@ const configuredNativeDecision = {
 const configuredEligibility = {
   ...eligibility,
   investmentDecision: { ...eligibility.investmentDecision, authorityProvider: "COMPASS_NATIVE" as const, authorityRecordId: configuredIds.investmentDecision, authorityChecksum: investmentAuthorityChecksum(configuredNativeDecision, configuredIds.investmentReceipt), applicationReceiptId: configuredIds.investmentReceipt, subjectId: configuredIds.solution },
-  capacity: { ...eligibility.capacity, planId: configuredIds.plan, reservedRoadmapItemIds: [configuredIds.reserved] },
+  capacity: { ...eligibility.capacity, planId: configuredIds.plan, unit: "FOCUS_SLOT", reservedRoadmapItemIds: [configuredIds.reserved] },
 }
 function configuredPolicyJson() {
   return JSON.stringify({ version: 1, workspaces: { [configuredIds.workspace]: {

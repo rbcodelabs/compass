@@ -34,7 +34,10 @@ human already recorded, but they cannot take the decision themselves.
 ## Configure NOW eligibility
 
 NOW preparation fails closed until the deployment supplies
-`NOW_COMMITMENT_POLICY_JSON`. The value is a versioned JSON document keyed by
+`NOW_COMMITMENT_POLICY_JSON`, or `NOW_COMMITMENT_POLICY_FILE` pointing to a
+generated JSON file. The file form is useful for local/ephemeral environments
+whose native decision and receipt IDs are created during setup; application
+source must never contain mutable authority IDs. The value is a versioned JSON document keyed by
 workspace UUID. Each workspace entry names the immutable portfolio policy,
 authoritative capacity plan, applied investment decisions keyed by Solution
 UUID, and any explicit displacement required when capacity is full:
@@ -48,7 +51,7 @@ UUID, and any explicit displacement required when capacity is full:
       "capacity": {
         "planId": "<capacity-plan-uuid>",
         "planFingerprint": "<64-character-sha256>",
-        "unit": "focus-slot",
+        "unit": "FOCUS_SLOT",
         "availableUnits": 3,
         "requestedUnits": 1,
         "unitsPerNowItem": 1,
@@ -75,10 +78,15 @@ UUID, and any explicit displacement required when capacity is full:
 }
 ```
 
+Compass's v1 policy is closed: the workspace has exactly three `FOCUS_SLOT`
+units, every NOW item requests and consumes one slot, `nowLimit` is three, and
+an explicitly named displaced item returns to `NEXT`. Other units, weights,
+limits, or displacement destinations fail configuration validation.
+
 The configured capacity plan must exist as the active authoritative plan for
 the workspace and match its policy, fingerprint, unit, available units, and NOW
 limit. Displacement is optional while capacity remains, but when supplied its
-destination must explicitly be `NEXT` or `LATER`.
+destination must be `NEXT`.
 
 ## Authorize a release
 

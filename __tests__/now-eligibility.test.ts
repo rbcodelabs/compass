@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 const mockFindPlan = vi.fn()
 const mockFindDecision = vi.fn()
@@ -32,8 +35,14 @@ function validPolicy() {
 
 describe("canonical NOW eligibility resolver", () => {
   const original = process.env.NOW_COMMITMENT_POLICY_JSON
-  beforeEach(() => { vi.clearAllMocks(); delete process.env.NOW_COMMITMENT_POLICY_JSON; mockFindDecision.mockResolvedValue(nativeDecision) })
-  afterEach(() => { if (original === undefined) delete process.env.NOW_COMMITMENT_POLICY_JSON; else process.env.NOW_COMMITMENT_POLICY_JSON = original })
+  const originalFile = process.env.NOW_COMMITMENT_POLICY_FILE
+  const temporaryDirectories: string[] = []
+  beforeEach(() => { vi.clearAllMocks(); delete process.env.NOW_COMMITMENT_POLICY_JSON; delete process.env.NOW_COMMITMENT_POLICY_FILE; mockFindDecision.mockResolvedValue(nativeDecision) })
+  afterEach(() => {
+    if (original === undefined) delete process.env.NOW_COMMITMENT_POLICY_JSON; else process.env.NOW_COMMITMENT_POLICY_JSON = original
+    if (originalFile === undefined) delete process.env.NOW_COMMITMENT_POLICY_FILE; else process.env.NOW_COMMITMENT_POLICY_FILE = originalFile
+    for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true })
+  })
 
   it("fails closed when product policy configuration is absent", async () => {
     await expect(resolveNowCommitmentEligibility(item)).rejects.toEqual(expect.objectContaining({ code: "POLICY_CONFIGURATION_REQUIRED" }))
@@ -46,8 +55,14 @@ describe("canonical NOW eligibility resolver", () => {
     ["forged checksum", (p: ReturnType<typeof validPolicy>) => { p.workspaces[ids.workspace].investmentDecisions[ids.solution].authorityChecksum = "not-a-sha256" }],
     ["noninteger capacity", (p: ReturnType<typeof validPolicy>) => { p.workspaces[ids.workspace].capacity.availableUnits = 1.5 }],
     ["negative capacity", (p: ReturnType<typeof validPolicy>) => { p.workspaces[ids.workspace].capacity.requestedUnits = -1 }],
+    ["wrong capacity unit", (p: ReturnType<typeof validPolicy>) => { p.workspaces[ids.workspace].capacity.unit = "STORY_POINT" }],
+    ["wrong available slots", (p: ReturnType<typeof validPolicy>) => { p.workspaces[ids.workspace].capacity.availableUnits = 4 }],
+    ["variable item weight", (p: ReturnType<typeof validPolicy>) => { p.workspaces[ids.workspace].capacity.unitsPerNowItem = 2 }],
+    ["wrong requested slots", (p: ReturnType<typeof validPolicy>) => { p.workspaces[ids.workspace].capacity.requestedUnits = 2 }],
+    ["wrong NOW limit", (p: ReturnType<typeof validPolicy>) => { p.workspaces[ids.workspace].capacity.nowLimit = 4 }],
     ["invalid plan mapping", (p: ReturnType<typeof validPolicy>) => { p.workspaces[ids.workspace].capacity.planId = "../../plan" }],
     ["open displacement enum", (p: ReturnType<typeof validPolicy>) => { p.workspaces[ids.workspace].displacementByRoadmapItemId = { [ids.item]: { itemId: ids.reserved, destination: "NOW" as "NEXT" } } }],
+    ["displacement outside NEXT", (p: ReturnType<typeof validPolicy>) => { p.workspaces[ids.workspace].displacementByRoadmapItemId = { [ids.item]: { itemId: ids.reserved, destination: "LATER" } } }],
   ])("rejects malformed policy: %s", async (_name, mutate) => {
     const policy = validPolicy(); mutate(policy); process.env.NOW_COMMITMENT_POLICY_JSON = JSON.stringify(policy)
     await expect(resolveNowCommitmentEligibility(item)).rejects.toEqual(expect.objectContaining({ code: "POLICY_CONFIGURATION_REQUIRED" }))
@@ -62,6 +77,16 @@ describe("canonical NOW eligibility resolver", () => {
       investmentDecision: expect.objectContaining({ subjectId: ids.solution, authorityRecordId: ids.decision }),
       capacity: expect.objectContaining({ reservedUnits: 1, reservedRoadmapItemIds: [ids.reserved] }),
     }))
+  })
+
+  it("loads a generated policy file without embedding mutable evidence IDs in application source", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "compass-now-policy-")); temporaryDirectories.push(directory)
+    const policyPath = join(directory, "policy.json")
+    writeFileSync(policyPath, JSON.stringify(validPolicy()))
+    process.env.NOW_COMMITMENT_POLICY_FILE = policyPath
+    mockFindPlan.mockResolvedValue({ id: ids.plan, workspaceId: ids.workspace, policyId: "portfolio-v1", planFingerprint: "b".repeat(64), unit: "FOCUS_SLOT", availableUnits: 3, unitsPerNowItem: 1, nowLimit: 3, state: "ACTIVE", version: 1, reservations: [] })
+
+    await expect(resolveNowCommitmentEligibility(item)).resolves.toEqual(expect.objectContaining({ portfolioPolicyId: "portfolio-v1" }))
   })
 
   it.each([

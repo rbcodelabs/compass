@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import crypto from "node:crypto";
+import path from "node:path";
 
 /**
  * Set E2E_FUNCTIONAL=1 to enable the functional test suite.
@@ -69,6 +70,7 @@ export default defineConfig({
         COMPASS_RESEARCH_CAPTURE_ENABLED: "1",
         // Deterministic test-only key; production must provide its own secret.
         SSO_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        NOW_COMMITMENT_POLICY_FILE: path.resolve(process.cwd(), "test-results/e2e-now-commitment-policy.json"),
       },
       timeout: 120_000,
     },

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { readFileSync } from "node:fs"
 import getPrisma from "@/lib/db"
 import type { NowCommitmentEligibilityInputs } from "@/lib/now-commitment"
 
@@ -70,7 +71,6 @@ type PolicyDocument = { version: 1; workspaces: Record<string, WorkspacePolicy> 
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const SHA256 = /^[0-9a-f]{64}$/i
-const positiveInteger = (value: unknown): value is number => Number.isInteger(value) && (value as number) > 0 && Number.isSafeInteger(value)
 const nonempty = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0
 
 function assertPolicyDocument(value: unknown): asserts value is PolicyDocument {
@@ -81,9 +81,9 @@ function assertPolicyDocument(value: unknown): asserts value is PolicyDocument {
     if (!UUID.test(workspaceId) || !policy || typeof policy !== "object") throw new Error("invalid workspace mapping")
     if (!nonempty(policy.portfolioPolicyId)) throw new Error("invalid policy id")
     const capacity = policy.capacity
-    if (!capacity || !UUID.test(capacity.planId) || !SHA256.test(capacity.planFingerprint) || !nonempty(capacity.unit)
-      || !positiveInteger(capacity.availableUnits) || !positiveInteger(capacity.requestedUnits)
-      || !positiveInteger(capacity.unitsPerNowItem) || !positiveInteger(capacity.nowLimit)) throw new Error("invalid capacity")
+    if (!capacity || !UUID.test(capacity.planId) || !SHA256.test(capacity.planFingerprint)
+      || capacity.unit !== "FOCUS_SLOT" || capacity.availableUnits !== 3 || capacity.requestedUnits !== 1
+      || capacity.unitsPerNowItem !== 1 || capacity.nowLimit !== 3) throw new Error("invalid capacity")
     if (!policy.investmentDecisions || typeof policy.investmentDecisions !== "object" || Array.isArray(policy.investmentDecisions)) throw new Error("invalid investment mappings")
     for (const [solutionId, decision] of Object.entries(policy.investmentDecisions)) {
       if (!UUID.test(solutionId) || !decision || !["OBSIDIAN", "COMPASS_NATIVE"].includes(decision.authorityProvider)
@@ -94,15 +94,16 @@ function assertPolicyDocument(value: unknown): asserts value is PolicyDocument {
     }
     for (const [candidateId, displacement] of Object.entries(policy.displacementByRoadmapItemId ?? {})) {
       if (!UUID.test(candidateId) || !displacement || !UUID.test(displacement.itemId)
-        || !["NEXT", "LATER"].includes(displacement.destination)) throw new Error("invalid displacement")
+        || displacement.destination !== "NEXT") throw new Error("invalid displacement")
     }
   }
 }
 
 function configuredPolicy(): PolicyDocument {
-  const raw = process.env.NOW_COMMITMENT_POLICY_JSON
-  if (!raw) throw new NowEligibilityError("POLICY_CONFIGURATION_REQUIRED", "NOW commitment policy configuration is unavailable.")
   try {
+    const raw = process.env.NOW_COMMITMENT_POLICY_JSON
+      ?? (process.env.NOW_COMMITMENT_POLICY_FILE ? readFileSync(process.env.NOW_COMMITMENT_POLICY_FILE, "utf8") : undefined)
+    if (!raw) throw new Error("missing policy")
     const parsed: unknown = JSON.parse(raw)
     assertPolicyDocument(parsed)
     return parsed
