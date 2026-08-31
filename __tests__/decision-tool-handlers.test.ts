@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockPrepare, mockAdmit, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision } = vi.hoisted(() => ({
+const { mockPrepare, mockPrepareRelease, mockAdmit, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision } = vi.hoisted(() => ({
   mockPrepare: vi.fn(),
+  mockPrepareRelease: vi.fn(),
   mockAdmit: vi.fn(),
   mockQueueRelease: vi.fn(),
   mockFindRequest: vi.fn(),
   mockListRequests: vi.fn(),
   mockFindDecision: vi.fn(),
 }))
-vi.mock("@/lib/release-authorization", () => ({ queueAuthorizedRelease: mockQueueRelease }))
+vi.mock("@/lib/release-authorization", () => ({ prepareReleaseRun: mockPrepareRelease, queueAuthorizedRelease: mockQueueRelease }))
 
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ kind: "USER", userId: "user-1" }) }))
 vi.mock("@/lib/now-commitment", () => ({
@@ -22,7 +23,7 @@ vi.mock("@/lib/db", () => ({
   }),
 }))
 
-import { applyRecordedDecision, getReviewRequest, listReviewRequests, requestNowCommitment } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, getReviewRequest, listReviewRequests, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 describe("decision MCP handlers", () => {
   beforeEach(() => vi.resetAllMocks())
@@ -34,6 +35,22 @@ describe("decision MCP handlers", () => {
 
     expect(result.content[0].text).toContain("ID: request-1")
     expect(mockPrepare).toHaveBeenCalledWith("item-1", { requestedById: "user-1" })
+  })
+
+  it("prepares an exact release authorization scope for human review", async () => {
+    const scope = {
+      workspaceId: "workspace-1", provider: "GITHUB" as const, repositoryOwner: "rbcodelabs",
+      repositoryName: "compass", pullRequestNumber: 42, baseRef: "main",
+      headSha: "a".repeat(40), targetEnvironment: "PRODUCTION" as const,
+      releasePolicyId: "release-policy-v1", taskIds: ["task-1"],
+    }
+    mockPrepareRelease.mockResolvedValue({ status: "READY", releaseRunId: "run-1", requestId: "request-1", revisionId: "revision-1" })
+
+    const result = await requestReleaseAuthorization(scope)
+
+    expect(result.structuredContent.ok).toBe(true)
+    expect(result.content[0].text).toContain("request-1")
+    expect(mockPrepareRelease).toHaveBeenCalledWith({ ...scope, requestedById: "user-1" })
   })
 
   it("returns the current immutable review packet", async () => {

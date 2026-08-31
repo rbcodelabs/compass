@@ -2,7 +2,7 @@ import getPrisma from "@/lib/db"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { admitRoadmapItemToNow, prepareNowCommitment } from "@/lib/now-commitment"
-import { queueAuthorizedRelease } from "@/lib/release-authorization"
+import { prepareReleaseRun, queueAuthorizedRelease, type ReleaseScope } from "@/lib/release-authorization"
 
 export async function requestNowCommitment({ itemId }: { itemId: string }) {
   const actor = getMcpActor()
@@ -11,6 +11,20 @@ export async function requestNowCommitment({ itemId }: { itemId: string }) {
     return ok(`NOW commitment review prepared.\nID: ${revision.requestId}\nRevision ID: ${revision.id}\nFingerprint: ${revision.fingerprint}`, revision)
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Could not prepare NOW commitment review.")
+  }
+}
+
+export async function requestReleaseAuthorization(scope: ReleaseScope) {
+  const actor = getMcpActor()
+  try {
+    const result = await prepareReleaseRun({ ...scope, requestedById: actor.userId })
+    if (result.status === "BLOCKED") return fail(`Release authorization blocked: ${result.code}`)
+    return ok(
+      `Release authorization review prepared.\nID: ${result.requestId}\nRelease run: ${result.releaseRunId}\nRevision ID: ${result.revisionId}`,
+      result,
+    )
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : "Could not prepare release authorization review.")
   }
 }
 

@@ -127,7 +127,7 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
-import { applyRecordedDecision, getReviewRequest, listReviewRequests, requestNowCommitment } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, getReviewRequest, listReviewRequests, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -1595,6 +1595,28 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       requestNowCommitment,
+    )
+
+    register(
+      "request_release_authorization",
+      {
+        title: "Request Release Authorization",
+        description: "Prepares an immutable human review packet for an exact GitHub PR commit and covered Task scope. Approval only writes a durable release dispatch outbox record; it does not invoke release automation.",
+        inputSchema: {
+          workspaceId: z.string().uuid(),
+          provider: z.literal("GITHUB"),
+          repositoryOwner: z.string().min(1),
+          repositoryName: z.string().min(1),
+          pullRequestNumber: z.number().int().positive(),
+          baseRef: z.string().min(1),
+          headSha: z.string().regex(/^[a-f0-9]{40}$/i),
+          targetEnvironment: z.literal("PRODUCTION"),
+          releasePolicyId: z.string().min(1),
+          taskIds: z.array(z.string().uuid()).min(1),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestReleaseAuthorization,
     )
 
     register(
