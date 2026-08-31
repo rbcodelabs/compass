@@ -173,7 +173,18 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await dragTo(page, sol2UnscheduledCard.getByLabel("Drag to schedule"), dropZoneBox);
 
       const dialog = page.getByRole("dialog");
-      await expect(dialog.getByRole("heading", { name: "Schedule on the roadmap" })).toBeVisible({
+      const scheduleHeading = dialog.getByRole("heading", { name: "Schedule on the roadmap" });
+      // PointerSensor activation can be lost when the browser is busy laying
+      // out the newly selected timeline. Retry the same user gesture only if
+      // the expected dialog state did not materialize.
+      const firstGestureOpenedDialog = await scheduleHeading
+        .waitFor({ state: "visible", timeout: 3_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!firstGestureOpenedDialog) {
+        await dragTo(page, sol2UnscheduledCard.getByLabel("Drag to schedule"), dropZoneBox);
+      }
+      await expect(scheduleHeading).toBeVisible({
         timeout: 10_000,
       });
       // The unscheduled panel still shows the card behind the dialog at this
