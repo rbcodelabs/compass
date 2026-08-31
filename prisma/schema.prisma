@@ -145,6 +145,7 @@ model Workspace {
   agentConversations   AgentConversation[]
   researchStudies      ResearchStudy[]
   researchAttachments  ResearchAttachment[]
+  reviewRequests       ReviewRequest[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -702,6 +703,8 @@ model RoadmapItem {
   opportunityId    String?          @map("opportunity_id") @db.Uuid
   experimentId     String?          @map("experiment_id") @db.Uuid
   feedbackId       String?          @map("feedback_id") @db.Uuid
+  nowCommitmentProvenance String     @default("LEGACY_UNGATED") @map("now_commitment_provenance") @db.VarChar(30)
+  nowDecisionRecordId String?        @map("now_decision_record_id") @db.Uuid
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @default(now()) @map("updated_at")
   workspace        Workspace        @relation(fields: [workspaceId], references: [id])
@@ -719,6 +722,115 @@ model RoadmapItem {
   positioningBrief Doc?
 
   @@map("roadmap_items")
+}
+
+// ─── Human decision gates ───────────────────────────────────────────────────
+// ReviewRequest is the mutable envelope. Revisions, options, decisions, and
+// application receipts are append-only by service contract. UUID references
+// are validated in application code because Aurora DSQL does not enforce FKs.
+
+model ReviewRequest {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String           @map("workspace_id") @db.Uuid
+  gateType           String           @map("gate_type") @db.VarChar(50)
+  subjectType        String           @map("subject_type") @db.VarChar(50)
+  subjectId          String           @map("subject_id") @db.Uuid
+  state              String           @default("DRAFT") @db.VarChar(30)
+  currentRevisionId  String?          @unique(map: "idx_review_requests_current_revision") @map("current_revision_id") @db.Uuid
+  revisionCount      Int              @default(0) @map("revision_count")
+  requestedById      String?          @map("requested_by_id") @db.Uuid
+  assignedToId       String?          @map("assigned_to_id") @db.Uuid
+  dueAt               DateTime?        @map("due_at")
+  expiresAt           DateTime?        @map("expires_at")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @default(now()) @map("updated_at")
+  workspace           Workspace        @relation(fields: [workspaceId], references: [id])
+  currentRevision     ReviewRevision?  @relation("CurrentReviewRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  revisions           ReviewRevision[] @relation("RequestRevisions")
+  decisions           DecisionRecord[]
+
+  @@unique([workspaceId, gateType, subjectType, subjectId], map: "idx_review_requests_subject_gate")
+  @@index([workspaceId, state], map: "idx_review_requests_workspace_state")
+  @@map("review_requests")
+}
+
+model ReviewRevision {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requestId       String          @map("request_id") @db.Uuid
+  revisionNumber  Int             @map("revision_number")
+  fingerprint     String          @db.VarChar(64)
+  title           String          @db.VarChar(255)
+  summary         String?         @db.Text
+  packetJson      String          @map("packet_json") @db.Text
+  requiredRole    String          @default("ADMIN") @map("required_role") @db.VarChar(30)
+  expiresAt       DateTime?       @map("expires_at")
+  supersededAt    DateTime?       @map("superseded_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  request         ReviewRequest   @relation("RequestRevisions", fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  currentFor      ReviewRequest?  @relation("CurrentReviewRevision")
+  options         ReviewOption[]
+  decisions       DecisionRecord[]
+
+  @@unique([requestId, revisionNumber], map: "idx_review_revisions_request_number")
+  @@unique([requestId, fingerprint], map: "idx_review_revisions_request_fingerprint")
+  @@map("review_revisions")
+}
+
+model ReviewOption {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  revisionId        String           @map("revision_id") @db.Uuid
+  actionKey         String           @map("action_key") @db.VarChar(50)
+  label             String           @db.VarChar(120)
+  outcomeClass      String           @map("outcome_class") @db.VarChar(30)
+  continuationKey   String           @map("continuation_key") @db.VarChar(80)
+  sortOrder         Int              @default(0) @map("sort_order")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  revision          ReviewRevision   @relation(fields: [revisionId], references: [id])
+  decisions         DecisionRecord[]
+
+  @@unique([revisionId, actionKey], map: "idx_review_options_revision_action")
+  @@map("review_options")
+}
+
+model DecisionRecord {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String                @map("workspace_id") @db.Uuid
+  requestId       String                @map("request_id") @db.Uuid
+  revisionId      String                @unique(map: "idx_decision_records_revision") @map("revision_id") @db.Uuid
+  optionId        String                @map("option_id") @db.Uuid
+  fingerprint     String                @db.VarChar(64)
+  actorUserId     String                @map("actor_user_id") @db.Uuid
+  actorRole       String                @map("actor_role") @db.VarChar(30)
+  rationale       String?               @db.Text
+  idempotencyKey  String                @unique(map: "idx_decision_records_idempotency") @map("idempotency_key") @db.VarChar(128)
+  decidedAt       DateTime              @default(now()) @map("decided_at")
+  request         ReviewRequest         @relation(fields: [requestId], references: [id])
+  revision        ReviewRevision        @relation(fields: [revisionId], references: [id])
+  option          ReviewOption          @relation(fields: [optionId], references: [id])
+  applications    DecisionApplication[]
+
+  @@index([workspaceId, decidedAt], map: "idx_decision_records_workspace_decided")
+  @@map("decision_records")
+}
+
+model DecisionApplication {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  decisionId        String         @map("decision_id") @db.Uuid
+  continuationKey   String         @map("continuation_key") @db.VarChar(80)
+  targetType        String         @map("target_type") @db.VarChar(50)
+  targetId          String         @map("target_id") @db.Uuid
+  status            String         @default("PENDING") @db.VarChar(30)
+  receiptKey        String         @unique(map: "idx_decision_applications_receipt") @map("receipt_key") @db.VarChar(160)
+  attemptCount      Int            @default(0) @map("attempt_count")
+  lastError         String?        @map("last_error") @db.Text
+  appliedAt         DateTime?      @map("applied_at")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @default(now()) @map("updated_at")
+  decision          DecisionRecord @relation(fields: [decisionId], references: [id])
+
+  @@unique([decisionId, continuationKey], map: "idx_decision_applications_decision_continuation")
+  @@index([targetType, targetId], map: "idx_decision_applications_target")
+  @@map("decision_applications")
 }
 
 // ─── Launch Tiers & Checklists ──────────────────────────────────────────────

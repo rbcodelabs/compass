@@ -182,6 +182,10 @@ const MIGRATIONS = [
     name: "038_research_blob_cleanup",
     filePath: path.join(process.cwd(), "prisma/migrations/038_research_blob_cleanup/migration.sql"),
   },
+  {
+    name: "039_native_decision_gates",
+    filePath: path.join(process.cwd(), "prisma/migrations/039_native_decision_gates/migration.sql"),
+  },
 ];
 
 const DSQL_WRITE_LIMITS = {
