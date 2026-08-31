@@ -28,6 +28,17 @@ function assertIdempotentIdentity(existing: DecisionIdentity, expected: Decision
   }
 }
 
+function assertConcurrentWinnerIdentity(winner: DecisionIdentity, expected: DecisionIdentity): void {
+  if (
+    winner.actorUserId !== expected.actorUserId ||
+    winner.revisionId !== expected.revisionId ||
+    winner.optionId !== expected.optionId ||
+    winner.fingerprint !== expected.fingerprint
+  ) {
+    throw new DecisionError("ALREADY_DECIDED", "A different terminal decision won this revision.")
+  }
+}
+
 async function repairRequestStateIfRevisionIsCurrent(tx: ReturnType<typeof getPrisma>, replay: DecisionIdentity & { requestId: string }): Promise<void> {
   const request = await tx.reviewRequest.findUnique({ where: { id: replay.requestId }, select: { currentRevisionId: true, state: true } })
   if (request?.currentRevisionId === replay.revisionId && request.state !== "DECIDED") {
@@ -105,7 +116,10 @@ export async function recordDecision(input: {
         return replay
       }
       const winner = await prisma.decisionRecord.findFirst({ where: { revisionId: input.revisionId } })
-      if (winner) return winner
+      if (winner) {
+        assertConcurrentWinnerIdentity(winner, expectedIdentity)
+        return winner
+      }
     }
     throw error
   }

@@ -145,7 +145,7 @@ describe("recordDecision", () => {
   })
 
   it("returns the winning decision when two terminal inserts race", async () => {
-    const winner = { id: "decision-winner", revisionId: "rev-1" }
+    const winner = { id: "decision-winner", actorUserId: "user-1", revisionId: "rev-1", optionId: "option-1", fingerprint: "fp-1" }
     mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
     mockPrisma.reviewRevision.findUnique.mockResolvedValue(revision)
     mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
@@ -157,5 +157,35 @@ describe("recordDecision", () => {
 
     await expect(recordDecision({ actor: { kind: "USER", userId: "user-1" }, revisionId: "rev-1", fingerprint: "fp-1", optionId: "option-1", idempotencyKey: "key-racer" }))
       .resolves.toBe(winner)
+  })
+
+  it("rejects a concurrent terminal winner with a different option identity", async () => {
+    const winner = { id: "decision-winner", actorUserId: "user-1", revisionId: "rev-1", optionId: "option-2", fingerprint: "fp-1" }
+    mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
+    mockPrisma.reviewRevision.findUnique.mockResolvedValue(revision)
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
+    mockPrisma.decisionRecord.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(winner)
+    mockPrisma.decisionRecord.create.mockRejectedValue({ code: "P2002" })
+
+    await expect(recordDecision({ actor: { kind: "USER", userId: "user-1" }, revisionId: "rev-1", fingerprint: "fp-1", optionId: "option-1", idempotencyKey: "key-racer" }))
+      .rejects.toEqual(expect.objectContaining({ code: "ALREADY_DECIDED" }))
+  })
+
+  it("rejects a concurrent terminal winner recorded by another actor", async () => {
+    const winner = { id: "decision-winner", actorUserId: "user-2", revisionId: "rev-1", optionId: "option-1", fingerprint: "fp-1" }
+    mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
+    mockPrisma.reviewRevision.findUnique.mockResolvedValue(revision)
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
+    mockPrisma.decisionRecord.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(winner)
+    mockPrisma.decisionRecord.create.mockRejectedValue({ code: "P2002" })
+
+    await expect(recordDecision({ actor: { kind: "USER", userId: "user-1" }, revisionId: "rev-1", fingerprint: "fp-1", optionId: "option-1", idempotencyKey: "key-racer" }))
+      .rejects.toEqual(expect.objectContaining({ code: "ALREADY_DECIDED" }))
   })
 })
