@@ -83,9 +83,13 @@ units, every NOW item requests and consumes one slot, `nowLimit` is three, and
 an explicitly named displaced item returns to `NEXT`. Other units, weights,
 limits, or displacement destinations fail configuration validation.
 
-The configured capacity plan must exist as the active authoritative plan for
-the workspace and match its policy, fingerprint, unit, available units, and NOW
-limit. Displacement is optional while capacity remains, but when supplied its
+Capacity plans are always created in `DRAFT`; a plain insert cannot authorize
+NOW admission. Before use, run the bounded reconciliation/activation operation,
+which reserves every existing NOW item, rejects any NOW/reservation drift,
+checks both the item limit and summed units, and uses optimistic concurrency to
+transition the plan to `ACTIVE`. The resulting active authoritative plan must
+match the workspace policy, fingerprint, unit, available units, and NOW limit.
+Displacement is optional while capacity remains, but when supplied its
 destination must be `NEXT`.
 
 ## Authorize a release
