@@ -102,6 +102,22 @@ describe("release authorization", () => {
     })
   })
 
+  it("recovers the identical winner when the preparation compare-and-swap loses", async () => {
+    const winner = { ...run, tasks: scope.taskIds.map((taskId) => ({ taskId })) }
+    const winnerRequest = {
+      id: "request-winner",
+      state: "PENDING",
+      currentRevision: { id: "revision-winner", sourceFingerprint, fingerprint: "review-winner" },
+    }
+    mocks.prisma.$transaction.mockRejectedValueOnce(Object.assign(new Error("OCC"), { code: "PREPARATION_RACE" }))
+    mocks.prisma.releaseRun.findFirst.mockResolvedValue(winner)
+    mocks.prisma.reviewRequest.findFirst.mockResolvedValue(winnerRequest)
+
+    await expect(prepareReleaseRun(scope)).resolves.toEqual(expect.objectContaining({
+      status: "READY", releaseRunId: run.id, revisionId: "revision-winner",
+    }))
+  })
+
   it("does not recover a P2002 winner with a different immutable identity", async () => {
     mocks.prisma.$transaction.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002" }))
     mocks.prisma.releaseRun.findFirst.mockResolvedValue({ ...run, headSha: "f".repeat(40), tasks: run.tasks })

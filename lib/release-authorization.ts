@@ -245,7 +245,9 @@ export async function prepareReleaseRun(input: PrepareReleaseInput): Promise<Pre
       where: { id: releaseRun.id, version: releaseRun.version, state: "PREPARING" },
       data: { state: "READY_FOR_APPROVAL", version: releaseRun.version + 1, updatedAt: new Date() },
     })
-    if (transitioned.count !== 1) throw new Error("ReleaseRun preparation compare-and-swap failed.")
+    if (transitioned.count !== 1) {
+      throw Object.assign(new Error("ReleaseRun preparation compare-and-swap failed."), { code: "PREPARATION_RACE" })
+    }
 
     return {
       status: "READY",
@@ -257,7 +259,7 @@ export async function prepareReleaseRun(input: PrepareReleaseInput): Promise<Pre
     }
     })
   } catch (error) {
-    if ((error as { code?: string }).code !== "P2002") throw error
+    if (!(["P2002", "P2034", "PREPARATION_RACE"] as const).includes((error as { code?: "P2002" | "P2034" | "PREPARATION_RACE" }).code!)) throw error
 
     const winner = await prisma.releaseRun.findFirst({
       where: {
