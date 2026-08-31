@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS "portfolio_capacity_reservations" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "plan_id" UUID NOT NULL,
   "roadmap_item_id" UUID NOT NULL,
-  "decision_record_id" UUID NOT NULL,
+  "decision_record_id" UUID,
   "units" INTEGER NOT NULL,
   "state" VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
   "released_at" TIMESTAMP(3),

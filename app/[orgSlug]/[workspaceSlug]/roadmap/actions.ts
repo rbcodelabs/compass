@@ -6,6 +6,7 @@ import getPrisma from "@/lib/db";
 import type { Horizon } from "@/lib/types";
 import { isLaunchHorizon } from "@/lib/roadmap";
 import { assertDirectNowWriteBlocked } from "@/lib/now-commitment";
+import { updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger";
 
 // ─── Add Roadmap Item ─────────────────────────────────────────────────────────
 
@@ -133,10 +134,7 @@ export async function moveItem(
 
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  await prisma.roadmapItem.update({
-    where: { id: itemId },
-    data: { horizon, sortOrder },
-  });
+  await updateRoadmapItemWithCapacityRelease(itemId, { horizon, sortOrder });
 
   revalidatePath(revalidatePathStr);
 }
@@ -147,12 +145,7 @@ export async function archiveItem(
   itemId: string,
   revalidatePathStr: string
 ) {
-  const prisma = getPrisma();
-
-  await prisma.roadmapItem.update({
-    where: { id: itemId },
-    data: { status: "ARCHIVED" },
-  });
+  await updateRoadmapItemWithCapacityRelease(itemId, { status: "ARCHIVED" });
 
   revalidatePath(revalidatePathStr);
 }

@@ -6,6 +6,7 @@ const mockRoadmapItem = {
   create: vi.fn(),
   update: vi.fn(),
   findFirst: vi.fn(),
+  findUnique: vi.fn(),
 };
 const mockSolution = {
   findUnique: vi.fn(),
@@ -18,6 +19,9 @@ const mockPrisma = {
   roadmapItem: mockRoadmapItem,
   solution: mockSolution,
   feedbackItem: mockFeedbackItem,
+  portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
+  portfolioCapacityPlan: { updateMany: vi.fn() },
+  $transaction: vi.fn(),
 };
 
 vi.mock("@/lib/db", () => ({
@@ -43,6 +47,9 @@ beforeEach(() => {
   mockRoadmapItem.create.mockResolvedValue({ id: "item-1", title: "Test Item" });
   mockRoadmapItem.update.mockResolvedValue({ id: "item-1" });
   mockRoadmapItem.findFirst.mockResolvedValue(null);
+  mockRoadmapItem.findUnique.mockResolvedValue({ id: "item-1", horizon: "NEXT", status: "ACTIVE" });
+  mockPrisma.portfolioCapacityReservation.findUnique.mockResolvedValue(null);
+  mockPrisma.$transaction.mockImplementation((fn: (database: typeof mockPrisma) => unknown) => fn(mockPrisma));
   mockSolution.findUnique.mockResolvedValue({ title: "My Solution" });
   mockAuth.mockResolvedValue({ user: { id: "user-1" } });
   mockFeedbackItem.findFirst.mockResolvedValue({ title: "Login button is broken" });
@@ -160,10 +167,10 @@ describe("moveItem", () => {
 describe("archiveItem", () => {
   it("sets status to ARCHIVED", async () => {
     await archiveItem("item-1", "/path");
-    expect(mockRoadmapItem.update).toHaveBeenCalledWith({
+    expect(mockRoadmapItem.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "item-1" },
-      data: { status: "ARCHIVED" },
-    });
+      data: expect.objectContaining({ status: "ARCHIVED" }),
+    }));
   });
 
   it("propagates DB errors", async () => {

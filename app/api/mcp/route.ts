@@ -13,6 +13,7 @@ import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import { assertDirectNowWriteBlocked } from "@/lib/now-commitment"
+import { updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger"
 import {
   createFeedback,
   addFeedbackAttachment,
@@ -1759,9 +1760,7 @@ const _handler = createMcpHandler(
         if (horizon) {
           try { assertDirectNowWriteBlocked(item.horizon, horizon) } catch (error) { return fail(error instanceof Error ? error.message : "NOW commitment decision required") }
         }
-        const updated = await prisma.roadmapItem.update({
-          where: { id: itemId },
-          data: {
+        const updated = await updateRoadmapItemWithCapacityRelease(itemId, {
             ...(horizon ? { horizon } : {}),
             ...(status ? { status } : {}),
             ...(title ? { title: title.trim() } : {}),
@@ -1770,7 +1769,6 @@ const _handler = createMcpHandler(
             ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
             ...(isPrivate !== undefined ? { isPrivate } : {}),
             updatedAt: new Date(),
-          },
         })
         return ok(
           `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +

@@ -722,6 +722,7 @@ model RoadmapItem {
   source           String           @default("UI") @map("source") @db.VarChar(20)
   launchChecklist  LaunchChecklist?
   positioningBrief Doc?
+  capacityReservation PortfolioCapacityReservation?
 
   @@map("roadmap_items")
 }
@@ -867,13 +868,14 @@ model PortfolioCapacityReservation {
   id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   planId          String                @map("plan_id") @db.Uuid
   roadmapItemId   String                @unique(map: "idx_capacity_reservations_item") @map("roadmap_item_id") @db.Uuid
-  decisionRecordId String               @map("decision_record_id") @db.Uuid
+  decisionRecordId String?              @map("decision_record_id") @db.Uuid
   units           Int
   state           String                @default("ACTIVE") @db.VarChar(30)
   releasedAt      DateTime?             @map("released_at")
   createdAt       DateTime              @default(now()) @map("created_at")
   updatedAt       DateTime              @default(now()) @map("updated_at")
   plan            PortfolioCapacityPlan @relation(fields: [planId], references: [id])
+  roadmapItem     RoadmapItem            @relation(fields: [roadmapItemId], references: [id])
 
   @@index([planId, state], map: "idx_capacity_reservations_plan_state")
   @@index([decisionRecordId], map: "idx_capacity_reservations_decision")

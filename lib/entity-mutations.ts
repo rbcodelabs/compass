@@ -14,6 +14,7 @@ import getPrisma from "@/lib/db";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
 import { SETTABLE_HORIZONS } from "@/lib/roadmap";
 import { assertDirectNowWriteBlocked } from "@/lib/now-commitment";
+import { updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger";
 
 type EnumFieldConfig = { field: "status" | "horizon"; options: readonly string[] };
 
@@ -141,6 +142,7 @@ export async function updateEntityField(
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
 
-  await model.update({ where: { id }, data });
+  if (type === "roadmapItem") await updateRoadmapItemWithCapacityRelease(id, data);
+  else await model.update({ where: { id }, data });
   return { ok: true };
 }
