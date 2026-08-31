@@ -31,6 +31,17 @@ test.describe("Entity detail panel", () => {
       if (msg.type() !== "error") return;
       const text = msg.text();
       if (KNOWN.some((s) => text.includes(s))) return;
+      // A fresh deep link intentionally opens Radix Sheet during hydration;
+      // its accessibility guard adds aria-hidden to the background before
+      // React finishes comparing the server tree. Keep filtering narrowly to
+      // that known background-only mismatch so panel errors still fail.
+      if (
+        text.includes("hydrated but some attributes") &&
+        text.includes("SquadFilterBar") &&
+        text.includes('aria-hidden="true"')
+      ) {
+        return;
+      }
       consoleErrors.push(text);
     });
     page.on("pageerror", (err) => consoleErrors.push(err.message));
@@ -48,6 +59,10 @@ test.describe("Entity detail panel", () => {
     await page.getByLabel("End date").fill("2026-09-30");
     await page.getByRole("button", { name: "Create cycle" }).click();
     await expect(page.getByText(cycleTitle)).toBeVisible({ timeout: 60_000 });
+    // Let the modal fully release its aria-hidden background before routing;
+    // navigating during the close transition carries the temporary attribute
+    // into the next page's hydration snapshot.
+    await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 10_000 });
 
     await page.getByText(cycleTitle).click();
     await page.waitForLoadState("networkidle");
@@ -97,6 +112,12 @@ test.describe("Entity detail panel", () => {
     await titleInput.fill(editedTitle);
     await titleInput.press("Enter");
     await expect(panel).toContainText(editedTitle, { timeout: 10_000 });
+
+    // Close the modal before navigating. Radix intentionally marks the page
+    // background aria-hidden while the sheet is open; forcing a fresh route
+    // during that state leaks the temporary attribute into hydration.
+    await page.goBack();
+    await expect(panel).toBeHidden();
 
     // Persisted: reload and the edited title shows on the OKRs list.
     await page.goto(`${base}/okrs`);
