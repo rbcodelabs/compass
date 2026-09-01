@@ -1,14 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { CDPSession, Page } from "@playwright/test";
 import { ROUTES, expect, test, type PerformanceRoute } from "./fixtures";
-
-type ResourceMetric = {
-  sampleId: string | null;
-  kind: "document" | "rsc" | "api";
-  url: string;
-  cdpEncodedDataLength: number;
-  cdpDecodedDataLength: number;
-};
+import { createResourceCollector, type ResourceMetric } from "./resource-collector";
 type ClientMetric = {
   longTaskSupported: boolean;
   eventTimingSupported: boolean;
@@ -18,12 +11,6 @@ type ClientMetric = {
   maxEventMs: number | null;
   heapBytes: number | null;
 };
-
-function normalizeHeaders(headers: Record<string, unknown>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(headers).map(([name, value]) => [name.toLowerCase(), String(value)])
-  );
-}
 
 const durationSummary = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -80,41 +67,6 @@ async function readClientMetrics(page: Page, disconnect = true): Promise<ClientM
   }, disconnect);
 }
 
-async function collectResources(cdp: CDPSession, resources: ResourceMetric[]) {
-  const requests = new Map<string, { url: string; decodedBytes: number; sampleId: string | null; kind: "document" | "rsc" | "api" }>();
-  const requestHeaders = new Map<string, Record<string, string>>();
-  cdp.on("Network.requestWillBeSent", ({ requestId, request }) => {
-    requestHeaders.set(requestId, normalizeHeaders(request.headers));
-  });
-  cdp.on("Network.responseReceived", ({ requestId, response, type }) => {
-    const headers = requestHeaders.get(requestId) ?? normalizeHeaders(response.requestHeaders ?? {});
-    const isRsc = headers.rsc === "1" ||
-      String(response.mimeType).includes("x-component");
-    const isPanelApi = response.url.includes("/api/panels/entity/");
-    if (isRsc || type === "Document" || isPanelApi) requests.set(requestId, {
-      url: response.url,
-      decodedBytes: 0,
-      sampleId: headers["x-compass-perf-request-id"] || null,
-      kind: isRsc ? "rsc" : isPanelApi ? "api" : "document",
-    });
-  });
-  cdp.on("Network.dataReceived", ({ requestId, dataLength }) => {
-    const request = requests.get(requestId);
-    if (request) request.decodedBytes += dataLength;
-  });
-  cdp.on("Network.loadingFinished", ({ requestId, encodedDataLength }) => {
-    const request = requests.get(requestId);
-    if (request) resources.push({
-      url: request.url,
-      sampleId: request.sampleId,
-      kind: request.kind,
-      cdpDecodedDataLength: request.decodedBytes,
-      cdpEncodedDataLength: encodedDataLength,
-    });
-  });
-  await cdp.send("Network.enable");
-}
-
 async function cdpSnapshot(cdp: CDPSession) {
   await cdp.send("Performance.enable");
   const { metrics } = await cdp.send("Performance.getMetrics");
@@ -165,7 +117,7 @@ async function waitForPanelEntity(sheet: ReturnType<typeof visiblePanel>, entity
   await settleClientRender(sheet.page());
 }
 
-async function recordWarmNavigation(page: Page, cdp: CDPSession, base: string, route: PerformanceRoute, resources: ResourceMetric[]) {
+async function recordWarmNavigation(page: Page, cdp: CDPSession, collector: Awaited<ReturnType<typeof createResourceCollector>>, base: string, route: PerformanceRoute) {
   const requestId = `perf_${randomUUID()}`;
   await page.setExtraHTTPHeaders({
     "x-compass-perf-request-id": requestId,
@@ -173,6 +125,7 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, base: string, r
       ? { "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET }
       : {}),
   });
+  collector.beginSample(requestId, { kind: "rsc", targetPath: `${base}/${route}`, match: "exact" });
   const startedAt = new Date().toISOString();
   const before = await cdpSnapshot(cdp);
   const prefetchObserved = await page.evaluate((targetPath) =>
@@ -194,9 +147,11 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, base: string, r
   await page.locator(`a[href="${base}/${route}"]`).first().click();
   await expect(page).toHaveURL(new RegExp(`/${route}(?:\\?|$)`));
   await ready(page, route);
+  const semanticEnd = performance.now();
   page.off("response", observeResponse);
-  if (matchedRscUrl) await expect.poll(() => resources.filter((resource) => resource.sampleId === requestId && resource.kind === "rsc").length).toBeGreaterThan(0);
   const after = await cdpSnapshot(cdp);
+  const client = await readClientMetrics(page, false);
+  const sampleResources = await collector.closeSample(requestId, matchedRscUrl ? 1 : 0);
   return {
     requestId,
     method: "GET",
@@ -205,9 +160,9 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, base: string, r
     prefetchObserved,
     startedAt,
     responseWaitMs: matchedRscAt === null ? null : matchedRscAt - start,
-    durationMs: performance.now() - start,
-    resources: resources.filter((resource) => resource.sampleId === requestId),
-    client: await readClientMetrics(page, false),
+    durationMs: semanticEnd - start,
+    resources: sampleResources,
+    client,
     cdp: cdpDelta(before, after),
   };
 }
@@ -216,16 +171,16 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
   await installClientObservers(page);
   const cdp = await page.context().newCDPSession(page);
   const resources: ResourceMetric[] = [];
-  await collectResources(cdp, resources);
+  const collector = await createResourceCollector(cdp, resources);
   await page.goto(`${workspaceBase}/discovery`);
   await ready(page, "discovery");
 
   const warm = [];
   for (let warmup = 0; warmup < 2; warmup++) {
-    await recordWarmNavigation(page, cdp, workspaceBase, ROUTES[(warmup + 1) % ROUTES.length], resources);
+    await recordWarmNavigation(page, cdp, collector, workspaceBase, ROUTES[(warmup + 1) % ROUTES.length]);
   }
   for (let iteration = 0; iteration < 10; iteration++) {
-    for (const route of ROUTES) warm.push({ route, ...(await recordWarmNavigation(page, cdp, workspaceBase, route, resources)) });
+    for (const route of ROUTES) warm.push({ route, ...(await recordWarmNavigation(page, cdp, collector, workspaceBase, route)) });
   }
 
   const cold = [];
@@ -246,26 +201,29 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
       await installClientObservers(coldPage);
       const coldResources: ResourceMetric[] = [];
       const coldCdp = await context.newCDPSession(coldPage);
-      await collectResources(coldCdp, coldResources);
+      const coldCollector = await createResourceCollector(coldCdp, coldResources);
+      coldCollector.beginSample(requestId, { kind: "document", targetPath: `${workspaceBase}/${route}`, match: "exact" });
       const startedAt = new Date().toISOString();
       const before = await cdpSnapshot(coldCdp);
       const start = performance.now();
       const documentResponse = await coldPage.goto(`${workspaceBase}/${route}`);
       if (!documentResponse) throw new Error("Cold document navigation returned no response");
       await ready(coldPage, route);
-      await expect.poll(() => coldResources.filter((resource) => resource.kind === "document" && resource.sampleId === requestId).length).toBe(1);
+      const semanticEnd = performance.now();
       const after = await cdpSnapshot(coldCdp);
+      const client = await readClientMetrics(coldPage);
+      const sampleResources = await coldCollector.closeSample(requestId, 1);
       cold.push({
         route,
         requestId,
         method: "GET",
         path: new URL(documentResponse.url()).pathname + new URL(documentResponse.url()).search,
         startedAt,
-        durationMs: performance.now() - start,
-        resources: coldResources,
-        documentResource: coldResources.find((resource) => resource.kind === "document") ?? null,
-        rscResources: coldResources.filter((resource) => resource.kind === "rsc"),
-        client: await readClientMetrics(coldPage),
+        durationMs: semanticEnd - start,
+        resources: sampleResources,
+        documentResource: sampleResources[0] ?? null,
+        rscResources: [],
+        client,
         cdp: cdpDelta(before, after),
       });
       await context.close();
@@ -280,6 +238,7 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
     viewport: { width: 1440, height: 900 },
     prefetchPolicy: "actual Next.js sidebar Link behavior; two warmups discarded",
     coldDefinition: "fresh browser context, cache-disabled direct document navigation; not a server cold start",
+    metricBoundary: "duration, client, and CDP metrics end immediately after route readiness; resource completion settles afterward and is excluded",
     warm,
     cold,
     aggregates: {
@@ -305,7 +264,7 @@ for (const panel of [
     await installClientObservers(page);
     const panelCdp = await page.context().newCDPSession(page);
     const panelResources: ResourceMetric[] = [];
-    await collectResources(panelCdp, panelResources);
+    const panelCollector = await createResourceCollector(panelCdp, panelResources);
     await page.goto(`${workspaceBase}/${panel.route}`);
     await ready(page, panel.route);
     const entityTitle = process.env[panel.entityEnv];
@@ -318,6 +277,11 @@ for (const panel of [
         ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET
           ? { "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET }
           : {}),
+      });
+      panelCollector.beginSample(requestId, {
+        kind: "api",
+        targetPath: `/api/panels/entity/${panel.apiType}/`,
+        match: "prefix",
       });
       const trigger = page.getByRole("button", { name: entityTitle, exact: true });
       await expect(trigger).toBeVisible();
@@ -335,9 +299,11 @@ for (const panel of [
       const response = await responsePromise;
       const responseMs = performance.now() - start;
       await waitForPanelEntity(sheet, entityTitle);
-      await expect.poll(() => panelResources.filter((resource) => resource.sampleId === requestId).length).toBeGreaterThan(0);
-      const meaningfulPaintMs = performance.now() - start;
+      const semanticEnd = performance.now();
       const after = await cdpSnapshot(panelCdp);
+      const client = await readClientMetrics(page, false);
+      const sampleResources = await panelCollector.closeSample(requestId, 1);
+      const meaningfulPaintMs = semanticEnd - start;
       const sample = {
         requestId,
         method: "GET",
@@ -347,8 +313,8 @@ for (const panel of [
         responseMs,
         meaningfulPaintMs,
         status: response.status(),
-        resources: panelResources.filter((resource) => resource.sampleId === requestId),
-        client: await readClientMetrics(page, false),
+        resources: sampleResources,
+        client,
         cdp: cdpDelta(before, after),
       };
       await page.keyboard.press("Escape");
@@ -362,6 +328,7 @@ for (const panel of [
         recordedAt: new Date().toISOString(),
         panel: panel.apiType,
         warmupsDiscarded: 2,
+        metricBoundary: "meaningful paint, client, and CDP metrics end immediately after the seeded entity title is visible; resource completion settles afterward and is excluded",
         samples,
         aggregates: {
           shell: durationSummary(samples.map((sample) => sample.shellMs)),

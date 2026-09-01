@@ -426,6 +426,19 @@ export function summarizeObserverOverhead(disabledMs: number[], enabledMs: numbe
   return { version: 1, sampleCount: disabledMs.length, disabled, enabled, medianDeltaMs: enabled.medianMs - disabled.medianMs, p95DeltaMs: enabled.p95Ms - disabled.p95Ms };
 }
 
+export function resolvePerformanceResourceSampleId(
+  headerSampleId: string | null,
+  activeSampleId: string | null
+): string | null {
+  if (!activeSampleId) return null;
+  if (headerSampleId && activeSampleId && headerSampleId !== activeSampleId) {
+    throw new Error(
+      `Resource sample ID ${headerSampleId} conflicts with active sample ${activeSampleId}`
+    );
+  }
+  return headerSampleId ?? activeSampleId;
+}
+
 export function correlateVercelRequests(
   browser: BrowserRequest[],
   vercel: VercelRequest[],

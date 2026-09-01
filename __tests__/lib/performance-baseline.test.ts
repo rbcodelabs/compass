@@ -18,11 +18,18 @@ import {
   initializeLocalPerformanceEnvironment,
   prismaPerformanceDbPushArgs,
   createLocalPerformanceChildEnv,
+  resolvePerformanceResourceSampleId,
 } from "@/lib/performance-baseline";
 
 describe("performance baseline safeguards", () => {
   const authFile = path.resolve("e2e/performance/.auth/unit-test.json");
   afterEach(() => fs.rmSync(authFile, { force: true }));
+  it("attributes only resources in the active serial sample and rejects conflicts", () => {
+    expect(resolvePerformanceResourceSampleId(null, "perf_active")).toBe("perf_active");
+    expect(resolvePerformanceResourceSampleId("perf_header", null)).toBeNull();
+    expect(resolvePerformanceResourceSampleId("perf_same", "perf_same")).toBe("perf_same");
+    expect(() => resolvePerformanceResourceSampleId("perf_other", "perf_active")).toThrow(/conflicts/);
+  });
   it("accepts only loopback compass databases with an owned performance schema", () => {
     expect(() =>
       assertSafeLocalPerformanceDatabase(
