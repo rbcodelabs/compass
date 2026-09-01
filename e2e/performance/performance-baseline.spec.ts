@@ -129,15 +129,33 @@ function cdpDelta(before: Record<string, number>, after: Record<string, number>)
   };
 }
 
-async function ready(page: Page, route?: PerformanceRoute) {
-  await page.locator("main").waitFor({ state: "visible" });
-  if (route) {
-    const title = route[0].toUpperCase() + route.slice(1);
-    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
-  }
+async function settleClientRender(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   ));
+}
+
+async function ready(page: Page, route: PerformanceRoute) {
+  const title = route[0].toUpperCase() + route.slice(1);
+  await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+  await settleClientRender(page);
+}
+
+function visiblePanel(page: Page) {
+  return page.locator('[data-slot="sheet-content"]:visible');
+}
+
+async function waitForPanelShell(page: Page, category: string) {
+  const sheet = visiblePanel(page);
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("heading", { name: category, exact: true })).toBeVisible();
+  return sheet;
+}
+
+async function waitForPanelEntity(sheet: ReturnType<typeof visiblePanel>, entityTitle: string) {
+  // Editable panel titles render as buttons until editing begins, not headings.
+  await expect(sheet.getByRole("button", { name: entityTitle, exact: true })).toBeVisible();
+  await settleClientRender(sheet.page());
 }
 
 async function recordWarmNavigation(page: Page, cdp: CDPSession, base: string, route: PerformanceRoute, resources: ResourceMetric[]) {
@@ -193,7 +211,7 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
   const resources: ResourceMetric[] = [];
   await collectResources(cdp, resources);
   await page.goto(`${workspaceBase}/discovery`);
-  await ready(page);
+  await ready(page, "discovery");
 
   const warm = [];
   for (let warmup = 0; warmup < 2; warmup++) {
@@ -282,7 +300,7 @@ for (const panel of [
     const panelResources: ResourceMetric[] = [];
     await collectResources(panelCdp, panelResources);
     await page.goto(`${workspaceBase}/${panel.route}`);
-    await ready(page);
+    await ready(page, panel.route);
     const entityTitle = process.env[panel.entityEnv];
     if (!entityTitle) throw new Error(`${panel.entityEnv} is required for deterministic panel targeting`);
     const samples = [];
@@ -305,12 +323,11 @@ for (const panel of [
       const before = await cdpSnapshot(panelCdp);
       const start = performance.now();
       await trigger.click();
-      await expect(page.getByRole("heading", { name: panel.title })).toBeVisible();
+      const sheet = await waitForPanelShell(page, panel.title);
       const shellMs = performance.now() - start;
       const response = await responsePromise;
       const responseMs = performance.now() - start;
-      await expect(page.getByRole("heading", { name: entityTitle, exact: true })).toBeVisible();
-      await ready(page);
+      await waitForPanelEntity(sheet, entityTitle);
       await expect.poll(() => panelResources.filter((resource) => resource.sampleId === requestId).length).toBeGreaterThan(0);
       const meaningfulPaintMs = performance.now() - start;
       const after = await cdpSnapshot(panelCdp);
@@ -328,7 +345,7 @@ for (const panel of [
         cdp: cdpDelta(before, after),
       };
       await page.keyboard.press("Escape");
-      await expect(page.getByRole("heading", { name: panel.title })).toBeHidden();
+      await expect(sheet).toBeHidden();
       if (iteration >= 2) samples.push(sample);
     }
     await readClientMetrics(page);
