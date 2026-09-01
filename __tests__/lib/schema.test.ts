@@ -81,4 +81,20 @@ describe("getActiveSchema", () => {
     delete process.env.PGSCHEMA;
     expect(getActiveSchema()).toBe("compass_dev");
   });
+
+  it("uses an exact performance schema only behind both guards", () => {
+    setNodeEnv("production");
+    process.env.COMPASS_PERF_BASELINE = "1";
+    process.env.COMPASS_PERF_SCHEMA = "compass_perf_0123456789abcdef";
+    expect(getActiveSchema()).toBe("compass_perf_0123456789abcdef");
+  });
+
+  it("rejects unsafe exact performance schema overrides", () => {
+    process.env.COMPASS_PERF_BASELINE = "1";
+    process.env.COMPASS_PERF_SCHEMA = "public";
+    expect(() => getActiveSchema()).toThrow(/performance schema/);
+    process.env.COMPASS_PERF_BASELINE = "0";
+    process.env.COMPASS_PERF_SCHEMA = "compass_perf_0123456789abcdef";
+    expect(() => getActiveSchema()).toThrow(/COMPASS_PERF_BASELINE/);
+  });
 });

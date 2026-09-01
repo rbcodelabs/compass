@@ -16,6 +16,10 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test --project=screenshots",
     "test:e2e:functional": "E2E_FUNCTIONAL=1 playwright test --project=functional-setup --project=functional",
+    "test:performance": "playwright test -c e2e/performance/playwright.config.ts",
+    "performance:ingest-vercel": "node --experimental-strip-types scripts/ingest-performance-vercel-logs.ts",
+    "performance:ingest-local": "node --experimental-strip-types scripts/ingest-performance-local-logs.ts",
+    "performance:run-local": "node --experimental-strip-types scripts/run-performance-baseline.ts",
     "test:e2e:all": "E2E_FUNCTIONAL=1 playwright test",
     "docs:screenshots": "playwright test --project=screenshots e2e/screenshots.spec.ts"
   },

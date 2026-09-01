@@ -2,6 +2,11 @@ import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { getActiveSchema } from "./schema";
+import {
+  formatPerformanceQueryLog,
+  instrumentPgPool,
+  type PerformanceQueryEvent,
+} from "./performance-baseline";
 
 declare global {
   var __prisma: PrismaClient | undefined;
@@ -19,6 +24,7 @@ export function createPrismaClient(): PrismaClient {
   // ── Local dev path ────────────────────────────────────────────────────────
   if (process.env.DATABASE_URL) {
     const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    enablePerformanceObserver(pool);
     const adapter = new PrismaPg(pool, { schema });
     return new PrismaClient({ adapter });
   }
@@ -61,9 +67,27 @@ export function createPrismaClient(): PrismaClient {
   });
 
   attachDatabasePool(pool);
+  enablePerformanceObserver(pool);
 
   const adapter = new PrismaPg(pool, { schema });
   return new PrismaClient({ adapter });
+}
+
+function enablePerformanceObserver(pool: Pool): void {
+  if (process.env.COMPASS_PERF_BASELINE !== "1") return;
+  instrumentPgPool(
+    pool as unknown as Parameters<typeof instrumentPgPool>[0],
+    (event: PerformanceQueryEvent) => console.info(formatPerformanceQueryLog(event)),
+    undefined,
+    async () => {
+      try {
+        const { headers } = await import("next/headers");
+        return (await headers()).get("x-compass-perf-request-id");
+      } catch {
+        return process.env.COMPASS_PERF_REQUEST_ID ?? null;
+      }
+    }
+  );
 }
 
 let _prisma: PrismaClient | undefined;

@@ -46,3 +46,7 @@ prisma/generated/
 e2e/.auth/
 e2e/functional/.auth/
 test-results/
+# Phase 0 performance baseline: raw samples, traces, logs, and auth are local-only.
+e2e/performance/.auth/
+test-results/performance-baseline/
+.performance-baseline/
