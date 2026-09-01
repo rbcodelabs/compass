@@ -76,7 +76,8 @@ matching is forbidden.
 
 Committed aggregate evidence may include:
 
-- build SHA, server kind, deployment/region, browser, viewport, and timestamp;
+- build SHA, server kind, deployment/region, browser project, engine/version,
+  viewport, and timestamp;
 - raw numeric samples plus median and p95;
 - cold direct-navigation and warm actual-link results kept separate;
 - RSC request count, CDP `encodedDataLength`, and accumulated CDP

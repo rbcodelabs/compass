@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 export const PERFORMANCE_QUERY_PREFIX = "COMPASS_PERF_QUERY ";
 const WRAPPED = Symbol.for("compass.performanceBaseline.wrapped");
 const QUERY_OBSERVATION = new AsyncLocalStorage<boolean>();
+const OWNED_PERFORMANCE_SCHEMA_PATTERN = /^compass_perf_[a-z0-9_]+$/;
 
 export function persistPerformanceArtifact(
   serverKind: "local-production" | "vercel-preview",
@@ -84,12 +85,27 @@ function operationOf(sql: string): string {
  * Returns a stable SHA-256 shape identifier. Raw or normalized SQL is never
  * emitted because comments and uncommon literal syntaxes can contain secrets.
  */
-export function normalizeQueryFingerprint(sql: string): string {
-  const shape = sql
+export function normalizeQueryFingerprint(
+  sql: string,
+  ownedPerformanceSchema = process.env.COMPASS_PERF_SCHEMA
+): string {
+  if (ownedPerformanceSchema !== undefined && !OWNED_PERFORMANCE_SCHEMA_PATTERN.test(ownedPerformanceSchema)) {
+    throw new Error("Query fingerprint schema must be an owned performance schema");
+  }
+  let shape = sql
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/--[^\r\n]*/g, " ")
     .replace(/\$[A-Za-z_][A-Za-z0-9_]*\$[\s\S]*?\$[A-Za-z_][A-Za-z0-9_]*\$/g, "?")
-    .replace(/'(?:''|[^'])*'/g, "?")
+    .replace(/'(?:''|[^'])*'/g, "?");
+  if (ownedPerformanceSchema) {
+    shape = shape
+      .replaceAll(`"${ownedPerformanceSchema}"`, '"__compass_owned_performance_schema__"')
+      .replace(
+        new RegExp(`(?<![A-Za-z0-9_$])${ownedPerformanceSchema}(?![A-Za-z0-9_$])`, "g"),
+        "__compass_owned_performance_schema__"
+      );
+  }
+  shape = shape
     .replace(/\$\d+/g, "?")
     .replace(/\b(?:0x[\da-f]+|\d+(?:\.\d+)?)\b/gi, "?")
     .replace(/\s+/g, " ")
@@ -115,7 +131,7 @@ export function assertSafeLocalPerformanceDatabase(
   if (decodeURIComponent(url.pathname).replace(/^\//, "") !== "compass") {
     throw new Error("Performance fixtures require the compass database");
   }
-  if (!/^compass_perf_[a-z0-9_]+$/.test(schema)) {
+  if (!OWNED_PERFORMANCE_SCHEMA_PATTERN.test(schema)) {
     throw new Error("Performance schema must be an owned compass_perf_* schema");
   }
 }

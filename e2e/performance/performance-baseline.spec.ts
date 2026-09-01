@@ -129,6 +129,15 @@ function visiblePanel(page: Page) {
   return page.locator('[data-slot="sheet-content"]:visible');
 }
 
+function browserProvenance(page: Page) {
+  const browser = page.context().browser();
+  if (!browser) throw new Error("Performance artifact requires a launched browser");
+  return {
+    browserEngine: browser.browserType().name(),
+    browserVersion: browser.version(),
+  };
+}
+
 async function waitForPanelShell(page: Page, category: string) {
   const sheet = visiblePanel(page);
   await expect(sheet).toBeVisible();
@@ -267,6 +276,7 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
     buildSha: process.env.PERF_BUILD_SHA ?? null,
     serverKind: process.env.PERF_SERVER_KIND,
     browser: testInfo.project.name,
+    ...browserProvenance(page),
     viewport: { width: 1440, height: 900 },
     prefetchPolicy: "actual Next.js sidebar Link behavior; two warmups discarded",
     coldDefinition: "fresh browser context, cache-disabled direct document navigation; not a server cold start",
@@ -363,6 +373,11 @@ for (const panel of [
     const artifact = {
       version: 1,
       recordedAt: new Date().toISOString(),
+      buildSha: process.env.PERF_BUILD_SHA ?? null,
+      serverKind: process.env.PERF_SERVER_KIND,
+      browser: testInfo.project.name,
+      ...browserProvenance(page),
+      viewport: { width: 1440, height: 900 },
       panel: panel.apiType,
       warmupsDiscarded: 2,
       metricBoundary: "meaningful paint, client, and CDP metrics end immediately after the seeded entity title is visible; resource completion settles afterward and is excluded",

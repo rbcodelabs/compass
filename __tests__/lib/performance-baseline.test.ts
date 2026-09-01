@@ -131,6 +131,65 @@ describe("performance baseline safeguards", () => {
     expect(fingerprint).not.toContain("rick@example.com");
     expect(fingerprint).not.toContain("42");
   });
+
+  it("stabilizes query shapes across owned disposable performance schemas", () => {
+    const first = normalizeQueryFingerprint(
+      `SELECT * FROM "compass_perf_aaa111"."Task" WHERE "id" = 'first-secret'`,
+      "compass_perf_aaa111"
+    );
+    const second = normalizeQueryFingerprint(
+      `SELECT * FROM "compass_perf_bbb222"."Task" WHERE "id" = 'second-secret'`,
+      "compass_perf_bbb222"
+    );
+    const unquotedFirst = normalizeQueryFingerprint(
+      "SELECT count(*) FROM compass_perf_aaa111._compass_perf_sentinel",
+      "compass_perf_aaa111"
+    );
+    const unquotedSecond = normalizeQueryFingerprint(
+      "SELECT count(*) FROM compass_perf_bbb222._compass_perf_sentinel",
+      "compass_perf_bbb222"
+    );
+
+    expect(first).toBe(second);
+    expect(unquotedFirst).toBe(unquotedSecond);
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("keeps different SQL and non-owned schema identities distinguishable", () => {
+    expect(normalizeQueryFingerprint(
+      `SELECT "id" FROM "compass_perf_aaa111"."Task"`
+    )).not.toBe(normalizeQueryFingerprint(
+      `SELECT "title" FROM "compass_perf_bbb222"."Task"`
+    ));
+    expect(normalizeQueryFingerprint(
+      `SELECT * FROM "tenant_alpha"."Task"`
+    )).not.toBe(normalizeQueryFingerprint(
+      `SELECT * FROM "tenant_beta"."Task"`
+    ));
+    expect(normalizeQueryFingerprint(
+      `SELECT * FROM "compass_perf_BAD"."Task"`
+    )).not.toBe(normalizeQueryFingerprint(
+      `SELECT * FROM "compass_perf_aaa111"."Task"`,
+      "compass_perf_aaa111"
+    ));
+    expect(normalizeQueryFingerprint(
+      `SELECT * FROM "compass_perf_other"."Task"`,
+      "compass_perf_current"
+    )).not.toBe(normalizeQueryFingerprint(
+      `SELECT * FROM "compass_perf_another"."Task"`,
+      "compass_perf_current"
+    ));
+    expect(() => normalizeQueryFingerprint("SELECT 1", "public")).toThrow(/owned performance schema/);
+  });
+
+  it("persists durable browser and panel provenance fields", () => {
+    const spec = fs.readFileSync(path.resolve("e2e/performance/performance-baseline.spec.ts"), "utf8");
+    expect(spec.match(/browserEngine:/g)).toHaveLength(1);
+    expect(spec.match(/browserVersion:/g)).toHaveLength(1);
+    expect(spec.match(/\.\.\.browserProvenance\(page\)/g)).toHaveLength(2);
+    expect(spec.match(/buildSha:/g)).toHaveLength(2);
+    expect(spec.match(/serverKind:/g)).toHaveLength(2);
+  });
 });
 
 describe("pg query instrumentation", () => {
