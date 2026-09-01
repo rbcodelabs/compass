@@ -49,7 +49,7 @@ export function PanelShell() {
     let idleId: number | undefined;
     let frameId: number | undefined;
     const activateWhenIdle = () => {
-      if ("requestIdleCallback" in window) {
+      if (typeof window.requestIdleCallback === "function") {
         idleId = window.requestIdleCallback(() => setHydrated(true));
       } else {
         frameId = window.requestAnimationFrame(() => setHydrated(true));

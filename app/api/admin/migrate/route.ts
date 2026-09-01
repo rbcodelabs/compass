@@ -679,6 +679,7 @@ export async function POST(req: NextRequest) {
       // Prefix unqualified DDL with schema search_path
       await client.query(`SET search_path TO "${schema}"`);
 
+      let pendingRoadmapCommitmentProvenanceBackfill = false;
       for (const stmt of statements) {
         try {
           // ASYNC is mandatory on DSQL and unsupported by local PostgreSQL.
@@ -691,6 +692,13 @@ export async function POST(req: NextRequest) {
             migration.name === "039_native_decision_gates" &&
             /ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+"?now_commitment_provenance"?/i.test(executableStmt)
           ) {
+            pendingRoadmapCommitmentProvenanceBackfill = true;
+          } else if (
+            migration.name === "039_native_decision_gates" &&
+            pendingRoadmapCommitmentProvenanceBackfill &&
+            /^COMMIT;?$/i.test(executableStmt.trim())
+          ) {
+            pendingRoadmapCommitmentProvenanceBackfill = false;
             await backfillRoadmapCommitmentProvenance(client, schema, log);
           }
           if (!process.env.DATABASE_URL && /CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC/i.test(stmt)) {

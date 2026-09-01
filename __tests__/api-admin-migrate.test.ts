@@ -286,6 +286,54 @@ describe("/api/admin/migrate rollout observability", () => {
     ).toBe(false)
   })
 
+  it("commits migration 039 column DDL before starting the provenance backfill", async () => {
+    let provenanceReads = 0
+    mocks.query.mockImplementation(async (sqlValue: unknown) => {
+      const sql = String(sqlValue)
+      if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
+      if (sql.includes("WHERE now_commitment_provenance IS NULL") && sql.includes("SELECT id")) {
+        provenanceReads += 1
+        return provenanceReads === 1
+          ? { rows: [{ id: "00000000-0000-4000-8000-000000000039", estimated_bytes: "128" }] }
+          : { rows: [] }
+      }
+      if (sql.includes("UPDATE") && sql.includes("now_commitment_provenance = 'LEGACY_UNGATED'")) {
+        return { rows: [], rowCount: 1 }
+      }
+      return { rows: [] }
+    })
+
+    const response = await POST(request("POST", { script: "039_native_decision_gates" }))
+
+    expect(response.status).toBe(200)
+    const statements = mocks.query.mock.calls.map(([sql]) => String(sql))
+    const addColumnIndex = statements.findIndex((sql) =>
+      /ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+"?now_commitment_provenance"?/i.test(sql),
+    )
+    const addColumnCommitIndex = statements.findIndex(
+      (sql, index) => index > addColumnIndex && /^COMMIT;?$/i.test(sql.trim()),
+    )
+    const backfillSelectIndex = statements.findIndex((sql) =>
+      sql.includes("WHERE now_commitment_provenance IS NULL"),
+    )
+    const backfillUpdateIndex = statements.findIndex((sql) =>
+      sql.includes("now_commitment_provenance = 'LEGACY_UNGATED'"),
+    )
+    const backfillCommitIndex = statements.findIndex(
+      (sql, index) => index > backfillUpdateIndex && /^COMMIT;?$/i.test(sql.trim()),
+    )
+    const setDefaultIndex = statements.findIndex((sql) =>
+      /ALTER\s+COLUMN\s+"?now_commitment_provenance"?\s+SET\s+DEFAULT/i.test(sql),
+    )
+
+    expect(addColumnIndex).toBeGreaterThan(-1)
+    expect(addColumnCommitIndex).toBeGreaterThan(addColumnIndex)
+    expect(backfillSelectIndex).toBeGreaterThan(addColumnCommitIndex)
+    expect(backfillUpdateIndex).toBeGreaterThan(backfillSelectIndex)
+    expect(backfillCommitIndex).toBeGreaterThan(backfillUpdateIndex)
+    expect(setDefaultIndex).toBeGreaterThan(backfillCommitIndex)
+  })
+
   it("returns migration 036 index validity after an explicit apply", async () => {
     mocks.query.mockImplementation(async (sqlValue: unknown) => {
       const sql = String(sqlValue)
