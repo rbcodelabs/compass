@@ -17,6 +17,7 @@ import {
   summarizeObserverOverhead,
   initializeLocalPerformanceEnvironment,
   prismaPerformanceDbPushArgs,
+  createLocalPerformanceChildEnv,
 } from "@/lib/performance-baseline";
 
 describe("performance baseline safeguards", () => {
@@ -63,6 +64,13 @@ describe("performance baseline safeguards", () => {
   it("uses the installed Prisma 7.8 db-push command shape", () => {
     expect(prismaPerformanceDbPushArgs()).toEqual(["prisma", "db", "push"]);
     expect(prismaPerformanceDbPushArgs()).not.toContain("--skip-generate");
+  });
+
+  it("trusts only the exact derived loopback origin for local Auth.js", () => {
+    const env = createLocalPerformanceChildEnv({ NODE_ENV: "production", AUTH_TRUST_HOST: "true" }, "http://localhost:5234");
+    expect(env.AUTH_URL).toBe("http://localhost:5234");
+    expect(env.AUTH_TRUST_HOST).toBeUndefined();
+    expect(() => createLocalPerformanceChildEnv({ NODE_ENV: "production" }, "https://example.com")).toThrow(/loopback/);
   });
 
   it("requires ignored owner-only, non-symlink auth state in the dedicated directory", () => {

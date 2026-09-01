@@ -19,6 +19,19 @@ export function prismaPerformanceDbPushArgs(): string[] {
   return ["prisma", "db", "push"];
 }
 
+export function createLocalPerformanceChildEnv(
+  baseEnv: NodeJS.ProcessEnv,
+  baseURL: string
+): NodeJS.ProcessEnv {
+  const url = new URL(baseURL);
+  if (url.protocol !== "http:" || (url.hostname !== "localhost" && url.hostname !== "127.0.0.1")) {
+    throw new Error("Local performance AUTH_URL must be an exact loopback HTTP origin");
+  }
+  const childEnv: NodeJS.ProcessEnv = { ...baseEnv, AUTH_URL: url.origin };
+  delete childEnv.AUTH_TRUST_HOST;
+  return childEnv;
+}
+
 export interface PerformanceQueryEvent {
   version: 1;
   timestamp: string;

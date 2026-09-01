@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import { Pool } from "pg";
-import { initializeLocalPerformanceEnvironment, instrumentPgPool, summarizeObserverOverhead } from "../lib/performance-baseline.ts";
+import { createLocalPerformanceChildEnv, initializeLocalPerformanceEnvironment, instrumentPgPool, summarizeObserverOverhead } from "../lib/performance-baseline.ts";
 import { setupPerformanceDatabase } from "../e2e/performance/global-setup.ts";
 import { teardownPerformanceDatabase } from "../e2e/performance/global-teardown.ts";
 
@@ -60,7 +60,7 @@ fs.writeFileSync(".performance-baseline/observer-overhead.json", JSON.stringify(
   pairedSamples,
 }, null, 2));
 const auth = JSON.parse(fs.readFileSync("e2e/performance/.auth/user.json", "utf8")) as { cookies: Array<{ value: string }> };
-const env = {
+const env = createLocalPerformanceChildEnv({
   ...process.env,
   PORT: String(port),
   COMPASS_PERF_BASELINE: "1",
@@ -69,7 +69,7 @@ const env = {
   PERF_EXTERNALLY_MANAGED: "1",
   PERF_BASE_URL: baseURL,
   PERF_STORAGE_STATE: "e2e/performance/.auth/user.json",
-};
+}, baseURL);
 const server = spawn("pnpm", ["start"], { env, stdio: ["ignore", "pipe", "pipe"] });
 let serverLogs = "";
 const logPath = ".performance-baseline/local-server.log";
