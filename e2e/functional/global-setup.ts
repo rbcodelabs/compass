@@ -9,6 +9,7 @@ import path from "path";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import pg from "pg";
+import { backfillRoadmapCommitmentProvenance } from "../../lib/dsql-backfill";
 import { seedE2E } from "./fixtures/seed-e2e";
 import { setRunToken } from "./fixtures/run-token";
 import { assertIsolatedE2EDatabase } from "./fixtures/isolated-database";
@@ -39,7 +40,26 @@ async function ensureFunctionalSchema(pool: pg.Pool) {
         .replaceAll("CREATE INDEX ASYNC IF NOT EXISTS ", "CREATE INDEX IF NOT EXISTS ")
         .replaceAll("CREATE UNIQUE INDEX ASYNC ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
         .replaceAll("CREATE INDEX ASYNC ", "CREATE INDEX IF NOT EXISTS ");
-      await client.query(migration);
+      if (!relativePath.includes("039_native_decision_gates")) {
+        await client.query(migration);
+        continue;
+      }
+
+      const statements = migration
+        .split(/;\s*\n/)
+        .map((statement) => statement.trim())
+        .filter(Boolean)
+        .map((statement) => (statement.endsWith(";") ? statement : `${statement};`));
+      let pendingProvenanceBackfill = false;
+      for (const statement of statements) {
+        await client.query(statement);
+        if (/ALTER\s+COLUMN\s+"?now_commitment_provenance"?\s+SET\s+DEFAULT/i.test(statement)) {
+          pendingProvenanceBackfill = true;
+        } else if (pendingProvenanceBackfill && /^COMMIT;?$/i.test(statement)) {
+          pendingProvenanceBackfill = false;
+          await backfillRoadmapCommitmentProvenance(client, schema, []);
+        }
+      }
     }
   } finally {
     client.release();
