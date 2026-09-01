@@ -9,7 +9,7 @@ const samples = artifact.samples ?? [...(artifact.warm ?? []), ...(artifact.cold
 const events = fs.readFileSync(logPath, "utf8").split(/\r?\n/).map(parsePerformanceQueryLog).filter((event): event is NonNullable<typeof event> => event !== null);
 const queries = samples.map((sample) => {
   const matching = events.filter((event) => event.requestId === sample.requestId);
-  if (!matching.length && !("networkOutcome" in sample && sample.networkOutcome === "router-cache-hit")) throw new Error(`Measured request ${sample.requestId} has no local query records`);
+  if (!matching.length && !("networkOutcome" in sample && String(sample.networkOutcome).startsWith("router-cache"))) throw new Error(`Measured request ${sample.requestId} has no local query records`);
   const byFingerprint = [...new Set(matching.map((event) => event.fingerprint))].map((fingerprint) => ({ fingerprint, ...aggregateQueryEvents(matching.filter((event) => event.fingerprint === fingerprint)) }));
   return { requestId: sample.requestId, ...aggregateQueryEvents(matching), fingerprints: byFingerprint };
 });

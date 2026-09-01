@@ -24,8 +24,8 @@ const queryEnvelopes = lines.map(parseVercelQueryEnvelope).filter((entry): entry
 const rawRequests = lines
   .map(parseVercelRequestLog)
   .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-const networkedSamples = browserSamples.filter((sample) => !("networkOutcome" in sample) || sample.networkOutcome !== "router-cache-hit");
-const cacheHits = browserSamples.filter((sample) => "networkOutcome" in sample && sample.networkOutcome === "router-cache-hit");
+const networkedSamples = browserSamples.filter((sample) => !("networkOutcome" in sample) || !String(sample.networkOutcome).startsWith("router-cache"));
+const cacheHits = browserSamples.filter((sample) => "networkOutcome" in sample && String(sample.networkOutcome).startsWith("router-cache"));
 const measuredIds = networkedSamples.map((request) => request.requestId);
 const logs = groupVercelEnvelopes(rawRequests, queryEnvelopes, measuredIds);
 const correlated = correlateVercelRequests(networkedSamples, logs);
