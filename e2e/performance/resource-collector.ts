@@ -15,6 +15,10 @@ export type ResourceContract = {
   match: "exact" | "prefix";
 };
 
+export type ResourceExpectation =
+  | { exact: number }
+  | { min: number; max?: number };
+
 const QUIESCENCE_MS = 100;
 const COMPLETION_TIMEOUT_MS = 5_000;
 
@@ -148,7 +152,7 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
       if (attributionError) throw attributionError;
       active = { sampleId, contract, requestIds: new Set(), phase: "open", activityVersion: 0 };
     },
-    async closeSample(sampleId: string, expectedCount: number): Promise<ReadonlyArray<Readonly<ResourceMetric>>> {
+    async closeSample(sampleId: string, expectation: ResourceExpectation): Promise<ReadonlyArray<Readonly<ResourceMetric>>> {
       if (attributionError) throw attributionError;
       if (active?.sampleId !== sampleId) throw new Error(`Resource sample ${sampleId} is not active`);
       const sample = active;
@@ -157,8 +161,15 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
       if (attributionError) throw attributionError;
       active = null;
       const requestIds = [...sample.requestIds];
-      if (requestIds.length !== expectedCount) {
-        throw new Error(`Resource sample ${sampleId} expected ${expectedCount} qualifying request(s), observed ${requestIds.length}`);
+      const validCount = "exact" in expectation
+        ? requestIds.length === expectation.exact
+        : requestIds.length >= expectation.min &&
+          (expectation.max === undefined || requestIds.length <= expectation.max);
+      if (!validCount) {
+        const expected = "exact" in expectation
+          ? `exactly ${expectation.exact}`
+          : `at least ${expectation.min}${expectation.max === undefined ? "" : ` and at most ${expectation.max}`}`;
+        throw new Error(`Resource sample ${sampleId} expected ${expected} qualifying request(s), observed ${requestIds.length}`);
       }
       await Promise.all(requestIds.map(async (requestId) => {
         const request = requests.get(requestId)!;

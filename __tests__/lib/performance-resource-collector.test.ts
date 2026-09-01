@@ -30,7 +30,7 @@ describe("performance CDP resource collector lifecycle", () => {
     collector.beginSample("perf_one", { kind: "rsc", targetPath: "/org/ws/roadmap", match: "exact" });
     cdp.emit("Network.requestWillBeSent", request("r1", "http://localhost/org/ws/roadmap", { Rsc: "1" }));
     cdp.emit("Network.loadingFailed", { requestId: "r1", errorText: "net::ERR_FAILED", canceled: false });
-    const closing = collector.closeSample("perf_one", 1);
+    const closing = collector.closeSample("perf_one", { exact: 1 });
     const assertion = expect(closing).rejects.toThrow(/r1.*ERR_FAILED/);
     await vi.advanceTimersByTimeAsync(200);
     await assertion;
@@ -43,7 +43,7 @@ describe("performance CDP resource collector lifecycle", () => {
     collector.beginSample("perf_one", { kind: "rsc", targetPath: "/org/ws/roadmap", match: "exact" });
     cdp.emit("Network.requestWillBeSent", request("r1", "http://localhost/org/ws/roadmap", { Rsc: "1" }));
     cdp.emit("Network.requestWillBeSent", request("r1", "http://localhost/org/ws/roadmap", { Rsc: "1" }, {}));
-    await expect(collector.closeSample("perf_one", 1)).rejects.toThrow(/redirected/);
+    await expect(collector.closeSample("perf_one", { exact: 1 })).rejects.toThrow(/redirected/);
   });
 
   it("observes a delayed duplicate during closing before enforcing exact count", async () => {
@@ -52,12 +52,27 @@ describe("performance CDP resource collector lifecycle", () => {
     const collector = await createResourceCollector(cdp as unknown as CDPSession, []);
     collector.beginSample("perf_one", { kind: "rsc", targetPath: "/org/ws/roadmap", match: "exact" });
     cdp.emit("Network.requestWillBeSent", request("r1", "http://localhost/org/ws/roadmap", { Rsc: "1" }));
-    const closing = collector.closeSample("perf_one", 1);
+    const closing = collector.closeSample("perf_one", { exact: 1 });
     const assertion = expect(closing).rejects.toThrow(/observed 2/);
     await vi.advanceTimersByTimeAsync(50);
     cdp.emit("Network.requestWillBeSent", request("r2", "http://localhost/org/ws/roadmap", { Rsc: "1" }));
     await vi.advanceTimersByTimeAsync(200);
     await assertion;
+  });
+
+  it("aggregates every isolated target request when the contract allows navigation fan-out", async () => {
+    vi.useFakeTimers();
+    const cdp = new FakeCdp();
+    const collector = await createResourceCollector(cdp as unknown as CDPSession, []);
+    collector.beginSample("perf_one", { kind: "rsc", targetPath: "/org/ws/roadmap", match: "exact" });
+    for (const requestId of ["r1", "r2", "r3"]) {
+      cdp.emit("Network.requestWillBeSent", request(requestId, "http://localhost/org/ws/roadmap", { Rsc: "1" }));
+      cdp.emit("Network.loadingFinished", { requestId, encodedDataLength: 10 });
+    }
+    const closing = collector.closeSample("perf_one", { min: 1 });
+    await vi.advanceTimersByTimeAsync(100);
+    const snapshot = await closing;
+    expect(snapshot).toHaveLength(3);
   });
 
   it("waits for completion and returns an immutable snapshot without unrelated traffic", async () => {
@@ -72,7 +87,7 @@ describe("performance CDP resource collector lifecycle", () => {
     collector.beginSample("perf_one", { kind: "rsc", targetPath: "/org/ws/roadmap", match: "exact" });
     cdp.emit("Network.requestWillBeSent", request("asset", "http://localhost/app.js"));
     cdp.emit("Network.requestWillBeSent", request("r1", "http://localhost/org/ws/roadmap", { Rsc: "1" }));
-    const closing = collector.closeSample("perf_one", 1);
+    const closing = collector.closeSample("perf_one", { exact: 1 });
     await vi.advanceTimersByTimeAsync(100);
     cdp.emit("Network.loadingFinished", { requestId: "r1", encodedDataLength: 42 });
     const snapshot = await closing;
