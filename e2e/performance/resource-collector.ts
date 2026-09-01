@@ -16,7 +16,7 @@ export type ResourceContract = {
 };
 
 export type ResourceExpectation =
-  | { exact: number }
+  | { exact: number; allowCanceledOnly?: boolean }
   | { min: number; max?: number };
 
 export type ResourceSnapshot = {
@@ -173,7 +173,7 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
       active = null;
       const requestIds = [...sample.requestIds];
       const validCount = "exact" in expectation
-        ? requestIds.length === expectation.exact
+        ? requestIds.length === expectation.exact || expectation.allowCanceledOnly === true
         : requestIds.length >= expectation.min &&
           (expectation.max === undefined || requestIds.length <= expectation.max);
       if (!validCount) {
@@ -197,8 +197,21 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
         .filter((resource) => resource.sampleId === sampleId)
         .map((resource) => Object.freeze({ ...resource })));
       const canceledCount = requestIds.filter((requestId) => requests.get(requestId)!.canceled).length;
+      if (
+        "exact" in expectation &&
+        expectation.allowCanceledOnly &&
+        requestIds.length !== expectation.exact &&
+        !(sample.contract.kind === "rsc" && sampleResources.length === 0 && canceledCount === requestIds.length)
+      ) {
+        throw new Error(
+          `Resource sample ${sampleId} expected ${expectation.exact} completed request(s) or canceled-only RSC attempts; ` +
+          `observed ${sampleResources.length} completed and ${canceledCount} canceled`
+        );
+      }
       if (sample.contract.kind === "rsc" && requestIds.length > 0 && sampleResources.length === 0) {
-        throw new Error(`Resource sample ${sampleId} had no completed RSC requests (${canceledCount} canceled)`);
+        if (!("exact" in expectation && expectation.allowCanceledOnly)) {
+          throw new Error(`Resource sample ${sampleId} had no completed RSC requests (${canceledCount} canceled)`);
+        }
       }
       return Object.freeze({
         resources: sampleResources,
