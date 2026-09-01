@@ -26,8 +26,8 @@ export type ResourceSnapshot = {
   canceledCount: number;
 };
 
-const QUIESCENCE_MS = 100;
-const COMPLETION_TIMEOUT_MS = 5_000;
+export const RESOURCE_QUIESCENCE_MS = 100;
+export const RESOURCE_COMPLETION_TIMEOUT_MS = 5_000;
 
 export function createCompletedRscResponseObserver(
   sampleId: string,
@@ -61,7 +61,15 @@ export function createCompletedRscResponseObserver(
       }, () => undefined));
     },
     async settle() {
-      await Promise.all(pending);
+      if (pending.length > 0) {
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(resolve, RESOURCE_COMPLETION_TIMEOUT_MS);
+          void Promise.all(pending).then(() => {
+            clearTimeout(timeout);
+            resolve();
+          });
+        });
+      }
       return { url: completedUrl, completedAt };
     },
   };
@@ -190,7 +198,7 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
   const waitForQuiescence = async (sample: ActiveSample) => {
     while (true) {
       const version = sample.activityVersion;
-      await new Promise((resolve) => setTimeout(resolve, QUIESCENCE_MS));
+      await new Promise((resolve) => setTimeout(resolve, RESOURCE_QUIESCENCE_MS));
       if (sample.activityVersion === version) return;
     }
   };
@@ -226,7 +234,7 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
           request.completed,
           new Promise<never>((_, reject) => setTimeout(
             () => reject(new Error(`Timed out waiting for ${request.kind} request ${requestId} to complete: ${request.url}`)),
-            COMPLETION_TIMEOUT_MS
+            RESOURCE_COMPLETION_TIMEOUT_MS
           )),
         ]);
         if (request.error) throw request.error;

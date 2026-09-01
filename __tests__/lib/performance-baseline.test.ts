@@ -90,7 +90,10 @@ describe("performance baseline safeguards", () => {
     expect(spec).toContain("discardedWarmups: 2");
     expect(spec).toContain("retainedWarmPerRoute: 10");
     expect(spec).toContain("coldPerRoute: 5");
-    expect(spec).toContain("timeoutMs: 240_000");
+    expect(spec).toContain("const NAVIGATION_TIMEOUT_HEADROOM_MS = 60_000");
+    expect(spec).toContain("timeoutHeadroomMs: NAVIGATION_TIMEOUT_HEADROOM_MS");
+    expect(spec).toContain("NAVIGATION_WARM_ATTEMPT_COUNT * RESOURCE_COMPLETION_TIMEOUT_MS");
+    expect(spec).toContain("NAVIGATION_TOTAL_ATTEMPT_COUNT * RESOURCE_QUIESCENCE_MS");
     expect(spec).toContain("test.setTimeout(NAVIGATION_MATRIX.timeoutMs)");
     expect(config).toContain("timeout: 120_000");
     expect(spec).toContain('artifactName: "panel-roadmap-item"');

@@ -5,6 +5,8 @@ import { ROUTES, expect, test, type PerformanceRoute } from "./fixtures";
 import {
   createCompletedRscResponseObserver,
   createResourceCollector,
+  RESOURCE_COMPLETION_TIMEOUT_MS,
+  RESOURCE_QUIESCENCE_MS,
   type ResourceMetric,
 } from "./resource-collector";
 type ClientMetric = {
@@ -17,11 +19,22 @@ type ClientMetric = {
   heapBytes: number | null;
 };
 
-const NAVIGATION_MATRIX = {
+const NAVIGATION_SAMPLE_COUNTS = {
   discardedWarmups: 2,
   retainedWarmPerRoute: 10,
   coldPerRoute: 5,
-  timeoutMs: 240_000,
+} as const;
+const NAVIGATION_WARM_ATTEMPT_COUNT = NAVIGATION_SAMPLE_COUNTS.discardedWarmups +
+  ROUTES.length * NAVIGATION_SAMPLE_COUNTS.retainedWarmPerRoute;
+const NAVIGATION_TOTAL_ATTEMPT_COUNT = NAVIGATION_WARM_ATTEMPT_COUNT +
+  ROUTES.length * NAVIGATION_SAMPLE_COUNTS.coldPerRoute;
+const NAVIGATION_TIMEOUT_HEADROOM_MS = 60_000;
+const NAVIGATION_MATRIX = {
+  ...NAVIGATION_SAMPLE_COUNTS,
+  timeoutHeadroomMs: NAVIGATION_TIMEOUT_HEADROOM_MS,
+  timeoutMs: NAVIGATION_WARM_ATTEMPT_COUNT * RESOURCE_COMPLETION_TIMEOUT_MS +
+    NAVIGATION_TOTAL_ATTEMPT_COUNT * RESOURCE_QUIESCENCE_MS +
+    NAVIGATION_TIMEOUT_HEADROOM_MS,
 } as const;
 
 const durationSummary = (values: number[]) => {

@@ -180,4 +180,25 @@ describe("performance CDP resource collector lifecycle", () => {
 
     await expect(observer.settle()).resolves.toEqual({ url: null, completedAt: null });
   });
+
+  it("bounds a warm-navigation response whose completion never settles", async () => {
+    vi.useFakeTimers();
+    const observer = createCompletedRscResponseObserver("perf_one", "/org/ws/roadmap", () => 42);
+    observer.observe({
+      url: () => "http://localhost/org/ws/roadmap?_rsc=one",
+      request: () => ({ headers: () => ({
+        rsc: "1",
+        "x-compass-perf-request-id": "perf_one",
+      }) }),
+      headers: () => ({ "content-type": "text/x-component" }),
+      finished: () => new Promise<null | Error>(() => undefined),
+    });
+    const settling = observer.settle();
+    let resolved = false;
+    void settling.then(() => { resolved = true; });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(resolved).toBe(true);
+    await expect(settling).resolves.toEqual({ url: null, completedAt: null });
+  });
 });
