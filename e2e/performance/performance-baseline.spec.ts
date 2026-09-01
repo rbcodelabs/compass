@@ -18,6 +18,13 @@ type ClientMetric = {
   maxEventMs: number | null;
   heapBytes: number | null;
 };
+
+function normalizeHeaders(headers: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [name.toLowerCase(), String(value)])
+  );
+}
+
 const durationSummary = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b);
   return { sampleCount: sorted.length, medianMs: sorted[Math.ceil(sorted.length * 0.5) - 1] ?? null, p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1] ?? null };
@@ -77,17 +84,17 @@ async function collectResources(cdp: CDPSession, resources: ResourceMetric[]) {
   const requests = new Map<string, { url: string; decodedBytes: number; sampleId: string | null; kind: "document" | "rsc" | "api" }>();
   const requestHeaders = new Map<string, Record<string, string>>();
   cdp.on("Network.requestWillBeSent", ({ requestId, request }) => {
-    requestHeaders.set(requestId, request.headers as Record<string, string>);
+    requestHeaders.set(requestId, normalizeHeaders(request.headers));
   });
   cdp.on("Network.responseReceived", ({ requestId, response, type }) => {
-    const headers = requestHeaders.get(requestId) ?? response.requestHeaders ?? {};
-    const isRsc = headers.rsc === "1" || headers.RSC === "1" ||
+    const headers = requestHeaders.get(requestId) ?? normalizeHeaders(response.requestHeaders ?? {});
+    const isRsc = headers.rsc === "1" ||
       String(response.mimeType).includes("x-component");
     const isPanelApi = response.url.includes("/api/panels/entity/");
     if (isRsc || type === "Document" || isPanelApi) requests.set(requestId, {
       url: response.url,
       decodedBytes: 0,
-      sampleId: String(headers["x-compass-perf-request-id"] ?? headers["X-Compass-Perf-Request-Id"] ?? "") || null,
+      sampleId: headers["x-compass-perf-request-id"] || null,
       kind: isRsc ? "rsc" : isPanelApi ? "api" : "document",
     });
   });
