@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest"
-import { planDsqlWriteBatch } from "@/lib/dsql-backfill"
+import type { PoolClient } from "pg"
+import { describe, expect, it, vi } from "vitest"
+import {
+  backfillRoadmapCommitmentProvenance,
+  planDsqlWriteBatch,
+} from "@/lib/dsql-backfill"
 
 describe("planDsqlWriteBatch", () => {
   it("bounds a batch by row count", () => {
@@ -16,4 +20,20 @@ describe("planDsqlWriteBatch", () => {
     expect(() => planDsqlWriteBatch([{ id: "large", estimatedBytes: 101 }], { maxRows: 3, maxBytes: 100 }))
       .toThrow("exceeds Aurora DSQL's transaction byte limit")
   })
+})
+
+describe("backfillRoadmapCommitmentProvenance", () => {
+  it.each(["not-a-number", "9007199254740992", "-1", "Infinity"])(
+    "fails closed before writing when estimated bytes are unsafe: %s",
+    async (estimatedBytes) => {
+      const query = vi.fn().mockResolvedValueOnce({
+        rows: [{ id: "00000000-0000-4000-8000-000000000039", estimated_bytes: estimatedBytes }],
+      })
+      const client = { query } as unknown as PoolClient
+
+      await expect(backfillRoadmapCommitmentProvenance(client, "compass_preview", []))
+        .rejects.toThrow("exceeds Aurora DSQL's transaction byte limit")
+      expect(query).toHaveBeenCalledTimes(1)
+    },
+  )
 })

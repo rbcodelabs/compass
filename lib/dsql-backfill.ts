@@ -9,7 +9,7 @@ export const DSQL_WRITE_LIMITS = {
 
 function toSafeNumber(value: unknown): number {
   const parsed = Number(value)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : Number.MAX_SAFE_INTEGER
 }
 
 export function planDsqlWriteBatch(
