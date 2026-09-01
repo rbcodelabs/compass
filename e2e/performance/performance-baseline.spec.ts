@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { CDPSession, Page } from "@playwright/test";
+import { persistPerformanceArtifact } from "../../lib/performance-baseline";
 import { ROUTES, expect, test, type PerformanceRoute } from "./fixtures";
-import { createResourceCollector, type ResourceMetric } from "./resource-collector";
+import {
+  createCompletedRscResponseObserver,
+  createResourceCollector,
+  type ResourceMetric,
+} from "./resource-collector";
 type ClientMetric = {
   longTaskSupported: boolean;
   eventTimingSupported: boolean;
@@ -133,29 +138,21 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, collector: Awai
     `${base}/${route}`
   );
   const start = performance.now();
-  let matchedRscUrl: string | null = null;
-  let matchedRscAt: number | null = null;
-  const observeResponse = (candidate: import("@playwright/test").Response) => {
-    const headers = candidate.request().headers();
-    if (headers["x-compass-perf-request-id"] === requestId &&
-      (headers.rsc === "1" || candidate.headers()["content-type"]?.includes("text/x-component"))) {
-      matchedRscUrl = candidate.url();
-      matchedRscAt = performance.now();
-    }
-  };
-  page.on("response", observeResponse);
+  const responseObserver = createCompletedRscResponseObserver(requestId, `${base}/${route}`);
+  page.on("response", responseObserver.observe);
   await page.locator(`a[href="${base}/${route}"]`).first().click();
   await expect(page).toHaveURL(new RegExp(`/${route}(?:\\?|$)`));
   await ready(page, route);
   const semanticEnd = performance.now();
-  page.off("response", observeResponse);
+  page.off("response", responseObserver.observe);
   const after = await cdpSnapshot(cdp);
   const client = await readClientMetrics(page, false);
+  const matchedRsc = await responseObserver.settle();
   const resourceSnapshot = await collector.closeSample(
     requestId,
-    matchedRscUrl ? { min: 1 } : { exact: 0, allowCanceledOnly: true }
+    matchedRsc.url ? { min: 1 } : { exact: 0, allowCanceledOnly: true }
   );
-  const networkOutcome = matchedRscUrl
+  const networkOutcome = matchedRsc.url
     ? "rsc-request"
     : resourceSnapshot.canceledCount > 0
       ? "router-cache-canceled-speculative"
@@ -163,11 +160,11 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, collector: Awai
   return {
     requestId,
     method: "GET",
-    path: matchedRscUrl ? new URL(matchedRscUrl).pathname + new URL(matchedRscUrl).search : `${base}/${route}`,
+    path: matchedRsc.url ? new URL(matchedRsc.url).pathname + new URL(matchedRsc.url).search : `${base}/${route}`,
     networkOutcome,
     prefetchObserved,
     startedAt,
-    responseWaitMs: matchedRscAt === null ? null : matchedRscAt - start,
+    responseWaitMs: matchedRsc.completedAt === null ? null : matchedRsc.completedAt - start,
     durationMs: semanticEnd - start,
     resourceRequestCount: resourceSnapshot.attemptedCount,
     completedResourceRequestCount: resourceSnapshot.completedCount,
@@ -262,12 +259,15 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
     resources,
     client: await readClientMetrics(page),
   };
-  const path = testInfo.outputPath("performance-baseline.json");
+  persistPerformanceArtifact(
+    process.env.PERF_SERVER_KIND as "local-production" | "vercel-preview",
+    "navigation",
+    artifact
+  );
   await testInfo.attach("performance-baseline", {
     body: Buffer.from(JSON.stringify(artifact, null, 2)),
     contentType: "application/json",
   });
-  expect(path).toBeTruthy();
 });
 
 for (const panel of [
@@ -339,20 +339,26 @@ for (const panel of [
       if (iteration >= 2) samples.push(sample);
     }
     await readClientMetrics(page);
+    const artifact = {
+      version: 1,
+      recordedAt: new Date().toISOString(),
+      panel: panel.apiType,
+      warmupsDiscarded: 2,
+      metricBoundary: "meaningful paint, client, and CDP metrics end immediately after the seeded entity title is visible; resource completion settles afterward and is excluded",
+      samples,
+      aggregates: {
+        shell: durationSummary(samples.map((sample) => sample.shellMs)),
+        response: durationSummary(samples.map((sample) => sample.responseMs)),
+        meaningfulPaint: durationSummary(samples.map((sample) => sample.meaningfulPaintMs)),
+      },
+    };
+    persistPerformanceArtifact(
+      process.env.PERF_SERVER_KIND as "local-production" | "vercel-preview",
+      `panel-${panel.apiType}`,
+      artifact
+    );
     await testInfo.attach(`${panel.apiType}-panel-baseline`, {
-      body: Buffer.from(JSON.stringify({
-        version: 1,
-        recordedAt: new Date().toISOString(),
-        panel: panel.apiType,
-        warmupsDiscarded: 2,
-        metricBoundary: "meaningful paint, client, and CDP metrics end immediately after the seeded entity title is visible; resource completion settles afterward and is excluded",
-        samples,
-        aggregates: {
-          shell: durationSummary(samples.map((sample) => sample.shellMs)),
-          response: durationSummary(samples.map((sample) => sample.responseMs)),
-          meaningfulPaint: durationSummary(samples.map((sample) => sample.meaningfulPaintMs)),
-        },
-      }, null, 2)),
+      body: Buffer.from(JSON.stringify(artifact, null, 2)),
       contentType: "application/json",
     });
   });

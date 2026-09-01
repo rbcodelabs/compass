@@ -16,6 +16,7 @@ import {
   groupVercelEnvelopes,
   summarizeObserverOverhead,
   initializeLocalPerformanceEnvironment,
+  persistPerformanceArtifact,
   prismaPerformanceDbPushArgs,
   createLocalPerformanceChildEnv,
   resolvePerformanceResourceSampleId,
@@ -66,6 +67,20 @@ describe("performance baseline safeguards", () => {
       PERF_EXTERNALLY_MANAGED: "1",
       COMPASS_PERF_BASELINE: "1",
     }));
+  });
+
+  it("persists successful browser artifacts at a stable ignored path", () => {
+    const root = path.resolve(".performance-baseline/unit-test-artifacts");
+    fs.rmSync(root, { recursive: true, force: true });
+
+    try {
+      const artifactPath = persistPerformanceArtifact("local-production", "navigation", { version: 1 }, root);
+      expect(artifactPath).toBe(path.join(root, "local-production-navigation.json"));
+      expect(JSON.parse(fs.readFileSync(artifactPath, "utf8"))).toEqual({ version: 1 });
+      expect(fs.statSync(artifactPath).mode & 0o777).toBe(0o600);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("uses the installed Prisma 7.8 db-push command shape", () => {

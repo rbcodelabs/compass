@@ -30,10 +30,13 @@ or add dependencies.
 Direct local `pnpm test:performance` is invalid because it cannot prove the
 running server uses the owned performance schema.
 
-Local raw server logs and the enabled/disabled 20-query observer probe are
-written under `.performance-baseline/local-server.log` and
-`.performance-baseline/observer-overhead.json`. Ingest a Playwright attachment
-with `pnpm performance:ingest-local <artifact.json>
+Local raw server logs, the enabled/disabled 20-query observer probe, and
+successful browser artifacts are written under `.performance-baseline/`.
+Navigation and panel artifacts use stable lane-qualified names such as
+`local-production-navigation.json` and
+`local-production-panel-opportunity.json`; the same JSON remains attached to
+the Playwright result. Ingest an artifact with
+`pnpm performance:ingest-local <artifact.json>
 .performance-baseline/local-server.log`. Preview logs use
 `pnpm performance:ingest-vercel <artifact.json> <vercel.jsonl>`.
 

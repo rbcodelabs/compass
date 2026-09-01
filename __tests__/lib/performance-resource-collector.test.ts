@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CDPSession } from "@playwright/test";
-import { createResourceCollector, type ResourceMetric } from "../../e2e/performance/resource-collector";
+import {
+  createCompletedRscResponseObserver,
+  createResourceCollector,
+  type ResourceMetric,
+} from "../../e2e/performance/resource-collector";
 
 class FakeCdp {
   private handlers = new Map<string, Array<(event: never) => void>>();
@@ -157,5 +161,23 @@ describe("performance CDP resource collector lifecycle", () => {
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot.resources)).toBe(true);
     expect(Object.isFrozen(snapshot.resources[0])).toBe(true);
+  });
+
+  it("does not treat response headers as a completed warm-navigation RSC", async () => {
+    let finish!: (result: null | Error) => void;
+    const finished = new Promise<null | Error>((resolve) => { finish = resolve; });
+    const observer = createCompletedRscResponseObserver("perf_one", "/org/ws/roadmap", () => 42);
+    observer.observe({
+      url: () => "http://localhost/org/ws/roadmap?_rsc=one",
+      request: () => ({ headers: () => ({
+        rsc: "1",
+        "x-compass-perf-request-id": "perf_one",
+      }) }),
+      headers: () => ({ "content-type": "text/x-component" }),
+      finished: () => finished,
+    });
+    finish(new Error("net::ERR_ABORTED"));
+
+    await expect(observer.settle()).resolves.toEqual({ url: null, completedAt: null });
   });
 });

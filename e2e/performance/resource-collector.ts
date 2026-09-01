@@ -29,6 +29,44 @@ export type ResourceSnapshot = {
 const QUIESCENCE_MS = 100;
 const COMPLETION_TIMEOUT_MS = 5_000;
 
+export function createCompletedRscResponseObserver(
+  sampleId: string,
+  targetPath: string,
+  now: () => number = () => performance.now()
+) {
+  let completedUrl: string | null = null;
+  let completedAt: number | null = null;
+  const pending: Promise<void>[] = [];
+
+  return {
+    observe(response: {
+      url: () => string;
+      request: () => { headers: () => Record<string, string> };
+      headers: () => Record<string, string>;
+      finished: () => Promise<null | Error>;
+    }) {
+      const requestHeaders = normalizeHeaders(response.request().headers());
+      const responseHeaders = normalizeHeaders(response.headers());
+      if (
+        requestHeaders["x-compass-perf-request-id"] !== sampleId ||
+        !(requestHeaders.rsc === "1" || responseHeaders["content-type"]?.includes("text/x-component")) ||
+        new URL(response.url()).pathname !== targetPath
+      ) return;
+
+      pending.push(response.finished().then((error) => {
+        if (error === null && completedUrl === null) {
+          completedUrl = response.url();
+          completedAt = now();
+        }
+      }, () => undefined));
+    },
+    async settle() {
+      await Promise.all(pending);
+      return { url: completedUrl, completedAt };
+    },
+  };
+}
+
 function normalizeHeaders(headers: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(
     Object.entries(headers).map(([name, value]) => [name.toLowerCase(), String(value)])

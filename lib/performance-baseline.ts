@@ -8,6 +8,20 @@ export const PERFORMANCE_QUERY_PREFIX = "COMPASS_PERF_QUERY ";
 const WRAPPED = Symbol.for("compass.performanceBaseline.wrapped");
 const QUERY_OBSERVATION = new AsyncLocalStorage<boolean>();
 
+export function persistPerformanceArtifact(
+  serverKind: "local-production" | "vercel-preview",
+  name: string,
+  artifact: unknown,
+  root = path.resolve(".performance-baseline")
+): string {
+  if (!/^[a-z0-9-]+$/.test(name)) throw new Error("Performance artifact name is invalid");
+  const artifactPath = path.join(root, `${serverKind}-${name}.json`);
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, { mode: 0o600 });
+  fs.chmodSync(artifactPath, 0o600);
+  return artifactPath;
+}
+
 export function initializeLocalPerformanceEnvironment(env: NodeJS.ProcessEnv): void {
   env.PERF_SERVER_KIND = "local-production";
   env.PERF_EXTERNALLY_MANAGED = "1";
