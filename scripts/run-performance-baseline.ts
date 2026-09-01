@@ -4,18 +4,18 @@ import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import { Pool } from "pg";
-import { instrumentPgPool, summarizeObserverOverhead } from "../lib/performance-baseline.ts";
+import { initializeLocalPerformanceEnvironment, instrumentPgPool, summarizeObserverOverhead } from "../lib/performance-baseline.ts";
 import { setupPerformanceDatabase } from "../e2e/performance/global-setup.ts";
 import { teardownPerformanceDatabase } from "../e2e/performance/global-teardown.ts";
 
 const port = Number(process.env.PERF_PORT ?? 4900 + (crypto.createHash("md5").update(process.cwd()).digest().readUInt16BE(0) % 700));
 const baseURL = `http://localhost:${port}`;
+initializeLocalPerformanceEnvironment(process.env);
 const sha = process.env.PERF_BUILD_SHA;
 if (!sha || sha !== process.env.PERF_EXPECTED_SHA) throw new Error("Exact build SHA is required");
 const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 if (head !== sha) throw new Error("PERF_BUILD_SHA must equal HEAD");
 execFileSync("pnpm", ["build"], { stdio: "inherit", env: process.env });
-process.env.PERF_EXTERNALLY_MANAGED = "1";
 
 async function waitForSession(sessionToken: string) {
   const deadline = Date.now() + 30_000;

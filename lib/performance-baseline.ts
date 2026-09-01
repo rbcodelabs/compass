@@ -8,6 +8,12 @@ export const PERFORMANCE_QUERY_PREFIX = "COMPASS_PERF_QUERY ";
 const WRAPPED = Symbol.for("compass.performanceBaseline.wrapped");
 const QUERY_OBSERVATION = new AsyncLocalStorage<boolean>();
 
+export function initializeLocalPerformanceEnvironment(env: NodeJS.ProcessEnv): void {
+  env.PERF_SERVER_KIND = "local-production";
+  env.PERF_EXTERNALLY_MANAGED = "1";
+  env.COMPASS_PERF_BASELINE = "1";
+}
+
 export interface PerformanceQueryEvent {
   version: 1;
   timestamp: string;

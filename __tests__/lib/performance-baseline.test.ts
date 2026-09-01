@@ -15,6 +15,7 @@ import {
   aggregateDsqlByRequest,
   groupVercelEnvelopes,
   summarizeObserverOverhead,
+  initializeLocalPerformanceEnvironment,
 } from "@/lib/performance-baseline";
 
 describe("performance baseline safeguards", () => {
@@ -46,6 +47,16 @@ describe("performance baseline safeguards", () => {
         "public"
       )
     ).toThrow(/schema/);
+  });
+
+  it("establishes the complete local runner environment without caller flags", () => {
+    const env: NodeJS.ProcessEnv = { NODE_ENV: "test" };
+    initializeLocalPerformanceEnvironment(env);
+    expect(env).toEqual(expect.objectContaining({
+      PERF_SERVER_KIND: "local-production",
+      PERF_EXTERNALLY_MANAGED: "1",
+      COMPASS_PERF_BASELINE: "1",
+    }));
   });
 
   it("requires ignored owner-only, non-symlink auth state in the dedicated directory", () => {
