@@ -16,6 +16,7 @@ import {
   groupVercelEnvelopes,
   summarizeObserverOverhead,
   initializeLocalPerformanceEnvironment,
+  prismaPerformanceDbPushArgs,
 } from "@/lib/performance-baseline";
 
 describe("performance baseline safeguards", () => {
@@ -57,6 +58,11 @@ describe("performance baseline safeguards", () => {
       PERF_EXTERNALLY_MANAGED: "1",
       COMPASS_PERF_BASELINE: "1",
     }));
+  });
+
+  it("uses the installed Prisma 7.8 db-push command shape", () => {
+    expect(prismaPerformanceDbPushArgs()).toEqual(["prisma", "db", "push"]);
+    expect(prismaPerformanceDbPushArgs()).not.toContain("--skip-generate");
   });
 
   it("requires ignored owner-only, non-symlink auth state in the dedicated directory", () => {

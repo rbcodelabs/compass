@@ -14,6 +14,11 @@ export function initializeLocalPerformanceEnvironment(env: NodeJS.ProcessEnv): v
   env.COMPASS_PERF_BASELINE = "1";
 }
 
+/** Prisma 7.8 removed the historical --skip-generate db-push option. */
+export function prismaPerformanceDbPushArgs(): string[] {
+  return ["prisma", "db", "push"];
+}
+
 export interface PerformanceQueryEvent {
   version: 1;
   timestamp: string;

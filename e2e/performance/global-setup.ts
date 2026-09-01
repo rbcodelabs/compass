@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
-import { assertSafeLocalPerformanceDatabase } from "../../lib/performance-baseline.ts";
+import { assertSafeLocalPerformanceDatabase, prismaPerformanceDbPushArgs } from "../../lib/performance-baseline.ts";
 
 const statePath = path.resolve(".performance-baseline/run.json");
 
@@ -27,7 +27,7 @@ export async function setupPerformanceDatabase() {
   const scopedUrl = withSchema(databaseUrl, schema);
   const pool = new Pool({ connectionString: databaseUrl });
   try {
-    execFileSync("pnpm", ["prisma", "db", "push", "--skip-generate"], { stdio: "inherit", env: { ...process.env, DATABASE_URL: scopedUrl } });
+    execFileSync("pnpm", prismaPerformanceDbPushArgs(), { stdio: "inherit", env: { ...process.env, DATABASE_URL: scopedUrl } });
   } catch (error) {
     await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     await pool.end();
