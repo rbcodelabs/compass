@@ -286,7 +286,7 @@ describe("/api/admin/migrate rollout observability", () => {
     ).toBe(false)
   })
 
-  it("commits migration 039 column DDL before starting the provenance backfill", async () => {
+  it("installs migration 039's default before backfill and NOT NULL afterward", async () => {
     let provenanceReads = 0
     mocks.query.mockImplementation(async (sqlValue: unknown) => {
       const sql = String(sqlValue)
@@ -325,13 +325,21 @@ describe("/api/admin/migrate rollout observability", () => {
     const setDefaultIndex = statements.findIndex((sql) =>
       /ALTER\s+COLUMN\s+"?now_commitment_provenance"?\s+SET\s+DEFAULT/i.test(sql),
     )
+    const setDefaultCommitIndex = statements.findIndex(
+      (sql, index) => index > setDefaultIndex && /^COMMIT;?$/i.test(sql.trim()),
+    )
+    const setNotNullIndex = statements.findIndex((sql) =>
+      /ALTER\s+COLUMN\s+"?now_commitment_provenance"?\s+SET\s+NOT\s+NULL/i.test(sql),
+    )
 
     expect(addColumnIndex).toBeGreaterThan(-1)
     expect(addColumnCommitIndex).toBeGreaterThan(addColumnIndex)
-    expect(backfillSelectIndex).toBeGreaterThan(addColumnCommitIndex)
+    expect(setDefaultIndex).toBeGreaterThan(addColumnCommitIndex)
+    expect(setDefaultCommitIndex).toBeGreaterThan(setDefaultIndex)
+    expect(backfillSelectIndex).toBeGreaterThan(setDefaultCommitIndex)
     expect(backfillUpdateIndex).toBeGreaterThan(backfillSelectIndex)
     expect(backfillCommitIndex).toBeGreaterThan(backfillUpdateIndex)
-    expect(setDefaultIndex).toBeGreaterThan(backfillCommitIndex)
+    expect(setNotNullIndex).toBeGreaterThan(backfillCommitIndex)
   })
 
   it("returns migration 036 index validity after an explicit apply", async () => {

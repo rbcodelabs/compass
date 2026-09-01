@@ -690,7 +690,7 @@ export async function POST(req: NextRequest) {
           const result = await client.query<{ job_id?: string }>(executableStmt);
           if (
             migration.name === "039_native_decision_gates" &&
-            /ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+"?now_commitment_provenance"?/i.test(executableStmt)
+            /ALTER\s+COLUMN\s+"?now_commitment_provenance"?\s+SET\s+DEFAULT/i.test(executableStmt)
           ) {
             pendingRoadmapCommitmentProvenanceBackfill = true;
           } else if (
