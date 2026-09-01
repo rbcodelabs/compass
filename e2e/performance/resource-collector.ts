@@ -19,6 +19,13 @@ export type ResourceExpectation =
   | { exact: number }
   | { min: number; max?: number };
 
+export type ResourceSnapshot = {
+  resources: ReadonlyArray<Readonly<ResourceMetric>>;
+  attemptedCount: number;
+  completedCount: number;
+  canceledCount: number;
+};
+
 const QUIESCENCE_MS = 100;
 const COMPLETION_TIMEOUT_MS = 5_000;
 
@@ -38,6 +45,7 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
     completed: Promise<void>;
     complete: () => void;
     error: Error | null;
+    canceled: boolean;
   };
   type ActiveSample = {
     sampleId: string;
@@ -76,7 +84,7 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
       if (!sampleId) return;
       let complete!: () => void;
       const completed = new Promise<void>((resolve) => { complete = resolve; });
-      requests.set(requestId, { url, decodedBytes: 0, sampleId, kind, completed, complete, error: null });
+      requests.set(requestId, { url, decodedBytes: 0, sampleId, kind, completed, complete, error: null, canceled: false });
       active.requestIds.add(requestId);
       active.activityVersion += 1;
     } catch (error) {
@@ -130,10 +138,13 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
   cdp.on("Network.loadingFailed", ({ requestId, errorText, canceled, blockedReason }) => {
     const request = requests.get(requestId);
     if (!request) return;
-    request.error = new Error(
-      `Tracked ${request.kind} request ${requestId} failed for ${request.url}: ${errorText}` +
-      `${canceled ? " (canceled)" : ""}${blockedReason ? ` (${blockedReason})` : ""}`
-    );
+    request.canceled = canceled === true;
+    if (!(request.kind === "rsc" && request.canceled)) {
+      request.error = new Error(
+        `Tracked ${request.kind} request ${requestId} failed for ${request.url}: ${errorText}` +
+        `${request.canceled ? " (canceled)" : ""}${blockedReason ? ` (${blockedReason})` : ""}`
+      );
+    }
     request.complete();
   });
   await cdp.send("Network.enable");
@@ -152,7 +163,7 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
       if (attributionError) throw attributionError;
       active = { sampleId, contract, requestIds: new Set(), phase: "open", activityVersion: 0 };
     },
-    async closeSample(sampleId: string, expectation: ResourceExpectation): Promise<ReadonlyArray<Readonly<ResourceMetric>>> {
+    async closeSample(sampleId: string, expectation: ResourceExpectation): Promise<ResourceSnapshot> {
       if (attributionError) throw attributionError;
       if (active?.sampleId !== sampleId) throw new Error(`Resource sample ${sampleId} is not active`);
       const sample = active;
@@ -182,9 +193,19 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
         ]);
         if (request.error) throw request.error;
       }));
-      return Object.freeze(resources
+      const sampleResources = Object.freeze(resources
         .filter((resource) => resource.sampleId === sampleId)
         .map((resource) => Object.freeze({ ...resource })));
+      const canceledCount = requestIds.filter((requestId) => requests.get(requestId)!.canceled).length;
+      if (sample.contract.kind === "rsc" && requestIds.length > 0 && sampleResources.length === 0) {
+        throw new Error(`Resource sample ${sampleId} had no completed RSC requests (${canceledCount} canceled)`);
+      }
+      return Object.freeze({
+        resources: sampleResources,
+        attemptedCount: requestIds.length,
+        completedCount: sampleResources.length,
+        canceledCount,
+      });
     },
   };
 }

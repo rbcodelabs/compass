@@ -151,7 +151,7 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, collector: Awai
   page.off("response", observeResponse);
   const after = await cdpSnapshot(cdp);
   const client = await readClientMetrics(page, false);
-  const sampleResources = await collector.closeSample(
+  const resourceSnapshot = await collector.closeSample(
     requestId,
     matchedRscUrl ? { min: 1 } : { exact: 0 }
   );
@@ -164,8 +164,10 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, collector: Awai
     startedAt,
     responseWaitMs: matchedRscAt === null ? null : matchedRscAt - start,
     durationMs: semanticEnd - start,
-    resourceRequestCount: sampleResources.length,
-    resources: sampleResources,
+    resourceRequestCount: resourceSnapshot.attemptedCount,
+    completedResourceRequestCount: resourceSnapshot.completedCount,
+    canceledResourceRequestCount: resourceSnapshot.canceledCount,
+    resources: resourceSnapshot.resources,
     client,
     cdp: cdpDelta(before, after),
   };
@@ -216,7 +218,7 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
       const semanticEnd = performance.now();
       const after = await cdpSnapshot(coldCdp);
       const client = await readClientMetrics(coldPage);
-      const sampleResources = await coldCollector.closeSample(requestId, { exact: 1 });
+      const resourceSnapshot = await coldCollector.closeSample(requestId, { exact: 1 });
       cold.push({
         route,
         requestId,
@@ -224,9 +226,11 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
         path: new URL(documentResponse.url()).pathname + new URL(documentResponse.url()).search,
         startedAt,
         durationMs: semanticEnd - start,
-        resourceRequestCount: sampleResources.length,
-        resources: sampleResources,
-        documentResource: sampleResources[0] ?? null,
+        resourceRequestCount: resourceSnapshot.attemptedCount,
+        completedResourceRequestCount: resourceSnapshot.completedCount,
+        canceledResourceRequestCount: resourceSnapshot.canceledCount,
+        resources: resourceSnapshot.resources,
+        documentResource: resourceSnapshot.resources[0] ?? null,
         rscResources: [],
         client,
         cdp: cdpDelta(before, after),
@@ -307,7 +311,7 @@ for (const panel of [
       const semanticEnd = performance.now();
       const after = await cdpSnapshot(panelCdp);
       const client = await readClientMetrics(page, false);
-      const sampleResources = await panelCollector.closeSample(requestId, { exact: 1 });
+      const resourceSnapshot = await panelCollector.closeSample(requestId, { exact: 1 });
       const meaningfulPaintMs = semanticEnd - start;
       const sample = {
         requestId,
@@ -317,9 +321,11 @@ for (const panel of [
         shellMs,
         responseMs,
         meaningfulPaintMs,
-        resourceRequestCount: sampleResources.length,
+        resourceRequestCount: resourceSnapshot.attemptedCount,
+        completedResourceRequestCount: resourceSnapshot.completedCount,
+        canceledResourceRequestCount: resourceSnapshot.canceledCount,
         status: response.status(),
-        resources: sampleResources,
+        resources: resourceSnapshot.resources,
         client,
         cdp: cdpDelta(before, after),
       };

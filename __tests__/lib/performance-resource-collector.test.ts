@@ -72,7 +72,39 @@ describe("performance CDP resource collector lifecycle", () => {
     const closing = collector.closeSample("perf_one", { min: 1 });
     await vi.advanceTimersByTimeAsync(100);
     const snapshot = await closing;
-    expect(snapshot).toHaveLength(3);
+    expect(snapshot.resources).toHaveLength(3);
+    expect(snapshot).toEqual(expect.objectContaining({ attemptedCount: 3, completedCount: 3, canceledCount: 0 }));
+  });
+
+  it("records canceled RSC attempts while retaining completed fan-out resources", async () => {
+    vi.useFakeTimers();
+    const cdp = new FakeCdp();
+    const collector = await createResourceCollector(cdp as unknown as CDPSession, []);
+    collector.beginSample("perf_one", { kind: "rsc", targetPath: "/org/ws/roadmap", match: "exact" });
+    cdp.emit("Network.requestWillBeSent", request("canceled", "http://localhost/org/ws/roadmap", { Rsc: "1" }));
+    cdp.emit("Network.loadingFailed", { requestId: "canceled", errorText: "net::ERR_ABORTED", canceled: true });
+    cdp.emit("Network.requestWillBeSent", request("completed", "http://localhost/org/ws/roadmap", { Rsc: "1" }));
+    cdp.emit("Network.loadingFinished", { requestId: "completed", encodedDataLength: 10 });
+    const closing = collector.closeSample("perf_one", { min: 1 });
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(closing).resolves.toEqual(expect.objectContaining({
+      attemptedCount: 2,
+      completedCount: 1,
+      canceledCount: 1,
+    }));
+  });
+
+  it("rejects an RSC sample when every qualifying attempt is canceled", async () => {
+    vi.useFakeTimers();
+    const cdp = new FakeCdp();
+    const collector = await createResourceCollector(cdp as unknown as CDPSession, []);
+    collector.beginSample("perf_one", { kind: "rsc", targetPath: "/org/ws/roadmap", match: "exact" });
+    cdp.emit("Network.requestWillBeSent", request("canceled", "http://localhost/org/ws/roadmap", { Rsc: "1" }));
+    cdp.emit("Network.loadingFailed", { requestId: "canceled", errorText: "net::ERR_ABORTED", canceled: true });
+    const closing = collector.closeSample("perf_one", { min: 1 });
+    const assertion = expect(closing).rejects.toThrow(/no completed RSC.*1 canceled/);
+    await vi.advanceTimersByTimeAsync(100);
+    await assertion;
   });
 
   it("waits for completion and returns an immutable snapshot without unrelated traffic", async () => {
@@ -91,9 +123,10 @@ describe("performance CDP resource collector lifecycle", () => {
     await vi.advanceTimersByTimeAsync(100);
     cdp.emit("Network.loadingFinished", { requestId: "r1", encodedDataLength: 42 });
     const snapshot = await closing;
-    expect(snapshot).toHaveLength(1);
-    expect(snapshot[0].url).toBe("http://localhost/org/ws/roadmap");
+    expect(snapshot.resources).toHaveLength(1);
+    expect(snapshot.resources[0].url).toBe("http://localhost/org/ws/roadmap");
     expect(Object.isFrozen(snapshot)).toBe(true);
-    expect(Object.isFrozen(snapshot[0])).toBe(true);
+    expect(Object.isFrozen(snapshot.resources)).toBe(true);
+    expect(Object.isFrozen(snapshot.resources[0])).toBe(true);
   });
 });
