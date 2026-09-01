@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Pool } from "pg";
-import { assertSafeLocalPerformanceDatabase } from "../../lib/performance-baseline";
+import { assertSafeLocalPerformanceDatabase } from "../../lib/performance-baseline.ts";
 
 export default async function globalTeardown() {
   if (process.env.PERF_EXTERNALLY_MANAGED === "1") return;

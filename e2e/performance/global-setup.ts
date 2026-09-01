@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
-import { assertSafeLocalPerformanceDatabase } from "../../lib/performance-baseline";
+import { assertSafeLocalPerformanceDatabase } from "../../lib/performance-baseline.ts";
 
 const statePath = path.resolve(".performance-baseline/run.json");
 

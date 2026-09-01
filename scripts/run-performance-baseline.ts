@@ -4,9 +4,9 @@ import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import { Pool } from "pg";
-import { instrumentPgPool, summarizeObserverOverhead } from "../lib/performance-baseline";
-import { setupPerformanceDatabase } from "../e2e/performance/global-setup";
-import { teardownPerformanceDatabase } from "../e2e/performance/global-teardown";
+import { instrumentPgPool, summarizeObserverOverhead } from "../lib/performance-baseline.ts";
+import { setupPerformanceDatabase } from "../e2e/performance/global-setup.ts";
+import { teardownPerformanceDatabase } from "../e2e/performance/global-teardown.ts";
 
 const port = Number(process.env.PERF_PORT ?? 4900 + (crypto.createHash("md5").update(process.cwd()).digest().readUInt16BE(0) % 700));
 const baseURL = `http://localhost:${port}`;

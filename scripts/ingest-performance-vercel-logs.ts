@@ -7,7 +7,7 @@ import {
   parseVercelRequestLog,
   parseVercelQueryEnvelope,
   type BrowserRequest,
-} from "../lib/performance-baseline";
+} from "../lib/performance-baseline.ts";
 
 const [artifactPath, logsPath] = process.argv.slice(2);
 if (!artifactPath || !logsPath) {

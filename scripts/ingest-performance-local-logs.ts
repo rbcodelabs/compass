@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import { aggregateQueryEvents, parsePerformanceQueryLog, type BrowserRequest } from "../lib/performance-baseline";
+import { aggregateQueryEvents, parsePerformanceQueryLog, type BrowserRequest } from "../lib/performance-baseline.ts";
 
 const [artifactPath, logPath] = process.argv.slice(2);
 if (!artifactPath || !logPath) throw new Error("Usage: ingest-performance-local-logs.ts <artifact.json> <server.log>");
