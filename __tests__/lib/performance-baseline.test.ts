@@ -83,6 +83,21 @@ describe("performance baseline safeguards", () => {
     }
   });
 
+  it("scopes the full navigation matrix timeout and uses safe panel artifact names", () => {
+    const spec = fs.readFileSync(path.resolve("e2e/performance/performance-baseline.spec.ts"), "utf8");
+    const config = fs.readFileSync(path.resolve("e2e/performance/playwright.config.ts"), "utf8");
+
+    expect(spec).toContain("discardedWarmups: 2");
+    expect(spec).toContain("retainedWarmPerRoute: 10");
+    expect(spec).toContain("coldPerRoute: 5");
+    expect(spec).toContain("timeoutMs: 240_000");
+    expect(spec).toContain("test.setTimeout(NAVIGATION_MATRIX.timeoutMs)");
+    expect(config).toContain("timeout: 120_000");
+    expect(spec).toContain('artifactName: "panel-roadmap-item"');
+    expect(spec).toContain("panel.artifactName");
+    expect(spec).not.toContain("`panel-${panel.apiType}`");
+  });
+
   it("uses the installed Prisma 7.8 db-push command shape", () => {
     expect(prismaPerformanceDbPushArgs()).toEqual(["prisma", "db", "push"]);
     expect(prismaPerformanceDbPushArgs()).not.toContain("--skip-generate");

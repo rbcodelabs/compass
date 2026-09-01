@@ -114,6 +114,8 @@ schema changes require separate review and approval.
 
 - Five fresh-context direct navigations per route.
 - Two discarded warmups and ten actual-link navigations per route.
+- The complete navigation matrix has a 240-second per-test ceiling; panel tests
+  retain the fail-closed 120-second global ceiling.
 - Navigation readiness includes two animation frames after visible route state.
 - Unsupported long-task, event-timing, or heap APIs are `null` with an explicit
   capability flag, never zero.

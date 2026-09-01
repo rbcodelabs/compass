@@ -17,6 +17,13 @@ type ClientMetric = {
   heapBytes: number | null;
 };
 
+const NAVIGATION_MATRIX = {
+  discardedWarmups: 2,
+  retainedWarmPerRoute: 10,
+  coldPerRoute: 5,
+  timeoutMs: 240_000,
+} as const;
+
 const durationSummary = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b);
   return { sampleCount: sorted.length, medianMs: sorted[Math.ceil(sorted.length * 0.5) - 1] ?? null, p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1] ?? null };
@@ -176,6 +183,7 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, collector: Awai
 }
 
 test("records cold and warm workspace navigation", async ({ browser, page, workspaceBase }, testInfo) => {
+  test.setTimeout(NAVIGATION_MATRIX.timeoutMs);
   await installClientObservers(page);
   const cdp = await page.context().newCDPSession(page);
   const resources: ResourceMetric[] = [];
@@ -184,16 +192,16 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
   await ready(page, "discovery");
 
   const warm = [];
-  for (let warmup = 0; warmup < 2; warmup++) {
+  for (let warmup = 0; warmup < NAVIGATION_MATRIX.discardedWarmups; warmup++) {
     await recordWarmNavigation(page, cdp, collector, workspaceBase, ROUTES[(warmup + 1) % ROUTES.length]);
   }
-  for (let iteration = 0; iteration < 10; iteration++) {
+  for (let iteration = 0; iteration < NAVIGATION_MATRIX.retainedWarmPerRoute; iteration++) {
     for (const route of ROUTES) warm.push({ route, ...(await recordWarmNavigation(page, cdp, collector, workspaceBase, route)) });
   }
 
   const cold = [];
   for (const route of ROUTES) {
-    for (let iteration = 0; iteration < 5; iteration++) {
+    for (let iteration = 0; iteration < NAVIGATION_MATRIX.coldPerRoute; iteration++) {
       const requestId = `perf_${randomUUID()}`;
       const context = await browser.newContext({
         storageState: process.env.PERF_STORAGE_STATE,
@@ -271,8 +279,8 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
 });
 
 for (const panel of [
-  { route: "discovery", title: "Opportunity", apiType: "opportunity", entityEnv: "PERF_OPPORTUNITY_TITLE" },
-  { route: "roadmap", title: "Roadmap Item", apiType: "roadmapItem", entityEnv: "PERF_ROADMAP_ITEM_TITLE" },
+  { route: "discovery", title: "Opportunity", apiType: "opportunity", artifactName: "panel-opportunity", entityEnv: "PERF_OPPORTUNITY_TITLE" },
+  { route: "roadmap", title: "Roadmap Item", apiType: "roadmapItem", artifactName: "panel-roadmap-item", entityEnv: "PERF_ROADMAP_ITEM_TITLE" },
 ] as const) {
   test(`records ${panel.title} panel latency`, async ({ page, workspaceBase }, testInfo) => {
     await installClientObservers(page);
@@ -354,7 +362,7 @@ for (const panel of [
     };
     persistPerformanceArtifact(
       process.env.PERF_SERVER_KIND as "local-production" | "vercel-preview",
-      `panel-${panel.apiType}`,
+      panel.artifactName,
       artifact
     );
     await testInfo.attach(`${panel.apiType}-panel-baseline`, {
