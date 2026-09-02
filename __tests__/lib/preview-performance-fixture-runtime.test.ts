@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildRuntimeFixturePlan,
   executePreviewFixtureActionWithStore,
+  PrismaRuntimeFixtureStore,
   type RuntimeFixtureStore,
 } from "@/lib/preview-performance-fixture-runtime";
 import { FIXTURE_COUNTS, SEED_ORDER, type PreviewFixtureManifest } from "@/lib/preview-performance-fixture";
@@ -58,11 +59,45 @@ describe("preview performance fixture runtime", () => {
     expect(result).toMatchObject({ state: "seeded", residue: 1231, replayed: false });
   });
 
+  it("submits every model insert through one installed Prisma interactive transaction", async () => {
+    const createManyCalls: unknown[] = [];
+    const delegate = {
+      count: async () => 0,
+      createMany: async (value: unknown) => { createManyCalls.push(value); return { count: 1 }; },
+    };
+    const transactionClient = {
+      user: delegate, organization: delegate, organizationMember: delegate, workspace: delegate,
+      workspaceMember: delegate, squad: delegate, oKRCycle: delegate, objective: delegate,
+      keyResult: delegate, opportunity: delegate, solution: delegate, assumption: delegate,
+      evidence: delegate, experiment: delegate, roadmapItem: delegate, feedbackItem: delegate,
+      task: delegate, session: delegate,
+    };
+    const prisma = {
+      $transaction: async (callback: (tx: typeof transactionClient) => Promise<void>) => callback(transactionClient),
+    };
+    const transaction = new PrismaRuntimeFixtureStore(prisma as never);
+    const plan = buildRuntimeFixturePlan(input("seed", "s".repeat(64)));
+    await transaction.transaction(async (operation) => operation.seed(plan));
+    expect(createManyCalls).toHaveLength(SEED_ORDER.length);
+    expect(createManyCalls.reduce<number>((total, call) => total + (call as { data: unknown[] }).data.length, 0)).toBe(1231);
+  });
+
   it("treats a complete exact seed replay as no-write success", async () => {
     const fixtureStore = mutableStore(1231);
     const result = await executePreviewFixtureActionWithStore(input("seed", "s".repeat(64)), fixtureStore);
     expect(fixtureStore.transactionCount).toBe(0);
     expect(result).toMatchObject({ state: "seeded", replayed: true });
+  });
+
+  it("requires seed replay to match the supplied session token and expiry", async () => {
+    const fixtureStore = mutableStore(1231);
+    fixtureStore.inspect = async (_manifest, _plan, mode) => ({
+      total: 1231,
+      complete: true,
+      exact: mode === "seed-credentials" ? false : true,
+    });
+    await expect(executePreviewFixtureActionWithStore(input("seed", "n".repeat(64)), fixtureStore)).rejects.toThrow("recovery required");
+    expect(fixtureStore.transactionCount).toBe(0);
   });
 
   it("refuses partial or ownership-mismatched state without mutation", async () => {

@@ -6,12 +6,12 @@ import { execFileSync } from "node:child_process";
 import {
   createPreviewFixtureAuthState,
   createPreviewFixtureManifest,
+  buildDeterministicPreviewFixturePlan,
   parsePreviewFixtureManifest,
   readPrivateManifest,
   redactSensitiveText,
   writePrivateJson,
 } from "../lib/preview-performance-fixture.ts";
-import { buildRuntimeFixturePlan } from "../lib/preview-performance-fixture-runtime.ts";
 
 type Command = "seed" | "cleanup" | "verify";
 
@@ -92,6 +92,18 @@ async function invoke(url: URL, body: object): Promise<Record<string, unknown>> 
   return result;
 }
 
+export function validatePreviewFixtureResponse(command: Command, value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail("Invalid fixture response");
+  const result = value as Record<string, unknown>;
+  const keys = Object.keys(result);
+  if (keys.some((key) => !["state", "residue", "replayed"].includes(key))) fail("Invalid fixture response");
+  if (typeof result.state !== "string" || typeof result.residue !== "number" || !Number.isInteger(result.residue)) fail("Invalid fixture response");
+  if ("replayed" in result && typeof result.replayed !== "boolean") fail("Invalid fixture response");
+  if (command === "seed" && (result.state !== "seeded" || result.residue !== 1231)) fail("Invalid seed fixture response");
+  if (command !== "seed" && (result.state !== "absent" || result.residue !== 0)) fail(`Invalid ${command} fixture response`);
+  return result;
+}
+
 export async function runPreviewFixtureOrchestration(argv: readonly string[]): Promise<void> {
   const args = parsePreviewFixtureOrchestrationArgs(argv);
   const repoRoot = process.cwd();
@@ -105,7 +117,14 @@ export async function runPreviewFixtureOrchestration(argv: readonly string[]): P
   if (args.command === "seed") {
     if (fs.existsSync(statePaths.manifestPath) || fs.existsSync(statePaths.authStatePath)) fail("Recovery state already exists; seed refused");
     sessionToken = crypto.randomBytes(32).toString("base64url");
-    const plan = buildRuntimeFixturePlan({ ...args, action: "seed", expiresAt, sessionToken });
+    const plan = buildDeterministicPreviewFixturePlan({
+      runId: args.runId,
+      deploymentSha: args.expectedSha,
+      deploymentId: args.expectedDeploymentId,
+      deploymentUrl: url.href,
+      expiresAt: new Date(expiresAt),
+      sessionToken,
+    });
     writePrivateJson(statePaths.manifestPath, createPreviewFixtureManifest(plan));
     writePrivateJson(statePaths.authStatePath, createPreviewFixtureAuthState(plan));
   } else {
@@ -115,14 +134,14 @@ export async function runPreviewFixtureOrchestration(argv: readonly string[]): P
     }
   }
 
-  const result = await invoke(url, {
+  const result = validatePreviewFixtureResponse(args.command, await invoke(url, {
     action: args.command,
     runId: args.runId,
     expectedSha: args.expectedSha,
     expectedDeploymentId: args.expectedDeploymentId,
     expiresAt,
     ...(sessionToken ? { sessionToken } : {}),
-  });
+  }));
   process.stdout.write(`${args.command} accepted: state=${String(result.state)} residue=${String(result.residue)}\n`);
 }
 

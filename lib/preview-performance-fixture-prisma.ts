@@ -149,7 +149,7 @@ export class PrismaPreviewFixtureStore implements PreviewFixtureStore {
     }
   }
 
-  async verifyExactRows(plan: { rows: Record<PreviewFixtureKind, PreviewFixtureRow[]> }): Promise<void> {
+  async verifyExactRows(plan: { rows: Record<PreviewFixtureKind, PreviewFixtureRow[]> }, includeSessionCredentials = false): Promise<void> {
     for (const kind of SEED_ORDER) {
       const expectedRows = plan.rows[kind];
       const actualRows = await this.findRows(kind, expectedRows.map(({ id }) => id));
@@ -160,7 +160,7 @@ export class PrismaPreviewFixtureStore implements PreviewFixtureStore {
         for (const [key, expectedValue] of Object.entries(expected)) {
           // Cleanup/verify never receive credential material or its original
           // expiry. Session ownership is proven by deterministic ID + user.
-          if (kind === "sessions" && (key === "sessionToken" || key === "expires")) continue;
+          if (!includeSessionCredentials && kind === "sessions" && (key === "sessionToken" || key === "expires")) continue;
           const actualValue = actual[key];
           const normalizedExpected = expectedValue instanceof Date ? expectedValue.toISOString() : expectedValue;
           const normalizedActual = actualValue instanceof Date ? actualValue.toISOString() : actualValue;

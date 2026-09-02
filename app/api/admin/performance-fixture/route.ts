@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { getVercelOidcTokenSync } from "@vercel/functions/oidc";
 import { getActiveSchema } from "@/lib/schema";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +40,7 @@ function isExactRuntime(req: NextRequest): boolean {
   if (env.DATABASE_URL || env.AWS_PROFILE || env.AWS_ACCESS_KEY_ID || env.AWS_SECRET_ACCESS_KEY || env.AWS_SESSION_TOKEN) return false;
   if (env.PGSCHEMA !== "compass" || getActiveSchema() !== "compass_preview") return false;
   if (!env.PGHOST || !/^[a-z0-9-]+\.dsql\.[a-z0-9-]+\.on\.aws$/.test(env.PGHOST)) return false;
-  if (!env.AWS_ROLE_ARN || !env.AWS_REGION || !env.VERCEL_OIDC_TOKEN) return false;
+  if (!env.AWS_ROLE_ARN || !env.AWS_REGION) return false;
   if (!env.VERCEL_GIT_COMMIT_SHA || !/^[a-f0-9]{40}$/.test(env.VERCEL_GIT_COMMIT_SHA)) return false;
   if (!env.VERCEL_DEPLOYMENT_ID || !/^dpl_[A-Za-z0-9]{20,64}$/.test(env.VERCEL_DEPLOYMENT_ID)) return false;
   if (!env.VERCEL_URL || !/^compass-[a-z0-9]+-rbcodelabs-team\.vercel\.app$/.test(env.VERCEL_URL)) return false;
@@ -90,10 +91,14 @@ function parseStrictBody(text: string): PreviewFixtureRequest | null {
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record);
   if (keys.some((key) => !ALLOWED_KEYS.has(key))) return null;
-  for (const key of keys) {
-    const occurrences = text.match(new RegExp(`"${key}"\\s*:`, "g"))?.length ?? 0;
-    if (occurrences !== 1) return null;
+  const serializedKeys = text.match(/"(?:\\.|[^"\\])*"\s*:/g) ?? [];
+  const decodedKeys: string[] = [];
+  try {
+    for (const serializedKey of serializedKeys) decodedKeys.push(JSON.parse(serializedKey.slice(0, serializedKey.lastIndexOf(":"))));
+  } catch {
+    return null;
   }
+  if (decodedKeys.length !== keys.length || new Set(decodedKeys).size !== decodedKeys.length) return null;
   if (record.action !== "seed" && record.action !== "cleanup" && record.action !== "verify") return null;
   if (typeof record.runId !== "string" || !/^perf_preview_[a-f0-9]{32}$/.test(record.runId)) return null;
   if (typeof record.expectedSha !== "string" || !/^[a-f0-9]{40}$/.test(record.expectedSha)) return null;
@@ -101,7 +106,7 @@ function parseStrictBody(text: string): PreviewFixtureRequest | null {
   if (typeof record.expiresAt !== "string") return null;
   const expiresAtMs = Date.parse(record.expiresAt);
   const remainingMs = expiresAtMs - Date.now();
-  if (!Number.isFinite(expiresAtMs) || remainingMs <= 0 || remainingMs > MAX_EXPIRY_MS) return null;
+  if (!Number.isFinite(expiresAtMs) || new Date(expiresAtMs).toISOString() !== record.expiresAt || remainingMs <= 0 || remainingMs > MAX_EXPIRY_MS) return null;
   if (record.action === "seed") {
     if (typeof record.sessionToken !== "string" || !/^[A-Za-z0-9_-]{43,128}$/.test(record.sessionToken)) return null;
   } else if ("sessionToken" in record) return null;
@@ -112,6 +117,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Environment and authorization gates intentionally precede body/token parsing
   // and any import capable of creating a DSQL connector.
   if (!isExactRuntime(req) || !hasSecret(req)) return hidden();
+  try {
+    if (!getVercelOidcTokenSync()) return hidden();
+  } catch {
+    return hidden();
+  }
   const text = await readLimitedBody(req);
   if (text === null) return hidden();
   const body = parseStrictBody(text);

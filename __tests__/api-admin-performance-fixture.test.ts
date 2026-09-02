@@ -2,8 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const execute = vi.fn();
+const getOidcToken = vi.fn();
 vi.mock("@/lib/preview-performance-fixture-runtime", () => ({
   executePreviewFixtureAction: execute,
+}));
+vi.mock("@vercel/functions/oidc", () => ({
+  getVercelOidcTokenSync: getOidcToken,
 }));
 
 const VALID_SHA = "a".repeat(40);
@@ -19,7 +23,7 @@ function environment(): void {
   process.env.PGHOST = "cluster.dsql.us-east-1.on.aws";
   process.env.AWS_ROLE_ARN = "arn:aws:iam::123456789012:role/preview";
   process.env.AWS_REGION = "us-east-1";
-  process.env.VERCEL_OIDC_TOKEN = "oidc";
+  delete process.env.VERCEL_OIDC_TOKEN;
   process.env.VERCEL_GIT_COMMIT_SHA = VALID_SHA;
   process.env.VERCEL_DEPLOYMENT_ID = VALID_DEPLOYMENT_ID;
   process.env.VERCEL_URL = VALID_HOST;
@@ -60,6 +64,7 @@ describe("POST /api/admin/performance-fixture", () => {
   beforeEach(() => {
     vi.resetModules();
     execute.mockReset().mockResolvedValue({ state: "absent", residue: 0 });
+    getOidcToken.mockReset().mockReturnValue("request-context-oidc");
     environment();
   });
 
@@ -68,17 +73,28 @@ describe("POST /api/admin/performance-fixture", () => {
     ["production schema", () => { process.env.PGSCHEMA = "compass_prod"; }],
     ["database URL", () => { process.env.DATABASE_URL = "postgres://forbidden"; }],
     ["static AWS credentials", () => { process.env.AWS_ACCESS_KEY_ID = "forbidden"; }],
-    ["missing OIDC", () => { delete process.env.VERCEL_OIDC_TOKEN; }],
     ["SHA mismatch", () => { process.env.VERCEL_GIT_COMMIT_SHA = "c".repeat(40); }],
     ["deployment mismatch", () => { process.env.VERCEL_DEPLOYMENT_ID = `dpl_${"B".repeat(24)}`; }],
     ["URL mismatch", () => { process.env.VERCEL_URL = "compass-other-rbcodelabs-team.vercel.app"; }],
-  ])("returns an indistinguishable 404 for %s before database access", async (_label, mutate) => {
+  ])("returns an indistinguishable 404 for %s before database access", async (label, mutate) => {
     mutate();
     const { POST } = await import("@/app/api/admin/performance-fixture/route");
     const response = await POST(request(body()));
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Not found" });
     expect(execute).not.toHaveBeenCalled();
+    if (label === "SHA mismatch" || label === "deployment mismatch") expect(getOidcToken).toHaveBeenCalledOnce();
+    else expect(getOidcToken).not.toHaveBeenCalled();
+  });
+
+  it("requires request-context OIDC with the build environment token absent", async () => {
+    const { POST } = await import("@/app/api/admin/performance-fixture/route");
+    expect((await POST(request(body()))).status).toBe(200);
+    expect(getOidcToken).toHaveBeenCalledOnce();
+    expect(process.env.VERCEL_OIDC_TOKEN).toBeUndefined();
+
+    getOidcToken.mockImplementationOnce(() => { throw new Error("missing request context"); });
+    expect((await POST(request(body()))).status).toBe(404);
   });
 
   it("returns the same 404 for a missing or wrong secret", async () => {
@@ -89,6 +105,7 @@ describe("POST /api/admin/performance-fixture", () => {
       expect(await response.json()).toEqual({ error: "Not found" });
     }
     expect(execute).not.toHaveBeenCalled();
+    expect(getOidcToken).not.toHaveBeenCalled();
   });
 
   it("rejects a body larger than 16 KiB before database access", async () => {
@@ -111,8 +128,10 @@ describe("POST /api/admin/performance-fixture", () => {
     const valid = JSON.stringify(body());
     const malformed = [
       valid.replace('"action":"verify"', '"action":"verify","action":"verify"'),
+      valid.replace('"action":"verify"', '"action":"verify","\\u0061ction":"verify"'),
       JSON.stringify({ ...body(), runId: { value: RUN_ID } }),
       JSON.stringify({ ...body(), expectedDeploymentId: 123 }),
+      JSON.stringify({ ...body(), expiresAt: new Date(Date.now() + 20 * 60_000).toUTCString() }),
     ];
     for (const serialized of malformed) {
       const req = request(body());

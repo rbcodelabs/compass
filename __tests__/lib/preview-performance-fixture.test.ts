@@ -317,4 +317,22 @@ describe("Prisma preview fixture adapter", () => {
     await expect(store.verifyOwnership(manifest)).rejects.toThrow(/user email sentinel/);
     expect(prisma.user.findMany).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ["session token", { sessionToken: "different-token" }],
+    ["session expiry", { expires: new Date("2026-09-01T13:59:00.000Z") }],
+  ])("rejects a seed replay with a stale %s without exposing it", async (_label, override) => {
+    const plan = createPlan();
+    const session = { ...plan.rows.sessions[0], ...override };
+    const empty = { findMany: vi.fn(async () => []) };
+    const prisma = {
+      user: empty, organization: empty, organizationMember: empty, workspace: empty,
+      workspaceMember: empty, squad: empty, oKRCycle: empty, objective: empty,
+      keyResult: empty, opportunity: empty, solution: empty, assumption: empty,
+      evidence: empty, experiment: empty, roadmapItem: empty, feedbackItem: empty,
+      task: empty, session: { findMany: vi.fn(async () => [session]) },
+    } as unknown as PrismaClient;
+    const store = new PrismaPreviewFixtureStore(prisma);
+    await expect(store.verifyExactRows(plan, true)).rejects.toThrow(/ownership mismatch/);
+  });
 });
