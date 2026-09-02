@@ -193,12 +193,12 @@ Health reporting is authenticated with the existing non-empty
 `MIGRATION_SECRET` boundary and is read-only. It reports, per active schema:
 
 - migration manifest entry and application status;
-- required table and column presence;
+- required table, column, and named-constraint presence;
 - bounded provenance-backfill counts, including unknown/null classifications;
 - required index name and observed DSQL state (`CREATING`, `ACTIVE`, `FAILED`,
   or unavailable);
-- a top-level readiness result that is false for missing/failed indexes and
-  remains pending while an async index is creating;
+- separate `migrationReady`, `capacityMetadataReady`, and
+  `runtimeEnforcementReady` results rather than one ambiguous green light;
 - capacity-plan counts and drift summaries without exposing secrets or policy
   contents.
 
@@ -212,11 +212,105 @@ split into DSQL-safe transactions and the backfill is bounded and recoverable.
 Migrations 040–041 add tables and async indexes only. Foreign-key-like ownership
 and identity checks remain application invariants.
 
+`migrationReady` is true only when:
+
+- manifest receipts for 039, 040, and 041 are present;
+- every required table/column and primary, unique, and `CHECK` constraint is
+  present and valid;
+- every required async index reports `ACTIVE` (`CREATING` is pending and
+  `FAILED`, missing, or unknown is false);
+- no Roadmap row has null or an unknown commitment provenance;
+- a `LEGACY_UNGATED` Roadmap row has no native decision link;
+- reservation state/claim constraints have no violating rows.
+
+`capacityMetadataReady` is plan-specific and additionally requires an active
+plan claim, internally valid reservation history, no capacity excess, and an
+immediate live-NOW observation matching the plan's reconciliation snapshot.
+Because that observation can become stale on the next ordinary Roadmap write,
+it includes `observedAt` and is never called an enforcement guarantee.
+
+`runtimeEnforcementReady` is hard-coded `false` in the precursor. Only the later
+contract release may change it after ordinary mutations participate in the
+same invariant.
+
+For migration 041, the minimum named-constraint health manifest includes plan,
+reservation, and operation primary keys plus:
+
+```text
+idx_capacity_plans_workspace_policy       unique(workspace_id, policy_id)
+idx_capacity_plans_active_workspace       unique nulls distinct(active_workspace_id)
+chk_capacity_plans_active_claim           active state/claim consistency
+idx_capacity_reservations_plan_item       unique(plan_id, roadmap_item_id)
+idx_capacity_reservations_active_item     unique nulls distinct(active_roadmap_item_id)
+chk_capacity_reservations_state_claim     staged/active/released consistency
+idx_capacity_operations_workspace_key     unique(workspace_id, idempotency_key)
+```
+
+The async-index health manifest includes every `CREATE INDEX ASYNC` declared by
+039–041, including workspace/state lookup, reservation plan/state, reservation
+history, decision reference, and operation plan/action/time indexes. Tests
+derive expected names from the migration manifest and fail if a migration adds
+an index without adding its health expectation.
+
 ### 3. Capacity operator contract
 
 The capacity path is authenticated by `MIGRATION_SECRET`, never exposed through
 an ordinary route or the general MCP service actor, and accepts an explicit
 idempotency key for mutations.
+
+#### Exact v1 transport and idempotency contract
+
+The operator route is a closed action API. `inspect` is a read-only `GET` and
+does not accept an idempotency key. Each `POST` accepts exactly one of:
+
+```text
+create
+  workspaceId, policyId, unit=FOCUS_SLOT, availableUnits,
+  unitsPerNowItem=1, nowLimit, idempotencyKey
+
+reconcile
+  planId, expectedPlanFingerprint, expectedVersion, idempotencyKey
+
+activate
+  planId, expectedPlanFingerprint, expectedVersion,
+  expectedNowSnapshotFingerprint, replacesPlanId?, idempotencyKey
+```
+
+Unknown actions and fields are rejected. IDs are UUIDs, limits are positive
+bounded integers, and all workspace/plan/item ownership is revalidated by the
+service. `MIGRATION_SECRET` authenticates the operator but is never stored in a
+receipt or response.
+
+Migration 041 includes `portfolio_capacity_operations` so idempotency is an
+auditable database property rather than a convention:
+
+```text
+PortfolioCapacityOperation
+  id                 UUID primary key
+  workspaceId        UUID
+  planId             UUID nullable for create reservation
+  action             CREATE | RECONCILE | ACTIVATE
+  idempotencyKey     varchar(160)
+  requestFingerprint char(64)
+  status             IN_PROGRESS | SUCCEEDED | FAILED_RETRYABLE | FAILED_FINAL
+  progressCursor     UUID nullable
+  resultJson         text nullable
+  errorCode          varchar(100) nullable
+  createdAt          timestamp
+  updatedAt          timestamp
+  completedAt        timestamp nullable
+
+  unique(workspaceId, idempotencyKey)
+  index(planId, action, createdAt)
+```
+
+The request fingerprint is a schema-versioned SHA-256 of the action and all
+semantic inputs except the secret and idempotency key. Reusing a key with a
+different fingerprint returns `IDEMPOTENCY_CONFLICT`. Reusing it with the same
+fingerprint returns the stored terminal result or resumes the recorded bounded
+reconcile cursor. A retryable database/serialization error leaves a typed
+retryable receipt; validation/auth/ownership errors are final. Result JSON is a
+receipt/cache of typed IDs, counts, versions, and fingerprints, not authority.
 
 #### Create
 
@@ -227,18 +321,49 @@ integers, supported unit (`FOCUS_SLOT` in v1), and workspace existence.
 The stable identity is `(workspaceId, policyId)`. Repeating an identical create
 returns the existing plan. Reusing that identity with different semantic
 fields fails with `IDEMPOTENCY_CONFLICT`; it never edits the existing plan.
-Plans start in `DRAFT`.
+Plans start in `DRAFT`. The plan stores the server-computed semantic
+`planFingerprint`; clients may assert but never choose it.
 
 #### Reconcile
 
 Reconciliation reads current Roadmap items with `horizon = NOW` in stable ID
-order and inserts one reservation per item with `decisionRecordId = null`.
-These are migration receipts for existing commitments, not authorizations.
-Writes are split to stay within DSQL row/byte limits and use unique constraints
-plus compare-and-swap plan versions for retry safety.
+order and inserts one `STAGED` reservation per plan/item with
+`decisionRecordId = null`. These are migration receipts for existing
+commitments, not authorizations. Writes are split to stay within DSQL row/byte
+limits and use unique constraints plus compare-and-swap plan versions and the
+operation progress cursor for retry safety.
 
-Re-running reconciliation is a no-op for existing reservations. It does not
-change Roadmap horizons, statuses, ordering, ownership, or provenance.
+At the end of a complete pass, reconciliation re-reads the sorted live `NOW`
+IDs, requires exact equality with the staged plan/item set, and stores
+`nowSnapshotFingerprint`, `nowSnapshotCount`, and `reconciledAt` on the plan.
+If the set changed during the pass, it returns `NOW_SNAPSHOT_CHANGED` and
+restarts from a fresh operation/cursor; it never guesses which version was
+intended. Re-running reconciliation is a no-op for identical staged receipts.
+It does not change Roadmap horizons, statuses, ordering, ownership, or
+provenance.
+
+Reservation history does not use a global uniqueness constraint on
+`roadmap_item_id`. That would make the first released or superseded receipt
+block every future plan forever. Migration 041 instead uses:
+
+```text
+unique(planId, roadmapItemId)
+unique nulls distinct(activeRoadmapItemId)
+index(roadmapItemId, createdAt)
+```
+
+`roadmapItemId` is the immutable historical subject. `activeRoadmapItemId` is
+nullable and equals `roadmapItemId` only while the reservation is `ACTIVE`.
+The migration-owned check constraint permits exactly:
+
+```text
+STAGED:   activeRoadmapItemId = null, releasedAt = null
+ACTIVE:   activeRoadmapItemId = roadmapItemId, releasedAt = null
+RELEASED: activeRoadmapItemId = null, releasedAt != null
+```
+
+Thus multiple draft/replacement plans may stage the same item, only one active
+reservation may claim it, and old receipts remain queryable after release.
 
 #### Inspect
 
@@ -246,12 +371,15 @@ Inspection returns the plan fingerprint/state/version and independently
 calculates:
 
 - current `NOW` item IDs and count;
-- active reservation IDs/count/units;
+- staged and active reservation IDs/count/units;
 - missing reservations;
 - reservations whose item is absent, not `NOW`, or in another workspace;
 - duplicate/cross-plan ownership conflicts;
+- invalid reservation state/active-claim/release combinations;
 - effective capacity `min(availableUnits, nowLimit)` and excess amount;
-- whether activation preconditions hold.
+- the live-NOW fingerprint, stored reconciliation fingerprint, equality result,
+  and observation time;
+- whether metadata-activation preconditions currently hold.
 
 Inspection is always read-only and safe before, between, and after reconciliation
 batches.
@@ -260,9 +388,10 @@ batches.
 
 Activation requires an explicit action and expected plan version/fingerprint.
 It re-runs the full inspection in the activation transaction. It succeeds only
-when every current `NOW` item has exactly one active reservation owned by the
-draft plan, no stale/cross-workspace reservation exists, and reserved units do
-not exceed either limit.
+when every current `NOW` item has exactly one staged reservation owned by the
+draft plan, no unexpected active reservation exists outside the exact plan
+being replaced, no stale/cross-workspace reservation exists, and reserved
+units do not exceed either limit.
 
 Only one plan may be active for a workspace. Three DSQL-safe arbitration
 options were considered:
@@ -297,9 +426,17 @@ The final activation write is one compare-and-swap update matching plan ID,
 workspace ID, expected fingerprint/version, `state = DRAFT`, and
 `active_workspace_id IS NULL`. It atomically sets `state = ACTIVE`,
 `active_workspace_id = workspace_id`, increments the version, and sets
-`updated_at`. If two different drafts race, the unique constraint allows at
-most one to commit. The loser maps a uniqueness or serialization conflict to a
-typed conflict and re-reads after the transaction:
+`updated_at`. When `replacesPlanId` is supplied, the same bounded transaction
+also compare-and-swap transitions that exact currently active plan to
+`SUPERSEDED`, clears its workspace claim, releases its active reservations, and
+activates the new plan's staged reservations by setting their active item
+claims. The transaction is rejected before writing if all affected rows would
+approach DSQL's 3,000-row/10-MiB limit. It never batches an activation switch;
+all plan and reservation claims change together or none do.
+
+If two different drafts race, unique constraints plus optimistic conflict
+resolution allow at most one to commit. The loser maps a uniqueness or
+serialization conflict to a typed conflict and re-reads after the transaction:
 
 - the same plan active with the expected workspace/fingerprint is an
   idempotent success (including ambiguous-commit recovery);
@@ -311,6 +448,37 @@ typed conflict and re-reads after the transaction:
 This claim is genuine low-frequency coordination: activation is an operator
 event, not a request-path counter. A retry with the same key returns the
 activated plan; a competing activation fails closed.
+
+#### Snapshot limitation and immediate re-inspection
+
+The precursor cannot make the plan's `NOW` snapshot a durable atomic invariant.
+Ordinary Roadmap routes are intentionally forbidden from reading or writing the
+new schema, so a concurrent ordinary transaction can change an item's horizon
+before or after activation without touching a plan/reservation row. Repeatable
+read and optimistic row conflicts do not justify assuming a predicate lock over
+all future `horizon = NOW` rows.
+
+Therefore precursor `activate` is explicitly a **non-enforcing metadata
+selection**, not proof that live Roadmap state remains equal to its snapshot.
+Its protocol is:
+
+1. Require the stored and caller-expected NOW snapshot fingerprint to match a
+   fresh pre-activation inspection.
+2. Commit only the bounded plan/reservation metadata switch described above.
+3. Outside the committed transaction, immediately re-read sorted live `NOW`
+   IDs and active reservations and calculate a new observation fingerprint.
+4. Return `ACTIVATED_MATCHED` only when they match, with `observedAt` and both
+   fingerprints. Return `ACTIVATED_DRIFTED` otherwise, with missing/extra IDs.
+5. In both cases, keep `runtimeEnforcementReady = false`. A drifted result is a
+   manual stop requiring reconciliation/replacement; it is never silently
+   repaired or treated as capacity authorization.
+
+Even `ACTIVATED_MATCHED` is point-in-time evidence, not a lasting guarantee.
+The exact merge/release plan must require a final human review of the immediate
+inspection output before proceeding to later policy work. True atomic binding
+moves to the contract phase, where every ordinary path entering/leaving `NOW`
+uses the centralized domain service and revalidates policy, capacity, and
+source state in the same transaction as the Roadmap mutation.
 
 Activation does **not** enable runtime enforcement. The later contract release
 must separately bind an exact plan ID and fingerprint into an approved policy
