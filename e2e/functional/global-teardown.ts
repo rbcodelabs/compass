@@ -17,6 +17,7 @@ import {
   COMPASS_META_WORKSPACE_SLUG,
 } from "./fixtures/seed-e2e";
 import { readRunToken, clearRunToken, orgNameForToken } from "./fixtures/run-token";
+import { assertIsolatedE2EDatabase } from "./fixtures/isolated-database";
 
 const S = process.env.PGSCHEMA
   ? `${process.env.PGSCHEMA}_dev`
@@ -40,6 +41,17 @@ export default async function globalTeardown() {
     return;
   }
 
+  const runToken = readRunToken();
+  if (!runToken) {
+    console.warn(
+      "[e2e teardown] Refusing to clean up: global setup did not establish run ownership."
+    );
+    return;
+  }
+
+  // Setup safety is incomplete if teardown can later target a different DB.
+  await assertIsolatedE2EDatabase();
+
   const pool = new pg.Pool({ connectionString });
   try {
     // ── Ownership check ───────────────────────────────────────────────────
@@ -48,27 +60,19 @@ export default async function globalTeardown() {
     // run, so a teardown belonging to an interrupted run would happily destroy
     // a *live* run's data — which is exactly what happened three times during
     // #120/#121. Bail out unless the org still carries this run's stamp.
-    const runToken = readRunToken();
-    if (runToken) {
-      const { rows: ownerRows } = await pool.query<{ name: string }>(
-        `SELECT name FROM "${S}".organizations WHERE slug = $1`,
-        [E2E_ORG_SLUG]
-      );
-      const actual = ownerRows[0]?.name;
-      const expected = orgNameForToken(runToken);
-      if (actual && actual !== expected) {
-        console.warn(
-          `[e2e teardown] Refusing to clean up: the e2e org is stamped ` +
-            `"${actual}" but this run holds "${expected}". Another run has ` +
-            `claimed it since — deleting now would destroy live data.`
-        );
-        return;
-      }
-    } else {
+    const { rows: ownerRows } = await pool.query<{ name: string }>(
+      `SELECT name FROM "${S}".organizations WHERE slug = $1`,
+      [E2E_ORG_SLUG]
+    );
+    const actual = ownerRows[0]?.name;
+    const expected = orgNameForToken(runToken);
+    if (actual && actual !== expected) {
       console.warn(
-        "[e2e teardown] No run token found — cleaning up by slug (legacy " +
-          "behaviour). If a concurrent run is active this may delete its data."
+        `[e2e teardown] Refusing to clean up: the e2e org is stamped ` +
+          `"${actual}" but this run holds "${expected}". Another run has ` +
+          `claimed it since — deleting now would destroy live data.`
       );
+      return;
     }
 
     // The "Send Feedback about Compass" target workspace (rbcodelabs/compass)
