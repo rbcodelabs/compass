@@ -194,7 +194,7 @@ describe("/api/admin/migrate rollout observability", () => {
       if (sql.includes("migration_name as name")) return { rows: catalog.migrations.map((name) => ({ name })) }
       if (sql.includes("information_schema.tables") && Array.isArray(values?.[1]) && values[1].includes("review_requests")) return { rows: catalog.tables.map((table_name) => ({ table_name })) }
       if (sql.includes("information_schema.columns") && sql.includes("roadmap_items")) return { rows: [
-        ...catalog.columns.map((column) => ({ table_name: column.table, column_name: column.name, data_type: column.type, character_maximum_length: column.maxLength, datetime_precision: column.datetimePrecision, is_nullable: column.nullable ? "YES" : "NO", column_default: column.default })),
+        ...catalog.columns.map((column, index) => ({ table_name: column.table, column_name: column.name, data_type: column.type, character_maximum_length: column.maxLength, datetime_precision: column.datetimePrecision, is_nullable: column.nullable ? "YES" : "NO", column_default: column.default === "0" ? (index % 2 ? "0::integer" : "'0'::integer") : column.default })),
         { table_name: "roadmap_items", column_name: "now_commitment_provenance", data_type: "character varying", character_maximum_length: 30, datetime_precision: null, is_nullable: "YES", column_default: "'LEGACY_UNGATED'::character varying" },
         { table_name: "roadmap_items", column_name: "now_decision_record_id", data_type: "uuid", character_maximum_length: null, datetime_precision: null, is_nullable: "YES", column_default: null },
       ] }
@@ -208,7 +208,16 @@ describe("/api/admin/migrate rollout observability", () => {
     expect(catalog.constraints.find((item) => item.name === "idx_release_runs_scope_fingerprint")?.definition).toContain("pull_request_number")
     expect(result.constraints.filter((item: { type: string }) => item.type === "c")).toHaveLength(3)
     expect(result.tableShapes.filter((item: { structureMatches: boolean }) => !item.structureMatches)).toEqual([])
+    expect(result.tableShapes.find((item: { name: string }) => item.name === "review_requests")).toMatchObject({
+      status: "MATCHED",
+      expectedColumns: expect.arrayContaining([expect.objectContaining({ name: "revision_count", default: "0" })]),
+      actualColumns: expect.arrayContaining([expect.objectContaining({ name: "revision_count", default: "0" })]),
+    })
+    expect(result.constraints.find((item: { name: string }) => item.name === "review_requests_pkey")).toMatchObject({ status: "MATCHED", expectedKeyColumns: ["id"], actualKeyColumns: ["id"] })
     expect(result.migrationReady).toBe(true)
+    const constraintQuery = mocks.query.mock.calls.find(([sql]) => String(sql).includes("FROM pg_constraint"))
+    expect(String(constraintQuery?.[0])).toContain("backing.indexrelid=c.conindid")
+    expect(String(constraintQuery?.[0])).toContain("key.ordinal <= backing.indnkeyatts")
   })
 
   it("rejects a same-name table whose complete column fingerprint is malformed", async () => {

@@ -248,12 +248,18 @@ type ColumnExpectation = { table: string; name: string; type: string; maxLength:
 const COLUMN_EXPECTATIONS = new Map<string, ColumnExpectation>()
 function normalizeColumnDefault(value: string | null | undefined) {
   if (!value) return null
-  const normalized = value.replace(/::(?:text|character varying|character)/gi, "").replace(/^\(([\s\S]*)\)$/, "$1").trim()
+  const normalized = value.replace(/::(?:text|character varying|character|smallint|integer|bigint|boolean)\b/gi, "").replace(/^\(([\s\S]*)\)$/, "$1").trim()
   const literal = normalized.match(/^'([^']*)'$/)
   if (literal) return literal[1]
   if (/^CURRENT_TIMESTAMP(?:\(\d+\))?$/i.test(normalized) || /^now\(\)$/i.test(normalized)) return "CURRENT_TIMESTAMP"
   if (/^[A-Z_]+$/.test(normalized)) return normalized
   return normalized.toLowerCase().replace(/\s+/g, "")
+}
+function sanitizeDefaultEvidence(value: string | null | undefined) {
+  const normalized = normalizeColumnDefault(value)
+  return normalized === null || /^(?:-?\d+|true|false|[A-Z_]+|CURRENT_TIMESTAMP|gen_random_uuid\(\))$/i.test(normalized)
+    ? normalized
+    : "REDACTED_EXPRESSION"
 }
 function addExpectedColumn(table: string, segment: string) {
   const match = segment.match(/^"([^"]+)"\s+(UUID|TEXT|INTEGER|BOOLEAN|VARCHAR\((\d+)\)|CHAR\((\d+)\)|TIMESTAMP\((\d+)\))([\s\S]*)$/i)
@@ -261,7 +267,7 @@ function addExpectedColumn(table: string, segment: string) {
   const [, name, declaredType, varcharLength, charLength, precision, suffix] = match
   if (COLUMN_EXPECTATIONS.has(`${table}.${name}`)) return
   const type = /^VARCHAR/i.test(declaredType) ? "character varying" : /^CHAR/i.test(declaredType) ? "character" : /^TIMESTAMP/i.test(declaredType) ? "timestamp without time zone" : declaredType.toLowerCase()
-  const defaultMatch = suffix.match(/\bDEFAULT\s+((?:'[^']*')|(?:[A-Za-z_][\w]*(?:\([^)]*\))?))/i)
+  const defaultMatch = suffix.match(/\bDEFAULT\s+((?:'[^']*')|(?:-?\d+)|(?:[A-Za-z_][\w]*(?:\([^)]*\))?))/i)
   COLUMN_EXPECTATIONS.set(`${table}.${name}`, {
     table, name, type,
     maxLength: varcharLength ? Number(varcharLength) : charLength ? Number(charLength) : null,
@@ -327,8 +333,13 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
       COALESCE(ARRAY(SELECT a.attname FROM unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinal) JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=key.attnum WHERE key.ordinal <= i.indnkeyatts ORDER BY key.ordinal), ARRAY[]::name[]) key_columns
       FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[])`, [schema, [...DECISION_GATE_INDEXES]]),
     client.query<{ constraint_name: string; table_name: string; constraint_type: string; valid: boolean; definition: string; key_columns: string[] }>(`SELECT c.conname constraint_name, t.relname table_name, c.contype constraint_type, c.convalidated valid, pg_get_constraintdef(c.oid) definition,
-        COALESCE(ARRAY(SELECT a.attname FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinal) JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=key.attnum ORDER BY key.ordinal), ARRAY[]::name[]) key_columns
+        CASE WHEN c.contype IN ('p','u') THEN COALESCE(ARRAY(
+          SELECT a.attname FROM unnest(backing.indkey) WITH ORDINALITY AS key(attnum, ordinal)
+          JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=key.attnum
+          WHERE key.ordinal <= backing.indnkeyatts ORDER BY key.ordinal
+        ), ARRAY[]::name[]) ELSE ARRAY[]::name[] END key_columns
       FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace JOIN pg_class t ON t.oid=c.conrelid
+      LEFT JOIN pg_index backing ON backing.indexrelid=c.conindid
       WHERE n.nspname=$1 AND c.conname=ANY($2::text[])`, [schema, [...DECISION_GATE_CONSTRAINTS]]),
     client.query<{ total: unknown; null_count: unknown; unknown_count: unknown; legacy_link_drift: unknown }>(`SELECT COUNT(*)::bigint total,
       COUNT(*) FILTER (WHERE now_commitment_provenance IS NULL)::bigint null_count,
@@ -363,7 +374,9 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
         && (row.is_nullable === "YES") === column.nullable
         && normalizeColumnDefault(row.column_default) === column.default)
     })
-    return { name, structureMatches }
+    const expectedEvidence = expected.map((column) => ({ name: column.name, type: column.type, maxLength: column.maxLength, datetimePrecision: column.datetimePrecision, nullable: column.nullable, default: sanitizeDefaultEvidence(column.default) }))
+    const actualEvidence = actual.map((column) => ({ name: column.column_name, type: column.data_type, maxLength: column.character_maximum_length ?? null, datetimePrecision: column.datetime_precision ?? null, nullable: column.is_nullable === "YES", default: sanitizeDefaultEvidence(column.column_default) }))
+    return { name, structureMatches, status: structureMatches ? "MATCHED" : "DRIFTED", expectedColumns: expectedEvidence, actualColumns: actualEvidence }
   })
   const indexesByName = new Map(indexesResult.rows.map((row) => [row.name, row]));
   const tables = DECISION_GATE_TABLES.map((name) => ({ name, present: presentTables.has(name) }));
@@ -393,7 +406,7 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
       row.constraint_type === "p" ? true : normalizeConstraintDefinition(row.definition, row.constraint_type) === expected.definition
     ))
     const structureMatches = Boolean(row && expected && row.table_name === expected.table && row.constraint_type === expected.type && exactKeys && exactDefinition)
-    return { name, present: Boolean(row), table: row?.table_name ?? null, type: row?.constraint_type ?? null, valid: row?.valid === true, definition: row?.definition ?? null, structureMatches }
+    return { name, present: Boolean(row), table: row?.table_name ?? null, type: row?.constraint_type ?? null, valid: row?.valid === true, definition: row?.definition ?? null, structureMatches, status: structureMatches ? "MATCHED" : row ? "DRIFTED" : "MISSING", expectedKeyColumns: expected?.keyColumns ?? [], actualKeyColumns: row?.key_columns ?? [] }
   });
   const count = (value: unknown) => typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.MAX_SAFE_INTEGER;
   const provenanceRow = provenanceResult.rows[0];
