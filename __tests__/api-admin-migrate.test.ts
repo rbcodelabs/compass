@@ -546,7 +546,7 @@ describe("/api/admin/migrate rollout observability", () => {
       if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
       if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) return { rows: [{ attempt_id: "attempt-1", plan_fingerprint: plan.fingerprint, next_step: addCheckStep, pending_job_id: null, pending_step: null, executing_step: addCheckStep, executing_started_at: new Date().toISOString(), claim_epoch: 1 }] }
       if (sql.includes("SET claimed_by=$2")) return { rows: [{ claim_epoch: 2 }], rowCount: 1 }
-      if (sql.includes("FROM pg_constraint")) return { rows: [{ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: false, definition: constraint.definition, key_columns: constraint.keyColumns }] }
+      if (sql.includes("FROM pg_constraint")) return { rows: [{ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: false, definition: "CHECK ((now_commitment_provenance IS NOT NULL)) NOT VALID", key_columns: constraint.keyColumns }] }
       if (sql.includes("SET next_step=next_step+1, executing_step=NULL")) return { rows: [], rowCount: 1 }
       if (sql.includes('ADD CONSTRAINT "chk_roadmap_items_commitment_provenance_not_null"')) { relaunches += 1; return { rows: [] } }
       return { rows: [] }
