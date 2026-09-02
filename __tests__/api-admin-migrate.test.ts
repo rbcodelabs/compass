@@ -483,6 +483,46 @@ describe("/api/admin/migrate rollout observability", () => {
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET finished_at"))).toBe(false)
   })
 
+  it("recovers a stale pre-launch EXECUTING intent only after proving no DSQL job exists", async () => {
+    delete process.env.DATABASE_URL
+    const plan = getDecisionGateExpectedCatalog().plans.find((item) => item.name === "040_release_authorization")!
+    const asyncStep = plan.steps.findIndex((step) => step.async)
+    let launches = 0
+    mocks.query.mockImplementation(async (sqlValue: unknown) => {
+      const sql = String(sqlValue)
+      if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
+      if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) return { rows: [{ attempt_id: "attempt-1", plan_fingerprint: plan.fingerprint, next_step: asyncStep, pending_job_id: null, pending_step: null, executing_step: asyncStep, executing_started_at: "2020-01-01T00:00:00Z", claim_epoch: 1 }] }
+      if (sql.includes("SET claimed_by=$2")) return { rows: [{ claim_epoch: 2 }], rowCount: 1 }
+      if (sql.includes("FROM sys.jobs") && sql.includes("object_name=$1")) return { rows: [] }
+      if (sql.includes("SET executing_step=NULL")) return { rows: [], rowCount: 1 }
+      if (sql.includes("SET executing_step=$4")) return { rows: [], rowCount: 1 }
+      if (/CREATE INDEX ASYNC/.test(sql)) { launches += 1; return { rows: [{ job_id: "job-recovered" }] } }
+      if (sql.includes("SET pending_step=$4")) return { rows: [], rowCount: 1 }
+      return { rows: [] }
+    })
+
+    const response = await POST(request("POST", { script: plan.name }))
+    expect(response.status).toBe(202)
+    expect(launches).toBe(1)
+  })
+
+  it("does not advance a synchronous step after its fenced lease ownership is lost", async () => {
+    const plan = getDecisionGateExpectedCatalog().plans.find((item) => item.name === "040_release_authorization")!
+    mocks.query.mockImplementation(async (sqlValue: unknown) => {
+      const sql = String(sqlValue)
+      if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
+      if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) return { rows: [{ attempt_id: "attempt-1", plan_fingerprint: plan.fingerprint, next_step: 0, pending_job_id: null, pending_step: null, executing_step: null, executing_started_at: null, claim_epoch: 1 }] }
+      if (sql.includes("SET claimed_by=$2")) return { rows: [{ claim_epoch: 2 }], rowCount: 1 }
+      if (sql.includes("SET executing_step=$4")) return { rows: [], rowCount: 1 }
+      if (sql.includes("SET next_step=next_step+1")) return { rows: [], rowCount: 0 }
+      return { rows: [] }
+    })
+
+    const response = await POST(request("POST", { script: plan.name }))
+    expect(response.status).toBe(500)
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET finished_at"))).toBe(false)
+  })
+
   it("rejects malformed existing 039 table columns before migration 042 mutates anything", async () => {
     const catalog = getDecisionGateExpectedCatalog()
     const repairTables = catalog.tables.slice(0, 5)

@@ -515,8 +515,10 @@ type DecisionRunRow = {
   pending_job_id: string | null
   pending_step: number | null
   executing_step: number | null
+  executing_started_at: string | Date | null
   claim_epoch: number
 }
+const EXECUTING_RECOVERY_GRACE_MS = 2 * 60 * 1000
 
 function asyncStepObject(step: DecisionMigrationStep) {
   return step.sql?.match(/INDEX\s+ASYNC(?:\s+IF\s+NOT\s+EXISTS)?\s+"([^"]+)"/i)?.[1]
@@ -530,6 +532,34 @@ async function asyncStepIsComplete(client: PoolClient, schema: string, step: Dec
   if (indexName) return health.indexes.some((index) => index.name === indexName && index.state === "ACTIVE")
   const constraintName = step.sql?.match(/VALIDATE\s+CONSTRAINT\s+"([^"]+)"/i)?.[1]
   return Boolean(constraintName && health.constraints.some((constraint) => constraint.name === constraintName && constraint.valid && constraint.structureMatches))
+}
+
+async function stepIsComplete(client: PoolClient, schema: string, migrationName: DecisionMigrationName, step: DecisionMigrationStep) {
+  if (step.async) return asyncStepIsComplete(client, schema, step)
+  if (step.kind === "backfill") {
+    const result = await client.query<{ remaining: string }>(`SELECT COUNT(*)::bigint remaining FROM "${schema}".roadmap_items WHERE now_commitment_provenance IS NULL`)
+    return result.rows[0]?.remaining === "0"
+  }
+  const table = step.sql?.match(/CREATE TABLE IF NOT EXISTS "([^"]+)"/i)?.[1]
+  if (table) {
+    const tables = new Set([table])
+    const expected = [...COLUMN_EXPECTATIONS.values()].filter((column) => column.table === table && !((migrationName === "039_native_decision_gates" || migrationName === "042_native_decision_gates_repair") && column.name === "source_fingerprint"))
+    return exactColumnsMatch(client, schema, tables, expected)
+  }
+  const column = step.sql?.match(/ALTER TABLE "([^"]+)" (?:ADD COLUMN IF NOT EXISTS "([^"]+)"|ALTER COLUMN "([^"]+)" SET DEFAULT)/i)
+  if (column) {
+    const expected = COLUMN_EXPECTATIONS.get(`${column[1]}.${column[2] ?? column[3]}`)
+    if (!expected) return false
+    const { rows } = await client.query<{ table_name: string; column_name: string; data_type: string; character_maximum_length: number | null; datetime_precision: number | null; is_nullable: string; column_default: string | null }>(`SELECT table_name, column_name, data_type, character_maximum_length, datetime_precision, is_nullable, column_default FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 AND column_name=$3`, [schema, expected.table, expected.name])
+    const row = rows[0]
+    return Boolean(row && row.data_type === expected.type && (row.character_maximum_length ?? null) === expected.maxLength && (row.datetime_precision ?? null) === expected.datetimePrecision && (row.is_nullable === "YES") === expected.nullable && normalizeColumnDefault(row.column_default) === expected.default)
+  }
+  const constraint = step.sql?.match(/ADD CONSTRAINT "([^"]+)"/i)?.[1]
+  if (constraint) {
+    const health = await getDecisionGateInfrastructureHealth(client, schema, [])
+    return health.constraints.some((item) => item.name === constraint && item.valid && item.structureMatches)
+  }
+  return false
 }
 
 async function runOneProvenanceBackfillBatch(client: PoolClient, schema: string, log: string[]) {
@@ -566,6 +596,7 @@ async function advanceDecisionMigration(client: PoolClient, schema: string, migr
     pending_step INTEGER,
     pending_job_id VARCHAR(255),
     executing_step INTEGER,
+    executing_started_at TIMESTAMP(3),
     claimed_by UUID,
     claim_expires_at TIMESTAMP(3),
     claim_epoch INTEGER NOT NULL DEFAULT 0,
@@ -573,7 +604,11 @@ async function advanceDecisionMigration(client: PoolClient, schema: string, migr
     updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT _migration_execution_state_pkey PRIMARY KEY (migration_name)
   )`)
-  let run = (await client.query<DecisionRunRow>(`SELECT attempt_id, plan_fingerprint, next_step, pending_job_id, pending_step, executing_step, claim_epoch FROM "${schema}"._migration_execution_state WHERE migration_name=$1`, [migration.name])).rows[0]
+  for (const upgrade of [
+    "pending_step INTEGER", "pending_job_id VARCHAR(255)", "executing_step INTEGER", "executing_started_at TIMESTAMP(3)",
+    "claimed_by UUID", "claim_expires_at TIMESTAMP(3)", "claim_epoch INTEGER", "last_error TEXT",
+  ]) await client.query(`ALTER TABLE "${schema}"._migration_execution_state ADD COLUMN IF NOT EXISTS ${upgrade}`)
+  let run = (await client.query<DecisionRunRow>(`SELECT attempt_id, plan_fingerprint, next_step, pending_job_id, pending_step, executing_step, executing_started_at, claim_epoch FROM "${schema}"._migration_execution_state WHERE migration_name=$1`, [migration.name])).rows[0]
   if (!run) {
     const attemptId = randomUUID()
     try {
@@ -586,11 +621,11 @@ async function advanceDecisionMigration(client: PoolClient, schema: string, migr
       // A concurrent initializer wins the primary-key race; only its attempt may advance.
       if (!(error instanceof Error) || !/duplicate|unique/i.test(error.message)) throw error
     }
-    run = (await client.query<DecisionRunRow>(`SELECT attempt_id, plan_fingerprint, next_step, pending_job_id, pending_step, executing_step, claim_epoch FROM "${schema}"._migration_execution_state WHERE migration_name=$1`, [migration.name])).rows[0]
+    run = (await client.query<DecisionRunRow>(`SELECT attempt_id, plan_fingerprint, next_step, pending_job_id, pending_step, executing_step, executing_started_at, claim_epoch FROM "${schema}"._migration_execution_state WHERE migration_name=$1`, [migration.name])).rows[0]
   }
   if (!run) throw new Error(`Migration ${migration.name} could not load its durable execution state.`)
   if (run.plan_fingerprint !== plan.fingerprint) throw new Error(`Migration ${migration.name} plan fingerprint changed; refusing unsafe resume.`)
-  const claimed = await client.query<{ claim_epoch: number }>(`UPDATE "${schema}"._migration_execution_state SET claimed_by=$2, claim_epoch=claim_epoch+1, claim_expires_at=CURRENT_TIMESTAMP + INTERVAL '50 seconds', updated_at=CURRENT_TIMESTAMP WHERE migration_name=$1 AND (claimed_by IS NULL OR claim_expires_at < CURRENT_TIMESTAMP) RETURNING claim_epoch`, [migration.name, claimId])
+  const claimed = await client.query<{ claim_epoch: number }>(`UPDATE "${schema}"._migration_execution_state SET claimed_by=$2, claim_epoch=COALESCE(claim_epoch,0)+1, claim_expires_at=CURRENT_TIMESTAMP + INTERVAL '50 seconds', updated_at=CURRENT_TIMESTAMP WHERE migration_name=$1 AND (claimed_by IS NULL OR claim_expires_at < CURRENT_TIMESTAMP) RETURNING claim_epoch`, [migration.name, claimId])
   if (claimed.rowCount !== 1) return { status: 409, state: "CLAIMED", attemptId: run.attempt_id, nextStep: run.next_step }
   const claimEpoch = claimed.rows[0]?.claim_epoch
   if (!Number.isInteger(claimEpoch)) throw new Error(`Migration ${migration.name} claim did not return a fencing epoch.`)
@@ -602,7 +637,7 @@ async function advanceDecisionMigration(client: PoolClient, schema: string, migr
       if (!job) throw new Error(`Migration ${migration.name} async job ${run.pending_job_id} is unknown.`)
       if (["submitted", "pending", "running", "in_progress"].includes(job.status.toLowerCase())) return { status: 202, state: "WAITING", attemptId: run.attempt_id, nextStep: run.next_step, jobId: run.pending_job_id }
       if (!["succeeded", "successful", "completed"].includes(job.status.toLowerCase())) throw new Error(`Migration ${migration.name} async job ${run.pending_job_id} failed: ${job.details ?? job.status}`)
-      const advanced = await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1, pending_step=NULL, pending_job_id=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
+      const advanced = await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1, pending_step=NULL, pending_job_id=NULL, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
       if (advanced.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim before advancing.`)
       return { status: 202, state: "ADVANCED", attemptId: run.attempt_id, nextStep: run.next_step + 1 }
     }
@@ -618,43 +653,56 @@ async function advanceDecisionMigration(client: PoolClient, schema: string, migr
       return { status: 200, state: "COMPLETE", attemptId: run.attempt_id, nextStep: run.next_step }
     }
     if (run.executing_step != null) {
-      if (run.executing_step !== run.next_step || !step.async) throw new Error(`Migration ${migration.name} has an ambiguous EXECUTING step.`)
-      if (await asyncStepIsComplete(client, schema, step)) {
-        const reconciled = await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1, executing_step=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
+      if (run.executing_step !== run.next_step) throw new Error(`Migration ${migration.name} has an ambiguous EXECUTING step.`)
+      if (await stepIsComplete(client, schema, migration.name, step)) {
+        const reconciled = await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1, executing_step=NULL, executing_started_at=NULL, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
         if (reconciled.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim while reconciling catalog state.`)
         return { status: 202, state: "ADVANCED", attemptId: run.attempt_id, nextStep: run.next_step + 1 }
       }
-      const objectName = asyncStepObject(step)
-      const discovered = objectName ? await client.query<{ job_id: string; status: string }>(`SELECT job_id, status FROM sys.jobs WHERE object_name=$1 ORDER BY job_id DESC LIMIT 2`, [`${schema}.${objectName}`]) : { rows: [] }
-      if (discovered.rows.length !== 1) return { status: 202, state: "RECONCILING", attemptId: run.attempt_id, nextStep: run.next_step }
-      const correlated = await client.query(`UPDATE "${schema}"._migration_execution_state SET pending_step=$4, pending_job_id=$5, executing_step=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step, discovered.rows[0].job_id])
-      if (correlated.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim while correlating the async job.`)
-      return { status: 202, state: "WAITING", attemptId: run.attempt_id, nextStep: run.next_step, jobId: discovered.rows[0].job_id }
+      if (step.async) {
+        const objectName = asyncStepObject(step)
+        const discovered = objectName ? await client.query<{ job_id: string; status: string }>(`SELECT job_id, status FROM sys.jobs WHERE object_name=$1 ORDER BY job_id DESC LIMIT 2`, [`${schema}.${objectName}`]) : { rows: [] }
+        if (discovered.rows.length === 1) {
+          const correlated = await client.query(`UPDATE "${schema}"._migration_execution_state SET pending_step=$4, pending_job_id=$5, executing_step=NULL, executing_started_at=NULL, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step, discovered.rows[0].job_id])
+          if (correlated.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim while correlating the async job.`)
+          return { status: 202, state: "WAITING", attemptId: run.attempt_id, nextStep: run.next_step, jobId: discovered.rows[0].job_id }
+        }
+        if (discovered.rows.length > 1) return { status: 202, state: "RECONCILING", attemptId: run.attempt_id, nextStep: run.next_step }
+      }
+      const startedAt = run.executing_started_at ? new Date(run.executing_started_at).getTime() : Number.NaN
+      if (!Number.isFinite(startedAt) || Date.now() - startedAt < EXECUTING_RECOVERY_GRACE_MS) return { status: 202, state: "RECONCILING", attemptId: run.attempt_id, nextStep: run.next_step }
+      const recovered = await client.query(`UPDATE "${schema}"._migration_execution_state SET executing_step=NULL, executing_started_at=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
+      if (recovered.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim during zero-job recovery.`)
     }
     if (step.kind === "backfill") {
+      const intent = await client.query(`UPDATE "${schema}"._migration_execution_state SET executing_step=$4, executing_started_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step])
+      if (intent.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim before the backfill step.`)
       const done = await runOneProvenanceBackfillBatch(client, schema, log)
-      if (done) await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1 WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
+      const persisted = done
+        ? await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1, executing_step=NULL, executing_started_at=NULL, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
+        : await client.query(`UPDATE "${schema}"._migration_execution_state SET executing_step=NULL, executing_started_at=NULL, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
+      if (persisted.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim after the backfill step.`)
       return { status: 202, state: done ? "ADVANCED" : "BACKFILLING", attemptId: run.attempt_id, nextStep: run.next_step + (done ? 1 : 0) }
     }
     if ((repairState?.checkPresent && /ADD\s+CONSTRAINT\s+"chk_roadmap_items_commitment_provenance_not_null"/i.test(step.sql!))
       || (repairState?.checkValid && /VALIDATE\s+CONSTRAINT\s+"chk_roadmap_items_commitment_provenance_not_null"/i.test(step.sql!))) {
-      await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1 WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
+      const skipped = await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
+      if (skipped.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim while skipping a verified step.`)
       return { status: 202, state: "ADVANCED", attemptId: run.attempt_id, nextStep: run.next_step + 1 }
     }
     const executableSql = process.env.DATABASE_URL ? step.sql!.replace(/\bINDEX ASYNC\b/gi, "INDEX").replace(/ALTER\s+TABLE\s+ASYNC/gi, "ALTER TABLE") : step.sql!
-    if (step.async && !process.env.DATABASE_URL) {
-      const intent = await client.query(`UPDATE "${schema}"._migration_execution_state SET executing_step=$4, updated_at=CURRENT_TIMESTAMP WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step])
-      if (intent.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim before launching async DDL.`)
-    }
+    const intent = await client.query(`UPDATE "${schema}"._migration_execution_state SET executing_step=$4, executing_started_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step])
+    if (intent.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim before executing step ${step.id}.`)
     const result = await client.query<{ job_id?: string }>(executableSql)
     if (step.async && !process.env.DATABASE_URL) {
       const jobId = result.rows[0]?.job_id
       if (!jobId) throw new Error(`Migration ${migration.name} async step ${step.id} returned no job_id.`)
-      const persisted = await client.query(`UPDATE "${schema}"._migration_execution_state SET pending_step=$4, pending_job_id=$5, executing_step=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step, jobId])
+      const persisted = await client.query(`UPDATE "${schema}"._migration_execution_state SET pending_step=$4, pending_job_id=$5, executing_step=NULL, executing_started_at=NULL, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step, jobId])
       if (persisted.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim after launching async DDL; EXECUTING intent remains for reconciliation.`)
       return { status: 202, state: "WAITING", attemptId: run.attempt_id, nextStep: run.next_step, jobId }
     }
-    await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1 WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
+    const advanced = await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1, executing_step=NULL, executing_started_at=NULL, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
+    if (advanced.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim after executing step ${step.id}.`)
     return { status: 202, state: "ADVANCED", attemptId: run.attempt_id, nextStep: run.next_step + 1 }
   } catch (error) {
     await client.query(`UPDATE "${schema}"._migration_execution_state SET last_error=$4 WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, error instanceof Error ? error.message : String(error)])
@@ -933,7 +981,7 @@ async function getPool(): Promise<Pool> {
   // worktree-bootstrap provides a local Postgres URL. Keep local verification
   // on the exact same migration runner/search_path as DSQL deployments.
   if (process.env.DATABASE_URL) {
-    return new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+    return new Pool({ connectionString: process.env.DATABASE_URL, max: 3, query_timeout: 40_000 });
   }
   const host = process.env.PGHOST!;
   const signer = new DsqlSigner({
@@ -954,6 +1002,7 @@ async function getPool(): Promise<Pool> {
     port: 5432,
     ssl: true,
     max: 3,
+    query_timeout: 40_000,
   });
 }
 
@@ -987,7 +1036,7 @@ export async function GET(req: NextRequest) {
       getResearchGuidedUxReport(client, schema),
       getResearchBlobCleanupReport(client, schema),
       getDecisionGateInfrastructureHealth(client, schema, appliedNames, incompleteNames),
-      client.query(`SELECT migration_name, attempt_id, plan_version, plan_fingerprint, next_step, executing_step, pending_step, pending_job_id, claim_epoch, claimed_by IS NOT NULL AND claim_expires_at >= CURRENT_TIMESTAMP AS claimed, last_error, updated_at FROM "${schema}"._migration_execution_state ORDER BY updated_at DESC`).then(({ rows }) => rows).catch(() => []),
+      client.query(`SELECT migration_name, attempt_id, plan_version, plan_fingerprint, next_step, executing_step, executing_started_at, pending_step, pending_job_id, claim_epoch, claimed_by IS NOT NULL AND claim_expires_at >= CURRENT_TIMESTAMP AS claimed, last_error, updated_at FROM "${schema}"._migration_execution_state ORDER BY updated_at DESC`).then(({ rows }) => rows).catch(() => []),
     ]);
 
     return NextResponse.json({

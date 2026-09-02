@@ -320,9 +320,16 @@ The resumable runner preserves these invariants:
 - before launch, the runner durably marks the step `EXECUTING`. A retry first
   reconciles that intent from the exact catalog or the uniquely discoverable
   DSQL job and never blindly launches the step again;
+- an `EXECUTING` intent records its start time. If no job and no catalog effect
+  exist, the runner waits through a visibility grace period before clearing the
+  intent and retrying; this distinguishes a pre-launch crash from a launched job
+  whose metadata has not propagated yet;
 - every lease acquisition increments a fencing epoch. State transitions and
   the final receipt require both the owner token and epoch, so an expired owner
   cannot advance after a successor takes the claim;
+- synchronous DDL and each bounded backfill batch use the same durable intent
+  and fencing checks. Database queries are capped below the lease duration, and
+  every advancement verifies that exactly one fenced state row was updated;
 - a pending job is never interpreted as success, and a failed/cancelled/unknown
   job leaves the attempt incomplete with diagnostic state;
 - retries inspect the exact catalog before launch and after completion, so
