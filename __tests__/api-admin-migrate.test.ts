@@ -523,6 +523,30 @@ describe("/api/admin/migrate rollout observability", () => {
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET finished_at"))).toBe(false)
   })
 
+  it("reconciles a lost ADD CHECK NOT VALID response without requiring validation or relaunching", async () => {
+    delete process.env.DATABASE_URL
+    const catalog = getDecisionGateExpectedCatalog()
+    const plan = catalog.plans.find((item) => item.name === "039_native_decision_gates")!
+    const addCheckStep = plan.steps.findIndex((step) => step.sql?.includes('ADD CONSTRAINT "chk_roadmap_items_commitment_provenance_not_null"'))
+    const constraint = catalog.constraints.find((item) => item.name === "chk_roadmap_items_commitment_provenance_not_null")!
+    let relaunches = 0
+    mocks.query.mockImplementation(async (sqlValue: unknown) => {
+      const sql = String(sqlValue)
+      if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
+      if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) return { rows: [{ attempt_id: "attempt-1", plan_fingerprint: plan.fingerprint, next_step: addCheckStep, pending_job_id: null, pending_step: null, executing_step: addCheckStep, executing_started_at: new Date().toISOString(), claim_epoch: 1 }] }
+      if (sql.includes("SET claimed_by=$2")) return { rows: [{ claim_epoch: 2 }], rowCount: 1 }
+      if (sql.includes("FROM pg_constraint")) return { rows: [{ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: false, definition: constraint.definition, key_columns: constraint.keyColumns }] }
+      if (sql.includes("SET next_step=next_step+1, executing_step=NULL")) return { rows: [], rowCount: 1 }
+      if (sql.includes('ADD CONSTRAINT "chk_roadmap_items_commitment_provenance_not_null"')) { relaunches += 1; return { rows: [] } }
+      return { rows: [] }
+    })
+
+    const response = await POST(request("POST", { script: plan.name }))
+    expect(response.status).toBe(202)
+    expect((await response.json()).migrationProgress).toMatchObject({ state: "ADVANCED", nextStep: addCheckStep + 1 })
+    expect(relaunches).toBe(0)
+  })
+
   it("rejects malformed existing 039 table columns before migration 042 mutates anything", async () => {
     const catalog = getDecisionGateExpectedCatalog()
     const repairTables = catalog.tables.slice(0, 5)

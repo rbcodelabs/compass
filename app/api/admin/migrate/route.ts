@@ -557,7 +557,9 @@ async function stepIsComplete(client: PoolClient, schema: string, migrationName:
   const constraint = step.sql?.match(/ADD CONSTRAINT "([^"]+)"/i)?.[1]
   if (constraint) {
     const health = await getDecisionGateInfrastructureHealth(client, schema, [])
-    return health.constraints.some((item) => item.name === constraint && item.valid && item.structureMatches)
+    // ADD ... CHECK NOT VALID owns existence and structure only. The following
+    // ALTER TABLE ASYNC ... VALIDATE step separately owns convalidated=true.
+    return health.constraints.some((item) => item.name === constraint && item.present && item.structureMatches)
   }
   return false
 }
