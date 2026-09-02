@@ -645,10 +645,12 @@ describe("/api/admin/migrate rollout observability", () => {
       repairTables.includes(constraint.table) || constraint.name === "chk_roadmap_items_commitment_provenance_not_null"
     )
     let job = 0
+    let searchPathSet = false
     let loseFirstJobPersistence = true
     let run: { attempt_id: string; plan_fingerprint: string; next_step: number; pending_job_id: string | null; pending_step: number | null; executing_step: number | null } | undefined
     mocks.query.mockImplementation(async (sqlValue: unknown, values?: unknown[]) => {
       const sql = String(sqlValue)
+      if (sql === 'SET search_path TO "compass_preview"') { searchPathSet = true; return { rows: [] } }
       if (sql.includes("SELECT migration_name FROM")) return { rows: [{ migration_name: "039_native_decision_gates" }] }
       if (sql.includes("information_schema.tables") && Array.isArray(values?.[1]) && values[1].includes("review_requests")) return { rows: repairTables.map((table_name) => ({ table_name })) }
       if (sql.includes("information_schema.columns") && sql.includes("roadmap_items")) return { rows: [
@@ -679,6 +681,7 @@ describe("/api/admin/migrate rollout observability", () => {
         return { rows: [], rowCount: 1 }
       }
       if (sql.includes("SET executing_step=$4")) { run!.executing_step = Number(values?.[3]); return { rows: [], rowCount: 1 } }
+      if (/^(?:ALTER TABLE|CREATE INDEX)/i.test(sql) && !sql.includes("_migration_execution_state") && !searchPathSet) throw new Error("relation \"roadmap_items\" does not exist")
       if (/ALTER TABLE ASYNC|CREATE INDEX ASYNC/i.test(sql)) return { rows: [{ job_id: `repair-job-${++job}` }] }
       if (sql.includes("FROM sys.jobs") && sql.includes("job_id=$1")) return { rows: [{ status: "completed", details: null }] }
       if (sql.includes("DELETE FROM") && sql.includes("_migration_execution_state")) { run = undefined; return { rows: [], rowCount: 1 } }
@@ -698,6 +701,7 @@ describe("/api/admin/migrate rollout observability", () => {
     }
 
     expect(response?.status).toBe(200)
+    expect(searchPathSet).toBe(true)
     expect(injectedFailures).toBe(1)
     expect(job).toBe(7)
     expect(mocks.query.mock.calls.filter(([sql]) => String(sql).includes("FROM sys.jobs") && String(sql).includes("job_id=$1"))).toHaveLength(6)

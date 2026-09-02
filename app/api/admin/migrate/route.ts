@@ -1135,6 +1135,7 @@ export async function POST(req: NextRequest) {
       // Decision-gate migrations advance one durable step per invocation. In
       // all-pending mode no dependent migration starts until this one reaches
       // its terminal postcondition check and receives a finished receipt.
+      await client.query(`SET search_path TO "${schema}"`)
       const repairState = decisionMigration.name === "042_native_decision_gates_repair" ? await inspectRepair039State(client, schema) : undefined
       const progress = await advanceDecisionMigration(client, schema, decisionMigration as { name: DecisionMigrationName; filePath: string }, log, repairState)
       return NextResponse.json({ schema, migrationProgress: progress, message: log.join("\n") }, { status: progress.status })
