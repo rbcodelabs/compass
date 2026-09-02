@@ -218,6 +218,8 @@ describe("/api/admin/migrate rollout observability", () => {
     const constraintQuery = mocks.query.mock.calls.find(([sql]) => String(sql).includes("FROM pg_constraint"))
     expect(String(constraintQuery?.[0])).toContain("backing.indexrelid=c.conindid")
     expect(String(constraintQuery?.[0])).toContain("key.ordinal <= backing.indnkeyatts")
+    expect(String(constraintQuery?.[0])).toContain("a.attname::text")
+    expect(String(constraintQuery?.[0])).toContain("ARRAY[]::text[]")
   })
 
   it("rejects a same-name table whose complete column fingerprint is malformed", async () => {

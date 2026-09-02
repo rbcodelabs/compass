@@ -334,10 +334,10 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
       FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[])`, [schema, [...DECISION_GATE_INDEXES]]),
     client.query<{ constraint_name: string; table_name: string; constraint_type: string; valid: boolean; definition: string; key_columns: string[] }>(`SELECT c.conname constraint_name, t.relname table_name, c.contype constraint_type, c.convalidated valid, pg_get_constraintdef(c.oid) definition,
         CASE WHEN c.contype IN ('p','u') THEN COALESCE(ARRAY(
-          SELECT a.attname FROM unnest(backing.indkey) WITH ORDINALITY AS key(attnum, ordinal)
+          SELECT a.attname::text FROM unnest(backing.indkey) WITH ORDINALITY AS key(attnum, ordinal)
           JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=key.attnum
           WHERE key.ordinal <= backing.indnkeyatts ORDER BY key.ordinal
-        ), ARRAY[]::name[]) ELSE ARRAY[]::name[] END key_columns
+        ), ARRAY[]::text[]) ELSE ARRAY[]::text[] END key_columns
       FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace JOIN pg_class t ON t.oid=c.conrelid
       LEFT JOIN pg_index backing ON backing.indexrelid=c.conindid
       WHERE n.nspname=$1 AND c.conname=ANY($2::text[])`, [schema, [...DECISION_GATE_CONSTRAINTS]]),
