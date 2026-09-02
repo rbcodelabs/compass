@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS "review_requests" (
   CONSTRAINT "idx_review_requests_current_revision" UNIQUE ("current_revision_id")
 );
 COMMIT;
-
 BEGIN;
 CREATE TABLE IF NOT EXISTS "review_revisions" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
@@ -140,4 +139,3 @@ COMMIT;
 BEGIN;
 CREATE INDEX ASYNC IF NOT EXISTS "idx_decision_applications_target" ON "decision_applications" ("target_type", "target_id");
 COMMIT;
-

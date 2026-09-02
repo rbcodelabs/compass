@@ -1,7 +1,6 @@
 BEGIN;
 ALTER TABLE "review_revisions" ADD COLUMN IF NOT EXISTS "source_fingerprint" VARCHAR(64);
 COMMIT;
-
 BEGIN;
 CREATE TABLE IF NOT EXISTS "release_runs" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
@@ -86,4 +85,3 @@ COMMIT;
 BEGIN;
 CREATE INDEX ASYNC IF NOT EXISTS "idx_release_dispatches_run_status" ON "release_dispatches" ("release_run_id", "status");
 COMMIT;
-
