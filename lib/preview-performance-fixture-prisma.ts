@@ -21,9 +21,9 @@ function requireAllowed(value: string | null, allowed: Set<string>, label: strin
 }
 
 export class PrismaPreviewFixtureStore implements PreviewFixtureStore {
-  private readonly prisma: PrismaClient;
+  private readonly prisma: PrismaClient | Prisma.TransactionClient;
 
-  constructor(prisma: PrismaClient) {
+  constructor(prisma: PrismaClient | Prisma.TransactionClient) {
     this.prisma = prisma;
   }
 
@@ -149,6 +149,53 @@ export class PrismaPreviewFixtureStore implements PreviewFixtureStore {
     }
   }
 
+  async verifyExactRows(plan: { rows: Record<PreviewFixtureKind, PreviewFixtureRow[]> }): Promise<void> {
+    for (const kind of SEED_ORDER) {
+      const expectedRows = plan.rows[kind];
+      const actualRows = await this.findRows(kind, expectedRows.map(({ id }) => id));
+      const actualById = new Map(actualRows.map((row) => [String(row.id), row]));
+      for (const expected of expectedRows) {
+        const actual = actualById.get(expected.id);
+        if (!actual) continue;
+        for (const [key, expectedValue] of Object.entries(expected)) {
+          // Cleanup/verify never receive credential material or its original
+          // expiry. Session ownership is proven by deterministic ID + user.
+          if (kind === "sessions" && (key === "sessionToken" || key === "expires")) continue;
+          const actualValue = actual[key];
+          const normalizedExpected = expectedValue instanceof Date ? expectedValue.toISOString() : expectedValue;
+          const normalizedActual = actualValue instanceof Date ? actualValue.toISOString() : actualValue;
+          if (normalizedActual !== normalizedExpected) throw new Error(`Preview fixture ownership mismatch for ${kind}.${key}`);
+        }
+      }
+    }
+  }
+
+  private async findRows(kind: PreviewFixtureKind, ids: readonly string[]): Promise<Record<string, unknown>[]> {
+    const where = { id: { in: [...ids] } };
+    let rows: unknown[];
+    switch (kind) {
+      case "users": rows = await this.prisma.user.findMany({ where }); break;
+      case "organizations": rows = await this.prisma.organization.findMany({ where }); break;
+      case "organizationMembers": rows = await this.prisma.organizationMember.findMany({ where }); break;
+      case "workspaces": rows = await this.prisma.workspace.findMany({ where }); break;
+      case "workspaceMembers": rows = await this.prisma.workspaceMember.findMany({ where }); break;
+      case "squads": rows = await this.prisma.squad.findMany({ where }); break;
+      case "okrCycles": rows = await this.prisma.oKRCycle.findMany({ where }); break;
+      case "objectives": rows = await this.prisma.objective.findMany({ where }); break;
+      case "keyResults": rows = await this.prisma.keyResult.findMany({ where }); break;
+      case "opportunities": rows = await this.prisma.opportunity.findMany({ where }); break;
+      case "solutions": rows = await this.prisma.solution.findMany({ where }); break;
+      case "assumptions": rows = await this.prisma.assumption.findMany({ where }); break;
+      case "evidence": rows = await this.prisma.evidence.findMany({ where }); break;
+      case "experiments": rows = await this.prisma.experiment.findMany({ where }); break;
+      case "roadmapItems": rows = await this.prisma.roadmapItem.findMany({ where }); break;
+      case "feedback": rows = await this.prisma.feedbackItem.findMany({ where }); break;
+      case "tasks": rows = await this.prisma.task.findMany({ where }); break;
+      case "sessions": rows = await this.prisma.session.findMany({ where }); break;
+    }
+    return rows as Record<string, unknown>[];
+  }
+
   async deleteIds(kind: PreviewFixtureKind, ids: readonly string[]): Promise<void> {
     const where = { id: { in: [...ids] } };
     switch (kind) {
@@ -175,6 +222,11 @@ export class PrismaPreviewFixtureStore implements PreviewFixtureStore {
 
   async countResidue(manifest: PreviewFixtureManifest): Promise<number> {
     const counts = await Promise.all(SEED_ORDER.map((kind) => this.countKind(kind, manifest.plannedIds[kind])));
+    const sentinelCount = await this.countSentinelRows(manifest);
+    return counts.reduce((total, count) => total + count, sentinelCount);
+  }
+
+  async countSentinelRows(manifest: PreviewFixtureManifest): Promise<number> {
     const uniqueSentinelCounts = await Promise.all([
       this.prisma.user.count({ where: { email: { in: manifest.plannedIds.users.map((_id, index) => index === 0
         ? manifest.identity.sentinel.ownerEmail
@@ -182,7 +234,12 @@ export class PrismaPreviewFixtureStore implements PreviewFixtureStore {
       this.prisma.organization.count({ where: { slug: manifest.identity.sentinel.organizationSlug } }),
       this.prisma.workspace.count({ where: { slug: manifest.identity.sentinel.workspaceSlug } }),
     ]);
-    return [...counts, ...uniqueSentinelCounts].reduce((total, count) => total + count, 0);
+    return uniqueSentinelCounts.reduce((total, count) => total + count, 0);
+  }
+
+  async countPlannedRows(manifest: PreviewFixtureManifest): Promise<number> {
+    const counts = await Promise.all(SEED_ORDER.map((kind) => this.countKind(kind, manifest.plannedIds[kind])));
+    return counts.reduce((total, count) => total + count, 0);
   }
 
   private async countKind(kind: PreviewFixtureKind, ids: readonly string[]): Promise<number> {

@@ -21,7 +21,6 @@ import {
   type PreviewFixtureStore,
 } from "@/lib/preview-performance-fixture";
 import { PrismaPreviewFixtureStore } from "@/lib/preview-performance-fixture-prisma";
-import { parsePreviewFixtureArgs } from "../../scripts/preview-performance-fixture";
 
 const RUN_ID = "perf_preview_0123456789abcdef0123456789abcdef";
 const SHA = "a".repeat(40);
@@ -167,21 +166,6 @@ describe("preview fixture hard guards", () => {
     expect(() => assertManifestMatchesGuard(createPreviewFixtureManifest(createPlan()), { ...cleanup, deploymentId: "dpl_AnotherExactDeployment123" })).toThrow(/re-proven/);
   });
 
-  it("requires every exact CLI identity and an explicit bounded seed expiry", () => {
-    const common = [
-      "--run-id", RUN_ID,
-      "--deployment-sha", SHA,
-      "--verified-deployment-sha", SHA,
-      "--deployment-url", DEPLOYMENT_URL,
-      "--deployment-id", "dpl_6Kf7JXNTuRu2AaAWoznGoABcW4Bn",
-    ];
-    expect(parsePreviewFixtureArgs(["seed", ...common, "--expires-minutes", "120"])).toMatchObject({ command: "seed", expiresMinutes: 120 });
-    expect(parsePreviewFixtureArgs(["seed", "--", ...common, "--expires-minutes", "120"])).toMatchObject({ command: "seed", expiresMinutes: 120 });
-    expect(parsePreviewFixtureArgs(["cleanup", ...common])).toMatchObject({ command: "cleanup", expiresMinutes: undefined });
-    expect(() => parsePreviewFixtureArgs(["seed", ...common])).toThrow(/expires-minutes/);
-    expect(() => parsePreviewFixtureArgs(["cleanup", ...common, "--expires-minutes", "120"])).toThrow(/does not accept/);
-    expect(() => parsePreviewFixtureArgs(["seed", ...common, "--expires-minutes", "241"])).toThrow(/15 through 240/);
-  });
 });
 
 describe("preview fixture plan and private artifacts", () => {

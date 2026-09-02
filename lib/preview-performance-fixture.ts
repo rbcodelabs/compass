@@ -439,7 +439,7 @@ export function parsePreviewFixtureManifest(value: unknown): PreviewFixtureManif
   return value;
 }
 
-function authState(plan: PreviewFixturePlan): unknown {
+export function createPreviewFixtureAuthState(plan: PreviewFixturePlan): unknown {
   const deployment = new URL(plan.identity.deploymentUrl);
   return {
     cookies: [{
@@ -472,7 +472,7 @@ export async function seedPreviewFixture(options: FixturePaths & { plan: Preview
     }
     manifest.status = "ready";
     writePrivateJson(options.manifestPath, manifest);
-    writePrivateJson(options.authStatePath, authState(options.plan));
+    writePrivateJson(options.authStatePath, createPreviewFixtureAuthState(options.plan));
   } catch (seedError) {
     const seedMessage = redactSensitiveText(String(seedError), [options.plan.sessionToken]);
     try {
