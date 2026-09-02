@@ -317,10 +317,20 @@ The resumable runner preserves these invariants:
   refuses resume if deployed code presents a different fingerprint;
 - a launched async job is durably correlated to its step before another step is
   advanced; missing or ambiguous correlation fails closed;
+- before launch, the runner durably marks the step `EXECUTING`. A retry first
+  reconciles that intent from the exact catalog or the uniquely discoverable
+  DSQL job and never blindly launches the step again;
+- every lease acquisition increments a fencing epoch. State transitions and
+  the final receipt require both the owner token and epoch, so an expired owner
+  cannot advance after a successor takes the claim;
 - a pending job is never interpreted as success, and a failed/cancelled/unknown
   job leaves the attempt incomplete with diagnostic state;
 - retries inspect the exact catalog before launch and after completion, so
   idempotent DDL cannot conceal a same-name, wrong-shape object;
+- repair 042 fingerprints every column of the five tables created by 039 before
+  its first mutation. The only permitted omission is
+  `review_revisions.source_fingerprint`, because that column belongs to the
+  later 040 migration and must not exist when 042 repairs 039 ahead of 040;
 - bounded backfills keep their existing durable cursor and row/byte limits;
 - `finished_at` remains null across all non-terminal invocations and is written
   only after every step is complete and the migration-specific exact catalog

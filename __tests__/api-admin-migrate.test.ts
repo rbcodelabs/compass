@@ -464,6 +464,47 @@ describe("/api/admin/migrate rollout observability", () => {
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET finished_at"))).toBe(false)
   })
 
+  it("fences an owner whose lease expires before async DDL launch", async () => {
+    delete process.env.DATABASE_URL
+    const plan = getDecisionGateExpectedCatalog().plans.find((item) => item.name === "040_release_authorization")!
+    const asyncStep = plan.steps.findIndex((step) => step.async)
+    mocks.query.mockImplementation(async (sqlValue: unknown) => {
+      const sql = String(sqlValue)
+      if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
+      if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) return { rows: [{ attempt_id: "attempt-1", plan_fingerprint: plan.fingerprint, next_step: asyncStep, pending_job_id: null, pending_step: null, executing_step: null, claim_epoch: 1 }] }
+      if (sql.includes("SET claimed_by=$2")) return { rows: [{ claim_epoch: 2 }], rowCount: 1 }
+      if (sql.includes("SET executing_step=$4")) return { rows: [], rowCount: 0 }
+      return { rows: [] }
+    })
+
+    const response = await POST(request("POST", { script: plan.name }))
+    expect(response.status).toBe(500)
+    expect(mocks.query.mock.calls.some(([sql]) => /CREATE INDEX ASYNC/.test(String(sql)))).toBe(false)
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET finished_at"))).toBe(false)
+  })
+
+  it("rejects malformed existing 039 table columns before migration 042 mutates anything", async () => {
+    const catalog = getDecisionGateExpectedCatalog()
+    const repairTables = catalog.tables.slice(0, 5)
+    mocks.query.mockImplementation(async (sqlValue: unknown, values?: unknown[]) => {
+      const sql = String(sqlValue)
+      if (sql.includes("SELECT migration_name FROM")) return { rows: [{ migration_name: "039_native_decision_gates" }] }
+      if (sql.includes("information_schema.tables") && Array.isArray(values?.[1]) && values[1].includes("review_requests")) return { rows: repairTables.map((table_name) => ({ table_name })) }
+      if (sql.includes("information_schema.columns") && sql.includes("roadmap_items")) return { rows: [
+        { table_name: "roadmap_items", column_name: "now_commitment_provenance", data_type: "character varying", character_maximum_length: 30, datetime_precision: null, is_nullable: "YES", column_default: "'LEGACY_UNGATED'::character varying" },
+        { table_name: "roadmap_items", column_name: "now_decision_record_id", data_type: "uuid", character_maximum_length: null, datetime_precision: null, is_nullable: "YES", column_default: null },
+      ] }
+      if (sql.includes("information_schema.columns") && sql.includes("table_name=ANY")) return { rows: [{ table_name: "review_requests", column_name: "id", data_type: "text", character_maximum_length: null, datetime_precision: null, is_nullable: "NO", column_default: null }] }
+      if (sql.includes("legacy_link_drift")) return { rows: [{ total: "0", null_count: "0", unknown_count: "0", legacy_link_drift: "0" }] }
+      return { rows: [] }
+    })
+
+    const response = await POST(request("POST", { script: "042_native_decision_gates_repair" }))
+    expect(response.status).toBe(500)
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO") && String(sql).includes("_migration_execution_state"))).toBe(false)
+    expect(mocks.query.mock.calls.some(([sql]) => /ALTER TABLE ASYNC|CREATE INDEX ASYNC/.test(String(sql)))).toBe(false)
+  })
+
   it("fails closed when an async DDL launch returns no job_id", async () => {
     delete process.env.DATABASE_URL
     const plan = getDecisionGateExpectedCatalog().plans.find((item) => item.name === "040_release_authorization")!
@@ -472,7 +513,8 @@ describe("/api/admin/migrate rollout observability", () => {
       const sql = String(sqlValue)
       if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
       if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) return { rows: [{ attempt_id: "attempt-1", plan_fingerprint: plan.fingerprint, next_step: asyncStep, pending_job_id: null, pending_step: null }] }
-      if (sql.includes("SET claimed_by=$2")) return { rows: [{ migration_name: plan.name }], rowCount: 1 }
+      if (sql.includes("SET claimed_by=$2")) return { rows: [{ claim_epoch: 1 }], rowCount: 1 }
+      if (sql.includes("SET claim_expires_at=CURRENT_TIMESTAMP")) return { rows: [{ migration_name: "042_native_decision_gates_repair" }], rowCount: 1 }
       return { rows: [] }
     })
 
@@ -493,7 +535,7 @@ describe("/api/admin/migrate rollout observability", () => {
       const sql = String(sqlValue)
       if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
       if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) return { rows: [{ attempt_id: "attempt-1", plan_fingerprint: plan.fingerprint, next_step: asyncStep, pending_job_id: "job-1", pending_step: asyncStep }] }
-      if (sql.includes("SET claimed_by=$2")) return { rows: [{ migration_name: plan.name }], rowCount: 1 }
+      if (sql.includes("SET claimed_by=$2")) return { rows: [{ claim_epoch: 1 }], rowCount: 1 }
       if (sql.includes("FROM sys.jobs") && sql.includes("job_id=$1")) return { rows: status ? [{ status, details: status === "failed" ? "boom" : null }] : [] }
       return { rows: [] }
     })
@@ -510,7 +552,7 @@ describe("/api/admin/migrate rollout observability", () => {
       const sql = String(sqlValue)
       if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
       if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) return { rows: [{ attempt_id: "attempt-1", plan_fingerprint: plan.fingerprint, next_step: plan.steps.length, pending_job_id: null, pending_step: null }] }
-      if (sql.includes("SET claimed_by=$2")) return { rows: [{ migration_name: plan.name }], rowCount: 1 }
+      if (sql.includes("SET claimed_by=$2")) return { rows: [{ claim_epoch: 1 }], rowCount: 1 }
       return { rows: [] }
     })
 
@@ -519,7 +561,7 @@ describe("/api/admin/migrate rollout observability", () => {
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET finished_at"))).toBe(false)
   })
 
-  it("resumes one bounded repair step at a time and finishes only after every async job and postcondition", async () => {
+  it("reconciles a lost async-job persistence response without relaunching DDL, then finishes", async () => {
     delete process.env.DATABASE_URL
     const catalog = getDecisionGateExpectedCatalog()
     const repairTables: string[] = catalog.tables.slice(0, 5)
@@ -528,7 +570,8 @@ describe("/api/admin/migrate rollout observability", () => {
       repairTables.includes(constraint.table) || constraint.name === "chk_roadmap_items_commitment_provenance_not_null"
     )
     let job = 0
-    let run: { attempt_id: string; plan_fingerprint: string; next_step: number; pending_job_id: string | null; pending_step: number | null } | undefined
+    let loseFirstJobPersistence = true
+    let run: { attempt_id: string; plan_fingerprint: string; next_step: number; pending_job_id: string | null; pending_step: number | null; executing_step: number | null } | undefined
     mocks.query.mockImplementation(async (sqlValue: unknown, values?: unknown[]) => {
       const sql = String(sqlValue)
       if (sql.includes("SELECT migration_name FROM")) return { rows: [{ migration_name: "039_native_decision_gates" }] }
@@ -546,36 +589,43 @@ describe("/api/admin/migrate rollout observability", () => {
       if (sql.includes("pg_column_size")) return { rows: [] }
       if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) return { rows: run ? [run] : [] }
       if (sql.includes("INSERT INTO") && sql.includes("_migration_execution_state")) {
-        run = { attempt_id: String(values?.[1]), plan_fingerprint: String(values?.[3]), next_step: 0, pending_job_id: null, pending_step: null }
+        run = { attempt_id: String(values?.[1]), plan_fingerprint: String(values?.[3]), next_step: 0, pending_job_id: null, pending_step: null, executing_step: null }
         return { rows: [], rowCount: 1 }
       }
-      if (sql.includes("SET claimed_by=$2")) return { rows: [{ migration_name: "042_native_decision_gates_repair" }], rowCount: 1 }
-      if (sql.includes("SET pending_step=$3")) {
-        run!.pending_step = Number(values?.[2]); run!.pending_job_id = String(values?.[3]); return { rows: [], rowCount: 1 }
+      if (sql.includes("SET claimed_by=$2")) return { rows: [{ claim_epoch: 1 }], rowCount: 1 }
+      if (sql.includes("SET pending_step=$4")) {
+        if (loseFirstJobPersistence) { loseFirstJobPersistence = false; throw new Error("injected lost response after DDL launch") }
+        run!.pending_step = Number(values?.[3]); run!.pending_job_id = String(values?.[4]); run!.executing_step = null; return { rows: [], rowCount: 1 }
       }
+      if (sql.includes("SET next_step=next_step+1, executing_step=NULL")) { run!.next_step += 1; run!.executing_step = null; return { rows: [], rowCount: 1 } }
       if (sql.includes("SET next_step=next_step+1")) {
         run!.next_step += 1
         if (sql.includes("pending_step=NULL")) { run!.pending_step = null; run!.pending_job_id = null }
         return { rows: [], rowCount: 1 }
       }
+      if (sql.includes("SET executing_step=$4")) { run!.executing_step = Number(values?.[3]); return { rows: [], rowCount: 1 } }
       if (/ALTER TABLE ASYNC|CREATE INDEX ASYNC/i.test(sql)) return { rows: [{ job_id: `repair-job-${++job}` }] }
       if (sql.includes("FROM sys.jobs") && sql.includes("job_id=$1")) return { rows: [{ status: "completed", details: null }] }
       if (sql.includes("DELETE FROM") && sql.includes("_migration_execution_state")) { run = undefined; return { rows: [], rowCount: 1 } }
+      if (sql.includes("SET claim_expires_at=CURRENT_TIMESTAMP")) return { rows: [{ migration_name: "042_native_decision_gates_repair" }], rowCount: 1 }
       if (sql.includes("SET finished_at=CURRENT_TIMESTAMP")) return { rows: [{ id: run?.attempt_id }], rowCount: 1 }
       return { rows: [] }
     })
 
     let response: Response | undefined
+    let injectedFailures = 0
     for (let invocation = 0; invocation < 40; invocation += 1) {
       response = await POST(request("POST", { script: "042_native_decision_gates_repair" }))
       if (response.status === 200) break
+      if (response.status === 500) { injectedFailures += 1; continue }
       expect(response.status).toBe(202)
       expect(mocks.query.mock.calls.filter(([sql]) => /ALTER TABLE ASYNC|CREATE INDEX ASYNC/i.test(String(sql))).length).toBeLessThanOrEqual(invocation + 1)
     }
 
     expect(response?.status).toBe(200)
+    expect(injectedFailures).toBe(1)
     expect(job).toBe(7)
-    expect(mocks.query.mock.calls.filter(([sql]) => String(sql).includes("FROM sys.jobs") && String(sql).includes("job_id=$1"))).toHaveLength(7)
+    expect(mocks.query.mock.calls.filter(([sql]) => String(sql).includes("FROM sys.jobs") && String(sql).includes("job_id=$1"))).toHaveLength(6)
     const calls = mocks.query.mock.calls.map(([sql]) => String(sql))
     expect(calls.findIndex((sql) => sql.includes("SET finished_at"))).toBeGreaterThan(calls.map((sql, index) => sql.includes("FROM sys.jobs") ? index : -1).at(-1)!)
   })
