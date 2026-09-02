@@ -38,6 +38,9 @@ export function packTimelineIntervals<T extends TimelineInterval>(
 ): Array<PackedTimelineInterval<T>> {
   const intervalIds = new Set<string>();
   const sortedIntervals = intervals.map((interval) => {
+    if (interval.id.trim().length === 0) {
+      throw new RangeError("Timeline interval ID must not be empty");
+    }
     if (intervalIds.has(interval.id)) {
       throw new RangeError(`Duplicate timeline interval ID: ${interval.id}`);
     }

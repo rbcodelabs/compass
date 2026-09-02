@@ -61,15 +61,39 @@ describe("native timeline horizontal virtualization", () => {
     )).toEqual([intervals[0]]);
   });
 
-  it("does not retain intervals when the render window is invalid", () => {
-    const interval = { id: "focused", start: 0, end: 10 };
+  it.each([
+    { start: 0, end: 0 },
+    { start: 100, end: 50 },
+  ])("retains valid focused and active intervals once during transient window %o", (renderWindow) => {
+    const intervals = [
+      { id: "focused", start: 0, end: 10 },
+      { id: "active", start: 20, end: 30 },
+      { id: "invalid", start: 40, end: 40 },
+      { id: "ordinary", start: 50, end: 60 },
+    ];
 
     expect(selectTimelineIntervalsForRender(
-      [interval],
-      { start: 100, end: 50 },
+      intervals,
+      renderWindow,
       (candidate) => candidate,
-      new Set([interval.id]),
-    )).toEqual([]);
+      new Set(["focused", "active", "invalid"]),
+    )).toEqual([intervals[0], intervals[1]]);
+  });
+
+  it("rejects duplicate or empty geometry IDs", () => {
+    expect(() => selectTimelineIntervalsForRender(
+      [
+        { id: "duplicate", start: 0, end: 10 },
+        { id: "duplicate", start: 20, end: 30 },
+      ],
+      { start: 0, end: 100 },
+      (candidate) => candidate,
+    )).toThrow(RangeError);
+    expect(() => selectTimelineIntervalsForRender(
+      [{ id: "", start: 0, end: 10 }],
+      { start: 0, end: 100 },
+      (candidate) => candidate,
+    )).toThrow(RangeError);
   });
 
   it("selects a bounded slice while retaining known focused and active items once", () => {

@@ -87,6 +87,10 @@ export function clampTimelineRange(
 ): TimelineDateRange {
   const duration = inclusiveDayCount(start, end);
   const viewportDuration = inclusiveDayCount(viewportStart, viewportEndInclusive);
+  // An overlong range cannot preserve its duration inside the viewport, so this
+  // operation intentionally truncates it to the full viewport. Renderers must
+  // not use this move-oriented helper for passive display unless truncation is
+  // the intended product behavior.
   if (duration > viewportDuration) {
     return { start: viewportStart, end: viewportEndInclusive };
   }

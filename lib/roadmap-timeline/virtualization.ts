@@ -55,17 +55,27 @@ export function selectTimelineIntervalsForRender<T>(
   getInterval: (interval: T) => { id: string; start: number; end: number },
   retainedIds: ReadonlySet<string> = new Set(),
 ): T[] {
-  if (!isValidRenderWindow(renderWindow)) return [];
-  return intervals.filter((interval) => {
+  const geometryIds = new Set<string>();
+  return intervals.map((interval) => {
     const geometry = getInterval(interval);
+    if (geometry.id.trim().length === 0) {
+      throw new RangeError("Timeline geometry ID must not be empty");
+    }
+    if (geometryIds.has(geometry.id)) {
+      throw new RangeError(`Duplicate timeline geometry ID: ${geometry.id}`);
+    }
+    geometryIds.add(geometry.id);
+    return { interval, geometry };
+  }).filter(({ geometry }) => {
     const hasValidGeometry = Number.isFinite(geometry.start)
       && Number.isFinite(geometry.end)
       && geometry.end > geometry.start;
     return hasValidGeometry && (
       retainedIds.has(geometry.id)
-      || isTimelineIntervalRendered(geometry.start, geometry.end, renderWindow)
+      || (isValidRenderWindow(renderWindow)
+        && isTimelineIntervalRendered(geometry.start, geometry.end, renderWindow))
     );
-  });
+  }).map(({ interval }) => interval);
 }
 
 function isValidRenderWindow(renderWindow: TimelineRenderWindow): boolean {

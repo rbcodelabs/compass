@@ -112,6 +112,9 @@ describe("native timeline lane packing", () => {
       { id: "duplicate", laneKey: "NOW:squad-a", start: "2026-09-01", end: "2026-09-01" },
       { id: "duplicate", laneKey: "NEXT:squad-a", start: "2026-09-01", end: "2026-09-01" },
     ])).toThrow(RangeError);
+    expect(() => packTimelineIntervals([
+      { id: "", laneKey: "NOW:squad-a", start: "2026-09-01", end: "2026-09-01" },
+    ])).toThrow(RangeError);
   });
 
   it("rejects invalid intervals", () => {
