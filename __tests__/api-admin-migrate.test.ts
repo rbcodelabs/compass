@@ -34,7 +34,7 @@ vi.mock("@/lib/schema", () => ({
   getActiveSchema: () => "compass_preview",
 }))
 
-import { GET, POST } from "@/app/api/admin/migrate/route"
+import { GET, POST, getDecisionGateExpectedCatalog } from "@/app/api/admin/migrate/route"
 
 const ORIGINAL_ENV = { ...process.env }
 const INDEX_NAMES = [
@@ -181,6 +181,28 @@ describe("/api/admin/migrate rollout observability", () => {
     expect(result.constraints).toContainEqual(expect.objectContaining({ name: "portfolio_capacity_plans_pkey", present: true, structureMatches: false }))
     expect(result.indexes).toContainEqual(expect.objectContaining({ name: "idx_capacity_plans_workspace_state", present: true, structureMatches: false, state: "FAILED_OR_MISMATCHED" }))
     expect(result.migrationReady).toBe(false)
+  })
+  it("marks the complete migration-derived catalog ready including multi-column UNIQUE and both CHECK constraints", async () => {
+    const catalog = getDecisionGateExpectedCatalog()
+    const fallback = mocks.query.getMockImplementation()!
+    mocks.query.mockImplementation(async (sqlValue, values) => {
+      const sql = String(sqlValue)
+      if (sql.includes("migration_name as name")) return { rows: catalog.migrations.map((name) => ({ name })) }
+      if (sql.includes("information_schema.tables") && Array.isArray(values?.[1]) && values[1].includes("review_requests")) return { rows: catalog.tables.map((table_name) => ({ table_name })) }
+      if (sql.includes("information_schema.columns") && sql.includes("roadmap_items")) return { rows: [
+        { column_name: "now_commitment_provenance", is_nullable: "NO", column_default: "'LEGACY_UNGATED'::character varying" },
+        { column_name: "now_decision_record_id", is_nullable: "YES", column_default: null },
+      ] }
+      if (sql.includes("pg_get_indexdef")) return { rows: catalog.indexes.map((index) => ({ name: index.name, table_name: index.table, valid: true, definition: index.definition })) }
+      if (sql.includes("FROM pg_constraint")) return { rows: catalog.constraints.map((constraint) => ({ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: true, definition: constraint.definition })) }
+      if (sql.includes("legacy_link_drift")) return { rows: [{ total: "4", null_count: "0", unknown_count: "0", legacy_link_drift: "0" }] }
+      if (sql.includes("plan_violations")) return { rows: [{ plan_violations: "0", reservation_violations: "0" }] }
+      return fallback(sqlValue, values)
+    })
+    const result = (await (await GET(request("GET"))).json()).decisionGateInfrastructure
+    expect(catalog.constraints.find((item) => item.name === "idx_release_runs_scope_fingerprint")?.definition).toContain("pull_request_number")
+    expect(result.constraints.filter((item: { type: string }) => item.type === "c")).toHaveLength(2)
+    expect(result.migrationReady).toBe(true)
   })
 
   it("keeps the existing GET fields and adds passing migration 036 preflight details", async () => {

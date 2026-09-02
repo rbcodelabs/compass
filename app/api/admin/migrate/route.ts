@@ -202,17 +202,38 @@ const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record
 const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
 const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
 const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger"] as const;
-const normalizeDefinition = (value: string) => value.toLowerCase().replace(/[";]/g, "").replace(/\s+/g, " ").trim()
+const normalizeDefinition = (value: string) => value.toLowerCase().replace(/::(?:text|character varying)/g, "").replace(/["();]/g, "").replace(/\s+/g, " ").trim()
+function splitTopLevel(value: string) {
+  const parts: string[] = []; let depth = 0; let start = 0; let quoted = false
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]
+    if (char === "'") quoted = !quoted
+    else if (!quoted && char === "(") depth += 1
+    else if (!quoted && char === ")") depth -= 1
+    else if (!quoted && char === "," && depth === 0) { parts.push(value.slice(start, index).trim()); start = index + 1 }
+  }
+  parts.push(value.slice(start).trim()); return parts
+}
 const decisionGateSql = MIGRATIONS.filter((migration) => DECISION_GATE_MIGRATIONS.includes(migration.name as typeof DECISION_GATE_MIGRATIONS[number])).map((migration) => readFileSync(migration.filePath, "utf8")).join("\n")
 const CONSTRAINT_EXPECTATIONS = new Map<string, { table: string; type: string; definition: string }>()
 for (const match of decisionGateSql.matchAll(/CREATE TABLE IF NOT EXISTS "([^"]+)" \(([\s\S]*?)\n\);/g)) {
-  for (const constraint of match[2].matchAll(/CONSTRAINT "([^"]+)" ((?:PRIMARY KEY|UNIQUE)[^\n,]+|CHECK \([\s\S]*?\n  \))/g)) {
+  for (const segment of splitTopLevel(match[2])) {
+    const constraint = segment.match(/^CONSTRAINT "([^"]+)" ([\s\S]+)$/)
+    if (!constraint) continue
     const definition = normalizeDefinition(constraint[2])
     CONSTRAINT_EXPECTATIONS.set(constraint[1], { table: match[1], type: definition.startsWith("primary key") ? "p" : definition.startsWith("unique") ? "u" : "c", definition })
   }
 }
 const INDEX_EXPECTATIONS = new Map<string, { table: string; definition: string }>()
 for (const match of decisionGateSql.matchAll(/CREATE INDEX ASYNC IF NOT EXISTS "([^"]+)" ON "([^"]+)" \(([^;]+)\);/g)) INDEX_EXPECTATIONS.set(match[1], { table: match[2], definition: normalizeDefinition(`(${match[3]})`) })
+export function getDecisionGateExpectedCatalog() {
+  return {
+    tables: [...DECISION_GATE_TABLES],
+    migrations: [...DECISION_GATE_MIGRATIONS],
+    constraints: [...CONSTRAINT_EXPECTATIONS].map(([name, value]) => ({ name, ...value })),
+    indexes: [...INDEX_EXPECTATIONS].map(([name, value]) => ({ name, ...value })),
+  }
+}
 
 async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string, applied: readonly string[]) {
   const [tablesResult, columnsResult, indexesResult, constraintsResult, provenanceResult, integrityResult] = await Promise.all([

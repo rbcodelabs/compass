@@ -85,6 +85,29 @@ describe("capacity plan operator invariants", () => {
     expect(sql.findIndex((statement) => statement.includes("state='SUPERSEDED'"))).toBeLessThan(sql.findIndex((statement) => statement.includes("active_roadmap_item_id=roadmap_item_id")))
     expect(sql).toContain("COMMIT")
   })
+  it("rolls back replacement when activating the new claims fails", async () => {
+    const itemId = "00000000-0000-4000-8000-000000000099", oldId = "00000000-0000-4000-8000-000000000042"
+    const nowFingerprint = crypto.createHash("sha256").update(JSON.stringify({ schemaVersion: "capacity-now-snapshot/v1", ids: [itemId] })).digest("hex")
+    const draft = { ...plan, state: "DRAFT", active_workspace_id: null, version: 1, now_snapshot_fingerprint: nowFingerprint, now_snapshot_count: 1 }
+    const old = { ...plan, id: oldId, state: "ACTIVE", active_workspace_id: workspaceId }
+    const staged = { id: "new-r", plan_id: planId, roadmap_item_id: itemId, active_roadmap_item_id: null, units: 1, state: "STAGED", released_at: null, item_workspace_id: workspaceId, item_horizon: "NOW" }
+    const operationFingerprint = crypto.createHash("sha256").update(JSON.stringify({ schemaVersion: "capacity-operation/v1", action: "ACTIVATE", semantic: { planId, expectedPlanFingerprint: plan.plan_fingerprint, expectedVersion: 1, expectedNowSnapshotFingerprint: nowFingerprint, replacesPlanId: oldId } })).digest("hex")
+    const responses = [
+      { rows: [draft] }, { rows: [] }, { rows: [{ id: "op", action: "ACTIVATE", request_fingerprint: operationFingerprint, status: "IN_PROGRESS", result_json: null }] },
+      { rows: [old] }, { rows: [draft] }, { rows: [{ id: itemId }] }, { rows: [staged] }, { rows: [{ reservation_id: "old-r", roadmap_item_id: itemId, plan_id: oldId }] },
+      { rows: [{ row_count: "3", estimated_bytes: "512" }] }, { rows: [staged] }, { rows: [{ ...staged, id: "old-r", plan_id: oldId, active_roadmap_item_id: itemId, state: "ACTIVE" }] },
+      { rows: [] }, { rows: [{ id: itemId }] }, { rows: [], rowCount: 1 }, { rows: [], rowCount: 1 },
+    ]
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("active_roadmap_item_id=roadmap_item_id")) throw new Error("injected claim failure")
+      return responses.shift() ?? { rows: [] }
+    })
+    await expect(activateCapacityPlan({ query: query as unknown as SqlClient["query"] }, { planId, expectedPlanFingerprint: plan.plan_fingerprint, expectedVersion: 1, expectedNowSnapshotFingerprint: nowFingerprint, replacesPlanId: oldId, idempotencyKey: "activate-rollback" })).rejects.toThrow("injected claim failure")
+    const sql = query.mock.calls.map(([statement]) => String(statement))
+    expect(sql).toContain("ROLLBACK")
+    expect(sql).not.toContain("COMMIT")
+    expect(sql.filter((statement) => statement.includes("status='SUCCEEDED'"))).toHaveLength(0)
+  })
   it("recovers an ambiguous committed activation and reports immediate DRIFTED evidence", async () => {
     const itemId = "00000000-0000-4000-8000-000000000099", extraId = "00000000-0000-4000-8000-000000000098"
     const nowFingerprint = crypto.createHash("sha256").update(JSON.stringify({ schemaVersion: "capacity-now-snapshot/v1", ids: [itemId] })).digest("hex")
