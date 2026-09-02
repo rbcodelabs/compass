@@ -42,7 +42,11 @@ export async function POST(req: NextRequest) {
     const result = await withAdminDsqlClient(async (db) => {
       if (body.action === "create") return createCapacityPlan(db, body)
       if (body.action === "reconcile") return reconcileCapacityPlan(db, body.planId ?? "")
-      if (body.action === "activate") return activateCapacityPlan(db, body.planId ?? "")
+      if (body.action === "activate") return activateCapacityPlan(db, {
+        planId: body.planId ?? "",
+        expectedVersion: body.expectedVersion,
+        planFingerprint: body.planFingerprint,
+      })
       throw new CapacityPlanOpsError("INVALID_INPUT", "action must be create, reconcile, or activate.")
     })
     return NextResponse.json(result)

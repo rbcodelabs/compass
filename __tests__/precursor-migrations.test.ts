@@ -46,7 +46,16 @@ describe("decision-gate expand precursor migrations", () => {
   it("does not add precursor models or columns to Prisma ordinary-route reads", () => {
     const schema = readFileSync(path.join(root, "prisma/schema.prisma"), "utf8")
     expect(schema).not.toContain("model ReviewRequest")
-    expect(schema).not.toContain("model PortfolioCapacityPlan")
+    expect(schema).toContain("model PortfolioCapacityPlan")
+    expect(schema).toMatch(/activeWorkspaceId\s+String\?\s+@unique\(map: "idx_capacity_plans_active_workspace"\)/)
     expect(schema).not.toContain("nowCommitmentProvenance")
+  })
+
+  it("atomically limits activation to one capacity plan per workspace", () => {
+    const sql = migration("041_portfolio_capacity_ledger")
+    expect(sql).toContain('"active_workspace_id" UUID')
+    expect(sql).toMatch(/UNIQUE NULLS DISTINCT \("active_workspace_id"\)/)
+    expect(sql).toContain("state = 'ACTIVE' AND active_workspace_id = workspace_id")
+    expect(sql).toContain("state <> 'ACTIVE' AND active_workspace_id IS NULL")
   })
 })

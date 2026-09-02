@@ -36,7 +36,8 @@ describe("authenticated capacity plan operator route", () => {
     expect((await POST(request("POST", { action: "create", workspaceId: id, policyId: "p", planFingerprint: "a".repeat(64), unit: "week", availableUnits: 4, unitsPerNowItem: 2, nowLimit: 2 }))).status).toBe(200)
     expect((await POST(request("POST", { action: "reconcile", planId: id }))).status).toBe(200)
     expect(ops.activate).not.toHaveBeenCalled()
-    expect((await POST(request("POST", { action: "activate", planId: id }))).status).toBe(200)
+    expect((await POST(request("POST", { action: "activate", planId: id, expectedVersion: 0, planFingerprint: "a".repeat(64) }))).status).toBe(200)
+    expect(ops.activate).toHaveBeenCalledWith({}, { planId: id, expectedVersion: 0, planFingerprint: "a".repeat(64) })
   })
 
   it("supports read-only inspect and rejects unknown actions", async () => {

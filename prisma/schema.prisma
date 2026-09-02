@@ -2,6 +2,45 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Expand-only operator models. These are not imported by ordinary routes.
+// Roadmap's new scalar columns intentionally remain migration-only until the
+// contract release so default Prisma reads stay deploy-before-migrate safe.
+model PortfolioCapacityPlan {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  policyId          String   @map("policy_id") @db.VarChar(160)
+  planFingerprint   String   @map("plan_fingerprint") @db.Char(64)
+  unit              String   @db.VarChar(80)
+  availableUnits    Int      @map("available_units")
+  unitsPerNowItem   Int      @map("units_per_now_item")
+  nowLimit          Int      @map("now_limit")
+  state             String   @default("DRAFT") @db.VarChar(30)
+  activeWorkspaceId String?  @unique(map: "idx_capacity_plans_active_workspace") @map("active_workspace_id") @db.Uuid
+  version           Int      @default(0)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @default(now()) @map("updated_at")
+
+  @@unique([workspaceId, policyId], map: "idx_capacity_plans_workspace_policy")
+  @@index([workspaceId, state], map: "idx_capacity_plans_workspace_state")
+  @@map("portfolio_capacity_plans")
+}
+
+model PortfolioCapacityReservation {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  planId           String    @map("plan_id") @db.Uuid
+  roadmapItemId    String    @unique(map: "idx_capacity_reservations_item") @map("roadmap_item_id") @db.Uuid
+  decisionRecordId String?   @map("decision_record_id") @db.Uuid
+  units            Int
+  state            String    @default("ACTIVE") @db.VarChar(30)
+  releasedAt       DateTime? @map("released_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @map("updated_at")
+
+  @@index([planId, state], map: "idx_capacity_reservations_plan_state")
+  @@index([decisionRecordId], map: "idx_capacity_reservations_decision")
+  @@map("portfolio_capacity_reservations")
+}
+
 datasource db {
   provider     = "postgresql"
   relationMode = "prisma"

@@ -19,6 +19,7 @@ const plan = {
   units_per_now_item: 2,
   now_limit: 3,
   state: "DRAFT",
+  active_workspace_id: null,
   version: 0,
 }
 
@@ -69,13 +70,13 @@ describe("capacity plan operator operations", () => {
       .mockResolvedValueOnce({ rows: [plan], rowCount: 1 })
       .mockResolvedValueOnce({ rows: [], rowCount: 0 })
       .mockResolvedValueOnce({ rows: [{ active_count: "2", active_units: "4", now_count: "3", drift_count: "0" }], rowCount: 1 })
-    await expect(activateCapacityPlan(db, plan.id)).rejects.toMatchObject({ code: "CAPACITY_DRIFT" })
+    await expect(activateCapacityPlan(db, { planId: plan.id, expectedVersion: 0, planFingerprint: plan.plan_fingerprint })).rejects.toMatchObject({ code: "CAPACITY_DRIFT" })
     expect(query.mock.calls.some(([sql]) => String(sql).includes("SET state = 'ACTIVE'"))).toBe(false)
   })
 
   it("activation is idempotent after a plan is already active", async () => {
-    query.mockResolvedValueOnce({ rows: [{ ...plan, state: "ACTIVE" }], rowCount: 1 })
-    await expect(activateCapacityPlan(db, plan.id)).resolves.toMatchObject({ activated: false })
+    query.mockResolvedValueOnce({ rows: [{ ...plan, state: "ACTIVE", active_workspace_id: plan.workspace_id }], rowCount: 1 })
+    await expect(activateCapacityPlan(db, { planId: plan.id, expectedVersion: 0, planFingerprint: plan.plan_fingerprint })).resolves.toMatchObject({ activated: false })
     expect(query).toHaveBeenCalledTimes(1)
   })
 
@@ -83,7 +84,13 @@ describe("capacity plan operator operations", () => {
     query
       .mockResolvedValueOnce({ rows: [plan], rowCount: 1 })
       .mockResolvedValueOnce({ rows: [{ id: "other-plan" }], rowCount: 1 })
-    await expect(activateCapacityPlan(db, plan.id)).rejects.toMatchObject({ code: "ACTIVE_PLAN_EXISTS" })
+    await expect(activateCapacityPlan(db, { planId: plan.id, expectedVersion: 0, planFingerprint: plan.plan_fingerprint })).rejects.toMatchObject({ code: "ACTIVE_PLAN_EXISTS" })
+  })
+
+  it("rejects stale activation inputs before claiming workspace authority", async () => {
+    query.mockResolvedValueOnce({ rows: [plan], rowCount: 1 })
+    await expect(activateCapacityPlan(db, { planId: plan.id, expectedVersion: 1, planFingerprint: plan.plan_fingerprint })).rejects.toMatchObject({ code: "PLAN_CHANGED" })
+    expect(query).toHaveBeenCalledTimes(1)
   })
 
   it("inspect reports the plan, reservations, NOW count, and drift without mutation", async () => {

@@ -17,6 +17,7 @@ export type CapacityPlanRow = {
   units_per_now_item: number
   now_limit: number
   state: string
+  active_workspace_id: string | null
   version: number
 }
 
@@ -58,7 +59,7 @@ async function findPlan(db: SqlClient, planId: string): Promise<CapacityPlanRow>
   requireUuid(planId, "planId")
   const { rows } = await db.query<CapacityPlanRow>(
     `SELECT id, workspace_id, policy_id, plan_fingerprint, unit, available_units,
-            units_per_now_item, now_limit, state, version
+            units_per_now_item, now_limit, state, active_workspace_id, version
      FROM portfolio_capacity_plans WHERE id = $1`,
     [planId],
   )
@@ -97,7 +98,7 @@ export async function createCapacityPlan(db: SqlClient, input: CreateCapacityPla
 
   const existing = await db.query<CapacityPlanRow>(
     `SELECT id, workspace_id, policy_id, plan_fingerprint, unit, available_units,
-            units_per_now_item, now_limit, state, version
+            units_per_now_item, now_limit, state, active_workspace_id, version
      FROM portfolio_capacity_plans WHERE workspace_id = $1 AND policy_id = $2`,
     [input.workspaceId, input.policyId],
   )
@@ -113,14 +114,14 @@ export async function createCapacityPlan(db: SqlClient, input: CreateCapacityPla
          (id, workspace_id, policy_id, plan_fingerprint, unit, available_units, units_per_now_item, now_limit, state)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'DRAFT')
        RETURNING id, workspace_id, policy_id, plan_fingerprint, unit, available_units,
-                 units_per_now_item, now_limit, state, version`,
+                 units_per_now_item, now_limit, state, active_workspace_id, version`,
       [id, input.workspaceId, input.policyId, input.planFingerprint, input.unit, input.availableUnits, input.unitsPerNowItem, input.nowLimit],
     )
     return { created: true, plan: inserted.rows[0] }
   } catch {
     const raced = await db.query<CapacityPlanRow>(
       `SELECT id, workspace_id, policy_id, plan_fingerprint, unit, available_units,
-              units_per_now_item, now_limit, state, version
+              units_per_now_item, now_limit, state, active_workspace_id, version
        FROM portfolio_capacity_plans WHERE workspace_id = $1 AND policy_id = $2`,
       [input.workspaceId, input.policyId],
     )
@@ -212,10 +213,20 @@ export async function reconcileCapacityPlan(db: SqlClient, planId: string) {
   return { created, released, ...(await capacityStats(db, plan)) }
 }
 
-export async function activateCapacityPlan(db: SqlClient, planId: string) {
-  const plan = await findPlan(db, planId)
-  if (plan.state === "ACTIVE") return { activated: false, plan }
+export type ActivateCapacityPlanInput = { planId: string; expectedVersion: number; planFingerprint: string }
+
+export async function activateCapacityPlan(db: SqlClient, input: ActivateCapacityPlanInput) {
+  const plan = await findPlan(db, input.planId)
+  if (!Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 0 || !SHA256.test(input.planFingerprint)) {
+    throw new CapacityPlanOpsError("INVALID_INPUT", "Activation requires a non-negative expectedVersion and SHA-256 planFingerprint.")
+  }
+  if (plan.plan_fingerprint !== input.planFingerprint) throw new CapacityPlanOpsError("PLAN_CHANGED", "Capacity plan fingerprint does not match the approved input.")
+  if (plan.state === "ACTIVE") {
+    if (plan.active_workspace_id !== plan.workspace_id) throw new CapacityPlanOpsError("CAPACITY_CONFLICT", "Active capacity plan is missing its workspace claim.")
+    return { activated: false, plan }
+  }
   if (plan.state !== "DRAFT") throw new CapacityPlanOpsError("PLAN_NOT_DRAFT", "Only a DRAFT capacity plan can be activated.")
+  if (plan.version !== input.expectedVersion) throw new CapacityPlanOpsError("PLAN_CHANGED", "Capacity plan version changed after inspection.")
   const otherActive = await db.query<{ id: string }>(
     `SELECT id FROM portfolio_capacity_plans WHERE workspace_id = $1 AND state = 'ACTIVE' AND id <> $2 LIMIT 1`,
     [plan.workspace_id, plan.id],
@@ -228,14 +239,27 @@ export async function activateCapacityPlan(db: SqlClient, planId: string) {
   if (stats.activeCount > plan.now_limit || stats.activeUnits > plan.available_units) {
     throw new CapacityPlanOpsError("CAPACITY_EXCEEDED", "Existing NOW commitments exceed this plan's capacity.")
   }
-  const result = await db.query<CapacityPlanRow>(
-    `UPDATE portfolio_capacity_plans
-     SET state = 'ACTIVE', version = version + 1, updated_at = CURRENT_TIMESTAMP
-     WHERE id = $1 AND state = 'DRAFT' AND version = $2
-     RETURNING id, workspace_id, policy_id, plan_fingerprint, unit, available_units,
-               units_per_now_item, now_limit, state, version`,
-    [plan.id, plan.version],
-  )
-  if (!result.rows[0]) throw new CapacityPlanOpsError("CAPACITY_CONFLICT", "Capacity plan activation lost its compare-and-swap claim.")
-  return { activated: true, plan: result.rows[0], ...stats }
+  try {
+    const result = await db.query<CapacityPlanRow>(
+      `UPDATE portfolio_capacity_plans
+       SET state = 'ACTIVE', active_workspace_id = workspace_id,
+           version = version + 1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND workspace_id = $2 AND state = 'DRAFT'
+         AND version = $3 AND active_workspace_id IS NULL AND plan_fingerprint = $4
+       RETURNING id, workspace_id, policy_id, plan_fingerprint, unit, available_units,
+                 units_per_now_item, now_limit, state, active_workspace_id, version`,
+      [plan.id, plan.workspace_id, input.expectedVersion, input.planFingerprint],
+    )
+    if (!result.rows[0]) throw new CapacityPlanOpsError("CAPACITY_CONFLICT", "Capacity plan activation lost its compare-and-swap claim.")
+    return { activated: true, plan: result.rows[0], ...stats }
+  } catch (error) {
+    if (error instanceof CapacityPlanOpsError) throw error
+    const current = await findPlan(db, plan.id)
+    if (current.state === "ACTIVE" && current.plan_fingerprint === input.planFingerprint && current.active_workspace_id === current.workspace_id) {
+      return { activated: false, plan: current, ...stats }
+    }
+    const competing = await db.query<{ id: string }>(`SELECT id FROM portfolio_capacity_plans WHERE active_workspace_id = $1 AND id <> $2 LIMIT 1`, [plan.workspace_id, plan.id])
+    if (competing.rows[0]) throw new CapacityPlanOpsError("ACTIVE_PLAN_EXISTS", "Another capacity plan won the workspace activation claim.")
+    throw new CapacityPlanOpsError("CAPACITY_CONFLICT", "Capacity plan activation conflicted with another operation.")
+  }
 }

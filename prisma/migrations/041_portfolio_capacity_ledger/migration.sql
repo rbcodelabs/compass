@@ -9,11 +9,17 @@ CREATE TABLE IF NOT EXISTS "portfolio_capacity_plans" (
   "units_per_now_item" INTEGER NOT NULL,
   "now_limit" INTEGER NOT NULL,
   "state" VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+  "active_workspace_id" UUID,
   "version" INTEGER NOT NULL DEFAULT 0,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "portfolio_capacity_plans_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT "idx_capacity_plans_workspace_policy" UNIQUE ("workspace_id", "policy_id")
+  CONSTRAINT "idx_capacity_plans_workspace_policy" UNIQUE ("workspace_id", "policy_id"),
+  CONSTRAINT "idx_capacity_plans_active_workspace" UNIQUE NULLS DISTINCT ("active_workspace_id"),
+  CONSTRAINT "chk_capacity_plans_active_workspace" CHECK (
+    (state = 'ACTIVE' AND active_workspace_id = workspace_id)
+    OR (state <> 'ACTIVE' AND active_workspace_id IS NULL)
+  )
 );
 COMMIT;
 
@@ -44,4 +50,3 @@ COMMIT;
 BEGIN;
 CREATE INDEX ASYNC IF NOT EXISTS "idx_capacity_reservations_decision" ON "portfolio_capacity_reservations" ("decision_record_id");
 COMMIT;
-
