@@ -202,14 +202,25 @@ const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record
 const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
 const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
 const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger"] as const;
+const normalizeDefinition = (value: string) => value.toLowerCase().replace(/[";]/g, "").replace(/\s+/g, " ").trim()
+const decisionGateSql = MIGRATIONS.filter((migration) => DECISION_GATE_MIGRATIONS.includes(migration.name as typeof DECISION_GATE_MIGRATIONS[number])).map((migration) => readFileSync(migration.filePath, "utf8")).join("\n")
+const CONSTRAINT_EXPECTATIONS = new Map<string, { table: string; type: string; definition: string }>()
+for (const match of decisionGateSql.matchAll(/CREATE TABLE IF NOT EXISTS "([^"]+)" \(([\s\S]*?)\n\);/g)) {
+  for (const constraint of match[2].matchAll(/CONSTRAINT "([^"]+)" ((?:PRIMARY KEY|UNIQUE)[^\n,]+|CHECK \([\s\S]*?\n  \))/g)) {
+    const definition = normalizeDefinition(constraint[2])
+    CONSTRAINT_EXPECTATIONS.set(constraint[1], { table: match[1], type: definition.startsWith("primary key") ? "p" : definition.startsWith("unique") ? "u" : "c", definition })
+  }
+}
+const INDEX_EXPECTATIONS = new Map<string, { table: string; definition: string }>()
+for (const match of decisionGateSql.matchAll(/CREATE INDEX ASYNC IF NOT EXISTS "([^"]+)" ON "([^"]+)" \(([^;]+)\);/g)) INDEX_EXPECTATIONS.set(match[1], { table: match[2], definition: normalizeDefinition(`(${match[3]})`) })
 
 async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string, applied: readonly string[]) {
   const [tablesResult, columnsResult, indexesResult, constraintsResult, provenanceResult, integrityResult] = await Promise.all([
     client.query<{ table_name: string }>(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = ANY($2::text[])`, [schema, [...DECISION_GATE_TABLES]]),
     client.query<{ column_name: string; is_nullable: string; column_default: string | null }>(`SELECT column_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'roadmap_items' AND column_name = ANY($2::text[])`, [schema, [...DECISION_GATE_COLUMNS]]),
-    client.query<{ name: string; valid: boolean }>(`SELECT c.relname AS name, i.indisvalid AS valid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[])`, [schema, [...DECISION_GATE_INDEXES]]),
-    client.query<{ constraint_name: string; constraint_type: string; valid: boolean; definition: string }>(`SELECT c.conname constraint_name, c.contype constraint_type, c.convalidated valid, pg_get_constraintdef(c.oid) definition
-      FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace
+    client.query<{ name: string; valid: boolean; table_name: string; definition: string }>(`SELECT c.relname AS name, i.indisvalid AS valid, t.relname table_name, pg_get_indexdef(i.indexrelid) definition FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[])`, [schema, [...DECISION_GATE_INDEXES]]),
+    client.query<{ constraint_name: string; table_name: string; constraint_type: string; valid: boolean; definition: string }>(`SELECT c.conname constraint_name, t.relname table_name, c.contype constraint_type, c.convalidated valid, pg_get_constraintdef(c.oid) definition
+      FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace JOIN pg_class t ON t.oid=c.conrelid
       WHERE n.nspname=$1 AND c.conname=ANY($2::text[])`, [schema, [...DECISION_GATE_CONSTRAINTS]]),
     client.query<{ total: unknown; null_count: unknown; unknown_count: unknown; legacy_link_drift: unknown }>(`SELECT COUNT(*)::bigint total,
       COUNT(*) FILTER (WHERE now_commitment_provenance IS NULL)::bigint null_count,
@@ -228,14 +239,20 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
   ]);
   const presentTables = new Set(tablesResult.rows.map((row) => row.table_name));
   const columnsByName = new Map(columnsResult.rows.map((row) => [row.column_name, row]));
-  const indexesByName = new Map(indexesResult.rows.map((row) => [row.name, row.valid]));
+  const indexesByName = new Map(indexesResult.rows.map((row) => [row.name, row]));
   const tables = DECISION_GATE_TABLES.map((name) => ({ name, present: presentTables.has(name) }));
   const columns = DECISION_GATE_COLUMNS.map((name) => ({ name, present: columnsByName.has(name), nullable: columnsByName.get(name)?.is_nullable !== "NO", default: columnsByName.get(name)?.column_default ?? null }));
-  const indexes = DECISION_GATE_INDEXES.map((name) => ({ name, present: indexesByName.has(name), valid: indexesByName.get(name) === true, state: indexesByName.get(name) === true ? "ACTIVE" : indexesByName.has(name) ? "FAILED_OR_CREATING" : "MISSING" }));
+  const indexes = DECISION_GATE_INDEXES.map((name) => {
+    const row = indexesByName.get(name), expected = INDEX_EXPECTATIONS.get(name)
+    const structureMatches = Boolean(row && expected && row.table_name === expected.table && normalizeDefinition(row.definition).includes(expected.definition))
+    return { name, present: Boolean(row), valid: row?.valid === true, table: row?.table_name ?? null, definition: row?.definition ?? null, structureMatches, state: row?.valid === true && structureMatches ? "ACTIVE" : row ? "FAILED_OR_MISMATCHED" : "MISSING" }
+  });
   const constraintsByName = new Map(constraintsResult.rows.map((row) => [row.constraint_name, row]));
   const constraints = DECISION_GATE_CONSTRAINTS.map((name) => {
     const row = constraintsByName.get(name)
-    return { name, present: Boolean(row), type: row?.constraint_type ?? null, valid: row?.valid === true, definition: row?.definition ?? null }
+    const expected = CONSTRAINT_EXPECTATIONS.get(name)
+    const structureMatches = Boolean(row && expected && row.table_name === expected.table && row.constraint_type === expected.type && normalizeDefinition(row.definition) === expected.definition)
+    return { name, present: Boolean(row), table: row?.table_name ?? null, type: row?.constraint_type ?? null, valid: row?.valid === true, definition: row?.definition ?? null, structureMatches }
   });
   const count = (value: unknown) => typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.MAX_SAFE_INTEGER;
   const provenanceRow = provenanceResult.rows[0];
@@ -245,7 +262,7 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
   const provenanceColumn = columnsByName.get("now_commitment_provenance");
   const columnsHealthy = columns.every((item) => item.present) && provenanceColumn?.is_nullable === "NO" && Boolean(provenanceColumn.column_default?.includes("LEGACY_UNGATED"));
   const migrationReceipts = DECISION_GATE_MIGRATIONS.map((name) => ({ name, applied: applied.includes(name) }));
-  const migrationReady = migrationReceipts.every((item) => item.applied) && tables.every((item) => item.present) && columnsHealthy && constraints.every((item) => item.present && item.valid && Boolean(item.type) && Boolean(item.definition)) && indexes.every((item) => item.state === "ACTIVE") && provenance.available && provenance.nullCount === 0 && provenance.unknownCount === 0 && provenance.legacyLinkDrift === 0 && integrity.available && integrity.planViolations === 0 && integrity.reservationViolations === 0;
+  const migrationReady = migrationReceipts.every((item) => item.applied) && tables.every((item) => item.present) && columnsHealthy && constraints.every((item) => item.present && item.valid && item.structureMatches) && indexes.every((item) => item.state === "ACTIVE") && provenance.available && provenance.nullCount === 0 && provenance.unknownCount === 0 && provenance.legacyLinkDrift === 0 && integrity.available && integrity.planViolations === 0 && integrity.reservationViolations === 0;
   return { migrationReceipts, tables, columns, constraints, indexes, provenance, integrity, migrationReady, capacityMetadataReady: false, runtimeEnforcementReady: false };
 }
 

@@ -169,6 +169,19 @@ describe("/api/admin/migrate rollout observability", () => {
     expect(result.decisionGateInfrastructure.integrity).toEqual({ available: true, planViolations: 1, reservationViolations: 2 })
     expect(result.decisionGateInfrastructure.migrationReady).toBe(false)
   })
+  it("rejects same-name constraints and indexes with the wrong table or definition", async () => {
+    const fallback = mocks.query.getMockImplementation()!
+    mocks.query.mockImplementation(async (sql, values) => {
+      const text = String(sql)
+      if (text.includes("FROM pg_constraint")) return { rows: [{ constraint_name: "portfolio_capacity_plans_pkey", table_name: "wrong_table", constraint_type: "p", valid: true, definition: "PRIMARY KEY (wrong_id)" }] }
+      if (text.includes("pg_get_indexdef")) return { rows: [{ name: "idx_capacity_plans_workspace_state", table_name: "wrong_table", valid: true, definition: "CREATE INDEX idx_capacity_plans_workspace_state ON wrong_table (wrong_id)" }] }
+      return fallback(sql, values)
+    })
+    const result = (await (await GET(request("GET"))).json()).decisionGateInfrastructure
+    expect(result.constraints).toContainEqual(expect.objectContaining({ name: "portfolio_capacity_plans_pkey", present: true, structureMatches: false }))
+    expect(result.indexes).toContainEqual(expect.objectContaining({ name: "idx_capacity_plans_workspace_state", present: true, structureMatches: false, state: "FAILED_OR_MISMATCHED" }))
+    expect(result.migrationReady).toBe(false)
+  })
 
   it("keeps the existing GET fields and adds passing migration 036 preflight details", async () => {
     const response = await GET(request("GET"))
