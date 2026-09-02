@@ -205,7 +205,9 @@ describe("/api/admin/migrate rollout observability", () => {
       "041_portfolio_capacity_ledger",
     ]))
     expect(result.decisionGateInfrastructure).toMatchObject({
-      ready: false,
+      migrationReady: false,
+      capacityMetadataReady: false,
+      runtimeEnforcementReady: false,
       tables: expect.arrayContaining([expect.objectContaining({ name: "review_requests", present: false })]),
       columns: expect.arrayContaining([expect.objectContaining({ name: "now_commitment_provenance", present: false })]),
       indexes: expect.arrayContaining([expect.objectContaining({ name: "idx_capacity_plans_workspace_state", present: false, valid: false })]),

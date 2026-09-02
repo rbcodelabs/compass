@@ -197,25 +197,40 @@ const MIGRATIONS = [
   },
 ];
 
-const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations"] as const;
+const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"] as const;
 const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record_id"] as const;
-const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_active_workspace", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_decision"] as const;
+const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
+const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
+const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger"] as const;
 
-async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string) {
-  const [tablesResult, columnsResult, indexesResult] = await Promise.all([
+async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string, applied: readonly string[]) {
+  const [tablesResult, columnsResult, indexesResult, constraintsResult, provenanceResult] = await Promise.all([
     client.query<{ table_name: string }>(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = ANY($2::text[])`, [schema, [...DECISION_GATE_TABLES]]),
     client.query<{ column_name: string; is_nullable: string; column_default: string | null }>(`SELECT column_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'roadmap_items' AND column_name = ANY($2::text[])`, [schema, [...DECISION_GATE_COLUMNS]]),
     client.query<{ name: string; valid: boolean }>(`SELECT c.relname AS name, i.indisvalid AS valid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[])`, [schema, [...DECISION_GATE_INDEXES]]),
+    client.query<{ constraint_name: string }>(`SELECT constraint_name FROM information_schema.table_constraints WHERE constraint_schema=$1 AND constraint_name=ANY($2::text[])`, [schema, [...DECISION_GATE_CONSTRAINTS]]),
+    client.query<{ total: unknown; null_count: unknown; unknown_count: unknown; legacy_link_drift: unknown }>(`SELECT COUNT(*)::bigint total,
+      COUNT(*) FILTER (WHERE now_commitment_provenance IS NULL)::bigint null_count,
+      COUNT(*) FILTER (WHERE now_commitment_provenance NOT IN ('LEGACY_UNGATED','NATIVE_GATED'))::bigint unknown_count,
+      COUNT(*) FILTER (WHERE now_commitment_provenance='LEGACY_UNGATED' AND now_decision_record_id IS NOT NULL)::bigint legacy_link_drift
+      FROM "${schema}".roadmap_items`).catch(() => ({ rows: [] })),
   ]);
   const presentTables = new Set(tablesResult.rows.map((row) => row.table_name));
   const columnsByName = new Map(columnsResult.rows.map((row) => [row.column_name, row]));
   const indexesByName = new Map(indexesResult.rows.map((row) => [row.name, row.valid]));
   const tables = DECISION_GATE_TABLES.map((name) => ({ name, present: presentTables.has(name) }));
   const columns = DECISION_GATE_COLUMNS.map((name) => ({ name, present: columnsByName.has(name), nullable: columnsByName.get(name)?.is_nullable !== "NO", default: columnsByName.get(name)?.column_default ?? null }));
-  const indexes = DECISION_GATE_INDEXES.map((name) => ({ name, present: indexesByName.has(name), valid: indexesByName.get(name) === true }));
-  const provenance = columnsByName.get("now_commitment_provenance");
-  const columnsHealthy = columns.every((item) => item.present) && provenance?.is_nullable === "NO" && Boolean(provenance.column_default?.includes("LEGACY_UNGATED"));
-  return { tables, columns, indexes, ready: tables.every((item) => item.present) && columnsHealthy && indexes.every((item) => item.valid) };
+  const indexes = DECISION_GATE_INDEXES.map((name) => ({ name, present: indexesByName.has(name), valid: indexesByName.get(name) === true, state: indexesByName.get(name) === true ? "ACTIVE" : indexesByName.has(name) ? "FAILED_OR_CREATING" : "MISSING" }));
+  const presentConstraints = new Set(constraintsResult.rows.map((row) => row.constraint_name));
+  const constraints = DECISION_GATE_CONSTRAINTS.map((name) => ({ name, present: presentConstraints.has(name) }));
+  const count = (value: unknown) => typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.MAX_SAFE_INTEGER;
+  const provenanceRow = provenanceResult.rows[0];
+  const provenance = { available: Boolean(provenanceRow), total: count(provenanceRow?.total), nullCount: count(provenanceRow?.null_count), unknownCount: count(provenanceRow?.unknown_count), legacyLinkDrift: count(provenanceRow?.legacy_link_drift) };
+  const provenanceColumn = columnsByName.get("now_commitment_provenance");
+  const columnsHealthy = columns.every((item) => item.present) && provenanceColumn?.is_nullable === "NO" && Boolean(provenanceColumn.column_default?.includes("LEGACY_UNGATED"));
+  const migrationReceipts = DECISION_GATE_MIGRATIONS.map((name) => ({ name, applied: applied.includes(name) }));
+  const migrationReady = migrationReceipts.every((item) => item.applied) && tables.every((item) => item.present) && columnsHealthy && constraints.every((item) => item.present) && indexes.every((item) => item.state === "ACTIVE") && provenance.available && provenance.nullCount === 0 && provenance.unknownCount === 0 && provenance.legacyLinkDrift === 0;
+  return { migrationReceipts, tables, columns, constraints, indexes, provenance, migrationReady, capacityMetadataReady: false, runtimeEnforcementReady: false };
 }
 
 const DSQL_WRITE_LIMITS = {
@@ -538,7 +553,7 @@ export async function GET(req: NextRequest) {
       getResearchCaptureHardeningReport(client, schema),
       getResearchGuidedUxReport(client, schema),
       getResearchBlobCleanupReport(client, schema),
-      getDecisionGateInfrastructureHealth(client, schema),
+      getDecisionGateInfrastructureHealth(client, schema, rows.map((row) => row.name)),
     ]);
 
     return NextResponse.json({

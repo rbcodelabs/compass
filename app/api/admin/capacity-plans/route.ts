@@ -38,15 +38,21 @@ export async function POST(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   const body = await req.json().catch(() => null)
   if (!body || typeof body.action !== "string") return NextResponse.json({ error: "An explicit action is required." }, { status: 400 })
+  const allowed = body.action === "create"
+    ? ["action", "workspaceId", "policyId", "unit", "availableUnits", "unitsPerNowItem", "nowLimit", "idempotencyKey"]
+    : body.action === "reconcile"
+      ? ["action", "planId", "expectedPlanFingerprint", "expectedVersion", "idempotencyKey"]
+      : body.action === "activate"
+        ? ["action", "planId", "expectedPlanFingerprint", "expectedVersion", "expectedNowSnapshotFingerprint", "replacesPlanId", "idempotencyKey"]
+        : []
+  if (allowed.length === 0 || Object.keys(body).some((key) => !allowed.includes(key))) {
+    return NextResponse.json({ error: "Unknown action or field." }, { status: 400 })
+  }
   try {
     const result = await withAdminDsqlClient(async (db) => {
       if (body.action === "create") return createCapacityPlan(db, body)
-      if (body.action === "reconcile") return reconcileCapacityPlan(db, body.planId ?? "")
-      if (body.action === "activate") return activateCapacityPlan(db, {
-        planId: body.planId ?? "",
-        expectedVersion: body.expectedVersion,
-        planFingerprint: body.planFingerprint,
-      })
+      if (body.action === "reconcile") return reconcileCapacityPlan(db, body)
+      if (body.action === "activate") return activateCapacityPlan(db, body)
       throw new CapacityPlanOpsError("INVALID_INPUT", "action must be create, reconcile, or activate.")
     })
     return NextResponse.json(result)
