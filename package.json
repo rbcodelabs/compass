@@ -20,6 +20,7 @@
     "performance:ingest-vercel": "node --experimental-strip-types scripts/ingest-performance-vercel-logs.ts",
     "performance:ingest-local": "node --experimental-strip-types scripts/ingest-performance-local-logs.ts",
     "performance:run-local": "node --experimental-strip-types scripts/run-performance-baseline.ts",
+    "performance:preview-preflight": "node --experimental-strip-types scripts/run-preview-performance-fixture.ts preflight",
     "performance:preview-seed": "node --experimental-strip-types scripts/run-preview-performance-fixture.ts seed",
     "performance:preview-cleanup": "node --experimental-strip-types scripts/run-preview-performance-fixture.ts cleanup",
     "performance:preview-verify": "node --experimental-strip-types scripts/run-preview-performance-fixture.ts verify",

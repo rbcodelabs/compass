@@ -54,6 +54,7 @@ export async function executePreviewFixtureActionWithStore(
   input: PreviewFixtureRequest,
   store: RuntimeFixtureStore,
 ): Promise<{ state: "seeded" | "absent"; residue: number; replayed?: boolean }> {
+  if (input.action === "preflight") throw new Error("Preflight must return before fixture runtime execution");
   const { manifest, plan } = stateFor(input);
   const inspectionMode = input.action === "seed" ? "seed-credentials" : "ownership";
   const before = await store.inspect(manifest, plan, inspectionMode);

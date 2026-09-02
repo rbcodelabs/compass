@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getVercelOidcTokenSync } from "@vercel/functions/oidc";
 import { getActiveSchema } from "@/lib/schema";
+import { previewFixtureIdentityDigest } from "@/lib/preview-performance-fixture";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -18,7 +19,7 @@ const ALLOWED_KEYS = new Set([
 ]);
 
 export interface PreviewFixtureRequest {
-  action: "seed" | "cleanup" | "verify";
+  action: "preflight" | "seed" | "cleanup" | "verify";
   runId: string;
   expectedSha: string;
   expectedDeploymentId: string;
@@ -99,7 +100,7 @@ function parseStrictBody(text: string): PreviewFixtureRequest | null {
     return null;
   }
   if (decodedKeys.length !== keys.length || new Set(decodedKeys).size !== decodedKeys.length) return null;
-  if (record.action !== "seed" && record.action !== "cleanup" && record.action !== "verify") return null;
+  if (record.action !== "preflight" && record.action !== "seed" && record.action !== "cleanup" && record.action !== "verify") return null;
   if (typeof record.runId !== "string" || !/^perf_preview_[a-f0-9]{32}$/.test(record.runId)) return null;
   if (typeof record.expectedSha !== "string" || !/^[a-f0-9]{40}$/.test(record.expectedSha)) return null;
   if (typeof record.expectedDeploymentId !== "string" || !/^dpl_[A-Za-z0-9]{20,64}$/.test(record.expectedDeploymentId)) return null;
@@ -127,6 +128,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = parseStrictBody(text);
   if (!body) return hidden();
   if (body.expectedSha !== process.env.VERCEL_GIT_COMMIT_SHA || body.expectedDeploymentId !== process.env.VERCEL_DEPLOYMENT_ID) return hidden();
+
+  if (body.action === "preflight") {
+    return NextResponse.json({
+      state: "ready",
+      checks: { preview: true, schema: true, sha: true, deployment: true, host: true, oidc: true, secret: true },
+      identityDigest: previewFixtureIdentityDigest({
+        runId: body.runId,
+        deploymentSha: process.env.VERCEL_GIT_COMMIT_SHA,
+        deploymentId: process.env.VERCEL_DEPLOYMENT_ID,
+        deploymentUrl: process.env.VERCEL_URL!,
+      }),
+    }, { headers: { "Cache-Control": "no-store" } });
+  }
 
   try {
     const { executePreviewFixtureAction } = await import("@/lib/preview-performance-fixture-runtime");

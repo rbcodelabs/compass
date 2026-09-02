@@ -10,16 +10,17 @@ import {
   parsePreviewFixtureManifest,
   readPrivateManifest,
   redactSensitiveText,
+  previewFixtureIdentityDigest,
   writePrivateJson,
 } from "../lib/preview-performance-fixture.ts";
 
-type Command = "seed" | "cleanup" | "verify";
+type Command = "preflight" | "seed" | "cleanup" | "verify";
 
 function fail(message: string): never { throw new Error(message); }
 
 export function parsePreviewFixtureOrchestrationArgs(argv: readonly string[]) {
   const command = argv[0] as Command;
-  if (!(["seed", "cleanup", "verify"] as const).includes(command)) fail("Usage: run-preview-performance-fixture.ts <seed|cleanup|verify> [flags]");
+  if (!(["preflight", "seed", "cleanup", "verify"] as const).includes(command)) fail("Usage: run-preview-performance-fixture.ts <preflight|seed|cleanup|verify> [flags]");
   const flags = new Map<string, string>();
   for (let index = 1; index < argv.length; index += 2) {
     const flag = argv[index];
@@ -30,11 +31,15 @@ export function parsePreviewFixtureOrchestrationArgs(argv: readonly string[]) {
   const allowed = new Set(["run-id", "deployment-sha", "deployment-id", "deployment-url", "expires-minutes"]);
   if ([...flags.keys()].some((key) => !allowed.has(key))) fail("Unknown fixture orchestration argument");
   const required = (key: string) => flags.get(key) ?? fail(`Missing --${key}`);
-  const expiresMinutes = Number(flags.get("expires-minutes") ?? "20");
-  if (!Number.isInteger(expiresMinutes) || expiresMinutes < 15 || expiresMinutes > 30) fail("--expires-minutes must be 15 through 30");
+  const expiresMinutes = Number(flags.get("expires-minutes") ?? (command === "preflight" ? "5" : "20"));
+  if (!Number.isInteger(expiresMinutes) || expiresMinutes <= 0 || expiresMinutes > 30 || (command !== "preflight" && expiresMinutes < 15) || (command === "preflight" && expiresMinutes > 5)) {
+    fail(command === "preflight" ? "Preflight expiry must be 1 through 5 minutes" : "--expires-minutes must be 15 through 30");
+  }
+  const suppliedRunId = flags.get("run-id");
+  if (command === "preflight" && suppliedRunId) fail("Preflight generates its own fresh run ID");
   return {
     command,
-    runId: required("run-id"),
+    runId: command === "preflight" ? `perf_preview_${crypto.randomBytes(16).toString("hex")}` : suppliedRunId ?? fail("Missing --run-id"),
     expectedSha: required("deployment-sha"),
     expectedDeploymentId: required("deployment-id"),
     deploymentUrl: required("deployment-url"),
@@ -92,9 +97,18 @@ async function invoke(url: URL, body: object): Promise<Record<string, unknown>> 
   return result;
 }
 
-export function validatePreviewFixtureResponse(command: Command, value: unknown): Record<string, unknown> {
+export function validatePreviewFixtureResponse(command: Command, value: unknown, expectedIdentityDigest?: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("Invalid fixture response");
   const result = value as Record<string, unknown>;
+  if (command === "preflight") {
+    const keys = Object.keys(result);
+    const expectedChecks = { preview: true, schema: true, sha: true, deployment: true, host: true, oidc: true, secret: true };
+    if (keys.length !== 3 || !keys.every((key) => ["state", "checks", "identityDigest"].includes(key))) fail("Invalid preflight fixture response");
+    if (result.state !== "ready" || typeof result.identityDigest !== "string" || !/^[a-f0-9]{64}$/.test(result.identityDigest)) fail("Invalid preflight fixture response");
+    if (!result.checks || typeof result.checks !== "object" || Array.isArray(result.checks) || JSON.stringify(result.checks) !== JSON.stringify(expectedChecks)) fail("Invalid preflight fixture response");
+    if (!expectedIdentityDigest || !constantTimeEqual(result.identityDigest, expectedIdentityDigest)) fail("Invalid preflight fixture response");
+    return result;
+  }
   const keys = Object.keys(result);
   if (keys.some((key) => !["state", "residue", "replayed"].includes(key))) fail("Invalid fixture response");
   if (typeof result.state !== "string" || typeof result.residue !== "number" || !Number.isInteger(result.residue)) fail("Invalid fixture response");
@@ -102,6 +116,12 @@ export function validatePreviewFixtureResponse(command: Command, value: unknown)
   if (command === "seed" && (result.state !== "seeded" || result.residue !== 1231)) fail("Invalid seed fixture response");
   if (command !== "seed" && (result.state !== "absent" || result.residue !== 0)) fail(`Invalid ${command} fixture response`);
   return result;
+}
+
+function constantTimeEqual(actual: string, expected: string): boolean {
+  const actualBytes = Buffer.from(actual);
+  const expectedBytes = Buffer.from(expected);
+  return actualBytes.length === expectedBytes.length && crypto.timingSafeEqual(actualBytes, expectedBytes);
 }
 
 export async function runPreviewFixtureOrchestration(argv: readonly string[]): Promise<void> {
@@ -127,13 +147,19 @@ export async function runPreviewFixtureOrchestration(argv: readonly string[]): P
     });
     writePrivateJson(statePaths.manifestPath, createPreviewFixtureManifest(plan));
     writePrivateJson(statePaths.authStatePath, createPreviewFixtureAuthState(plan));
-  } else {
+  } else if (args.command !== "preflight") {
     const manifest = parsePreviewFixtureManifest(readPrivateManifest(statePaths.manifestPath));
     if (manifest.identity.runId !== args.runId || manifest.identity.deploymentSha !== args.expectedSha || manifest.identity.deploymentId !== args.expectedDeploymentId) {
       fail("Recovery manifest does not match the exact deployment identity");
     }
   }
 
+  const expectedIdentityDigest = args.command === "preflight" ? previewFixtureIdentityDigest({
+    runId: args.runId,
+    deploymentSha: args.expectedSha,
+    deploymentId: args.expectedDeploymentId,
+    deploymentUrl: url.hostname,
+  }) : undefined;
   const result = validatePreviewFixtureResponse(args.command, await invoke(url, {
     action: args.command,
     runId: args.runId,
@@ -141,8 +167,10 @@ export async function runPreviewFixtureOrchestration(argv: readonly string[]): P
     expectedDeploymentId: args.expectedDeploymentId,
     expiresAt,
     ...(sessionToken ? { sessionToken } : {}),
-  }));
-  process.stdout.write(`${args.command} accepted: state=${String(result.state)} residue=${String(result.residue)}\n`);
+  }), expectedIdentityDigest);
+  process.stdout.write(args.command === "preflight"
+    ? `preflight accepted: state=${String(result.state)}\n`
+    : `${args.command} accepted: state=${String(result.state)} residue=${String(result.residue)}\n`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {

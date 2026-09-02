@@ -116,6 +116,24 @@ export interface DeterministicPreviewFixturePlanInput {
   sessionToken: string;
 }
 
+export interface PreviewFixtureIdentityDigestInput {
+  runId: string;
+  deploymentSha: string;
+  deploymentId: string;
+  deploymentUrl: string;
+}
+
+export function previewFixtureIdentityDigest(input: PreviewFixtureIdentityDigestInput): string {
+  const canonicalTuple = JSON.stringify([
+    "compass-preview-fixture-identity-v1",
+    input.runId,
+    input.deploymentSha,
+    input.deploymentId,
+    input.deploymentUrl,
+  ]);
+  return crypto.createHash("sha256").update(canonicalTuple).digest("hex");
+}
+
 export interface PreviewFixtureIdentity {
   version: 1;
   runId: string;

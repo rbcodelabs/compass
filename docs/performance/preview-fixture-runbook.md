@@ -44,6 +44,21 @@ export PERF_DEPLOYMENT_ID="<exact dpl_… ID>"
 export PERF_DEPLOYMENT_URL="https://compass-<unique>-rbcodelabs-team.vercel.app/"
 ```
 
+Run the probe against the exact deployment before seed. It generates a fresh
+random run identity, uses a five-minute request expiry, and independently
+compares the returned versioned SHA-256 identity digest in constant time:
+
+```sh
+pnpm performance:preview-preflight -- \
+  --deployment-sha "$PERF_DEPLOYMENT_SHA" \
+  --deployment-id "$PERF_DEPLOYMENT_ID" \
+  --deployment-url "$PERF_DEPLOYMENT_URL"
+```
+
+The response contains only fixed boolean checks, `state: "ready"`, and the
+identity digest. The route returns before importing the fixture runtime or
+constructing a database connector, and creates no local recovery state.
+
 ## Seed and measurement
 
 ```sh

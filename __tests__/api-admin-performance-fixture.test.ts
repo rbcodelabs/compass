@@ -3,7 +3,9 @@ import { NextRequest } from "next/server";
 
 const execute = vi.fn();
 const getOidcToken = vi.fn();
+const runtimeImport = vi.fn();
 vi.mock("@/lib/preview-performance-fixture-runtime", () => ({
+  __imported: runtimeImport(),
   executePreviewFixtureAction: execute,
 }));
 vi.mock("@vercel/functions/oidc", () => ({
@@ -35,7 +37,7 @@ function environment(): void {
   delete process.env.AWS_PROFILE;
 }
 
-function body(action: "seed" | "cleanup" | "verify" = "verify") {
+function body(action: "seed" | "cleanup" | "verify" | "preflight" = "verify") {
   const expiresAt = new Date(Date.now() + 20 * 60_000);
   return {
     action,
@@ -64,6 +66,7 @@ describe("POST /api/admin/performance-fixture", () => {
   beforeEach(() => {
     vi.resetModules();
     execute.mockReset().mockResolvedValue({ state: "absent", residue: 0 });
+    runtimeImport.mockClear();
     getOidcToken.mockReset().mockReturnValue("request-context-oidc");
     environment();
   });
@@ -83,6 +86,7 @@ describe("POST /api/admin/performance-fixture", () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Not found" });
     expect(execute).not.toHaveBeenCalled();
+    expect(runtimeImport).not.toHaveBeenCalled();
     if (label === "SHA mismatch" || label === "deployment mismatch") expect(getOidcToken).toHaveBeenCalledOnce();
     else expect(getOidcToken).not.toHaveBeenCalled();
   });
@@ -105,6 +109,7 @@ describe("POST /api/admin/performance-fixture", () => {
       expect(await response.json()).toEqual({ error: "Not found" });
     }
     expect(execute).not.toHaveBeenCalled();
+    expect(runtimeImport).not.toHaveBeenCalled();
     expect(getOidcToken).not.toHaveBeenCalled();
   });
 
@@ -113,6 +118,7 @@ describe("POST /api/admin/performance-fixture", () => {
     const response = await POST(request({ ...body(), padding: "x".repeat(17 * 1024) }));
     expect(response.status).toBe(404);
     expect(execute).not.toHaveBeenCalled();
+    expect(runtimeImport).not.toHaveBeenCalled();
   });
 
   it("rejects unknown properties and a session token outside seed", async () => {
@@ -121,6 +127,7 @@ describe("POST /api/admin/performance-fixture", () => {
       expect((await POST(request(value))).status).toBe(404);
     }
     expect(execute).not.toHaveBeenCalled();
+    expect(runtimeImport).not.toHaveBeenCalled();
   });
 
   it("rejects duplicate fields, nested values, coercion, and byte-count mismatches", async () => {
@@ -143,6 +150,7 @@ describe("POST /api/admin/performance-fixture", () => {
     wrongLength.headers.set("content-length", "1");
     expect((await POST(wrongLength)).status).toBe(404);
     expect(execute).not.toHaveBeenCalled();
+    expect(runtimeImport).not.toHaveBeenCalled();
   });
 
   it("rejects expired and more-than-30-minute requests before database access", async () => {
@@ -154,6 +162,7 @@ describe("POST /api/admin/performance-fixture", () => {
       expect((await POST(request({ ...body(), expiresAt }))).status).toBe(404);
     }
     expect(execute).not.toHaveBeenCalled();
+    expect(runtimeImport).not.toHaveBeenCalled();
   });
 
   it("rejects non-canonical hosts and missing content length", async () => {
@@ -169,6 +178,7 @@ describe("POST /api/admin/performance-fixture", () => {
     missingLength.headers.delete("content-length");
     expect((await POST(missingLength)).status).toBe(404);
     expect(execute).not.toHaveBeenCalled();
+    expect(runtimeImport).not.toHaveBeenCalled();
   });
 
   it("executes a valid exact-deployment request without returning a token", async () => {
@@ -181,6 +191,26 @@ describe("POST /api/admin/performance-fixture", () => {
     expect(JSON.stringify(result)).not.toContain("s".repeat(64));
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("returns the exact token-free preflight proof before importing the fixture runtime", async () => {
+    const { POST } = await import("@/app/api/admin/performance-fixture/route");
+    const response = await POST(request(body("preflight")));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      state: "ready",
+      checks: { preview: true, schema: true, sha: true, deployment: true, host: true, oidc: true, secret: true },
+      identityDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(runtimeImport).not.toHaveBeenCalled();
+  });
+
+  it("forbids session credentials and unknown input on preflight", async () => {
+    const { POST } = await import("@/app/api/admin/performance-fixture/route");
+    expect((await POST(request({ ...body("preflight"), sessionToken: "s".repeat(64) }))).status).toBe(404);
+    expect((await POST(request({ ...body("preflight"), extra: true }))).status).toBe(404);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("returns a sanitized no-store failure without application logging", async () => {

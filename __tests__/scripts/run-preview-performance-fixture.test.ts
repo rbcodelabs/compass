@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { parsePreviewFixtureOrchestrationArgs } from "@/scripts/run-preview-performance-fixture";
-import { validatePreviewFixtureResponse } from "@/scripts/run-preview-performance-fixture";
+import { parsePreviewFixtureOrchestrationArgs, validatePreviewFixtureResponse } from "@/scripts/run-preview-performance-fixture";
+import { previewFixtureIdentityDigest } from "@/lib/preview-performance-fixture";
 
 const common = [
   "--run-id", `perf_preview_${"a".repeat(32)}`,
@@ -12,10 +12,13 @@ const common = [
 ];
 
 describe("preview fixture HTTPS orchestration", () => {
-  it("accepts only seed, cleanup, and verify with bounded expiry", () => {
+  it("accepts only preflight, seed, cleanup, and verify with bounded expiry", () => {
     expect(parsePreviewFixtureOrchestrationArgs(["seed", ...common, "--expires-minutes", "20"])).toMatchObject({ command: "seed", expiresMinutes: 20 });
     expect(parsePreviewFixtureOrchestrationArgs(["cleanup", ...common])).toMatchObject({ command: "cleanup" });
     expect(parsePreviewFixtureOrchestrationArgs(["verify", ...common])).toMatchObject({ command: "verify" });
+    const preflight = parsePreviewFixtureOrchestrationArgs(["preflight", ...common.slice(2)]);
+    expect(preflight).toMatchObject({ command: "preflight", expiresMinutes: 5 });
+    expect(preflight.runId).toMatch(/^perf_preview_[a-f0-9]{32}$/);
     expect(() => parsePreviewFixtureOrchestrationArgs(["seed", ...common, "--expires-minutes", "31"])).toThrow(/15 through 30/);
     expect(() => parsePreviewFixtureOrchestrationArgs(["seed", ...common, "--session-token", "secret"])).toThrow(/Unknown/);
   });
@@ -27,12 +30,12 @@ describe("preview fixture HTTPS orchestration", () => {
     }
   });
 
-  it.each(["performance:preview-seed", "performance:preview-cleanup", "performance:preview-verify"])(
+  it.each(["performance:preview-preflight", "performance:preview-seed", "performance:preview-cleanup", "performance:preview-verify"])(
     "loads the actual %s package script under Node strip-types",
     (script) => {
       const result = spawnSync("pnpm", [script], { cwd: process.cwd(), encoding: "utf8", env: { ...process.env, FORCE_COLOR: "0" } });
       expect(result.status).toBe(1);
-      expect(`${result.stdout}${result.stderr}`).toContain("Missing --run-id");
+      expect(`${result.stdout}${result.stderr}`).toContain(script.endsWith("preflight") ? "Missing --deployment-sha" : "Missing --run-id");
       expect(`${result.stdout}${result.stderr}`).not.toMatch(/ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX|ERR_MODULE_NOT_FOUND/);
     },
   );
@@ -47,6 +50,38 @@ describe("preview fixture HTTPS orchestration", () => {
       { state: "absent", residue: "0" },
       { state: "other", residue: 0 },
     ]) expect(() => validatePreviewFixtureResponse("verify", invalid)).toThrow(/response/);
+  });
+
+  it("strictly validates the preflight proof and independently bound digest", () => {
+    const expectedDigest = "a".repeat(64);
+    const response = {
+      state: "ready",
+      checks: { preview: true, schema: true, sha: true, deployment: true, host: true, oidc: true, secret: true },
+      identityDigest: expectedDigest,
+    };
+    expect(validatePreviewFixtureResponse("preflight", response, expectedDigest)).toEqual(response);
+    for (const invalid of [
+      { ...response, identityDigest: "b".repeat(64) },
+      { ...response, checks: { ...response.checks, oidc: false } },
+      { ...response, extra: true },
+      { ...response, identityDigest: `${expectedDigest}token` },
+    ]) expect(() => validatePreviewFixtureResponse("preflight", invalid, expectedDigest)).toThrow(/response/);
+  });
+
+  it("binds the identity digest to every versioned tuple component", () => {
+    const identity = {
+      runId: `perf_preview_${"1".repeat(32)}`,
+      deploymentSha: "2".repeat(40),
+      deploymentId: `dpl_${"A".repeat(24)}`,
+      deploymentUrl: "compass-digest-rbcodelabs-team.vercel.app",
+    };
+    const digest = previewFixtureIdentityDigest(identity);
+    for (const changed of [
+      { ...identity, runId: `perf_preview_${"3".repeat(32)}` },
+      { ...identity, deploymentSha: "4".repeat(40) },
+      { ...identity, deploymentId: `dpl_${"B".repeat(24)}` },
+      { ...identity, deploymentUrl: "compass-other-rbcodelabs-team.vercel.app" },
+    ]) expect(previewFixtureIdentityDigest(changed)).not.toBe(digest);
   });
 
   it("uses the explicitly verified deployment URL for manifest and cookie state", async () => {
