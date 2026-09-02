@@ -264,10 +264,53 @@ when every current `NOW` item has exactly one active reservation owned by the
 draft plan, no stale/cross-workspace reservation exists, and reserved units do
 not exceed either limit.
 
-Only one plan may be active for a workspace. Because DSQL cannot express all
-of this as an exclusion constraint, activation uses a workspace-scoped
-compare-and-swap check and rejects an existing active plan. A retry with the
-same key returns the activated plan; a competing activation fails closed.
+Only one plan may be active for a workspace. Three DSQL-safe arbitration
+options were considered:
+
+| Option | Benefits | Costs and risks |
+|---|---|---|
+| Update a version/claim on `workspaces` | Existing singleton row makes compare-and-swap direct | Adds a new scalar dependency to a heavily read ordinary model and makes Workspace a hot coordination row |
+| Add `portfolio_capacity_activations` keyed by workspace | Primary-key insert cleanly arbitrates activation and separates the pointer from plan history | Adds another model, migration surface, health checks, and replacement lifecycle for one invariant |
+| **Nullable workspace claim on each plan with an ordinary unique constraint** | One column and two constraints; multiple drafts remain legal; the database arbitrates concurrent plans | The custom check constraint is migration-owned because Prisma cannot express it |
+
+Use the **nullable workspace claim**. Migration 041 adds:
+
+```sql
+"active_workspace_id" UUID,
+CONSTRAINT "idx_capacity_plans_active_workspace"
+  UNIQUE NULLS DISTINCT ("active_workspace_id"),
+CONSTRAINT "chk_capacity_plans_active_claim" CHECK (
+  ("state" = 'ACTIVE' AND "active_workspace_id" = "workspace_id") OR
+  ("state" <> 'ACTIVE' AND "active_workspace_id" IS NULL)
+)
+```
+
+`NULLS DISTINCT` is explicit so any number of non-active/draft plans may carry
+`NULL`, while only one row can claim a given workspace UUID. The check binds
+the claim to both the plan's workspace and its `ACTIVE` state; neither state nor
+claim can be changed independently. These are ordinary `CREATE TABLE`
+constraints, not a partial index or a row-lock assumption. DSQL checks unique
+and `CHECK` constraints on every modified row, and resolves conflicting
+transactions so two committed rows cannot hold the same non-null claim.
+
+The final activation write is one compare-and-swap update matching plan ID,
+workspace ID, expected fingerprint/version, `state = DRAFT`, and
+`active_workspace_id IS NULL`. It atomically sets `state = ACTIVE`,
+`active_workspace_id = workspace_id`, increments the version, and sets
+`updated_at`. If two different drafts race, the unique constraint allows at
+most one to commit. The loser maps a uniqueness or serialization conflict to a
+typed conflict and re-reads after the transaction:
+
+- the same plan active with the expected workspace/fingerprint is an
+  idempotent success (including ambiguous-commit recovery);
+- a different plan holding the workspace claim returns
+  `ACTIVE_PLAN_EXISTS` and performs no mutation;
+- any other mismatch returns `CAPACITY_CONFLICT` and is eligible only for a
+  bounded full-inspection retry.
+
+This claim is genuine low-frequency coordination: activation is an operator
+event, not a request-path counter. A retry with the same key returns the
+activated plan; a competing activation fails closed.
 
 Activation does **not** enable runtime enforcement. The later contract release
 must separately bind an exact plan ID and fingerprint into an approved policy
