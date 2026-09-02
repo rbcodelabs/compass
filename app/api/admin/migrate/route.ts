@@ -4,6 +4,7 @@ import { DsqlSigner } from "@aws-sdk/dsql-signer";
 import { awsCredentialsProvider } from "@vercel/functions/oidc";
 import { readFileSync } from "fs";
 import path from "path";
+import { randomUUID } from "node:crypto";
 import { getActiveSchema } from "@/lib/schema";
 import { backfillRoadmapCommitmentProvenance } from "@/lib/dsql-backfill";
 
@@ -195,14 +196,21 @@ const MIGRATIONS = [
     name: "041_portfolio_capacity_ledger",
     filePath: path.join(process.cwd(), "prisma/migrations/041_portfolio_capacity_ledger/migration.sql"),
   },
+  {
+    name: "042_native_decision_gates_repair",
+    filePath: path.join(process.cwd(), "prisma/migrations/042_native_decision_gates_repair/migration.sql"),
+  },
 ];
 
 const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"] as const;
 const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record_id"] as const;
 const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
-const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
-const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger"] as const;
+const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "chk_roadmap_items_commitment_provenance_not_null", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
+const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger", "042_native_decision_gates_repair"] as const;
 const normalizeDefinition = (value: string) => value.toLowerCase().replace(/::(?:text|character varying)/g, "").replace(/["();]/g, "").replace(/\s+/g, " ").trim()
+const normalizeConstraintDefinition = (value: string, type: string) => normalizeDefinition(
+  type === "p" ? value.replace(/\s+INCLUDE\s*\([^)]*\)\s*$/i, "") : value,
+)
 function splitTopLevel(value: string) {
   const parts: string[] = []; let depth = 0; let start = 0; let quoted = false
   for (let index = 0; index < value.length; index += 1) {
@@ -215,17 +223,33 @@ function splitTopLevel(value: string) {
   parts.push(value.slice(start).trim()); return parts
 }
 const decisionGateSql = MIGRATIONS.filter((migration) => DECISION_GATE_MIGRATIONS.includes(migration.name as typeof DECISION_GATE_MIGRATIONS[number])).map((migration) => readFileSync(migration.filePath, "utf8")).join("\n")
-const CONSTRAINT_EXPECTATIONS = new Map<string, { table: string; type: string; definition: string }>()
+const CONSTRAINT_EXPECTATIONS = new Map<string, { table: string; type: string; definition: string; keyColumns: string[] }>()
 for (const match of decisionGateSql.matchAll(/CREATE TABLE IF NOT EXISTS "([^"]+)" \(([\s\S]*?)\n\);/g)) {
   for (const segment of splitTopLevel(match[2])) {
     const constraint = segment.match(/^CONSTRAINT "([^"]+)" ([\s\S]+)$/)
     if (!constraint) continue
-    const definition = normalizeDefinition(constraint[2])
-    CONSTRAINT_EXPECTATIONS.set(constraint[1], { table: match[1], type: definition.startsWith("primary key") ? "p" : definition.startsWith("unique") ? "u" : "c", definition })
+    const normalized = normalizeDefinition(constraint[2])
+    const type = normalized.startsWith("primary key") ? "p" : normalized.startsWith("unique") ? "u" : "c"
+    const definition = normalizeConstraintDefinition(constraint[2], type)
+    const keyColumns = type === "p" || type === "u"
+      ? (constraint[2].match(/\(([^)]*)\)/)?.[1].match(/"([^"]+)"/g) ?? []).map((column) => column.slice(1, -1))
+      : []
+    CONSTRAINT_EXPECTATIONS.set(constraint[1], { table: match[1], type, definition, keyColumns })
   }
 }
-const INDEX_EXPECTATIONS = new Map<string, { table: string; definition: string }>()
-for (const match of decisionGateSql.matchAll(/CREATE INDEX ASYNC IF NOT EXISTS "([^"]+)" ON "([^"]+)" \(([^;]+)\);/g)) INDEX_EXPECTATIONS.set(match[1], { table: match[2], definition: normalizeDefinition(`(${match[3]})`) })
+CONSTRAINT_EXPECTATIONS.set("chk_roadmap_items_commitment_provenance_not_null", {
+  table: "roadmap_items",
+  type: "c",
+  definition: normalizeDefinition('CHECK ("now_commitment_provenance" IS NOT NULL)'),
+  keyColumns: [],
+})
+const INDEX_EXPECTATIONS = new Map<string, { table: string; definition: string; keyColumns: string[]; unique: boolean }>()
+for (const match of decisionGateSql.matchAll(/CREATE (UNIQUE )?INDEX ASYNC IF NOT EXISTS "([^"]+)" ON "([^"]+)" \(([^;]+)\);/g)) INDEX_EXPECTATIONS.set(match[2], {
+  table: match[3],
+  definition: normalizeDefinition(`(${match[4]})`),
+  keyColumns: [...match[4].matchAll(/"([^"]+)"/g)].map((column) => column[1]),
+  unique: Boolean(match[1]),
+})
 export function getDecisionGateExpectedCatalog() {
   return {
     tables: [...DECISION_GATE_TABLES],
@@ -235,12 +259,15 @@ export function getDecisionGateExpectedCatalog() {
   }
 }
 
-async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string, applied: readonly string[]) {
+async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string, applied: readonly string[], incomplete: readonly string[] = []) {
   const [tablesResult, columnsResult, indexesResult, constraintsResult, provenanceResult, integrityResult] = await Promise.all([
     client.query<{ table_name: string }>(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = ANY($2::text[])`, [schema, [...DECISION_GATE_TABLES]]),
     client.query<{ column_name: string; is_nullable: string; column_default: string | null }>(`SELECT column_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'roadmap_items' AND column_name = ANY($2::text[])`, [schema, [...DECISION_GATE_COLUMNS]]),
-    client.query<{ name: string; valid: boolean; table_name: string; definition: string }>(`SELECT c.relname AS name, i.indisvalid AS valid, t.relname table_name, pg_get_indexdef(i.indexrelid) definition FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[])`, [schema, [...DECISION_GATE_INDEXES]]),
-    client.query<{ constraint_name: string; table_name: string; constraint_type: string; valid: boolean; definition: string }>(`SELECT c.conname constraint_name, t.relname table_name, c.contype constraint_type, c.convalidated valid, pg_get_constraintdef(c.oid) definition
+    client.query<{ name: string; valid: boolean; unique: boolean; table_name: string; definition: string; key_columns: string[] }>(`SELECT c.relname AS name, i.indisvalid AS valid, i.indisunique AS unique, t.relname table_name, pg_get_indexdef(i.indexrelid) definition,
+      COALESCE(ARRAY(SELECT a.attname FROM unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinal) JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=key.attnum WHERE key.ordinal <= i.indnkeyatts ORDER BY key.ordinal), ARRAY[]::name[]) key_columns
+      FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[])`, [schema, [...DECISION_GATE_INDEXES]]),
+    client.query<{ constraint_name: string; table_name: string; constraint_type: string; valid: boolean; definition: string; key_columns: string[] }>(`SELECT c.conname constraint_name, t.relname table_name, c.contype constraint_type, c.convalidated valid, pg_get_constraintdef(c.oid) definition,
+        COALESCE(ARRAY(SELECT a.attname FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinal) JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=key.attnum ORDER BY key.ordinal), ARRAY[]::name[]) key_columns
       FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace JOIN pg_class t ON t.oid=c.conrelid
       WHERE n.nspname=$1 AND c.conname=ANY($2::text[])`, [schema, [...DECISION_GATE_CONSTRAINTS]]),
     client.query<{ total: unknown; null_count: unknown; unknown_count: unknown; legacy_link_drift: unknown }>(`SELECT COUNT(*)::bigint total,
@@ -265,14 +292,18 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
   const columns = DECISION_GATE_COLUMNS.map((name) => ({ name, present: columnsByName.has(name), nullable: columnsByName.get(name)?.is_nullable !== "NO", default: columnsByName.get(name)?.column_default ?? null }));
   const indexes = DECISION_GATE_INDEXES.map((name) => {
     const row = indexesByName.get(name), expected = INDEX_EXPECTATIONS.get(name)
-    const structureMatches = Boolean(row && expected && row.table_name === expected.table && normalizeDefinition(row.definition).includes(expected.definition))
+    const structureMatches = Boolean(row && expected && row.table_name === expected.table && row.unique === expected.unique && JSON.stringify(row.key_columns ?? []) === JSON.stringify(expected.keyColumns))
     return { name, present: Boolean(row), valid: row?.valid === true, table: row?.table_name ?? null, definition: row?.definition ?? null, structureMatches, state: row?.valid === true && structureMatches ? "ACTIVE" : row ? "FAILED_OR_MISMATCHED" : "MISSING" }
   });
   const constraintsByName = new Map(constraintsResult.rows.map((row) => [row.constraint_name, row]));
   const constraints = DECISION_GATE_CONSTRAINTS.map((name) => {
     const row = constraintsByName.get(name)
     const expected = CONSTRAINT_EXPECTATIONS.get(name)
-    const structureMatches = Boolean(row && expected && row.table_name === expected.table && row.constraint_type === expected.type && normalizeDefinition(row.definition) === expected.definition)
+    const exactKeys = Boolean(row && expected && JSON.stringify(row.key_columns ?? []) === JSON.stringify(expected.keyColumns))
+    const exactDefinition = Boolean(row && expected && (
+      row.constraint_type === "p" ? true : normalizeConstraintDefinition(row.definition, row.constraint_type) === expected.definition
+    ))
+    const structureMatches = Boolean(row && expected && row.table_name === expected.table && row.constraint_type === expected.type && exactKeys && exactDefinition)
     return { name, present: Boolean(row), table: row?.table_name ?? null, type: row?.constraint_type ?? null, valid: row?.valid === true, definition: row?.definition ?? null, structureMatches }
   });
   const count = (value: unknown) => typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.MAX_SAFE_INTEGER;
@@ -281,10 +312,52 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
   const integrityRow = integrityResult.rows[0];
   const integrity = { available: Boolean(integrityRow), planViolations: count(integrityRow?.plan_violations), reservationViolations: count(integrityRow?.reservation_violations) };
   const provenanceColumn = columnsByName.get("now_commitment_provenance");
-  const columnsHealthy = columns.every((item) => item.present) && provenanceColumn?.is_nullable === "NO" && Boolean(provenanceColumn.column_default?.includes("LEGACY_UNGATED"));
-  const migrationReceipts = DECISION_GATE_MIGRATIONS.map((name) => ({ name, applied: applied.includes(name) }));
-  const migrationReady = migrationReceipts.every((item) => item.applied) && tables.every((item) => item.present) && columnsHealthy && constraints.every((item) => item.present && item.valid && item.structureMatches) && indexes.every((item) => item.state === "ACTIVE") && provenance.available && provenance.nullCount === 0 && provenance.unknownCount === 0 && provenance.legacyLinkDrift === 0 && integrity.available && integrity.planViolations === 0 && integrity.reservationViolations === 0;
+  const columnsHealthy = columns.every((item) => item.present) && Boolean(provenanceColumn?.column_default?.includes("LEGACY_UNGATED"));
+  const repairApplied = applied.includes("042_native_decision_gates_repair")
+  const migrationReceipts = DECISION_GATE_MIGRATIONS.map((name) => ({
+    name,
+    applied: applied.includes(name),
+    status: name === "039_native_decision_gates" && !applied.includes(name) && repairApplied ? "REPAIRED_BY" : applied.includes(name) ? "APPLIED" : incomplete.includes(name) ? "INCOMPLETE" : "MISSING",
+    repairedBy: name === "039_native_decision_gates" && !applied.includes(name) && repairApplied ? "042_native_decision_gates_repair" : null,
+  }));
+  const receiptsReady = (applied.includes("039_native_decision_gates") || repairApplied) && applied.includes("040_release_authorization") && applied.includes("041_portfolio_capacity_ledger")
+  const migrationReady = receiptsReady && tables.every((item) => item.present) && columnsHealthy && constraints.every((item) => item.present && item.valid && item.structureMatches) && indexes.every((item) => item.state === "ACTIVE") && provenance.available && provenance.nullCount === 0 && provenance.unknownCount === 0 && provenance.legacyLinkDrift === 0 && integrity.available && integrity.planViolations === 0 && integrity.reservationViolations === 0;
   return { migrationReceipts, tables, columns, constraints, indexes, provenance, integrity, migrationReady, capacityMetadataReady: false, runtimeEnforcementReady: false };
+}
+
+const REPAIR_039_TABLES = new Set(["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications"])
+const REPAIR_039_INDEXES = new Set(["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target"])
+const REPAIR_039_CONSTRAINTS = new Set([
+  "review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision",
+  "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint",
+  "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey",
+  "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey",
+  "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation",
+  "chk_roadmap_items_commitment_provenance_not_null",
+])
+
+type Repair039State = { checkPresent: boolean; checkValid: boolean }
+async function inspectRepair039State(client: PoolClient, schema: string): Promise<Repair039State> {
+  const health = await getDecisionGateInfrastructureHealth(client, schema, [])
+  const missingTable = health.tables.find((table) => REPAIR_039_TABLES.has(table.name) && !table.present)
+  const provenanceColumn = health.columns.find((column) => column.name === "now_commitment_provenance")
+  const badConstraint = health.constraints.find((constraint) => REPAIR_039_CONSTRAINTS.has(constraint.name) && constraint.present && !constraint.structureMatches)
+  const badIndex = health.indexes.find((index) => REPAIR_039_INDEXES.has(index.name) && index.present && index.state !== "ACTIVE")
+  if (missingTable || !provenanceColumn?.present || !provenanceColumn.default?.includes("LEGACY_UNGATED") || badConstraint || badIndex) {
+    throw new Error(`Migration 042 refused unknown partial-039 catalog shape${missingTable ? `: missing ${missingTable.name}` : badConstraint ? `: mismatched ${badConstraint.name}` : badIndex ? `: mismatched ${badIndex.name}` : ": invalid provenance column"}.`)
+  }
+  const check = health.constraints.find((constraint) => constraint.name === "chk_roadmap_items_commitment_provenance_not_null")
+  return { checkPresent: check?.present === true, checkValid: check?.present === true && check.valid && check.structureMatches }
+}
+
+async function assertRepair039Postconditions(client: PoolClient, schema: string) {
+  const health = await getDecisionGateInfrastructureHealth(client, schema, [])
+  const healthy = health.tables.filter((table) => REPAIR_039_TABLES.has(table.name)).every((table) => table.present)
+    && health.columns.every((column) => column.present)
+    && health.constraints.filter((constraint) => REPAIR_039_CONSTRAINTS.has(constraint.name)).every((constraint) => constraint.present && constraint.valid && constraint.structureMatches)
+    && health.indexes.filter((index) => REPAIR_039_INDEXES.has(index.name)).every((index) => index.state === "ACTIVE")
+    && health.provenance.available && health.provenance.nullCount === 0 && health.provenance.unknownCount === 0 && health.provenance.legacyLinkDrift === 0
+  if (!healthy) throw new Error("Migration 042 postcondition failed: repaired 039 catalog or provenance integrity is incomplete.")
 }
 
 const DSQL_WRITE_LIMITS = {
@@ -598,21 +671,24 @@ export async function GET(req: NextRequest) {
 
   try {
     // Check if tracking table exists
-    const { rows } = await client.query<{ name: string }>(`
-      SELECT migration_name as name
-      FROM "${schema}"._prisma_migrations
-      ORDER BY finished_at ASC
-    `).catch(() => ({ rows: [] as { name: string }[] }));
+    const { rows } = await client.query<{ name: string; applied?: boolean }>(`
+      SELECT migration_name as name, finished_at IS NOT NULL AS applied
+       FROM "${schema}"._prisma_migrations
+      ORDER BY started_at ASC
+    `).catch(() => ({ rows: [] as { name: string; applied?: boolean }[] }));
+    const appliedNames = rows.filter((row) => row.applied !== false).map((row) => row.name)
+    const incompleteNames = rows.filter((row) => row.applied === false).map((row) => row.name)
     const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup, decisionGateInfrastructure] = await Promise.all([
       getResearchCaptureHardeningReport(client, schema),
       getResearchGuidedUxReport(client, schema),
       getResearchBlobCleanupReport(client, schema),
-      getDecisionGateInfrastructureHealth(client, schema, rows.map((row) => row.name)),
+      getDecisionGateInfrastructureHealth(client, schema, appliedNames, incompleteNames),
     ]);
 
     return NextResponse.json({
       schema,
-      appliedMigrations: rows.map((r) => r.name),
+      appliedMigrations: appliedNames,
+      incompleteMigrations: incompleteNames,
       manifest: MIGRATIONS.map((m) => m.name),
       researchCaptureHardening,
       researchGuidedUx,
@@ -664,7 +740,7 @@ export async function POST(req: NextRequest) {
     const appliedSet = new Set(applied.map((r) => r.migration_name));
 
     const toRun = MIGRATIONS.filter((m) =>
-      targetScript ? m.name === targetScript : !appliedSet.has(m.name)
+      targetScript ? m.name === targetScript : !(appliedSet.has(m.name) || (m.name === "039_native_decision_gates" && appliedSet.has("042_native_decision_gates_repair")))
     );
 
     if (toRun.length === 0) {
@@ -684,6 +760,9 @@ export async function POST(req: NextRequest) {
 
     for (const migration of toRun) {
       log.push(`\nApplying: ${migration.name}`);
+      const repair039State = migration.name === "042_native_decision_gates_repair"
+        ? await inspectRepair039State(client, schema)
+        : null
 
       if (migration.name === "036_research_capture_hardening") {
         const preflight = await getResearchCapturePreflight(client, schema);
@@ -709,11 +788,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Record start
+      const attemptId = randomUUID()
       await client.query(
-        `INSERT INTO "${schema}"._prisma_migrations (migration_name) VALUES ($1)`,
-        [migration.name]
-      );
+        `INSERT INTO "${schema}"._prisma_migrations (id, migration_name) VALUES ($1, $2)`,
+        [attemptId, migration.name],
+      )
 
       const rawSql = readFileSync(migration.filePath, "utf-8");
 
@@ -741,12 +820,27 @@ export async function POST(req: NextRequest) {
           // ASYNC is mandatory on DSQL and unsupported by local PostgreSQL.
           // DATABASE_URL is the worktree-bootstrap local-mode signal.
           const executableStmt = process.env.DATABASE_URL
-            ? stmt.replace(/\bINDEX ASYNC\b/gi, "INDEX")
+            ? stmt.replace(/\bINDEX ASYNC\b/gi, "INDEX").replace(/ALTER\s+TABLE\s+ASYNC/gi, "ALTER TABLE")
             : stmt;
+          if (repair039State?.checkPresent && /ADD\s+CONSTRAINT\s+"chk_roadmap_items_commitment_provenance_not_null"/i.test(executableStmt)) {
+            log.push("  ~ matching provenance CHECK already exists (skipped)")
+            continue
+          }
+          if (repair039State?.checkValid && /VALIDATE\s+CONSTRAINT\s+"chk_roadmap_items_commitment_provenance_not_null"/i.test(executableStmt)) {
+            log.push("  ~ provenance CHECK already validated (skipped)")
+            continue
+          }
           const result = await client.query<{ job_id?: string }>(executableStmt);
-          if (migration.name === "039_native_decision_gates" && /ALTER\s+COLUMN\s+"?now_commitment_provenance"?\s+SET\s+DEFAULT/i.test(executableStmt)) {
+          if (!process.env.DATABASE_URL && DECISION_GATE_MIGRATIONS.includes(migration.name as typeof DECISION_GATE_MIGRATIONS[number]) && /(?:CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC|ALTER\s+TABLE\s+ASYNC)/i.test(stmt)) {
+            const jobId = result.rows[0]?.job_id
+            if (jobId) {
+              const waited = await client.query<{ succeeded: boolean }>("SELECT sys.wait_for_job($1) AS succeeded", [jobId])
+              if (waited.rows[0]?.succeeded !== true) throw new Error(`Aurora DSQL async DDL job ${jobId} did not complete successfully.`)
+            }
+          }
+          if ((migration.name === "039_native_decision_gates" || migration.name === "042_native_decision_gates_repair") && /ALTER\s+COLUMN\s+"?now_commitment_provenance"?\s+SET\s+DEFAULT/i.test(executableStmt)) {
             pendingRoadmapCommitmentProvenanceBackfill = true;
-          } else if (migration.name === "039_native_decision_gates" && pendingRoadmapCommitmentProvenanceBackfill && /^COMMIT;?$/i.test(executableStmt.trim())) {
+          } else if ((migration.name === "039_native_decision_gates" || migration.name === "042_native_decision_gates_repair") && pendingRoadmapCommitmentProvenanceBackfill && /^COMMIT;?$/i.test(executableStmt.trim())) {
             pendingRoadmapCommitmentProvenanceBackfill = false;
             await backfillRoadmapCommitmentProvenance(client, schema, log);
           }
@@ -773,10 +867,15 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Mark finished
+      if (migration.name === "039_native_decision_gates" || migration.name === "042_native_decision_gates_repair") {
+        await assertRepair039Postconditions(client, schema)
+      }
+
+      // Only this distinct attempt becomes a successful receipt. A failed
+      // attempt remains unfinished as forensic evidence and is never relabeled.
       await client.query(
-        `UPDATE "${schema}"._prisma_migrations SET finished_at = CURRENT_TIMESTAMP WHERE migration_name = $1`,
-        [migration.name]
+        `UPDATE "${schema}"._prisma_migrations SET finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [attemptId]
       );
 
       log.push(`  ✅ ${migration.name} applied`);

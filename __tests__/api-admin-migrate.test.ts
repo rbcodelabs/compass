@@ -193,16 +193,64 @@ describe("/api/admin/migrate rollout observability", () => {
         { column_name: "now_commitment_provenance", is_nullable: "NO", column_default: "'LEGACY_UNGATED'::character varying" },
         { column_name: "now_decision_record_id", is_nullable: "YES", column_default: null },
       ] }
-      if (sql.includes("pg_get_indexdef")) return { rows: catalog.indexes.map((index) => ({ name: index.name, table_name: index.table, valid: true, definition: index.definition })) }
-      if (sql.includes("FROM pg_constraint")) return { rows: catalog.constraints.map((constraint) => ({ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: true, definition: constraint.definition })) }
+      if (sql.includes("pg_get_indexdef")) return { rows: catalog.indexes.map((index) => ({ name: index.name, table_name: index.table, valid: true, unique: index.unique, key_columns: index.keyColumns, definition: index.definition })) }
+      if (sql.includes("FROM pg_constraint")) return { rows: catalog.constraints.map((constraint) => ({ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: true, definition: constraint.definition, key_columns: constraint.keyColumns })) }
       if (sql.includes("legacy_link_drift")) return { rows: [{ total: "4", null_count: "0", unknown_count: "0", legacy_link_drift: "0" }] }
       if (sql.includes("plan_violations")) return { rows: [{ plan_violations: "0", reservation_violations: "0" }] }
       return fallback(sqlValue, values)
     })
     const result = (await (await GET(request("GET"))).json()).decisionGateInfrastructure
     expect(catalog.constraints.find((item) => item.name === "idx_release_runs_scope_fingerprint")?.definition).toContain("pull_request_number")
-    expect(result.constraints.filter((item: { type: string }) => item.type === "c")).toHaveLength(2)
+    expect(result.constraints.filter((item: { type: string }) => item.type === "c")).toHaveLength(3)
     expect(result.migrationReady).toBe(true)
+  })
+
+  it("accepts Aurora DSQL primary-key INCLUDE rendering without weakening other constraint comparisons", async () => {
+    const catalog = getDecisionGateExpectedCatalog()
+    const fallback = mocks.query.getMockImplementation()!
+    mocks.query.mockImplementation(async (sqlValue, values) => {
+      const sql = String(sqlValue)
+      if (sql.includes("migration_name as name")) return { rows: catalog.migrations.map((name) => ({ name })) }
+      if (sql.includes("information_schema.tables") && Array.isArray(values?.[1]) && values[1].includes("review_requests")) return { rows: catalog.tables.map((table_name) => ({ table_name })) }
+      if (sql.includes("information_schema.columns") && sql.includes("roadmap_items")) return { rows: [
+        { column_name: "now_commitment_provenance", is_nullable: "YES", column_default: "'LEGACY_UNGATED'::character varying" },
+        { column_name: "now_decision_record_id", is_nullable: "YES", column_default: null },
+      ] }
+      if (sql.includes("pg_get_indexdef")) return { rows: catalog.indexes.map((index) => ({ name: index.name, table_name: index.table, valid: true, unique: index.unique, key_columns: index.keyColumns, definition: index.definition })) }
+      if (sql.includes("FROM pg_constraint")) return { rows: catalog.constraints.map((constraint) => ({
+        constraint_name: constraint.name,
+        table_name: constraint.table,
+        constraint_type: constraint.type,
+        valid: true,
+        key_columns: constraint.keyColumns,
+        definition: constraint.type === "p" ? `${constraint.definition} INCLUDE (workspace_id)` : constraint.definition,
+      })) }
+      if (sql.includes("legacy_link_drift")) return { rows: [{ total: "4", null_count: "0", unknown_count: "0", legacy_link_drift: "0" }] }
+      if (sql.includes("plan_violations")) return { rows: [{ plan_violations: "0", reservation_violations: "0" }] }
+      return fallback(sqlValue, values)
+    })
+
+    const result = (await (await GET(request("GET"))).json()).decisionGateInfrastructure
+    expect(result.constraints.filter((item: { type: string; structureMatches: boolean }) => item.type === "p" && !item.structureMatches)).toEqual([])
+    expect(result.migrationReady).toBe(true)
+  })
+
+  it("reports partially applied 039 as not ready until the repair receipt and missing structures exist", async () => {
+    const fallback = mocks.query.getMockImplementation()!
+    mocks.query.mockImplementation(async (sqlValue, values) => {
+      const sql = String(sqlValue)
+      if (sql.includes("migration_name as name")) return { rows: [{ name: "039_native_decision_gates", applied: false }] }
+      if (sql.includes("information_schema.tables") && Array.isArray(values?.[1]) && values[1].includes("review_requests")) return { rows: values[1].slice(0, 5).map((table_name: string) => ({ table_name })) }
+      if (sql.includes("information_schema.columns") && sql.includes("roadmap_items")) return { rows: [
+        { column_name: "now_commitment_provenance", is_nullable: "YES", column_default: "'LEGACY_UNGATED'::character varying" },
+      ] }
+      return fallback(sqlValue, values)
+    })
+    const result = (await (await GET(request("GET"))).json()).decisionGateInfrastructure
+    expect(result.migrationReceipts).toContainEqual(expect.objectContaining({ name: "039_native_decision_gates", applied: false, status: "INCOMPLETE" }))
+    expect(result.migrationReceipts).toContainEqual(expect.objectContaining({ name: "042_native_decision_gates_repair", applied: false }))
+    expect(result.columns).toContainEqual(expect.objectContaining({ name: "now_decision_record_id", present: false }))
+    expect(result.migrationReady).toBe(false)
   })
 
   it("keeps the existing GET fields and adds passing migration 036 preflight details", async () => {
@@ -343,6 +391,62 @@ describe("/api/admin/migrate rollout observability", () => {
     expect(
       mocks.query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO") && String(sql).includes("_prisma_migrations"))
     ).toBe(false)
+  })
+
+  it("leaves failed DDL as an unfinished forensic attempt, never a successful receipt", async () => {
+    mocks.query.mockImplementation(async (sqlValue: unknown) => {
+      const sql = String(sqlValue)
+      if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
+      if (/CREATE TABLE IF NOT EXISTS "review_requests"/.test(sql)) throw new Error("unsupported DDL")
+      return { rows: [] }
+    })
+
+    const response = await POST(request("POST", { script: "039_native_decision_gates" }))
+
+    expect(response.status).toBe(500)
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO "compass_preview"._prisma_migrations'))).toBe(true)
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE "compass_preview"._prisma_migrations SET finished_at'))).toBe(false)
+  })
+
+  it("waits for every repair async job and verifies postconditions before finishing the receipt", async () => {
+    delete process.env.DATABASE_URL
+    const catalog = getDecisionGateExpectedCatalog()
+    const repairTables: string[] = catalog.tables.slice(0, 5)
+    const repairIndexes = catalog.indexes.filter((index) => index.name.startsWith("idx_review_") || index.name.startsWith("idx_decision_"))
+    const repairConstraints = catalog.constraints.filter((constraint) =>
+      repairTables.includes(constraint.table) || constraint.name === "chk_roadmap_items_commitment_provenance_not_null"
+    )
+    let repaired = false
+    let job = 0
+    mocks.query.mockImplementation(async (sqlValue: unknown, values?: unknown[]) => {
+      const sql = String(sqlValue)
+      if (sql.includes("SELECT migration_name FROM")) return { rows: [{ migration_name: "039_native_decision_gates" }] }
+      if (sql.includes("information_schema.tables") && Array.isArray(values?.[1]) && values[1].includes("review_requests")) return { rows: repairTables.map((table_name) => ({ table_name })) }
+      if (sql.includes("information_schema.columns") && sql.includes("roadmap_items")) return { rows: [
+        { column_name: "now_commitment_provenance", is_nullable: "YES", column_default: "'LEGACY_UNGATED'::character varying" },
+        ...(repaired ? [{ column_name: "now_decision_record_id", is_nullable: "YES", column_default: null }] : []),
+      ] }
+      if (sql.includes("FROM pg_constraint")) return { rows: repairConstraints
+        .filter((constraint) => repaired || constraint.name !== "chk_roadmap_items_commitment_provenance_not_null")
+        .map((constraint) => ({ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: true, definition: constraint.definition, key_columns: constraint.keyColumns })) }
+      if (sql.includes("pg_get_indexdef")) return { rows: repaired ? repairIndexes.map((index) => ({ name: index.name, table_name: index.table, valid: true, unique: index.unique, key_columns: index.keyColumns, definition: index.definition })) : [] }
+      if (sql.includes("legacy_link_drift")) return { rows: [{ total: "4", null_count: "0", unknown_count: "0", legacy_link_drift: "0" }] }
+      if (sql.includes("plan_violations")) return { rows: [] }
+      if (sql.includes("pg_column_size")) return { rows: [] }
+      if (/ALTER TABLE ASYNC|CREATE INDEX ASYNC/i.test(sql)) return { rows: [{ job_id: `repair-job-${++job}` }] }
+      if (sql.includes("sys.wait_for_job")) {
+        if (job === 8) repaired = true
+        return { rows: [{ succeeded: true }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await POST(request("POST", { script: "042_native_decision_gates_repair" }))
+
+    expect(response.status).toBe(200)
+    expect(mocks.query.mock.calls.filter(([sql]) => String(sql).includes("sys.wait_for_job"))).toHaveLength(8)
+    const calls = mocks.query.mock.calls.map(([sql]) => String(sql))
+    expect(calls.findIndex((sql) => sql.includes("SET finished_at"))).toBeGreaterThan(calls.map((sql, index) => sql.includes("sys.wait_for_job") ? index : -1).at(-1)!)
   })
 
   it("returns migration 036 index validity after an explicit apply", async () => {

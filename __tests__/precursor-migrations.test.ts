@@ -14,6 +14,7 @@ describe("decision-gate expand precursor migrations", () => {
     "039_native_decision_gates",
     "040_release_authorization",
     "041_portfolio_capacity_ledger",
+    "042_native_decision_gates_repair",
   ])("registers %s in the authenticated migration manifest", (name) => {
     expect(route).toContain(`name: "${name}"`)
     expect(migration(name)).toMatch(/CREATE (?:TABLE|INDEX)|ALTER TABLE/)
@@ -24,23 +25,36 @@ describe("decision-gate expand precursor migrations", () => {
       "039_native_decision_gates",
       "040_release_authorization",
       "041_portfolio_capacity_ledger",
+      "042_native_decision_gates_repair",
     ]) {
       const sql = migration(name)
       expect(sql).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?!ASYNC\b)/i)
       const ddlStatements = sql.match(/(?:CREATE|ALTER)\s+(?:TABLE|INDEX)[\s\S]*?;/gi) ?? []
-      expect((sql.match(/BEGIN;/g) ?? [])).toHaveLength(ddlStatements.length)
-      expect((sql.match(/COMMIT;/g) ?? [])).toHaveLength(ddlStatements.length)
+      const asyncConstraintValidations = sql.match(/ALTER\s+TABLE\s+ASYNC[\s\S]*?;/gi) ?? []
+      expect((sql.match(/BEGIN;/g) ?? [])).toHaveLength(ddlStatements.length - asyncConstraintValidations.length)
+      expect((sql.match(/COMMIT;/g) ?? [])).toHaveLength(ddlStatements.length - asyncConstraintValidations.length)
+      expect(asyncConstraintValidations.every((statement) => /VALIDATE\s+CONSTRAINT/i.test(statement))).toBe(true)
       expect(sql).not.toMatch(/FOREIGN\s+KEY/i)
     }
   })
 
-  it("installs a default before the bounded provenance backfill and NOT NULL afterward", () => {
+  it("keeps migration 039 DSQL-safe while installing the provenance default before the bounded backfill", () => {
     const sql = migration("039_native_decision_gates")
     const defaultIndex = sql.indexOf('ALTER COLUMN "now_commitment_provenance" SET DEFAULT')
-    const notNullIndex = sql.indexOf('ALTER COLUMN "now_commitment_provenance" SET NOT NULL')
     expect(defaultIndex).toBeGreaterThan(-1)
-    expect(notNullIndex).toBeGreaterThan(defaultIndex)
+    expect(sql).not.toMatch(/ALTER\s+COLUMN\s+"now_commitment_provenance"\s+SET\s+NOT\s+NULL/i)
     expect(route).toContain("backfillRoadmapCommitmentProvenance")
+  })
+
+  it("repairs a partially applied 039 without unsupported DSQL ALTER COLUMN operations", () => {
+    const sql = migration("042_native_decision_gates_repair")
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS "now_commitment_provenance"')
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS "now_decision_record_id"')
+    expect(sql).toContain('SET DEFAULT \'LEGACY_UNGATED\'')
+    expect(sql).toContain('CREATE INDEX ASYNC IF NOT EXISTS "idx_review_requests_workspace_state"')
+    expect(sql).not.toMatch(/SET\s+NOT\s+NULL/i)
+    expect(sql).toContain('ADD CONSTRAINT "chk_roadmap_items_commitment_provenance_not_null"')
+    expect(sql).toContain('ALTER TABLE ASYNC "roadmap_items" VALIDATE CONSTRAINT')
   })
 
   it("does not add precursor models or columns to Prisma ordinary-route reads", () => {

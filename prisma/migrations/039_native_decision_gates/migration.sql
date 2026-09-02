@@ -105,12 +105,14 @@ ALTER TABLE "roadmap_items" ALTER COLUMN "now_commitment_provenance" SET DEFAULT
 COMMIT;
 
 BEGIN;
-ALTER TABLE "roadmap_items" ALTER COLUMN "now_commitment_provenance" SET NOT NULL;
+ALTER TABLE "roadmap_items" ADD COLUMN IF NOT EXISTS "now_decision_record_id" UUID;
 COMMIT;
 
 BEGIN;
-ALTER TABLE "roadmap_items" ADD COLUMN IF NOT EXISTS "now_decision_record_id" UUID;
+ALTER TABLE "roadmap_items" ADD CONSTRAINT "chk_roadmap_items_commitment_provenance_not_null" CHECK ("now_commitment_provenance" IS NOT NULL) NOT VALID;
 COMMIT;
+
+ALTER TABLE ASYNC "roadmap_items" VALIDATE CONSTRAINT "chk_roadmap_items_commitment_provenance_not_null";
 
 BEGIN;
 CREATE INDEX ASYNC IF NOT EXISTS "idx_review_requests_workspace_state" ON "review_requests" ("workspace_id", "state");
