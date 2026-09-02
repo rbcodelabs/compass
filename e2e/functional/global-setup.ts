@@ -11,6 +11,7 @@ import fs from "node:fs/promises";
 import pg from "pg";
 import { seedE2E } from "./fixtures/seed-e2e";
 import { setRunToken } from "./fixtures/run-token";
+import { assertIsolatedE2EDatabase } from "./fixtures/isolated-database";
 
 const schema = process.env.PGSCHEMA
   ? `${process.env.PGSCHEMA}_dev`
@@ -56,6 +57,10 @@ export default async function globalSetup() {
         "Copy .env.local from the repo root into this worktree."
     );
   }
+
+  // Every functional run mutates a fixed fixture workspace. Refuse to seed
+  // until the target is the explicitly prepared, local-only E2E database.
+  await assertIsolatedE2EDatabase();
 
   // Claim the shared e2e org for this run. The seed is upsert-only, so an
   // overlapping run reuses the same row — stamping it here is what lets
