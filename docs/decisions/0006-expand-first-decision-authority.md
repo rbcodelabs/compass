@@ -1,6 +1,6 @@
 # ADR-0006: Expand-First Decision Authority and Generated Policy Artifacts
 
-**Date:** 2026-09-01
+**Date:** 2026-09-02
 
 **Status:** Proposed
 
@@ -212,11 +212,116 @@ split into DSQL-safe transactions and the backfill is bounded and recoverable.
 Migrations 040–041 add tables and async indexes only. Foreign-key-like ownership
 and identity checks remain application invariants.
 
+#### DSQL repair after the Preview 039 failure
+
+Preview proved that Aurora DSQL does not support `ALTER COLUMN ... SET NOT
+NULL`. The supported `ALTER TABLE` grammar includes `DROP NOT NULL`, but not
+`SET NOT NULL`. Current DSQL does support adding a `CHECK` constraint to an
+existing table with `NOT VALID`, followed by asynchronous validation with
+`ALTER TABLE ASYNC ... VALIDATE CONSTRAINT`. A validated named check is therefore
+the physical invariant for this expand phase:
+
+```sql
+CONSTRAINT "chk_roadmap_items_commitment_provenance_not_null"
+CHECK ("now_commitment_provenance" IS NOT NULL)
+```
+
+The check is not a weaker application contract: `NOT VALID` begins rejecting
+nulls on new inserts and updates immediately, and readiness remains false until
+the asynchronous validation proves every existing row satisfies it. The
+contract-phase Prisma model may continue to declare the field required, but
+health must inspect the validated named check rather than
+`information_schema.columns.is_nullable`.
+
+The failed Preview attempt is a partial expansion: the five decision tables and
+the provenance column/default exist, while the decision-link column and 039
+indexes do not. It must be repaired forward; no created object is dropped and no
+receipt is rewritten to imply that the original execution succeeded.
+
+Options considered:
+
+| Option | Benefits | Costs and risks |
+|---|---|---|
+| Recreate `roadmap_items` with a native `NOT NULL` column | Preserves PostgreSQL column metadata | Destructive table swap, difficult index recreation, unnecessary risk to the core Roadmap table |
+| Enforce non-null only in application code and health counts | No additional DDL | Concurrent or future writers can create nulls; does not establish a database invariant |
+| **Validated named `CHECK`, plus a forward repair migration** | Supported additive DDL, protects future writes immediately, validates old rows asynchronously, preserves the partial expansion | Column remains reported nullable by PostgreSQL metadata; clients and health must understand the named invariant |
+
+Use the **validated named check plus forward repair** option.
+
+Because this PR has not merged, migration 039 is corrected for clean databases
+so it never emits the unsupported statement. A new
+`042_native_decision_gates_repair` migration is also required for the exact
+partially expanded Preview. Its sequence is:
+
+1. Inspect the exact partial-state fingerprint and refuse any unknown shape.
+2. Run the existing bounded row/byte preflight and backfill null provenance in
+   bounded transactions; require zero null and unknown values afterward.
+3. Add `now_decision_record_id` with `ADD COLUMN IF NOT EXISTS`.
+4. Add the named provenance-not-null check with `NOT VALID` only when absent;
+   if present, require its table, type, and expression to match exactly.
+5. Start `ALTER TABLE ASYNC ... VALIDATE CONSTRAINT`, wait for the DSQL job, and
+   require successful completion and `convalidated = true`.
+6. Create every missing 039 secondary index with `CREATE INDEX ASYNC IF NOT
+   EXISTS`, wait for each job, and require exact structure and valid state.
+7. Re-run full 039 catalog and data-integrity health before recording 042
+   successful.
+
+Migration 042 is a superseding receipt for the failed 039 attempt, not evidence
+that the original attempt completed. Pending-migration selection and health use
+an explicit `039 -> 042` supersession mapping: a successful 042 suppresses retry
+of 039 and satisfies the 039 infrastructure requirement while retaining the
+unfinished 039 attempt as forensic evidence. On a clean database, corrected 039
+completes and 042 is an idempotent verification/repair pass.
+
+#### Migration receipt semantics
+
+An attempt row is not an applied-migration receipt. The runner may record a
+start before executing, but:
+
+- GET and readiness consider only rows with `finished_at IS NOT NULL`;
+- `finished_at` is written only after every statement, bounded backfill,
+  asynchronous DDL job, and postcondition succeeds;
+- an exception leaves an unfinished attempt visible as `INCOMPLETE` and never
+  reports it as applied;
+- retries must not convert an older failed attempt into success; they create or
+  complete a distinct attempt and success is established by a finished receipt;
+- a superseding migration is reported explicitly as `REPAIRED_BY`, never by
+  relabeling the failed predecessor `APPLIED`.
+
+This fixes the Preview reporting defect in which the health GET selected all
+tracking rows, including unfinished attempts, and therefore described 039 as
+applied after its statement failure.
+
+#### DSQL catalog equivalence
+
+Aurora DSQL stores table rows in the primary-key structure and includes all
+non-key table columns in that structure. Consequently,
+`pg_get_constraintdef` can render a one-column primary key as `PRIMARY KEY (id)
+INCLUDE (...)`. That is semantically the declared primary key, not an extra
+logical uniqueness requirement.
+
+Catalog health therefore compares structured semantics rather than raw rendered
+DDL:
+
+- for a primary key, require the expected table, `contype = 'p'`, validity, and
+  the exact ordered key-column list from `pg_constraint.conkey`; ignore only the
+  DSQL physical INCLUDE payload;
+- for a unique constraint, require the exact ordered key columns and nulls-
+  distinct semantics; never strip an INCLUDE clause generically;
+- for a check constraint, require the expected named constraint, table,
+  `contype = 'c'`, validated state, and normalized expression tree/text;
+- continue to verify every secondary index by name, table, ordered key columns,
+  uniqueness, and valid/active state.
+
+This accepts DSQL's documented primary-key storage rendering without weakening
+unique, check, or secondary-index verification.
+
 `migrationReady` is true only when:
 
-- manifest receipts for 039, 040, and 041 are present;
+- successful receipts for 040 and 041 are present, and 039 is either successful
+  or explicitly satisfied by a successful 042 repair receipt;
 - every required table/column and primary, unique, and `CHECK` constraint is
-  present and valid;
+  present and valid, including the validated named provenance-not-null check;
 - every required async index reports `ACTIVE` (`CREATING` is pending and
   `FAILED`, missing, or unknown is false);
 - no Roadmap row has null or an unknown commitment provenance;
@@ -794,3 +899,15 @@ not permission to merge or deploy anything.
   would justify quorum and stronger identity/key infrastructure.
 - Capacity can no longer be represented as workspace focus slots, requiring a
   versioned replacement capacity model rather than silently changing v1 units.
+
+## DSQL references
+
+- [ALTER TABLE — Aurora DSQL](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/alter-table-syntax-support.html)
+  defines the supported actions, the `ADD CONSTRAINT ... NOT VALID` rule, and
+  asynchronous constraint validation.
+- [Primary keys in Aurora DSQL](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/working-with-primary-keys.html)
+  documents that DSQL's primary-key structure includes all table columns.
+- [Aurora DSQL release notes](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/release-notes.html)
+  record the August 3, 2026 addition of `ADD CONSTRAINT` and `VALIDATE
+  CONSTRAINT`; implementation must verify the deployed cluster supports that
+  release before attempting the repair.
