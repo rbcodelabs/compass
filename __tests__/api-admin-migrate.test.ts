@@ -159,6 +159,16 @@ describe("/api/admin/migrate rollout observability", () => {
     expect(response.status).toBe(401)
     expect(mocks.pool).not.toHaveBeenCalled()
   })
+  it("reports violating capacity rows and cannot mark migrations ready", async () => {
+    const fallback = mocks.query.getMockImplementation()!
+    mocks.query.mockImplementation(async (sql, values) => {
+      if (String(sql).includes("plan_violations")) return { rows: [{ plan_violations: "1", reservation_violations: "2" }] }
+      return fallback(sql, values)
+    })
+    const result = await (await GET(request("GET"))).json()
+    expect(result.decisionGateInfrastructure.integrity).toEqual({ available: true, planViolations: 1, reservationViolations: 2 })
+    expect(result.decisionGateInfrastructure.migrationReady).toBe(false)
+  })
 
   it("keeps the existing GET fields and adds passing migration 036 preflight details", async () => {
     const response = await GET(request("GET"))
@@ -208,6 +218,7 @@ describe("/api/admin/migrate rollout observability", () => {
       migrationReady: false,
       capacityMetadataReady: false,
       runtimeEnforcementReady: false,
+      integrity: { available: false, planViolations: Number.MAX_SAFE_INTEGER, reservationViolations: Number.MAX_SAFE_INTEGER },
       tables: expect.arrayContaining([expect.objectContaining({ name: "review_requests", present: false })]),
       columns: expect.arrayContaining([expect.objectContaining({ name: "now_commitment_provenance", present: false })]),
       indexes: expect.arrayContaining([expect.objectContaining({ name: "idx_capacity_plans_workspace_state", present: false, valid: false })]),

@@ -19,6 +19,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const SHA = /^[0-9a-f]{64}$/i
 const MAX_ROWS = 2_900
 const MAX_BYTES = 9 * 1024 * 1024
+const MAX_INT32 = 2_147_483_647
+const CONSERVATIVE_WRITE_BYTES = 2_048
 const digest = (value: unknown) => crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex")
 const snapshot = (ids: string[]) => digest({ schemaVersion: "capacity-now-snapshot/v1", ids: [...ids].sort() })
 function uuid(value: unknown, field: string): asserts value is string {
@@ -28,7 +30,10 @@ function textValue(value: unknown, field: string, max: number): asserts value is
   if (typeof value !== "string" || !value.trim() || value.length > max) throw new CapacityPlanOpsError("INVALID_INPUT", `${field} must be 1-${max} characters.`)
 }
 function positive(value: unknown, field: string): asserts value is number {
-  if (!Number.isSafeInteger(value) || Number(value) <= 0) throw new CapacityPlanOpsError("INVALID_INPUT", `${field} must be a positive integer.`)
+  if (!Number.isSafeInteger(value) || Number(value) <= 0 || Number(value) > MAX_INT32) throw new CapacityPlanOpsError("INVALID_INPUT", `${field} must be a positive int32.`)
+}
+function version(value: unknown, field: string): asserts value is number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > MAX_INT32) throw new CapacityPlanOpsError("INVALID_INPUT", `${field} must be a non-negative int32.`)
 }
 const uniqueConflict = (error: unknown) => typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "23505"
 function safeEstimate(value: unknown) {
@@ -43,14 +48,19 @@ export function capacityOperationPreflight(row: { row_count?: unknown; estimated
     passed: rowCount !== null && estimatedBytes !== null && rowCount <= MAX_ROWS && estimatedBytes <= MAX_BYTES,
     limits: { maxRows: MAX_ROWS, maxBytes: MAX_BYTES } }
 }
-async function assertOperationFits(db: SqlClient, workspaceId: string, planIds: string[]) {
+async function assertOperationFits(db: SqlClient, workspaceId: string, planIds: string[], plannedWrites = 0) {
   const result = await db.query<{ row_count: unknown; estimated_bytes: unknown }>(
     `SELECT COUNT(*)::bigint row_count, COALESCE(SUM(estimated_bytes),0)::bigint estimated_bytes FROM (
        SELECT pg_column_size(r)::bigint estimated_bytes FROM portfolio_capacity_reservations r WHERE r.plan_id = ANY($1::uuid[])
        UNION ALL
        SELECT pg_column_size(i)::bigint estimated_bytes FROM roadmap_items i WHERE i.workspace_id=$2 AND i.horizon='NOW'
      ) operation_rows`, [planIds, workspaceId])
-  const check = capacityOperationPreflight(result.rows[0])
+  const base = result.rows[0]
+  const rowCount = safeEstimate(base?.row_count), estimatedBytes = safeEstimate(base?.estimated_bytes)
+  const check = capacityOperationPreflight(rowCount === null || estimatedBytes === null ? undefined : {
+    row_count: rowCount + plannedWrites,
+    estimated_bytes: estimatedBytes + plannedWrites * CONSERVATIVE_WRITE_BYTES,
+  })
   if (!check.passed) throw new CapacityPlanOpsError("CAPACITY_OPERATION_LIMIT", "Capacity operation row/byte estimate is unavailable, malformed, or unsafe.")
   return check
 }
@@ -154,7 +164,8 @@ export async function createCapacityPlan(db: SqlClient, input: CreateCapacityPla
   return result
 }
 
-export async function inspectCapacityPlan(db: SqlClient, planId: string) {
+export async function inspectCapacityPlan(db: SqlClient, planId: string, allowedReplacesPlanId?: string) {
+  if (allowedReplacesPlanId) uuid(allowedReplacesPlanId, "allowedReplacesPlanId")
   const plan = await planById(db, planId)
   const [liveIds, rows, competing] = await Promise.all([
     nowIds(db, plan.workspace_id), reservations(db, plan.id),
@@ -177,12 +188,14 @@ export async function inspectCapacityPlan(db: SqlClient, planId: string) {
   const excessItems = Math.max(0, relevant.length - plan.now_limit), excessUnits = Math.max(0, reservedUnits - plan.available_units)
   const liveFingerprint = snapshot(liveIds)
   const snapshotMatches = plan.now_snapshot_fingerprint === liveFingerprint && plan.now_snapshot_count === liveIds.length
-  const competingActiveClaims = competing.rows.filter((r) => live.has(r.roadmap_item_id))
+  const activeClaims = competing.rows.filter((r) => live.has(r.roadmap_item_id))
+  const allowedReplacementClaims = activeClaims.filter((r) => r.plan_id === allowedReplacesPlanId)
+  const competingActiveClaims = activeClaims.filter((r) => r.plan_id !== allowedReplacesPlanId)
   const clean = missingItemIds.length === 0 && staleReservationIds.length === 0 && invalidReservationIds.length === 0 && competingActiveClaims.length === 0 && excessItems === 0 && excessUnits === 0
   return {
     plan, currentNowItemIds: liveIds,
     reservations: rows.map((r) => ({ id: r.id, planId: r.plan_id, roadmapItemId: r.roadmap_item_id, activeRoadmapItemId: r.active_roadmap_item_id, state: r.state, units: r.units })),
-    missingItemIds, staleReservationIds, invalidReservationIds, competingActiveClaims, reservedUnits, excessItems, excessUnits,
+    missingItemIds, staleReservationIds, invalidReservationIds, allowedReplacementClaims, competingActiveClaims, reservedUnits, excessItems, excessUnits,
     liveNowSnapshotFingerprint: liveFingerprint, storedNowSnapshotFingerprint: plan.now_snapshot_fingerprint,
     snapshotMatches, observedAt: new Date().toISOString(), activationEligible: plan.state === "DRAFT" && snapshotMatches && clean,
     capacityMetadataReady: plan.state === "ACTIVE" && snapshotMatches && clean, runtimeEnforcementReady: false,
@@ -191,18 +204,28 @@ export async function inspectCapacityPlan(db: SqlClient, planId: string) {
 
 export type ReconcileCapacityPlanInput = { planId: string; expectedPlanFingerprint: string; expectedVersion: number; idempotencyKey: string }
 export async function reconcileCapacityPlan(db: SqlClient, input: ReconcileCapacityPlanInput) {
+  version(input.expectedVersion, "expectedVersion")
   const plan = await planById(db, input.planId)
-  if (!SHA.test(input.expectedPlanFingerprint) || plan.plan_fingerprint !== input.expectedPlanFingerprint || !Number.isSafeInteger(input.expectedVersion) || plan.version !== input.expectedVersion) throw new CapacityPlanOpsError("PLAN_CHANGED", "Plan changed after inspection.")
-  if (plan.state !== "DRAFT") throw new CapacityPlanOpsError("PLAN_NOT_DRAFT", "Only DRAFT plans reconcile.")
-  await assertOperationFits(db, plan.workspace_id, [plan.id])
   const semantic = { planId: plan.id, expectedPlanFingerprint: input.expectedPlanFingerprint, expectedVersion: input.expectedVersion }
   const receipt = await beginOperation(db, { workspaceId: plan.workspace_id, planId: plan.id, action: "RECONCILE", key: input.idempotencyKey, semantic })
   if (receipt.stored) return receipt.stored
+  if (!SHA.test(input.expectedPlanFingerprint) || plan.plan_fingerprint !== input.expectedPlanFingerprint || plan.version !== input.expectedVersion) {
+    await failed(db, receipt.row.id, "PLAN_CHANGED", false)
+    throw new CapacityPlanOpsError("PLAN_CHANGED", "Plan changed after inspection.")
+  }
+  if (plan.state !== "DRAFT") {
+    await failed(db, receipt.row.id, "PLAN_NOT_DRAFT", false)
+    throw new CapacityPlanOpsError("PLAN_NOT_DRAFT", "Only DRAFT plans reconcile.")
+  }
   try {
-    await db.query("BEGIN")
     const ids = await nowIds(db, plan.workspace_id)
     if (ids.length > plan.now_limit || ids.length > plan.available_units) throw new CapacityPlanOpsError("CAPACITY_EXCEEDED", "NOW exceeds capacity.")
     const old = await reservations(db, plan.id), wanted = new Set(ids)
+    const deletes = old.filter((row) => row.state === "STAGED" && !wanted.has(row.roadmap_item_id)).length
+    const existingIds = new Set(old.filter((row) => row.state === "STAGED" && wanted.has(row.roadmap_item_id)).map((row) => row.roadmap_item_id))
+    const inserts = ids.filter((id) => !existingIds.has(id)).length
+    await assertOperationFits(db, plan.workspace_id, [plan.id], deletes + inserts * 2 + 1)
+    await db.query("BEGIN")
     for (const row of old) {
       if (row.state === "STAGED" && !wanted.has(row.roadmap_item_id)) await db.query(`DELETE FROM portfolio_capacity_reservations WHERE id=$1 AND state='STAGED'`, [row.id])
       else if (row.state !== "STAGED" || row.active_roadmap_item_id !== null) throw new CapacityPlanOpsError("RESERVATION_CONFLICT", "Draft has non-staged history.")
@@ -237,6 +260,7 @@ export type ActivateCapacityPlanInput = {
   expectedNowSnapshotFingerprint: string; replacesPlanId?: string; idempotencyKey: string
 }
 export async function activateCapacityPlan(db: SqlClient, input: ActivateCapacityPlanInput) {
+  version(input.expectedVersion, "expectedVersion")
   const plan = await planById(db, input.planId)
   const semantic = { planId: plan.id, expectedPlanFingerprint: input.expectedPlanFingerprint, expectedVersion: input.expectedVersion, expectedNowSnapshotFingerprint: input.expectedNowSnapshotFingerprint, replacesPlanId: input.replacesPlanId ?? null }
   const receipt = await beginOperation(db, { workspaceId: plan.workspace_id, planId: plan.id, action: "ACTIVATE", key: input.idempotencyKey, semantic })
@@ -246,15 +270,15 @@ export async function activateCapacityPlan(db: SqlClient, input: ActivateCapacit
     await failed(db, receipt.row.id, "PLAN_CHANGED", false)
     throw new CapacityPlanOpsError("PLAN_CHANGED", "Activation inputs differ from reconciled plan.")
   }
-  const pre = await inspectCapacityPlan(db, plan.id)
-  if (plan.state !== "ACTIVE" && (!pre.activationEligible || pre.liveNowSnapshotFingerprint !== input.expectedNowSnapshotFingerprint)) {
-    await failed(db, receipt.row.id, "ACTIVATION_PRECHECK_FAILED", false)
-    throw new CapacityPlanOpsError("ACTIVATION_PRECHECK_FAILED", "Fresh inspection differs from reconciled snapshot.")
-  }
   const replaced = input.replacesPlanId && !recoveredActivation ? await planById(db, input.replacesPlanId) : null
   if (replaced && (replaced.workspace_id !== plan.workspace_id || replaced.state !== "ACTIVE")) {
     await failed(db, receipt.row.id, "REPLACEMENT_MISMATCH", false)
     throw new CapacityPlanOpsError("REPLACEMENT_MISMATCH", "Replacement is not active in this workspace.")
+  }
+  const pre = await inspectCapacityPlan(db, plan.id, replaced?.id)
+  if (plan.state !== "ACTIVE" && (!pre.activationEligible || pre.liveNowSnapshotFingerprint !== input.expectedNowSnapshotFingerprint)) {
+    await failed(db, receipt.row.id, "ACTIVATION_PRECHECK_FAILED", false)
+    throw new CapacityPlanOpsError("ACTIVATION_PRECHECK_FAILED", "Fresh inspection differs from reconciled snapshot.")
   }
   await assertOperationFits(db, plan.workspace_id, replaced ? [plan.id, replaced.id] : [plan.id])
   if (plan.state !== "ACTIVE") {
@@ -282,7 +306,9 @@ export async function activateCapacityPlan(db: SqlClient, input: ActivateCapacit
     }
   }
   const post = await inspectCapacityPlan(db, plan.id)
-  const status = post.snapshotMatches && !post.missingItemIds.length && !post.staleReservationIds.length ? "ACTIVATED_MATCHED" : "ACTIVATED_DRIFTED"
-  const result = { action: "ACTIVATE", status, planId: plan.id, replacesPlanId: replaced?.id ?? input.replacesPlanId ?? null, observedAt: post.observedAt, expectedNowSnapshotFingerprint: input.expectedNowSnapshotFingerprint, observedNowSnapshotFingerprint: post.liveNowSnapshotFingerprint, missingItemIds: post.missingItemIds, staleReservationIds: post.staleReservationIds, runtimeEnforcementReady: false }
+  const matched = post.snapshotMatches && !post.missingItemIds.length && !post.staleReservationIds.length && !post.invalidReservationIds.length && !post.competingActiveClaims.length && post.excessItems === 0 && post.excessUnits === 0
+  const status = matched ? "ACTIVATED_MATCHED" : "ACTIVATED_DRIFTED"
+  const expectedIds = new Set(pre.currentNowItemIds), observedIds = new Set(post.currentNowItemIds)
+  const result = { action: "ACTIVATE", status, planId: plan.id, replacesPlanId: replaced?.id ?? input.replacesPlanId ?? null, observedAt: post.observedAt, expectedNowSnapshotFingerprint: input.expectedNowSnapshotFingerprint, observedNowSnapshotFingerprint: post.liveNowSnapshotFingerprint, expectedNowItemIds: pre.currentNowItemIds, observedNowItemIds: post.currentNowItemIds, missingItemIds: pre.currentNowItemIds.filter((id) => !observedIds.has(id)), extraItemIds: post.currentNowItemIds.filter((id) => !expectedIds.has(id)), staleReservationIds: post.staleReservationIds, invalidReservationIds: post.invalidReservationIds, competingActiveClaims: post.competingActiveClaims, reservedUnits: post.reservedUnits, excessItems: post.excessItems, excessUnits: post.excessUnits, runtimeEnforcementReady: false }
   await complete(db, receipt.row.id, result); return result
 }

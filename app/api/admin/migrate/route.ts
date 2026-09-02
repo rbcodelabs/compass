@@ -204,16 +204,27 @@ const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_
 const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger"] as const;
 
 async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string, applied: readonly string[]) {
-  const [tablesResult, columnsResult, indexesResult, constraintsResult, provenanceResult] = await Promise.all([
+  const [tablesResult, columnsResult, indexesResult, constraintsResult, provenanceResult, integrityResult] = await Promise.all([
     client.query<{ table_name: string }>(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = ANY($2::text[])`, [schema, [...DECISION_GATE_TABLES]]),
     client.query<{ column_name: string; is_nullable: string; column_default: string | null }>(`SELECT column_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'roadmap_items' AND column_name = ANY($2::text[])`, [schema, [...DECISION_GATE_COLUMNS]]),
     client.query<{ name: string; valid: boolean }>(`SELECT c.relname AS name, i.indisvalid AS valid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[])`, [schema, [...DECISION_GATE_INDEXES]]),
-    client.query<{ constraint_name: string }>(`SELECT constraint_name FROM information_schema.table_constraints WHERE constraint_schema=$1 AND constraint_name=ANY($2::text[])`, [schema, [...DECISION_GATE_CONSTRAINTS]]),
+    client.query<{ constraint_name: string; constraint_type: string; valid: boolean; definition: string }>(`SELECT c.conname constraint_name, c.contype constraint_type, c.convalidated valid, pg_get_constraintdef(c.oid) definition
+      FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace
+      WHERE n.nspname=$1 AND c.conname=ANY($2::text[])`, [schema, [...DECISION_GATE_CONSTRAINTS]]),
     client.query<{ total: unknown; null_count: unknown; unknown_count: unknown; legacy_link_drift: unknown }>(`SELECT COUNT(*)::bigint total,
       COUNT(*) FILTER (WHERE now_commitment_provenance IS NULL)::bigint null_count,
       COUNT(*) FILTER (WHERE now_commitment_provenance NOT IN ('LEGACY_UNGATED','NATIVE_GATED'))::bigint unknown_count,
       COUNT(*) FILTER (WHERE now_commitment_provenance='LEGACY_UNGATED' AND now_decision_record_id IS NOT NULL)::bigint legacy_link_drift
       FROM "${schema}".roadmap_items`).catch(() => ({ rows: [] })),
+    client.query<{ plan_violations: unknown; reservation_violations: unknown }>(`SELECT
+      (SELECT COUNT(*) FROM "${schema}".portfolio_capacity_plans WHERE
+        (state='ACTIVE' AND active_workspace_id IS DISTINCT FROM workspace_id) OR
+        (state<>'ACTIVE' AND active_workspace_id IS NOT NULL))::bigint plan_violations,
+      (SELECT COUNT(*) FROM "${schema}".portfolio_capacity_reservations WHERE NOT (
+        (state='STAGED' AND active_roadmap_item_id IS NULL AND released_at IS NULL) OR
+        (state='ACTIVE' AND active_roadmap_item_id=roadmap_item_id AND released_at IS NULL) OR
+        (state='RELEASED' AND active_roadmap_item_id IS NULL AND released_at IS NOT NULL)
+      ))::bigint reservation_violations`).catch(() => ({ rows: [] })),
   ]);
   const presentTables = new Set(tablesResult.rows.map((row) => row.table_name));
   const columnsByName = new Map(columnsResult.rows.map((row) => [row.column_name, row]));
@@ -221,16 +232,21 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
   const tables = DECISION_GATE_TABLES.map((name) => ({ name, present: presentTables.has(name) }));
   const columns = DECISION_GATE_COLUMNS.map((name) => ({ name, present: columnsByName.has(name), nullable: columnsByName.get(name)?.is_nullable !== "NO", default: columnsByName.get(name)?.column_default ?? null }));
   const indexes = DECISION_GATE_INDEXES.map((name) => ({ name, present: indexesByName.has(name), valid: indexesByName.get(name) === true, state: indexesByName.get(name) === true ? "ACTIVE" : indexesByName.has(name) ? "FAILED_OR_CREATING" : "MISSING" }));
-  const presentConstraints = new Set(constraintsResult.rows.map((row) => row.constraint_name));
-  const constraints = DECISION_GATE_CONSTRAINTS.map((name) => ({ name, present: presentConstraints.has(name) }));
+  const constraintsByName = new Map(constraintsResult.rows.map((row) => [row.constraint_name, row]));
+  const constraints = DECISION_GATE_CONSTRAINTS.map((name) => {
+    const row = constraintsByName.get(name)
+    return { name, present: Boolean(row), type: row?.constraint_type ?? null, valid: row?.valid === true, definition: row?.definition ?? null }
+  });
   const count = (value: unknown) => typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.MAX_SAFE_INTEGER;
   const provenanceRow = provenanceResult.rows[0];
   const provenance = { available: Boolean(provenanceRow), total: count(provenanceRow?.total), nullCount: count(provenanceRow?.null_count), unknownCount: count(provenanceRow?.unknown_count), legacyLinkDrift: count(provenanceRow?.legacy_link_drift) };
+  const integrityRow = integrityResult.rows[0];
+  const integrity = { available: Boolean(integrityRow), planViolations: count(integrityRow?.plan_violations), reservationViolations: count(integrityRow?.reservation_violations) };
   const provenanceColumn = columnsByName.get("now_commitment_provenance");
   const columnsHealthy = columns.every((item) => item.present) && provenanceColumn?.is_nullable === "NO" && Boolean(provenanceColumn.column_default?.includes("LEGACY_UNGATED"));
   const migrationReceipts = DECISION_GATE_MIGRATIONS.map((name) => ({ name, applied: applied.includes(name) }));
-  const migrationReady = migrationReceipts.every((item) => item.applied) && tables.every((item) => item.present) && columnsHealthy && constraints.every((item) => item.present) && indexes.every((item) => item.state === "ACTIVE") && provenance.available && provenance.nullCount === 0 && provenance.unknownCount === 0 && provenance.legacyLinkDrift === 0;
-  return { migrationReceipts, tables, columns, constraints, indexes, provenance, migrationReady, capacityMetadataReady: false, runtimeEnforcementReady: false };
+  const migrationReady = migrationReceipts.every((item) => item.applied) && tables.every((item) => item.present) && columnsHealthy && constraints.every((item) => item.present && item.valid && Boolean(item.type) && Boolean(item.definition)) && indexes.every((item) => item.state === "ACTIVE") && provenance.available && provenance.nullCount === 0 && provenance.unknownCount === 0 && provenance.legacyLinkDrift === 0 && integrity.available && integrity.planViolations === 0 && integrity.reservationViolations === 0;
+  return { migrationReceipts, tables, columns, constraints, indexes, provenance, integrity, migrationReady, capacityMetadataReady: false, runtimeEnforcementReady: false };
 }
 
 const DSQL_WRITE_LIMITS = {
