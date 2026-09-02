@@ -20,6 +20,8 @@
     "performance:ingest-vercel": "node --experimental-strip-types scripts/ingest-performance-vercel-logs.ts",
     "performance:ingest-local": "node --experimental-strip-types scripts/ingest-performance-local-logs.ts",
     "performance:run-local": "node --experimental-strip-types scripts/run-performance-baseline.ts",
+    "performance:preview-seed": "node --experimental-strip-types scripts/preview-performance-fixture.ts seed",
+    "performance:preview-cleanup": "node --experimental-strip-types scripts/preview-performance-fixture.ts cleanup",
     "performance:smoke-load": "node --experimental-strip-types --input-type=module -e \"await import('./e2e/performance/global-setup.ts'); await import('./e2e/performance/global-teardown.ts'); await import('./scripts/ingest-performance-local-logs.ts').catch(e => { if (!String(e.message).includes('Usage:')) throw e }); await import('./scripts/ingest-performance-vercel-logs.ts').catch(e => { if (!String(e.message).includes('Usage:')) throw e })\"",
     "test:e2e:all": "E2E_FUNCTIONAL=1 playwright test",
     "docs:screenshots": "playwright test --project=screenshots e2e/screenshots.spec.ts"
