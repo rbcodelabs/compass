@@ -360,6 +360,45 @@ async function assertRepair039Postconditions(client: PoolClient, schema: string)
   if (!healthy) throw new Error("Migration 042 postcondition failed: repaired 039 catalog or provenance integrity is incomplete.")
 }
 
+const DECISION_MIGRATION_POSTCONDITIONS = {
+  "040_release_authorization": {
+    tables: new Set<string>(["release_runs", "release_run_tasks", "release_dispatches"]),
+    constraints: new Set<string>(["release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency"]),
+    indexes: new Set<string>(["idx_review_revisions_request_source", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status"]),
+  },
+  "041_portfolio_capacity_ledger": {
+    tables: new Set<string>(["portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"]),
+    constraints: new Set<string>(["portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"]),
+    indexes: new Set<string>(["idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"]),
+  },
+} as const
+
+async function assertDecisionMigrationPostconditions(client: PoolClient, schema: string, migrationName: string) {
+  if (migrationName === "039_native_decision_gates" || migrationName === "042_native_decision_gates_repair") {
+    await assertRepair039Postconditions(client, schema)
+    return
+  }
+  const expected = DECISION_MIGRATION_POSTCONDITIONS[migrationName as keyof typeof DECISION_MIGRATION_POSTCONDITIONS]
+  if (!expected) return
+  const health = await getDecisionGateInfrastructureHealth(client, schema, [])
+  const tables = health.tables.filter((table) => expected.tables.has(table.name))
+  const constraints = health.constraints.filter((constraint) => expected.constraints.has(constraint.name))
+  const indexes = health.indexes.filter((index) => expected.indexes.has(index.name))
+  const healthy = tables.length === expected.tables.size
+    && tables.every((table) => table.present)
+    && constraints.length === expected.constraints.size
+    && constraints.every((constraint) => constraint.present && constraint.valid && constraint.structureMatches)
+    && indexes.length === expected.indexes.size
+    && indexes.every((index) => index.state === "ACTIVE")
+  if (!healthy) throw new Error(`Migration ${migrationName} postcondition failed: catalog is incomplete or mismatched.`)
+  if (migrationName === "040_release_authorization") {
+    const sourceColumn = await client.query<{ present: boolean }>(`SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='review_revisions' AND column_name='source_fingerprint'
+    ) present`, [schema])
+    if (sourceColumn.rows[0]?.present !== true) throw new Error("Migration 040 postcondition failed: review_revisions.source_fingerprint is missing.")
+  }
+}
+
 const DSQL_WRITE_LIMITS = {
   maxRows: 3_000,
   maxBytes: 10 * 1024 * 1024,
@@ -867,9 +906,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (migration.name === "039_native_decision_gates" || migration.name === "042_native_decision_gates_repair") {
-        await assertRepair039Postconditions(client, schema)
-      }
+      await assertDecisionMigrationPostconditions(client, schema, migration.name)
 
       // Only this distinct attempt becomes a successful receipt. A failed
       // attempt remains unfinished as forensic evidence and is never relabeled.

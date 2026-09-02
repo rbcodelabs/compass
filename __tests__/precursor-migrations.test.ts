@@ -57,6 +57,15 @@ describe("decision-gate expand precursor migrations", () => {
     expect(sql).toContain('ALTER TABLE ASYNC "roadmap_items" VALIDATE CONSTRAINT')
   })
 
+  it("requires migration-specific catalog postconditions before finishing every decision-gate receipt", () => {
+    expect(route).toContain('"040_release_authorization":')
+    expect(route).toContain('"041_portfolio_capacity_ledger":')
+    expect(route).toContain("assertDecisionMigrationPostconditions")
+    expect(route).toContain("tables.length === expected.tables.size")
+    expect(route).toContain("constraints.length === expected.constraints.size")
+    expect(route).toContain("indexes.length === expected.indexes.size")
+  })
+
   it("does not add precursor models or columns to Prisma ordinary-route reads", () => {
     const schema = readFileSync(path.join(root, "prisma/schema.prisma"), "utf8")
     expect(schema).not.toContain("model ReviewRequest")
