@@ -292,6 +292,51 @@ This fixes the Preview reporting defect in which the health GET selected all
 tracking rows, including unfinished attempts, and therefore described 039 as
 applied after its statement failure.
 
+#### Bounded, resumable asynchronous DDL
+
+The migration route must not make correctness depend on one Vercel invocation
+remaining alive until every Aurora DSQL asynchronous DDL job finishes. Raising
+`maxDuration` is operational headroom, not a completion guarantee: migrations
+039–042 can create several jobs and DSQL does not provide a useful upper bound
+for their combined duration.
+
+For migrations 039–042, `POST` is therefore a bounded advancement operation over
+a durable attempt, not a synchronous promise to finish the migration. Each
+authenticated invocation may execute only a configured statement/job/time
+budget, persists the exact next step and every returned DSQL job ID before
+returning, and responds with terminal success or an explicit non-terminal state.
+A later invocation with the same migration name resumes that attempt by polling
+the recorded job IDs and advancing only completed steps. Concurrent invocations
+must serialize on the migration attempt; neither may launch the same logical
+step independently.
+
+The resumable runner preserves these invariants:
+
+- the migration plan is a versioned, ordered list of stable step identities;
+- an attempt is bound to the migration name and exact SQL/plan fingerprint, and
+  refuses resume if deployed code presents a different fingerprint;
+- a launched async job is durably correlated to its step before another step is
+  advanced; missing or ambiguous correlation fails closed;
+- a pending job is never interpreted as success, and a failed/cancelled/unknown
+  job leaves the attempt incomplete with diagnostic state;
+- retries inspect the exact catalog before launch and after completion, so
+  idempotent DDL cannot conceal a same-name, wrong-shape object;
+- bounded backfills keep their existing durable cursor and row/byte limits;
+- `finished_at` remains null across all non-terminal invocations and is written
+  only after every step is complete and the migration-specific exact catalog
+  and data postconditions pass;
+- losing an HTTP response is safe: the next authenticated call returns or
+  resumes the same durable attempt rather than inferring success from the
+  client-visible response;
+- the all-pending form advances at most one migration at a time and never begins
+  a dependent migration while its predecessor is non-terminal.
+
+Authenticated `GET` remains read-only and reports the active attempt, current
+step, recorded job states, and whether another `POST` is required. Operators may
+poll and re-invoke; polling itself never launches DDL. The ordinary 60-second
+route limit can remain as a guardrail once the advancement budget leaves enough
+time to persist state and return cleanly.
+
 #### DSQL catalog equivalence
 
 Aurora DSQL stores table rows in the primary-key structure and includes all
