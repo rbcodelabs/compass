@@ -5,6 +5,7 @@ import { awsCredentialsProvider } from "@vercel/functions/oidc";
 import { readFileSync } from "fs";
 import path from "path";
 import { getActiveSchema } from "@/lib/schema";
+import { backfillRoadmapCommitmentProvenance } from "@/lib/dsql-backfill";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -182,7 +183,40 @@ const MIGRATIONS = [
     name: "038_research_blob_cleanup",
     filePath: path.join(process.cwd(), "prisma/migrations/038_research_blob_cleanup/migration.sql"),
   },
+  {
+    name: "039_native_decision_gates",
+    filePath: path.join(process.cwd(), "prisma/migrations/039_native_decision_gates/migration.sql"),
+  },
+  {
+    name: "040_release_authorization",
+    filePath: path.join(process.cwd(), "prisma/migrations/040_release_authorization/migration.sql"),
+  },
+  {
+    name: "041_portfolio_capacity_ledger",
+    filePath: path.join(process.cwd(), "prisma/migrations/041_portfolio_capacity_ledger/migration.sql"),
+  },
 ];
+
+const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations"] as const;
+const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record_id"] as const;
+const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_decision"] as const;
+
+async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string) {
+  const [tablesResult, columnsResult, indexesResult] = await Promise.all([
+    client.query<{ table_name: string }>(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = ANY($2::text[])`, [schema, [...DECISION_GATE_TABLES]]),
+    client.query<{ column_name: string; is_nullable: string; column_default: string | null }>(`SELECT column_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'roadmap_items' AND column_name = ANY($2::text[])`, [schema, [...DECISION_GATE_COLUMNS]]),
+    client.query<{ name: string; valid: boolean }>(`SELECT c.relname AS name, i.indisvalid AS valid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[])`, [schema, [...DECISION_GATE_INDEXES]]),
+  ]);
+  const presentTables = new Set(tablesResult.rows.map((row) => row.table_name));
+  const columnsByName = new Map(columnsResult.rows.map((row) => [row.column_name, row]));
+  const indexesByName = new Map(indexesResult.rows.map((row) => [row.name, row.valid]));
+  const tables = DECISION_GATE_TABLES.map((name) => ({ name, present: presentTables.has(name) }));
+  const columns = DECISION_GATE_COLUMNS.map((name) => ({ name, present: columnsByName.has(name), nullable: columnsByName.get(name)?.is_nullable !== "NO", default: columnsByName.get(name)?.column_default ?? null }));
+  const indexes = DECISION_GATE_INDEXES.map((name) => ({ name, present: indexesByName.has(name), valid: indexesByName.get(name) === true }));
+  const provenance = columnsByName.get("now_commitment_provenance");
+  const columnsHealthy = columns.every((item) => item.present) && provenance?.is_nullable === "NO" && Boolean(provenance.column_default?.includes("LEGACY_UNGATED"));
+  return { tables, columns, indexes, ready: tables.every((item) => item.present) && columnsHealthy && indexes.every((item) => item.valid) };
+}
 
 const DSQL_WRITE_LIMITS = {
   maxRows: 3_000,
@@ -500,10 +534,11 @@ export async function GET(req: NextRequest) {
       FROM "${schema}"._prisma_migrations
       ORDER BY finished_at ASC
     `).catch(() => ({ rows: [] as { name: string }[] }));
-    const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup] = await Promise.all([
+    const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup, decisionGateInfrastructure] = await Promise.all([
       getResearchCaptureHardeningReport(client, schema),
       getResearchGuidedUxReport(client, schema),
       getResearchBlobCleanupReport(client, schema),
+      getDecisionGateInfrastructureHealth(client, schema),
     ]);
 
     return NextResponse.json({
@@ -513,6 +548,7 @@ export async function GET(req: NextRequest) {
       researchCaptureHardening,
       researchGuidedUx,
       researchBlobCleanup,
+      decisionGateInfrastructure,
     });
   } finally {
     client.release();
@@ -630,6 +666,7 @@ export async function POST(req: NextRequest) {
       // Prefix unqualified DDL with schema search_path
       await client.query(`SET search_path TO "${schema}"`);
 
+      let pendingRoadmapCommitmentProvenanceBackfill = false;
       for (const stmt of statements) {
         try {
           // ASYNC is mandatory on DSQL and unsupported by local PostgreSQL.
@@ -638,6 +675,12 @@ export async function POST(req: NextRequest) {
             ? stmt.replace(/\bINDEX ASYNC\b/gi, "INDEX")
             : stmt;
           const result = await client.query<{ job_id?: string }>(executableStmt);
+          if (migration.name === "039_native_decision_gates" && /ALTER\s+COLUMN\s+"?now_commitment_provenance"?\s+SET\s+DEFAULT/i.test(executableStmt)) {
+            pendingRoadmapCommitmentProvenanceBackfill = true;
+          } else if (migration.name === "039_native_decision_gates" && pendingRoadmapCommitmentProvenanceBackfill && /^COMMIT;?$/i.test(executableStmt.trim())) {
+            pendingRoadmapCommitmentProvenanceBackfill = false;
+            await backfillRoadmapCommitmentProvenance(client, schema, log);
+          }
           if (!process.env.DATABASE_URL && /CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC/i.test(stmt)) {
             const jobId = result.rows[0]?.job_id;
             if (jobId && migration.name === "036_research_capture_hardening") {

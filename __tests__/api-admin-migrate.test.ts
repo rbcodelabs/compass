@@ -199,6 +199,17 @@ describe("/api/admin/migrate rollout observability", () => {
       preflight: { passed: true, writesExistingRows: false },
       indexesValid: false,
     })
+    expect(result.manifest).toEqual(expect.arrayContaining([
+      "039_native_decision_gates",
+      "040_release_authorization",
+      "041_portfolio_capacity_ledger",
+    ]))
+    expect(result.decisionGateInfrastructure).toMatchObject({
+      ready: false,
+      tables: expect.arrayContaining([expect.objectContaining({ name: "review_requests", present: false })]),
+      columns: expect.arrayContaining([expect.objectContaining({ name: "now_commitment_provenance", present: false })]),
+      indexes: expect.arrayContaining([expect.objectContaining({ name: "idx_capacity_plans_workspace_state", present: false, valid: false })]),
+    })
   })
 
   it("reports every required index and marks missing or invalid indexes false", async () => {
