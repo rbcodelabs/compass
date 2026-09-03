@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -14,9 +15,25 @@ export function parseRecoveryArgs(argv: readonly string[]) {
     if (!flag?.startsWith("--") || !value || value.startsWith("--")) throw new Error("Invalid recovery argument");
     flags.set(flag.slice(2), value);
   }
-  if ([...flags.keys()].some((key) => !["deployment-sha", "deployment-id", "deployment-url"].includes(key))) throw new Error("Unknown recovery argument");
+  if ([...flags.keys()].some((key) => !["deployment-sha", "deployment-id", "deployment-url", "deployment-metadata-file"].includes(key))) throw new Error("Unknown recovery argument");
   const required = (key: string) => flags.get(key) ?? (() => { throw new Error(`Missing --${key}`); })();
-  return { action, expectedSha: required("deployment-sha"), expectedDeploymentId: required("deployment-id"), deploymentUrl: required("deployment-url") };
+  return { action, expectedSha: required("deployment-sha"), expectedDeploymentId: required("deployment-id"), deploymentUrl: required("deployment-url"), deploymentMetadataFile: required("deployment-metadata-file") };
+}
+
+const RECOVERY_PROJECT_ID = "prj_BofzJ65kFnTykvTkoti7o4hjvxw9";
+
+export function validateRecoveryDeploymentMetadata(
+  value: unknown,
+  expected: { expectedSha: string; expectedDeploymentId: string; deploymentUrl: string },
+): void {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) throw new Error("Invalid recovery deployment metadata");
+  const metadata = value as Record<string, unknown>;
+  if (Object.keys(metadata).length !== 6 || Object.keys(metadata).some((key) => !["id", "url", "sha", "projectId", "readyState", "aliases"].includes(key))) throw new Error("Invalid recovery deployment metadata");
+  if (
+    metadata.id !== expected.expectedDeploymentId || metadata.url !== expected.deploymentUrl ||
+    metadata.sha !== expected.expectedSha || metadata.projectId !== RECOVERY_PROJECT_ID ||
+    metadata.readyState !== "READY" || !Array.isArray(metadata.aliases) || metadata.aliases.length !== 0
+  ) throw new Error("Recovery deployment metadata does not prove the exact executor");
 }
 
 export async function runRecovery(argv: readonly string[]): Promise<void> {
@@ -29,6 +46,9 @@ export async function runRecovery(argv: readonly string[]): Promise<void> {
   if (!/^dpl_[A-Za-z0-9]{20,64}$/.test(args.expectedDeploymentId)) throw new Error("Invalid executor deployment ID");
   const url = new URL(args.deploymentUrl);
   if (url.protocol !== "https:" || !/^compass-[a-z0-9]+-rbcodelabs-team\.vercel\.app$/.test(url.hostname) || url.pathname !== "/") throw new Error("Exact unaliased Compass executor URL required");
+  const metadataStat = fs.lstatSync(args.deploymentMetadataFile);
+  if (!metadataStat.isFile() || metadataStat.isSymbolicLink()) throw new Error("Recovery deployment metadata must be a regular file");
+  validateRecoveryDeploymentMetadata(JSON.parse(fs.readFileSync(args.deploymentMetadataFile, "utf8")), args);
   const body = JSON.stringify({ action: args.action, expectedSha: args.expectedSha, expectedDeploymentId: args.expectedDeploymentId, expiresAt: new Date(Date.now() + 20 * 60_000).toISOString() });
   const response = await fetch(new URL("/api/admin/performance-fixture-recovery", url), {
     method: "POST",

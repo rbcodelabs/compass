@@ -8,6 +8,7 @@ export const maxDuration = 300;
 
 const MAX_BODY_BYTES = 1024;
 const MAX_EXPIRY_MS = 30 * 60_000;
+const RECOVERY_PROJECT_ID = "prj_BofzJ65kFnTykvTkoti7o4hjvxw9";
 const ALLOWED_KEYS = new Set(["action", "expectedSha", "expectedDeploymentId", "expiresAt"]);
 
 interface RecoveryRequest {
@@ -27,9 +28,9 @@ function hidden(status = 404): NextResponse {
 function exactExecutor(req: NextRequest, body: RecoveryRequest): boolean {
   const env = process.env;
   return !!env.VERCEL_GIT_COMMIT_SHA && /^[a-f0-9]{40}$/.test(env.VERCEL_GIT_COMMIT_SHA) &&
-    !!env.VERCEL_DEPLOYMENT_ID && /^dpl_[A-Za-z0-9]{20,64}$/.test(env.VERCEL_DEPLOYMENT_ID) &&
+    env.VERCEL_PROJECT_ID === RECOVERY_PROJECT_ID &&
     !!env.VERCEL_URL && /^compass-[a-z0-9]+-rbcodelabs-team\.vercel\.app$/.test(env.VERCEL_URL) &&
-    body.expectedSha === env.VERCEL_GIT_COMMIT_SHA && body.expectedDeploymentId === env.VERCEL_DEPLOYMENT_ID &&
+    body.expectedSha === env.VERCEL_GIT_COMMIT_SHA &&
     req.nextUrl.protocol === "https:" && req.nextUrl.host === env.VERCEL_URL;
 }
 

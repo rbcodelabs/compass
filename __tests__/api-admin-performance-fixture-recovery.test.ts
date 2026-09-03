@@ -17,7 +17,7 @@ function env() {
     VERCEL_ENV: "preview", COMPASS_PERF_BASELINE: "1", PERF_SERVER_KIND: "vercel-preview",
     PGSCHEMA: "compass", PGHOST: "cluster.dsql.us-east-1.on.aws",
     AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/preview", AWS_REGION: "us-east-1",
-    VERCEL_GIT_COMMIT_SHA: SHA, VERCEL_DEPLOYMENT_ID: DEPLOYMENT, VERCEL_URL: HOST, MIGRATION_SECRET: SECRET,
+    VERCEL_GIT_COMMIT_SHA: SHA, VERCEL_DEPLOYMENT_ID: DEPLOYMENT, VERCEL_PROJECT_ID: "prj_BofzJ65kFnTykvTkoti7o4hjvxw9", VERCEL_URL: HOST, MIGRATION_SECRET: SECRET,
   });
   for (const key of ["DATABASE_URL", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "VERCEL_OIDC_TOKEN", "COMPASS_PERF_SCHEMA"]) delete process.env[key];
 }
@@ -37,7 +37,7 @@ describe("POST /api/admin/performance-fixture-recovery", () => {
     ["production schema", () => { process.env.PGSCHEMA = "compass_prod"; }],
     ["static credentials", () => { process.env.AWS_ACCESS_KEY_ID = "forbidden"; }],
     ["wrong executor SHA", () => undefined, { expectedSha: "b".repeat(40) }],
-    ["wrong executor deployment", () => undefined, { expectedDeploymentId: `dpl_${"B".repeat(24)}` }],
+    ["malformed executor deployment", () => undefined, { expectedDeploymentId: "not-a-deployment" }],
   ];
   it.each(guardCases)("refuses %s before Prisma", async (_label, mutate, overrides = {}) => {
     mutate();
@@ -61,6 +61,20 @@ describe("POST /api/admin/performance-fixture-recovery", () => {
     expect((await POST(request("cleanup"))).status).toBe(200);
     expect(execute).toHaveBeenCalledWith("cleanup");
     expect((await POST(request("verify", SECRET, { runId: "other-run" }))).status).toBe(404);
+  });
+
+  it("uses project, SHA, and unique host as the runtime composite rather than VERCEL_DEPLOYMENT_ID", async () => {
+    process.env.VERCEL_DEPLOYMENT_ID = `dpl_${"Z".repeat(24)}`;
+    const { POST } = await import("@/app/api/admin/performance-fixture-recovery/route");
+    expect((await POST(request("verify"))).status).toBe(200);
+    expect(execute).toHaveBeenCalledWith("verify");
+  });
+
+  it("refuses the wrong immutable Vercel project before Prisma", async () => {
+    process.env.VERCEL_PROJECT_ID = "prj_wrong";
+    const { POST } = await import("@/app/api/admin/performance-fixture-recovery/route");
+    expect((await POST(request("verify"))).status).toBe(404);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("returns generic no-store failures without logging secrets", async () => {
@@ -100,7 +114,7 @@ describe("POST /api/admin/performance-fixture-recovery", () => {
     ["missing secret", "", {}],
     ["wrong secret", "wrong", {}],
     ["wrong SHA", SECRET, { expectedSha: "b".repeat(40) }],
-    ["wrong deployment", SECRET, { expectedDeploymentId: `dpl_${"B".repeat(24)}` }],
+    ["malformed deployment", SECRET, { expectedDeploymentId: "not-a-deployment" }],
     ["expired", SECRET, { expiresAt: new Date(Date.now() - 1_000).toISOString() }],
     ["unknown field", SECRET, { runId: "other" }],
   ])("logs nothing for diagnose with %s", async (_label, secret, overrides) => {
