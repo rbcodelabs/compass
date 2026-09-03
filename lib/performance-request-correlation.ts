@@ -62,8 +62,8 @@ export function createServerOwnedPerformanceHeaders(incoming: Headers, correlati
 }
 
 export function verifyDownstreamPerformanceCorrelation(
-  env: NodeJS.ProcessEnv, headers: Headers, now = Date.now(), method = headers.get(PERFORMANCE_METHOD_HEADER),
-  pathname = headers.get(PERFORMANCE_PATH_HEADER),
+  env: NodeJS.ProcessEnv, headers: Headers, now: number, method: string | null,
+  pathname: string | null,
 ): string | null {
   const sha = env.VERCEL_GIT_COMMIT_SHA ?? null;
   if (!exactRuntime(env, sha) || !method || !pathname) return null;

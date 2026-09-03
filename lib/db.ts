@@ -85,7 +85,8 @@ function enablePerformanceObserver(pool: Pool): void {
         const { headers } = await import("next/headers");
         const requestHeaders = await headers();
         return currentPerformanceInvocation() ?? verifyDownstreamPerformanceCorrelation(
-          process.env, new Headers(requestHeaders),
+          process.env, new Headers(requestHeaders), Date.now(),
+          requestHeaders.get("x-compass-perf-method"), requestHeaders.get("x-compass-perf-path"),
         );
       } catch {
         return process.env.COMPASS_PERF_REQUEST_ID ?? null;

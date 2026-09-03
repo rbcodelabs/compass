@@ -93,7 +93,7 @@ describe("preview performance request correlation", () => {
     expect(currentPerformanceInvocation()).toBeNull();
   });
 
-  it("accepts the signed envelope downstream and rejects tamper, replay, method, path, SHA, and deployment changes", () => {
+  it("accepts the signed envelope downstream and rejects tamper, expiry, method, path, SHA, and deployment changes", () => {
     const now = 1_788_283_200_000;
     const correlation = createPreviewPerformanceCorrelation(
       validEnv(), "perf_11111111-1111-4111-8111-111111111111", "a".repeat(40),
@@ -104,11 +104,11 @@ describe("preview performance request correlation", () => {
     expect(verifyDownstreamPerformanceCorrelation(validEnv(), headers, now + 30_001, "GET", "/roadmap")).toBeNull();
     expect(verifyDownstreamPerformanceCorrelation(validEnv(), headers, now + 1, "POST", "/roadmap")).toBeNull();
     expect(verifyDownstreamPerformanceCorrelation(validEnv(), headers, now + 1, "GET", "/tasks")).toBeNull();
-    expect(verifyDownstreamPerformanceCorrelation({ ...validEnv(), VERCEL_GIT_COMMIT_SHA: "b".repeat(40) }, headers, now + 1)).toBeNull();
-    expect(verifyDownstreamPerformanceCorrelation({ ...validEnv(), VERCEL_DEPLOYMENT_ID: `dpl_${"B".repeat(24)}` }, headers, now + 1)).toBeNull();
+    expect(verifyDownstreamPerformanceCorrelation({ ...validEnv(), VERCEL_GIT_COMMIT_SHA: "b".repeat(40) }, headers, now + 1, "GET", "/roadmap")).toBeNull();
+    expect(verifyDownstreamPerformanceCorrelation({ ...validEnv(), VERCEL_DEPLOYMENT_ID: `dpl_${"B".repeat(24)}` }, headers, now + 1, "GET", "/roadmap")).toBeNull();
     const tampered = new Headers(headers);
     tampered.set("x-compass-perf-tag", "0".repeat(64));
-    expect(verifyDownstreamPerformanceCorrelation(validEnv(), tampered, now + 1)).toBeNull();
+    expect(verifyDownstreamPerformanceCorrelation(validEnv(), tampered, now + 1, "GET", "/roadmap")).toBeNull();
   });
 
   it("uses passive headers without interception or cache variance", () => {

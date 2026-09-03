@@ -174,6 +174,21 @@ describe("performance CDP resource collector lifecycle", () => {
     expect(snapshot).toEqual(expect.objectContaining({ attemptedCount: 3, completedCount: 3, canceledCount: 0 }));
   });
 
+  it("rejects duplicate invocation evidence across distinct browser requests", async () => {
+    vi.useFakeTimers();
+    const cdp = new FakeCdp();
+    const collector = await createResourceCollector(cdp as unknown as CDPSession, []);
+    collector.beginSample("perf_one", { kind: "rsc", targetPath: "/org/ws/roadmap", match: "exact" });
+    for (const requestId of ["r1", "r2"]) {
+      cdp.emit("Network.requestWillBeSent", request(requestId, "http://localhost/org/ws/roadmap", { Rsc: "1" }));
+      cdp.emit("Network.responseReceived", { requestId, type: "Fetch", response: {
+        url: "http://localhost/org/ws/roadmap", mimeType: "text/x-component", status: 200,
+        headers: { "x-compass-perf-invocation-id": `perf_inv_${"1".repeat(32)}` },
+      }});
+    }
+    await expect(collector.closeSample("perf_one", { min: 1 })).rejects.toThrow(/reused by multiple requests/);
+  });
+
   it("records canceled RSC attempts while retaining completed fan-out resources", async () => {
     vi.useFakeTimers();
     const cdp = new FakeCdp();

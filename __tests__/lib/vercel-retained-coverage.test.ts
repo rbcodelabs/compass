@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { createRetainedCoverageManifest, exportRetainedVercelLogs, fetchAllRetainedPages, serializeExactDeploymentRecords, verifyRetainedCoverage, writeCoverageManifestAtomic } from "@/lib/vercel-retained-coverage";
+import { createRetainedCoverageManifest, exportRetainedVercelLogs, fetchAllRetainedPages, runVercelLogsCli, serializeExactDeploymentRecords, verifyRetainedCoverage, writeCoverageManifestAtomic } from "@/lib/vercel-retained-coverage";
 
 const expected = { projectId: "prj_one", deploymentId: "dpl_ABCDEFGHIJKLMNOPQRSTUVWX", deploymentUrl: "https://exact.vercel.app", sourceSha: "a".repeat(40) };
 const browser = [{ requestId: "perf_inv_" + "1".repeat(32), method: "GET", path: "/roadmap", startedAt: "2026-09-03T12:00:01.000Z" }];
 const raw = `${JSON.stringify({ id: "one", deploymentId: expected.deploymentId })}\n`;
-const manifest = () => createRetainedCoverageManifest({ ...expected, raw, requestedStart: "2026-09-03T12:00:00.000Z", requestedEnd: "2026-09-03T12:00:02.000Z", browserMin: browser[0].startedAt, browserMax: browser[0].startedAt, safetyMarginMs: 500, retrievedAt: "2026-09-03T12:01:00.000Z", clientVersion: "vercel-api-v1/50.44.0", pageCount: 2, cursorExhausted: true, finalCursor: null, exactDeploymentRejectionCount: 0 });
+const manifest = () => createRetainedCoverageManifest({ ...expected, raw, requestedStart: "2026-09-03T12:00:00.000Z", requestedEnd: "2026-09-03T12:00:02.000Z", browserMin: browser[0].startedAt, browserMax: browser[0].startedAt, safetyMarginMs: 500, retrievedAt: "2026-09-03T12:01:00.000Z", clientVersion: "Vercel CLI 50.44.0", settlingDelayMs: 30_000, recordLimit: 10_000, pageCount: 2, cursorExhausted: true, finalCursor: null, exactDeploymentRejectionCount: 0 });
 
 describe("retained Vercel coverage", () => {
   it("accepts exact bounded exhausted hash-verified coverage", () => {
@@ -63,5 +63,27 @@ describe("retained Vercel coverage", () => {
     });
     expect(seen).toEqual([{ ...input, cursor: null }, { ...input, cursor: "next" }]);
     expect(result.cursorExhausted).toBe(true);
+  });
+  it("uses the supported bounded Vercel CLI argument vector and accepts real envelope shape", () => {
+    const calls: string[][] = [];
+    const envelope = { id: "gm98s-1788400459949-41d83ef6154b", timestamp: 1788400459949, deploymentId: expected.deploymentId, projectId: expected.projectId, source: "serverless", requestMethod: "GET", requestPath: "/acme/compass/roadmap", responseStatusCode: 200, environment: "preview", domain: "exact.vercel.app", logs: [] };
+    const run = ((_command: string, args: readonly string[]) => {
+      calls.push([...args]);
+      return { status: 0, stdout: args[0] === "--version" ? "Vercel CLI 50.44.0\n" : `${JSON.stringify(envelope)}\n`, stderr: "", pid: 1, output: [], signal: null };
+    }) as never;
+    const result = runVercelLogsCli({ deploymentId: expected.deploymentId, projectCwd: "/repo", scope: "rbcodelabs-team", requestedStart: "2026-09-03T12:00:00.000Z", requestedEnd: "2026-09-03T12:00:02.000Z", settledAt: "2026-09-03T12:00:32.000Z" }, run);
+    expect(calls[0]).toEqual(["logs", expected.deploymentId, "--since", "2026-09-03T12:00:00.000Z", "--until", "2026-09-03T12:00:02.000Z", "--json", "--limit", "10000", "--cwd", "/repo", "--scope", "rbcodelabs-team"]);
+    expect(result).toEqual(expect.objectContaining({ recordCount: 1, settlingDelayMs: 30_000 }));
+  });
+
+  it.each([
+    ["nonzero", { status: 1, stdout: "", stderr: "failed" }],
+    ["warning", { status: 0, stdout: "", stderr: "limit reached; output truncated" }],
+    ["malformed", { status: 0, stdout: "not json\n", stderr: "" }],
+    ["foreign", { status: 0, stdout: `${JSON.stringify({ deploymentId: "dpl_other", source: "serverless" })}\n`, stderr: "" }],
+  ])("rejects %s CLI output", (_name, first) => {
+    let call = 0;
+    const run = (() => call++ === 0 ? { ...first, pid: 1, output: [], signal: null } : { status: 0, stdout: "Vercel CLI 50.44.0\n", stderr: "", pid: 1, output: [], signal: null }) as never;
+    expect(() => runVercelLogsCli({ deploymentId: expected.deploymentId, projectCwd: "/repo", scope: "team", requestedStart: "2026-09-03T12:00:00.000Z", requestedEnd: "2026-09-03T12:00:02.000Z", settledAt: "2026-09-03T12:00:32.000Z" }, run)).toThrow();
   });
 });

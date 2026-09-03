@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import type { BrowserRequest } from "./performance-baseline";
 
 export interface RetainedCoverageManifest {
@@ -8,6 +9,7 @@ export interface RetainedCoverageManifest {
   projectId: string; deploymentId: string; deploymentUrl: string; sourceSha: string;
   requestedStart: string; requestedEnd: string; browserMin: string; browserMax: string;
   safetyMarginMs: number; retrievedAt: string; clientVersion: string;
+  settlingDelayMs: number; recordLimit: 10000;
   pageCount: number; cursorExhausted: boolean; finalCursor: null;
   recordCount: number; exactDeploymentRejectionCount: number;
   rawSha256: string; normalizedSha256: string;
@@ -44,6 +46,11 @@ export function verifyRetainedCoverage(
 ): void {
   if (manifest.schemaVersion !== 1 || !manifest.cursorExhausted || manifest.finalCursor !== null ||
       manifest.pageCount < 1 || manifest.exactDeploymentRejectionCount !== 0 ||
+      manifest.recordLimit !== 10_000 || !Number.isFinite(manifest.settlingDelayMs) || manifest.settlingDelayMs < 0 ||
+      !Number.isFinite(manifest.safetyMarginMs) || manifest.safetyMarginMs < 500 ||
+      !manifest.clientVersion || Number.isNaN(Date.parse(manifest.retrievedAt)) ||
+      Number.isNaN(Date.parse(manifest.requestedStart)) || Number.isNaN(Date.parse(manifest.requestedEnd)) ||
+      Date.parse(manifest.requestedStart) >= Date.parse(manifest.requestedEnd) ||
       manifest.projectId !== expected.projectId || manifest.deploymentId !== expected.deploymentId ||
       manifest.deploymentUrl !== expected.deploymentUrl || manifest.sourceSha !== expected.sourceSha ||
       manifest.rawSha256 !== sha(raw) || manifest.normalizedSha256 !== sha(normalizeRetainedLines(raw)) ||
@@ -62,6 +69,59 @@ export function verifyRetainedCoverage(
     const value = JSON.parse(line) as { deploymentId?: unknown };
     if (value.deploymentId !== expected.deploymentId) throw new Error("Retained Vercel record has the wrong deployment");
   }
+}
+
+export interface VercelCliExportInput {
+  deploymentId: string; projectCwd: string; scope: string;
+  requestedStart: string; requestedEnd: string; settledAt: string;
+}
+
+export function runVercelLogsCli(
+  input: VercelCliExportInput,
+  run: typeof spawnSync = spawnSync,
+): { raw: string; clientVersion: string; settlingDelayMs: number; recordCount: number } {
+  const start = Date.parse(input.requestedStart), end = Date.parse(input.requestedEnd), settled = Date.parse(input.settledAt);
+  if (!/^dpl_[A-Za-z0-9]{20,64}$/.test(input.deploymentId) || !path.isAbsolute(input.projectCwd) ||
+      !input.scope || !Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(settled) ||
+      start >= end || settled < end) throw new Error("Vercel log export identity or bounds are invalid");
+  const args = ["logs", input.deploymentId, "--since", input.requestedStart, "--until", input.requestedEnd,
+    "--json", "--limit", "10000", "--cwd", input.projectCwd, "--scope", input.scope];
+  const result = run("vercel", args, { encoding: "utf8", shell: false }) as SpawnSyncReturns<string>;
+  const stderr = result.stderr ?? "";
+  if (result.status !== 0 || result.error || /truncat|limit reached|retriev(?:al|e).*warn|incomplete/i.test(stderr)) {
+    throw new Error("Vercel log export failed completeness gates");
+  }
+  const raw = result.stdout ?? "";
+  const lines = raw.split(/\r?\n/).filter(Boolean);
+  if (lines.length >= 10_000) throw new Error("Vercel log export reached its record limit");
+  for (const line of lines) {
+    let record: { deploymentId?: unknown; source?: unknown };
+    try { record = JSON.parse(line) as typeof record; } catch { throw new Error("Vercel log export contains malformed JSONL"); }
+    if (record.deploymentId !== input.deploymentId ||
+        (record.source !== "serverless" && record.source !== "serverless-middleware")) {
+      throw new Error("Vercel log export contains foreign records");
+    }
+  }
+  const version = run("vercel", ["--version"], { encoding: "utf8", shell: false }) as SpawnSyncReturns<string>;
+  if (version.status !== 0 || !version.stdout?.trim()) throw new Error("Vercel CLI version is unavailable");
+  return { raw, clientVersion: version.stdout.trim(), settlingDelayMs: settled - end, recordCount: lines.length };
+}
+
+function writeAtomic(file: string, content: string): void {
+  const temporary = `${file}.${process.pid}.tmp`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(temporary, content, { mode: 0o600 });
+  fs.chmodSync(temporary, 0o600);
+  fs.renameSync(temporary, file);
+}
+
+export function writeRetainedCoverageBundle(
+  rawFile: string, normalizedFile: string, manifestFile: string,
+  raw: string, manifest: RetainedCoverageManifest,
+): void {
+  writeAtomic(rawFile, raw);
+  writeAtomic(normalizedFile, normalizeRetainedLines(raw));
+  writeCoverageManifestAtomic(manifestFile, manifest);
 }
 
 export async function fetchAllRetainedPages(
