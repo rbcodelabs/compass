@@ -10,18 +10,29 @@ import {
   parseVercelRetainedLogs,
   type BrowserSample,
 } from "../lib/performance-baseline.ts";
+import { verifyRetainedCoverage, type RetainedCoverageManifest } from "../lib/vercel-retained-coverage.ts";
 
-const [artifactPath, logsPath] = process.argv.slice(2);
-if (!artifactPath || !logsPath) {
-  throw new Error("Usage: ingest-performance-vercel-logs.ts <browser-artifact.json> <vercel-logs.jsonl>");
+const [artifactPath, logsPath, coveragePath] = process.argv.slice(2);
+if (!artifactPath || !logsPath || !coveragePath) {
+  throw new Error("Usage: ingest-performance-vercel-logs.ts <browser-artifact.json> <vercel-logs.jsonl> <coverage-manifest.json>");
 }
 const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8")) as {
   warm?: BrowserSample[];
   cold?: BrowserSample[];
   samples?: BrowserSample[];
+  buildSha?: string; deploymentId?: string; deploymentUrl?: string; projectId?: string;
 };
 const browserSamples = artifact.samples ?? [...(artifact.warm ?? []), ...(artifact.cold ?? [])];
-const lines = fs.readFileSync(logsPath, "utf8").split(/\r?\n/).filter(Boolean);
+const rawLogs = fs.readFileSync(logsPath, "utf8");
+const lines = rawLogs.split(/\r?\n/).filter(Boolean);
+if (!artifact.buildSha || !artifact.deploymentId || !artifact.deploymentUrl || !artifact.projectId) {
+  throw new Error("Browser artifact is missing immutable preview deployment metadata");
+}
+const coverage = JSON.parse(fs.readFileSync(coveragePath, "utf8")) as RetainedCoverageManifest;
+verifyRetainedCoverage(coverage, rawLogs, browserSamples.flatMap((sample) => sample.requests ?? [sample]), {
+  sourceSha: artifact.buildSha, deploymentId: artifact.deploymentId,
+  deploymentUrl: artifact.deploymentUrl, projectId: artifact.projectId,
+});
 const { requests: rawRequests, queryEnvelopes, schemaPath } = parseVercelRetainedLogs(lines);
 const { requests: browserRequests, cacheHits, cdnCacheHits } = extractCorrelatedBrowserRequests(browserSamples);
 const logs = groupVercelRequestLogs(rawRequests);

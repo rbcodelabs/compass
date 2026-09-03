@@ -3,6 +3,9 @@ import fs from "node:fs";
 import {
   createPreviewPerformanceCorrelation,
   createServerOwnedPerformanceHeaders,
+  currentPerformanceInvocation,
+  runWithPerformanceInvocation,
+  verifyDownstreamPerformanceCorrelation,
   PERFORMANCE_INVOCATION_HEADER,
 } from "@/lib/performance-request-correlation";
 
@@ -14,7 +17,9 @@ const validEnv = (): NodeJS.ProcessEnv => ({
   PGSCHEMA: "compass",
   PGHOST: "cluster.dsql.us-east-1.on.aws",
   VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
+  VERCEL_DEPLOYMENT_ID: `dpl_${"A".repeat(24)}`,
   VERCEL_OIDC_TOKEN: "oidc-runtime-signal",
+  MIGRATION_SECRET: "migration-secret-with-enough-entropy",
 });
 
 describe("preview performance request correlation", () => {
@@ -23,11 +28,16 @@ describe("preview performance request correlation", () => {
       validEnv(),
       "perf_11111111-1111-4111-8111-111111111111",
       "a".repeat(40),
-      () => "22222222-2222-4222-8222-222222222222",
+      "GET", "/roadmap", 1_788_283_200_000,
+      () => "22222222222242228222222222222222",
     );
     expect(value).toEqual({
       header: PERFORMANCE_INVOCATION_HEADER,
       invocationId: "perf_inv_22222222222242228222222222222222",
+      issuedAt: "1788283200000",
+      method: "GET",
+      pathname: "/roadmap",
+      tag: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
   });
 
@@ -63,8 +73,42 @@ describe("preview performance request correlation", () => {
     const incoming = new Headers({ [PERFORMANCE_INVOCATION_HEADER]: "perf_inv_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" });
     const headers = createServerOwnedPerformanceHeaders(incoming, {
       invocationId: "perf_inv_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      header: PERFORMANCE_INVOCATION_HEADER,
+      issuedAt: "1788283200000",
+      tag: "c".repeat(64),
+      method: "GET",
+      pathname: "/roadmap",
     });
     expect(headers.get(PERFORMANCE_INVOCATION_HEADER)).toBe("perf_inv_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+  });
+
+  it("auth and adapter work inside middleware-local correlation without cross-request bleed", async () => {
+    const seen = await Promise.all(["perf_inv_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "perf_inv_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"].map(
+      (id) => runWithPerformanceInvocation(id, async () => {
+        await Promise.resolve();
+        return currentPerformanceInvocation();
+      }),
+    ));
+    expect(seen).toEqual(["perf_inv_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "perf_inv_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
+    expect(currentPerformanceInvocation()).toBeNull();
+  });
+
+  it("accepts the signed envelope downstream and rejects tamper, replay, method, path, SHA, and deployment changes", () => {
+    const now = 1_788_283_200_000;
+    const correlation = createPreviewPerformanceCorrelation(
+      validEnv(), "perf_11111111-1111-4111-8111-111111111111", "a".repeat(40),
+      "GET", "/roadmap", now, () => "1".repeat(32),
+    )!;
+    const headers = createServerOwnedPerformanceHeaders(new Headers(), correlation);
+    expect(verifyDownstreamPerformanceCorrelation(validEnv(), headers, now + 1, "GET", "/roadmap")).toBe(correlation.invocationId);
+    expect(verifyDownstreamPerformanceCorrelation(validEnv(), headers, now + 30_001, "GET", "/roadmap")).toBeNull();
+    expect(verifyDownstreamPerformanceCorrelation(validEnv(), headers, now + 1, "POST", "/roadmap")).toBeNull();
+    expect(verifyDownstreamPerformanceCorrelation(validEnv(), headers, now + 1, "GET", "/tasks")).toBeNull();
+    expect(verifyDownstreamPerformanceCorrelation({ ...validEnv(), VERCEL_GIT_COMMIT_SHA: "b".repeat(40) }, headers, now + 1)).toBeNull();
+    expect(verifyDownstreamPerformanceCorrelation({ ...validEnv(), VERCEL_DEPLOYMENT_ID: `dpl_${"B".repeat(24)}` }, headers, now + 1)).toBeNull();
+    const tampered = new Headers(headers);
+    tampered.set("x-compass-perf-tag", "0".repeat(64));
+    expect(verifyDownstreamPerformanceCorrelation(validEnv(), tampered, now + 1)).toBeNull();
   });
 
   it("uses passive headers without interception or cache variance", () => {

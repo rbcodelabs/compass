@@ -7,7 +7,7 @@ import {
   instrumentPgPool,
   type PerformanceQueryEvent,
 } from "./performance-baseline";
-import { PERFORMANCE_INVOCATION_HEADER } from "./performance-request-correlation";
+import { currentPerformanceInvocation, verifyDownstreamPerformanceCorrelation } from "./performance-request-correlation";
 
 declare global {
   var __prisma: PrismaClient | undefined;
@@ -84,7 +84,9 @@ function enablePerformanceObserver(pool: Pool): void {
       try {
         const { headers } = await import("next/headers");
         const requestHeaders = await headers();
-        return requestHeaders.get(PERFORMANCE_INVOCATION_HEADER);
+        return currentPerformanceInvocation() ?? verifyDownstreamPerformanceCorrelation(
+          process.env, new Headers(requestHeaders),
+        );
       } catch {
         return process.env.COMPASS_PERF_REQUEST_ID ?? null;
       }
