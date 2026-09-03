@@ -2,10 +2,8 @@ import { notFound } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { decideReviewAction } from "../actions"
-import { ensureNowCommitmentRevisionFresh } from "@/lib/now-commitment"
-import { isOrgAdminRole } from "@/lib/roles"
+import { canDecideReview, isOrgAdminRole } from "@/lib/roles"
 import { ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh } from "@/lib/building-investment"
-import { ensureNativePolicyActivationRevisionFresh } from "@/lib/native-policy-activation"
 import { DecisionActions } from "@/components/decisions/decision-actions"
 
 export default async function ReviewRequestPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string; requestId: string }> }) {
@@ -29,15 +27,11 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
   })
   if (!request?.currentRevision || (request.workspace.members.length === 0 && !isOrgAdminRole(request.workspace.organization.members[0]?.role))) notFound()
   const revision = request.currentRevision
-  const freshness = request.gateType === "NOW_COMMITMENT"
-    ? await ensureNowCommitmentRevisionFresh(revision.id)
-    : request.gateType === "BUILDING_INVESTMENT"
+  const freshness = request.gateType === "BUILDING_INVESTMENT"
       ? await ensureBuildingInvestmentRevisionFresh(revision.id)
       : request.gateType === "BUILDING_INVESTMENT_REVOCATION"
         ? await ensureBuildingInvestmentRevocationRevisionFresh(revision.id)
-      : request.gateType === "NOW_POLICY_ACTIVATION"
-        ? await ensureNativePolicyActivationRevisionFresh(revision.id)
-        : { stale: Boolean(revision.supersededAt) }
+      : { stale: Boolean(revision.supersededAt) }
   const packet = JSON.parse(revision.packetJson) as {
     roadmapItem?: { title?: string; solutionId?: string | null; opportunityId?: string | null; squadId?: string | null }
     policyVersion?: string
@@ -64,7 +58,8 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
   const isRevocation = request.gateType === "BUILDING_INVESTMENT_REVOCATION"
   const isPolicyActivation = request.gateType === "NOW_POLICY_ACTIVATION"
   const isTracked = request.gateType === "TRACKED_DECISION"
-  const canDecide = request.workspace.members[0]?.role === "ADMIN" || isOrgAdminRole(request.workspace.organization.members[0]?.role)
+  const isRetired = request.gateType === "NOW_COMMITMENT" || isPolicyActivation
+  const canDecide = canDecideReview(request.workspace.members[0]?.role, request.workspace.organization.members[0]?.role)
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
@@ -108,7 +103,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
           {!isTracked && <><dt>Fingerprint</dt><dd className="break-all font-mono">{revision.fingerprint}</dd></>}
         </dl>
       </section>
-      {freshness.stale ? (
+      {isRetired && !decided ? <section className="rounded-lg border p-4 text-sm"><strong>This legacy review is read-only.</strong><p className="text-muted-foreground">Historical evidence remains available for audit.</p></section> : freshness.stale ? (
         <section className="space-y-2 rounded-lg border p-4 text-sm">
           <strong>This review is stale and cannot be decided.</strong>
           <p className="text-muted-foreground">Material inputs changed after this packet was published. Prepare a new immutable revision before deciding.</p>

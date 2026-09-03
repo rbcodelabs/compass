@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockAuth, mockPrepare, mockPrepareBuilding, mockPrepareTracked, mockReviseTracked, mockApplyBuilding, mockFreshBuilding, mockFreshPolicy, mockRecord, mockAdmit, mockQueueRelease, mockRequireEnforcement } = vi.hoisted(() => ({
-  mockAuth: vi.fn(), mockPrepare: vi.fn(), mockPrepareBuilding: vi.fn(), mockPrepareTracked: vi.fn(), mockReviseTracked: vi.fn(), mockApplyBuilding: vi.fn(), mockFreshBuilding: vi.fn(), mockFreshPolicy: vi.fn(), mockRecord: vi.fn(), mockAdmit: vi.fn(), mockQueueRelease: vi.fn(), mockRequireEnforcement: vi.fn(),
+const { mockAuth, mockPrepareBuilding, mockApplyBuilding, mockFreshBuilding, mockRecord, mockQueueRelease } = vi.hoisted(() => ({
+  mockAuth: vi.fn(), mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(), mockFreshBuilding: vi.fn(), mockRecord: vi.fn(), mockQueueRelease: vi.fn(),
 }))
 const prisma = {
   workspace: { findFirst: vi.fn() },
@@ -11,36 +11,21 @@ const prisma = {
 }
 vi.mock("@/auth", () => ({ auth: mockAuth }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
-vi.mock("@/lib/now-commitment", () => ({ prepareNowCommitment: mockPrepare, admitRoadmapItemToNow: mockAdmit }))
-vi.mock("@/lib/now-gate-runtime", () => ({ requireEffectiveNowEnforcement: mockRequireEnforcement }))
 vi.mock("@/lib/decision-service", () => ({ recordDecision: mockRecord }))
-vi.mock("@/lib/tracked-decisions", () => ({ createTrackedDecisionRequest: mockPrepareTracked, reviseTrackedDecisionRequest: mockReviseTracked }))
 vi.mock("@/lib/building-investment", () => ({ prepareBuildingInvestmentReview: mockPrepareBuilding, applyBuildingInvestmentDecision: mockApplyBuilding, ensureBuildingInvestmentRevisionFresh: mockFreshBuilding }))
-vi.mock("@/lib/native-policy-activation", () => ({ applyNativePolicyActivationDecision: vi.fn(), ensureNativePolicyActivationRevisionFresh: mockFreshPolicy }))
 vi.mock("@/lib/release-authorization", () => ({
   queueAuthorizedRelease: mockQueueRelease,
   unconfiguredReleaseSourceRevalidator: { revalidate: vi.fn() },
 }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
-import { createTrackedDecisionAction, decideReviewAction, requestBuildingInvestmentAction, requestNowCommitmentAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
+import { decideReviewAction, requestBuildingInvestmentAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
 
 describe("review actions ownership", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    process.env.NOW_DECISION_GATE_MODE = "enforce"
     mockAuth.mockResolvedValue({ user: { id: "user-1" } })
-    mockFreshBuilding.mockResolvedValue({ stale: false }); mockFreshPolicy.mockResolvedValue({ stale: false })
-  })
-
-  it("authorizes NOW preparation against the item's canonical workspace", async () => {
-    prisma.roadmapItem.findUnique.mockResolvedValue({ id: "item-1", workspaceId: "ws-2" })
-    prisma.workspace.findFirst.mockResolvedValue(null)
-
-    await expect(requestNowCommitmentAction("ws-1", "item-1")).rejects.toThrow("Workspace not found")
-    expect(prisma.workspace.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "ws-2" }) }))
-    expect(mockRequireEnforcement).toHaveBeenCalledWith("ws-2")
-    expect(mockPrepare).not.toHaveBeenCalled()
+    mockFreshBuilding.mockResolvedValue({ stale: false })
   })
 
   it("authorizes Building preparation against the Solution's canonical workspace", async () => {
@@ -57,6 +42,14 @@ describe("review actions ownership", () => {
     await expect(decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "fp", optionId: "option-1" })).rejects.toThrow("Workspace not found")
     expect(prisma.workspace.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "ws-2" }) }))
     expect(mockRecord).not.toHaveBeenCalled()
+  })
+
+  it.each(["NOW_COMMITMENT", "NOW_POLICY_ACTIVATION"])("rejects retired %s reviews before auth or mutation", async (gateType) => {
+    prisma.reviewRevision.findUnique.mockResolvedValue({ id: "rev-legacy", request: { workspaceId: "ws-1", subjectId: "item-1", gateType } })
+    await expect(decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-legacy", fingerprint: "fp", optionId: "option-1" })).rejects.toThrow("read-only")
+    expect(prisma.workspace.findFirst).not.toHaveBeenCalled()
+    expect(mockRecord).not.toHaveBeenCalled()
+    expect(prisma.reviewOption.findUnique).not.toHaveBeenCalled()
   })
 
   it("queues an approved release decision with the immutable source fingerprint", async () => {
@@ -87,36 +80,5 @@ describe("review actions ownership", () => {
     mockRecord.mockResolvedValue({ id: "decision-1" })
     await decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "fp", optionId: "option-1" })
     expect(mockApplyBuilding).toHaveBeenCalledWith("solution-1", "decision-1")
-  })
-
-  it("lets a workspace member create a tracking-only decision request", async () => {
-    prisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", members: [{ id: "member-1" }], organization: { members: [] } })
-    mockPrepareTracked.mockResolvedValue({ id: "revision-1", requestId: "request-1" })
-
-    await expect(createTrackedDecisionAction({ workspaceId: "ws-1", subjectType: "DOC", subjectId: "doc-1", question: "Publish?", context: "Ready for review.", idempotencyKey: "00000000-0000-4000-8000-000000000001" }))
-      .resolves.toEqual({ requestId: "request-1", revisionId: "revision-1" })
-    expect(mockPrepareTracked).toHaveBeenCalledWith(expect.objectContaining({ requestedById: "user-1" }))
-  })
-
-  it("never applies a side effect for a tracking-only decision", async () => {
-    prisma.reviewRevision.findUnique.mockResolvedValue({ id: "rev-1", request: { workspaceId: "ws-1", subjectId: "doc-1", gateType: "TRACKED_DECISION" } })
-    prisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", members: [{ id: "member-1" }], organization: { members: [] } })
-    prisma.reviewOption.findUnique.mockResolvedValue({ outcomeClass: "APPROVE", continuationKey: "NO_ACTION" })
-    mockRecord.mockResolvedValue({ id: "decision-1" })
-
-    await decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "fp", optionId: "option-1" })
-
-    expect(mockAdmit).not.toHaveBeenCalled()
-    expect(mockApplyBuilding).not.toHaveBeenCalled()
-    expect(mockQueueRelease).not.toHaveBeenCalled()
-    expect(prisma.reviewOption.findUnique).not.toHaveBeenCalled()
-  })
-
-  it("revises only the explicitly named request", async () => {
-    prisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", members: [{ id: "member-1" }], organization: { members: [] } })
-    mockReviseTracked.mockResolvedValue({ id: "revision-2", requestId: "request-1" })
-    await createTrackedDecisionAction({ workspaceId: "ws-1", subjectType: "DOC", subjectId: "doc-1", question: "Publish?", context: "Updated.", idempotencyKey: "00000000-0000-4000-8000-000000000001", revise: { requestId: "request-1", expectedDecisionId: "decision-1", reason: "Changes made" } })
-    expect(mockReviseTracked).toHaveBeenCalledWith(expect.objectContaining({ requestId: "request-1", expectedDecisionId: "decision-1", subjectId: "doc-1" }))
-    expect(mockPrepareTracked).not.toHaveBeenCalled()
   })
 })

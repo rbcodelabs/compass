@@ -13,8 +13,7 @@
 import getPrisma from "@/lib/db";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
 import { SETTABLE_HORIZONS } from "@/lib/roadmap";
-import { transitionRoadmapItemWithNowGate, type NowIngressActor } from "@/lib/now-gate-runtime";
-import { updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger";
+type MutationActor = { kind: "USER" | "SERVICE" | "ANONYMOUS" | "SYSTEM"; id: string | null };
 
 type EnumFieldConfig = { field: "status" | "horizon"; options: readonly string[] };
 
@@ -72,10 +71,10 @@ export async function updateEntityField(
   workspaceId: string,
   field: string,
   value: unknown,
-  actor: NowIngressActor = { kind: "SYSTEM", id: null },
+  _actor: MutationActor = { kind: "SYSTEM", id: null },
 ): Promise<UpdateResult> {
+  void _actor;
   const config = EDIT_CONFIG[type];
-  let roadmapCurrentHorizon: string | undefined;
 
   // ── Validate the field is editable and coerce the value ──────────────────
   let data: Record<string, unknown>;
@@ -111,15 +110,6 @@ export async function updateEntityField(
     if (typeof value !== "string" || !config.enum.options.includes(value)) {
       return { ok: false, status: 400, error: `Invalid ${field}` };
     }
-    if (type === "roadmapItem" && field === "horizon" && value === "NOW") {
-      const prisma = getPrisma();
-      const current = await prisma.roadmapItem.findFirst({
-        where: entityScopeWhere(type, id, workspaceId),
-        select: { horizon: true },
-      });
-      if (!current) return { ok: false, status: 404, error: "Not found" };
-      roadmapCurrentHorizon = current.horizon;
-    }
     data = { [field]: value };
   } else {
     return { ok: false, status: 400, error: `Field "${field}" is not editable` };
@@ -140,10 +130,6 @@ export async function updateEntityField(
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
 
-  if (type === "roadmapItem" && field === "horizon" && value === "NOW") {
-    try { await transitionRoadmapItemWithNowGate({ workspaceId, roadmapItemId: id, currentHorizon: roadmapCurrentHorizon, requestedHorizon: value, ingressKey: "api.entity.update", actor, mutate: (database) => updateRoadmapItemWithCapacityRelease(id, data, database) }); }
-    catch (error) { return { ok: false, status: 400, error: error instanceof Error ? error.message : "NOW commitment decision required" }; }
-  } else if (type === "roadmapItem") await updateRoadmapItemWithCapacityRelease(id, data);
-  else await model.update({ where: { id }, data });
+  await model.update({ where: { id }, data });
   return { ok: true };
 }

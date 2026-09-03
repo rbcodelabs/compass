@@ -119,9 +119,8 @@ The MCP server exposes tools that agents can call, grouped below by area.
 | Tool | Description |
 |---|---|
 | `list_roadmap_items` | Fetch active roadmap items for a workspace, grouped by horizon (including LAUNCHING/LAUNCHED), including start/end dates and whether each item is private (`isPrivate`) |
-| `add_to_roadmap` | Create a roadmap item in NEXT/LATER/SHIPPED, optionally with a start date and end date for the Timeline view, and an `isPrivate` flag to hide it from the public portal roadmap and block voting on it. NOW requires a recorded commitment decision |
-| `update_roadmap_item` | Update a roadmap item's horizon, status, title, description, start/end dates, or `isPrivate` flag. Direct moves to NOW and LAUNCHING/LAUNCHED are rejected; use the decision and launch operations instead |
-| `request_now_commitment` | Prepare or refresh the immutable review packet for admitting an existing Roadmap Item to NOW. This operation never takes the human decision |
+| `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
+| `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
 | `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item |
 | `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state, linked item type, outcome, reviewer, or search text |
 | `get_decision` | Read one tracking-only decision and its immutable revision history |

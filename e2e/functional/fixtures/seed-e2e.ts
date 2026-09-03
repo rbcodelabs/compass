@@ -38,7 +38,6 @@ export type SeedResult = {
   workspaceId: string;
   userId: string;
   schema: string;
-  nowCommitmentPolicy: object;
 };
 
 /**
@@ -289,7 +288,7 @@ export async function seedE2E(
             TIMESTAMP '2026-08-31 12:00:00.000')
     RETURNING id, to_char(decided_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS decided_at_utc
   `, [ws.id, investmentRequest.id, investmentRevision.id, investmentOption.id, investmentFingerprint, user.id, `e2e-building:${solutionId}`]);
-  const { rows: [investmentApplication] } = await pool.query<{ id: string }>(`
+  await pool.query(`
     INSERT INTO "${S}".decision_applications
       (id, decision_id, continuation_key, target_type, target_id, status,
        receipt_key, attempt_count, applied_at, created_at, updated_at)
@@ -297,67 +296,6 @@ export async function seedE2E(
             $2, 'APPLIED', $3, 1, NOW(), NOW(), NOW())
     RETURNING id
   `, [investmentDecision.id, solutionId, `e2e-building-authority:${solutionId}`]);
-
-  const policyId = "e2e-native-now-policy-v1";
-  const planFingerprint = createHash("sha256")
-    .update(`e2e-capacity:${ws.id}:${policyId}:3`)
-    .digest("hex");
-  await pool.query(`DELETE FROM "${S}".portfolio_capacity_reservations WHERE plan_id IN (SELECT id FROM "${S}".portfolio_capacity_plans WHERE workspace_id = $1 AND policy_id = $2)`, [ws.id, policyId]);
-  await pool.query(`UPDATE "${S}".portfolio_capacity_plans SET state = 'SUPERSEDED', active_workspace_id = NULL, updated_at = NOW() WHERE workspace_id = $1 AND policy_id <> $2 AND state = 'ACTIVE'`, [ws.id, policyId]);
-  const { rows: [capacityPlan] } = await pool.query<{ id: string }>(`
-    INSERT INTO "${S}".portfolio_capacity_plans
-      (id, workspace_id, policy_id, plan_fingerprint, unit, available_units,
-       units_per_now_item, now_limit, state, active_workspace_id, version, created_at, updated_at)
-    VALUES (gen_random_uuid(), $1, $2, $3, 'FOCUS_SLOT', 3, 1, 3, 'ACTIVE', $1, 0, NOW(), NOW())
-    ON CONFLICT (workspace_id, policy_id) DO UPDATE SET
-      plan_fingerprint = EXCLUDED.plan_fingerprint, unit = EXCLUDED.unit,
-      available_units = EXCLUDED.available_units,
-      units_per_now_item = EXCLUDED.units_per_now_item,
-      now_limit = EXCLUDED.now_limit, state = 'ACTIVE', active_workspace_id = EXCLUDED.active_workspace_id,
-      version = 0, updated_at = NOW()
-    RETURNING id
-  `, [ws.id, policyId, planFingerprint]);
-
-  const authorityChecksum = createHash("sha256").update(JSON.stringify({
-    authority: "COMPASS_NATIVE",
-    decisionId: investmentDecision.id,
-    workspaceId: ws.id,
-    solutionId,
-    revisionId: investmentRevision.id,
-    optionId: investmentOption.id,
-    fingerprint: investmentFingerprint,
-    decidedAt: investmentDecision.decided_at_utc,
-    applicationId: investmentApplication.id,
-    continuationKey: "AUTHORIZE_BUILDING_INVESTMENT",
-  })).digest("hex");
-  const nowCommitmentPolicy = {
-    version: 1,
-    workspaces: {
-      [ws.id]: {
-        portfolioPolicyId: policyId,
-        capacity: {
-          planId: capacityPlan.id,
-          planFingerprint,
-          unit: "FOCUS_SLOT",
-          availableUnits: 3,
-          requestedUnits: 1,
-          unitsPerNowItem: 1,
-          nowLimit: 3,
-          planVersion: 0,
-        },
-        investmentDecisions: {
-          [solutionId]: {
-            authorityProvider: "COMPASS_NATIVE",
-            authorityRecordId: investmentDecision.id,
-            authorityChecksum,
-            decisionOutcome: "APPROVE_BUILDING",
-            applicationStatus: "APPLIED",
-            applicationReceiptId: investmentApplication.id,
-          },
-        },
-      },
-    },
-  };
 
   // ── Baseline opportunity ──────────────────────────────────────────────────
   await pool.query(`
@@ -431,5 +369,5 @@ export async function seedE2E(
   console.log(
     `[e2e seed] schema=${S} org=${org.id} ws=${ws.id} user=${user.id} metaOrg=${metaOrg.id} metaWs=${metaWs.id}`
   );
-  return { orgId: org.id, workspaceId: ws.id, userId: user.id, schema: S, nowCommitmentPolicy };
+  return { orgId: org.id, workspaceId: ws.id, userId: user.id, schema: S };
 }

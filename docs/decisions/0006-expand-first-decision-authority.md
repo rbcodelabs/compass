@@ -2,7 +2,9 @@
 
 **Date:** 2026-09-02
 
-**Status:** Proposed
+**Status:** Superseded
+
+Native NOW policy, capacity, routing, signing, and activation are retired runtime concepts. Release authorization remains independent.
 
 **Decision owner:** Rick Bowman
 

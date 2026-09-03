@@ -20,7 +20,6 @@ import { LaunchChecklist, type LaunchChecklistItemData } from "./launch-checklis
 import { PositioningBriefRow } from "./positioning-brief-row";
 import { RoadmapDeliveryTasks, type RoadmapDeliveryTaskData } from "./roadmap-delivery-tasks";
 import type { MemberData } from "@/lib/types";
-import { NowCommitmentCard } from "@/components/roadmap/now-commitment-card";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 type RoadmapItemData = {
@@ -44,10 +43,6 @@ type RoadmapItemData = {
   deliveryTasks: RoadmapDeliveryTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
-  nowReview: { id: string; state: string } | null;
-  nowCommitmentProvenance: string;
-  nowDecisionRecordId: string | null;
-  nowApplication: { id: string; status: string; receiptKey: string } | null;
   _count: { votes: number };
 };
 
@@ -132,19 +127,6 @@ export function RoadmapItemPanel({
         {data.isPrivate && <Field label="Visibility">Private (hidden from public roadmap)</Field>}
       </div>
 
-      <Section label="NOW commitment">
-        <NowCommitmentCard
-          itemId={id}
-          workspaceId={data.workspaceId}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          horizon={data.horizon}
-          review={data.nowReview}
-          provenance={data.nowCommitmentProvenance}
-          decisionRecordId={data.nowDecisionRecordId}
-          application={data.nowApplication}
-        />
-      </Section>
 
       <Section label="Launch">
         <div className="flex flex-col gap-4">

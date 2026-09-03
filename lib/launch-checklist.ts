@@ -10,7 +10,6 @@ import { randomUUID } from "crypto";
 import getPrisma from "@/lib/db";
 import type { LaunchTier, ChecklistTemplateSnapshot, LaunchChecklistItemStatus } from "@/lib/types";
 import { DEFAULT_CHECKLIST_TEMPLATES } from "@/lib/launch-defaults";
-import { releaseNowCapacityInTransaction } from "@/lib/capacity-ledger";
 
 /** A template plus its ordered items — the shape the attach transaction needs. */
 export interface ResolvedTemplate {
@@ -43,7 +42,6 @@ export async function setLaunchTierCore(
   const launchChecklistId = randomUUID();
 
   await prisma.$transaction(async (tx) => {
-    await releaseNowCapacityInTransaction(tx as ReturnType<typeof getPrisma>, itemId)
     await tx.launchChecklist.create({
       data: {
         id: launchChecklistId,
