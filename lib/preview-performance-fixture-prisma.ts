@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   SEED_ORDER,
   type PreviewFixtureKind,
@@ -19,6 +19,15 @@ function requireAllowed(value: string | null, allowed: Set<string>, label: strin
   if (value === null && nullable) return;
   if (value === null || !allowed.has(value)) throw new Error(`Preview fixture ownership mismatch for ${label}`);
 }
+
+const RECOVERY_TABLES: Record<PreviewFixtureKind, string> = {
+  users: "users", organizations: "organizations", organizationMembers: "organization_members",
+  workspaces: "workspaces", workspaceMembers: "workspace_members", squads: "squads",
+  okrCycles: "okr_cycles", objectives: "objectives", keyResults: "key_results",
+  opportunities: "opportunities", solutions: "solutions", assumptions: "assumptions",
+  evidence: "evidence", experiments: "experiments", roadmapItems: "roadmap_items",
+  feedback: "feedback_items", tasks: "tasks", sessions: "sessions",
+};
 
 export class PrismaPreviewFixtureStore implements PreviewFixtureStore {
   private readonly prisma: PrismaClient | Prisma.TransactionClient;
@@ -227,6 +236,15 @@ export class PrismaPreviewFixtureStore implements PreviewFixtureStore {
       case "sessions": result = await this.prisma.session.deleteMany({ where }); break;
     }
     return result.count;
+  }
+
+  async deleteIdsDirectWithCount(kind: PreviewFixtureKind, ids: readonly string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    // The recovery route has already proven every row and deletes in explicit
+    // dependency order. A direct DSQL delete avoids Prisma relationMode=prisma
+    // traversing unrelated Workspace relations that are not part of the fixture.
+    const table = Prisma.raw(`"compass_preview"."${RECOVERY_TABLES[kind]}"`);
+    return this.prisma.$executeRaw(Prisma.sql`DELETE FROM ${table} WHERE "id" IN (${Prisma.join([...ids])})`);
   }
 
   async countResidue(manifest: PreviewFixtureManifest): Promise<number> {

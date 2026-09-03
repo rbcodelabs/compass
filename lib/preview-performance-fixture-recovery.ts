@@ -122,7 +122,7 @@ export class PrismaRecoveryFixtureStore implements RecoveryFixtureStore {
       if (expectedRows.length !== ids.length) throw new Error("Invalid recovery chunk identity");
       await store.verifyExactRowsForIds(kind, expectedRows);
       const before = await store.countIds(kind, ids);
-      const affected = await store.deleteIdsWithCount(kind, ids);
+      const affected = await store.deleteIdsDirectWithCount(kind, ids);
       if (affected !== before) throw new Error("Preview fixture changed during recovery chunk");
       return affected;
     }, { maxWait: 10_000, timeout: 30_000 });

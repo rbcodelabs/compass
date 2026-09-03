@@ -88,15 +88,17 @@ describe("emergency preview fixture recovery", () => {
 
   it("keeps each Prisma transaction scoped to the current chunk instead of rescanning the 1,231-row graph", async () => {
     let queries = 0;
+    let directDelete: { sql?: string; text?: string; values?: unknown[] } | undefined;
     const row = { id: "row-1", workspaceId: "workspace-1" };
     const delegate = {
       findMany: async () => { queries += 1; return [row]; },
       count: async () => { queries += 1; return 1; },
-      deleteMany: async () => { queries += 1; return { count: 1 }; },
+      deleteMany: async () => { throw new Error("Prisma relation emulation must not run"); },
     };
+    const executeRaw = async (query: { sql?: string; text?: string; values?: unknown[] }) => { queries += 1; directDelete = query; return 1; };
     const prisma = {
       roadmapItem: delegate,
-      $transaction: async (callback: (tx: { roadmapItem: typeof delegate }) => Promise<number>) => callback({ roadmapItem: delegate }),
+      $transaction: async (callback: (tx: { roadmapItem: typeof delegate; $executeRaw: typeof executeRaw }) => Promise<number>) => callback({ roadmapItem: delegate, $executeRaw: executeRaw }),
     };
     const { PrismaRecoveryFixtureStore } = await import("@/lib/preview-performance-fixture-recovery");
     const store = new PrismaRecoveryFixtureStore(prisma as never);
@@ -106,6 +108,8 @@ describe("emergency preview fixture recovery", () => {
     const manifest = { plannedIds: { roadmapItems: [row.id] } };
     await expect(store.deleteChunk("roadmapItems", [row.id], manifest as never, plan as never)).resolves.toBe(1);
     expect(queries).toBe(4);
+    expect(directDelete?.text ?? directDelete?.sql).toContain('DELETE FROM "compass_preview"."roadmap_items"');
+    expect(directDelete?.values).toEqual([row.id]);
   });
 
   it("does not open a transaction for an already-absent retry chunk", async () => {
@@ -126,11 +130,12 @@ describe("emergency preview fixture recovery", () => {
     const transaction = {
       findMany: async () => [{ id: "row-1", workspaceId: "other-workspace" }],
       count: async () => 1,
-      deleteMany: async () => { deletes += 1; return { count: 1 }; },
+      deleteMany: async () => { throw new Error("Prisma relation emulation must not run"); },
     };
+    const executeRaw = async () => { deletes += 1; return 1; };
     const prisma = {
       roadmapItem: root,
-      $transaction: async (callback: (tx: { roadmapItem: typeof transaction }) => Promise<number>) => callback({ roadmapItem: transaction }),
+      $transaction: async (callback: (tx: { roadmapItem: typeof transaction; $executeRaw: typeof executeRaw }) => Promise<number>) => callback({ roadmapItem: transaction, $executeRaw: executeRaw }),
     };
     const { PrismaRecoveryFixtureStore } = await import("@/lib/preview-performance-fixture-recovery");
     const store = new PrismaRecoveryFixtureStore(prisma as never);
