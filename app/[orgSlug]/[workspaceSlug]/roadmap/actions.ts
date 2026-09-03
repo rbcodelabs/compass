@@ -5,13 +5,13 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import type { Horizon } from "@/lib/types";
 import { isLaunchHorizon } from "@/lib/roadmap";
-import { assertDirectNowWriteBlocked } from "@/lib/now-commitment";
+import { createRoadmapItemWithNowGate, evaluateDirectNowIngress, transitionRoadmapItemWithNowGate } from "@/lib/now-gate-runtime";
 import { releaseNowCapacityInTransaction, updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger";
 
 type Database = ReturnType<typeof getPrisma>;
 const ROADMAP_ITEM_NOT_FOUND = "Roadmap item not found";
 
-async function requireWorkspaceMember(workspaceId: string): Promise<void> {
+async function requireWorkspaceMember(workspaceId: string): Promise<string> {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
   const member = await getPrisma().workspaceMember.findUnique({
@@ -19,6 +19,7 @@ async function requireWorkspaceMember(workspaceId: string): Promise<void> {
     select: { id: true },
   });
   if (!member) throw new Error("Workspace not found");
+  return session.user.id;
 }
 
 async function requireRoadmapItem(prisma: Database, itemId: string, workspaceId: string) {
@@ -68,9 +69,8 @@ export async function addRoadmapItem(
     opportunityId?: string; experimentId?: string; startDate?: Date; endDate?: Date; isPrivate?: boolean;
   },
 ) {
-  await requireWorkspaceMember(workspaceId);
+  const userId = await requireWorkspaceMember(workspaceId);
   assertDirectLaunchWriteBlocked(data.horizon);
-  assertDirectNowWriteBlocked(null, data.horizon);
   validateInclusiveDates(data.startDate ?? null, data.endDate ?? null);
   const prisma = getPrisma();
   await validateRoadmapRelations(prisma, workspaceId, data);
@@ -79,11 +79,25 @@ export async function addRoadmapItem(
     orderBy: [{ sortOrder: "desc" }, { id: "desc" }],
     select: { sortOrder: true },
   });
-  const item = await prisma.roadmapItem.create({
-    data: { ...data, workspaceId, sortOrder: lastItem ? lastItem.sortOrder + 1 : 0, isPrivate: data.isPrivate ?? false },
-  });
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
+
+  const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: data.horizon, ingressKey: "ui.roadmap.add", actor: { kind: "USER", id: userId }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
+      workspaceId,
+      title: data.title,
+      description: data.description,
+      horizon: initialHorizon,
+      sortOrder,
+      solutionId: data.solutionId,
+      keyResultId: data.keyResultId,
+      opportunityId: data.opportunityId,
+      experimentId: data.experimentId,
+      startDate: data.startDate,
+      endDate: data.endDate,
+      isPrivate: data.isPrivate ?? false,
+    } }) });
+
   revalidateRoadmap();
-  return item;
+  return { ...item, horizon: data.horizon };
 }
 
 export async function updateRoadmapItem(
@@ -109,16 +123,14 @@ export async function updateRoadmapItem(
 }
 
 export async function moveItem(itemId: string, horizon: Horizon, workspaceId: string) {
-  await requireWorkspaceMember(workspaceId);
+  const userId = await requireWorkspaceMember(workspaceId);
   assertDirectLaunchWriteBlocked(horizon);
   const prisma = getPrisma();
   const current = await requireRoadmapItem(prisma, itemId, workspaceId);
-  assertDirectNowWriteBlocked(current.horizon, horizon);
-  const lastItem = await prisma.roadmapItem.findFirst({
-    where: { workspaceId, horizon, status: "ACTIVE", NOT: { id: itemId } },
-    orderBy: [{ sortOrder: "desc" }, { id: "desc" }], select: { sortOrder: true },
-  });
-  await updateRoadmapItemWithCapacityRelease(itemId, { horizon, sortOrder: lastItem ? lastItem.sortOrder + 1 : 0 });
+  await transitionRoadmapItemWithNowGate({ workspaceId, roadmapItemId: itemId, currentHorizon: current.horizon, requestedHorizon: horizon, ingressKey: "ui.roadmap.move", actor: { kind: "USER", id: userId }, mutate: async (database) => {
+    const lastItem = await database.roadmapItem.findFirst({ where: { workspaceId, horizon, status: "ACTIVE", NOT: { id: itemId } }, orderBy: [{ sortOrder: "desc" }, { id: "desc" }], select: { sortOrder: true } });
+    return updateRoadmapItemWithCapacityRelease(itemId, { horizon, sortOrder: lastItem ? lastItem.sortOrder + 1 : 0 }, database);
+  } });
   revalidateRoadmap();
 }
 
@@ -133,35 +145,48 @@ export async function promoteToRoadmap(
   solutionId: string, workspaceId: string, horizon: Horizon, squadId: string | null,
   opportunityId: string | null, dates?: { startDate?: Date; endDate?: Date }, isPrivate?: boolean,
 ) {
-  await requireWorkspaceMember(workspaceId);
+  const userId = await requireWorkspaceMember(workspaceId);
   assertDirectLaunchWriteBlocked(horizon);
-  assertDirectNowWriteBlocked(null, horizon);
   validateInclusiveDates(dates?.startDate ?? null, dates?.endDate ?? null);
   const prisma = getPrisma();
+
   const solution = await prisma.solution.findFirst({
-    where: { id: solutionId, opportunity: { workspaceId } }, select: { title: true, opportunityId: true },
+    where: { id: solutionId, opportunity: { workspaceId } },
+    select: { title: true, opportunityId: true, opportunity: { select: { id: true, squadId: true } } },
   });
   if (!solution) throw new Error("Solution not found");
   await validateRoadmapRelations(prisma, workspaceId, { opportunityId: opportunityId ?? undefined, squadId });
+  const solutionOpportunityId = solution.opportunity?.id ?? solution.opportunityId;
+  if (opportunityId && opportunityId !== solutionOpportunityId) throw new Error("Solution opportunity mismatch");
+  if (squadId && solution.opportunity?.squadId !== undefined && squadId !== solution.opportunity.squadId) throw new Error("Solution squad mismatch");
   const lastItem = await prisma.roadmapItem.findFirst({
     where: { workspaceId, horizon, status: "ACTIVE" }, orderBy: [{ sortOrder: "desc" }, { id: "desc" }], select: { sortOrder: true },
   });
-  const item = await prisma.roadmapItem.create({
-    data: { workspaceId, title: solution.title, horizon, sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
-      solutionId, squadId, opportunityId: opportunityId ?? solution.opportunityId,
-      startDate: dates?.startDate, endDate: dates?.endDate, isPrivate: isPrivate ?? false },
-  });
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
+
+  const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "ui.solution.promote", actor: { kind: "USER", id: userId }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
+      workspaceId,
+      title: solution.title,
+      horizon: initialHorizon,
+      sortOrder,
+      solutionId,
+      squadId: solution.opportunity?.squadId ?? squadId,
+      opportunityId: solutionOpportunityId,
+      startDate: dates?.startDate,
+      endDate: dates?.endDate,
+      isPrivate: isPrivate ?? false,
+    } }) });
+
   revalidateRoadmap();
-  return item;
+  return { ...item, horizon };
 }
 
 export async function promoteFeedbackToRoadmap(
   feedbackId: string, workspaceId: string, horizon: Horizon,
   dates?: { startDate?: Date; endDate?: Date }, isPrivate?: boolean,
 ) {
-  await requireWorkspaceMember(workspaceId);
+  const userId = await requireWorkspaceMember(workspaceId);
   assertDirectLaunchWriteBlocked(horizon);
-  assertDirectNowWriteBlocked(null, horizon);
   validateInclusiveDates(dates?.startDate ?? null, dates?.endDate ?? null);
   const prisma = getPrisma();
   const feedback = await prisma.feedbackItem.findFirst({ where: { id: feedbackId, workspaceId }, select: { title: true } });
@@ -169,12 +194,21 @@ export async function promoteFeedbackToRoadmap(
   const lastItem = await prisma.roadmapItem.findFirst({
     where: { workspaceId, horizon, status: "ACTIVE" }, orderBy: [{ sortOrder: "desc" }, { id: "desc" }], select: { sortOrder: true },
   });
-  const item = await prisma.roadmapItem.create({
-    data: { workspaceId, title: feedback.title, horizon, sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
-      feedbackId, startDate: dates?.startDate, endDate: dates?.endDate, isPrivate: isPrivate ?? false },
-  });
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
+
+  const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "ui.feedback.promote", actor: { kind: "USER", id: userId }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
+      workspaceId,
+      title: feedback.title,
+      horizon: initialHorizon,
+      sortOrder,
+      feedbackId,
+      startDate: dates?.startDate,
+      endDate: dates?.endDate,
+      isPrivate: isPrivate ?? false,
+    } }) });
+
   revalidateRoadmap();
-  return item;
+  return { ...item, horizon };
 }
 
 export async function updateSortOrder(itemId: string, workspaceId: string, sortOrder: number) {
@@ -189,24 +223,32 @@ export async function rescheduleRoadmapItem(
   itemId: string, workspaceId: string,
   data: { horizon: Horizon; startDate: Date | null; endDate: Date | null },
 ) {
-  await requireWorkspaceMember(workspaceId);
+  const userId = await requireWorkspaceMember(workspaceId);
   assertDirectLaunchWriteBlocked(data.horizon);
   validateInclusiveDates(data.startDate, data.endDate);
   const prisma = getPrisma();
   const item = await prisma.$transaction(async (tx) => {
-    const current = await requireRoadmapItem(tx as Database, itemId, workspaceId);
+    const database = tx as unknown as Database;
+    const current = await requireRoadmapItem(database, itemId, workspaceId);
     if (current.status !== "ACTIVE") throw new Error(ROADMAP_ITEM_NOT_FOUND);
-    assertDirectNowWriteBlocked(current.horizon, data.horizon);
+    await evaluateDirectNowIngress({
+      workspaceId,
+      roadmapItemId: itemId,
+      currentHorizon: current.horizon,
+      requestedHorizon: data.horizon,
+      ingressKey: "ui.roadmap.reschedule",
+      actor: { kind: "USER", id: userId },
+    }, database, { telemetryFailure: "throw" });
     let sortOrder = current.sortOrder;
     if (current.horizon !== data.horizon) {
-      const lastItem = await tx.roadmapItem.findFirst({
+      const lastItem = await database.roadmapItem.findFirst({
         where: { workspaceId, horizon: data.horizon, status: "ACTIVE", NOT: { id: itemId } },
         orderBy: [{ sortOrder: "desc" }, { id: "desc" }], select: { sortOrder: true },
       });
       sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
     }
-    if (current.horizon === "NOW" && data.horizon !== "NOW") await releaseNowCapacityInTransaction(tx as Database, current.id);
-    return tx.roadmapItem.update({
+    if (current.horizon === "NOW" && data.horizon !== "NOW") await releaseNowCapacityInTransaction(database, current.id);
+    return database.roadmapItem.update({
       where: { id: current.id },
       data: { horizon: data.horizon, startDate: data.startDate, endDate: data.endDate,
         sortOrder, updatedAt: new Date() },

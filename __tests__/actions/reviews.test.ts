@@ -1,30 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockAuth, mockPrepare, mockRecord, mockAdmit, mockQueueRelease } = vi.hoisted(() => ({
-  mockAuth: vi.fn(), mockPrepare: vi.fn(), mockRecord: vi.fn(), mockAdmit: vi.fn(), mockQueueRelease: vi.fn(),
+const { mockAuth, mockPrepare, mockPrepareBuilding, mockApplyBuilding, mockFreshBuilding, mockFreshPolicy, mockRecord, mockAdmit, mockQueueRelease, mockRequireEnforcement } = vi.hoisted(() => ({
+  mockAuth: vi.fn(), mockPrepare: vi.fn(), mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(), mockFreshBuilding: vi.fn(), mockFreshPolicy: vi.fn(), mockRecord: vi.fn(), mockAdmit: vi.fn(), mockQueueRelease: vi.fn(), mockRequireEnforcement: vi.fn(),
 }))
 const prisma = {
   workspace: { findFirst: vi.fn() },
-  roadmapItem: { findUnique: vi.fn() },
+  roadmapItem: { findUnique: vi.fn() }, solution: { findUnique: vi.fn() },
   reviewRevision: { findUnique: vi.fn() },
   reviewOption: { findUnique: vi.fn() },
 }
 vi.mock("@/auth", () => ({ auth: mockAuth }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 vi.mock("@/lib/now-commitment", () => ({ prepareNowCommitment: mockPrepare, admitRoadmapItemToNow: mockAdmit }))
+vi.mock("@/lib/now-gate-runtime", () => ({ requireEffectiveNowEnforcement: mockRequireEnforcement }))
 vi.mock("@/lib/decision-service", () => ({ recordDecision: mockRecord }))
+vi.mock("@/lib/building-investment", () => ({ prepareBuildingInvestmentReview: mockPrepareBuilding, applyBuildingInvestmentDecision: mockApplyBuilding, ensureBuildingInvestmentRevisionFresh: mockFreshBuilding }))
+vi.mock("@/lib/native-policy-activation", () => ({ applyNativePolicyActivationDecision: vi.fn(), ensureNativePolicyActivationRevisionFresh: mockFreshPolicy }))
 vi.mock("@/lib/release-authorization", () => ({
   queueAuthorizedRelease: mockQueueRelease,
   unconfiguredReleaseSourceRevalidator: { revalidate: vi.fn() },
 }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
-import { decideReviewAction, requestNowCommitmentAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
+import { decideReviewAction, requestBuildingInvestmentAction, requestNowCommitmentAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
 
 describe("review actions ownership", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    process.env.NOW_DECISION_GATE_MODE = "enforce"
     mockAuth.mockResolvedValue({ user: { id: "user-1" } })
+    mockFreshBuilding.mockResolvedValue({ stale: false }); mockFreshPolicy.mockResolvedValue({ stale: false })
   })
 
   it("authorizes NOW preparation against the item's canonical workspace", async () => {
@@ -33,7 +38,15 @@ describe("review actions ownership", () => {
 
     await expect(requestNowCommitmentAction("ws-1", "item-1")).rejects.toThrow("Workspace not found")
     expect(prisma.workspace.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "ws-2" }) }))
+    expect(mockRequireEnforcement).toHaveBeenCalledWith("ws-2")
     expect(mockPrepare).not.toHaveBeenCalled()
+  })
+
+  it("authorizes Building preparation against the Solution's canonical workspace", async () => {
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", opportunity: { workspaceId: "ws-2" } })
+    prisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(requestBuildingInvestmentAction("ws-1", "solution-1")).rejects.toThrow("Workspace not found")
+    expect(mockPrepareBuilding).not.toHaveBeenCalled()
   })
 
   it("authorizes a decision against the revision request workspace", async () => {
@@ -64,5 +77,14 @@ describe("review actions ownership", () => {
       "source-fp",
       expect.objectContaining({ revalidate: expect.any(Function) }),
     )
+  })
+
+  it("applies an approved Building decision after the human record is committed", async () => {
+    prisma.reviewRevision.findUnique.mockResolvedValue({ id: "rev-1", request: { workspaceId: "ws-2", subjectId: "solution-1", gateType: "BUILDING_INVESTMENT" } })
+    prisma.workspace.findFirst.mockResolvedValue({ id: "ws-2", members: [{ id: "member-1" }], organization: { members: [] } })
+    prisma.reviewOption.findUnique.mockResolvedValue({ outcomeClass: "APPROVE", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT" })
+    mockRecord.mockResolvedValue({ id: "decision-1" })
+    await decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "fp", optionId: "option-1" })
+    expect(mockApplyBuilding).toHaveBeenCalledWith("solution-1", "decision-1")
   })
 })

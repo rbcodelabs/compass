@@ -29,13 +29,14 @@ export async function releaseNowCapacityInTransaction(tx: Database, itemId: stri
 export async function updateRoadmapItemWithCapacityRelease(
   itemId: string,
   data: { horizon?: string; status?: string; [key: string]: unknown },
+  database?: Database,
 ) {
-  const prisma = getPrisma()
-  return prisma.$transaction(async (tx) => {
+  const run = async (tx: Database) => {
     const item = await tx.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, horizon: true, status: true } })
     if (!item) throw new CapacityLedgerError("ITEM_NOT_FOUND", "Roadmap item not found.")
     const exitsNow = item.horizon === "NOW" && ((data.horizon !== undefined && data.horizon !== "NOW") || data.status === "ARCHIVED")
     if (exitsNow) await releaseNowCapacityInTransaction(tx as Database, item.id)
     return tx.roadmapItem.update({ where: { id: item.id }, data: { ...data, updatedAt: new Date() } })
-  })
+  }
+  return database ? run(database) : getPrisma().$transaction(async (tx) => run(tx as Database))
 }

@@ -870,6 +870,54 @@ model DecisionApplication {
   @@map("decision_applications")
 }
 
+model NowPolicyApplicationEvidence {
+  id                         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId                String   @map("workspace_id") @db.Uuid
+  applicationReceiptId       String   @unique(map: "idx_now_policy_evidence_receipt") @map("application_receipt_id") @db.Uuid
+  policyArtifactId           String   @map("policy_artifact_id") @db.VarChar(160)
+  policyPayloadHash          String   @map("policy_payload_hash") @db.Char(64)
+  activationDecisionId       String   @map("activation_decision_id") @db.Uuid
+  activationApplicationReceiptId String @map("activation_application_receipt_id") @db.Uuid
+  activationDecisionChecksum String   @map("activation_decision_checksum") @db.Char(64)
+  selectorMode               String   @map("selector_mode") @db.VarChar(20)
+  selectorSignature          String   @map("selector_signature") @db.Text
+  signingKeyId               String   @map("signing_key_id") @db.VarChar(160)
+  routingFingerprint         String   @map("routing_fingerprint") @db.VarChar(71)
+  capacityPlanId             String   @map("capacity_plan_id") @db.Uuid
+  capacityPlanFingerprint    String   @map("capacity_plan_fingerprint") @db.Char(64)
+  capacityPlanVersion        Int      @map("capacity_plan_version")
+  createdAt                  DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt], map: "idx_now_policy_evidence_workspace_created")
+  @@map("now_policy_application_evidence")
+}
+
+/// Append-only, sanitized evidence for authorized shadow-mode NOW attempts.
+/// No raw policy, rationale, or user-supplied content is stored.
+model NowGateEvaluation {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId            String   @map("workspace_id") @db.Uuid
+  roadmapItemId          String   @map("roadmap_item_id") @db.Uuid
+  ingressKey             String   @map("ingress_key") @db.VarChar(64)
+  mode                   String   @db.VarChar(16)
+  outcome                String   @db.VarChar(24)
+  blockerCode            String?  @map("blocker_code") @db.VarChar(80)
+  policyArtifactId       String?  @map("policy_artifact_id") @db.VarChar(160)
+  routingFingerprint     String?  @map("routing_fingerprint") @db.VarChar(71)
+  capacityPlanId         String?  @map("capacity_plan_id") @db.Uuid
+  capacityPlanFingerprint String? @map("capacity_plan_fingerprint") @db.Char(64)
+  sourceFingerprint      String?  @map("source_fingerprint") @db.Char(64)
+  actorKind              String   @map("actor_kind") @db.VarChar(16)
+  actorId                String?  @map("actor_id") @db.Uuid
+  correlationId          String   @map("correlation_id") @db.Uuid
+  createdAt              DateTime @map("created_at")
+
+  @@index([workspaceId, createdAt], map: "idx_now_gate_evaluations_workspace_created")
+  @@index([workspaceId, outcome, createdAt], map: "idx_now_gate_evaluations_workspace_outcome_created")
+  @@index([roadmapItemId, createdAt], map: "idx_now_gate_evaluations_item_created")
+  @@map("now_gate_evaluations")
+}
+
 model PortfolioCapacityPlan {
   id              String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId     String                         @map("workspace_id") @db.Uuid

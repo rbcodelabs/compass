@@ -7,6 +7,10 @@ import {
   inspectCapacityPlan,
   reconcileCapacityPlan,
 } from "@/lib/capacity-plan-ops"
+import { inspectConfiguredNowPolicy } from "@/lib/now-eligibility"
+import { deploymentNowGateMode } from "@/lib/now-gate-mode"
+import { getDecisionGateInfrastructureHealth } from "@/app/api/admin/migrate/route"
+import { getActiveSchema } from "@/lib/schema"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -27,8 +31,43 @@ function errorResponse(error: unknown) {
 export async function GET(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   const planId = req.nextUrl.searchParams.get("planId") ?? ""
+  const workspaceId = req.nextUrl.searchParams.get("workspaceId") ?? ""
   try {
-    return NextResponse.json(await withAdminDsqlClient((db) => inspectCapacityPlan(db, planId)))
+    const policy = inspectConfiguredNowPolicy(workspaceId)
+    const { inspection, shadowCount, infrastructure } = await withAdminDsqlClient(async (db) => {
+      const inspection = await inspectCapacityPlan(db, planId)
+      let shadowCount = 0
+      let appliedMigrations: string[] = []
+      const policyEvidenceComplete = policy.runtimePolicyReady
+        && typeof policy.policyArtifactId === "string"
+        && typeof policy.routingFingerprint === "string"
+        && typeof policy.capacityPlanId === "string"
+        && typeof policy.capacityPlanFingerprint === "string"
+        && typeof policy.generatedAt === "string"
+        && Number.isFinite(Date.parse(policy.generatedAt))
+      try { shadowCount = policyEvidenceComplete ? Number((await db.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM now_gate_evaluations WHERE workspace_id=$1 AND outcome='WOULD_ALLOW' AND policy_artifact_id=$2 AND routing_fingerprint=$3 AND capacity_plan_id=$4 AND capacity_plan_fingerprint=$5 AND created_at >= $6", [workspaceId, policy.policyArtifactId, policy.routingFingerprint, policy.capacityPlanId, policy.capacityPlanFingerprint, new Date(policy.generatedAt)])).rows[0]?.count ?? 0) : 0 }
+      catch { shadowCount = 0 }
+      try { appliedMigrations = (await db.query<{ migration_name: string }>("SELECT DISTINCT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND migration_name = ANY($1::text[])", [["039_native_decision_gates", "042_native_decision_gates_repair", "040_release_authorization", "041_portfolio_capacity_ledger", "043_decision_evidence_refs", "044_now_policy_application_evidence", "045_now_gate_shadow_evaluations"]])).rows.map((row) => row.migration_name) }
+      catch { appliedMigrations = [] }
+      const infrastructure = await getDecisionGateInfrastructureHealth(db, getActiveSchema(), appliedMigrations).catch(() => null)
+      return { inspection, shadowCount, infrastructure }
+    })
+    if (!workspaceId || inspection.plan.workspace_id !== workspaceId) return NextResponse.json({ error: "Workspace or plan not found." }, { status: 404 })
+    const deploymentMode = deploymentNowGateMode()
+    const shadowTelemetryReady = shadowCount > 0
+    const migrationReady = infrastructure?.migrationReady === true
+    const policyCapacityMatches = policy.runtimePolicyReady && policy.capacityPlanId === inspection.plan.id
+      && policy.capacityPlanFingerprint === inspection.plan.plan_fingerprint && policy.capacityPlanVersion === inspection.plan.version
+    const shadowEvaluationReady = policy.runtimePolicyReady && policyCapacityMatches && inspection.capacityMetadataReady && shadowTelemetryReady && migrationReady
+    return NextResponse.json({
+      ...inspection,
+      deploymentMode,
+      ...policy,
+      shadowTelemetryReady,
+      migrationReady,
+      shadowEvaluationReady,
+      runtimeEnforcementReady: deploymentMode === "enforce" && policy.effectiveMode === "enforce" && shadowEvaluationReady,
+    })
   } catch (error) {
     return errorResponse(error)
   }

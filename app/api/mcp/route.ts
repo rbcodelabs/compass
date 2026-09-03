@@ -12,7 +12,7 @@ import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
 import { normalizeWorkspaceRole } from "@/lib/roles"
-import { assertDirectNowWriteBlocked } from "@/lib/now-commitment"
+import { createRoadmapItemWithNowGate, transitionRoadmapItemWithNowGate } from "@/lib/now-gate-runtime"
 import { updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger"
 import {
   createFeedback,
@@ -128,7 +128,7 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
-import { applyRecordedDecision, getReviewRequest, listReviewRequests, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, getReviewRequest, inspectNativeNowPolicy, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestNativePolicyActivation, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -1311,7 +1311,6 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ solutionId, workspaceId, horizon, isPrivate }) => {
-        try { assertDirectNowWriteBlocked(null, horizon) } catch (error) { return fail(error instanceof Error ? error.message : "NOW commitment decision required") }
         const prisma = getPrisma()
         const solution = await prisma.solution.findUnique({
           where: { id: solutionId },
@@ -1325,18 +1324,17 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const item = await prisma.roadmapItem.create({
-          data: {
+        const actor = getMcpActor()
+        const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "mcp.solution.promote", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
             workspaceId,
             title: solution.title,
-            horizon,
+            horizon: initialHorizon,
             sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
             solutionId,
             opportunityId: solution.opportunity.id,
             squadId: solution.opportunity.squadId ?? null,
             isPrivate: isPrivate ?? false,
-          },
-        })
+          } }) })
         return ok(
           `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
             (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
@@ -1588,6 +1586,39 @@ const _handler = createMcpHandler(
     // ════════════════════════════════════════════════════════════════
 
     register(
+      "request_building_investment",
+      {
+        title: "Request Building Investment",
+        description: "Prepares an immutable human-admin review of Building investment in an exact Solution. This does not take the decision.",
+        inputSchema: { solutionId: z.string().uuid().describe("UUID of the Solution") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestBuildingInvestment,
+    )
+
+    register(
+      "reconsider_building_investment",
+      {
+        title: "Reconsider Building Investment",
+        description: "Starts an explicit new decision cycle after a rejected or changes-requested Building investment decision. Approved investments require a separate revocation.",
+        inputSchema: { solutionId: z.string().uuid(), expectedTerminalDecisionId: z.string().uuid(), reason: z.string().min(1) },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      reconsiderBuildingInvestment,
+    )
+
+    register(
+      "request_building_investment_revocation",
+      {
+        title: "Request Building Investment Revocation",
+        description: "Prepares an immutable human-admin correction review for an exact applied Building investment authority.",
+        inputSchema: { solutionId: z.string().uuid(), authorityDecisionId: z.string().uuid() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestBuildingInvestmentRevocation,
+    )
+
+    register(
       "request_now_commitment",
       {
         title: "Request NOW Commitment",
@@ -1618,6 +1649,27 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       requestReleaseAuthorization,
+    )
+
+    register(
+      "request_native_policy_activation",
+      {
+        title: "Request Native Policy Activation",
+        description: "Prepares a human-admin review bound to the exact generated native policy, capacity plan, routing fingerprint, and intended mode.",
+        inputSchema: { workspaceId: z.string().uuid(), routingFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/i).optional(), mode: z.enum(["shadow", "enforce"]), expectedTerminalDecisionId: z.string().uuid().optional(), reason: z.string().min(1).optional() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      }, requestNativePolicyActivation,
+    )
+
+    register(
+      "inspect_native_now_policy",
+      {
+        title: "Inspect Native NOW Policy",
+        description: "Fails closed unless the active capacity plan and all selected Compass-native Building approvals can produce a deterministic NOW policy.",
+        inputSchema: { workspaceId: z.string().uuid() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      inspectNativeNowPolicy,
     )
 
     register(
@@ -1753,14 +1805,11 @@ const _handler = createMcpHandler(
           return fail(`Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`)
         }
         const prisma = getPrisma()
-        const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, title: true, horizon: true, status: true } })
+        const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, workspaceId: true, title: true, horizon: true, status: true } })
         if (!item) {
           return fail(`Roadmap item "${itemId}" not found.`)
         }
-        if (horizon) {
-          try { assertDirectNowWriteBlocked(item.horizon, horizon) } catch (error) { return fail(error instanceof Error ? error.message : "NOW commitment decision required") }
-        }
-        const updated = await updateRoadmapItemWithCapacityRelease(itemId, {
+        const updateData = {
             ...(horizon ? { horizon } : {}),
             ...(status ? { status } : {}),
             ...(title ? { title: title.trim() } : {}),
@@ -1769,7 +1818,11 @@ const _handler = createMcpHandler(
             ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
             ...(isPrivate !== undefined ? { isPrivate } : {}),
             updatedAt: new Date(),
-        })
+        }
+        const actor = getMcpActor()
+        let updated
+        try { updated = await transitionRoadmapItemWithNowGate({ workspaceId: item.workspaceId, roadmapItemId: itemId, currentHorizon: item.horizon, requestedHorizon: horizon ?? item.horizon, ingressKey: "mcp.roadmap.update", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null }, mutate: (database) => updateRoadmapItemWithCapacityRelease(itemId, updateData, database) }) }
+        catch (error) { return fail(error instanceof Error ? error.message : "NOW commitment decision required") }
         return ok(
           `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
             `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
@@ -1811,7 +1864,6 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId, startDate, endDate, isPrivate }) => {
-        try { assertDirectNowWriteBlocked(null, horizon) } catch (error) { return fail(error instanceof Error ? error.message : "NOW commitment decision required") }
         const prisma = getPrisma()
         const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
         if (!workspace) {
@@ -1822,11 +1874,11 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const item = await prisma.roadmapItem.create({
-          data: {
+        const actor = getMcpActor()
+        const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "mcp.roadmap.add", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
             workspaceId,
             title: title.trim(),
-            horizon,
+            horizon: initialHorizon,
             description: description?.trim(),
             sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
             solutionId: solutionId ?? null,
@@ -1836,8 +1888,7 @@ const _handler = createMcpHandler(
             startDate: startDate ? new Date(startDate) : undefined,
             endDate: endDate ? new Date(endDate) : undefined,
             isPrivate: isPrivate ?? false,
-          },
-        })
+          } }) })
         return ok(
           `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
             (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +

@@ -17,7 +17,8 @@ import {
 } from "@/lib/feedback-attachments"
 import { feedbackItemUrl } from "@/lib/compass-url"
 import type { FeedbackStatus } from "@/lib/feedback-meta"
-import { assertDirectNowWriteBlocked } from "@/lib/now-commitment"
+import { createRoadmapItemWithNowGate } from "@/lib/now-gate-runtime"
+import { getMcpActor } from "@/lib/mcp-authz"
 
 type FeedbackWorkspace = {
   slug: string
@@ -565,7 +566,6 @@ export async function promoteFeedbackToRoadmap({
   horizon: "NOW" | "NEXT" | "LATER" | "SHIPPED"
   isPrivate?: boolean
 }) {
-  assertDirectNowWriteBlocked(null, horizon)
   const prisma = getPrisma()
   const feedback = await prisma.feedbackItem.findUnique({
     where: { id: feedbackId },
@@ -582,16 +582,15 @@ export async function promoteFeedbackToRoadmap({
   })
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0
 
-  const item = await prisma.roadmapItem.create({
-    data: {
+  const actor = horizon === "NOW" ? getMcpActor() : { userId: null }
+  const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "mcp.feedback.promote", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
       workspaceId,
       title: feedback.title,
-      horizon,
+      horizon: initialHorizon,
       sortOrder,
       feedbackId,
       isPrivate: isPrivate ?? false,
-    },
-  })
+    } }) })
 
   const lines = [
     `**Promoted to roadmap (${horizon})**`,
@@ -603,7 +602,7 @@ export async function promoteFeedbackToRoadmap({
   return ok(lines.join("\n"), {
     id: item.id,
     title: item.title,
-    horizon: item.horizon,
+    horizon,
     sortOrder: item.sortOrder,
     isPrivate: item.isPrivate,
     workspaceId: item.workspaceId,

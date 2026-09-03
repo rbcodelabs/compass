@@ -13,6 +13,7 @@ import { backfillRoadmapCommitmentProvenance } from "../../lib/dsql-backfill";
 import { seedE2E } from "./fixtures/seed-e2e";
 import { setRunToken } from "./fixtures/run-token";
 import { assertIsolatedE2EDatabase } from "./fixtures/isolated-database";
+import { signedE2ENativePolicy } from "./fixtures/native-policy-config";
 
 const schema = process.env.PGSCHEMA
   ? `${process.env.PGSCHEMA}_dev`
@@ -30,6 +31,8 @@ async function ensureFunctionalSchema(pool: pg.Pool) {
     "prisma/migrations/040_release_authorization/migration.sql",
     "prisma/migrations/041_portfolio_capacity_ledger/migration.sql",
     "prisma/migrations/043_decision_evidence_refs/migration.sql",
+    "prisma/migrations/044_now_policy_application_evidence/migration.sql",
+    "prisma/migrations/045_now_gate_shadow_evaluations/migration.sql",
   ];
 
   const client = await pool.connect();
@@ -99,9 +102,11 @@ export default async function globalSetup() {
   try {
     await ensureFunctionalSchema(pool);
     const seed = await seedE2E(pool, runToken);
-    const policyPath = path.resolve(process.cwd(), "test-results/e2e-now-commitment-policy.json");
-    await fs.mkdir(path.dirname(policyPath), { recursive: true });
-    await fs.writeFile(policyPath, `${JSON.stringify(seed.nowCommitmentPolicy, null, 2)}\n`, "utf8");
+    if (seed.nowCommitmentPolicy && "workspaces" in seed.nowCommitmentPolicy) {
+      const policyPath = path.resolve(process.cwd(), "test-results/e2e-now-commitment-policy.json");
+      await fs.mkdir(path.dirname(policyPath), { recursive: true });
+      await fs.writeFile(policyPath, `${JSON.stringify(signedE2ENativePolicy(seed.nowCommitmentPolicy as Record<string, unknown>), null, 2)}\n`, "utf8");
+    }
     console.log(`[e2e globalSetup] Seed complete ✓ (run ${runToken})`);
   } finally {
     await pool.end();

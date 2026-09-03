@@ -254,17 +254,16 @@ describe("rescheduleRoadmapItem", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 
-  it("rejects direct entry to NOW without writing", async () => {
-    await expect(
-      rescheduleRoadmapItem(ITEM, WS, {
-        horizon: "NOW",
-        startDate: new Date("2026-09-07T00:00:00.000Z"),
-        endDate: new Date("2026-09-11T00:00:00.000Z"),
-      }),
-    ).rejects.toThrow(/NOW/);
-
+  it("admits direct entry to NOW transactionally while the native gate is OFF", async () => {
+    await rescheduleRoadmapItem(ITEM, WS, {
+      horizon: "NOW",
+      startDate: new Date("2026-09-07T00:00:00.000Z"),
+      endDate: new Date("2026-09-11T00:00:00.000Z"),
+    });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(roadmapItem.update).not.toHaveBeenCalled();
+    expect(roadmapItem.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ horizon: "NOW" }),
+    }));
   });
 
   it("allows a date-only reschedule for an item already in NOW without releasing capacity", async () => {
