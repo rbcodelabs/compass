@@ -27,6 +27,7 @@ import {
   createLocalPerformanceChildEnv,
   resolvePerformanceResourceSampleId,
   resolvePerformanceInvocationId,
+  assertNoAppInvocationForCacheHits,
 } from "@/lib/performance-baseline";
 
 describe("performance baseline safeguards", () => {
@@ -106,6 +107,9 @@ describe("performance baseline safeguards", () => {
     expect(spec).toContain('artifactName: "panel-roadmap-item"');
     expect(spec).toContain("panel.artifactName");
     expect(spec).not.toContain("`panel-${panel.apiType}`");
+    expect(spec).not.toMatch(/\.route\s*\(/);
+    expect(spec).not.toContain("Fetch.enable");
+    expect(spec).not.toContain("Network.setRequestInterception");
   });
 
   it("uses the installed Prisma 7.8 db-push command shape", () => {
@@ -409,15 +413,35 @@ describe("query artifacts", () => {
     ).toThrow(/ambiguous/);
   });
 
-  it("correlates by exact request evidence when edge and function IDs differ", () => {
-    const browser = { requestId: "perf_inv_edge", method: "GET", path: "/roadmap?_rsc=edge", startedAt: "2026-09-01T12:00:00.000Z" };
-    const platform = { requestId: "platform_1", customRequestId: "perf_inv_function", method: "GET", path: "/roadmap", timestamp: "2026-09-01T12:00:00.038Z", durationMs: 20, statusCode: 200 };
+  it("requires the exact echoed app invocation ID in addition to request evidence", () => {
+    const browser = { requestId: "perf_inv_exact", method: "GET", path: "/roadmap?_rsc=edge", startedAt: "2026-09-01T12:00:00.000Z" };
+    const platform = { requestId: "platform_1", customRequestId: "perf_inv_exact", method: "GET", path: "/roadmap", timestamp: "2026-09-01T12:00:00.038Z", durationMs: 20, statusCode: 200 };
     expect(correlateVercelRequests([browser], [platform])).toEqual([{ browser, vercel: platform }]);
+    expect(() => correlateVercelRequests([browser], [{ ...platform, customRequestId: "perf_inv_other" }])).toThrow(/No Vercel request/);
+  });
+
+  it("accepts an authoritative CDN hit only when the retained interval has zero app evidence", () => {
+    const hit = {
+      requestId: "perf_inv_stale",
+      cdpRequestId: "cdp-1",
+      method: "GET",
+      path: "/roadmap?_rsc=edge",
+      startedAt: "2026-09-01T12:00:00.000Z",
+      responseHeaders: { age: "10", cacheControl: "public", xVercelCache: "HIT", xVercelId: "edge" },
+    };
+    const extracted = extractCorrelatedBrowserRequests([hit]);
+    expect(extracted.requests).toEqual([]);
+    expect(extracted.cdnCacheHits).toEqual([hit]);
+    expect(() => assertNoAppInvocationForCacheHits([hit], [])).not.toThrow();
+    expect(() => assertNoAppInvocationForCacheHits([hit], [{
+      requestId: "platform", customRequestId: "different", method: "GET", path: "/roadmap",
+      timestamp: "2026-09-01T12:00:00.050Z", durationMs: null, statusCode: 200,
+    }])).toThrow(/app invocation evidence/);
   });
 
   it("uses a 500ms inclusive correlation window and rejects adjacent ambiguity", () => {
     const browser = { requestId: "perf_edge", method: "GET", path: "/roadmap?_rsc=edge", startedAt: "2026-09-01T12:00:00.000Z" };
-    const candidate = { requestId: "platform_1", customRequestId: "", method: "GET", path: "/roadmap", timestamp: "2026-09-01T12:00:00.500Z", durationMs: 20, statusCode: 200 };
+    const candidate = { requestId: "platform_1", customRequestId: "perf_edge", method: "GET", path: "/roadmap", timestamp: "2026-09-01T12:00:00.500Z", durationMs: 20, statusCode: 200 };
     expect(correlateVercelRequests([browser], [candidate])).toHaveLength(1);
     expect(() => correlateVercelRequests([browser], [candidate, { ...candidate, requestId: "platform_2", timestamp: "2026-09-01T11:59:59.400Z" }])).not.toThrow();
     expect(() => correlateVercelRequests([browser], [candidate, { ...candidate, requestId: "platform_2", timestamp: "2026-09-01T11:59:59.700Z" }])).toThrow(/ambiguous/);
@@ -425,8 +449,8 @@ describe("query artifacts", () => {
 
   it("does not reuse one platform invocation for two browser requests", () => {
     const browser = { requestId: "perf_edge_1", method: "GET", path: "/roadmap?_rsc=edge", startedAt: "2026-09-01T12:00:00.000Z" };
-    const candidate = { requestId: "platform_1", customRequestId: "", method: "GET", path: "/roadmap", timestamp: "2026-09-01T12:00:00.038Z", durationMs: 20, statusCode: 200 };
-    expect(() => correlateVercelRequests([browser, { ...browser, requestId: "perf_edge_2" }], [candidate])).toThrow(/one-to-one/);
+    const candidate = { requestId: "platform_1", customRequestId: "perf_edge_1", method: "GET", path: "/roadmap", timestamp: "2026-09-01T12:00:00.038Z", durationMs: 20, statusCode: 200 };
+    expect(() => correlateVercelRequests([browser, { ...browser, cdpRequestId: "second" }], [candidate])).toThrow(/one-to-one/);
   });
 
   it("groups selected platform logs and DSQL without accepting unrelated traffic", () => {

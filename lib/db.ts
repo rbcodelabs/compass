@@ -5,9 +5,9 @@ import { getActiveSchema } from "./schema";
 import {
   formatPerformanceQueryLog,
   instrumentPgPool,
-  resolvePerformanceInvocationId,
   type PerformanceQueryEvent,
 } from "./performance-baseline";
+import { PERFORMANCE_INVOCATION_HEADER } from "./performance-request-correlation";
 
 declare global {
   var __prisma: PrismaClient | undefined;
@@ -84,10 +84,7 @@ function enablePerformanceObserver(pool: Pool): void {
       try {
         const { headers } = await import("next/headers");
         const requestHeaders = await headers();
-        return resolvePerformanceInvocationId(
-          requestHeaders.get("x-compass-perf-request-id"),
-          requestHeaders.get("x-vercel-id")
-        );
+        return requestHeaders.get(PERFORMANCE_INVOCATION_HEADER);
       } catch {
         return process.env.COMPASS_PERF_REQUEST_ID ?? null;
       }

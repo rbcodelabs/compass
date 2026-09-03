@@ -2,9 +2,11 @@
 import fs from "node:fs";
 import {
   correlateVercelRequests,
+  assertNoAppInvocationForCacheHits,
   extractCorrelatedBrowserRequests,
   aggregateDsqlByPlatformRequest,
   groupVercelRequestLogs,
+  groupVercelEnvelopes,
   parseVercelRetainedLogs,
   type BrowserSample,
 } from "../lib/performance-baseline.ts";
@@ -21,9 +23,15 @@ const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8")) as {
 const browserSamples = artifact.samples ?? [...(artifact.warm ?? []), ...(artifact.cold ?? [])];
 const lines = fs.readFileSync(logsPath, "utf8").split(/\r?\n/).filter(Boolean);
 const { requests: rawRequests, queryEnvelopes, schemaPath } = parseVercelRetainedLogs(lines);
-const { requests: browserRequests, cacheHits } = extractCorrelatedBrowserRequests(browserSamples);
+const { requests: browserRequests, cacheHits, cdnCacheHits } = extractCorrelatedBrowserRequests(browserSamples);
 const logs = groupVercelRequestLogs(rawRequests);
-const correlated = correlateVercelRequests(browserRequests, logs);
+const invocationLogs = groupVercelEnvelopes(
+  logs,
+  queryEnvelopes,
+  browserRequests.map((request) => request.requestId!),
+);
+const correlated = correlateVercelRequests(browserRequests, invocationLogs);
+assertNoAppInvocationForCacheHits(cdnCacheHits, logs);
 const durations = correlated.flatMap(({ vercel }) => vercel.durationMs === null ? [] : [vercel.durationMs]).sort((a, b) => a - b);
 const dsql = aggregateDsqlByPlatformRequest(correlated.map(({ vercel }) => vercel.requestId), queryEnvelopes);
 const percentile = (p: number) => durations[Math.ceil(durations.length * p) - 1] ?? null;
@@ -36,7 +44,7 @@ process.stdout.write(JSON.stringify({
   medianServerDurationMs: percentile(0.5),
   p95ServerDurationMs: percentile(0.95),
   dsql,
-  cacheHits: cacheHits.map((sample) => ({ ...sample, serverDurationMs: null, dsql: null })),
+  cacheHits: [...cacheHits, ...cdnCacheHits].map((sample) => ({ ...sample, serverDurationMs: null, dsql: null })),
   requests: correlated.map(({ browser, vercel }) => ({
     customRequestId: browser.requestId,
     platformRequestId: vercel.requestId,

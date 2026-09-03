@@ -49,9 +49,12 @@ const groupedNavigationSummary = (samples: Array<{ route: string; durationMs: nu
 
 const correlatedRequests = (resources: ReadonlyArray<ResourceMetric>) => resources.map((resource) => ({
   requestId: resource.requestId,
+  cdpRequestId: resource.cdpRequestId,
   method: resource.method,
+  statusCode: resource.statusCode,
   path: new URL(resource.url).pathname + new URL(resource.url).search,
   startedAt: resource.startedAt,
+  responseHeaders: resource.responseHeaders,
 }));
 
 async function installClientObservers(page: Page): Promise<void> {

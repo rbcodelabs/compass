@@ -39,7 +39,7 @@ describe("performance CDP resource collector lifecycle", () => {
     delete process.env.PERF_SERVER_KIND;
   });
 
-  it("fails closed when a preview target response has no Vercel invocation ID", async () => {
+  it("passively merges allowlisted CDP response headers and records the CDP request ID", async () => {
     vi.useFakeTimers();
     process.env.PERF_SERVER_KIND = "vercel-preview";
     const cdp = new FakeCdp();
@@ -49,10 +49,34 @@ describe("performance CDP resource collector lifecycle", () => {
     cdp.emit("Network.responseReceived", {
       requestId: "r1",
       type: "Fetch",
-      response: { url: "http://localhost/api/panels/entity/opportunity/one", mimeType: "application/json", headers: {} },
+      response: { url: "http://localhost/api/panels/entity/opportunity/one", mimeType: "application/json", status: 200, headers: {
+        "x-vercel-id": "iad1::one",
+        "cache-control": "private, no-store",
+      } },
+    });
+    cdp.emit("Network.loadingFinished", { requestId: "r1", encodedDataLength: 12 });
+    cdp.emit("Network.responseReceivedExtraInfo", {
+      requestId: "r1",
+      headers: {
+        "x-compass-perf-invocation-id": "perf_inv_11111111111141118111111111111111",
+        "X-Vercel-Cache": "MISS", Age: "0", "Set-Cookie": "secret",
+      },
     });
     const closing = collector.closeSample("perf_one", { exact: 1 });
-    await expect(closing).rejects.toThrow(/missing its Vercel invocation ID/);
+    await vi.advanceTimersByTimeAsync(100);
+    const snapshot = await closing;
+    expect(snapshot.resources[0]).toEqual(expect.objectContaining({
+      cdpRequestId: "r1",
+      statusCode: 200,
+      requestId: "perf_inv_11111111111141118111111111111111",
+      responseHeaders: {
+        age: "0",
+        cacheControl: "private, no-store",
+        xVercelCache: "MISS",
+        xVercelId: "iad1::one",
+      },
+    }));
+    expect(JSON.stringify(snapshot)).not.toContain("secret");
   });
 
   it("rejects a tracked loading failure with request context", async () => {
@@ -97,7 +121,7 @@ describe("performance CDP resource collector lifecycle", () => {
     const cdp = new FakeCdp();
     const collector = await createResourceCollector(cdp as unknown as CDPSession, []);
     collector.beginSample("perf_one", { kind: "rsc", targetPath: "/org/ws/roadmap", match: "exact" });
-    for (const requestId of ["r1", "r2", "r3"]) {
+    for (const [index, requestId] of ["r1", "r2", "r3"].entries()) {
       cdp.emit("Network.requestWillBeSent", request(requestId, "http://localhost/org/ws/roadmap", {
         Rsc: "1",
         "X-Compass-Perf-Request-Id": "perf_11111111-1111-4111-8111-111111111111",
@@ -108,7 +132,10 @@ describe("performance CDP resource collector lifecycle", () => {
         response: {
           url: "http://localhost/org/ws/roadmap",
           mimeType: "text/x-component",
-          headers: { "x-vercel-id": `iad1::${requestId}` },
+          headers: {
+            "x-compass-perf-invocation-id": `perf_inv_${String(index + 1).padStart(32, "0")}`,
+            "x-vercel-id": `iad1::${requestId}`,
+          },
         },
       });
       cdp.emit("Network.loadingFinished", { requestId, encodedDataLength: 10 });

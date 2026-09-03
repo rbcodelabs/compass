@@ -332,10 +332,18 @@ export function assertSafeAuthState(authPath: string, repositoryRoot = process.c
 }
 
 export interface BrowserRequest {
-  requestId: string;
+  requestId: string | null;
+  cdpRequestId?: string;
   method: string;
+  statusCode?: number | null;
   path: string;
   startedAt: string;
+  responseHeaders?: {
+    age: string | null;
+    cacheControl: string | null;
+    xVercelCache: string | null;
+    xVercelId: string | null;
+  };
 }
 
 export type BrowserSample = BrowserRequest & {
@@ -351,14 +359,38 @@ export function resolvePerformanceInvocationId(sampleId: string | null, vercelRe
 
 export function extractCorrelatedBrowserRequests(samples: BrowserSample[]) {
   const cacheHits = samples.filter((sample) => sample.networkOutcome?.startsWith("router-cache"));
-  const requests = samples
+  const network = samples
     .filter((sample) => !sample.networkOutcome?.startsWith("router-cache"))
     .flatMap((sample) => sample.requests ?? [sample]);
-  const ids = requests.map((request) => request.requestId);
+  const cdnCacheHits = network.filter((request) => request.responseHeaders?.xVercelCache === "HIT");
+  const requests = network.filter((request) => request.responseHeaders?.xVercelCache !== "HIT");
+  if (requests.some((request) => !request.requestId)) {
+    throw new Error("Function-backed browser request is missing its app invocation ID");
+  }
+  const ids = requests.map((request) => request.requestId!);
   if (new Set(ids).size !== ids.length) {
     throw new Error("Browser performance requests must have unique correlation IDs");
   }
-  return { requests, cacheHits };
+  return { requests, cacheHits, cdnCacheHits };
+}
+
+export function assertNoAppInvocationForCacheHits(
+  cacheHits: BrowserRequest[],
+  vercel: VercelRequest[],
+  toleranceMs = 500,
+): void {
+  for (const request of cacheHits) {
+    const pathname = new URL(request.path, "https://performance.invalid").pathname;
+    const started = Date.parse(request.startedAt);
+    const candidates = vercel.filter((candidate) =>
+      candidate.method === request.method &&
+      candidate.path === pathname &&
+      Math.abs(Date.parse(candidate.timestamp) - started) <= toleranceMs
+    );
+    if (candidates.length !== 0) {
+      throw new Error(`Cache-hit browser request ${request.cdpRequestId ?? "unknown"} has app invocation evidence`);
+    }
+  }
 }
 export interface VercelRequest {
   requestId: string;
@@ -668,7 +700,9 @@ export function correlateVercelRequests(
     }
     const candidates = vercel.filter(
       (candidate) =>
+        candidate.customRequestId === request.requestId &&
         candidate.method === request.method &&
+        (request.statusCode == null || candidate.statusCode === request.statusCode) &&
         candidate.path === browserPathname &&
         candidate.statusCode >= 200 &&
         candidate.statusCode < 400 &&

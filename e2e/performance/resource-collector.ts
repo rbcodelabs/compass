@@ -1,14 +1,21 @@
 import type { CDPSession } from "@playwright/test";
-import { resolvePerformanceInvocationId } from "../../lib/performance-baseline";
 export type ResourceMetric = {
   sampleId: string | null;
-  requestId: string;
+  requestId: string | null;
+  cdpRequestId: string;
   method: string;
+  statusCode: number | null;
   startedAt: string;
   kind: "document" | "rsc" | "api";
   url: string;
   cdpEncodedDataLength: number;
   cdpDecodedDataLength: number;
+  responseHeaders: {
+    age: string | null;
+    cacheControl: string | null;
+    xVercelCache: string | null;
+    xVercelId: string | null;
+  };
 };
 
 export type ResourceContract = {
@@ -89,8 +96,10 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
     url: string;
     decodedBytes: number;
     sampleId: string;
-    correlationId: string;
+    correlationId: string | null;
+    responseHeaders: Record<string, string>;
     method: string;
+    statusCode: number | null;
     startedAt: string;
     kind: Kind;
     completed: Promise<void>;
@@ -129,6 +138,36 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
       : pathname.startsWith(contract.targetPath);
   };
   const correlationOwners = new Map<string, string>();
+  const publicResponseHeaders = (headers: Record<string, string>) => ({
+    age: headers.age ?? null,
+    cacheControl: headers["cache-control"] ?? null,
+    xVercelCache: headers["x-vercel-cache"] ?? null,
+    xVercelId: headers["x-vercel-id"] ?? null,
+  });
+  const applyResponseHeaders = (requestId: string, headers: Record<string, unknown>) => {
+    const tracked = requests.get(requestId);
+    if (!tracked) return;
+    Object.assign(tracked.responseHeaders, normalizeHeaders(headers));
+    const correlationId = tracked.responseHeaders["x-compass-perf-invocation-id"] ?? null;
+    if (correlationId) {
+      if (!/^perf_inv_[0-9a-f]{32}$/.test(correlationId)) {
+        attributionError = new Error(`Tracked target response ${requestId} has an invalid performance invocation ID`);
+        return;
+      }
+      const owner = correlationOwners.get(correlationId);
+      if (owner && owner !== requestId) {
+        attributionError = new Error(`Performance invocation ID ${correlationId} was reused by multiple requests`);
+        return;
+      }
+      correlationOwners.set(correlationId, requestId);
+      tracked.correlationId = correlationId;
+    }
+    const materialized = resources.find((resource) => resource.cdpRequestId === requestId);
+    if (materialized) {
+      materialized.requestId = tracked.correlationId;
+      materialized.responseHeaders = publicResponseHeaders(tracked.responseHeaders);
+    }
+  };
   const track = (
     requestId: string,
     url: string,
@@ -150,8 +189,10 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
         url,
         decodedBytes: 0,
         sampleId: active.sampleId,
-        correlationId,
+        correlationId: null,
+        responseHeaders: {},
         method,
+        statusCode: null,
         startedAt: new Date(wallTime! * 1_000).toISOString(),
         kind,
         completed,
@@ -196,22 +237,14 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
       else attributionError = new Error(`Tracked target response ${requestId} had no request start event`);
       const tracked = requests.get(requestId);
       if (tracked) {
-        const responseHeaders = normalizeHeaders(response.headers ?? {});
-        const vercelRequestId = responseHeaders["x-vercel-id"] ?? null;
-        if (process.env.PERF_SERVER_KIND === "vercel-preview" && !vercelRequestId) {
-          attributionError = new Error(`Tracked preview response ${requestId} is missing its Vercel invocation ID`);
-          return;
-        }
-        const correlationId = resolvePerformanceInvocationId(tracked.correlationId, vercelRequestId)!;
-        const owner = correlationOwners.get(correlationId);
-        if (owner && owner !== requestId) {
-          attributionError = new Error(`Performance invocation ID ${correlationId} was reused by multiple requests`);
-          return;
-        }
-        correlationOwners.set(correlationId, requestId);
-        tracked.correlationId = correlationId;
+        tracked.statusCode = Number.isInteger(response.status) ? response.status : null;
+        applyResponseHeaders(requestId, response.headers ?? {});
       }
     }
+  });
+  cdp.on("Network.responseReceivedExtraInfo", ({ requestId, headers }) => {
+    const tracked = requests.get(requestId);
+    if (tracked) applyResponseHeaders(requestId, headers ?? {});
   });
   cdp.on("Network.dataReceived", ({ requestId, dataLength }) => {
     const request = requests.get(requestId);
@@ -224,11 +257,14 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
       url: request.url,
       sampleId: request.sampleId,
       requestId: request.correlationId,
+      cdpRequestId: requestId,
       method: request.method,
+      statusCode: request.statusCode,
       startedAt: request.startedAt,
       kind: request.kind,
       cdpDecodedDataLength: request.decodedBytes,
       cdpEncodedDataLength: encodedDataLength,
+      responseHeaders: publicResponseHeaders(request.responseHeaders),
     });
     request.complete();
   });
