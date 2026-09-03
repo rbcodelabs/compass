@@ -3,7 +3,8 @@ import { isPublicPath } from "@/lib/route-access";
 import { NextResponse } from "next/server";
 import {
   createPreviewPerformanceCorrelation,
-  PERFORMANCE_INVOCATION_HEADER,
+  createServerOwnedPerformanceHeaders,
+  PERFORMANCE_BUILD_SHA_HEADER,
   PERFORMANCE_SAMPLE_HEADER,
 } from "@/lib/performance-request-correlation";
 
@@ -20,14 +21,15 @@ export const proxy = auth((req) => {
   const correlation = createPreviewPerformanceCorrelation(
     process.env,
     req.headers.get(PERFORMANCE_SAMPLE_HEADER),
+    req.headers.get(PERFORMANCE_BUILD_SHA_HEADER),
   );
+  const requestHeaders = createServerOwnedPerformanceHeaders(req.headers, correlation);
   if (correlation) {
-    const requestHeaders = new Headers(req.headers);
-    requestHeaders.set(PERFORMANCE_INVOCATION_HEADER, correlation.invocationId);
     const response = NextResponse.next({ request: { headers: requestHeaders } });
     response.headers.set(correlation.header, correlation.invocationId);
     return response;
   }
+  return NextResponse.next({ request: { headers: requestHeaders } });
 })
 
 

@@ -362,8 +362,12 @@ export function extractCorrelatedBrowserRequests(samples: BrowserSample[]) {
   const network = samples
     .filter((sample) => !sample.networkOutcome?.startsWith("router-cache"))
     .flatMap((sample) => sample.requests ?? [sample]);
-  const cdnCacheHits = network.filter((request) => request.responseHeaders?.xVercelCache === "HIT");
-  const requests = network.filter((request) => request.responseHeaders?.xVercelCache !== "HIT");
+  const isSuccessfulCdnHit = (request: BrowserRequest) =>
+    request.responseHeaders?.xVercelCache === "HIT" &&
+    request.statusCode !== null && request.statusCode !== undefined &&
+    request.statusCode >= 200 && request.statusCode < 400;
+  const cdnCacheHits = network.filter(isSuccessfulCdnHit);
+  const requests = network.filter((request) => !isSuccessfulCdnHit(request));
   if (requests.some((request) => !request.requestId)) {
     throw new Error("Function-backed browser request is missing its app invocation ID");
   }
@@ -379,6 +383,8 @@ export function assertNoAppInvocationForCacheHits(
   vercel: VercelRequest[],
   toleranceMs = 500,
 ): void {
+  // The retained export must cover the complete browser interval; otherwise
+  // absence of a matching Function invocation is not affirmative cache proof.
   for (const request of cacheHits) {
     const pathname = new URL(request.path, "https://performance.invalid").pathname;
     const started = Date.parse(request.startedAt);

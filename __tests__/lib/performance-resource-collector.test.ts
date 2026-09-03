@@ -79,6 +79,28 @@ describe("performance CDP resource collector lifecycle", () => {
     expect(JSON.stringify(snapshot)).not.toContain("secret");
   });
 
+  it.each([
+    ["response-first", "x-compass-perf-invocation-id", "perf_inv_11111111111111111111111111111111", "perf_inv_22222222222222222222222222222222"],
+    ["extra-first", "x-compass-perf-invocation-id", "perf_inv_11111111111111111111111111111111", "perf_inv_22222222222222222222222222222222"],
+    ["response-first", "x-vercel-cache", "MISS", "HIT"],
+    ["extra-first", "x-vercel-id", "iad1::one", "iad1::two"],
+    ["response-first", "cache-control", "private", "public"],
+    ["extra-first", "age", "0", "1"],
+  ])("rejects conflicting %s passive %s evidence", async (order, header, first, second) => {
+    vi.useFakeTimers();
+    const cdp = new FakeCdp();
+    const collector = await createResourceCollector(cdp as unknown as CDPSession, []);
+    collector.beginSample("perf_one", { kind: "api", targetPath: "/api/panels/entity/opportunity/", match: "prefix" });
+    cdp.emit("Network.requestWillBeSent", request("r1", "http://localhost/api/panels/entity/opportunity/one"));
+    const response = () => cdp.emit("Network.responseReceived", {
+      requestId: "r1", type: "Fetch",
+      response: { url: "http://localhost/api/panels/entity/opportunity/one", mimeType: "application/json", status: 200, headers: { [header]: first } },
+    });
+    const extra = () => cdp.emit("Network.responseReceivedExtraInfo", { requestId: "r1", headers: { [header]: second } });
+    if (order === "response-first") { response(); extra(); } else { extra(); response(); }
+    await expect(collector.closeSample("perf_one", { exact: 1 })).rejects.toThrow(new RegExp(`conflicting.*${header}`, "i"));
+  });
+
   it("rejects a tracked loading failure with request context", async () => {
     vi.useFakeTimers();
     const cdp = new FakeCdp();

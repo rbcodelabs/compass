@@ -144,10 +144,21 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
     xVercelCache: headers["x-vercel-cache"] ?? null,
     xVercelId: headers["x-vercel-id"] ?? null,
   });
+  const CORRELATION_HEADERS = new Set([
+    "x-compass-perf-invocation-id", "x-vercel-cache", "x-vercel-id", "cache-control", "age",
+  ]);
   const applyResponseHeaders = (requestId: string, headers: Record<string, unknown>) => {
     const tracked = requests.get(requestId);
     if (!tracked) return;
-    Object.assign(tracked.responseHeaders, normalizeHeaders(headers));
+    for (const [name, value] of Object.entries(normalizeHeaders(headers))) {
+      if (!CORRELATION_HEADERS.has(name)) continue;
+      const existing = tracked.responseHeaders[name];
+      if (existing !== undefined && existing !== value) {
+        attributionError = new Error(`Tracked target response ${requestId} has conflicting ${name} evidence`);
+        return;
+      }
+      tracked.responseHeaders[name] = value;
+    }
     const correlationId = tracked.responseHeaders["x-compass-perf-invocation-id"] ?? null;
     if (correlationId) {
       if (!/^perf_inv_[0-9a-f]{32}$/.test(correlationId)) {

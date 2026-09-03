@@ -165,6 +165,7 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, collector: Awai
   const requestId = `perf_${randomUUID()}`;
   await page.setExtraHTTPHeaders({
     "x-compass-perf-request-id": requestId,
+    "x-compass-perf-build-sha": process.env.PERF_BUILD_SHA!,
     ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET
       ? { "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET }
       : {}),
@@ -240,6 +241,7 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
         viewport: { width: 1440, height: 900 },
         extraHTTPHeaders: {
           "x-compass-perf-request-id": requestId,
+          "x-compass-perf-build-sha": process.env.PERF_BUILD_SHA!,
           ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET
             ? { "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET }
             : {}),
@@ -330,6 +332,7 @@ for (const panel of [
       const requestId = `perf_${randomUUID()}`;
       await page.setExtraHTTPHeaders({
         "x-compass-perf-request-id": requestId,
+        "x-compass-perf-build-sha": process.env.PERF_BUILD_SHA!,
         ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET
           ? { "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET }
           : {}),

@@ -425,6 +425,7 @@ describe("query artifacts", () => {
       requestId: "perf_inv_stale",
       cdpRequestId: "cdp-1",
       method: "GET",
+      statusCode: 200,
       path: "/roadmap?_rsc=edge",
       startedAt: "2026-09-01T12:00:00.000Z",
       responseHeaders: { age: "10", cacheControl: "public", xVercelCache: "HIT", xVercelId: "edge" },
@@ -437,6 +438,7 @@ describe("query artifacts", () => {
       requestId: "platform", customRequestId: "different", method: "GET", path: "/roadmap",
       timestamp: "2026-09-01T12:00:00.050Z", durationMs: null, statusCode: 200,
     }])).toThrow(/app invocation evidence/);
+    expect(extractCorrelatedBrowserRequests([{ ...hit, statusCode: 500 }]).cdnCacheHits).toEqual([]);
   });
 
   it("uses a 500ms inclusive correlation window and rejects adjacent ambiguity", () => {
