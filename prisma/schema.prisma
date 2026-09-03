@@ -2,6 +2,71 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Expand-only operator models. These are not imported by ordinary routes.
+// Roadmap's new scalar columns intentionally remain migration-only until the
+// contract release so default Prisma reads stay deploy-before-migrate safe.
+model PortfolioCapacityPlan {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId            String    @map("workspace_id") @db.Uuid
+  policyId               String    @map("policy_id") @db.VarChar(160)
+  planFingerprint        String    @map("plan_fingerprint") @db.Char(64)
+  unit                   String    @db.VarChar(80)
+  availableUnits         Int       @map("available_units")
+  unitsPerNowItem        Int       @map("units_per_now_item")
+  nowLimit               Int       @map("now_limit")
+  state                  String    @default("DRAFT") @db.VarChar(30)
+  activeWorkspaceId      String?   @unique(map: "idx_capacity_plans_active_workspace") @map("active_workspace_id") @db.Uuid
+  nowSnapshotFingerprint String?   @map("now_snapshot_fingerprint") @db.Char(64)
+  nowSnapshotCount       Int?      @map("now_snapshot_count")
+  reconciledAt           DateTime? @map("reconciled_at")
+  version                Int       @default(0)
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @default(now()) @map("updated_at")
+
+  @@unique([workspaceId, policyId], map: "idx_capacity_plans_workspace_policy")
+  @@index([workspaceId, state], map: "idx_capacity_plans_workspace_state")
+  @@map("portfolio_capacity_plans")
+}
+
+model PortfolioCapacityReservation {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  planId              String    @map("plan_id") @db.Uuid
+  roadmapItemId       String    @map("roadmap_item_id") @db.Uuid
+  activeRoadmapItemId String?   @unique(map: "idx_capacity_reservations_active_item") @map("active_roadmap_item_id") @db.Uuid
+  decisionRecordId    String?   @map("decision_record_id") @db.Uuid
+  units               Int
+  state               String    @default("STAGED") @db.VarChar(30)
+  releasedAt          DateTime? @map("released_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @default(now()) @map("updated_at")
+
+  @@unique([planId, roadmapItemId], map: "idx_capacity_reservations_plan_item")
+  @@index([planId, state], map: "idx_capacity_reservations_plan_state")
+  @@index([roadmapItemId, createdAt], map: "idx_capacity_reservations_item_history")
+  @@index([decisionRecordId], map: "idx_capacity_reservations_decision")
+  @@map("portfolio_capacity_reservations")
+}
+
+model PortfolioCapacityOperation {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String    @map("workspace_id") @db.Uuid
+  planId             String?   @map("plan_id") @db.Uuid
+  action             String    @db.VarChar(20)
+  idempotencyKey     String    @map("idempotency_key") @db.VarChar(160)
+  requestFingerprint String    @map("request_fingerprint") @db.Char(64)
+  status             String    @default("IN_PROGRESS") @db.VarChar(30)
+  progressCursor     String?   @map("progress_cursor") @db.Uuid
+  resultJson         String?   @map("result_json") @db.Text
+  errorCode          String?   @map("error_code") @db.VarChar(100)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @default(now()) @map("updated_at")
+  completedAt        DateTime? @map("completed_at")
+
+  @@unique([workspaceId, idempotencyKey], map: "idx_capacity_operations_workspace_key")
+  @@index([planId, action, createdAt], map: "idx_capacity_operations_plan_action_created")
+  @@map("portfolio_capacity_operations")
+}
+
 datasource db {
   provider     = "postgresql"
   relationMode = "prisma"
@@ -153,83 +218,83 @@ model Workspace {
 // ─── Capture / Research Studies ──────────────────────────────────────────────
 
 model ResearchStudy {
-  id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId    String              @map("workspace_id") @db.Uuid
-  name           String              @db.VarChar(255)
-  goal           String              @db.Text
-  studyType      String              @default("CUSTOMER_INTERVIEW") @map("study_type") @db.VarChar(30)
-  guide          String              @db.Text
-  targetMinutes  Int                 @default(15) @map("target_minutes")
-  appUrl         String?             @map("app_url") @db.Text
-  shareTokenHash String?             @unique @map("share_token_hash") @db.VarChar(64)
-  shareExpiresAt DateTime?           @map("share_expires_at")
-  status         String              @default("DRAFT") @db.VarChar(20)
-  createdAt      DateTime            @default(now()) @map("created_at")
-  updatedAt      DateTime            @default(now()) @map("updated_at")
-  createdById    String?             @map("created_by_id") @db.Uuid
-  updatedById    String?             @map("updated_by_id") @db.Uuid
-  source         String              @default("UI") @db.VarChar(20)
-  workspace      Workspace           @relation(fields: [workspaceId], references: [id])
-  sessions       ResearchSession[]
-  syntheses      ResearchSynthesis[]
+  id                String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String                     @map("workspace_id") @db.Uuid
+  name              String                     @db.VarChar(255)
+  goal              String                     @db.Text
+  studyType         String                     @default("CUSTOMER_INTERVIEW") @map("study_type") @db.VarChar(30)
+  guide             String                     @db.Text
+  targetMinutes     Int                        @default(15) @map("target_minutes")
+  appUrl            String?                    @map("app_url") @db.Text
+  shareTokenHash    String?                    @unique @map("share_token_hash") @db.VarChar(64)
+  shareExpiresAt    DateTime?                  @map("share_expires_at")
+  status            String                     @default("DRAFT") @db.VarChar(20)
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  updatedAt         DateTime                   @default(now()) @map("updated_at")
+  createdById       String?                    @map("created_by_id") @db.Uuid
+  updatedById       String?                    @map("updated_by_id") @db.Uuid
+  source            String                     @default("UI") @db.VarChar(20)
+  workspace         Workspace                  @relation(fields: [workspaceId], references: [id])
+  sessions          ResearchSession[]
+  syntheses         ResearchSynthesis[]
   participantTokens ResearchParticipantToken[]
-  attachments      ResearchAttachment[]
+  attachments       ResearchAttachment[]
 
   @@index([workspaceId, status])
   @@map("research_studies")
 }
 
 model ResearchParticipantToken {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  studyId     String    @map("study_id") @db.Uuid
-  tokenHash   String    @unique(map: "idx_research_participant_tokens_hash") @map("token_hash") @db.VarChar(64)
-  kind        String    @default("PRIMARY") @db.VarChar(30)
-  expiresAt   DateTime  @map("expires_at")
-  revokedAt   DateTime? @map("revoked_at")
-  lastUsedAt  DateTime? @map("last_used_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  createdById String?   @map("created_by_id") @db.Uuid
-  startWindowAt DateTime? @map("start_window_at")
-  startCount    Int?      @map("start_count")
-  responseWindowAt DateTime? @map("response_window_at")
-  responseCount Int?      @map("response_count")
-  agentWindowAt DateTime? @map("agent_window_at")
-  agentCallCount Int?     @map("agent_call_count")
-  study       ResearchStudy @relation(fields: [studyId], references: [id])
-  sessions    ResearchSession[]
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studyId          String            @map("study_id") @db.Uuid
+  tokenHash        String            @unique(map: "idx_research_participant_tokens_hash") @map("token_hash") @db.VarChar(64)
+  kind             String            @default("PRIMARY") @db.VarChar(30)
+  expiresAt        DateTime          @map("expires_at")
+  revokedAt        DateTime?         @map("revoked_at")
+  lastUsedAt       DateTime?         @map("last_used_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  createdById      String?           @map("created_by_id") @db.Uuid
+  startWindowAt    DateTime?         @map("start_window_at")
+  startCount       Int?              @map("start_count")
+  responseWindowAt DateTime?         @map("response_window_at")
+  responseCount    Int?              @map("response_count")
+  agentWindowAt    DateTime?         @map("agent_window_at")
+  agentCallCount   Int?              @map("agent_call_count")
+  study            ResearchStudy     @relation(fields: [studyId], references: [id])
+  sessions         ResearchSession[]
 
   @@index([studyId, kind, revokedAt], map: "idx_research_participant_tokens_study_kind")
   @@map("research_participant_tokens")
 }
 
 model ResearchSession {
-  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  studyId          String         @map("study_id") @db.Uuid
-  modality         String         @default("CHAT") @db.VarChar(10)
-  status           String         @default("PENDING") @db.VarChar(20)
-  participantTokenId String?      @map("participant_token_id") @db.Uuid
-  resumeTokenHash  String?        @unique(map: "idx_research_sessions_resume_token") @map("resume_token_hash") @db.VarChar(64)
-  participantName  String?        @map("participant_name") @db.VarChar(255)
-  participantEmail String?        @map("participant_email") @db.VarChar(255)
-  summary          String?        @db.Text
-  audioUrl         String?        @map("audio_url") @db.Text
-  startedAt        DateTime?      @map("started_at")
-  lastActiveAt     DateTime?      @map("last_active_at")
-  completedAt      DateTime?      @map("completed_at")
-  endedReason      String?        @map("ended_reason") @db.VarChar(50)
-  nextSequence     Int?           @map("next_sequence")
-  activeRequestId  String?        @map("active_request_id") @db.Uuid
-  activeRequestExpiresAt DateTime? @map("active_request_expires_at")
-  createdAt        DateTime       @default(now()) @map("created_at")
-  updatedAt        DateTime       @default(now()) @map("updated_at")
-  study            ResearchStudy  @relation(fields: [studyId], references: [id])
-  participantToken ResearchParticipantToken? @relation(fields: [participantTokenId], references: [id])
-  turns            ResearchTurn[]
-  requests         ResearchRequest[]
-  attachments      ResearchAttachment[]
-  voiceEvents      ResearchVoiceEvent[]
-  voiceLeaseId     String?        @map("voice_lease_id") @db.Uuid
-  voiceLeaseExpiresAt DateTime?    @map("voice_lease_expires_at")
+  id                     String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studyId                String                    @map("study_id") @db.Uuid
+  modality               String                    @default("CHAT") @db.VarChar(10)
+  status                 String                    @default("PENDING") @db.VarChar(20)
+  participantTokenId     String?                   @map("participant_token_id") @db.Uuid
+  resumeTokenHash        String?                   @unique(map: "idx_research_sessions_resume_token") @map("resume_token_hash") @db.VarChar(64)
+  participantName        String?                   @map("participant_name") @db.VarChar(255)
+  participantEmail       String?                   @map("participant_email") @db.VarChar(255)
+  summary                String?                   @db.Text
+  audioUrl               String?                   @map("audio_url") @db.Text
+  startedAt              DateTime?                 @map("started_at")
+  lastActiveAt           DateTime?                 @map("last_active_at")
+  completedAt            DateTime?                 @map("completed_at")
+  endedReason            String?                   @map("ended_reason") @db.VarChar(50)
+  nextSequence           Int?                      @map("next_sequence")
+  activeRequestId        String?                   @map("active_request_id") @db.Uuid
+  activeRequestExpiresAt DateTime?                 @map("active_request_expires_at")
+  createdAt              DateTime                  @default(now()) @map("created_at")
+  updatedAt              DateTime                  @default(now()) @map("updated_at")
+  study                  ResearchStudy             @relation(fields: [studyId], references: [id])
+  participantToken       ResearchParticipantToken? @relation(fields: [participantTokenId], references: [id])
+  turns                  ResearchTurn[]
+  requests               ResearchRequest[]
+  attachments            ResearchAttachment[]
+  voiceEvents            ResearchVoiceEvent[]
+  voiceLeaseId           String?                   @map("voice_lease_id") @db.Uuid
+  voiceLeaseExpiresAt    DateTime?                 @map("voice_lease_expires_at")
 
   @@index([studyId, status])
   @@index([participantTokenId, status], map: "idx_research_sessions_participant_token")
@@ -237,13 +302,13 @@ model ResearchSession {
 }
 
 model ResearchTurn {
-  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  sessionId String          @map("session_id") @db.Uuid
-  role      String          @db.VarChar(20)
-  content   String          @db.Text
-  sequence  Int
-  createdAt DateTime        @default(now()) @map("created_at")
-  session   ResearchSession @relation(fields: [sessionId], references: [id])
+  id          String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId   String               @map("session_id") @db.Uuid
+  role        String               @db.VarChar(20)
+  content     String               @db.Text
+  sequence    Int
+  createdAt   DateTime             @default(now()) @map("created_at")
+  session     ResearchSession      @relation(fields: [sessionId], references: [id])
   attachments ResearchAttachment[]
 
   @@unique([sessionId, sequence], map: "idx_research_turns_session_sequence")
@@ -1137,19 +1202,19 @@ model Artifact {
 /// Insert-only Artifact content revision. Exactly one of blobPathname or
 /// externalUrl is populated according to the parent Artifact.sourceType.
 model ArtifactRevision {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  artifactId     String    @map("artifact_id") @db.Uuid
-  revisionNumber Int       @map("revision_number")
-  blobPathname   String?   @map("blob_pathname") @db.Text
-  filename       String?   @db.VarChar(255)
-  mimeType       String?   @map("mime_type") @db.VarChar(100)
-  byteSize       Int?      @map("byte_size")
-  sha256         String?   @db.VarChar(64)
-  externalUrl    String?   @map("external_url") @db.Text
-  createdById    String?   @map("created_by_id") @db.Uuid
-  source         String    @default("UI") @db.VarChar(20)
-  createdAt      DateTime  @default(now()) @map("created_at")
-  artifact       Artifact  @relation("ArtifactRevisions", fields: [artifactId], references: [id])
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  artifactId     String     @map("artifact_id") @db.Uuid
+  revisionNumber Int        @map("revision_number")
+  blobPathname   String?    @map("blob_pathname") @db.Text
+  filename       String?    @db.VarChar(255)
+  mimeType       String?    @map("mime_type") @db.VarChar(100)
+  byteSize       Int?       @map("byte_size")
+  sha256         String?    @db.VarChar(64)
+  externalUrl    String?    @map("external_url") @db.Text
+  createdById    String?    @map("created_by_id") @db.Uuid
+  source         String     @default("UI") @db.VarChar(20)
+  createdAt      DateTime   @default(now()) @map("created_at")
+  artifact       Artifact   @relation("ArtifactRevisions", fields: [artifactId], references: [id])
   currentFor     Artifact[] @relation("CurrentArtifactRevision")
 
   @@unique([artifactId, revisionNumber])
