@@ -57,7 +57,8 @@ server-duration fields are therefore `null` with an explicit availability
 count, never synthesized as zero; browser latency and DSQL query timing remain
 available.
 Overlapping Vercel time-slice exports for the same platform request are merged
-only when every outer invocation field is identical. Nested log records are
+only when every authoritative outer invocation field is identical; the
+human-readable outer `message` is presentation metadata and may vary. Nested log records are
 canonical-set-unioned before query parsing; an exactly repeated timestamp,
 level, and message is treated as export duplication rather than a second query.
 Only the `serverless` phase is authoritative. A same-ID

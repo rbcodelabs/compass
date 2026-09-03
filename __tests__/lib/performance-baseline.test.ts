@@ -601,9 +601,13 @@ describe("query artifacts", () => {
       serverless,
       JSON.stringify({ ...outer, source: "serverless-middleware", message: "Middleware invocation", traceId: "trace-two", logs: [log] }),
     ])).toThrow(/middleware companion/);
-    expect(() => parseVercelRetainedLogs([
+    expect(parseVercelRetainedLogs([
       serverless,
       JSON.stringify({ ...outer, source: "serverless", message: "Different authoritative message", logs: [log] }),
+    ]).requests).toHaveLength(1);
+    expect(() => parseVercelRetainedLogs([
+      serverless,
+      JSON.stringify({ ...outer, source: "serverless", message: "Different authoritative message", requestPath: "/tasks", logs: [log] }),
     ])).toThrow(/conflicting retained envelopes/);
   });
 

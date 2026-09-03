@@ -496,7 +496,7 @@ export function parseVercelRetainedLogs(lines: string[]): {
       throw new Error(`Platform request ${id} has an unsupported same-ID source`);
     }
     const outer = authoritative.map(({ raw }) => {
-      return Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "logs"));
+      return Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "logs" && key !== "message"));
     });
     if (new Set(outer.map(canonical)).size !== 1) {
       throw new Error(`Platform request ${id} has conflicting retained envelopes`);
