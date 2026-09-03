@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockPrepare, mockPrepareRelease, mockAdmit, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision } = vi.hoisted(() => ({
+const { mockPrepare, mockPrepareBuilding, mockApplyBuilding, mockGeneratePolicy, mockPrepareRelease, mockAdmit, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision } = vi.hoisted(() => ({
   mockPrepare: vi.fn(),
+  mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(), mockGeneratePolicy: vi.fn(),
   mockPrepareRelease: vi.fn(),
   mockAdmit: vi.fn(),
   mockQueueRelease: vi.fn(),
@@ -20,6 +21,8 @@ vi.mock("@/lib/now-commitment", () => ({
   prepareNowCommitment: mockPrepare,
   admitRoadmapItemToNow: mockAdmit,
 }))
+vi.mock("@/lib/building-investment", () => ({ prepareBuildingInvestmentReview: mockPrepareBuilding, applyBuildingInvestmentDecision: mockApplyBuilding }))
+vi.mock("@/lib/native-now-policy", () => ({ generateNativeNowPolicy: mockGeneratePolicy }))
 vi.mock("@/lib/db", () => ({
   default: () => ({
     reviewRequest: { findUnique: mockFindRequest, findMany: mockListRequests },
@@ -27,7 +30,7 @@ vi.mock("@/lib/db", () => ({
   }),
 }))
 
-import { applyRecordedDecision, getReviewRequest, listReviewRequests, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, getReviewRequest, inspectNativeNowPolicy, listReviewRequests, requestBuildingInvestment, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 describe("decision MCP handlers", () => {
   beforeEach(() => vi.resetAllMocks())
@@ -39,6 +42,20 @@ describe("decision MCP handlers", () => {
 
     expect(result.content[0].text).toContain("ID: request-1")
     expect(mockPrepare).toHaveBeenCalledWith("item-1", { requestedById: "user-1" })
+  })
+
+  it("prepares a Building investment review without taking the decision", async () => {
+    mockPrepareBuilding.mockResolvedValue({ requestId: "request-1", id: "revision-1", fingerprint: "abc" })
+    const result = await requestBuildingInvestment({ solutionId: "solution-1" })
+    expect(result.structuredContent.ok).toBe(true)
+    expect(mockPrepareBuilding).toHaveBeenCalledWith("solution-1", { requestedById: "user-1" })
+  })
+
+  it("inspects a deterministic native policy for an authorized workspace", async () => {
+    mockGeneratePolicy.mockResolvedValue({ document: { version: 1 }, inspection: { ready: true } })
+    const result = await inspectNativeNowPolicy({ workspaceId: "workspace-1" })
+    expect(result.structuredContent.ok).toBe(true)
+    expect(mockGeneratePolicy).toHaveBeenCalledWith("workspace-1")
   })
 
   it("prepares an exact release authorization scope for human review", async () => {
@@ -83,6 +100,14 @@ describe("decision MCP handlers", () => {
 
     expect(result.content[0].text).toContain("ID: receipt-1")
     expect(mockAdmit).toHaveBeenCalledWith("item-1", "decision-1")
+  })
+
+  it("applies an approved Building investment decision", async () => {
+    mockFindDecision.mockResolvedValue({ id: "decision-1", revision: { request: { gateType: "BUILDING_INVESTMENT", subjectId: "solution-1" } } })
+    mockApplyBuilding.mockResolvedValue({ id: "receipt-1", receiptKey: "building:1", status: "APPLIED" })
+    const result = await applyRecordedDecision({ decisionId: "decision-1" })
+    expect(result.structuredContent.ok).toBe(true)
+    expect(mockApplyBuilding).toHaveBeenCalledWith("solution-1", "decision-1")
   })
 
   it("queues an authorized release through the durable outbox", async () => {

@@ -12,6 +12,22 @@ Compass protects consequential delivery transitions with a shared, immutable
 decision ledger. The first supported gate is the commitment to move a Roadmap
 Item into **NOW**.
 
+## Authorize Building investment
+
+Before a Roadmap Item can enter NOW, its linked Solution needs an applied
+Building-investment approval. Open the Solution panel and choose **Request
+Building investment review**. Compass publishes an immutable packet containing
+the exact Solution and Opportunity evidence. A signed-in workspace or
+organization administrator chooses **Approve Building investment**, **Do not
+invest**, or **Request changes**. Agents may prepare packets and apply recorded
+approvals, but cannot make decisions.
+
+Approval creates one idempotent `AUTHORIZE_BUILDING_INVESTMENT` receipt for the
+exact Solution. Rejection and change requests create no authorization. To
+reconsider those outcomes, call `reconsider_building_investment` with the
+terminal decision ID and a reason. Approved investments cannot be silently
+reopened; they require an explicit revocation workflow.
+
 ## Commit an item to NOW
 
 1. Create or move the Roadmap Item into **NEXT** or **LATER**.
@@ -91,6 +107,47 @@ transition the plan to `ACTIVE`. The resulting active authoritative plan must
 match the workspace policy, fingerprint, unit, available units, and NOW limit.
 Displacement is optional while capacity remains, but when supplied its
 destination must be `NEXT`.
+
+For Compass-native authority, `inspect_native_now_policy` derives policy inputs
+only from the active workspace capacity plan and current, applied native
+investment decisions. Generation fails closed on any workspace, revision,
+option, receipt, subject, fingerprint, or capacity mismatch. The generator
+also excludes any authority covered by an applied immutable
+`BUILDING_INVESTMENT_REVOCATION`; the original approval and revocation remain
+in the ledger for audit.
+signs both a content-addressed artifact and its active selector with Ed25519.
+Runtime verification requires the matching public key in
+`NOW_DECISION_PUBLIC_KEYS_JSON`, an unexpired artifact, valid artifact and
+selector signatures, the exact artifact hash, and selector mode `enforce`.
+
+The private signing key is never application configuration. The complete signed
+bundle belongs under `config/generated/decision-gates/<workspace-id>/`; the
+atomically replaced, compare-and-swap pointer belongs at
+`config/generated/decision-gates/<workspace-id>/active.json`. Runtime configuration points to
+the immutable bundle, not the mutable pointer. Committing or activating these
+files remains a separately reviewed rollout action.
+
+After the exact activation review is approved and its receipt is applied, a
+trusted local operator generates the files with `pnpm policy:generate-native`.
+Supply the private Ed25519 PEM only through `NOW_DECISION_SIGNING_KEY_FILE`; the
+file must be a regular `0600` file and is never logged, accepted on the command
+line, copied into output, or sent to Vercel. The non-secret
+`NOW_DECISION_SIGNING_KEY_ID` must exactly match `--signing-key-id`. The signer
+derives routing from the closed manifest in `NOW_DECISION_ROUTING_MANIFEST_FILE`
+(or the equivalent JSON environment value); a supplied routing fingerprint is
+only a mismatch assertion and never routing authority. Required options are
+`--workspace-id`, `--activation-decision-id`, `--mode`,
+`--generated-at`, `--signing-key-id`, `--output-dir`, and
+`--expected-active-artifact-id` and `--expected-active-selector-digest` (`none`
+for both on the first activation).
+`--valid-until` is optional and defaults to 14 days after generation.
+Generation refuses invalid inputs and non-identical output collisions; an exact
+rerun is idempotent. Selectors are workspace-bound and protected by an
+exclusive lock, no-follow reads, inode revalidation, fsync, and compare-and-swap.
+Policy validity defaults operationally to 14 days and may never exceed 30 days.
+NOW review/application stores the exact artifact, activation, selector, signing
+key, routing, and capacity provenance in immutable evidence records. Production
+receives public verification keys only.
 
 ## Authorize a release
 

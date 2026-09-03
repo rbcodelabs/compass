@@ -128,7 +128,7 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
-import { applyRecordedDecision, getReviewRequest, listReviewRequests, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, getReviewRequest, inspectNativeNowPolicy, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestNativePolicyActivation, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -1588,6 +1588,39 @@ const _handler = createMcpHandler(
     // ════════════════════════════════════════════════════════════════
 
     register(
+      "request_building_investment",
+      {
+        title: "Request Building Investment",
+        description: "Prepares an immutable human-admin review of Building investment in an exact Solution. This does not take the decision.",
+        inputSchema: { solutionId: z.string().uuid().describe("UUID of the Solution") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestBuildingInvestment,
+    )
+
+    register(
+      "reconsider_building_investment",
+      {
+        title: "Reconsider Building Investment",
+        description: "Starts an explicit new decision cycle after a rejected or changes-requested Building investment decision. Approved investments require a separate revocation.",
+        inputSchema: { solutionId: z.string().uuid(), expectedTerminalDecisionId: z.string().uuid(), reason: z.string().min(1) },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      reconsiderBuildingInvestment,
+    )
+
+    register(
+      "request_building_investment_revocation",
+      {
+        title: "Request Building Investment Revocation",
+        description: "Prepares an immutable human-admin correction review for an exact applied Building investment authority.",
+        inputSchema: { solutionId: z.string().uuid(), authorityDecisionId: z.string().uuid() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestBuildingInvestmentRevocation,
+    )
+
+    register(
       "request_now_commitment",
       {
         title: "Request NOW Commitment",
@@ -1618,6 +1651,27 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       requestReleaseAuthorization,
+    )
+
+    register(
+      "request_native_policy_activation",
+      {
+        title: "Request Native Policy Activation",
+        description: "Prepares a human-admin review bound to the exact generated native policy, capacity plan, routing fingerprint, and intended mode.",
+        inputSchema: { workspaceId: z.string().uuid(), routingFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/i).optional(), mode: z.enum(["shadow", "enforce"]), expectedTerminalDecisionId: z.string().uuid().optional(), reason: z.string().min(1).optional() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      }, requestNativePolicyActivation,
+    )
+
+    register(
+      "inspect_native_now_policy",
+      {
+        title: "Inspect Native NOW Policy",
+        description: "Fails closed unless the active capacity plan and all selected Compass-native Building approvals can produce a deterministic NOW policy.",
+        inputSchema: { workspaceId: z.string().uuid() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      inspectNativeNowPolicy,
     )
 
     register(

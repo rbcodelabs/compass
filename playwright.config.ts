@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import crypto from "node:crypto";
 import path from "node:path";
+import { E2E_POLICY_KEY_ID, E2E_POLICY_PUBLIC_KEY, E2E_ROUTING_MANIFEST } from "./e2e/functional/fixtures/native-policy-config";
 
 /**
  * Set E2E_FUNCTIONAL=1 to enable the functional test suite.
@@ -71,6 +72,8 @@ export default defineConfig({
         // Deterministic test-only key; production must provide its own secret.
         SSO_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
         NOW_COMMITMENT_POLICY_FILE: path.resolve(process.cwd(), "test-results/e2e-now-commitment-policy.json"),
+        NOW_DECISION_PUBLIC_KEYS_JSON: JSON.stringify({ [E2E_POLICY_KEY_ID]: E2E_POLICY_PUBLIC_KEY }),
+        NOW_DECISION_ROUTING_MANIFEST_JSON: JSON.stringify(E2E_ROUTING_MANIFEST),
       },
       timeout: 120_000,
     },

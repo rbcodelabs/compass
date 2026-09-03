@@ -8,6 +8,7 @@
 import pg from "pg";
 import { createHash } from "node:crypto";
 import { orgNameForToken } from "./run-token";
+import { buildingInvestmentSourceFingerprint } from "../../../lib/building-investment";
 import {
   GUIDED_UX_SCREENSHOT_STUDY,
   GUIDED_UX_SCREENSHOT_TOKEN,
@@ -236,9 +237,6 @@ export async function seedE2E(
     await pool.query(`DELETE FROM "${S}".review_requests WHERE id = ANY($1::uuid[])`, [priorRequestIds]);
   }
 
-  const investmentFingerprint = createHash("sha256")
-    .update(`e2e-building-investment:${ws.id}:${solutionId}`)
-    .digest("hex");
   const { rows: [investmentRequest] } = await pool.query<{ id: string }>(`
     INSERT INTO "${S}".review_requests
       (id, workspace_id, gate_type, subject_type, subject_id, state,
@@ -247,15 +245,33 @@ export async function seedE2E(
             'DECIDED', 1, 1, $3, NOW(), NOW())
     RETURNING id
   `, [ws.id, solutionId, user.id]);
+  const { rows: [investmentSolution] } = await pool.query<{
+    id: string; title: string; description: string | null; status: string; updated_at_utc: string;
+    opportunity_id: string; opportunity_title: string; workspace_id: string;
+  }>(`
+    SELECT s.id, s.title, s.description, s.status,
+           to_char(s.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at_utc,
+           o.id AS opportunity_id, o.title AS opportunity_title, o.workspace_id
+    FROM "${S}".solutions s JOIN "${S}".opportunities o ON o.id = s.opportunity_id
+    WHERE s.id = $1
+  `, [solutionId]);
+  const investmentSourceFingerprint = buildingInvestmentSourceFingerprint({
+    id: investmentSolution.id, title: investmentSolution.title, description: investmentSolution.description,
+    status: investmentSolution.status, updatedAt: new Date(investmentSolution.updated_at_utc),
+    opportunity: { id: investmentSolution.opportunity_id, title: investmentSolution.opportunity_title, workspaceId: investmentSolution.workspace_id },
+  });
+  const investmentFingerprint = createHash("sha256")
+    .update(`${investmentRequest.id}:1:1:${investmentSourceFingerprint}`)
+    .digest("hex");
   const { rows: [investmentRevision] } = await pool.query<{ id: string }>(`
     INSERT INTO "${S}".review_revisions
-      (id, request_id, revision_number, fingerprint, title, summary,
+      (id, request_id, revision_number, fingerprint, source_fingerprint, title, summary,
        packet_json, required_role, created_at)
-    VALUES (gen_random_uuid(), $1, 1, $2, 'Authorize E2E Building investment',
+    VALUES (gen_random_uuid(), $1, 1, $2, $3, 'Authorize E2E Building investment',
             'Seeded applied investment authority for the functional NOW gate.',
-            $3, 'ADMIN', NOW())
+            $4, 'ADMIN', NOW())
     RETURNING id
-  `, [investmentRequest.id, investmentFingerprint, JSON.stringify({ solutionId, outcome: "APPROVE_BUILDING" })]);
+  `, [investmentRequest.id, investmentFingerprint, investmentSourceFingerprint, JSON.stringify({ solutionId, outcome: "APPROVE_BUILDING" })]);
   await pool.query(`UPDATE "${S}".review_requests SET current_revision_id = $2 WHERE id = $1`, [investmentRequest.id, investmentRevision.id]);
   const { rows: [investmentOption] } = await pool.query<{ id: string }>(`
     INSERT INTO "${S}".review_options
@@ -264,15 +280,14 @@ export async function seedE2E(
             'APPROVE', 'AUTHORIZE_BUILDING_INVESTMENT', 0, NOW())
     RETURNING id
   `, [investmentRevision.id]);
-  const investmentDecidedAt = "2026-08-31T12:00:00.000Z";
-  const { rows: [investmentDecision] } = await pool.query<{ id: string }>(`
+  const { rows: [investmentDecision] } = await pool.query<{ id: string; decided_at_utc: string }>(`
     INSERT INTO "${S}".decision_records
       (id, workspace_id, request_id, revision_id, option_id, fingerprint,
        actor_user_id, actor_role, rationale, idempotency_key, decided_at)
     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'ADMIN',
             'Seeded E2E Building investment authority', $7,
             TIMESTAMP '2026-08-31 12:00:00.000')
-    RETURNING id
+    RETURNING id, to_char(decided_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS decided_at_utc
   `, [ws.id, investmentRequest.id, investmentRevision.id, investmentOption.id, investmentFingerprint, user.id, `e2e-building:${solutionId}`]);
   const { rows: [investmentApplication] } = await pool.query<{ id: string }>(`
     INSERT INTO "${S}".decision_applications
@@ -288,16 +303,18 @@ export async function seedE2E(
     .update(`e2e-capacity:${ws.id}:${policyId}:3`)
     .digest("hex");
   await pool.query(`DELETE FROM "${S}".portfolio_capacity_reservations WHERE plan_id IN (SELECT id FROM "${S}".portfolio_capacity_plans WHERE workspace_id = $1 AND policy_id = $2)`, [ws.id, policyId]);
+  await pool.query(`UPDATE "${S}".portfolio_capacity_plans SET state = 'SUPERSEDED', active_workspace_id = NULL, updated_at = NOW() WHERE workspace_id = $1 AND policy_id <> $2 AND state = 'ACTIVE'`, [ws.id, policyId]);
   const { rows: [capacityPlan] } = await pool.query<{ id: string }>(`
     INSERT INTO "${S}".portfolio_capacity_plans
       (id, workspace_id, policy_id, plan_fingerprint, unit, available_units,
-       units_per_now_item, now_limit, state, version, created_at, updated_at)
-    VALUES (gen_random_uuid(), $1, $2, $3, 'FOCUS_SLOT', 3, 1, 3, 'ACTIVE', 0, NOW(), NOW())
+       units_per_now_item, now_limit, state, active_workspace_id, version, created_at, updated_at)
+    VALUES (gen_random_uuid(), $1, $2, $3, 'FOCUS_SLOT', 3, 1, 3, 'ACTIVE', $1, 0, NOW(), NOW())
     ON CONFLICT (workspace_id, policy_id) DO UPDATE SET
       plan_fingerprint = EXCLUDED.plan_fingerprint, unit = EXCLUDED.unit,
       available_units = EXCLUDED.available_units,
       units_per_now_item = EXCLUDED.units_per_now_item,
-      now_limit = EXCLUDED.now_limit, state = 'ACTIVE', version = 0, updated_at = NOW()
+      now_limit = EXCLUDED.now_limit, state = 'ACTIVE', active_workspace_id = EXCLUDED.active_workspace_id,
+      version = 0, updated_at = NOW()
     RETURNING id
   `, [ws.id, policyId, planFingerprint]);
 
@@ -309,7 +326,7 @@ export async function seedE2E(
     revisionId: investmentRevision.id,
     optionId: investmentOption.id,
     fingerprint: investmentFingerprint,
-    decidedAt: investmentDecidedAt,
+    decidedAt: investmentDecision.decided_at_utc,
     applicationId: investmentApplication.id,
     continuationKey: "AUTHORIZE_BUILDING_INVESTMENT",
   })).digest("hex");
@@ -326,6 +343,7 @@ export async function seedE2E(
           requestedUnits: 1,
           unitsPerNowItem: 1,
           nowLimit: 3,
+          planVersion: 0,
         },
         investmentDecisions: {
           [solutionId]: {

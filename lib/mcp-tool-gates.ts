@@ -163,7 +163,18 @@ export const TOOL_GATES: Record<string, Gate> = {
     if (x.keyResultId) await assertEntityAccess(a, "keyResult", x.keyResultId)
   },
   request_now_commitment: async (a, x) => void (await assertEntityAccess(a, "roadmapItem", x.itemId)),
+  request_building_investment: async (a, x) => void (await assertEntityAccess(a, "solution", x.solutionId)),
+  reconsider_building_investment: async (a, x) => {
+    await assertEntityAccess(a, "solution", x.solutionId)
+    await assertEntityAccess(a, "decisionRecord", x.expectedTerminalDecisionId)
+  },
+  request_building_investment_revocation: async (a, x) => {
+    await assertEntityAccess(a, "solution", x.solutionId)
+    await assertEntityAccess(a, "decisionRecord", x.authorityDecisionId)
+  },
   request_release_authorization: async (a, x) => void (await assertWorkspaceAdmin(a, x.workspaceId)),
+  inspect_native_now_policy: async (a, x) => void (await assertWorkspaceAdmin(a, x.workspaceId)),
+  request_native_policy_activation: async (a, x) => void (await assertWorkspaceAdmin(a, x.workspaceId)),
   get_review_request: async (a, x) => void (await assertEntityAccess(a, "reviewRequest", x.requestId)),
   list_review_requests: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   apply_recorded_decision: async (a, x) => void (await assertEntityAccess(a, "decisionRecord", x.decisionId)),

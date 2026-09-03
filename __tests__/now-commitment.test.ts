@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createHash, generateKeyPairSync, sign } from "node:crypto"
 
 const tx = {
   roadmapItem: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+  solution: { findUnique: vi.fn() },
   reviewRequest: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   reviewRevision: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
-  decisionRecord: { findUnique: vi.fn() },
+  decisionRecord: { findUnique: vi.fn(), findMany: vi.fn() },
   decisionApplication: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+  nowPolicyApplicationEvidence: { findUnique: vi.fn(), create: vi.fn() },
   portfolioCapacityPlan: { findUnique: vi.fn(), updateMany: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
 }
@@ -14,6 +17,8 @@ vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
 import { NowCommitmentError, admitRoadmapItemToNow, ensureNowCommitmentRevisionFresh, nowCommitmentFingerprint, prepareNowCommitment, startNewNowCommitmentDecisionCycle } from "@/lib/now-commitment"
 import { investmentAuthorityChecksum, resolveNowCommitmentEligibility } from "@/lib/now-eligibility"
+import { buildingInvestmentSourceFingerprint } from "@/lib/building-investment"
+import { nativeRoutingFingerprint, nativeRoutingManifestJson } from "@/__tests__/fixtures/native-routing"
 
 const item = { id: "item-1", workspaceId: "ws-1", title: "Ship it", description: "Scope", horizon: "NEXT", status: "ACTIVE", solutionId: "sol-1", opportunityId: "opp-1", squadId: "squad-1", startDate: null, endDate: null, isPrivate: false, sortOrder: 2, updatedAt: new Date("2026-08-31T12:00:00Z"), nowCommitmentProvenance: "LEGACY_UNGATED" }
 const eligibility = {
@@ -29,10 +34,16 @@ const configuredIds = {
   investmentOption: "00000000-0000-4000-8000-000000000019", investmentReceipt: "00000000-0000-4000-8000-00000000001a",
 }
 const configuredItem = { ...item, id: configuredIds.item, workspaceId: configuredIds.workspace, solutionId: configuredIds.solution, squadId: configuredIds.squad }
+const configuredSolution = {
+  id: configuredIds.solution, title: "Native decision gates", description: "Use native authority", status: "VALIDATED",
+  updatedAt: new Date("2026-08-31T11:00:00Z"),
+  opportunity: { id: "00000000-0000-4000-8000-00000000001b", title: "Trusted delivery", workspaceId: configuredIds.workspace },
+}
 const configuredNativeDecision = {
-  id: configuredIds.investmentDecision, workspaceId: configuredIds.workspace, revisionId: configuredIds.investmentRevision,
+  id: configuredIds.investmentDecision, workspaceId: configuredIds.workspace, requestId: "00000000-0000-4000-8000-00000000001c", revisionId: configuredIds.investmentRevision,
   optionId: configuredIds.investmentOption, fingerprint: "d".repeat(64), decidedAt: new Date("2026-08-31T12:00:00Z"),
-  revision: { fingerprint: "d".repeat(64), supersededAt: null, request: { gateType: "BUILDING_INVESTMENT", subjectType: "SOLUTION", subjectId: configuredIds.solution, workspaceId: configuredIds.workspace } },
+  request: { id: "00000000-0000-4000-8000-00000000001c", state: "DECIDED", currentRevisionId: configuredIds.investmentRevision },
+  revision: { fingerprint: "d".repeat(64), sourceFingerprint: buildingInvestmentSourceFingerprint(configuredSolution), supersededAt: null, options: [{ id: configuredIds.investmentOption }], request: { id: "00000000-0000-4000-8000-00000000001c", gateType: "BUILDING_INVESTMENT", subjectType: "SOLUTION", subjectId: configuredIds.solution, workspaceId: configuredIds.workspace } },
   option: { outcomeClass: "APPROVE", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT" },
   applications: [{ id: configuredIds.investmentReceipt, status: "APPLIED", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: configuredIds.solution }],
 }
@@ -41,12 +52,27 @@ const configuredEligibility = {
   investmentDecision: { ...eligibility.investmentDecision, authorityProvider: "COMPASS_NATIVE" as const, authorityRecordId: configuredIds.investmentDecision, authorityChecksum: investmentAuthorityChecksum(configuredNativeDecision, configuredIds.investmentReceipt), applicationReceiptId: configuredIds.investmentReceipt, subjectId: configuredIds.solution },
   capacity: { ...eligibility.capacity, planId: configuredIds.plan, unit: "FOCUS_SLOT", reservedRoadmapItemIds: [configuredIds.reserved] },
 }
+const configuredKeys = generateKeyPairSync("ed25519")
+const configuredRoutingFingerprint = nativeRoutingFingerprint
 function configuredPolicyJson() {
-  return JSON.stringify({ version: 1, workspaces: { [configuredIds.workspace]: {
+  const document = { version: 1, workspaces: { [configuredIds.workspace]: {
     portfolioPolicyId: configuredEligibility.portfolioPolicyId,
-    capacity: { planId: configuredIds.plan, planFingerprint: configuredEligibility.capacity.planFingerprint, unit: configuredEligibility.capacity.unit, availableUnits: 3, requestedUnits: 1, unitsPerNowItem: 1, nowLimit: 3 },
+    capacity: { planId: configuredIds.plan, planFingerprint: configuredEligibility.capacity.planFingerprint, planVersion: 1, unit: configuredEligibility.capacity.unit, availableUnits: 3, requestedUnits: 1, unitsPerNowItem: 1, nowLimit: 3 },
     investmentDecisions: { [configuredIds.solution]: { ...configuredEligibility.investmentDecision, subjectId: undefined } },
-  } } })
+  } } }
+  const workspacePolicy = document.workspaces[configuredIds.workspace]
+  const payload = {
+    schemaVersion: "compass-now-policy/v1", workspaceId: configuredIds.workspace, routingFingerprint: configuredRoutingFingerprint,
+    portfolioPolicy: { policyId: workspacePolicy.portfolioPolicyId, canonical: workspacePolicy },
+    capacityPlan: { id: configuredIds.plan, fingerprint: configuredEligibility.capacity.planFingerprint, version: 1, expectedState: "ACTIVE" },
+    investmentEvidence: workspacePolicy.investmentDecisions, generatedAt: "2026-08-31T12:00:00.000Z", validUntil: "2099-09-09T12:00:00.000Z",
+    supersedesArtifactId: null, activationDecision: { recordId: "00000000-0000-4000-8000-00000000001d", applicationReceiptId: "00000000-0000-4000-8000-00000000001e", checksum: "f".repeat(64) }, signingKeyId: "now-test-key",
+  }
+  const artifact = { ...payload, artifactId: `now-policy:v1:sha256:${createHash("sha256").update(JSON.stringify(payload)).digest("hex")}` }
+  const selector = { schemaVersion: "compass-now-policy-selector/v1", workspaceId: configuredIds.workspace, artifactId: artifact.artifactId, mode: "enforce", activationDecisionChecksum: payload.activationDecision.checksum, supersedesArtifactId: null, signingKeyId: "now-test-key" }
+  process.env.NOW_DECISION_PUBLIC_KEYS_JSON = JSON.stringify({ "now-test-key": configuredKeys.publicKey.export({ type: "spki", format: "pem" }).toString() })
+  process.env.NOW_DECISION_ROUTING_MANIFEST_JSON = nativeRoutingManifestJson
+  return JSON.stringify({ artifact, artifactSignature: sign(null, Buffer.from(JSON.stringify(artifact)), configuredKeys.privateKey).toString("base64"), selector, selectorSignature: sign(null, Buffer.from(JSON.stringify(selector)), configuredKeys.privateKey).toString("base64") })
 }
 const eligibilityResolver = { resolve: vi.fn(async () => eligibility) }
 const reviewedSourceFingerprint = nowCommitmentFingerprint(item, eligibility)
@@ -63,6 +89,9 @@ describe("NOW commitment", () => {
     vi.resetAllMocks()
     mockPrisma.$transaction.mockImplementation((fn: (value: typeof tx) => unknown) => fn(tx))
     delete process.env.NOW_COMMITMENT_POLICY_JSON
+    delete process.env.NOW_DECISION_PUBLIC_KEYS_JSON
+    delete process.env.NOW_DECISION_ROUTING_FINGERPRINT
+    process.env.NOW_DECISION_ROUTING_MANIFEST_JSON = nativeRoutingManifestJson
     tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
       id: eligibility.capacity.planId, workspaceId: item.workspaceId, policyId: eligibility.portfolioPolicyId,
       planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit,
@@ -73,6 +102,7 @@ describe("NOW commitment", () => {
     tx.portfolioCapacityPlan.updateMany.mockResolvedValue({ count: 1 })
     tx.portfolioCapacityReservation.findUnique.mockResolvedValue(null)
     tx.portfolioCapacityReservation.create.mockResolvedValue({})
+    tx.decisionRecord.findMany.mockResolvedValue([])
   })
 
   it("prepares an immutable revision with explicit approve and reject options", async () => {
@@ -99,6 +129,7 @@ describe("NOW commitment", () => {
     process.env.NOW_COMMITMENT_POLICY_JSON = configuredPolicyJson()
     tx.roadmapItem.findUnique.mockResolvedValue(configuredItem)
     tx.decisionRecord.findUnique.mockResolvedValue(configuredNativeDecision)
+    tx.solution.findUnique.mockResolvedValue(configuredSolution)
     tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
       id: configuredIds.plan, workspaceId: configuredIds.workspace, policyId: configuredEligibility.portfolioPolicyId,
       planFingerprint: configuredEligibility.capacity.planFingerprint, unit: configuredEligibility.capacity.unit,
@@ -110,6 +141,15 @@ describe("NOW commitment", () => {
     tx.reviewRevision.create.mockResolvedValue({ id: "rev-1", fingerprint: "fp-1" })
 
     await expect(prepareNowCommitment("item-1", { requestedById: "user-1" })).resolves.toEqual(expect.objectContaining({ id: "rev-1" }))
+    expect(tx.reviewRevision.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        evidenceRefs: { create: [expect.objectContaining({
+          evidenceType: "NATIVE_NOW_POLICY",
+          authorityRecordId: "00000000-0000-4000-8000-00000000001d",
+          applicationReceiptId: "00000000-0000-4000-8000-00000000001e",
+        })] },
+      }),
+    }))
   })
 
   it("fingerprints current horizon and every material roadmap field", () => {
@@ -311,6 +351,7 @@ describe("NOW commitment", () => {
       reservations: [{ id: "reservation-configured", roadmapItemId: configuredIds.reserved, units: 1 }],
     })
     tx.decisionRecord.findUnique.mockResolvedValue(configuredNativeDecision)
+    tx.solution.findUnique.mockResolvedValue(configuredSolution)
     const currentEligibility = await resolveNowCommitmentEligibility(configuredItem, mockPrisma as never)
     const approval = {
       id: "decision-1", fingerprint: "review-fp",
@@ -341,15 +382,20 @@ describe("NOW commitment", () => {
   it("returns an existing receipt without repeating the roadmap mutation", async () => {
     const receipt = { id: "receipt-existing", status: "APPLIED", receiptKey: "now-commitment:item-1:decision-1:v1" }
     tx.decisionApplication.findUnique.mockResolvedValue(receipt)
+    tx.roadmapItem.findUnique.mockResolvedValue(item)
+    tx.decisionRecord.findUnique.mockResolvedValue(approvedDecision())
 
-    await expect(admitRoadmapItemToNow("item-1", "decision-1")).resolves.toBe(receipt)
-    expect(tx.roadmapItem.findUnique).not.toHaveBeenCalled()
+    await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver })).resolves.toBe(receipt)
     expect(tx.roadmapItem.update).not.toHaveBeenCalled()
     expect(tx.decisionApplication.create).not.toHaveBeenCalled()
   })
 
   it("reloads and returns the winning receipt after a concurrent application insert", async () => {
-    const winner = { id: "receipt-winner", status: "APPLIED", receiptKey: "now-commitment:item-1:decision-1:v1" }
+    const winner = {
+      id: "receipt-winner", decisionId: "decision-1", status: "APPLIED",
+      continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW", targetType: "ROADMAP_ITEM", targetId: "item-1",
+      receiptKey: "now-commitment:item-1:decision-1:v1",
+    }
     tx.decisionApplication.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(winner)
     tx.roadmapItem.findUnique.mockResolvedValue(item)
     tx.decisionRecord.findUnique.mockResolvedValue(approvedDecision())
@@ -357,6 +403,28 @@ describe("NOW commitment", () => {
     tx.decisionApplication.create.mockRejectedValue({ code: "P2002" })
 
     await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver })).resolves.toBe(winner)
+  })
+
+  it("rejects a concurrent receipt winner that is not the exact applied continuation", async () => {
+    const winner = {
+      id: "receipt-winner",
+      decisionId: "different-decision",
+      targetType: "ROADMAP_ITEM",
+      targetId: "item-1",
+      continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW",
+      status: "BLOCKED",
+      receiptKey: "now-commitment:item-1:decision-1:v1",
+    }
+    tx.decisionApplication.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(winner)
+    tx.roadmapItem.findUnique.mockResolvedValue(item)
+    tx.decisionRecord.findUnique.mockResolvedValue(approvedDecision())
+    tx.roadmapItem.update.mockResolvedValue({ ...item, horizon: "NOW" })
+    tx.decisionApplication.create.mockRejectedValue({ code: "P2002" })
+
+    await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver }))
+      .rejects.toEqual(expect.objectContaining({ code: "RECEIPT_CONFLICT" }))
   })
 
   it("persists a blocked receipt when application validation fails", async () => {

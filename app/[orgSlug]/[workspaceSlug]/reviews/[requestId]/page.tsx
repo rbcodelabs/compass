@@ -4,6 +4,8 @@ import getPrisma from "@/lib/db"
 import { decideReviewAction } from "../actions"
 import { ensureNowCommitmentRevisionFresh } from "@/lib/now-commitment"
 import { isOrgAdminRole } from "@/lib/roles"
+import { ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh } from "@/lib/building-investment"
+import { ensureNativePolicyActivationRevisionFresh } from "@/lib/native-policy-activation"
 
 export default async function ReviewRequestPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string; requestId: string }> }) {
   const { orgSlug, workspaceSlug, requestId } = await params
@@ -27,7 +29,13 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
   const revision = request.currentRevision
   const freshness = request.gateType === "NOW_COMMITMENT"
     ? await ensureNowCommitmentRevisionFresh(revision.id)
-    : { stale: Boolean(revision.supersededAt) }
+    : request.gateType === "BUILDING_INVESTMENT"
+      ? await ensureBuildingInvestmentRevisionFresh(revision.id)
+      : request.gateType === "BUILDING_INVESTMENT_REVOCATION"
+        ? await ensureBuildingInvestmentRevocationRevisionFresh(revision.id)
+      : request.gateType === "NOW_POLICY_ACTIVATION"
+        ? await ensureNativePolicyActivationRevisionFresh(revision.id)
+        : { stale: Boolean(revision.supersededAt) }
   const packet = JSON.parse(revision.packetJson) as {
     roadmapItem?: { title?: string; solutionId?: string | null; opportunityId?: string | null; squadId?: string | null }
     policyVersion?: string
@@ -39,14 +47,22 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
     targetEnvironment?: string
     releasePolicyId?: string
     taskIds?: string[]
+    solution?: { id?: string; title?: string; description?: string | null; status?: string; opportunityId?: string; opportunityTitle?: string }
+    mode?: string
+    routingFingerprint?: string
+    inspection?: { capacityPlanId?: string; capacityPlanFingerprint?: string; verifiedDecisionCount?: number }
+    authorityDecisionId?: string
   }
   const decided = revision.decisions[0]
   const isRelease = request.gateType === "RELEASE_AUTHORIZATION"
+  const isInvestment = request.gateType === "BUILDING_INVESTMENT" || request.gateType === "BUILDING_INVESTMENT_REVOCATION"
+  const isRevocation = request.gateType === "BUILDING_INVESTMENT_REVOCATION"
+  const isPolicyActivation = request.gateType === "NOW_POLICY_ACTIVATION"
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
       <div>
-        <p className="text-sm text-muted-foreground">{isRelease ? "Release authorization review" : "NOW commitment review"}</p>
+        <p className="text-sm text-muted-foreground">{isRelease ? "Release authorization review" : isRevocation ? "Building investment revocation review" : isInvestment ? "Building investment review" : isPolicyActivation ? "Native policy activation review" : "NOW commitment review"}</p>
         <h1 className="text-2xl font-semibold">{revision.title}</h1>
         <p className="mt-2 text-muted-foreground">{revision.summary}</p>
       </div>
@@ -60,6 +76,17 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
             <dt>Environment</dt><dd>{packet.targetEnvironment}</dd>
             <dt>Covered tasks</dt><dd>{packet.taskIds?.join(", ")}</dd>
             <dt>Policy</dt><dd>{packet.releasePolicyId}</dd>
+          </> : isInvestment ? <>
+            <dt>Solution</dt><dd>{packet.solution?.title}</dd>
+            {isRevocation && <><dt>Authority decision</dt><dd className="break-all font-mono">{packet.authorityDecisionId}</dd></>}
+            <dt>Status</dt><dd>{packet.solution?.status}</dd>
+            <dt>Opportunity</dt><dd>{packet.solution?.opportunityTitle}</dd>
+          </> : isPolicyActivation ? <>
+            <dt>Workspace</dt><dd>{request.workspaceId}</dd>
+            <dt>Mode</dt><dd>{packet.mode}</dd>
+            <dt>Routing</dt><dd className="break-all font-mono">{packet.routingFingerprint}</dd>
+            <dt>Capacity plan</dt><dd>{packet.inspection?.capacityPlanId}</dd>
+            <dt>Native approvals</dt><dd>{packet.inspection?.verifiedDecisionCount}</dd>
           </> : <>
             <dt>Roadmap item</dt><dd>{packet.roadmapItem?.title}</dd>
             <dt>Solution</dt><dd>{packet.roadmapItem?.solutionId ?? "Not linked"}</dd>
@@ -74,7 +101,9 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
         <section className="space-y-2 rounded-lg border p-4 text-sm">
           <strong>This review is stale and cannot be decided.</strong>
           <p className="text-muted-foreground">Material inputs changed after this packet was published. Prepare a new immutable revision before deciding.</p>
-          {!isRelease && <a className="font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/roadmap?detail=roadmapItem:${request.subjectId}`}>Return to Roadmap Item</a>}
+          {request.gateType === "NOW_COMMITMENT" && <a className="font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/roadmap?detail=roadmapItem:${request.subjectId}`}>Return to Roadmap Item</a>}
+          {isInvestment && packet.solution?.opportunityId && <a className="font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/discovery/${packet.solution.opportunityId}`}>Return to Solution</a>}
+          {isPolicyActivation && <a className="font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/roadmap`}>Return to Roadmap</a>}
         </section>
       ) : decided ? (
         <section className="rounded-lg border bg-status-success-surface p-4 text-sm text-status-success">

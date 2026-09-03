@@ -7,6 +7,8 @@ import { recordDecision } from "@/lib/decision-service"
 import { admitRoadmapItemToNow, prepareNowCommitment } from "@/lib/now-commitment"
 import { isOrgAdminRole } from "@/lib/roles"
 import { queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator } from "@/lib/release-authorization"
+import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh, prepareBuildingInvestmentReview } from "@/lib/building-investment"
+import { applyNativePolicyActivationDecision, ensureNativePolicyActivationRevisionFresh } from "@/lib/native-policy-activation"
 
 async function requireWorkspaceMember(workspaceId: string) {
   const session = await auth()
@@ -34,6 +36,16 @@ export async function requestNowCommitmentAction(_workspaceId: string, itemId: s
   return { requestId: revision.requestId, revisionId: revision.id }
 }
 
+export async function requestBuildingInvestmentAction(_workspaceId: string, solutionId: string) {
+  const prisma = getPrisma()
+  const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, opportunity: { select: { workspaceId: true } } } })
+  if (!solution) throw new Error("Solution not found")
+  const userId = await requireWorkspaceMember(solution.opportunity.workspaceId)
+  const revision = await prepareBuildingInvestmentReview(solutionId, { requestedById: userId })
+  revalidatePath("/", "layout")
+  return { requestId: revision.requestId, revisionId: revision.id }
+}
+
 export async function decideReviewAction(input: {
   workspaceId: string
   revisionId: string
@@ -45,6 +57,14 @@ export async function decideReviewAction(input: {
   const revision = await prisma.reviewRevision.findUnique({ where: { id: input.revisionId }, include: { request: true } })
   if (!revision) throw new Error("Review revision not found")
   const userId = await requireWorkspaceMember(revision.request.workspaceId)
+  const freshness = revision.request.gateType === "BUILDING_INVESTMENT"
+    ? await ensureBuildingInvestmentRevisionFresh(revision.id)
+    : revision.request.gateType === "BUILDING_INVESTMENT_REVOCATION"
+      ? await ensureBuildingInvestmentRevocationRevisionFresh(revision.id)
+    : revision.request.gateType === "NOW_POLICY_ACTIVATION"
+      ? await ensureNativePolicyActivationRevisionFresh(revision.id)
+      : { stale: false }
+  if (freshness.stale) throw new Error("This review is stale. Prepare a new immutable revision before deciding.")
   const decision = await recordDecision({
     actor: { kind: "USER", userId },
     revisionId: input.revisionId,
@@ -56,6 +76,15 @@ export async function decideReviewAction(input: {
   const selected = await prisma.reviewOption.findUnique({ where: { id: input.optionId } })
   if (selected?.continuationKey === "ADMIT_ROADMAP_ITEM_TO_NOW" && selected.outcomeClass === "APPROVE") {
     await admitRoadmapItemToNow(revision.request.subjectId, decision.id)
+  }
+  if (selected?.continuationKey === "AUTHORIZE_BUILDING_INVESTMENT" && selected.outcomeClass === "APPROVE") {
+    await applyBuildingInvestmentDecision(revision.request.subjectId, decision.id)
+  }
+  if (selected?.continuationKey === "REVOKE_BUILDING_INVESTMENT" && selected.outcomeClass === "APPROVE") {
+    await applyBuildingInvestmentRevocationDecision(revision.request.subjectId, decision.id)
+  }
+  if (selected?.continuationKey === "AUTHORIZE_NOW_POLICY" && selected.outcomeClass === "APPROVE") {
+    await applyNativePolicyActivationDecision(revision.request.workspaceId, decision.id)
   }
   if (selected?.continuationKey === "DISPATCH_RELEASE_RUN" && selected.outcomeClass === "APPROVE") {
     if (!revision.sourceFingerprint) throw new Error("Release review is missing its immutable source fingerprint")

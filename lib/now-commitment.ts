@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import getPrisma from "@/lib/db"
-import { defaultNowEligibilityResolver, type NowEligibilityResolver } from "@/lib/now-eligibility"
+import { defaultNowEligibilityResolver, type NativePolicyEvidence, type NowEligibilityResolver } from "@/lib/now-eligibility"
 
 const POLICY_VERSION = "now-commitment-v1"
 
@@ -62,6 +62,7 @@ export type NowCommitmentEligibilityInputs = {
     planVersion: number
   }
   displacement?: { itemId: string; destination: "NEXT" | "LATER" }
+  policyEvidence?: NativePolicyEvidence
 }
 
 export function nowCommitmentFingerprint(item: FingerprintItem, eligibility?: NowCommitmentEligibilityInputs): string {
@@ -97,6 +98,9 @@ function assertEligibilityConfigured(item: FingerprintItem, eligibility: NowComm
   if (!item.solutionId || eligibility.investmentDecision.subjectId !== item.solutionId) {
     throw new NowCommitmentError("NO_APPLIED_INVESTMENT_DECISION", "An applied Building investment decision for the exact Solution is required.")
   }
+  if (eligibility.investmentDecision.authorityProvider === "COMPASS_NATIVE" && (!eligibility.policyEvidence || eligibility.policyEvidence.workspaceId !== item.workspaceId)) {
+    throw new NowCommitmentError("POLICY_CONFIGURATION_REQUIRED", "Signed native policy provenance is required for NOW review.")
+  }
   const capacity = eligibility.capacity
   if (!eligibility.portfolioPolicyId || !capacity.planId || !capacity.planFingerprint || capacity.availableUnits <= 0 || capacity.requestedUnits <= 0 || capacity.unitsPerNowItem <= 0 || capacity.nowLimit <= 0 || !Number.isSafeInteger(capacity.planVersion) || capacity.planVersion < 0) {
     throw new NowCommitmentError("NO_CAPACITY_PLAN", "A complete explicit capacity plan is required.")
@@ -109,7 +113,12 @@ function assertEligibilityConfigured(item: FingerprintItem, eligibility: NowComm
 
 function evidenceRefsFor(eligibility: NowCommitmentEligibilityInputs) {
   const decision = eligibility.investmentDecision
-  if (decision.authorityProvider !== "OBSIDIAN") return undefined
+  if (decision.authorityProvider === "COMPASS_NATIVE") {
+    const policy = eligibility.policyEvidence
+    if (!policy) throw new NowCommitmentError("POLICY_CONFIGURATION_REQUIRED", "Signed native policy provenance is missing.")
+    const at = new Date(policy.generatedAt)
+    return { create: [{ evidenceType: "NATIVE_NOW_POLICY", authorityProvider: "COMPASS_NATIVE", authorityRecordId: policy.activationDecisionId, authorityLocator: `native-policy:${policy.artifactId}`, authorityChecksum: policy.payloadHash, subjectType: "WORKSPACE", subjectId: policy.workspaceId, decisionOutcome: "AUTHORIZE_NOW_POLICY", decisionSourceVersion: "compass-now-policy/v1", applicationStatus: "APPLIED", appliedAt: at, applicationReceiptId: policy.activationApplicationReceiptId, verifiedAt: at, verifierVersion: "compass-native-policy-verifier/v1" }] }
+  }
   if (!decision.authorityLocator || !decision.decisionSourceVersion || !decision.appliedAt
     || !decision.verifiedAt || !decision.verifierVersion) {
     throw new NowCommitmentError("NO_APPLIED_INVESTMENT_DECISION", "Verified Obsidian decision evidence is incomplete.")
@@ -328,7 +337,6 @@ export async function admitRoadmapItemToNow(
   try {
     return await prisma.$transaction(async (tx) => {
       const receipt = await tx.decisionApplication.findUnique({ where: { receiptKey } })
-      if (receipt?.status === "APPLIED") return receipt
       const item = await tx.roadmapItem.findUnique({ where: { id: itemId }, select: itemSelect })
       if (!item) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
       const decision = await tx.decisionRecord.findUnique({
@@ -347,6 +355,23 @@ export async function admitRoadmapItemToNow(
       const reviewedSourceFingerprint = decision.revision.sourceFingerprint ?? decision.revision.fingerprint
       if (decision.fingerprint !== decision.revision.fingerprint || reviewedSourceFingerprint !== currentFingerprint || decision.revision.supersededAt) {
         throw new NowCommitmentError("STALE_DECISION", "The roadmap commitment inputs changed after review.")
+      }
+      const policyEvidence = eligibility.policyEvidence
+      const expectedPolicyEvidence = policyEvidence ? {
+        workspaceId: item.workspaceId, applicationReceiptId: receipt?.id,
+        policyArtifactId: policyEvidence.artifactId, policyPayloadHash: policyEvidence.payloadHash,
+        activationDecisionId: policyEvidence.activationDecisionId, activationApplicationReceiptId: policyEvidence.activationApplicationReceiptId, activationDecisionChecksum: policyEvidence.activationDecisionChecksum,
+        selectorMode: policyEvidence.selectorMode, selectorSignature: policyEvidence.selectorSignature, signingKeyId: policyEvidence.signingKeyId,
+        routingFingerprint: policyEvidence.routingFingerprint, capacityPlanId: policyEvidence.capacityPlanId,
+        capacityPlanFingerprint: policyEvidence.capacityPlanFingerprint, capacityPlanVersion: policyEvidence.capacityPlanVersion,
+      } : null
+      if (receipt?.status === "APPLIED") {
+        if (!expectedPolicyEvidence) return receipt
+        const audit = await tx.nowPolicyApplicationEvidence.findUnique({ where: { applicationReceiptId: receipt.id } })
+        if (!audit || Object.entries(expectedPolicyEvidence).some(([key, value]) => value !== undefined && audit[key as keyof typeof audit] !== value)) {
+          throw new NowCommitmentError("POLICY_EVIDENCE_MISMATCH", "Applied NOW receipt is missing its exact signed policy evidence.")
+        }
+        return receipt
       }
       const plan = await tx.portfolioCapacityPlan.findUnique({
         where: { id: eligibility.capacity.planId },
@@ -425,16 +450,49 @@ export async function admitRoadmapItemToNow(
         data: { horizon: "NOW", ...(displacedSortOrder === undefined ? {} : { sortOrder: displacedSortOrder }), nowCommitmentProvenance: "NATIVE_GATED", nowDecisionRecordId: decision.id, updatedAt: new Date() },
       })
       const applied = { status: "APPLIED", lastError: null, appliedAt: new Date(), updatedAt: new Date() }
-      return receipt
+      const application = receipt
         ? tx.decisionApplication.update({ where: { id: receipt.id }, data: { ...applied, attemptCount: { increment: 1 } } })
         : tx.decisionApplication.create({
             data: { decisionId: decision.id, continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW", targetType: "ROADMAP_ITEM", targetId: item.id, ...applied, receiptKey, attemptCount: 1 },
           })
+      const savedApplication = await application
+      if (policyEvidence) await tx.nowPolicyApplicationEvidence.create({ data: {
+        workspaceId: item.workspaceId, applicationReceiptId: savedApplication.id,
+        policyArtifactId: policyEvidence.artifactId, policyPayloadHash: policyEvidence.payloadHash,
+        activationDecisionId: policyEvidence.activationDecisionId, activationApplicationReceiptId: policyEvidence.activationApplicationReceiptId, activationDecisionChecksum: policyEvidence.activationDecisionChecksum,
+        selectorMode: policyEvidence.selectorMode, selectorSignature: policyEvidence.selectorSignature, signingKeyId: policyEvidence.signingKeyId,
+        routingFingerprint: policyEvidence.routingFingerprint, capacityPlanId: policyEvidence.capacityPlanId,
+        capacityPlanFingerprint: policyEvidence.capacityPlanFingerprint, capacityPlanVersion: policyEvidence.capacityPlanVersion,
+      } })
+      return savedApplication
     })
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
       const winner = await prisma.decisionApplication.findUnique({ where: { receiptKey } })
-      if (winner) return winner
+      if (winner?.status === "APPLIED" && winner.decisionId === decisionId
+        && winner.continuationKey === "ADMIT_ROADMAP_ITEM_TO_NOW" && winner.targetType === "ROADMAP_ITEM" && winner.targetId === itemId) {
+        const winnerItem = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: itemSelect })
+        if (!winnerItem) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
+        const winnerEligibility = await (dependencies.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(winnerItem, prisma)
+        assertEligibilityConfigured(winnerItem, winnerEligibility)
+        if (winnerEligibility.policyEvidence) {
+          const evidence = winnerEligibility.policyEvidence
+          const audit = await prisma.nowPolicyApplicationEvidence.findUnique({ where: { applicationReceiptId: winner.id } })
+          const expected = {
+            workspaceId: winnerItem.workspaceId, applicationReceiptId: winner.id,
+            policyArtifactId: evidence.artifactId, policyPayloadHash: evidence.payloadHash,
+            activationDecisionId: evidence.activationDecisionId, activationApplicationReceiptId: evidence.activationApplicationReceiptId, activationDecisionChecksum: evidence.activationDecisionChecksum,
+            selectorMode: evidence.selectorMode, selectorSignature: evidence.selectorSignature, signingKeyId: evidence.signingKeyId,
+            routingFingerprint: evidence.routingFingerprint, capacityPlanId: evidence.capacityPlanId,
+            capacityPlanFingerprint: evidence.capacityPlanFingerprint, capacityPlanVersion: evidence.capacityPlanVersion,
+          }
+          if (!audit || Object.entries(expected).some(([key, value]) => audit[key as keyof typeof audit] !== value)) {
+            throw new NowCommitmentError("POLICY_EVIDENCE_MISMATCH", "Concurrent NOW receipt is missing its exact signed policy evidence.")
+          }
+        }
+        return winner
+      }
+      throw new NowCommitmentError("RECEIPT_CONFLICT", "A conflicting NOW application receipt already exists.")
     }
     if (error instanceof NowCommitmentError) {
       await prisma.$transaction(async (tx) => {
