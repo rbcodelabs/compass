@@ -26,7 +26,7 @@ const RECOVERY_TABLES: Record<PreviewFixtureKind, string> = {
   okrCycles: "okr_cycles", objectives: "objectives", keyResults: "key_results",
   opportunities: "opportunities", solutions: "solutions", assumptions: "assumptions",
   evidence: "evidence", experiments: "experiments", roadmapItems: "roadmap_items",
-  feedback: "feedback_items", tasks: "tasks", sessions: "sessions",
+  feedback: "feedback", tasks: "tasks", sessions: "sessions",
 };
 
 export class PrismaPreviewFixtureStore implements PreviewFixtureStore {

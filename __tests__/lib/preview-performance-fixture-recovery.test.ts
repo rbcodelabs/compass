@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import fs from "node:fs";
 import {
   RECOVERY_CHUNK_SIZE,
   SOURCE_FIXTURE_IDENTITY,
@@ -142,5 +143,28 @@ describe("emergency preview fixture recovery", () => {
     const plan = { rows: { roadmapItems: [{ id: "row-1", workspaceId: "expected-workspace" }] } };
     await expect(store.deleteChunk("roadmapItems", ["row-1"], {} as never, plan as never)).rejects.toThrow(/ownership mismatch/);
     expect(deletes).toBe(0);
+  });
+
+  it("maps every fixture kind to its physical Prisma table", async () => {
+    const models: Record<PreviewFixtureKind, string> = {
+      users: "User", organizations: "Organization", organizationMembers: "OrganizationMember",
+      workspaces: "Workspace", workspaceMembers: "WorkspaceMember", squads: "Squad",
+      okrCycles: "OKRCycle", objectives: "Objective", keyResults: "KeyResult",
+      opportunities: "Opportunity", solutions: "Solution", assumptions: "Assumption",
+      evidence: "Evidence", experiments: "Experiment", roadmapItems: "RoadmapItem",
+      feedback: "FeedbackItem", tasks: "Task", sessions: "Session",
+    };
+    const schema = fs.readFileSync("prisma/schema.prisma", "utf8");
+    const statements: string[] = [];
+    const prisma = { $executeRaw: async (query: { text?: string; sql?: string }) => { statements.push(query.text ?? query.sql ?? ""); return 1; } };
+    const { PrismaPreviewFixtureStore } = await import("@/lib/preview-performance-fixture-prisma");
+    const store = new PrismaPreviewFixtureStore(prisma as never);
+    for (const kind of CLEANUP_ORDER) {
+      const block = schema.match(new RegExp(`model ${models[kind]} \\{[\\s\\S]*?\\n\\}`))?.[0];
+      const table = block?.match(/@@map\("([^"]+)"\)/)?.[1];
+      expect(table, `missing schema mapping for ${kind}`).toBeTruthy();
+      await store.deleteIdsDirectWithCount(kind, ["00000000-0000-4000-8000-000000000001"]);
+      expect(statements.at(-1)).toContain(`"compass_preview"."${table}"`);
+    }
   });
 });
