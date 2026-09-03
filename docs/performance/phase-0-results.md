@@ -45,11 +45,13 @@ Router-cache-hit samples remain in the browser aggregate with null server and
 DSQL fields. Only samples with an observed completed request enter server/DSQL
 correlation. Each route and panel artifact is version 2 and contains real
 sample-count, median, and p95 aggregates calculated from its retained samples.
-Each sample also contains a `requests` list. A completed target request is
-identified by the hash of its browser sample ID and Vercel's per-invocation
-`x-vercel-id`; this keeps legitimate RSC fan-out one-to-one with platform and
-query-log records without changing the browser cache policy. Preview responses
-without that invocation ID fail the sample.
+Each sample also contains a `requests` list. Browser response `x-vercel-id`
+hashes are retained as provenance, but Vercel exposes different edge-response
+and Function request IDs. Correlation therefore requires exactly one
+authoritative platform invocation with the same method, exact pathname, success
+status, and start timestamp within ±500 ms. The selected platform request ID
+then binds its DSQL envelopes, which must contain exactly one internally
+consistent query request ID. Zero or multiple candidates fail closed.
 Navigation aggregates are authoritative per route and, for warm samples, per
 `networkOutcome`; overall aggregates are convenience summaries only.
 
@@ -72,10 +74,10 @@ query-shape fingerprint, and disabled/enabled median/p95 plus deltas.
    ```
 
 Every measured networked browser sample carries a scoped
-`x-compass-perf-request-id`; every completed target request derives a distinct
-invocation ID from that scope and Vercel's `x-vercel-id`. Its authoritative
-Vercel invocation and DSQL events must reconcile to exactly the same
-invocation+platform request pair.
+`x-compass-perf-request-id`; every completed target request retains distinct
+edge provenance. Exact method/path and the bounded ±500 ms start window select
+one platform request, and only that platform request's internally consistent
+DSQL envelopes enter the result.
 Unrelated preview traffic is excluded before reconciliation. Router Cache hits
 remain browser-only samples with null server and DSQL fields. Timestamp-only
 matching is forbidden.

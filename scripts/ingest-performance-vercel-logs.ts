@@ -3,8 +3,8 @@ import fs from "node:fs";
 import {
   correlateVercelRequests,
   extractCorrelatedBrowserRequests,
-  aggregateDsqlByRequest,
-  groupVercelEnvelopes,
+  aggregateDsqlByPlatformRequest,
+  groupVercelRequestLogs,
   parseVercelRequestLog,
   parseVercelQueryEnvelope,
   type BrowserSample,
@@ -26,16 +26,10 @@ const rawRequests = lines
   .map(parseVercelRequestLog)
   .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
 const { requests: browserRequests, cacheHits } = extractCorrelatedBrowserRequests(browserSamples);
-const measuredIds = browserRequests.map((request) => request.requestId);
-const logs = groupVercelEnvelopes(rawRequests, queryEnvelopes, measuredIds);
+const logs = groupVercelRequestLogs(rawRequests);
 const correlated = correlateVercelRequests(browserRequests, logs);
 const durations = correlated.map(({ vercel }) => vercel.durationMs).sort((a, b) => a - b);
-const dsql = aggregateDsqlByRequest(measuredIds, queryEnvelopes);
-for (const id of measuredIds) if (!dsql.some((entry) => entry.customRequestId === id)) throw new Error(`Measured sample ${id} has no DSQL query records`);
-for (const match of correlated) {
-  const groups = dsql.filter((entry) => entry.customRequestId === match.browser.requestId);
-  if (groups.length !== 1 || groups[0].platformRequestId !== match.vercel.requestId) throw new Error(`DSQL records for ${match.browser.requestId} do not match its selected platform request`);
-}
+const dsql = aggregateDsqlByPlatformRequest(correlated.map(({ vercel }) => vercel.requestId), queryEnvelopes);
 const percentile = (p: number) => durations[Math.ceil(durations.length * p) - 1] ?? null;
 process.stdout.write(JSON.stringify({
   version: 1,

@@ -15,6 +15,8 @@ import {
   parseVercelQueryEnvelope,
   aggregateDsqlByRequest,
   groupVercelEnvelopes,
+  groupVercelRequestLogs,
+  aggregateDsqlByPlatformRequest,
   summarizeObserverOverhead,
   initializeLocalPerformanceEnvironment,
   persistPerformanceArtifact,
@@ -402,6 +404,40 @@ describe("query artifacts", () => {
     expect(() =>
       correlateVercelRequests([browser], [candidate, { ...candidate }])
     ).toThrow(/ambiguous/);
+  });
+
+  it("correlates by exact request evidence when edge and function IDs differ", () => {
+    const browser = { requestId: "perf_inv_edge", method: "GET", path: "/roadmap?_rsc=edge", startedAt: "2026-09-01T12:00:00.000Z" };
+    const platform = { requestId: "platform_1", customRequestId: "perf_inv_function", method: "GET", path: "/roadmap", timestamp: "2026-09-01T12:00:00.038Z", durationMs: 20, statusCode: 200 };
+    expect(correlateVercelRequests([browser], [platform])).toEqual([{ browser, vercel: platform }]);
+  });
+
+  it("uses a 500ms inclusive correlation window and rejects adjacent ambiguity", () => {
+    const browser = { requestId: "perf_edge", method: "GET", path: "/roadmap?_rsc=edge", startedAt: "2026-09-01T12:00:00.000Z" };
+    const candidate = { requestId: "platform_1", customRequestId: "", method: "GET", path: "/roadmap", timestamp: "2026-09-01T12:00:00.500Z", durationMs: 20, statusCode: 200 };
+    expect(correlateVercelRequests([browser], [candidate])).toHaveLength(1);
+    expect(() => correlateVercelRequests([browser], [candidate, { ...candidate, requestId: "platform_2", timestamp: "2026-09-01T11:59:59.400Z" }])).not.toThrow();
+    expect(() => correlateVercelRequests([browser], [candidate, { ...candidate, requestId: "platform_2", timestamp: "2026-09-01T11:59:59.700Z" }])).toThrow(/ambiguous/);
+  });
+
+  it("does not reuse one platform invocation for two browser requests", () => {
+    const browser = { requestId: "perf_edge_1", method: "GET", path: "/roadmap?_rsc=edge", startedAt: "2026-09-01T12:00:00.000Z" };
+    const candidate = { requestId: "platform_1", customRequestId: "", method: "GET", path: "/roadmap", timestamp: "2026-09-01T12:00:00.038Z", durationMs: 20, statusCode: 200 };
+    expect(() => correlateVercelRequests([browser, { ...browser, requestId: "perf_edge_2" }], [candidate])).toThrow(/one-to-one/);
+  });
+
+  it("groups selected platform logs and DSQL without accepting unrelated traffic", () => {
+    const request = { requestId: "platform_1", customRequestId: "", method: "GET", path: "/roadmap", timestamp: "2026-09-01T12:00:00Z", durationMs: 12, statusCode: 200 };
+    const event = { version: 1 as const, timestamp: "2026-09-01T12:00:00Z", requestId: "perf_inv_function", operation: "SELECT", fingerprint: "a".repeat(64), durationMs: 2, success: true, rowCount: 1 };
+    expect(groupVercelRequestLogs([request, { ...request }])).toEqual([request]);
+    expect(aggregateDsqlByPlatformRequest(["platform_1"], [
+      { platformRequestId: "platform_1", event },
+      { platformRequestId: "unrelated", event: { ...event, requestId: "background" } },
+    ])).toEqual([expect.objectContaining({ platformRequestId: "platform_1", customRequestId: "perf_inv_function", count: 1 })]);
+    expect(() => aggregateDsqlByPlatformRequest(["platform_1"], [
+      { platformRequestId: "platform_1", event },
+      { platformRequestId: "platform_1", event: { ...event, requestId: "other" } },
+    ])).toThrow(/inconsistent/);
   });
 
   it("ingests Vercel JSON with separate platform and Compass request IDs", () => {

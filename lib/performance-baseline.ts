@@ -469,6 +469,46 @@ export function groupVercelEnvelopes(requests: VercelRequest[], queries: Array<{
   });
 }
 
+export function groupVercelRequestLogs(requests: VercelRequest[]): VercelRequest[] {
+  const grouped = new Map<string, VercelRequest[]>();
+  for (const request of requests) grouped.set(request.requestId, [...(grouped.get(request.requestId) ?? []), request]);
+  return [...grouped.entries()].map(([platformRequestId, candidates]) => {
+    const signatures = new Set(candidates.map((item) =>
+      `${item.method}\0${item.path}\0${item.statusCode}\0${item.timestamp}\0${item.durationMs}`));
+    if (signatures.size !== 1) throw new Error(`Platform request ${platformRequestId} has inconsistent invocation records`);
+    return candidates[0];
+  });
+}
+
+export function aggregateDsqlByPlatformRequest(
+  selectedPlatformIds: string[],
+  envelopes: Array<{ platformRequestId: string; event: PerformanceQueryEvent }>,
+) {
+  if (new Set(selectedPlatformIds).size !== selectedPlatformIds.length) {
+    throw new Error("Selected platform request IDs must be one-to-one with browser requests");
+  }
+  const selected = new Set(selectedPlatformIds);
+  const grouped = new Map<string, typeof envelopes>();
+  for (const envelope of envelopes) {
+    if (!selected.has(envelope.platformRequestId)) continue;
+    grouped.set(envelope.platformRequestId, [...(grouped.get(envelope.platformRequestId) ?? []), envelope]);
+  }
+  return selectedPlatformIds.map((platformRequestId) => {
+    const values = grouped.get(platformRequestId) ?? [];
+    if (values.length === 0) throw new Error(`Selected platform request ${platformRequestId} has no DSQL query records`);
+    const ids = new Set(values.map(({ event }) => event.requestId).filter((id): id is string => Boolean(id)));
+    if (ids.size !== 1 || values.some(({ event }) => !event.requestId)) {
+      throw new Error(`Platform request ${platformRequestId} has inconsistent Compass request IDs`);
+    }
+    const events = values.map(({ event }) => event);
+    const fingerprints = [...new Set(events.map((event) => event.fingerprint))].sort().map((fingerprint) => ({
+      fingerprint,
+      ...aggregateQueryEvents(events.filter((event) => event.fingerprint === fingerprint)),
+    }));
+    return { customRequestId: [...ids][0], platformRequestId, ...aggregateQueryEvents(events), fingerprints };
+  });
+}
+
 export function summarizeObserverOverhead(disabledMs: number[], enabledMs: number[]) {
   if (!disabledMs.length || disabledMs.length !== enabledMs.length) throw new Error("Observer overhead samples must be non-empty and paired");
   const summary = (values: number[]) => {
@@ -495,9 +535,9 @@ export function resolvePerformanceResourceSampleId(
 export function correlateVercelRequests(
   browser: BrowserRequest[],
   vercel: VercelRequest[],
-  toleranceMs = 2_000
+  toleranceMs = 500
 ): Array<{ browser: BrowserRequest; vercel: VercelRequest }> {
-  return browser.map((request) => {
+  const correlated = browser.map((request) => {
     if (!request.requestId) throw new Error("Browser request is missing a requestId");
     const started = Date.parse(request.startedAt);
     let browserPathname: string;
@@ -508,7 +548,6 @@ export function correlateVercelRequests(
     }
     const candidates = vercel.filter(
       (candidate) =>
-        candidate.customRequestId === request.requestId &&
         candidate.method === request.method &&
         candidate.path === browserPathname &&
         candidate.statusCode >= 200 &&
@@ -524,4 +563,9 @@ export function correlateVercelRequests(
     }
     return { browser: request, vercel: candidates[0] };
   });
+  const platformIds = correlated.map(({ vercel: request }) => request.requestId);
+  if (new Set(platformIds).size !== platformIds.length) {
+    throw new Error("Vercel platform requests must correlate one-to-one with browser requests");
+  }
+  return correlated;
 }
