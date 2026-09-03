@@ -11,7 +11,7 @@ const MAX_EXPIRY_MS = 30 * 60_000;
 const ALLOWED_KEYS = new Set(["action", "expectedSha", "expectedDeploymentId", "expiresAt"]);
 
 interface RecoveryRequest {
-  action: "cleanup" | "verify";
+  action: "cleanup" | "verify" | "diagnose";
   expectedSha: string;
   expectedDeploymentId: string;
   expiresAt: string;
@@ -24,7 +24,16 @@ function hidden(status = 404): NextResponse {
   });
 }
 
-function exactRuntime(req: NextRequest): boolean {
+function exactExecutor(req: NextRequest, body: RecoveryRequest): boolean {
+  const env = process.env;
+  return !!env.VERCEL_GIT_COMMIT_SHA && /^[a-f0-9]{40}$/.test(env.VERCEL_GIT_COMMIT_SHA) &&
+    !!env.VERCEL_DEPLOYMENT_ID && /^dpl_[A-Za-z0-9]{20,64}$/.test(env.VERCEL_DEPLOYMENT_ID) &&
+    !!env.VERCEL_URL && /^compass-[a-z0-9]+-rbcodelabs-team\.vercel\.app$/.test(env.VERCEL_URL) &&
+    body.expectedSha === env.VERCEL_GIT_COMMIT_SHA && body.expectedDeploymentId === env.VERCEL_DEPLOYMENT_ID &&
+    req.nextUrl.protocol === "https:" && req.nextUrl.host === env.VERCEL_URL;
+}
+
+function exactRuntimeConfiguration(): boolean {
   const env = process.env;
   return env.VERCEL_ENV === "preview" &&
     env.COMPASS_PERF_BASELINE === "1" &&
@@ -32,11 +41,7 @@ function exactRuntime(req: NextRequest): boolean {
     !env.DATABASE_URL && !env.AWS_PROFILE && !env.AWS_ACCESS_KEY_ID && !env.AWS_SECRET_ACCESS_KEY && !env.AWS_SESSION_TOKEN &&
     env.PGSCHEMA === "compass" && getActiveSchema() === "compass_preview" &&
     !!env.PGHOST && /^[a-z0-9-]+\.dsql\.[a-z0-9-]+\.on\.aws$/.test(env.PGHOST) &&
-    !!env.AWS_ROLE_ARN && !!env.AWS_REGION &&
-    !!env.VERCEL_GIT_COMMIT_SHA && /^[a-f0-9]{40}$/.test(env.VERCEL_GIT_COMMIT_SHA) &&
-    !!env.VERCEL_DEPLOYMENT_ID && /^dpl_[A-Za-z0-9]{20,64}$/.test(env.VERCEL_DEPLOYMENT_ID) &&
-    !!env.VERCEL_URL && /^compass-[a-z0-9]+-rbcodelabs-team\.vercel\.app$/.test(env.VERCEL_URL) &&
-    req.nextUrl.protocol === "https:" && req.nextUrl.host === env.VERCEL_URL;
+    !!env.AWS_ROLE_ARN && !!env.AWS_REGION;
 }
 
 function hasSecret(req: NextRequest): boolean {
@@ -69,7 +74,7 @@ async function parseBody(req: NextRequest): Promise<RecoveryRequest | null> {
   if (keys.length !== 4 || keys.some((key) => !ALLOWED_KEYS.has(key))) return null;
   const serializedKeys = text.match(/"(?:\\.|[^"\\])*"\s*:/g) ?? [];
   if (serializedKeys.length !== keys.length) return null;
-  if (record.action !== "cleanup" && record.action !== "verify") return null;
+  if (record.action !== "cleanup" && record.action !== "verify" && record.action !== "diagnose") return null;
   if (typeof record.expectedSha !== "string" || !/^[a-f0-9]{40}$/.test(record.expectedSha)) return null;
   if (typeof record.expectedDeploymentId !== "string" || !/^dpl_[A-Za-z0-9]{20,64}$/.test(record.expectedDeploymentId)) return null;
   if (typeof record.expiresAt !== "string") return null;
@@ -80,14 +85,28 @@ async function parseBody(req: NextRequest): Promise<RecoveryRequest | null> {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  if (!exactRuntime(req) || !hasSecret(req)) return hidden();
-  try {
-    if (!getVercelOidcTokenSync()) return hidden();
-  } catch {
+  // Secret validation is deliberately the first gate. Diagnostics remain
+  // completely silent until both the secret and immutable caller identity pass.
+  if (!hasSecret(req)) return hidden();
+  const body = await parseBody(req);
+  if (!body || !exactExecutor(req, body)) return hidden();
+  if (!exactRuntimeConfiguration()) {
+    if (body.action === "diagnose") console.info("PF_DIAG_RUNTIME");
     return hidden();
   }
-  const body = await parseBody(req);
-  if (!body || body.expectedSha !== process.env.VERCEL_GIT_COMMIT_SHA || body.expectedDeploymentId !== process.env.VERCEL_DEPLOYMENT_ID) return hidden();
+  try {
+    if (!getVercelOidcTokenSync()) {
+      if (body.action === "diagnose") console.info("PF_DIAG_OIDC");
+      return hidden();
+    }
+  } catch {
+    if (body.action === "diagnose") console.info("PF_DIAG_OIDC");
+    return hidden();
+  }
+  if (body.action === "diagnose") {
+    console.info("PF_DIAG_READY");
+    return hidden();
+  }
   try {
     const { executePreviewFixtureRecovery } = await import("@/lib/preview-performance-fixture-recovery");
     return NextResponse.json(await executePreviewFixtureRecovery(body.action), { headers: { "Cache-Control": "no-store" } });

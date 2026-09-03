@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import fs from "node:fs";
 
 const execute = vi.fn();
 const oidc = vi.fn();
@@ -21,9 +22,9 @@ function env() {
   for (const key of ["DATABASE_URL", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "VERCEL_OIDC_TOKEN"]) delete process.env[key];
 }
 
-function request(action: "cleanup" | "verify" = "verify", secret = SECRET, overrides: Record<string, unknown> = {}) {
+function request(action: "cleanup" | "verify" | "diagnose" = "verify", secret = SECRET, overrides: Record<string, unknown> = {}, host = HOST) {
   const body = JSON.stringify({ action, expectedSha: SHA, expectedDeploymentId: DEPLOYMENT, expiresAt: new Date(Date.now() + 20 * 60_000).toISOString(), ...overrides });
-  return new NextRequest(`https://${HOST}/api/admin/performance-fixture-recovery`, {
+  return new NextRequest(`https://${host}/api/admin/performance-fixture-recovery`, {
     method: "POST", headers: { "content-type": "application/json", "content-length": String(Buffer.byteLength(body)), "x-migration-secret": secret }, body,
   });
 }
@@ -71,6 +72,76 @@ describe("POST /api/admin/performance-fixture-recovery", () => {
     expect(await response.json()).toEqual({ error: "Request failed" });
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it.each([
+    ["production runtime", () => { process.env.VERCEL_ENV = "production"; }, "PF_DIAG_RUNTIME"],
+    ["schema runtime", () => { process.env.PGSCHEMA = "compass_prod"; }, "PF_DIAG_RUNTIME"],
+    ["static-credential runtime", () => { process.env.AWS_ACCESS_KEY_ID = "forbidden"; }, "PF_DIAG_RUNTIME"],
+    ["DSQL runtime", () => { process.env.PGHOST = "postgres.example.com"; }, "PF_DIAG_RUNTIME"],
+    ["oidc", () => { oidc.mockReturnValue(undefined); }, "PF_DIAG_OIDC"],
+    ["ready", () => undefined, "PF_DIAG_READY"],
+  ])("returns the byte-identical 404 and emits only the %s code", async (_label, mutate, code) => {
+    mutate();
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const { POST } = await import("@/app/api/admin/performance-fixture-recovery/route");
+    const response = await POST(request("diagnose"));
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('{"error":"Not found"}');
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(log).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledWith(code);
+    expect(execute).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it.each([
+    ["missing secret", "", {}],
+    ["wrong secret", "wrong", {}],
+    ["wrong SHA", SECRET, { expectedSha: "b".repeat(40) }],
+    ["wrong deployment", SECRET, { expectedDeploymentId: `dpl_${"B".repeat(24)}` }],
+    ["expired", SECRET, { expiresAt: new Date(Date.now() - 1_000).toISOString() }],
+    ["unknown field", SECRET, { runId: "other" }],
+  ])("logs nothing for diagnose with %s", async (_label, secret, overrides) => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const { POST } = await import("@/app/api/admin/performance-fixture-recovery/route");
+    const response = await POST(request("diagnose", secret, overrides));
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('{"error":"Not found"}');
+    expect(log).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(oidc).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("logs nothing for an alias host", async () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const { POST } = await import("@/app/api/admin/performance-fixture-recovery/route");
+    expect((await POST(request("diagnose", SECRET, {}, "preview.example.com"))).status).toBe(404);
+    expect(log).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(oidc).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("keeps diagnose ahead of and independent from every Prisma-capable runtime import", () => {
+    const source = fs.readFileSync("app/api/admin/performance-fixture-recovery/route.ts", "utf8");
+    const diagnosticReturn = source.indexOf('console.info("PF_DIAG_READY")');
+    const runtimeImport = source.indexOf('await import("@/lib/preview-performance-fixture-recovery")');
+    expect(diagnosticReturn).toBeGreaterThan(0);
+    expect(runtimeImport).toBeGreaterThan(diagnosticReturn);
+    expect(source).not.toMatch(/from ["']@\/lib\/db|from ["']@prisma\/client|getPrisma\(/);
+  });
+
+  it("does not expose secrets, environment values, request fields, errors, or stacks in diagnostic logs", async () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    process.env.PGSCHEMA = "compass_prod";
+    const { POST } = await import("@/app/api/admin/performance-fixture-recovery/route");
+    await POST(request("diagnose"));
+    const output = JSON.stringify(log.mock.calls);
+    expect(output).toBe('[["PF_DIAG_RUNTIME"]]');
+    for (const forbidden of [SECRET, SHA, DEPLOYMENT, HOST, "PGSCHEMA", "compass_prod", "Error", "stack", "true", "false"]) expect(output).not.toContain(forbidden);
     log.mockRestore();
   });
 });

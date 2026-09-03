@@ -6,7 +6,7 @@ import { redactSensitiveText } from "../lib/preview-performance-fixture.ts";
 
 export function parseRecoveryArgs(argv: readonly string[]) {
   const action = argv[0];
-  if (action !== "cleanup" && action !== "verify") throw new Error("Usage: run-preview-performance-recovery.ts <cleanup|verify> [flags]");
+  if (action !== "cleanup" && action !== "verify" && action !== "diagnose") throw new Error("Usage: run-preview-performance-recovery.ts <cleanup|verify|diagnose> [flags]");
   const flags = new Map<string, string>();
   for (let index = 1; index < argv.length; index += 2) {
     const flag = argv[index];
@@ -37,7 +37,16 @@ export async function runRecovery(argv: readonly string[]): Promise<void> {
     cache: "no-store",
     redirect: "error",
   });
-  const result = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const responseText = await response.text();
+  if (args.action === "diagnose") {
+    if (response.status !== 404 || responseText !== '{"error":"Not found"}' || response.headers.get("cache-control") !== "no-store") {
+      throw new Error(`Recovery diagnostic refused with HTTP ${response.status}`);
+    }
+    process.stdout.write("diagnose accepted: inspect sanitized runtime logs\n");
+    return;
+  }
+  let result: Record<string, unknown> | null = null;
+  try { result = JSON.parse(responseText) as Record<string, unknown>; } catch { /* validated below */ }
   if (!response.ok || !result || result.state !== "absent" || result.residue !== 0 || Object.keys(result).length !== 2) throw new Error(`Recovery action refused with HTTP ${response.status}`);
   process.stdout.write(`${args.action} accepted: state=absent residue=0\n`);
 }
