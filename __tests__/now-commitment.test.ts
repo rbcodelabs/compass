@@ -255,7 +255,7 @@ describe("NOW commitment", () => {
     tx.roadmapItem.update.mockResolvedValue({ ...item, horizon: "NOW" })
     tx.decisionApplication.create.mockResolvedValue({ id: "receipt-1", status: "APPLIED" })
     await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver })).resolves.toEqual({ id: "receipt-1", status: "APPLIED" })
-    expect(tx.roadmapItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ horizon: "NOW", nowCommitmentProvenance: "NATIVE_DECISION", nowDecisionRecordId: "decision-1" }) }))
+    expect(tx.roadmapItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ horizon: "NOW", nowCommitmentProvenance: "NATIVE_GATED", nowDecisionRecordId: "decision-1" }) }))
   })
 
   it("uses plan CAS so a concurrent different admission cannot oversubscribe workspace capacity", async () => {

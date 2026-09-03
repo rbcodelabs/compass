@@ -161,7 +161,7 @@ export async function prepareNowCommitment(itemId: string, input: { requestedByI
     return await prisma.$transaction(async (tx) => {
     const item = await tx.roadmapItem.findUnique({ where: { id: itemId }, select: itemSelect })
     if (!item) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
-    if (item.horizon === "NOW" && item.nowCommitmentProvenance !== "NATIVE_DECISION") {
+    if (item.horizon === "NOW" && item.nowCommitmentProvenance !== "NATIVE_GATED") {
       throw new NowCommitmentError("LEGACY_NOW", "Legacy NOW items cannot be retroactively approved.")
     }
     const eligibility = input.eligibility ?? await (input.eligibilityResolver ?? defaultNowEligibilityResolver).resolve(item, tx as ReturnType<typeof getPrisma>)
@@ -422,7 +422,7 @@ export async function admitRoadmapItemToNow(
       }
       await tx.roadmapItem.update({
         where: { id: item.id },
-        data: { horizon: "NOW", ...(displacedSortOrder === undefined ? {} : { sortOrder: displacedSortOrder }), nowCommitmentProvenance: "NATIVE_DECISION", nowDecisionRecordId: decision.id, updatedAt: new Date() },
+        data: { horizon: "NOW", ...(displacedSortOrder === undefined ? {} : { sortOrder: displacedSortOrder }), nowCommitmentProvenance: "NATIVE_GATED", nowDecisionRecordId: decision.id, updatedAt: new Date() },
       })
       const applied = { status: "APPLIED", lastError: null, appliedAt: new Date(), updatedAt: new Date() }
       return receipt

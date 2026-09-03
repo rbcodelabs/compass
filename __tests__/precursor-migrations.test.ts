@@ -80,6 +80,13 @@ describe("decision-gate expand precursor migrations", () => {
     expect(schema).toContain("model DecisionEvidenceRef")
   })
 
+  it("uses the migration-health canonical native provenance literal at runtime", () => {
+    const commitment = readFileSync(path.join(root, "lib/now-commitment.ts"), "utf8")
+    expect(route).toContain("'LEGACY_UNGATED','NATIVE_GATED'")
+    expect(commitment).toContain('nowCommitmentProvenance: "NATIVE_GATED"')
+    expect(commitment).not.toContain('"NATIVE_DECISION"')
+  })
+
   it("atomically limits activation to one capacity plan per workspace", () => {
     const sql = migration("041_portfolio_capacity_ledger")
     expect(sql).toContain('"active_workspace_id" UUID')
