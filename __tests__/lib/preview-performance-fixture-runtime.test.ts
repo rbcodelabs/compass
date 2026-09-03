@@ -3,6 +3,7 @@ import {
   buildRuntimeFixturePlan,
   executePreviewFixtureActionWithStore,
   PrismaRuntimeFixtureStore,
+  hasExactRuntimeSentinels,
   type RuntimeFixtureStore,
 } from "@/lib/preview-performance-fixture-runtime";
 import { CLEANUP_ORDER, FIXTURE_COUNTS, SEED_ORDER, createPreviewFixtureManifest, type PreviewFixtureKind, type PreviewFixtureManifest } from "@/lib/preview-performance-fixture";
@@ -43,6 +44,12 @@ function mutableStore(initial = 0): RuntimeFixtureStore & { transactionCount: nu
 }
 
 describe("preview performance fixture runtime", () => {
+  it("rejects an extra workspace sentinel outside the deterministic graph", () => {
+    const counts = Object.fromEntries(CLEANUP_ORDER.map((kind) => [kind, FIXTURE_COUNTS[kind]])) as Record<PreviewFixtureKind, number>;
+    expect(hasExactRuntimeSentinels(counts, 12)).toBe(true);
+    expect(hasExactRuntimeSentinels(counts, 13)).toBe(false);
+  });
+
   it("derives stable domain-separated UUIDs and the complete 1,231-row graph", () => {
     const request = input("seed", "s".repeat(64));
     const first = buildRuntimeFixturePlan(request);
@@ -88,6 +95,14 @@ describe("preview performance fixture runtime", () => {
     const result = await executePreviewFixtureActionWithStore(input("seed", "s".repeat(64)), fixtureStore);
     expect(fixtureStore.transactionCount).toBe(0);
     expect(result).toMatchObject({ state: "seeded", replayed: true });
+  });
+
+  it("blocks complete seed replay when another organization owns the same workspace sentinel", async () => {
+    const fixtureStore = mutableStore(1231);
+    const original = fixtureStore.inspect;
+    fixtureStore.inspect = async (...args) => ({ ...(await original(...args)), exact: false, sentinelTotal: 13 });
+    await expect(executePreviewFixtureActionWithStore(input("seed", "s".repeat(64)), fixtureStore)).rejects.toThrow("recovery required");
+    expect(fixtureStore.transactionCount).toBe(0);
   });
 
   it("requires seed replay to match the supplied session token and expiry", async () => {
@@ -149,5 +164,18 @@ describe("preview performance fixture runtime", () => {
     const fixtureStore = mutableStore();
     fixtureStore.transaction = async () => { throw new Error(`database failed ${token}`); };
     await expect(executePreviewFixtureActionWithStore(input("seed", token), fixtureStore)).rejects.not.toThrow(token);
+  });
+
+  it("rejects post-seed verification when an extra workspace sentinel appears", async () => {
+    const fixtureStore = mutableStore();
+    let inspections = 0;
+    fixtureStore.inspect = async () => {
+      inspections += 1;
+      const counts = Object.fromEntries(CLEANUP_ORDER.map((kind) => [kind, inspections === 1 ? 0 : FIXTURE_COUNTS[kind]])) as Record<PreviewFixtureKind, number>;
+      return inspections === 1
+        ? { total: 0, sentinelTotal: 0, counts, complete: false, exact: true }
+        : { total: 1231, sentinelTotal: 13, counts, complete: true, exact: false };
+    };
+    await expect(executePreviewFixtureActionWithStore(input("seed", "s".repeat(64)), fixtureStore)).rejects.toThrow(/post-transaction verification/);
   });
 });

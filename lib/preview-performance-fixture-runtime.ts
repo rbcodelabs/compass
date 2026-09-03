@@ -8,6 +8,7 @@ import {
   createPreviewFixtureManifest,
   redactSensitiveText,
   type PreviewFixtureManifest,
+  type PreviewFixtureKind,
   type PreviewFixturePlan,
 } from "@/lib/preview-performance-fixture";
 import { PrismaPreviewFixtureStore } from "@/lib/preview-performance-fixture-prisma";
@@ -19,6 +20,13 @@ import {
 import type { PreviewFixtureRequest } from "@/app/api/admin/performance-fixture/route";
 
 const TOTAL_ROWS = Object.values(FIXTURE_COUNTS).reduce((total, count) => total + count, 0);
+
+export function hasExactRuntimeSentinels(
+  counts: Record<PreviewFixtureKind, number>,
+  sentinelTotal: number,
+): boolean {
+  return sentinelTotal === counts.users + counts.organizations + counts.workspaces;
+}
 
 export interface RuntimeFixtureInspection extends RecoveryFixtureInspection {
   complete: boolean;
@@ -117,7 +125,8 @@ export class PrismaRuntimeFixtureStore implements RuntimeFixtureStore {
       await store.verifyOwnership(manifest);
       if (!plan) return { counts, total, sentinelTotal, complete: false, exact: false };
       await store.verifyExactRows(plan, mode === "seed-credentials");
-      return { counts, total, sentinelTotal, complete: total === TOTAL_ROWS, exact: true };
+      const exact = hasExactRuntimeSentinels(counts, sentinelTotal);
+      return { counts, total, sentinelTotal, complete: exact && total === TOTAL_ROWS, exact };
     } catch {
       return { counts, total, sentinelTotal, complete: false, exact: false };
     }
