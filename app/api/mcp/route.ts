@@ -126,7 +126,7 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
-import { applyRecordedDecision, getReviewRequest, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, getDecision, getReviewRequest, listDecisions, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -1616,6 +1616,55 @@ const _handler = createMcpHandler(
     )
 
     register(
+      "request_decision",
+      {
+        title: "Request Decision",
+        description: "Creates a tracking-only human decision request linked to a workspace or Compass item. This never changes the linked item.",
+        inputSchema: {
+          workspaceId: z.string().uuid(),
+          subjectType: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"]),
+          subjectId: z.string().uuid(),
+          question: z.string().min(1).max(255),
+          context: z.string().min(1).max(20000),
+          idempotencyKey: z.string().uuid(),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestDecision,
+    )
+
+    register(
+      "list_decisions",
+      {
+        title: "List Decisions",
+        description: "Lists tracking-only decision requests in a workspace, newest first.",
+        inputSchema: {
+          workspaceId: z.string().uuid(),
+          state: z.enum(["PENDING", "DECIDED"]).optional(),
+          subjectType: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"]).optional(),
+          outcome: z.enum(["APPROVE", "REQUEST_CHANGES", "REJECT"]).optional(),
+          reviewerId: z.string().uuid().optional(),
+          query: z.string().max(255).optional(),
+          page: z.number().int().positive().optional(),
+          pageSize: z.number().int().min(1).max(50).optional(),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listDecisions,
+    )
+
+    register(
+      "get_decision",
+      {
+        title: "Get Decision",
+        description: "Reads one tracking-only decision request and its immutable revision history.",
+        inputSchema: { workspaceId: z.string().uuid(), requestId: z.string().uuid() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getDecision,
+    )
+
+    register(
       "request_release_authorization",
       {
         title: "Request Release Authorization",
@@ -1809,7 +1858,7 @@ const _handler = createMcpHandler(
       "add_to_roadmap",
       {
         title: "Add to Roadmap",
-        description: "Creates a Roadmap Item in any ordinary roadmap horizon. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
+        description: "Creates a Roadmap Item in any ordinary roadmap horizon, including NOW. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Title of the roadmap item"),
