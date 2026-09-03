@@ -506,11 +506,11 @@ export function parseVercelRetainedLogs(lines: string[]): {
       for (const log of Array.isArray(raw.logs) ? raw.logs : []) nested.set(canonical(log), log);
     }
     const authoritativeCompanionOuter = canonical(Object.fromEntries(
-      Object.entries(outer[0]).filter(([key]) => key !== "source"),
+      Object.entries(outer[0]).filter(([key]) => key !== "source" && key !== "message"),
     ));
     for (const { raw } of middleware) {
       const companionOuter = canonical(Object.fromEntries(
-        Object.entries(raw).filter(([key]) => key !== "logs" && key !== "source"),
+        Object.entries(raw).filter(([key]) => key !== "logs" && key !== "source" && key !== "message"),
       ));
       const contained = (Array.isArray(raw.logs) ? raw.logs : []).every((log) => nested.has(canonical(log)));
       if (companionOuter !== authoritativeCompanionOuter || !contained) {

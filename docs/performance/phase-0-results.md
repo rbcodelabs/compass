@@ -61,8 +61,10 @@ only when every outer invocation field is identical. Nested log records are
 canonical-set-unioned before query parsing; an exactly repeated timestamp,
 level, and message is treated as export duplication rather than a second query.
 Only the `serverless` phase is authoritative. A same-ID
-`serverless-middleware` companion is ignored only when all other outer fields
-match and every middleware log is already contained in the serverless union.
+`serverless-middleware` companion is ignored only when all immutable and
+request-context outer fields match and every middleware log is already
+contained in the serverless union. Only the phase-specific outer `source` and
+human-readable `message` may differ.
 Middleware-only and other-source IDs are excluded as non-authoritative window
 noise (and therefore cannot satisfy a measured request); divergent or additive
 same-ID middleware companions fail closed.

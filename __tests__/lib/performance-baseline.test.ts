@@ -591,6 +591,22 @@ describe("query artifacts", () => {
     expect(parseVercelRetainedLogs([JSON.stringify({ ...outer, id: "noise", source: "edge", logs: [a] })]).requests).toEqual([]);
   });
 
+  it("allows only the phase-specific outer message to differ on a middleware companion", () => {
+    const log = { timestamp: "2026-09-03T01:54:19.950Z", level: "info", message: `COMPASS_PERF_QUERY {"version":1,"timestamp":"2026-09-03T01:54:19.950Z","requestId":"perf_function","operation":"SELECT","durationMs":4,"fingerprint":"${"a".repeat(64)}","success":true,"rowCount":1}` };
+    const outer = { id: "platform_1", timestamp: 1788400459949, deploymentId: "dpl_One", projectId: "prj_One", requestMethod: "GET", requestPath: "/roadmap", responseStatusCode: 200, environment: "preview", domain: "one.vercel.app", traceId: "trace-one", branch: "branch-one" };
+    const serverless = JSON.stringify({ ...outer, source: "serverless", message: "Function invocation", logs: [log] });
+    const middleware = JSON.stringify({ ...outer, source: "serverless-middleware", message: "Middleware invocation", logs: [log] });
+    expect(parseVercelRetainedLogs([serverless, middleware]).requests).toHaveLength(1);
+    expect(() => parseVercelRetainedLogs([
+      serverless,
+      JSON.stringify({ ...outer, source: "serverless-middleware", message: "Middleware invocation", traceId: "trace-two", logs: [log] }),
+    ])).toThrow(/middleware companion/);
+    expect(() => parseVercelRetainedLogs([
+      serverless,
+      JSON.stringify({ ...outer, source: "serverless", message: "Different authoritative message", logs: [log] }),
+    ])).toThrow(/conflicting retained envelopes/);
+  });
+
   it("correlates a browser URL with query parameters to an exact Vercel pathname", () => {
     const browser = {
       requestId: "perf_sample_1",
