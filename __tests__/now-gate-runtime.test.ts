@@ -6,7 +6,7 @@ const { prisma, resolve, inspectPolicy } = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 vi.mock("@/lib/now-eligibility", () => ({ defaultNowEligibilityResolver: { resolve }, inspectConfiguredNowPolicy: inspectPolicy }))
-import { createRoadmapItemWithNowGate, evaluateDirectNowIngress, finalizeCreatedNowIngress, initialHorizonForNowCreate } from "@/lib/now-gate-runtime"
+import { createRoadmapItemWithNowGate, evaluateDirectNowIngress, finalizeCreatedNowIngress, initialHorizonForNowCreate, transitionRoadmapItemWithNowGate } from "@/lib/now-gate-runtime"
 
 const item = { id: "00000000-0000-4000-8000-000000000001", workspaceId: "00000000-0000-4000-8000-000000000002", title: "Candidate", description: null, horizon: "NEXT", status: "ACTIVE", solutionId: null, opportunityId: null, squadId: null, startDate: null, endDate: null, isPrivate: false, sortOrder: 0, updatedAt: new Date(), nowCommitmentProvenance: "LEGACY_UNGATED" }
 
@@ -109,6 +109,61 @@ describe("NOW gate runtime modes", () => {
     prisma.nowGateEvaluation.create.mockRejectedValue(new Error("audit unavailable"))
     await expect(createRoadmapItemWithNowGate({ workspaceId: item.workspaceId, requestedHorizon: "NOW", ingressKey: "ui.roadmap.add", actor: { kind: "USER", id: "00000000-0000-4000-8000-000000000003" }, create: vi.fn().mockResolvedValue(item) })).rejects.toThrow("audit unavailable")
     expect(prisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+  it("evaluates and mutates an existing NOW transition in one transaction", async () => {
+    process.env.NOW_DECISION_GATE_MODE = "shadow"
+    resolve.mockRejectedValue({ code: "NO_APPLIED_INVESTMENT_DECISION" })
+    const mutate = vi.fn().mockResolvedValue({ id: item.id, horizon: "NOW" })
+
+    await expect(transitionRoadmapItemWithNowGate({
+      workspaceId: item.workspaceId,
+      roadmapItemId: item.id,
+      currentHorizon: "NEXT",
+      requestedHorizon: "NOW",
+      ingressKey: "ui.roadmap.move",
+      actor: { kind: "USER", id: "00000000-0000-4000-8000-000000000003" },
+      mutate,
+    })).resolves.toMatchObject({ horizon: "NOW" })
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+    expect(prisma.nowGateEvaluation.create).toHaveBeenCalledTimes(1)
+    expect(mutate).toHaveBeenCalledWith(prisma)
+    expect(prisma.nowGateEvaluation.create.mock.invocationCallOrder[0]).toBeLessThan(mutate.mock.invocationCallOrder[0])
+  })
+  it("does not invoke an existing-item mutation when shadow telemetry fails", async () => {
+    process.env.NOW_DECISION_GATE_MODE = "shadow"
+    prisma.nowGateEvaluation.create.mockRejectedValue(new Error("audit unavailable"))
+    const mutate = vi.fn()
+
+    await expect(transitionRoadmapItemWithNowGate({
+      workspaceId: item.workspaceId,
+      roadmapItemId: item.id,
+      currentHorizon: "NEXT",
+      requestedHorizon: "NOW",
+      ingressKey: "ui.roadmap.move",
+      actor: { kind: "USER", id: "00000000-0000-4000-8000-000000000003" },
+      mutate,
+    })).rejects.toThrow("audit unavailable")
+
+    expect(mutate).not.toHaveBeenCalled()
+  })
+  it("rejects a stale existing-item horizon before telemetry or mutation", async () => {
+    process.env.NOW_DECISION_GATE_MODE = "shadow"
+    prisma.roadmapItem.findFirst.mockResolvedValue({ horizon: "LATER" })
+    const mutate = vi.fn()
+
+    await expect(transitionRoadmapItemWithNowGate({
+      workspaceId: item.workspaceId,
+      roadmapItemId: item.id,
+      currentHorizon: "NEXT",
+      requestedHorizon: "NOW",
+      ingressKey: "ui.roadmap.move",
+      actor: { kind: "USER", id: "00000000-0000-4000-8000-000000000003" },
+      mutate,
+    })).rejects.toEqual(expect.objectContaining({ code: "ITEM_CONFLICT" }))
+
+    expect(prisma.nowGateEvaluation.create).not.toHaveBeenCalled()
+    expect(mutate).not.toHaveBeenCalled()
   })
   it.each([
     ["workspace", { workspaceId: "not-a-uuid" }, "WORKSPACE_INVALID"],
