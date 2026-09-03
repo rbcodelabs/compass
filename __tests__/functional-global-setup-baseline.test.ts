@@ -17,6 +17,8 @@ describe("functional E2E baseline migrations", () => {
     expect(setup).toContain("040_release_authorization/migration.sql")
     expect(setup).toContain("041_portfolio_capacity_ledger/migration.sql")
     expect(setup).toContain("backfillRoadmapCommitmentProvenance")
+    expect(setup).toContain('.replaceAll("ALTER TABLE ASYNC ", "ALTER TABLE ")')
+    expect(setup).not.toContain("042_native_decision_gates_repair/migration.sql")
     expect(setup.indexOf("backfillRoadmapCommitmentProvenance")).toBeLessThan(setup.indexOf("seedE2E"))
   })
 })

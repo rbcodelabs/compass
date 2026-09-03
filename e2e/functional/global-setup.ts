@@ -39,7 +39,8 @@ async function ensureFunctionalSchema(pool: pg.Pool) {
         .replaceAll("CREATE UNIQUE INDEX ASYNC IF NOT EXISTS ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
         .replaceAll("CREATE INDEX ASYNC IF NOT EXISTS ", "CREATE INDEX IF NOT EXISTS ")
         .replaceAll("CREATE UNIQUE INDEX ASYNC ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
-        .replaceAll("CREATE INDEX ASYNC ", "CREATE INDEX IF NOT EXISTS ");
+        .replaceAll("CREATE INDEX ASYNC ", "CREATE INDEX IF NOT EXISTS ")
+        .replaceAll("ALTER TABLE ASYNC ", "ALTER TABLE ");
       if (!relativePath.includes("039_native_decision_gates")) {
         await client.query(migration);
         continue;
