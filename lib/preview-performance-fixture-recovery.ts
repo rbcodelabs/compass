@@ -80,8 +80,6 @@ export async function executePreviewFixtureRecoveryWithStore(
   for (const kind of CLEANUP_ORDER) {
     const ids = manifest.plannedIds[kind];
     for (let offset = 0; offset < ids.length; offset += RECOVERY_CHUNK_SIZE) {
-      inspection = await store.inspect(manifest, plan);
-      requireSafeInspection(inspection);
       const chunk = ids.slice(offset, offset + RECOVERY_CHUNK_SIZE);
       try {
         await store.deleteChunk(kind, chunk, manifest, plan);
@@ -115,14 +113,14 @@ export class PrismaRecoveryFixtureStore implements RecoveryFixtureStore {
 
   async deleteChunk(kind: PreviewFixtureKind, ids: readonly string[], manifest: PreviewFixtureManifest, plan: PreviewFixturePlan): Promise<number> {
     if (ids.length === 0 || ids.length > RECOVERY_CHUNK_SIZE) throw new Error("Invalid recovery chunk");
+    const existing = await new PrismaPreviewFixtureStore(this.prisma).countIds(kind, ids);
+    if (existing === 0) return 0;
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const store = new PrismaPreviewFixtureStore(tx);
-      const counts = await store.countPlannedRowsByKind(manifest);
-      const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-      const sentinelTotal = await store.countSentinelRows(manifest);
-      await store.verifyOwnership(manifest);
-      await store.verifyExactRows(plan);
-      requireSafeInspection({ counts, total, sentinelTotal, exact: true });
+      const chunkIds = new Set(ids);
+      const expectedRows = plan.rows[kind].filter(({ id }) => chunkIds.has(id));
+      if (expectedRows.length !== ids.length) throw new Error("Invalid recovery chunk identity");
+      await store.verifyExactRowsForIds(kind, expectedRows);
       const before = await store.countIds(kind, ids);
       const affected = await store.deleteIdsWithCount(kind, ids);
       if (affected !== before) throw new Error("Preview fixture changed during recovery chunk");

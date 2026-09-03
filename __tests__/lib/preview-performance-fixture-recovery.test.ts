@@ -12,11 +12,13 @@ function fullCounts(): Record<PreviewFixtureKind, number> {
   return Object.fromEntries(CLEANUP_ORDER.map((kind) => [kind, FIXTURE_COUNTS[kind]])) as Record<PreviewFixtureKind, number>;
 }
 
-function storeWithCounts(initial = fullCounts()): RecoveryFixtureStore & { calls: Array<{ kind: PreviewFixtureKind; size: number }> } {
+function storeWithCounts(initial = fullCounts()): RecoveryFixtureStore & { calls: Array<{ kind: PreviewFixtureKind; size: number }>; inspections: number } {
   const counts = { ...initial };
   const store = {
     calls: [] as Array<{ kind: PreviewFixtureKind; size: number }>,
+    inspections: 0,
     async inspect(): Promise<RecoveryFixtureInspection> {
+      store.inspections += 1;
       const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
       return { counts: { ...counts }, total, sentinelTotal: counts.users + counts.organizations + counts.workspaces, exact: true };
     },
@@ -45,6 +47,7 @@ describe("emergency preview fixture recovery", () => {
     await expect(executePreviewFixtureRecoveryWithStore("cleanup", store)).resolves.toEqual({ state: "absent", residue: 0 });
     expect(store.calls.every(({ size }) => size <= RECOVERY_CHUNK_SIZE)).toBe(true);
     expect([...new Set(store.calls.map(({ kind }) => kind))]).toEqual(CLEANUP_ORDER);
+    expect(store.inspections).toBe(2);
   });
 
   it("resumes after interruption from a valid monotonic subset", async () => {
@@ -81,5 +84,58 @@ describe("emergency preview fixture recovery", () => {
     const collision = storeWithCounts(absent);
     collision.inspect = async () => ({ counts: absent, total: 0, sentinelTotal: 1, exact: false });
     await expect(executePreviewFixtureRecoveryWithStore("verify", collision)).rejects.toThrow("recovery required");
+  });
+
+  it("keeps each Prisma transaction scoped to the current chunk instead of rescanning the 1,231-row graph", async () => {
+    let queries = 0;
+    const row = { id: "row-1", workspaceId: "workspace-1" };
+    const delegate = {
+      findMany: async () => { queries += 1; return [row]; },
+      count: async () => { queries += 1; return 1; },
+      deleteMany: async () => { queries += 1; return { count: 1 }; },
+    };
+    const prisma = {
+      roadmapItem: delegate,
+      $transaction: async (callback: (tx: { roadmapItem: typeof delegate }) => Promise<number>) => callback({ roadmapItem: delegate }),
+    };
+    const { PrismaRecoveryFixtureStore } = await import("@/lib/preview-performance-fixture-recovery");
+    const store = new PrismaRecoveryFixtureStore(prisma as never);
+    const plan = {
+      rows: { roadmapItems: [row] },
+    };
+    const manifest = { plannedIds: { roadmapItems: [row.id] } };
+    await expect(store.deleteChunk("roadmapItems", [row.id], manifest as never, plan as never)).resolves.toBe(1);
+    expect(queries).toBe(4);
+  });
+
+  it("does not open a transaction for an already-absent retry chunk", async () => {
+    let transactions = 0;
+    const prisma = {
+      roadmapItem: { count: async () => 0 },
+      $transaction: async () => { transactions += 1; throw new Error("must not start"); },
+    };
+    const { PrismaRecoveryFixtureStore } = await import("@/lib/preview-performance-fixture-recovery");
+    const store = new PrismaRecoveryFixtureStore(prisma as never);
+    await expect(store.deleteChunk("roadmapItems", ["absent"], {} as never, {} as never)).resolves.toBe(0);
+    expect(transactions).toBe(0);
+  });
+
+  it("still blocks a changed chunk row inside the transaction before deletion", async () => {
+    let deletes = 0;
+    const root = { count: async () => 1 };
+    const transaction = {
+      findMany: async () => [{ id: "row-1", workspaceId: "other-workspace" }],
+      count: async () => 1,
+      deleteMany: async () => { deletes += 1; return { count: 1 }; },
+    };
+    const prisma = {
+      roadmapItem: root,
+      $transaction: async (callback: (tx: { roadmapItem: typeof transaction }) => Promise<number>) => callback({ roadmapItem: transaction }),
+    };
+    const { PrismaRecoveryFixtureStore } = await import("@/lib/preview-performance-fixture-recovery");
+    const store = new PrismaRecoveryFixtureStore(prisma as never);
+    const plan = { rows: { roadmapItems: [{ id: "row-1", workspaceId: "expected-workspace" }] } };
+    await expect(store.deleteChunk("roadmapItems", ["row-1"], {} as never, plan as never)).rejects.toThrow(/ownership mismatch/);
+    expect(deletes).toBe(0);
   });
 });

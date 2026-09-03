@@ -151,21 +151,24 @@ export class PrismaPreviewFixtureStore implements PreviewFixtureStore {
 
   async verifyExactRows(plan: { rows: Record<PreviewFixtureKind, PreviewFixtureRow[]> }, includeSessionCredentials = false): Promise<void> {
     for (const kind of SEED_ORDER) {
-      const expectedRows = plan.rows[kind];
-      const actualRows = await this.findRows(kind, expectedRows.map(({ id }) => id));
-      const actualById = new Map(actualRows.map((row) => [String(row.id), row]));
-      for (const expected of expectedRows) {
-        const actual = actualById.get(expected.id);
-        if (!actual) continue;
-        for (const [key, expectedValue] of Object.entries(expected)) {
-          // Cleanup/verify never receive credential material or its original
-          // expiry. Session ownership is proven by deterministic ID + user.
-          if (!includeSessionCredentials && kind === "sessions" && (key === "sessionToken" || key === "expires")) continue;
-          const actualValue = actual[key];
-          const normalizedExpected = expectedValue instanceof Date ? expectedValue.toISOString() : expectedValue;
-          const normalizedActual = actualValue instanceof Date ? actualValue.toISOString() : actualValue;
-          if (normalizedActual !== normalizedExpected) throw new Error(`Preview fixture ownership mismatch for ${kind}.${key}`);
-        }
+      await this.verifyExactRowsForIds(kind, plan.rows[kind], includeSessionCredentials);
+    }
+  }
+
+  async verifyExactRowsForIds(kind: PreviewFixtureKind, expectedRows: readonly PreviewFixtureRow[], includeSessionCredentials = false): Promise<void> {
+    const actualRows = await this.findRows(kind, expectedRows.map(({ id }) => id));
+    const actualById = new Map(actualRows.map((row) => [String(row.id), row]));
+    for (const expected of expectedRows) {
+      const actual = actualById.get(expected.id);
+      if (!actual) continue;
+      for (const [key, expectedValue] of Object.entries(expected)) {
+        // Cleanup/verify never receive credential material or its original
+        // expiry. Session ownership is proven by deterministic ID + user.
+        if (!includeSessionCredentials && kind === "sessions" && (key === "sessionToken" || key === "expires")) continue;
+        const actualValue = actual[key];
+        const normalizedExpected = expectedValue instanceof Date ? expectedValue.toISOString() : expectedValue;
+        const normalizedActual = actualValue instanceof Date ? actualValue.toISOString() : actualValue;
+        if (normalizedActual !== normalizedExpected) throw new Error(`Preview fixture ownership mismatch for ${kind}.${key}`);
       }
     }
   }
