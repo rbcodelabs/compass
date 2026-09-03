@@ -12,7 +12,7 @@ import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
 import { normalizeWorkspaceRole } from "@/lib/roles"
-import { evaluateDirectNowIngress, finalizeCreatedNowIngress, initialHorizonForNowCreate } from "@/lib/now-gate-runtime"
+import { createRoadmapItemWithNowGate, transitionRoadmapItemWithNowGate } from "@/lib/now-gate-runtime"
 import { updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger"
 import {
   createFeedback,
@@ -1324,20 +1324,17 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const item = await prisma.roadmapItem.create({
-          data: {
+        const actor = getMcpActor()
+        const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "mcp.solution.promote", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
             workspaceId,
             title: solution.title,
-            horizon: initialHorizonForNowCreate(horizon, workspaceId),
+            horizon: initialHorizon,
             sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
             solutionId,
             opportunityId: solution.opportunity.id,
             squadId: solution.opportunity.squadId ?? null,
             isPrivate: isPrivate ?? false,
-          },
-        })
-        const actor = getMcpActor()
-        await finalizeCreatedNowIngress({ workspaceId, roadmapItemId: item.id, currentHorizon: item.horizon, requestedHorizon: horizon, ingressKey: "mcp.solution.promote", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null } })
+          } }) })
         return ok(
           `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
             (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
@@ -1812,11 +1809,7 @@ const _handler = createMcpHandler(
         if (!item) {
           return fail(`Roadmap item "${itemId}" not found.`)
         }
-        if (horizon) {
-          const actor = getMcpActor()
-          try { await evaluateDirectNowIngress({ workspaceId: item.workspaceId, roadmapItemId: itemId, currentHorizon: item.horizon, requestedHorizon: horizon, ingressKey: "mcp.roadmap.update", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null } }) } catch (error) { return fail(error instanceof Error ? error.message : "NOW commitment decision required") }
-        }
-        const updated = await updateRoadmapItemWithCapacityRelease(itemId, {
+        const updateData = {
             ...(horizon ? { horizon } : {}),
             ...(status ? { status } : {}),
             ...(title ? { title: title.trim() } : {}),
@@ -1825,7 +1818,11 @@ const _handler = createMcpHandler(
             ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
             ...(isPrivate !== undefined ? { isPrivate } : {}),
             updatedAt: new Date(),
-        })
+        }
+        const actor = getMcpActor()
+        let updated
+        try { updated = await transitionRoadmapItemWithNowGate({ workspaceId: item.workspaceId, roadmapItemId: itemId, currentHorizon: item.horizon, requestedHorizon: horizon ?? item.horizon, ingressKey: "mcp.roadmap.update", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null }, mutate: (database) => updateRoadmapItemWithCapacityRelease(itemId, updateData, database) }) }
+        catch (error) { return fail(error instanceof Error ? error.message : "NOW commitment decision required") }
         return ok(
           `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
             `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
@@ -1877,11 +1874,11 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const item = await prisma.roadmapItem.create({
-          data: {
+        const actor = getMcpActor()
+        const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "mcp.roadmap.add", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
             workspaceId,
             title: title.trim(),
-            horizon: initialHorizonForNowCreate(horizon, workspaceId),
+            horizon: initialHorizon,
             description: description?.trim(),
             sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
             solutionId: solutionId ?? null,
@@ -1891,10 +1888,7 @@ const _handler = createMcpHandler(
             startDate: startDate ? new Date(startDate) : undefined,
             endDate: endDate ? new Date(endDate) : undefined,
             isPrivate: isPrivate ?? false,
-          },
-        })
-        const actor = getMcpActor()
-        await finalizeCreatedNowIngress({ workspaceId, roadmapItemId: item.id, currentHorizon: item.horizon, requestedHorizon: horizon, ingressKey: "mcp.roadmap.add", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null } })
+          } }) })
         return ok(
           `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
             (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +

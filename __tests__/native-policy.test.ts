@@ -93,6 +93,21 @@ describe("native NOW policy generation", () => {
       .rejects.toEqual(expect.objectContaining({ code: "DECISION_INTEGRITY_FAILURE" }))
   })
 
+  it("preserves revoked history while selecting a later reauthorization", async () => {
+    const old = { ...decision, id: "00000000-0000-4000-8000-000000000081", revisionId: "00000000-0000-4000-8000-000000000082", optionId: "00000000-0000-4000-8000-000000000083", requestId: "old-request", request: { id: "old-request", state: "DECIDED", currentRevisionId: ids.revision }, revision: { ...decision.revision, supersededAt: new Date("2026-09-02T13:00:00Z"), options: [{ id: "00000000-0000-4000-8000-000000000083" }], request: { ...decision.revision.request, id: "old-request", currentRevisionId: ids.revision } }, applications: [{ ...decision.applications[0], id: "00000000-0000-4000-8000-000000000084" }] }
+    const authorityChecksum = investmentAuthorityChecksum(old, old.applications[0].id)
+    const revocation = {
+      id: "00000000-0000-4000-8000-000000000091", requestId: "revocation-request", workspaceId: ids.workspace,
+      revisionId: "00000000-0000-4000-8000-000000000092", optionId: "00000000-0000-4000-8000-000000000093", fingerprint: "e".repeat(64), decidedAt: new Date("2026-09-02T14:00:00Z"),
+      request: { id: "revocation-request", state: "DECIDED", currentRevisionId: "00000000-0000-4000-8000-000000000092" },
+      revision: { fingerprint: "e".repeat(64), sourceFingerprint: "f".repeat(64), supersededAt: null, packetJson: JSON.stringify({ authorityDecisionId: old.id, authorityReceiptId: old.applications[0].id, authorityChecksum, solution: { id: ids.solution } }), options: [{ id: "00000000-0000-4000-8000-000000000093" }], request: { id: "revocation-request", workspaceId: ids.workspace, gateType: "BUILDING_INVESTMENT_REVOCATION", subjectType: "SOLUTION", subjectId: ids.solution } },
+      option: { outcomeClass: "APPROVE", continuationKey: "REVOKE_BUILDING_INVESTMENT" }, applications: [{ id: "00000000-0000-4000-8000-000000000094", status: "APPLIED", continuationKey: "REVOKE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: ids.solution }],
+    }
+    const db = database({ decisionRecord: { findMany: vi.fn().mockResolvedValueOnce([decision]).mockResolvedValueOnce([revocation]).mockResolvedValueOnce([old]) } })
+    const generated = await generateNativeNowPolicy(ids.workspace, db)
+    expect(generated.document.workspaces[ids.workspace].investmentDecisions[ids.solution]).toEqual(expect.objectContaining({ authorityRecordId: ids.decision, applicationReceiptId: ids.receipt }))
+  })
+
   it("signs and verifies a content-addressed artifact and active selector reproducibly", async () => {
     const generated = await generateNativeNowPolicy(ids.workspace, database())
     const keys = generateKeyPairSync("ed25519")

@@ -144,6 +144,7 @@ export function inspectConfiguredNowPolicy(workspaceId: string) {
       routingFingerprint: evidence.routingFingerprint,
       capacityPlanId: evidence.capacityPlanId,
       capacityPlanFingerprint: evidence.capacityPlanFingerprint,
+      capacityPlanVersion: evidence.capacityPlanVersion,
       signingKeyId: evidence.signingKeyId,
       generatedAt: evidence.generatedAt,
     }

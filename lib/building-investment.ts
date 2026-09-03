@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import getPrisma from "@/lib/db"
+import { investmentAuthorityChecksum } from "@/lib/native-decision-evidence"
 
 export class BuildingInvestmentError extends Error {
   constructor(public readonly code: string, message: string) {
@@ -15,6 +16,10 @@ type SolutionPacket = {
   status: string
   updatedAt: Date
   opportunity: { id: string; title: string; workspaceId: string }
+}
+
+function exactAuthorityChecksum(authority: Parameters<typeof investmentAuthorityChecksum>[0] | null | undefined, receiptId: string): string | null {
+  try { return authority ? investmentAuthorityChecksum(authority, receiptId) : null } catch { return null }
 }
 
 export function buildingInvestmentSourceFingerprint(solution: SolutionPacket): string {
@@ -97,7 +102,7 @@ export async function startNewBuildingInvestmentDecisionCycle(solutionId: string
     if (!solution) throw new BuildingInvestmentError("SOLUTION_NOT_FOUND", "Solution not found.")
     const request = await tx.reviewRequest.findFirst({
       where: { workspaceId: solution.opportunity.workspaceId, gateType: "BUILDING_INVESTMENT", subjectType: "SOLUTION", subjectId: solution.id },
-      include: { currentRevision: { include: { decisions: { include: { option: true, applications: true } } } } },
+      include: { currentRevision: { include: { decisions: { include: { revision: { include: { request: true, options: { select: { id: true } } } }, request: true, option: true, applications: true } } } } },
     })
     const terminal = request?.currentRevision?.decisions[0]
     if (!request || request.state !== "DECIDED" || !terminal || terminal.id !== input.expectedTerminalDecisionId) {
@@ -111,7 +116,7 @@ export async function startNewBuildingInvestmentDecisionCycle(solutionId: string
         include: { request: true, revision: { include: { request: true, options: { select: { id: true } } } }, option: true, applications: true },
         orderBy: { decidedAt: "desc" },
       })
-      const packet = revocation ? JSON.parse(revocation.revision.packetJson) as { authorityDecisionId?: string; authorityReceiptId?: string; solution?: { id?: string } } : {}
+      const packet = revocation ? JSON.parse(revocation.revision.packetJson) as { authorityDecisionId?: string; authorityReceiptId?: string; authorityChecksum?: string; solution?: { id?: string } } : {}
       const revocationReceipt = revocation?.applications.find((application) => application.status === "APPLIED"
         && application.continuationKey === "REVOKE_BUILDING_INVESTMENT" && application.targetType === "SOLUTION" && application.targetId === solutionId)
       if (!authorityReceipt || !revocation || packet.authorityDecisionId !== terminal.id || packet.authorityReceiptId !== authorityReceipt.id
@@ -120,7 +125,8 @@ export async function startNewBuildingInvestmentDecisionCycle(solutionId: string
         || revocation.request.state !== "DECIDED" || revocation.request.currentRevisionId !== revocation.revisionId
         || revocation.fingerprint !== revocation.revision.fingerprint || !revocation.revision.options.some((option) => option.id === revocation.optionId)
         || revocation.option.outcomeClass !== "APPROVE" || revocation.option.continuationKey !== "REVOKE_BUILDING_INVESTMENT"
-        || !revocationReceipt || revocation.revision.sourceFingerprint !== buildingRevocationSourceFingerprint(solution, terminal.id, authorityReceipt.id)) {
+        || !revocationReceipt || !packet.authorityChecksum || packet.authorityChecksum !== exactAuthorityChecksum(terminal, authorityReceipt.id)
+        || revocation.revision.sourceFingerprint !== buildingRevocationSourceFingerprint(solution, terminal.id, authorityReceipt.id, packet.authorityChecksum)) {
         throw new BuildingInvestmentError("APPROVAL_REQUIRES_REVOCATION", "An approved investment requires an exact applied revocation before reconsideration.")
       }
     }
@@ -208,8 +214,8 @@ export async function applyBuildingInvestmentDecision(solutionId: string, decisi
   }
 }
 
-function buildingRevocationSourceFingerprint(solution: SolutionPacket, authorityDecisionId: string, authorityReceiptId: string) {
-  return createHash("sha256").update(JSON.stringify({ gateType: "BUILDING_INVESTMENT_REVOCATION", solutionSourceFingerprint: buildingInvestmentSourceFingerprint(solution), authorityDecisionId, authorityReceiptId })).digest("hex")
+function buildingRevocationSourceFingerprint(solution: SolutionPacket, authorityDecisionId: string, authorityReceiptId: string, authorityChecksum: string) {
+  return createHash("sha256").update(JSON.stringify({ gateType: "BUILDING_INVESTMENT_REVOCATION", solutionSourceFingerprint: buildingInvestmentSourceFingerprint(solution), authorityDecisionId, authorityReceiptId, authorityChecksum })).digest("hex")
 }
 
 export async function prepareBuildingInvestmentRevocationReview(solutionId: string, authorityDecisionId: string, input: { requestedById?: string | null } = {}) {
@@ -222,14 +228,16 @@ export async function prepareBuildingInvestmentRevocationReview(solutionId: stri
       || authority.revision.request.subjectId !== solutionId || authority.option.outcomeClass !== "APPROVE" || !receipt) {
       throw new BuildingInvestmentError("AUTHORITY_NOT_FOUND", "A current applied Building investment authority is required for revocation.")
     }
-    const sourceFingerprint = buildingRevocationSourceFingerprint(solution, authority.id, receipt.id)
+    const authorityChecksum = exactAuthorityChecksum(authority, receipt.id)
+    if (!authorityChecksum) throw new BuildingInvestmentError("AUTHORITY_NOT_FOUND", "The Building investment authority evidence is incomplete.")
+    const sourceFingerprint = buildingRevocationSourceFingerprint(solution, authority.id, receipt.id, authorityChecksum)
     const existing = await tx.reviewRequest.findFirst({ where: { workspaceId: solution.opportunity.workspaceId, gateType: "BUILDING_INVESTMENT_REVOCATION", subjectType: "SOLUTION", subjectId: solutionId }, include: { currentRevision: true } })
     if (existing?.state === "PENDING" && existing.currentRevision?.sourceFingerprint === sourceFingerprint) return existing.currentRevision
     if (existing?.state === "DECIDED") throw new BuildingInvestmentError("REVOCATION_CYCLE_REQUIRED", "This revocation was already decided; start an explicit correction cycle.")
     if (existing?.currentRevisionId) await tx.reviewRevision.update({ where: { id: existing.currentRevisionId }, data: { supersededAt: new Date() } })
     const request = existing ?? await tx.reviewRequest.create({ data: { workspaceId: solution.opportunity.workspaceId, gateType: "BUILDING_INVESTMENT_REVOCATION", subjectType: "SOLUTION", subjectId: solutionId, state: "DRAFT", requestedById: input.requestedById ?? null } })
     const revisionNumber = existing ? existing.revisionCount + 1 : 1
-    const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, sourceFingerprint, fingerprint: revisionFingerprint(request.id, existing?.decisionCycle ?? 1, revisionNumber, sourceFingerprint), title: `Revoke Building investment in ${solution.title}`, summary: "Correct or revoke the applied Building investment authority while preserving its history.", packetJson: JSON.stringify({ policyVersion: "building-investment-revocation-v1", sourceFingerprint, solution: { id: solution.id, title: solution.title, status: solution.status, opportunityId: solution.opportunity.id, opportunityTitle: solution.opportunity.title }, authorityDecisionId: authority.id, authorityReceiptId: receipt.id }), requiredRole: "ADMIN", options: { create: [
+    const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, sourceFingerprint, fingerprint: revisionFingerprint(request.id, existing?.decisionCycle ?? 1, revisionNumber, sourceFingerprint), title: `Revoke Building investment in ${solution.title}`, summary: "Correct or revoke the applied Building investment authority while preserving its history.", packetJson: JSON.stringify({ policyVersion: "building-investment-revocation-v1", sourceFingerprint, solution: { id: solution.id, title: solution.title, status: solution.status, opportunityId: solution.opportunity.id, opportunityTitle: solution.opportunity.title }, authorityDecisionId: authority.id, authorityReceiptId: receipt.id, authorityChecksum }), requiredRole: "ADMIN", options: { create: [
       { actionKey: "REVOKE_BUILDING", label: "Revoke Building investment", outcomeClass: "APPROVE", continuationKey: "REVOKE_BUILDING_INVESTMENT", sortOrder: 0 },
       { actionKey: "KEEP_BUILDING", label: "Keep Building investment", outcomeClass: "REJECT", continuationKey: "NO_ACTION", sortOrder: 1 },
     ] } } })
@@ -249,14 +257,16 @@ export async function applyBuildingInvestmentRevocationDecision(solutionId: stri
       }
       const solution = await tx.solution.findUnique({ where: { id: solutionId }, select: solutionSelect })
       const decision = await tx.decisionRecord.findUnique({ where: { id: decisionId }, include: { request: true, revision: { include: { request: true, options: { select: { id: true } } } }, option: true } })
-      const packet = decision ? JSON.parse(decision.revision.packetJson) as { authorityDecisionId?: string; authorityReceiptId?: string } : {}
-      const authority = packet.authorityDecisionId ? await tx.decisionRecord.findUnique({ where: { id: packet.authorityDecisionId }, include: { applications: true } }) : null
+      const packet = decision ? JSON.parse(decision.revision.packetJson) as { authorityDecisionId?: string; authorityReceiptId?: string; authorityChecksum?: string } : {}
+      const authority = packet.authorityDecisionId ? await tx.decisionRecord.findUnique({ where: { id: packet.authorityDecisionId }, include: { revision: { include: { request: true, options: { select: { id: true } } } }, option: true, applications: true } }) : null
       const authorityReceipt = authority?.applications.find((candidate) => candidate.id === packet.authorityReceiptId && candidate.status === "APPLIED" && candidate.continuationKey === "AUTHORIZE_BUILDING_INVESTMENT" && candidate.targetId === solutionId)
       if (!solution || !decision || decision.requestId !== decision.revision.request.id || decision.request.id !== decision.requestId || decision.workspaceId !== solution.opportunity.workspaceId
         || decision.request.state !== "DECIDED" || decision.request.currentRevisionId !== decision.revisionId || decision.revision.request.gateType !== "BUILDING_INVESTMENT_REVOCATION"
         || decision.revision.request.subjectType !== "SOLUTION" || decision.revision.request.subjectId !== solutionId || decision.revision.supersededAt
         || !decision.revision.options.some((option) => option.id === decision.optionId) || decision.option.outcomeClass !== "APPROVE" || decision.option.continuationKey !== "REVOKE_BUILDING_INVESTMENT"
-        || !packet.authorityDecisionId || !packet.authorityReceiptId || !authorityReceipt || decision.revision.sourceFingerprint !== buildingRevocationSourceFingerprint(solution, packet.authorityDecisionId, packet.authorityReceiptId)) {
+        || !packet.authorityDecisionId || !packet.authorityReceiptId || !packet.authorityChecksum || !authorityReceipt
+        || packet.authorityChecksum !== exactAuthorityChecksum(authority, authorityReceipt.id)
+        || decision.revision.sourceFingerprint !== buildingRevocationSourceFingerprint(solution, packet.authorityDecisionId, packet.authorityReceiptId, packet.authorityChecksum)) {
         throw new BuildingInvestmentError("DECISION_MISMATCH", "Decision does not revoke the exact current Building authority.")
       }
       return tx.decisionApplication.create({ data: { decisionId, continuationKey: "REVOKE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: solutionId, status: "APPLIED", receiptKey, attemptCount: 1, appliedAt: new Date(), updatedAt: new Date() } })
@@ -277,11 +287,11 @@ export async function ensureBuildingInvestmentRevocationRevisionFresh(revisionId
   if (!revision || revision.request.gateType !== "BUILDING_INVESTMENT_REVOCATION") throw new BuildingInvestmentError("REVISION_NOT_FOUND", "Building revocation revision not found.")
   if (revision.supersededAt) return { stale: true }
   if (revision.request.state === "DECIDED") return { stale: false }
-  const packet = JSON.parse(revision.packetJson) as { authorityDecisionId?: string; authorityReceiptId?: string }
+  const packet = JSON.parse(revision.packetJson) as { authorityDecisionId?: string; authorityReceiptId?: string; authorityChecksum?: string }
   const solution = await prisma.solution.findUnique({ where: { id: revision.request.subjectId }, select: solutionSelect })
-  const authority = packet.authorityDecisionId ? await prisma.decisionRecord.findUnique({ where: { id: packet.authorityDecisionId }, include: { applications: true } }) : null
+  const authority = packet.authorityDecisionId ? await prisma.decisionRecord.findUnique({ where: { id: packet.authorityDecisionId }, include: { revision: { include: { request: true } }, option: true, applications: true } }) : null
   const receipt = authority?.applications.find((candidate) => candidate.id === packet.authorityReceiptId && candidate.status === "APPLIED" && candidate.continuationKey === "AUTHORIZE_BUILDING_INVESTMENT" && candidate.targetId === revision.request.subjectId)
-  const current = solution && packet.authorityDecisionId && receipt ? buildingRevocationSourceFingerprint(solution, packet.authorityDecisionId, receipt.id) : null
+  const current = solution && packet.authorityDecisionId && packet.authorityChecksum && receipt && packet.authorityChecksum === exactAuthorityChecksum(authority, receipt.id) ? buildingRevocationSourceFingerprint(solution, packet.authorityDecisionId, receipt.id, packet.authorityChecksum) : null
   if (current === revision.sourceFingerprint) return { stale: false }
   const now = new Date()
   await prisma.$transaction(async (tx) => {

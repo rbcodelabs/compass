@@ -10,12 +10,17 @@ const mockRoadmapItem = {
 };
 const mockSolution = {
   findUnique: vi.fn(),
+  findFirst: vi.fn(),
 };
 const mockFeedbackItem = {
   findFirst: vi.fn(),
 };
 
 const mockPrisma = {
+  workspace: { findFirst: vi.fn() },
+  opportunity: { findFirst: vi.fn() },
+  experiment: { findFirst: vi.fn() },
+  keyResult: { findFirst: vi.fn() },
   roadmapItem: mockRoadmapItem,
   solution: mockSolution,
   feedbackItem: mockFeedbackItem,
@@ -51,6 +56,11 @@ beforeEach(() => {
   mockPrisma.portfolioCapacityReservation.findUnique.mockResolvedValue(null);
   mockPrisma.$transaction.mockImplementation((fn: (database: typeof mockPrisma) => unknown) => fn(mockPrisma));
   mockSolution.findUnique.mockResolvedValue({ title: "My Solution" });
+  mockSolution.findFirst.mockResolvedValue({ id: "sol-1", title: "My Solution", opportunity: { id: "opp-1", squadId: null } });
+  mockPrisma.workspace.findFirst.mockResolvedValue({ members: [{ id: "member-1" }], organization: { members: [] } });
+  mockPrisma.opportunity.findFirst.mockResolvedValue({ id: "opp-1" });
+  mockPrisma.experiment.findFirst.mockResolvedValue({ id: "exp-1" });
+  mockPrisma.keyResult.findFirst.mockResolvedValue({ id: "kr-1" });
   mockAuth.mockResolvedValue({ user: { id: "user-1" } });
   mockFeedbackItem.findFirst.mockResolvedValue({ title: "Login button is broken" });
 });
@@ -58,6 +68,12 @@ beforeEach(() => {
 // ─── addRoadmapItem ───────────────────────────────────────────────────────────
 
 describe("addRoadmapItem", () => {
+  it("rejects a non-member before roadmap reads or writes", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null);
+    await expect(addRoadmapItem("other-workspace", { title: "Forbidden", horizon: "NOW" }, "/path")).rejects.toThrow("Workspace not found");
+    expect(mockRoadmapItem.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled();
+  });
   it("creates an item at sortOrder 0 when column is empty", async () => {
     mockRoadmapItem.findFirst.mockResolvedValue(null);
     const result = await addRoadmapItem(
@@ -139,8 +155,14 @@ describe("addRoadmapItem", () => {
 // ─── moveItem ─────────────────────────────────────────────────────────────────
 
 describe("moveItem", () => {
+  it("rejects a non-member before item lookup or telemetry", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null);
+    await expect(moveItem("item-1", "NOW", "other-workspace", "/path")).rejects.toThrow("Workspace not found");
+    expect(mockRoadmapItem.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
   it("changes horizon and places at sortOrder 0 when destination empty", async () => {
-    mockRoadmapItem.findFirst.mockResolvedValue(null);
+    mockRoadmapItem.findFirst.mockResolvedValueOnce({ horizon: "NEXT" }).mockResolvedValueOnce(null);
     await moveItem("item-1", "LATER", "ws-1", "/path");
     const data = mockRoadmapItem.update.mock.calls[0][0].data;
     expect(data.horizon).toBe("LATER");
@@ -148,14 +170,14 @@ describe("moveItem", () => {
   });
 
   it("places item after last existing item in destination horizon", async () => {
-    mockRoadmapItem.findFirst.mockResolvedValue({ sortOrder: 7 });
+    mockRoadmapItem.findFirst.mockResolvedValueOnce({ horizon: "LATER" }).mockResolvedValueOnce({ sortOrder: 7 });
     await moveItem("item-1", "NEXT", "ws-1", "/path");
     const data = mockRoadmapItem.update.mock.calls[0][0].data;
     expect(data.sortOrder).toBe(8);
   });
 
   it("moves an item to the SHIPPED horizon", async () => {
-    mockRoadmapItem.findFirst.mockResolvedValue(null);
+    mockRoadmapItem.findFirst.mockResolvedValueOnce({ horizon: "NEXT" }).mockResolvedValueOnce(null);
     await moveItem("item-1", "SHIPPED", "ws-1", "/path");
     const data = mockRoadmapItem.update.mock.calls[0][0].data;
     expect(data.horizon).toBe("SHIPPED");
@@ -182,8 +204,13 @@ describe("archiveItem", () => {
 // ─── promoteToRoadmap ─────────────────────────────────────────────────────────
 
 describe("promoteToRoadmap", () => {
+  it("rejects a Solution outside the authorized workspace before roadmap mutation", async () => {
+    mockSolution.findFirst.mockResolvedValue(null);
+    await expect(promoteToRoadmap("foreign-solution", "ws-1", "NOW", null, null)).rejects.toThrow("Solution not found");
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled();
+  });
   it("creates a roadmap item using the solution title", async () => {
-    mockSolution.findUnique.mockResolvedValue({ title: "Great Solution" });
+    mockSolution.findFirst.mockResolvedValue({ title: "Great Solution", opportunity: { id: "opp-1", squadId: null } });
     const result = await promoteToRoadmap("sol-1", "ws-1", "NEXT", null, null);
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.title).toBe("Great Solution");
@@ -192,7 +219,7 @@ describe("promoteToRoadmap", () => {
   });
 
   it("throws when solution is not found", async () => {
-    mockSolution.findUnique.mockResolvedValue(null);
+    mockSolution.findFirst.mockResolvedValue(null);
     await expect(
       promoteToRoadmap("sol-999", "ws-1", "NEXT", null, null)
     ).rejects.toThrow("Solution not found");
@@ -213,6 +240,7 @@ describe("promoteToRoadmap", () => {
   });
 
   it("passes through squadId and opportunityId", async () => {
+    mockSolution.findFirst.mockResolvedValue({ title: "My Solution", opportunity: { id: "opp-1", squadId: "squad-1" } });
     await promoteToRoadmap("sol-1", "ws-1", "NEXT", "squad-1", "opp-1");
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.squadId).toBe("squad-1");

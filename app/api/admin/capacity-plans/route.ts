@@ -9,6 +9,8 @@ import {
 } from "@/lib/capacity-plan-ops"
 import { inspectConfiguredNowPolicy } from "@/lib/now-eligibility"
 import { deploymentNowGateMode } from "@/lib/now-gate-mode"
+import { getDecisionGateInfrastructureHealth } from "@/app/api/admin/migrate/route"
+import { getActiveSchema } from "@/lib/schema"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -32,7 +34,7 @@ export async function GET(req: NextRequest) {
   const workspaceId = req.nextUrl.searchParams.get("workspaceId") ?? ""
   try {
     const policy = inspectConfiguredNowPolicy(workspaceId)
-    const { inspection, shadowCount, appliedMigrations } = await withAdminDsqlClient(async (db) => {
+    const { inspection, shadowCount, infrastructure } = await withAdminDsqlClient(async (db) => {
       const inspection = await inspectCapacityPlan(db, planId)
       let shadowCount = 0
       let appliedMigrations: string[] = []
@@ -47,14 +49,16 @@ export async function GET(req: NextRequest) {
       catch { shadowCount = 0 }
       try { appliedMigrations = (await db.query<{ migration_name: string }>("SELECT DISTINCT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND migration_name = ANY($1::text[])", [["039_native_decision_gates", "042_native_decision_gates_repair", "040_release_authorization", "041_portfolio_capacity_ledger", "043_decision_evidence_refs", "044_now_policy_application_evidence", "045_now_gate_shadow_evaluations"]])).rows.map((row) => row.migration_name) }
       catch { appliedMigrations = [] }
-      return { inspection, shadowCount, appliedMigrations }
+      const infrastructure = await getDecisionGateInfrastructureHealth(db, getActiveSchema(), appliedMigrations).catch(() => null)
+      return { inspection, shadowCount, infrastructure }
     })
     if (!workspaceId || inspection.plan.workspace_id !== workspaceId) return NextResponse.json({ error: "Workspace or plan not found." }, { status: 404 })
     const deploymentMode = deploymentNowGateMode()
     const shadowTelemetryReady = shadowCount > 0
-    const migrationReady = (appliedMigrations.includes("039_native_decision_gates") || appliedMigrations.includes("042_native_decision_gates_repair"))
-      && ["040_release_authorization", "041_portfolio_capacity_ledger", "043_decision_evidence_refs", "044_now_policy_application_evidence", "045_now_gate_shadow_evaluations"].every((name) => appliedMigrations.includes(name))
-    const shadowEvaluationReady = policy.runtimePolicyReady && inspection.capacityMetadataReady && shadowTelemetryReady && migrationReady
+    const migrationReady = infrastructure?.migrationReady === true
+    const policyCapacityMatches = policy.runtimePolicyReady && policy.capacityPlanId === inspection.plan.id
+      && policy.capacityPlanFingerprint === inspection.plan.plan_fingerprint && policy.capacityPlanVersion === inspection.plan.version
+    const shadowEvaluationReady = policy.runtimePolicyReady && policyCapacityMatches && inspection.capacityMetadataReady && shadowTelemetryReady && migrationReady
     return NextResponse.json({
       ...inspection,
       deploymentMode,

@@ -343,7 +343,7 @@ export function getDecisionGateExpectedCatalog() {
   }
 }
 
-async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string, applied: readonly string[], incomplete: readonly string[] = []) {
+export async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string, applied: readonly string[], incomplete: readonly string[] = []) {
   const [tablesResult, columnsResult, indexesResult, constraintsResult, provenanceResult, integrityResult] = await Promise.all([
     client.query<{ table_name: string }>(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = ANY($2::text[])`, [schema, [...DECISION_GATE_TABLES]]),
     client.query<{ table_name: string; column_name: string; data_type: string; character_maximum_length: number | null; datetime_precision: number | null; is_nullable: string; column_default: string | null }>(`SELECT table_name, column_name, data_type, character_maximum_length, datetime_precision, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND (table_name = ANY($2::text[]) OR (table_name = 'roadmap_items' AND column_name = ANY($3::text[]))) ORDER BY table_name, ordinal_position`, [schema, [...DECISION_GATE_TABLES], [...DECISION_GATE_COLUMNS]]),

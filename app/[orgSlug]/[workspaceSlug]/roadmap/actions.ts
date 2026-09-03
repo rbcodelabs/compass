@@ -5,8 +5,20 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import type { Horizon } from "@/lib/types";
 import { isLaunchHorizon } from "@/lib/roadmap";
-import { evaluateDirectNowIngress, finalizeCreatedNowIngress, initialHorizonForNowCreate } from "@/lib/now-gate-runtime";
+import { createRoadmapItemWithNowGate, transitionRoadmapItemWithNowGate } from "@/lib/now-gate-runtime";
 import { updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger";
+import { isOrgAdminRole } from "@/lib/roles";
+
+async function requireWorkspaceMember(workspaceId: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const workspace = await getPrisma().workspace.findFirst({
+    where: { id: workspaceId },
+    select: { members: { where: { userId: session.user.id }, select: { id: true } }, organization: { select: { members: { where: { userId: session.user.id }, select: { role: true } } } } },
+  });
+  if (!workspace || (workspace.members.length === 0 && !isOrgAdminRole(workspace.organization.members[0]?.role))) throw new Error("Workspace not found");
+  return session.user.id;
+}
 
 // ─── Add Roadmap Item ─────────────────────────────────────────────────────────
 
@@ -26,7 +38,13 @@ export async function addRoadmapItem(
   },
   revalidatePathStr: string
 ) {
+  const userId = await requireWorkspaceMember(workspaceId);
   const prisma = getPrisma();
+
+  if (data.solutionId && !await prisma.solution.findFirst({ where: { id: data.solutionId, opportunity: { workspaceId } }, select: { id: true } })) throw new Error("Linked Solution not found");
+  if (data.opportunityId && !await prisma.opportunity.findFirst({ where: { id: data.opportunityId, workspaceId }, select: { id: true } })) throw new Error("Linked Opportunity not found");
+  if (data.experimentId && !await prisma.experiment.findFirst({ where: { id: data.experimentId, workspaceId }, select: { id: true } })) throw new Error("Linked Experiment not found");
+  if (data.keyResultId && !await prisma.keyResult.findFirst({ where: { id: data.keyResultId, objective: { cycle: { workspaceId } } }, select: { id: true } })) throw new Error("Linked Key Result not found");
 
   // Place new item at the end of its column by finding the current max sortOrder.
   const lastItem = await prisma.roadmapItem.findFirst({
@@ -37,12 +55,11 @@ export async function addRoadmapItem(
 
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  const item = await prisma.roadmapItem.create({
-    data: {
+  const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: data.horizon, ingressKey: "ui.roadmap.add", actor: { kind: "USER", id: userId }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
       workspaceId,
       title: data.title,
       description: data.description,
-      horizon: initialHorizonForNowCreate(data.horizon, workspaceId),
+      horizon: initialHorizon,
       sortOrder,
       solutionId: data.solutionId,
       keyResultId: data.keyResultId,
@@ -51,10 +68,7 @@ export async function addRoadmapItem(
       startDate: data.startDate,
       endDate: data.endDate,
       isPrivate: data.isPrivate ?? false,
-    },
-  });
-  const session = await auth();
-  await finalizeCreatedNowIngress({ workspaceId, roadmapItemId: item.id, currentHorizon: item.horizon, requestedHorizon: data.horizon, ingressKey: "ui.roadmap.add", actor: session?.user?.id ? { kind: "USER", id: session.user.id } : { kind: "ANONYMOUS", id: null } });
+    } }) });
 
   revalidatePath(revalidatePathStr);
   return { ...item, horizon: data.horizon };
@@ -106,6 +120,7 @@ export async function moveItem(
   workspaceId: string,
   revalidatePathStr: string
 ) {
+  const userId = await requireWorkspaceMember(workspaceId);
   // A bare move can't enter a launch horizon — LAUNCHING requires a tier +
   // checklist (setLaunchTier), and LAUNCHED its own transition. The board's
   // drag handler already intercepts these drops and opens the panel instead;
@@ -117,26 +132,12 @@ export async function moveItem(
   }
 
   const prisma = getPrisma();
-  if (horizon === "NOW") {
-    const current = await prisma.roadmapItem.findFirst({
-      where: { id: itemId, workspaceId },
-      select: { horizon: true },
-    });
-    if (!current) throw new Error("Roadmap item not found");
-    const session = await auth();
-    await evaluateDirectNowIngress({ workspaceId, roadmapItemId: itemId, currentHorizon: current.horizon, requestedHorizon: horizon, ingressKey: "ui.roadmap.move", actor: session?.user?.id ? { kind: "USER", id: session.user.id } : { kind: "ANONYMOUS", id: null } });
-  }
-
-  // Place the moved item at the end of the destination column.
-  const lastItem = await prisma.roadmapItem.findFirst({
-    where: { workspaceId, horizon, status: "ACTIVE", NOT: { id: itemId } },
-    orderBy: { sortOrder: "desc" },
-    select: { sortOrder: true },
-  });
-
-  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
-
-  await updateRoadmapItemWithCapacityRelease(itemId, { horizon, sortOrder });
+  const current = await prisma.roadmapItem.findFirst({ where: { id: itemId, workspaceId }, select: { horizon: true } });
+  if (!current) throw new Error("Roadmap item not found");
+  await transitionRoadmapItemWithNowGate({ workspaceId, roadmapItemId: itemId, currentHorizon: current.horizon, requestedHorizon: horizon, ingressKey: "ui.roadmap.move", actor: { kind: "USER", id: userId }, mutate: async (database) => {
+    const lastItem = await database.roadmapItem.findFirst({ where: { workspaceId, horizon, status: "ACTIVE", NOT: { id: itemId } }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } });
+    return updateRoadmapItemWithCapacityRelease(itemId, { horizon, sortOrder: lastItem ? lastItem.sortOrder + 1 : 0 }, database);
+  } });
 
   revalidatePath(revalidatePathStr);
 }
@@ -163,13 +164,16 @@ export async function promoteToRoadmap(
   dates?: { startDate?: Date; endDate?: Date },
   isPrivate?: boolean
 ) {
+  const userId = await requireWorkspaceMember(workspaceId);
   const prisma = getPrisma();
 
-  const solution = await prisma.solution.findUnique({
-    where: { id: solutionId },
-    select: { title: true },
+  const solution = await prisma.solution.findFirst({
+    where: { id: solutionId, opportunity: { workspaceId } },
+    select: { title: true, opportunity: { select: { id: true, squadId: true } } },
   });
   if (!solution) throw new Error("Solution not found");
+  if (opportunityId && opportunityId !== solution.opportunity.id) throw new Error("Solution opportunity mismatch");
+  if (squadId && squadId !== solution.opportunity.squadId) throw new Error("Solution squad mismatch");
 
   const lastItem = await prisma.roadmapItem.findFirst({
     where: { workspaceId, horizon, status: "ACTIVE" },
@@ -178,22 +182,18 @@ export async function promoteToRoadmap(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  const item = await prisma.roadmapItem.create({
-    data: {
+  const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "ui.solution.promote", actor: { kind: "USER", id: userId }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
       workspaceId,
       title: solution.title,
-      horizon: initialHorizonForNowCreate(horizon, workspaceId),
+      horizon: initialHorizon,
       sortOrder,
       solutionId,
-      squadId: squadId ?? null,
-      opportunityId: opportunityId ?? null,
+      squadId: solution.opportunity.squadId,
+      opportunityId: solution.opportunity.id,
       startDate: dates?.startDate,
       endDate: dates?.endDate,
       isPrivate: isPrivate ?? false,
-    },
-  });
-  const session = await auth();
-  await finalizeCreatedNowIngress({ workspaceId, roadmapItemId: item.id, currentHorizon: item.horizon, requestedHorizon: horizon, ingressKey: "ui.solution.promote", actor: session?.user?.id ? { kind: "USER", id: session.user.id } : { kind: "ANONYMOUS", id: null } });
+    } }) });
 
   revalidatePath(`/[orgSlug]/[workspaceSlug]/roadmap`, "page");
   return { ...item, horizon };
@@ -231,19 +231,16 @@ export async function promoteFeedbackToRoadmap(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  const item = await prisma.roadmapItem.create({
-    data: {
+  const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "ui.feedback.promote", actor: { kind: "USER", id: session.user.id }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
       workspaceId,
       title: feedback.title,
-      horizon: initialHorizonForNowCreate(horizon, workspaceId),
+      horizon: initialHorizon,
       sortOrder,
       feedbackId,
       startDate: dates?.startDate,
       endDate: dates?.endDate,
       isPrivate: isPrivate ?? false,
-    },
-  });
-  await finalizeCreatedNowIngress({ workspaceId, roadmapItemId: item.id, currentHorizon: item.horizon, requestedHorizon: horizon, ingressKey: "ui.feedback.promote", actor: { kind: "USER", id: session.user.id } });
+    } }) });
 
   revalidatePath(revalidatePathStr);
   return { ...item, horizon };

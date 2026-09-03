@@ -17,7 +17,7 @@ import {
 } from "@/lib/feedback-attachments"
 import { feedbackItemUrl } from "@/lib/compass-url"
 import type { FeedbackStatus } from "@/lib/feedback-meta"
-import { finalizeCreatedNowIngress, initialHorizonForNowCreate } from "@/lib/now-gate-runtime"
+import { createRoadmapItemWithNowGate } from "@/lib/now-gate-runtime"
 import { getMcpActor } from "@/lib/mcp-authz"
 
 type FeedbackWorkspace = {
@@ -582,20 +582,15 @@ export async function promoteFeedbackToRoadmap({
   })
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0
 
-  const item = await prisma.roadmapItem.create({
-    data: {
+  const actor = horizon === "NOW" ? getMcpActor() : { userId: null }
+  const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "mcp.feedback.promote", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
       workspaceId,
       title: feedback.title,
-      horizon: initialHorizonForNowCreate(horizon, workspaceId),
+      horizon: initialHorizon,
       sortOrder,
       feedbackId,
       isPrivate: isPrivate ?? false,
-    },
-  })
-  if (horizon === "NOW") {
-    const actor = getMcpActor()
-    await finalizeCreatedNowIngress({ workspaceId, roadmapItemId: item.id, currentHorizon: item.horizon, requestedHorizon: horizon, ingressKey: "mcp.feedback.promote", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null } })
-  }
+    } }) })
 
   const lines = [
     `**Promoted to roadmap (${horizon})**`,

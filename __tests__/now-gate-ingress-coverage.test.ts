@@ -37,25 +37,20 @@ describe("NOW gate ingress coverage", () => {
     }
   })
 
-  it("preflights all six create ingresses from a non-NOW provisional row", () => {
+  it("runs all six create ingresses through the atomic gate helper", () => {
     const combined = sources.map(({ text }) => text).join("\n")
-    expect(combined.match(/roadmapItem\.create\(\{[\s\S]{0,500}?horizon:\s*initialHorizonForNowCreate\(/g) ?? [])
-      .toHaveLength(6)
-    expect(combined.match(/await finalizeCreatedNowIngress\(/g) ?? [])
+    expect(combined.match(/createRoadmapItemWithNowGate\(\{/g) ?? [])
       .toHaveLength(6)
   })
 
   it("evaluates existing-item transitions before their horizon mutation", () => {
     const roadmap = sources.find(({ path }) => path.endsWith("roadmap/actions.ts"))!.text
-    expect(roadmap.indexOf('ingressKey: "ui.roadmap.move"'))
-      .toBeLessThan(roadmap.indexOf("updateRoadmapItemWithCapacityRelease(itemId, { horizon, sortOrder })"))
+    expect(roadmap).toContain('transitionRoadmapItemWithNowGate({ workspaceId, roadmapItemId: itemId')
 
     const mcp = sources.find(({ path }) => path === "app/api/mcp/route.ts")!.text
-    expect(mcp.indexOf('ingressKey: "mcp.roadmap.update"'))
-      .toBeLessThan(mcp.indexOf("const updated = await updateRoadmapItemWithCapacityRelease(itemId"))
+    expect(mcp).toContain('transitionRoadmapItemWithNowGate({ workspaceId: item.workspaceId')
 
     const entity = sources.find(({ path }) => path === "lib/entity-mutations.ts")!.text
-    expect(entity.indexOf('ingressKey: "api.entity.update"'))
-      .toBeLessThan(entity.indexOf("await model.update({"))
+    expect(entity).toContain('transitionRoadmapItemWithNowGate({ workspaceId, roadmapItemId: id')
   })
 })

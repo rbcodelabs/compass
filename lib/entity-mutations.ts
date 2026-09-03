@@ -13,7 +13,7 @@
 import getPrisma from "@/lib/db";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
 import { SETTABLE_HORIZONS } from "@/lib/roadmap";
-import { evaluateDirectNowIngress, type NowIngressActor } from "@/lib/now-gate-runtime";
+import { transitionRoadmapItemWithNowGate, type NowIngressActor } from "@/lib/now-gate-runtime";
 import { updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger";
 
 type EnumFieldConfig = { field: "status" | "horizon"; options: readonly string[] };
@@ -75,6 +75,7 @@ export async function updateEntityField(
   actor: NowIngressActor = { kind: "SYSTEM", id: null },
 ): Promise<UpdateResult> {
   const config = EDIT_CONFIG[type];
+  let roadmapCurrentHorizon: string | undefined;
 
   // ── Validate the field is editable and coerce the value ──────────────────
   let data: Record<string, unknown>;
@@ -117,11 +118,7 @@ export async function updateEntityField(
         select: { horizon: true },
       });
       if (!current) return { ok: false, status: 404, error: "Not found" };
-      try {
-        await evaluateDirectNowIngress({ workspaceId, roadmapItemId: id, currentHorizon: current.horizon, requestedHorizon: value, ingressKey: "api.entity.update", actor });
-      } catch (error) {
-        return { ok: false, status: 400, error: error instanceof Error ? error.message : "NOW commitment decision required" };
-      }
+      roadmapCurrentHorizon = current.horizon;
     }
     data = { [field]: value };
   } else {
@@ -143,7 +140,10 @@ export async function updateEntityField(
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
 
-  if (type === "roadmapItem") await updateRoadmapItemWithCapacityRelease(id, data);
+  if (type === "roadmapItem" && field === "horizon" && value === "NOW") {
+    try { await transitionRoadmapItemWithNowGate({ workspaceId, roadmapItemId: id, currentHorizon: roadmapCurrentHorizon, requestedHorizon: value, ingressKey: "api.entity.update", actor, mutate: (database) => updateRoadmapItemWithCapacityRelease(id, data, database) }); }
+    catch (error) { return { ok: false, status: 400, error: error instanceof Error ? error.message : "NOW commitment decision required" }; }
+  } else if (type === "roadmapItem") await updateRoadmapItemWithCapacityRelease(id, data);
   else await model.update({ where: { id }, data });
   return { ok: true };
 }

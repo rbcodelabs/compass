@@ -12,6 +12,7 @@ const prisma = {
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 
 import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, buildingInvestmentSourceFingerprint, prepareBuildingInvestmentReview, prepareBuildingInvestmentRevocationReview, startNewBuildingInvestmentDecisionCycle } from "@/lib/building-investment"
+import { investmentAuthorityChecksum } from "@/lib/native-decision-evidence"
 
 const solution = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -21,6 +22,13 @@ const solution = {
   updatedAt: new Date("2026-09-02T12:00:00Z"),
   opportunity: { workspaceId: "00000000-0000-4000-8000-000000000002", id: "00000000-0000-4000-8000-000000000003", title: "Trusted delivery" },
 }
+const authorityReceipt = { id: "authority-receipt", status: "APPLIED", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: solution.id }
+function authorityFixture() { return {
+  id: "authority-1", workspaceId: solution.opportunity.workspaceId, requestId: "authority-request", revisionId: "authority-revision", optionId: "authority-option", fingerprint: "a".repeat(64), decidedAt: new Date("2026-09-02T12:00:00Z"),
+  request: { id: "authority-request", state: "DECIDED", currentRevisionId: "authority-revision" },
+  revision: { fingerprint: "a".repeat(64), sourceFingerprint: buildingInvestmentSourceFingerprint(solution), supersededAt: null, options: [{ id: "authority-option" }], request: { id: "authority-request", workspaceId: solution.opportunity.workspaceId, gateType: "BUILDING_INVESTMENT", subjectType: "SOLUTION", subjectId: solution.id } },
+  option: { outcomeClass: "APPROVE", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT" }, applications: [authorityReceipt],
+} }
 
 describe("Building investment decisions", () => {
   beforeEach(() => {
@@ -93,40 +101,41 @@ describe("Building investment decisions", () => {
   })
 
   it("prepares an immutable revocation review bound to an applied authority", async () => {
-    prisma.decisionRecord.findUnique.mockResolvedValue({ id: "authority-1", workspaceId: solution.opportunity.workspaceId, revision: { request: { gateType: "BUILDING_INVESTMENT", subjectId: solution.id } }, option: { outcomeClass: "APPROVE" }, applications: [{ id: "authority-receipt", status: "APPLIED", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: solution.id }] })
+    prisma.decisionRecord.findUnique.mockResolvedValue(authorityFixture())
     await prepareBuildingInvestmentRevocationReview(solution.id, "authority-1", { requestedById: "user-1" })
     expect(prisma.reviewRequest.create).toHaveBeenCalledWith({ data: expect.objectContaining({ gateType: "BUILDING_INVESTMENT_REVOCATION", subjectId: solution.id }) })
     expect(prisma.reviewRevision.create).toHaveBeenCalledWith({ data: expect.objectContaining({ options: { create: expect.arrayContaining([expect.objectContaining({ continuationKey: "REVOKE_BUILDING_INVESTMENT" })]) } }) })
   })
 
   it("applies a revocation receipt only for the exact historical authority", async () => {
-    const authority = { id: "authority-1", applications: [{ id: "authority-receipt", status: "APPLIED", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: solution.id }] }
-    prisma.decisionRecord.findUnique.mockResolvedValue({ ...authority, workspaceId: solution.opportunity.workspaceId, revision: { request: { gateType: "BUILDING_INVESTMENT", subjectId: solution.id } }, option: { outcomeClass: "APPROVE" } })
+    const authority = authorityFixture()
+    prisma.decisionRecord.findUnique.mockResolvedValue(authority)
     await prepareBuildingInvestmentRevocationReview(solution.id, "authority-1", { requestedById: "user-1" })
     const created = prisma.reviewRevision.create.mock.calls.at(-1)?.[0]?.data
     const sourceFingerprint = created?.sourceFingerprint
     prisma.decisionRecord.findUnique.mockReset()
-    prisma.decisionRecord.findUnique.mockResolvedValueOnce({ id: "revocation-1", requestId: "request-1", workspaceId: solution.opportunity.workspaceId, revisionId: "revision-1", optionId: "option-1", fingerprint: "fp", request: { id: "request-1", state: "DECIDED", currentRevisionId: "revision-1" }, revision: { fingerprint: "fp", sourceFingerprint, packetJson: JSON.stringify({ authorityDecisionId: "authority-1", authorityReceiptId: "authority-receipt" }), supersededAt: null, options: [{ id: "option-1" }], request: { id: "request-1", workspaceId: solution.opportunity.workspaceId, gateType: "BUILDING_INVESTMENT_REVOCATION", subjectType: "SOLUTION", subjectId: solution.id } }, option: { outcomeClass: "APPROVE", continuationKey: "REVOKE_BUILDING_INVESTMENT" } }).mockResolvedValueOnce(authority)
+    prisma.decisionRecord.findUnique.mockResolvedValueOnce({ id: "revocation-1", requestId: "request-1", workspaceId: solution.opportunity.workspaceId, revisionId: "revision-1", optionId: "option-1", fingerprint: "fp", request: { id: "request-1", state: "DECIDED", currentRevisionId: "revision-1" }, revision: { fingerprint: "fp", sourceFingerprint, packetJson: created.packetJson, supersededAt: null, options: [{ id: "option-1" }], request: { id: "request-1", workspaceId: solution.opportunity.workspaceId, gateType: "BUILDING_INVESTMENT_REVOCATION", subjectType: "SOLUTION", subjectId: solution.id } }, option: { outcomeClass: "APPROVE", continuationKey: "REVOKE_BUILDING_INVESTMENT" } }).mockResolvedValueOnce(authority)
     prisma.decisionApplication.findUnique.mockResolvedValue(null)
     prisma.decisionApplication.create.mockResolvedValue({ id: "revocation-receipt", status: "APPLIED" })
     await expect(applyBuildingInvestmentRevocationDecision(solution.id, "revocation-1")).resolves.toEqual(expect.objectContaining({ status: "APPLIED" }))
   })
 
   it("starts a new approval cycle only after the exact authority has an applied revocation", async () => {
-    const authorityReceipt = { id: "authority-receipt", status: "APPLIED", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: solution.id }
+    const authority = authorityFixture()
     prisma.reviewRequest.findFirst.mockResolvedValue({
       id: "request-1", state: "DECIDED", revisionCount: 1, decisionCycle: 1, currentRevisionId: "revision-1",
-      currentRevision: { id: "revision-1", decisions: [{ id: "authority-1", option: { outcomeClass: "APPROVE" }, applications: [authorityReceipt] }] },
+      currentRevision: { id: "revision-1", decisions: [authority] },
     })
     const revocationSource = createHash("sha256").update(JSON.stringify({
       gateType: "BUILDING_INVESTMENT_REVOCATION",
       solutionSourceFingerprint: buildingInvestmentSourceFingerprint(solution),
       authorityDecisionId: "authority-1", authorityReceiptId: authorityReceipt.id,
+      authorityChecksum: investmentAuthorityChecksum(authority, authorityReceipt.id),
     })).digest("hex")
     prisma.decisionRecord.findFirst.mockResolvedValue({
       id: "revocation-1", workspaceId: solution.opportunity.workspaceId, requestId: "revocation-request", revisionId: "revocation-revision", optionId: "revocation-option", fingerprint: "revocation-fp",
       request: { id: "revocation-request", state: "DECIDED", currentRevisionId: "revocation-revision" },
-      revision: { fingerprint: "revocation-fp", sourceFingerprint: revocationSource, supersededAt: null, packetJson: JSON.stringify({ authorityDecisionId: "authority-1", authorityReceiptId: authorityReceipt.id, solution: { id: solution.id } }), options: [{ id: "revocation-option" }], request: { id: "revocation-request", workspaceId: solution.opportunity.workspaceId } },
+      revision: { fingerprint: "revocation-fp", sourceFingerprint: revocationSource, supersededAt: null, packetJson: JSON.stringify({ authorityDecisionId: "authority-1", authorityReceiptId: authorityReceipt.id, authorityChecksum: investmentAuthorityChecksum(authority, authorityReceipt.id), solution: { id: solution.id } }), options: [{ id: "revocation-option" }], request: { id: "revocation-request", workspaceId: solution.opportunity.workspaceId } },
       option: { outcomeClass: "APPROVE", continuationKey: "REVOKE_BUILDING_INVESTMENT" },
       applications: [{ status: "APPLIED", continuationKey: "REVOKE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: solution.id }],
     })

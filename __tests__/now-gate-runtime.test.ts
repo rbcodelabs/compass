@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const { prisma, resolve, inspectPolicy } = vi.hoisted(() => ({
-  prisma: { roadmapItem: { findFirst: vi.fn(), update: vi.fn() }, nowGateEvaluation: { create: vi.fn() } },
+  prisma: { roadmapItem: { findFirst: vi.fn(), update: vi.fn() }, nowGateEvaluation: { create: vi.fn() }, $transaction: vi.fn() },
   resolve: vi.fn(),
   inspectPolicy: vi.fn(),
 }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 vi.mock("@/lib/now-eligibility", () => ({ defaultNowEligibilityResolver: { resolve }, inspectConfiguredNowPolicy: inspectPolicy }))
-import { evaluateDirectNowIngress, finalizeCreatedNowIngress, initialHorizonForNowCreate } from "@/lib/now-gate-runtime"
+import { createRoadmapItemWithNowGate, evaluateDirectNowIngress, finalizeCreatedNowIngress, initialHorizonForNowCreate } from "@/lib/now-gate-runtime"
 
 const item = { id: "00000000-0000-4000-8000-000000000001", workspaceId: "00000000-0000-4000-8000-000000000002", title: "Candidate", description: null, horizon: "NEXT", status: "ACTIVE", solutionId: null, opportunityId: null, squadId: null, startDate: null, endDate: null, isPrivate: false, sortOrder: 0, updatedAt: new Date(), nowCommitmentProvenance: "LEGACY_UNGATED" }
 
 describe("NOW gate runtime modes", () => {
-  beforeEach(() => { vi.clearAllMocks(); delete process.env.NOW_DECISION_GATE_MODE; prisma.roadmapItem.findFirst.mockResolvedValue(item); prisma.nowGateEvaluation.create.mockResolvedValue({ id: "audit" }); inspectPolicy.mockReturnValue({ runtimePolicyReady: true, selectorMode: "enforce", effectiveMode: "shadow" }) })
+  beforeEach(() => { vi.clearAllMocks(); delete process.env.NOW_DECISION_GATE_MODE; prisma.$transaction.mockImplementation((fn) => fn(prisma)); prisma.roadmapItem.findFirst.mockResolvedValue(item); prisma.nowGateEvaluation.create.mockResolvedValue({ id: "audit" }); inspectPolicy.mockReturnValue({ runtimePolicyReady: true, selectorMode: "enforce", effectiveMode: "shadow" }) })
   it("returns before any gate or audit query while off", async () => {
     await expect(evaluateDirectNowIngress({ workspaceId: item.workspaceId, roadmapItemId: item.id, currentHorizon: "NEXT", requestedHorizon: "NOW", ingressKey: "ui.move", actor: { kind: "USER", id: "00000000-0000-4000-8000-000000000003" } })).resolves.toMatchObject({ mode: "off", outcome: null })
     expect(prisma.roadmapItem.findFirst).not.toHaveBeenCalled()
@@ -93,6 +93,22 @@ describe("NOW gate runtime modes", () => {
     resolve.mockRejectedValue({ code: "NO_APPLIED_INVESTMENT_DECISION" })
     await expect(evaluateDirectNowIngress({ workspaceId: item.workspaceId, roadmapItemId: item.id, currentHorizon: "NEXT", requestedHorizon: "NOW", ingressKey: "ui.move", actor: { kind: "USER", id: "00000000-0000-4000-8000-000000000003" } })).resolves.toMatchObject({ outcome: "WOULD_BLOCK", evidenceIncomplete: false })
     expect(prisma.nowGateEvaluation.create).toHaveBeenCalledWith({ data: expect.objectContaining({ mode: "SHADOW", outcome: "WOULD_BLOCK", blockerCode: "NO_APPLIED_INVESTMENT_DECISION", workspaceId: item.workspaceId }) })
+  })
+  it("creates, evaluates, records telemetry, and finalizes shadow NOW in one transaction", async () => {
+    process.env.NOW_DECISION_GATE_MODE = "shadow"
+    resolve.mockRejectedValue({ code: "NO_APPLIED_INVESTMENT_DECISION" })
+    const create = vi.fn().mockResolvedValue(item)
+    await createRoadmapItemWithNowGate({ workspaceId: item.workspaceId, requestedHorizon: "NOW", ingressKey: "ui.roadmap.add", actor: { kind: "USER", id: "00000000-0000-4000-8000-000000000003" }, create })
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+    expect(create).toHaveBeenCalledWith(prisma, "NEXT")
+    expect(prisma.nowGateEvaluation.create).toHaveBeenCalledTimes(1)
+    expect(prisma.roadmapItem.update).toHaveBeenCalledTimes(1)
+  })
+  it("rolls back the shadow transition contract when telemetry cannot be committed", async () => {
+    process.env.NOW_DECISION_GATE_MODE = "shadow"
+    prisma.nowGateEvaluation.create.mockRejectedValue(new Error("audit unavailable"))
+    await expect(createRoadmapItemWithNowGate({ workspaceId: item.workspaceId, requestedHorizon: "NOW", ingressKey: "ui.roadmap.add", actor: { kind: "USER", id: "00000000-0000-4000-8000-000000000003" }, create: vi.fn().mockResolvedValue(item) })).rejects.toThrow("audit unavailable")
+    expect(prisma.roadmapItem.update).not.toHaveBeenCalled()
   })
   it.each([
     ["workspace", { workspaceId: "not-a-uuid" }, "WORKSPACE_INVALID"],

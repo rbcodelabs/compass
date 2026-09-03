@@ -34,7 +34,7 @@ const itemSelect = {
 export async function evaluateDirectNowIngress(input: {
   workspaceId: string; roadmapItemId: string; currentHorizon: string | null | undefined; requestedHorizon: string
   ingressKey: string; actor: NowIngressActor; correlationId?: string
-}) {
+}, database?: ReturnType<typeof getPrisma>, options: { telemetryFailure?: "report" | "throw" } = {}) {
   const deploymentMode = deploymentNowGateMode()
   if (input.requestedHorizon !== "NOW" || input.currentHorizon === "NOW" || deploymentMode === "off") return { mode: deploymentMode, outcome: null, evidenceIncomplete: false } as const
   if (!UUID.test(input.workspaceId)) throw new NowCommitmentError("WORKSPACE_INVALID", "NOW ingress workspace is invalid.")
@@ -48,7 +48,7 @@ export async function evaluateDirectNowIngress(input: {
   if (deploymentMode === "enforce" && !configured.runtimePolicyReady) throw new NowCommitmentError("POLICY_CONFIGURATION_REQUIRED", "A verified signed NOW policy is required before enforcement.")
   const mode = configured.runtimePolicyReady ? configured.effectiveMode : deploymentMode
   if (mode === "enforce") throw new NowCommitmentError("DECISION_REQUIRED", "NOW admission requires a recorded commitment decision. Prepare and apply a NOW commitment review.")
-  const prisma = getPrisma()
+  const prisma = database ?? getPrisma()
   const item = await prisma.roadmapItem.findFirst({ where: { id: input.roadmapItemId, workspaceId: input.workspaceId }, select: itemSelect })
   if (!item) throw new NowCommitmentError("ITEM_NOT_FOUND", "Roadmap item not found.")
   let outcome: "WOULD_ALLOW" | "WOULD_BLOCK" = "WOULD_ALLOW", blockerCode: string | null = null
@@ -72,10 +72,41 @@ export async function evaluateDirectNowIngress(input: {
       actorKind: input.actor.kind, actorId: input.actor.id, correlationId, createdAt: new Date(),
     } })
     return { mode, outcome, blockerCode, evidenceIncomplete: false }
-  } catch {
+  } catch (error) {
+    if (options.telemetryFailure === "throw") throw error
     console.error("[now-gate-shadow] SHADOW_TELEMETRY_WRITE_FAILED", { correlationId })
     return { mode, outcome, blockerCode, evidenceIncomplete: true, operationalError: "SHADOW_TELEMETRY_WRITE_FAILED" as const }
   }
+}
+
+export async function createRoadmapItemWithNowGate<T extends { id: string; horizon: string }>(input: {
+  workspaceId: string; requestedHorizon: string; ingressKey: string; actor: NowIngressActor
+  create: (database: ReturnType<typeof getPrisma>, horizon: string) => Promise<T>
+}): Promise<T> {
+  const initialHorizon = initialHorizonForNowCreate(input.requestedHorizon, input.workspaceId)
+  const prisma = getPrisma()
+  if (initialHorizon === input.requestedHorizon) return input.create(prisma, initialHorizon)
+  return prisma.$transaction(async (tx) => {
+    const database = tx as unknown as ReturnType<typeof getPrisma>
+    const item = await input.create(database, initialHorizon)
+    await evaluateDirectNowIngress({ workspaceId: input.workspaceId, roadmapItemId: item.id, currentHorizon: item.horizon, requestedHorizon: input.requestedHorizon, ingressKey: input.ingressKey, actor: input.actor }, database, { telemetryFailure: "throw" })
+    await database.roadmapItem.update({ where: { id: item.id }, data: { horizon: input.requestedHorizon, updatedAt: new Date() } })
+    return { ...item, horizon: input.requestedHorizon }
+  })
+}
+
+export async function transitionRoadmapItemWithNowGate<T>(input: {
+  workspaceId: string; roadmapItemId: string; currentHorizon: string | null | undefined; requestedHorizon: string
+  ingressKey: string; actor: NowIngressActor; mutate: (database: ReturnType<typeof getPrisma>) => Promise<T>
+}): Promise<T> {
+  if (input.requestedHorizon !== "NOW" || input.currentHorizon === "NOW" || deploymentNowGateMode() === "off") return input.mutate(getPrisma())
+  return getPrisma().$transaction(async (tx) => {
+    const database = tx as unknown as ReturnType<typeof getPrisma>
+    const current = await database.roadmapItem.findFirst({ where: { id: input.roadmapItemId, workspaceId: input.workspaceId }, select: { horizon: true } })
+    if (!current || current.horizon !== input.currentHorizon) throw new NowCommitmentError("ITEM_CONFLICT", "Roadmap item changed before NOW admission.")
+    await evaluateDirectNowIngress({ ...input, currentHorizon: current.horizon }, database, { telemetryFailure: "throw" })
+    return input.mutate(database)
+  })
 }
 
 export async function finalizeCreatedNowIngress(input: Omit<Parameters<typeof evaluateDirectNowIngress>[0], "currentHorizon"> & { currentHorizon?: string | null }) {

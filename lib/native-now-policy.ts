@@ -60,18 +60,30 @@ export async function generateNativeNowPolicy(workspaceId: string, database: Dat
     where: { workspaceId, revision: { request: { workspaceId, gateType: "BUILDING_INVESTMENT_REVOCATION", subjectType: "SOLUTION" }, supersededAt: null }, option: { outcomeClass: "APPROVE", continuationKey: "REVOKE_BUILDING_INVESTMENT" }, applications: { some: { status: "APPLIED", continuationKey: "REVOKE_BUILDING_INVESTMENT", targetType: "SOLUTION" } } },
     include: { request: true, revision: { include: { request: true, options: { select: { id: true } } } }, option: true, applications: true },
   }) as unknown as NativeDecision[]
-  const authoritySubjectById = new Map(decisions.map((decision) => [decision.id, decision.revision.request.subjectId]))
+  const revocationPackets = revocations.map((revocation) => JSON.parse((revocation.revision as typeof revocation.revision & { packetJson?: string }).packetJson ?? "{}") as { authorityDecisionId?: string; authorityReceiptId?: string; authorityChecksum?: string; solution?: { id?: string } })
+  const historicalAuthorityIds = [...new Set(revocationPackets.map((packet) => packet.authorityDecisionId).filter((id): id is string => Boolean(id)))]
+  const historicalAuthorities = historicalAuthorityIds.length ? (await database.decisionRecord.findMany({
+    where: { workspaceId, id: { in: historicalAuthorityIds } },
+    include: { request: true, revision: { include: { request: true, options: { select: { id: true } } } }, option: true, applications: true },
+  }) ?? []) as unknown as NativeDecision[] : []
+  const authorityById = new Map([...decisions, ...historicalAuthorities].map((decision) => [decision.id, decision]))
   const revokedAuthorityIds = new Set<string>()
-  for (const revocation of revocations) {
+  for (const [index, revocation] of revocations.entries()) {
     if (revocation.revision.request.gateType !== "BUILDING_INVESTMENT_REVOCATION") continue
-    const packet = JSON.parse((revocation.revision as typeof revocation.revision & { packetJson?: string }).packetJson ?? "{}") as { authorityDecisionId?: string; solution?: { id?: string } }
+    const packet = revocationPackets[index]
     const receipt = revocation.applications.find((candidate) => candidate.status === "APPLIED" && candidate.continuationKey === "REVOKE_BUILDING_INVESTMENT" && candidate.targetType === "SOLUTION" && candidate.targetId === revocation.revision.request.subjectId)
+    const authority = packet.authorityDecisionId ? authorityById.get(packet.authorityDecisionId) : undefined
+    const authorityReceipt = authority?.applications.find((candidate) => candidate.id === packet.authorityReceiptId && candidate.status === "APPLIED" && candidate.continuationKey === "AUTHORIZE_BUILDING_INVESTMENT" && candidate.targetType === "SOLUTION" && candidate.targetId === revocation.revision.request.subjectId)
     if (revocation.workspaceId !== workspaceId || revocation.requestId !== revocation.revision.request.id || revocation.request.id !== revocation.requestId
       || revocation.request.state !== "DECIDED" || revocation.request.currentRevisionId !== revocation.revisionId || revocation.fingerprint !== revocation.revision.fingerprint
       || !revocation.revision.options.some((option) => option.id === revocation.optionId) || revocation.option.outcomeClass !== "APPROVE"
-      || revocation.option.continuationKey !== "REVOKE_BUILDING_INVESTMENT" || !receipt || !packet.authorityDecisionId
+      || revocation.option.continuationKey !== "REVOKE_BUILDING_INVESTMENT" || !receipt || !packet.authorityDecisionId || !packet.authorityReceiptId || !packet.authorityChecksum
       || packet.solution?.id !== revocation.revision.request.subjectId
-      || authoritySubjectById.get(packet.authorityDecisionId) !== revocation.revision.request.subjectId) {
+      || !authority || authority.workspaceId !== workspaceId || authority.requestId !== authority.revision.request.id || authority.request.id !== authority.requestId
+      || authority.revision.request.workspaceId !== workspaceId || authority.revision.request.gateType !== "BUILDING_INVESTMENT" || authority.revision.request.subjectType !== "SOLUTION"
+      || authority.revision.request.subjectId !== revocation.revision.request.subjectId || authority.fingerprint !== authority.revision.fingerprint
+      || !authority.revision.options.some((option) => option.id === authority.optionId) || authority.option.outcomeClass !== "APPROVE" || authority.option.continuationKey !== "AUTHORIZE_BUILDING_INVESTMENT"
+      || !authorityReceipt || packet.authorityChecksum !== investmentAuthorityChecksum(authority, authorityReceipt.id)) {
       throw new NativeNowPolicyError("DECISION_INTEGRITY_FAILURE", "A Building investment revocation failed integrity verification.")
     }
     revokedAuthorityIds.add(packet.authorityDecisionId)
