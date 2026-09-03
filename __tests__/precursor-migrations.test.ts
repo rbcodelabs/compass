@@ -82,9 +82,12 @@ describe("decision-gate expand precursor migrations", () => {
 
   it("uses the migration-health canonical native provenance literal at runtime", () => {
     const commitment = readFileSync(path.join(root, "lib/now-commitment.ts"), "utf8")
+    const card = readFileSync(path.join(root, "components/roadmap/now-commitment-card.tsx"), "utf8")
     expect(route).toContain("'LEGACY_UNGATED','NATIVE_GATED'")
     expect(commitment).toContain('nowCommitmentProvenance: "NATIVE_GATED"')
     expect(commitment).not.toContain('"NATIVE_DECISION"')
+    expect(card).toContain('provenance === "NATIVE_GATED"')
+    expect(card).not.toContain('"NATIVE_DECISION"')
   })
 
   it("atomically limits activation to one capacity plan per workspace", () => {

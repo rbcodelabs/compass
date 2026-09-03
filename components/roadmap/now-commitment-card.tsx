@@ -22,7 +22,7 @@ export function NowCommitmentCard({ itemId, workspaceId, orgSlug, workspaceSlug,
   if (horizon === "NOW") {
     return (
       <div className="space-y-1 text-sm">
-        <p>This item is in NOW with <strong>{provenance === "NATIVE_DECISION" ? "native decision provenance" : "legacy ungated provenance"}</strong>.</p>
+        <p>This item is in NOW with <strong>{provenance === "NATIVE_GATED" ? "native decision provenance" : "legacy ungated provenance"}</strong>.</p>
         {decisionRecordId && reviewHref && <Link className="block font-medium text-primary underline" href={reviewHref}>Decision record: {decisionRecordId}</Link>}
         {application && <p>Application receipt: <span className="font-mono">{application.receiptKey}</span> ({application.status})</p>}
       </div>
