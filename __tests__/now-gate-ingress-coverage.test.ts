@@ -12,6 +12,7 @@ const sources = [
 const ingressKeys = [
   "ui.roadmap.add",
   "ui.roadmap.move",
+  "ui.roadmap.reschedule",
   "ui.solution.promote",
   "ui.feedback.promote",
   "api.entity.update",
@@ -22,7 +23,7 @@ const ingressKeys = [
 ] as const
 
 describe("NOW gate ingress coverage", () => {
-  it("keeps all nine state-changing NOW ingress paths explicitly instrumented once", () => {
+  it("keeps all ten state-changing NOW ingress paths explicitly instrumented once", () => {
     const combined = sources.map(({ text }) => text).join("\n")
     for (const ingressKey of ingressKeys) {
       expect(combined.match(new RegExp(`ingressKey: ["']${ingressKey.replaceAll(".", "\\.")}["']`, "g")) ?? [], ingressKey)

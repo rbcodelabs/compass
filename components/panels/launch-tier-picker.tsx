@@ -23,7 +23,6 @@ const TIERS: { tier: LaunchTier; blurb: string }[] = [
 export function LaunchTierPicker({
   itemId,
   workspaceId,
-  revalidatePathStr,
   onDone,
 }: {
   itemId: string;
@@ -40,7 +39,7 @@ export function LaunchTierPicker({
     setChosen(tier);
     startTransition(async () => {
       try {
-        await setLaunchTier(itemId, tier, workspaceId, revalidatePathStr);
+        await setLaunchTier(itemId, tier, workspaceId);
         // The panel's own refresh (onDone) only updates the panel's local
         // data — it never reaches the roadmap board, which lives outside the
         // panel and holds its own optimistic column state. Without this, the

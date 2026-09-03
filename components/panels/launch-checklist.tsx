@@ -48,7 +48,6 @@ export function LaunchChecklist({
   tier,
   items,
   workspaceId,
-  revalidatePathStr,
 }: {
   horizon: string;
   tier: string;
@@ -74,7 +73,7 @@ export function LaunchChecklist({
     setStatuses((s) => ({ ...s, [itemId]: next }));
     startTransition(async () => {
       try {
-        await updateLaunchChecklistItem(itemId, next, workspaceId, revalidatePathStr);
+        await updateLaunchChecklistItem(itemId, next, workspaceId);
       } catch {
         // revert on failure
         setStatuses((s) => ({ ...s, [itemId]: prev }));

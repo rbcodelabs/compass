@@ -67,6 +67,7 @@ function formatDateRange(startIso: string | null, endIso: string | null): string
 }
 
 type Props = {
+  workspaceId: string;
   item: RoadmapCardData;
   revalidatePathStr: string;
   onArchive: (itemId: string) => void;
@@ -75,7 +76,7 @@ type Props = {
   workspaceSlug: string;
 };
 
-export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgSlug, workspaceSlug }: Props) {
+export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, onUpdate, orgSlug, workspaceSlug }: Props) {
   const [isArchiving, startArchiveTransition] = useTransition();
   const [editOpen, setEditOpen] = useState(false);
   const { openPanel } = usePanelContext();
@@ -104,7 +105,7 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
   function handleArchive() {
     onArchive(item.id);
     startArchiveTransition(async () => {
-      await archiveItem(item.id, revalidatePathStr);
+      await archiveItem(item.id, workspaceId);
     });
   }
 
@@ -305,6 +306,7 @@ export function RoadmapCard({ item, revalidatePathStr, onArchive, onUpdate, orgS
 
       <EditItemDialog
         item={item}
+        workspaceId={workspaceId}
         open={editOpen}
         onOpenChange={setEditOpen}
         revalidatePathStr={revalidatePathStr}

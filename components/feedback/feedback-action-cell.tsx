@@ -63,7 +63,6 @@ export function FeedbackActionCell({
   row,
   opportunities,
   workspaceId,
-  roadmapPath,
 }: FeedbackActionCellProps) {
   const [isPromoting, startPromote] = useTransition();
   // Server truth for a freshly promoted row does not arrive until a refresh
@@ -129,7 +128,6 @@ export function FeedbackActionCell({
                         row.id,
                         workspaceId,
                         horizon,
-                        roadmapPath,
                       );
                       setPromoted({ title: item.title, horizon });
                     } catch (cause) {
