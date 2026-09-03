@@ -37,6 +37,7 @@ import {
   SOLUTION_STATUS_ORDER,
   solutionStatusBadge,
 } from "@/lib/solution-status";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 type SolutionData = {
   id: string;
@@ -117,6 +118,7 @@ export function SolutionPanel({
         edit={edit}
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
       />
+      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="SOLUTION" subjectId={data.id} subjectTitle={data.title} />
 
       <EditableText
         value={data.description}

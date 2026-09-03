@@ -85,6 +85,13 @@ export async function recordDecision(input: {
       }
       const option = revision.options.find((candidate) => candidate.id === input.optionId)
       if (!option) throw new DecisionError("OPTION_MISMATCH", "The selected option is not part of this revision.")
+      if (
+        revision.request.gateType === "TRACKED_DECISION" &&
+        (option.outcomeClass === "REJECT" || option.outcomeClass === "REQUEST_CHANGES") &&
+        !input.rationale?.trim()
+      ) {
+        throw new DecisionError("RATIONALE_REQUIRED", "Add a rationale before rejecting or requesting changes.")
+      }
 
       const [workspaceMember, orgMember] = await Promise.all([
         tx.workspaceMember.findFirst({ where: { workspaceId: revision.request.workspaceId, userId: actorUserId }, select: { role: true } }),

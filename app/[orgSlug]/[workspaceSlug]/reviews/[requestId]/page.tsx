@@ -6,6 +6,7 @@ import { ensureNowCommitmentRevisionFresh } from "@/lib/now-commitment"
 import { isOrgAdminRole } from "@/lib/roles"
 import { ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh } from "@/lib/building-investment"
 import { ensureNativePolicyActivationRevisionFresh } from "@/lib/native-policy-activation"
+import { DecisionActions } from "@/components/decisions/decision-actions"
 
 export default async function ReviewRequestPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string; requestId: string }> }) {
   const { orgSlug, workspaceSlug, requestId } = await params
@@ -22,7 +23,8 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
     },
     include: {
       currentRevision: { include: { options: { orderBy: { sortOrder: "asc" } }, decisions: { include: { option: true } } } },
-      workspace: { include: { members: { where: { userId: session.user.id }, select: { id: true } }, organization: { include: { members: { where: { userId: session.user.id }, select: { role: true } } } } } },
+      revisions: { orderBy: { revisionNumber: "desc" }, include: { decisions: { include: { option: true } } } },
+      workspace: { include: { members: { where: { userId: session.user.id }, select: { id: true, role: true } }, organization: { include: { members: { where: { userId: session.user.id }, select: { role: true } } } } } },
     },
   })
   if (!request?.currentRevision || (request.workspace.members.length === 0 && !isOrgAdminRole(request.workspace.organization.members[0]?.role))) notFound()
@@ -52,23 +54,32 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
     routingFingerprint?: string
     inspection?: { capacityPlanId?: string; capacityPlanFingerprint?: string; verifiedDecisionCount?: number }
     authorityDecisionId?: string
+    question?: string
+    context?: string
+    entity?: { type?: string; id?: string; title?: string }
   }
   const decided = revision.decisions[0]
   const isRelease = request.gateType === "RELEASE_AUTHORIZATION"
   const isInvestment = request.gateType === "BUILDING_INVESTMENT" || request.gateType === "BUILDING_INVESTMENT_REVOCATION"
   const isRevocation = request.gateType === "BUILDING_INVESTMENT_REVOCATION"
   const isPolicyActivation = request.gateType === "NOW_POLICY_ACTIVATION"
+  const isTracked = request.gateType === "TRACKED_DECISION"
+  const canDecide = request.workspace.members[0]?.role === "ADMIN" || isOrgAdminRole(request.workspace.organization.members[0]?.role)
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
       <div>
-        <p className="text-sm text-muted-foreground">{isRelease ? "Release authorization review" : isRevocation ? "Building investment revocation review" : isInvestment ? "Building investment review" : isPolicyActivation ? "Native policy activation review" : "NOW commitment review"}</p>
+        <p className="text-sm text-muted-foreground">{isTracked ? "Decision" : isRelease ? "Legacy system decision · Release authorization" : isRevocation ? "Legacy system decision · Building investment revocation" : isInvestment ? "Legacy system decision · Building investment" : isPolicyActivation ? "Legacy system decision · Native policy activation" : "Legacy system decision · NOW commitment"}</p>
         <h1 className="text-2xl font-semibold">{revision.title}</h1>
         <p className="mt-2 text-muted-foreground">{revision.summary}</p>
       </div>
       <section className="rounded-lg border p-4 text-sm">
         <dl className="grid grid-cols-[10rem_1fr] gap-2">
-          {isRelease ? <>
+          {isTracked ? <>
+            <dt>Linked to</dt><dd>{packet.entity?.title ?? request.subjectType}</dd>
+            <dt>Type</dt><dd>{packet.entity?.type ?? request.subjectType}</dd>
+            <dt>Context</dt><dd className="whitespace-pre-wrap">{packet.context ?? revision.summary}</dd>
+          </> : isRelease ? <>
             <dt>Repository</dt><dd>{packet.repositoryOwner}/{packet.repositoryName}</dd>
             <dt>Pull request</dt><dd>#{packet.pullRequestNumber}</dd>
             <dt>Reviewed commit</dt><dd className="break-all font-mono">{packet.headSha}</dd>
@@ -94,7 +105,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
             <dt>Owning squad</dt><dd>{packet.roadmapItem?.squadId ?? "Unassigned"}</dd>
             <dt>Policy</dt><dd>{packet.policyVersion}</dd>
           </>}
-          <dt>Fingerprint</dt><dd className="break-all font-mono">{revision.fingerprint}</dd>
+          {!isTracked && <><dt>Fingerprint</dt><dd className="break-all font-mono">{revision.fingerprint}</dd></>}
         </dl>
       </section>
       {freshness.stale ? (
@@ -106,9 +117,15 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
           {isPolicyActivation && <a className="font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/roadmap`}>Return to Roadmap</a>}
         </section>
       ) : decided ? (
-        <section className="rounded-lg border bg-status-success-surface p-4 text-sm text-status-success">
-          Decision recorded: <strong>{decided.option.label}</strong> by {decided.actorRole} at {decided.decidedAt.toISOString()}.
+        <section className="space-y-2 rounded-lg border bg-status-success-surface p-4 text-sm text-status-success">
+          <p>Decision recorded: <strong>{decided.option.label}</strong> by {decided.actorRole} at {decided.decidedAt.toLocaleString()}.</p>
+          {decided.rationale && <p className="whitespace-pre-wrap text-foreground">{decided.rationale}</p>}
+          {isTracked && decided.option.outcomeClass === "REQUEST_CHANGES" && <a className="inline-block font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/decisions/new?reviseRequestId=${request.id}`}>Create revised request</a>}
         </section>
+      ) : isTracked && canDecide ? (
+        <DecisionActions workspaceId={request.workspaceId} revisionId={revision.id} fingerprint={revision.fingerprint} options={revision.options.map((option) => ({ id: option.id, label: option.label, outcomeClass: option.outcomeClass }))} />
+      ) : isTracked ? (
+        <section className="rounded-lg border p-4 text-sm text-muted-foreground">Waiting for a workspace or organization admin to decide.</section>
       ) : (
         <div className="flex flex-wrap gap-3">
           {revision.options.map((option) => (
@@ -118,6 +135,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
           ))}
         </div>
       )}
+      {isTracked && request.revisions.length > 1 && <section className="space-y-3"><h2 className="text-lg font-semibold">History</h2>{request.revisions.map((item) => <div key={item.id} className="rounded-lg border p-4 text-sm"><div className="flex justify-between gap-3"><strong>Revision {item.revisionNumber}</strong><span className="text-muted-foreground">{item.createdAt.toLocaleString()}</span></div><p className="mt-1">{item.title}</p>{item.decisions[0] && <p className="mt-2 text-muted-foreground">{item.decisions[0].option.label}{item.decisions[0].rationale ? ` — ${item.decisions[0].rationale}` : ""}</p>}</div>)}</section>}
     </main>
   )
 }

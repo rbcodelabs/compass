@@ -59,6 +59,7 @@ interface DocEditorProps {
   versions: DocVersionListItem[];
   comments: DocCommentItem[];
   revalidatePathStr: string;
+  decisionAction?: React.ReactNode;
 }
 
 type SaveStatus = "idle" | "saving" | "saved";
@@ -96,7 +97,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, decisionAction }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -546,6 +547,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             </div>
           )}
         </div>
+        {decisionAction && <div className="ml-auto">{decisionAction}</div>}
       </div>
 
       {/* Hidden file input */}

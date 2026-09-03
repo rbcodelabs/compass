@@ -10,6 +10,7 @@ import { queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator } from "@/
 import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh, prepareBuildingInvestmentReview } from "@/lib/building-investment"
 import { applyNativePolicyActivationDecision, ensureNativePolicyActivationRevisionFresh } from "@/lib/native-policy-activation"
 import { requireEffectiveNowEnforcement } from "@/lib/now-gate-runtime"
+import { createTrackedDecisionRequest, type TrackedSubjectType } from "@/lib/tracked-decisions"
 
 async function requireWorkspaceMember(workspaceId: string) {
   const session = await auth()
@@ -44,6 +45,20 @@ export async function requestBuildingInvestmentAction(_workspaceId: string, solu
   if (!solution) throw new Error("Solution not found")
   const userId = await requireWorkspaceMember(solution.opportunity.workspaceId)
   const revision = await prepareBuildingInvestmentReview(solutionId, { requestedById: userId })
+  revalidatePath("/", "layout")
+  return { requestId: revision.requestId, revisionId: revision.id }
+}
+
+export async function createTrackedDecisionAction(input: {
+  workspaceId: string
+  subjectType: TrackedSubjectType
+  subjectId: string
+  question: string
+  context: string
+  revise?: { expectedDecisionId: string; reason: string }
+}) {
+  const userId = await requireWorkspaceMember(input.workspaceId)
+  const revision = await createTrackedDecisionRequest({ ...input, requestedById: userId })
   revalidatePath("/", "layout")
   return { requestId: revision.requestId, revisionId: revision.id }
 }
