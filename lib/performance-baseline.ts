@@ -489,15 +489,35 @@ export function parseVercelRetainedLogs(lines: string[]): {
     grouped.set(id, [...(grouped.get(id) ?? []), item]);
   }
   const unique = [...grouped.entries()].map(([id, candidates]) => {
-    const outer = candidates.map(({ raw }) => {
+    const authoritative = candidates.filter(({ raw }) => raw.source === "serverless");
+    const middleware = candidates.filter(({ raw }) => raw.source === "serverless-middleware");
+    if (candidates.some(({ raw }) => raw.source !== "serverless" && raw.source !== "serverless-middleware")) {
+      throw new Error(`Platform request ${id} has an unsupported source`);
+    }
+    if (authoritative.length === 0) {
+      throw new Error(`Platform request ${id} has no authoritative serverless envelope`);
+    }
+    const outer = authoritative.map(({ raw }) => {
       return Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "logs"));
     });
     if (new Set(outer.map(canonical)).size !== 1) {
       throw new Error(`Platform request ${id} has conflicting retained envelopes`);
     }
     const nested = new Map<string, unknown>();
-    for (const { raw } of candidates) {
+    for (const { raw } of authoritative) {
       for (const log of Array.isArray(raw.logs) ? raw.logs : []) nested.set(canonical(log), log);
+    }
+    const authoritativeCompanionOuter = canonical(Object.fromEntries(
+      Object.entries(outer[0]).filter(([key]) => key !== "source"),
+    ));
+    for (const { raw } of middleware) {
+      const companionOuter = canonical(Object.fromEntries(
+        Object.entries(raw).filter(([key]) => key !== "logs" && key !== "source"),
+      ));
+      const contained = (Array.isArray(raw.logs) ? raw.logs : []).every((log) => nested.has(canonical(log)));
+      if (companionOuter !== authoritativeCompanionOuter || !contained) {
+        throw new Error(`Platform request ${id} has an inconsistent middleware companion`);
+      }
     }
     return JSON.stringify({ ...outer[0], logs: [...nested.values()] });
   });

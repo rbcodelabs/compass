@@ -564,6 +564,24 @@ describe("query artifacts", () => {
     ])).toThrow(/conflicting retained envelopes/);
   });
 
+  it("accepts only contained middleware companion evidence for an authoritative serverless invocation", () => {
+    const query = (id: string) => ({ timestamp: `2026-09-03T01:54:19.95${id === "a" ? "0" : "1"}Z`, level: "info", message: `COMPASS_PERF_QUERY {"version":1,"timestamp":"2026-09-03T01:54:19.950Z","requestId":"perf_function","operation":"SELECT","durationMs":4,"fingerprint":"${id.repeat(64)}","success":true,"rowCount":1}` });
+    const a = query("a"), b = query("b");
+    const outer = { id: "platform_1", timestamp: 1788400459949, deploymentId: "dpl_One", projectId: "prj_One", requestMethod: "GET", requestPath: "/roadmap", responseStatusCode: 200, environment: "preview", domain: "one.vercel.app" };
+    const serverless = JSON.stringify({ ...outer, source: "serverless", logs: [a, b] });
+    for (const logs of [[a, b], [b]]) {
+      const parsed = parseVercelRetainedLogs([serverless, JSON.stringify({ ...outer, source: "serverless-middleware", logs })]);
+      expect(parsed.requests).toHaveLength(1);
+      expect(parsed.requests[0].source).toBe("serverless");
+      expect(parsed.queryEnvelopes).toHaveLength(2);
+    }
+    expect(() => parseVercelRetainedLogs([JSON.stringify({ ...outer, source: "serverless-middleware", logs: [a] })])).toThrow(/authoritative serverless/);
+    expect(() => parseVercelRetainedLogs([serverless, JSON.stringify({ ...outer, source: "serverless-middleware", requestPath: "/tasks", logs: [a] })])).toThrow(/middleware companion/);
+    const extra = query("c");
+    expect(() => parseVercelRetainedLogs([serverless, JSON.stringify({ ...outer, source: "serverless-middleware", logs: [a, extra] })])).toThrow(/middleware companion/);
+    expect(() => parseVercelRetainedLogs([serverless, JSON.stringify({ ...outer, source: "edge", logs: [a] })])).toThrow(/unsupported source/);
+  });
+
   it("correlates a browser URL with query parameters to an exact Vercel pathname", () => {
     const browser = {
       requestId: "perf_sample_1",
