@@ -575,11 +575,16 @@ describe("query artifacts", () => {
       expect(parsed.requests[0].source).toBe("serverless");
       expect(parsed.queryEnvelopes).toHaveLength(2);
     }
-    expect(() => parseVercelRetainedLogs([JSON.stringify({ ...outer, source: "serverless-middleware", logs: [a] })])).toThrow(/authoritative serverless/);
+    const middlewareOnly = parseVercelRetainedLogs([JSON.stringify({ ...outer, source: "serverless-middleware", logs: [a] })]);
+    expect(middlewareOnly.requests).toEqual([]);
+    expect(middlewareOnly.queryEnvelopes).toEqual([]);
+    expect(() => correlateVercelRequests([
+      { requestId: "perf_edge", method: "GET", path: "/roadmap", startedAt: "2026-09-03T01:54:19.949Z" },
+    ], middlewareOnly.requests)).toThrow(/No Vercel request/);
     expect(() => parseVercelRetainedLogs([serverless, JSON.stringify({ ...outer, source: "serverless-middleware", requestPath: "/tasks", logs: [a] })])).toThrow(/middleware companion/);
     const extra = query("c");
     expect(() => parseVercelRetainedLogs([serverless, JSON.stringify({ ...outer, source: "serverless-middleware", logs: [a, extra] })])).toThrow(/middleware companion/);
-    expect(() => parseVercelRetainedLogs([serverless, JSON.stringify({ ...outer, source: "edge", logs: [a] })])).toThrow(/unsupported source/);
+    expect(parseVercelRetainedLogs([serverless, JSON.stringify({ ...outer, source: "edge", logs: [a] })]).requests).toHaveLength(1);
   });
 
   it("correlates a browser URL with query parameters to an exact Vercel pathname", () => {

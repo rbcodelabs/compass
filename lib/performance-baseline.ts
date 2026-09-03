@@ -488,15 +488,10 @@ export function parseVercelRetainedLogs(lines: string[]): {
     const id = String(item.raw.id);
     grouped.set(id, [...(grouped.get(id) ?? []), item]);
   }
-  const unique = [...grouped.entries()].map(([id, candidates]) => {
+  const unique = [...grouped.entries()].flatMap(([id, candidates]) => {
     const authoritative = candidates.filter(({ raw }) => raw.source === "serverless");
     const middleware = candidates.filter(({ raw }) => raw.source === "serverless-middleware");
-    if (candidates.some(({ raw }) => raw.source !== "serverless" && raw.source !== "serverless-middleware")) {
-      throw new Error(`Platform request ${id} has an unsupported source`);
-    }
-    if (authoritative.length === 0) {
-      throw new Error(`Platform request ${id} has no authoritative serverless envelope`);
-    }
+    if (authoritative.length === 0) return [];
     const outer = authoritative.map(({ raw }) => {
       return Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "logs"));
     });
@@ -519,7 +514,7 @@ export function parseVercelRetainedLogs(lines: string[]): {
         throw new Error(`Platform request ${id} has an inconsistent middleware companion`);
       }
     }
-    return JSON.stringify({ ...outer[0], logs: [...nested.values()] });
+    return [JSON.stringify({ ...outer[0], logs: [...nested.values()] })];
   });
   const requests = unique.map(parseVercelRequestLog).filter((request): request is VercelRequest => request !== null);
   if (requests.length !== unique.length) throw new Error("Observed Vercel CLI envelope is invalid");

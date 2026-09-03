@@ -62,8 +62,10 @@ canonical-set-unioned before query parsing; an exactly repeated timestamp,
 level, and message is treated as export duplication rather than a second query.
 Only the `serverless` phase is authoritative. A same-ID
 `serverless-middleware` companion is ignored only when all other outer fields
-match and every middleware log is already contained in the serverless union;
-middleware-only, divergent, additive, or other-source evidence fails closed.
+match and every middleware log is already contained in the serverless union.
+Middleware-only and other-source IDs are excluded as non-authoritative window
+noise (and therefore cannot satisfy a measured request); divergent or additive
+same-ID middleware companions fail closed.
 Navigation aggregates are authoritative per route and, for warm samples, per
 `networkOutcome`; overall aggregates are convenience summaries only.
 
