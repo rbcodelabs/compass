@@ -334,7 +334,7 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
     client.query<{ table_name: string }>(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = ANY($2::text[])`, [schema, [...DECISION_GATE_TABLES]]),
     client.query<{ table_name: string; column_name: string; data_type: string; character_maximum_length: number | null; datetime_precision: number | null; is_nullable: string; column_default: string | null }>(`SELECT table_name, column_name, data_type, character_maximum_length, datetime_precision, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND (table_name = ANY($2::text[]) OR (table_name = 'roadmap_items' AND column_name = ANY($3::text[]))) ORDER BY table_name, ordinal_position`, [schema, [...DECISION_GATE_TABLES], [...DECISION_GATE_COLUMNS]]),
     client.query<{ name: string; valid: boolean; unique: boolean; table_name: string; definition: string; key_columns: string[] }>(`SELECT c.relname AS name, i.indisvalid AS valid, i.indisunique AS unique, t.relname table_name, pg_get_indexdef(i.indexrelid) definition,
-      COALESCE(ARRAY(SELECT a.attname FROM unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinal) JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=key.attnum WHERE key.ordinal <= i.indnkeyatts ORDER BY key.ordinal), ARRAY[]::name[]) key_columns
+      COALESCE(ARRAY(SELECT a.attname::text FROM unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinal) JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=key.attnum WHERE key.ordinal <= i.indnkeyatts ORDER BY key.ordinal), ARRAY[]::text[]) key_columns
       FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[])`, [schema, [...DECISION_GATE_INDEXES]]),
     client.query<{ constraint_name: string; table_name: string; constraint_type: string; valid: boolean; definition: string; key_columns: string[] }>(`SELECT c.conname constraint_name, t.relname table_name, c.contype constraint_type, c.convalidated valid, pg_get_constraintdef(c.oid) definition,
         CASE WHEN c.contype IN ('p','u') THEN COALESCE(ARRAY(
@@ -399,7 +399,8 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
     const structureMatches = Boolean(row && expected && row.table_name === expected.table && row.unique === expected.unique
       && JSON.stringify(row.key_columns ?? []) === JSON.stringify(expected.keyColumns)
       && normalizeIndexKeys(row.definition) === expected.definition)
-    return { name, present: Boolean(row), valid: row?.valid === true, table: row?.table_name ?? null, definition: row?.definition ?? null, structureMatches, state: row?.valid === true && structureMatches ? "ACTIVE" : row ? "FAILED_OR_MISMATCHED" : "MISSING" }
+    const state = row?.valid === true && structureMatches ? "ACTIVE" : row ? "FAILED_OR_MISMATCHED" : "MISSING"
+    return { name, present: Boolean(row), valid: row?.valid === true, table: row?.table_name ?? null, definition: row?.definition ?? null, structureMatches, state, status: structureMatches ? "MATCHED" : row ? "DRIFTED" : "MISSING", expectedKeyColumns: expected?.keyColumns ?? [], actualKeyColumns: row?.key_columns ?? [] }
   });
   const constraintsByName = new Map(constraintsResult.rows.map((row) => [row.constraint_name, row]));
   const constraints = DECISION_GATE_CONSTRAINTS.map((name) => {

@@ -198,7 +198,7 @@ describe("/api/admin/migrate rollout observability", () => {
         { table_name: "roadmap_items", column_name: "now_commitment_provenance", data_type: "character varying", character_maximum_length: 30, datetime_precision: null, is_nullable: "YES", column_default: "'LEGACY_UNGATED'::character varying" },
         { table_name: "roadmap_items", column_name: "now_decision_record_id", data_type: "uuid", character_maximum_length: null, datetime_precision: null, is_nullable: "YES", column_default: null },
       ] }
-      if (sql.includes("pg_get_indexdef")) return { rows: catalog.indexes.map((index) => ({ name: index.name, table_name: index.table, valid: true, unique: index.unique, key_columns: index.keyColumns, definition: index.definition })) }
+      if (sql.includes("pg_get_indexdef")) return { rows: catalog.indexes.map((index, indexNumber) => ({ name: index.name, table_name: index.table, valid: true, unique: index.unique, key_columns: index.keyColumns, definition: indexNumber === 0 ? `CREATE INDEX ${index.name} ON compass_preview.${index.table} USING btree_index ("workspace_id", "state")` : index.definition })) }
       if (sql.includes("FROM pg_constraint")) return { rows: catalog.constraints.map((constraint) => ({ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: true, definition: constraint.definition, key_columns: constraint.keyColumns })) }
       if (sql.includes("legacy_link_drift")) return { rows: [{ total: "4", null_count: "0", unknown_count: "0", legacy_link_drift: "0" }] }
       if (sql.includes("plan_violations")) return { rows: [{ plan_violations: "0", reservation_violations: "0" }] }
@@ -214,12 +214,16 @@ describe("/api/admin/migrate rollout observability", () => {
       actualColumns: expect.arrayContaining([expect.objectContaining({ name: "revision_count", default: "0" })]),
     })
     expect(result.constraints.find((item: { name: string }) => item.name === "review_requests_pkey")).toMatchObject({ status: "MATCHED", expectedKeyColumns: ["id"], actualKeyColumns: ["id"] })
+    expect(result.indexes.find((item: { name: string }) => item.name === "idx_review_requests_workspace_state")).toMatchObject({ status: "MATCHED", expectedKeyColumns: ["workspace_id", "state"], actualKeyColumns: ["workspace_id", "state"] })
     expect(result.migrationReady).toBe(true)
     const constraintQuery = mocks.query.mock.calls.find(([sql]) => String(sql).includes("FROM pg_constraint"))
     expect(String(constraintQuery?.[0])).toContain("backing.indexrelid=c.conindid")
     expect(String(constraintQuery?.[0])).toContain("key.ordinal <= backing.indnkeyatts")
     expect(String(constraintQuery?.[0])).toContain("a.attname::text")
     expect(String(constraintQuery?.[0])).toContain("ARRAY[]::text[]")
+    const indexQuery = mocks.query.mock.calls.find(([sql]) => String(sql).includes("pg_get_indexdef"))
+    expect(String(indexQuery?.[0])).toContain("a.attname::text")
+    expect(String(indexQuery?.[0])).toContain("ARRAY[]::text[]")
   })
 
   it("rejects a same-name table whose complete column fingerprint is malformed", async () => {
