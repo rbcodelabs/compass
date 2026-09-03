@@ -15,8 +15,9 @@ export function NewDecisionForm({ workspaceId, orgSlug, workspaceSlug, subjects,
   workspaceSlug: string
   subjects: DecisionSubjectOption[]
   initial?: Partial<Pick<DecisionSubjectOption, "type" | "id">> & { question?: string; context?: string }
-  revise?: { expectedDecisionId: string; reason: string }
+  revise?: { requestId: string; expectedDecisionId: string; reason: string }
 }) {
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
   const [type, setType] = useState<TrackedSubjectType>(initial?.type ?? "WORKSPACE")
   const [subjectId, setSubjectId] = useState(initial?.id ?? workspaceId)
   const [question, setQuestion] = useState(initial?.question ?? "")
@@ -36,7 +37,7 @@ export function NewDecisionForm({ workspaceId, orgSlug, workspaceSlug, subjects,
     setError(null)
     startTransition(async () => {
       try {
-        const result = await createTrackedDecisionAction({ workspaceId, subjectType: type, subjectId, question, context, revise })
+        const result = await createTrackedDecisionAction({ workspaceId, subjectType: type, subjectId, question, context, idempotencyKey, revise })
         router.push(`/${orgSlug}/${workspaceSlug}/reviews/${result.requestId}`)
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Could not request the decision.")

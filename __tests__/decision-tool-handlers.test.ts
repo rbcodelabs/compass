@@ -110,7 +110,7 @@ describe("decision MCP handlers", () => {
 
   it("requests a generic tracking-only decision", async () => {
     mockPrepareTracked.mockResolvedValue({ requestId: "request-1", id: "revision-1" })
-    const result = await requestDecision({ workspaceId: "workspace-1", subjectType: "DOC", subjectId: "doc-1", question: "Publish?", context: "Ready." })
+    const result = await requestDecision({ workspaceId: "workspace-1", subjectType: "DOC", subjectId: "doc-1", question: "Publish?", context: "Ready.", idempotencyKey: "00000000-0000-4000-8000-000000000001" })
     expect(result.content[0].text).toContain("ID: request-1")
     expect(mockPrepareTracked).toHaveBeenCalledWith(expect.objectContaining({ requestedById: "user-1" }))
   })

@@ -31,9 +31,14 @@ export default async function DecisionsPage({ params, searchParams }: {
   const result = await listTrackedDecisions({
     workspaceId: workspace.id, tab, subjectType,
     outcome: ["APPROVE", "REQUEST_CHANGES", "REJECT"].includes(query.outcome ?? "") ? query.outcome as "APPROVE" | "REQUEST_CHANGES" | "REJECT" : undefined,
-    reviewerId: query.reviewer || undefined, query: query.q, from: dateValue(query.from), to: dateValue(query.to, true), page, pageSize: 20,
+    reviewerId: query.reviewer && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(query.reviewer) ? query.reviewer : undefined, query: query.q, from: dateValue(query.from), to: dateValue(query.to, true), page, pageSize: 20, includeLegacy: true,
   })
-  const members = await getPrisma().workspaceMember.findMany({ where: { workspaceId: workspace.id }, select: { userId: true, user: { select: { name: true, email: true } } }, orderBy: { user: { name: "asc" } } })
+  const prisma = getPrisma()
+  const [workspaceMembers, organizationAdmins] = await Promise.all([
+    prisma.workspaceMember.findMany({ where: { workspaceId: workspace.id }, select: { userId: true, user: { select: { name: true, email: true } } }, orderBy: { user: { name: "asc" } } }),
+    prisma.organizationMember.findMany({ where: { organizationId: workspace.organizationId, role: { in: ["OWNER", "ADMIN"] } }, select: { userId: true, user: { select: { name: true, email: true } } }, orderBy: { user: { name: "asc" } } }),
+  ])
+  const members = [...new Map([...workspaceMembers, ...organizationAdmins].map((member) => [member.userId, member])).values()]
   const reviewerNames = new Map(members.map((member) => [member.userId, member.user.name ?? member.user.email]))
   const base = `/${orgSlug}/${workspaceSlug}/decisions`
   const paramsFor = (overrides: Record<string, string | undefined>) => {
@@ -58,8 +63,10 @@ export default async function DecisionsPage({ params, searchParams }: {
       const revision = request.currentRevision
       const decision = revision?.decisions[0]
       const legacy = request.gateType !== "TRACKED_DECISION"
+      let linkedType = request.subjectType
+      if (!legacy && revision?.packetJson) { try { linkedType = (JSON.parse(revision.packetJson) as { entity?: { type?: string } }).entity?.type ?? linkedType } catch {} }
       return <Link key={request.id} href={`/${orgSlug}/${workspaceSlug}/reviews/${request.id}`} className="block rounded-xl border bg-card p-4 hover:border-primary/40">
-        <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{legacy ? "Legacy system decision" : LABELS[request.subjectType] ?? request.subjectType}</p><h2 className="mt-1 font-semibold">{revision?.title ?? "Decision"}</h2><p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{revision?.summary}</p></div><span className="rounded-full bg-muted px-2 py-1 text-xs">{decision?.option.label ?? request.state}</span></div>
+        <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{legacy ? "Legacy system decision" : LABELS[linkedType] ?? linkedType}</p><h2 className="mt-1 font-semibold">{revision?.title ?? "Decision"}</h2><p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{revision?.summary}</p></div><span className="rounded-full bg-muted px-2 py-1 text-xs">{decision?.option.label ?? request.state}</span></div>
         <p className="mt-3 text-xs text-muted-foreground">Updated {request.updatedAt.toLocaleDateString()} {decision ? `• ${reviewerNames.get(decision.actorUserId) ?? "Workspace admin"}` : ""}</p>
       </Link>
     })}</div>}

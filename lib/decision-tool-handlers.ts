@@ -15,6 +15,7 @@ export async function requestDecision(input: {
   subjectId: string
   question: string
   context: string
+  idempotencyKey: string
 }) {
   const actor = getMcpActor()
   try {

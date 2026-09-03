@@ -26,7 +26,12 @@ readable and are labeled **Legacy system decision**.
 
 Agents can use `request_decision`, `list_decisions`, and `get_decision` for the
 same tracking workflow. Service credentials may request and read decisions, but
-only an authenticated human admin can choose an outcome.
+only an authenticated human admin can choose an outcome. Each
+`request_decision` call supplies a UUID `idempotencyKey`; retrying the same
+request with that key returns the original request, while a new key creates an
+independent decision even when it links to the same item. Generic list and get
+tools return tracking-only decisions; legacy authorization reviews remain
+available through the existing review tools and the Decisions UI.
 
 ## Legacy delivery reviews
 

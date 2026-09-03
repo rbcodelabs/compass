@@ -1629,6 +1629,7 @@ const _handler = createMcpHandler(
           subjectId: z.string().uuid(),
           question: z.string().min(1).max(255),
           context: z.string().min(1).max(20000),
+          idempotencyKey: z.string().uuid(),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },

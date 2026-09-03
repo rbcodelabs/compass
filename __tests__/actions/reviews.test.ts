@@ -93,7 +93,7 @@ describe("review actions ownership", () => {
     prisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", members: [{ id: "member-1" }], organization: { members: [] } })
     mockPrepareTracked.mockResolvedValue({ id: "revision-1", requestId: "request-1" })
 
-    await expect(createTrackedDecisionAction({ workspaceId: "ws-1", subjectType: "DOC", subjectId: "doc-1", question: "Publish?", context: "Ready for review." }))
+    await expect(createTrackedDecisionAction({ workspaceId: "ws-1", subjectType: "DOC", subjectId: "doc-1", question: "Publish?", context: "Ready for review.", idempotencyKey: "00000000-0000-4000-8000-000000000001" }))
       .resolves.toEqual({ requestId: "request-1", revisionId: "revision-1" })
     expect(mockPrepareTracked).toHaveBeenCalledWith(expect.objectContaining({ requestedById: "user-1" }))
   })
@@ -109,5 +109,6 @@ describe("review actions ownership", () => {
     expect(mockAdmit).not.toHaveBeenCalled()
     expect(mockApplyBuilding).not.toHaveBeenCalled()
     expect(mockQueueRelease).not.toHaveBeenCalled()
+    expect(prisma.reviewOption.findUnique).not.toHaveBeenCalled()
   })
 })
