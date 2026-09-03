@@ -134,6 +134,19 @@ describe("recordDecision", () => {
     expect(mockPrisma.decisionRecord.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actorUserId: "user-1", actorRole: "ADMIN", fingerprint: "fp-1" }) }))
   })
 
+  it("requires rationale for tracked rejections and change requests", async () => {
+    mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
+    mockPrisma.reviewRevision.findUnique.mockResolvedValue({
+      ...revision,
+      request: { ...revision.request, gateType: "TRACKED_DECISION" },
+      options: [{ id: "option-1", outcomeClass: "REJECT", continuationKey: "NO_ACTION" }],
+    })
+
+    await expect(recordDecision({ actor: { kind: "USER", userId: "user-1" }, revisionId: "rev-1", fingerprint: "fp-1", optionId: "option-1", rationale: " ", idempotencyKey: "key-rationale" }))
+      .rejects.toEqual(expect.objectContaining({ code: "RATIONALE_REQUIRED" }))
+    expect(mockPrisma.decisionRecord.create).not.toHaveBeenCalled()
+  })
+
   it("rejects a competing terminal response", async () => {
     mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
     mockPrisma.reviewRevision.findUnique.mockResolvedValue(revision)

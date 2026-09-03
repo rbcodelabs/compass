@@ -20,6 +20,7 @@ import {
   FEEDBACK_STATUS_OPTIONS,
   FEEDBACK_TYPE_OPTIONS,
 } from "@/lib/feedback-meta";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 type FeedbackData = {
   id: string;
@@ -89,6 +90,7 @@ export function FeedbackPanel({
         status={TYPE[data.type] ?? { label: data.type }}
         edit={edit}
       />
+      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="FEEDBACK" subjectId={data.id} subjectTitle={data.title} />
 
       <EditableText
         value={data.description}

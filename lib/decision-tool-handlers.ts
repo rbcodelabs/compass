@@ -7,6 +7,54 @@ import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRev
 import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, prepareBuildingInvestmentReview, prepareBuildingInvestmentRevocationReview, startNewBuildingInvestmentDecisionCycle } from "@/lib/building-investment"
 import { generateNativeNowPolicy } from "@/lib/native-now-policy"
 import { applyNativePolicyActivationDecision, prepareNativePolicyActivationReview } from "@/lib/native-policy-activation"
+import { createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, type TrackedSubjectType } from "@/lib/tracked-decisions"
+
+export async function requestDecision(input: {
+  workspaceId: string
+  subjectType: TrackedSubjectType
+  subjectId: string
+  question: string
+  context: string
+  idempotencyKey: string
+}) {
+  const actor = getMcpActor()
+  try {
+    const revision = await createTrackedDecisionRequest({ ...input, requestedById: actor.userId })
+    return ok(`Decision requested.\nID: ${revision.requestId}\nRevision ID: ${revision.id}`, revision)
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : "Could not request decision.")
+  }
+}
+
+export async function listDecisions(input: {
+  workspaceId: string
+  state?: "PENDING" | "DECIDED"
+  subjectType?: TrackedSubjectType
+  outcome?: "APPROVE" | "REQUEST_CHANGES" | "REJECT"
+  reviewerId?: string
+  query?: string
+  page?: number
+  pageSize?: number
+}) {
+  try {
+    const result = await listTrackedDecisions({ ...input, tab: input.state })
+    return ok(result.requests.length
+      ? result.requests.map((request) => `• ${request.currentRevision?.title ?? request.subjectId} [${request.state}] (${request.id})`).join("\n")
+      : "No decisions found.", result)
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : "Could not list decisions.")
+  }
+}
+
+export async function getDecision({ workspaceId, requestId }: { workspaceId: string; requestId: string }) {
+  try {
+    const request = await getTrackedDecision(workspaceId, requestId)
+    if (!request) return fail(`Decision "${requestId}" not found.`)
+    return ok(`${request.currentRevision?.title ?? "Decision"} [${request.state}]\nID: ${request.id}`, request)
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : "Could not get decision.")
+  }
+}
 
 export async function requestNativePolicyActivation(input: { workspaceId: string; routingFingerprint?: string; mode: "shadow" | "enforce"; expectedTerminalDecisionId?: string; reason?: string }) {
   const actor = getMcpActor()

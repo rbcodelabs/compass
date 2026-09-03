@@ -10,6 +10,7 @@ import { queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator } from "@/
 import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh, prepareBuildingInvestmentReview } from "@/lib/building-investment"
 import { applyNativePolicyActivationDecision, ensureNativePolicyActivationRevisionFresh } from "@/lib/native-policy-activation"
 import { requireEffectiveNowEnforcement } from "@/lib/now-gate-runtime"
+import { createTrackedDecisionRequest, reviseTrackedDecisionRequest, type TrackedSubjectType } from "@/lib/tracked-decisions"
 
 async function requireWorkspaceMember(workspaceId: string) {
   const session = await auth()
@@ -48,6 +49,24 @@ export async function requestBuildingInvestmentAction(_workspaceId: string, solu
   return { requestId: revision.requestId, revisionId: revision.id }
 }
 
+export async function createTrackedDecisionAction(input: {
+  workspaceId: string
+  subjectType: TrackedSubjectType
+  subjectId: string
+  question: string
+  context: string
+  idempotencyKey: string
+  revise?: { requestId: string; expectedDecisionId: string; reason: string }
+}) {
+  const userId = await requireWorkspaceMember(input.workspaceId)
+  const { revise, idempotencyKey, ...request } = input
+  const revision = revise
+    ? await reviseTrackedDecisionRequest({ ...request, ...revise, requestedById: userId })
+    : await createTrackedDecisionRequest({ ...request, idempotencyKey, requestedById: userId })
+  revalidatePath("/", "layout")
+  return { requestId: revision.requestId, revisionId: revision.id }
+}
+
 export async function decideReviewAction(input: {
   workspaceId: string
   revisionId: string
@@ -76,6 +95,10 @@ export async function decideReviewAction(input: {
     rationale: input.rationale,
     idempotencyKey: `review:${input.revisionId}:${input.optionId}:${userId}`,
   })
+  if (revision.request.gateType === "TRACKED_DECISION") {
+    revalidatePath("/", "layout")
+    return
+  }
   const selected = await prisma.reviewOption.findUnique({ where: { id: input.optionId } })
   if (selected?.continuationKey === "ADMIT_ROADMAP_ITEM_TO_NOW" && selected.outcomeClass === "APPROVE") {
     await admitRoadmapItemToNow(revision.request.subjectId, decision.id)

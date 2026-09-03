@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockPrepare, mockPrepareBuilding, mockApplyBuilding, mockGeneratePolicy, mockPrepareRelease, mockAdmit, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision, mockFindItem, mockRequireEnforcement } = vi.hoisted(() => ({
+const { mockPrepare, mockPrepareBuilding, mockPrepareTracked, mockListTracked, mockGetTracked, mockApplyBuilding, mockGeneratePolicy, mockPrepareRelease, mockAdmit, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision, mockFindItem, mockRequireEnforcement } = vi.hoisted(() => ({
   mockPrepare: vi.fn(),
+  mockPrepareTracked: vi.fn(), mockListTracked: vi.fn(), mockGetTracked: vi.fn(),
   mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(), mockGeneratePolicy: vi.fn(),
   mockPrepareRelease: vi.fn(),
   mockAdmit: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock("@/lib/now-commitment", () => ({
 }))
 vi.mock("@/lib/building-investment", () => ({ prepareBuildingInvestmentReview: mockPrepareBuilding, applyBuildingInvestmentDecision: mockApplyBuilding }))
 vi.mock("@/lib/native-now-policy", () => ({ generateNativeNowPolicy: mockGeneratePolicy }))
+vi.mock("@/lib/tracked-decisions", () => ({ createTrackedDecisionRequest: mockPrepareTracked, listTrackedDecisions: mockListTracked, getTrackedDecision: mockGetTracked }))
 vi.mock("@/lib/db", () => ({
   default: () => ({
     reviewRequest: { findUnique: mockFindRequest, findMany: mockListRequests },
@@ -34,7 +36,7 @@ vi.mock("@/lib/db", () => ({
   }),
 }))
 
-import { applyRecordedDecision, getReviewRequest, inspectNativeNowPolicy, listReviewRequests, requestBuildingInvestment, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, getDecision, getReviewRequest, inspectNativeNowPolicy, listDecisions, listReviewRequests, requestBuildingInvestment, requestDecision, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 describe("decision MCP handlers", () => {
   beforeEach(() => { vi.resetAllMocks(); process.env.NOW_DECISION_GATE_MODE = "enforce"; mockFindItem.mockResolvedValue({ workspaceId: "workspace-1" }) })
@@ -104,6 +106,26 @@ describe("decision MCP handlers", () => {
 
     expect(result.content[0].text).toContain("ID: receipt-1")
     expect(mockAdmit).toHaveBeenCalledWith("item-1", "decision-1")
+  })
+
+  it("requests a generic tracking-only decision", async () => {
+    mockPrepareTracked.mockResolvedValue({ requestId: "request-1", id: "revision-1" })
+    const result = await requestDecision({ workspaceId: "workspace-1", subjectType: "DOC", subjectId: "doc-1", question: "Publish?", context: "Ready.", idempotencyKey: "00000000-0000-4000-8000-000000000001" })
+    expect(result.content[0].text).toContain("ID: request-1")
+    expect(mockPrepareTracked).toHaveBeenCalledWith(expect.objectContaining({ requestedById: "user-1" }))
+  })
+
+  it("lists generic decisions with bounded filters", async () => {
+    mockListTracked.mockResolvedValue({ requests: [], total: 0, page: 1, pageSize: 20, pageCount: 1 })
+    const result = await listDecisions({ workspaceId: "workspace-1", state: "PENDING" })
+    expect(result.structuredContent.ok).toBe(true)
+    expect(mockListTracked).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "workspace-1", tab: "PENDING" }))
+  })
+
+  it("gets a generic decision in its declared workspace", async () => {
+    mockGetTracked.mockResolvedValue({ id: "request-1", state: "DECIDED", currentRevision: { title: "Publish?" } })
+    const result = await getDecision({ workspaceId: "workspace-1", requestId: "request-1" })
+    expect(result.content[0].text).toContain("Publish?")
   })
 
   it("applies an approved Building investment decision", async () => {

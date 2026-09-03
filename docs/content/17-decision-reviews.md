@@ -1,12 +1,39 @@
 ---
-title: "Decision Reviews"
-description: "Use immutable human review packets to authorize NOW commitments"
+title: "Decisions"
+description: "Request, review, and revisit product decisions in one shared history"
 icon: "CircleCheckBig"
 order: 17
 section: "Delivery"
 ---
 
-# Decision Reviews
+# Decisions
+
+Open **Decisions** from a workspace to see what needs a call and what the team
+already decided. Any workspace member can choose **New decision**, ask a clear
+question, add context, and link it to the workspace or an Opportunity, Solution,
+Roadmap Item, Doc, Experiment, or Feedback item. The same **Request decision**
+shortcut appears on those item views.
+
+Workspace and organization admins choose **Approve**, **Request changes**, or
+**Reject**. A rationale is required for changes or rejection and optional for an
+approval. These decisions are tracking-only: choosing an outcome records the
+call and never changes the linked item. If changes are requested, use **Create
+revised request** to carry the question and context into a new immutable cycle.
+
+Use the **Pending** and **Decided** tabs to search or filter by linked item type,
+outcome, reviewer, or decision date. Older automated authorization records stay
+readable and are labeled **Legacy system decision**.
+
+Agents can use `request_decision`, `list_decisions`, and `get_decision` for the
+same tracking workflow. Service credentials may request and read decisions, but
+only an authenticated human admin can choose an outcome. Each
+`request_decision` call supplies a UUID `idempotencyKey`; retrying the same
+request with that key returns the original request, while a new key creates an
+independent decision even when it links to the same item. Generic list and get
+tools return tracking-only decisions; legacy authorization reviews remain
+available through the existing review tools and the Decisions UI.
+
+## Legacy delivery reviews
 
 Compass protects consequential delivery transitions with a shared, immutable
 decision ledger. The first supported gate is the commitment to move a Roadmap

@@ -1,4 +1,5 @@
 "use client";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -140,6 +141,7 @@ export function ExperimentPanel({
           className="text-base font-semibold leading-snug w-full"
         />
       </div>
+      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="EXPERIMENT" subjectId={data.id} subjectTitle={data.title} />
 
       {/* Kill condition — prominent when active */}
       {isActive && (
