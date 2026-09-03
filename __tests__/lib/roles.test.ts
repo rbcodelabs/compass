@@ -10,7 +10,7 @@
  * provisioning endpoint and setup-compass-workspace.ts).
  */
 import { describe, it, expect } from "vitest";
-import { normalizeWorkspaceRole, normalizeOrgRole, isOrgAdminRole } from "@/lib/roles";
+import { canDecideReview, normalizeWorkspaceRole, normalizeOrgRole, isOrgAdminRole } from "@/lib/roles";
 
 describe("normalizeWorkspaceRole", () => {
   const toAdmin = [
@@ -83,5 +83,19 @@ describe("isOrgAdminRole", () => {
     expect(isOrgAdminRole("whatever")).toBe(false);
     expect(isOrgAdminRole(null)).toBe(false);
     expect(isOrgAdminRole(undefined)).toBe(false);
+  });
+});
+
+describe("review decision authority", () => {
+  it.each(["ADMIN", "admin", "OWNER", "owner", "  Admin "])("shows decision controls for normalized workspace role %s", (role) => {
+    expect(canDecideReview(role, null)).toBe(true);
+  });
+
+  it.each(["ADMIN", "admin", "OWNER", "owner"])("shows decision controls for normalized organization role %s", (role) => {
+    expect(canDecideReview("MEMBER", role)).toBe(true);
+  });
+
+  it("does not show decision controls to ordinary members", () => {
+    expect(canDecideReview("member", "member")).toBe(false);
   });
 });

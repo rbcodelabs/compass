@@ -2,7 +2,7 @@ import { notFound } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { decideReviewAction } from "../actions"
-import { isOrgAdminRole } from "@/lib/roles"
+import { canDecideReview, isOrgAdminRole } from "@/lib/roles"
 import { ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh } from "@/lib/building-investment"
 import { DecisionActions } from "@/components/decisions/decision-actions"
 
@@ -59,7 +59,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
   const isPolicyActivation = request.gateType === "NOW_POLICY_ACTIVATION"
   const isTracked = request.gateType === "TRACKED_DECISION"
   const isRetired = request.gateType === "NOW_COMMITMENT" || isPolicyActivation
-  const canDecide = request.workspace.members[0]?.role === "ADMIN" || isOrgAdminRole(request.workspace.organization.members[0]?.role)
+  const canDecide = canDecideReview(request.workspace.members[0]?.role, request.workspace.organization.members[0]?.role)
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
