@@ -87,6 +87,7 @@ const approvedDecision = (overrides: Record<string, unknown> = {}) => ({
 describe("NOW commitment", () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    process.env.NOW_DECISION_GATE_MODE = "enforce"
     mockPrisma.$transaction.mockImplementation((fn: (value: typeof tx) => unknown) => fn(tx))
     delete process.env.NOW_COMMITMENT_POLICY_JSON
     delete process.env.NOW_DECISION_PUBLIC_KEYS_JSON

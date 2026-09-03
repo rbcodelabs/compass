@@ -10,7 +10,8 @@ function signBundle(generated: GeneratedNativePolicy, input: SigningInput) {
   const workspaceId = generated.inspection.workspaceId, workspacePolicy = generated.document.workspaces[workspaceId]
   const generatedAt = Date.parse(input.generatedAt), validUntil = Date.parse(input.validUntil)
   if (!/^sha256:[0-9a-f]{64}$/i.test(input.routingFingerprint) || !/^[0-9a-f]{64}$/i.test(input.activationDecision.checksum) || !input.signingKeyId || !workspacePolicy
-    || !Number.isFinite(generatedAt) || !Number.isFinite(validUntil) || generatedAt >= validUntil || validUntil - generatedAt > 30 * 24 * 60 * 60_000) {
+    || !Number.isFinite(generatedAt) || !Number.isFinite(validUntil) || generatedAt >= validUntil
+    || generatedAt > Date.now() + 5 * 60_000 || validUntil - generatedAt > 30 * 24 * 60 * 60_000) {
     throw new NativeNowPolicyError("INVALID_SIGNING_INPUT", "Policy signing inputs or validity window are invalid.")
   }
   const payload = { schemaVersion: "compass-now-policy/v1" as const, workspaceId, routingFingerprint: input.routingFingerprint, portfolioPolicy: { policyId: workspacePolicy.portfolioPolicyId, canonical: workspacePolicy }, capacityPlan: { id: workspacePolicy.capacity.planId, fingerprint: workspacePolicy.capacity.planFingerprint, version: generated.inspection.capacityPlanVersion, expectedState: "ACTIVE" as const }, investmentEvidence: workspacePolicy.investmentDecisions, generatedAt: input.generatedAt, validUntil: input.validUntil, supersedesArtifactId: input.supersedesArtifactId ?? null, activationDecision: input.activationDecision, signingKeyId: input.signingKeyId }

@@ -151,4 +151,13 @@ describe("native NOW policy generation", () => {
     bundle.selectorSignature = sign(null, Buffer.from(JSON.stringify(bundle.selector)), keys.privateKey).toString("base64")
     expect(() => verifyNativeNowPolicyBundle(bundle, { "test-key": keys.publicKey }, new Date("2026-09-03T00:00:00Z"), routing)).toThrowError(expect.objectContaining({ code: "POLICY_BINDING_INVALID" }))
   })
+
+  it("refuses to sign an artifact generated beyond the allowed clock skew", async () => {
+    const generated = await generateNativeNowPolicy(ids.workspace, database())
+    const keys = generateKeyPairSync("ed25519"), routing = nativeRoutingFingerprint
+    const db = database(), sourceFingerprint = nativePolicyCandidateFingerprint(generated, routing, "enforce")
+    ;(db as never as { decisionRecord: { findUnique: ReturnType<typeof vi.fn> } }).decisionRecord.findUnique.mockResolvedValue({ ...decision, revision: { ...decision.revision, sourceFingerprint, request: { ...decision.revision.request, gateType: "NOW_POLICY_ACTIVATION", subjectType: "WORKSPACE", subjectId: ids.workspace } }, option: { outcomeClass: "APPROVE", continuationKey: "AUTHORIZE_NOW_POLICY" }, applications: [{ id: ids.receipt, status: "APPLIED", continuationKey: "AUTHORIZE_NOW_POLICY", targetType: "WORKSPACE", targetId: ids.workspace }] })
+    const future = Date.now() + 10 * 60_000
+    await expect(generateSignedNativeNowPolicyBundle(ids.workspace, ids.decision, { signingKeyId: "test-key", privateKey: keys.privateKey, routingFingerprint: routing, generatedAt: new Date(future).toISOString(), validUntil: new Date(future + 24 * 60 * 60_000).toISOString(), mode: "enforce" }, db)).rejects.toEqual(expect.objectContaining({ code: "INVALID_SIGNING_INPUT" }))
+  })
 })

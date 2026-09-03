@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockPrepare, mockPrepareBuilding, mockApplyBuilding, mockGeneratePolicy, mockPrepareRelease, mockAdmit, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision } = vi.hoisted(() => ({
+const { mockPrepare, mockPrepareBuilding, mockApplyBuilding, mockGeneratePolicy, mockPrepareRelease, mockAdmit, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision, mockFindItem, mockRequireEnforcement } = vi.hoisted(() => ({
   mockPrepare: vi.fn(),
   mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(), mockGeneratePolicy: vi.fn(),
   mockPrepareRelease: vi.fn(),
@@ -9,7 +9,10 @@ const { mockPrepare, mockPrepareBuilding, mockApplyBuilding, mockGeneratePolicy,
   mockFindRequest: vi.fn(),
   mockListRequests: vi.fn(),
   mockFindDecision: vi.fn(),
+  mockFindItem: vi.fn(),
+  mockRequireEnforcement: vi.fn(),
 }))
+vi.mock("@/lib/now-gate-runtime", () => ({ requireEffectiveNowEnforcement: mockRequireEnforcement }))
 vi.mock("@/lib/release-authorization", () => ({
   prepareReleaseRun: mockPrepareRelease,
   queueAuthorizedRelease: mockQueueRelease,
@@ -27,13 +30,14 @@ vi.mock("@/lib/db", () => ({
   default: () => ({
     reviewRequest: { findUnique: mockFindRequest, findMany: mockListRequests },
     decisionRecord: { findUnique: mockFindDecision },
+    roadmapItem: { findUnique: mockFindItem },
   }),
 }))
 
 import { applyRecordedDecision, getReviewRequest, inspectNativeNowPolicy, listReviewRequests, requestBuildingInvestment, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 describe("decision MCP handlers", () => {
-  beforeEach(() => vi.resetAllMocks())
+  beforeEach(() => { vi.resetAllMocks(); process.env.NOW_DECISION_GATE_MODE = "enforce"; mockFindItem.mockResolvedValue({ workspaceId: "workspace-1" }) })
 
   it("returns the review request ID when preparing a NOW commitment", async () => {
     mockPrepare.mockResolvedValue({ requestId: "request-1", id: "revision-1", fingerprint: "abc" })
@@ -93,7 +97,7 @@ describe("decision MCP handlers", () => {
   })
 
   it("applies a NOW decision idempotently and returns the receipt ID", async () => {
-    mockFindDecision.mockResolvedValue({ id: "decision-1", revision: { request: { gateType: "NOW_COMMITMENT", subjectId: "item-1" } } })
+    mockFindDecision.mockResolvedValue({ id: "decision-1", revision: { request: { gateType: "NOW_COMMITMENT", subjectId: "item-1", workspaceId: "workspace-1" } } })
     mockAdmit.mockResolvedValue({ id: "receipt-1", receiptKey: "decision-1:ADMIT", status: "APPLIED" })
 
     const result = await applyRecordedDecision({ decisionId: "decision-1" })

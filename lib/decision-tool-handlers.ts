@@ -2,6 +2,7 @@ import getPrisma from "@/lib/db"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { admitRoadmapItemToNow, prepareNowCommitment } from "@/lib/now-commitment"
+import { requireEffectiveNowEnforcement } from "@/lib/now-gate-runtime"
 import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
 import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, prepareBuildingInvestmentReview, prepareBuildingInvestmentRevocationReview, startNewBuildingInvestmentDecisionCycle } from "@/lib/building-investment"
 import { generateNativeNowPolicy } from "@/lib/native-now-policy"
@@ -55,6 +56,9 @@ export async function inspectNativeNowPolicy({ workspaceId }: { workspaceId: str
 export async function requestNowCommitment({ itemId }: { itemId: string }) {
   const actor = getMcpActor()
   try {
+    const item = await getPrisma().roadmapItem.findUnique({ where: { id: itemId }, select: { workspaceId: true } })
+    if (!item) return fail(`Roadmap item "${itemId}" not found.`)
+    requireEffectiveNowEnforcement(item.workspaceId)
     const revision = await prepareNowCommitment(itemId, { requestedById: actor.userId })
     return ok(`NOW commitment review prepared.\nID: ${revision.requestId}\nRevision ID: ${revision.id}\nFingerprint: ${revision.fingerprint}`, revision)
   } catch (error) {
@@ -100,6 +104,7 @@ export async function applyRecordedDecision({ decisionId }: { decisionId: string
   if (!decision) return fail(`Decision "${decisionId}" not found.`)
   try {
     if (decision.revision.request.gateType === "NOW_COMMITMENT") {
+      requireEffectiveNowEnforcement(decision.revision.request.workspaceId)
       const receipt = await admitRoadmapItemToNow(decision.revision.request.subjectId, decision.id)
       return ok(`Decision applied.\nID: ${receipt.id}\nReceipt: ${receipt.receiptKey}\nStatus: ${receipt.status}`, receipt)
     }

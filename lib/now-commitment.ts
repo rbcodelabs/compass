@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import getPrisma from "@/lib/db"
 import { defaultNowEligibilityResolver, type NativePolicyEvidence, type NowEligibilityResolver } from "@/lib/now-eligibility"
+import { deploymentNowGateMode } from "@/lib/now-gate-mode"
 
 const POLICY_VERSION = "now-commitment-v1"
 
@@ -515,7 +516,7 @@ export async function admitRoadmapItemToNow(
 }
 
 export function assertDirectNowWriteBlocked(currentHorizon: string | null | undefined, requestedHorizon: string): void {
-  if (requestedHorizon === "NOW" && currentHorizon !== "NOW") {
+  if (deploymentNowGateMode() === "enforce" && requestedHorizon === "NOW" && currentHorizon !== "NOW") {
     throw new NowCommitmentError("DECISION_REQUIRED", "NOW admission requires a recorded commitment decision. Prepare and apply a NOW commitment review.")
   }
 }

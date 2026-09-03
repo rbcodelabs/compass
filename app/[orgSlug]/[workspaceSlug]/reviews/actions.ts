@@ -9,6 +9,7 @@ import { isOrgAdminRole } from "@/lib/roles"
 import { queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator } from "@/lib/release-authorization"
 import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh, prepareBuildingInvestmentReview } from "@/lib/building-investment"
 import { applyNativePolicyActivationDecision, ensureNativePolicyActivationRevisionFresh } from "@/lib/native-policy-activation"
+import { requireEffectiveNowEnforcement } from "@/lib/now-gate-runtime"
 
 async function requireWorkspaceMember(workspaceId: string) {
   const session = await auth()
@@ -30,6 +31,7 @@ export async function requestNowCommitmentAction(_workspaceId: string, itemId: s
   const prisma = getPrisma()
   const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, workspaceId: true } })
   if (!item) throw new Error("Roadmap item not found")
+  requireEffectiveNowEnforcement(item.workspaceId)
   const userId = await requireWorkspaceMember(item.workspaceId)
   const revision = await prepareNowCommitment(itemId, { requestedById: userId })
   revalidatePath("/", "layout")
@@ -56,6 +58,7 @@ export async function decideReviewAction(input: {
   const prisma = getPrisma()
   const revision = await prisma.reviewRevision.findUnique({ where: { id: input.revisionId }, include: { request: true } })
   if (!revision) throw new Error("Review revision not found")
+  if (revision.request.gateType === "NOW_COMMITMENT") requireEffectiveNowEnforcement(revision.request.workspaceId)
   const userId = await requireWorkspaceMember(revision.request.workspaceId)
   const freshness = revision.request.gateType === "BUILDING_INVESTMENT"
     ? await ensureBuildingInvestmentRevisionFresh(revision.id)

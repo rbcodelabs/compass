@@ -89,7 +89,7 @@ describe("canonical NOW eligibility resolver", () => {
   const originalKeys = process.env.NOW_DECISION_PUBLIC_KEYS_JSON
   const originalRouting = process.env.NOW_DECISION_ROUTING_FINGERPRINT
   const temporaryDirectories: string[] = []
-  beforeEach(() => { vi.clearAllMocks(); delete process.env.NOW_COMMITMENT_POLICY_JSON; delete process.env.NOW_COMMITMENT_POLICY_FILE; delete process.env.NOW_DECISION_PUBLIC_KEYS_JSON; delete process.env.NOW_DECISION_ROUTING_FINGERPRINT; process.env.NOW_DECISION_ROUTING_MANIFEST_JSON = nativeRoutingManifestJson; mockFindDecision.mockResolvedValue(nativeDecision); mockFindRevocations.mockResolvedValue([]); mockFindSolution.mockResolvedValue(solution) })
+  beforeEach(() => { vi.clearAllMocks(); process.env.NOW_DECISION_GATE_MODE = "enforce"; delete process.env.NOW_COMMITMENT_POLICY_JSON; delete process.env.NOW_COMMITMENT_POLICY_FILE; delete process.env.NOW_DECISION_PUBLIC_KEYS_JSON; delete process.env.NOW_DECISION_ROUTING_FINGERPRINT; process.env.NOW_DECISION_ROUTING_MANIFEST_JSON = nativeRoutingManifestJson; mockFindDecision.mockResolvedValue(nativeDecision); mockFindRevocations.mockResolvedValue([]); mockFindSolution.mockResolvedValue(solution) })
   afterEach(() => {
     if (original === undefined) delete process.env.NOW_COMMITMENT_POLICY_JSON; else process.env.NOW_COMMITMENT_POLICY_JSON = original
     if (originalFile === undefined) delete process.env.NOW_COMMITMENT_POLICY_FILE; else process.env.NOW_COMMITMENT_POLICY_FILE = originalFile

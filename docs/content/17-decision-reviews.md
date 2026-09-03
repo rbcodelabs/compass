@@ -114,11 +114,25 @@ investment decisions. Generation fails closed on any workspace, revision,
 option, receipt, subject, fingerprint, or capacity mismatch. The generator
 also excludes any authority covered by an applied immutable
 `BUILDING_INVESTMENT_REVOCATION`; the original approval and revocation remain
-in the ledger for audit.
-signs both a content-addressed artifact and its active selector with Ed25519.
+in the ledger for audit. A new authorization cycle is possible only after that
+exact authority has a valid applied revocation. The generator signs both a
+content-addressed artifact and its active selector with Ed25519.
 Runtime verification requires the matching public key in
 `NOW_DECISION_PUBLIC_KEYS_JSON`, an unexpired artifact, valid artifact and
-selector signatures, the exact artifact hash, and selector mode `enforce`.
+selector signatures, the exact artifact hash, and a closed selector mode.
+
+`NOW_DECISION_GATE_MODE` is the deployment ceiling and defaults to `off`.
+`off` retains the legacy NOW transition and does not read native policy,
+decision-gate, capacity, or shadow-audit tables. `shadow` verifies the signed
+policy and performs the same read-only preflight, but never creates a review,
+decision, application, reservation, or `NATIVE_GATED` provenance; the legacy
+transition proceeds and Compass writes only a sanitized `WOULD_ALLOW` or
+`WOULD_BLOCK` evaluation. A telemetry-write failure does not block that legacy
+transition, but health reports incomplete shadow evidence. `enforce` requires
+the native review and application path. The effective mode is always the less
+permissive of the deployment ceiling and signed selector, so configuration can
+downgrade but cannot elevate signed authority. Shadow evaluations contain no
+raw policy or user content and must be retained for at least 180 days.
 
 The private signing key is never application configuration. The complete signed
 bundle belongs under `config/generated/decision-gates/<workspace-id>/`; the

@@ -210,7 +210,7 @@ describe("/api/admin/migrate rollout observability", () => {
     })
     const result = (await (await GET(request("GET"))).json()).decisionGateInfrastructure
     expect(catalog.constraints.find((item) => item.name === "idx_release_runs_scope_fingerprint")?.definition).toContain("pull_request_number")
-    expect(result.constraints.filter((item: { type: string }) => item.type === "c")).toHaveLength(3)
+    expect(result.constraints.filter((item: { type: string }) => item.type === "c")).toHaveLength(6)
     expect(result.tableShapes.filter((item: { structureMatches: boolean }) => !item.structureMatches)).toEqual([])
     expect(result.tableShapes.find((item: { name: string }) => item.name === "review_requests")).toMatchObject({
       status: "MATCHED",

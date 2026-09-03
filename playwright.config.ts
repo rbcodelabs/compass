@@ -74,6 +74,7 @@ export default defineConfig({
         NOW_COMMITMENT_POLICY_FILE: path.resolve(process.cwd(), "test-results/e2e-now-commitment-policy.json"),
         NOW_DECISION_PUBLIC_KEYS_JSON: JSON.stringify({ [E2E_POLICY_KEY_ID]: E2E_POLICY_PUBLIC_KEY }),
         NOW_DECISION_ROUTING_MANIFEST_JSON: JSON.stringify(E2E_ROUTING_MANIFEST),
+        NOW_DECISION_GATE_MODE: "enforce",
       },
       timeout: 120_000,
     },

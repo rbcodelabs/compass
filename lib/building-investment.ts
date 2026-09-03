@@ -97,13 +97,33 @@ export async function startNewBuildingInvestmentDecisionCycle(solutionId: string
     if (!solution) throw new BuildingInvestmentError("SOLUTION_NOT_FOUND", "Solution not found.")
     const request = await tx.reviewRequest.findFirst({
       where: { workspaceId: solution.opportunity.workspaceId, gateType: "BUILDING_INVESTMENT", subjectType: "SOLUTION", subjectId: solution.id },
-      include: { currentRevision: { include: { decisions: { include: { option: true } } } } },
+      include: { currentRevision: { include: { decisions: { include: { option: true, applications: true } } } } },
     })
     const terminal = request?.currentRevision?.decisions[0]
     if (!request || request.state !== "DECIDED" || !terminal || terminal.id !== input.expectedTerminalDecisionId) {
       throw new BuildingInvestmentError("TERMINAL_DECISION_MISMATCH", "The expected terminal investment decision is no longer current.")
     }
-    if (terminal.option.outcomeClass === "APPROVE") throw new BuildingInvestmentError("APPROVAL_REQUIRES_REVOCATION", "An approved investment requires explicit revocation before reconsideration.")
+    if (terminal.option.outcomeClass === "APPROVE") {
+      const authorityReceipt = terminal.applications.find((application) => application.status === "APPLIED"
+        && application.continuationKey === "AUTHORIZE_BUILDING_INVESTMENT" && application.targetType === "SOLUTION" && application.targetId === solutionId)
+      const revocation = await tx.decisionRecord.findFirst({
+        where: { workspaceId: solution.opportunity.workspaceId, revision: { request: { workspaceId: solution.opportunity.workspaceId, gateType: "BUILDING_INVESTMENT_REVOCATION", subjectType: "SOLUTION", subjectId: solutionId }, supersededAt: null }, option: { outcomeClass: "APPROVE", continuationKey: "REVOKE_BUILDING_INVESTMENT" }, applications: { some: { status: "APPLIED", continuationKey: "REVOKE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: solutionId } } },
+        include: { request: true, revision: { include: { request: true, options: { select: { id: true } } } }, option: true, applications: true },
+        orderBy: { decidedAt: "desc" },
+      })
+      const packet = revocation ? JSON.parse(revocation.revision.packetJson) as { authorityDecisionId?: string; authorityReceiptId?: string; solution?: { id?: string } } : {}
+      const revocationReceipt = revocation?.applications.find((application) => application.status === "APPLIED"
+        && application.continuationKey === "REVOKE_BUILDING_INVESTMENT" && application.targetType === "SOLUTION" && application.targetId === solutionId)
+      if (!authorityReceipt || !revocation || packet.authorityDecisionId !== terminal.id || packet.authorityReceiptId !== authorityReceipt.id
+        || packet.solution?.id !== solutionId || revocation.workspaceId !== solution.opportunity.workspaceId
+        || revocation.requestId !== revocation.revision.request.id || revocation.request.id !== revocation.requestId
+        || revocation.request.state !== "DECIDED" || revocation.request.currentRevisionId !== revocation.revisionId
+        || revocation.fingerprint !== revocation.revision.fingerprint || !revocation.revision.options.some((option) => option.id === revocation.optionId)
+        || revocation.option.outcomeClass !== "APPROVE" || revocation.option.continuationKey !== "REVOKE_BUILDING_INVESTMENT"
+        || !revocationReceipt || revocation.revision.sourceFingerprint !== buildingRevocationSourceFingerprint(solution, terminal.id, authorityReceipt.id)) {
+        throw new BuildingInvestmentError("APPROVAL_REQUIRES_REVOCATION", "An approved investment requires an exact applied revocation before reconsideration.")
+      }
+    }
     const sourceFingerprint = buildingInvestmentSourceFingerprint(solution)
     const revisionNumber = request.revisionCount + 1
     const decisionCycle = request.decisionCycle + 1

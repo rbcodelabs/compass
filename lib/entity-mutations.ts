@@ -13,7 +13,7 @@
 import getPrisma from "@/lib/db";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
 import { SETTABLE_HORIZONS } from "@/lib/roadmap";
-import { assertDirectNowWriteBlocked } from "@/lib/now-commitment";
+import { evaluateDirectNowIngress, type NowIngressActor } from "@/lib/now-gate-runtime";
 import { updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger";
 
 type EnumFieldConfig = { field: "status" | "horizon"; options: readonly string[] };
@@ -71,7 +71,8 @@ export async function updateEntityField(
   id: string,
   workspaceId: string,
   field: string,
-  value: unknown
+  value: unknown,
+  actor: NowIngressActor = { kind: "SYSTEM", id: null },
 ): Promise<UpdateResult> {
   const config = EDIT_CONFIG[type];
 
@@ -117,7 +118,7 @@ export async function updateEntityField(
       });
       if (!current) return { ok: false, status: 404, error: "Not found" };
       try {
-        assertDirectNowWriteBlocked(current.horizon, value);
+        await evaluateDirectNowIngress({ workspaceId, roadmapItemId: id, currentHorizon: current.horizon, requestedHorizon: value, ingressKey: "api.entity.update", actor });
       } catch (error) {
         return { ok: false, status: 400, error: error instanceof Error ? error.message : "NOW commitment decision required" };
       }

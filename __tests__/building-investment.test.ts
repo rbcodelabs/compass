@@ -1,16 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createHash } from "node:crypto"
 
 const prisma = {
   solution: { findUnique: vi.fn() },
   reviewRequest: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   reviewRevision: { create: vi.fn(), update: vi.fn() },
-  decisionRecord: { findUnique: vi.fn() },
+  decisionRecord: { findUnique: vi.fn(), findFirst: vi.fn() },
   decisionApplication: { findUnique: vi.fn(), create: vi.fn() },
   $transaction: vi.fn(),
 }
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 
-import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, buildingInvestmentSourceFingerprint, prepareBuildingInvestmentReview, prepareBuildingInvestmentRevocationReview } from "@/lib/building-investment"
+import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, buildingInvestmentSourceFingerprint, prepareBuildingInvestmentReview, prepareBuildingInvestmentRevocationReview, startNewBuildingInvestmentDecisionCycle } from "@/lib/building-investment"
 
 const solution = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -109,5 +110,28 @@ describe("Building investment decisions", () => {
     prisma.decisionApplication.findUnique.mockResolvedValue(null)
     prisma.decisionApplication.create.mockResolvedValue({ id: "revocation-receipt", status: "APPLIED" })
     await expect(applyBuildingInvestmentRevocationDecision(solution.id, "revocation-1")).resolves.toEqual(expect.objectContaining({ status: "APPLIED" }))
+  })
+
+  it("starts a new approval cycle only after the exact authority has an applied revocation", async () => {
+    const authorityReceipt = { id: "authority-receipt", status: "APPLIED", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: solution.id }
+    prisma.reviewRequest.findFirst.mockResolvedValue({
+      id: "request-1", state: "DECIDED", revisionCount: 1, decisionCycle: 1, currentRevisionId: "revision-1",
+      currentRevision: { id: "revision-1", decisions: [{ id: "authority-1", option: { outcomeClass: "APPROVE" }, applications: [authorityReceipt] }] },
+    })
+    const revocationSource = createHash("sha256").update(JSON.stringify({
+      gateType: "BUILDING_INVESTMENT_REVOCATION",
+      solutionSourceFingerprint: buildingInvestmentSourceFingerprint(solution),
+      authorityDecisionId: "authority-1", authorityReceiptId: authorityReceipt.id,
+    })).digest("hex")
+    prisma.decisionRecord.findFirst.mockResolvedValue({
+      id: "revocation-1", workspaceId: solution.opportunity.workspaceId, requestId: "revocation-request", revisionId: "revocation-revision", optionId: "revocation-option", fingerprint: "revocation-fp",
+      request: { id: "revocation-request", state: "DECIDED", currentRevisionId: "revocation-revision" },
+      revision: { fingerprint: "revocation-fp", sourceFingerprint: revocationSource, supersededAt: null, packetJson: JSON.stringify({ authorityDecisionId: "authority-1", authorityReceiptId: authorityReceipt.id, solution: { id: solution.id } }), options: [{ id: "revocation-option" }], request: { id: "revocation-request", workspaceId: solution.opportunity.workspaceId } },
+      option: { outcomeClass: "APPROVE", continuationKey: "REVOKE_BUILDING_INVESTMENT" },
+      applications: [{ status: "APPLIED", continuationKey: "REVOKE_BUILDING_INVESTMENT", targetType: "SOLUTION", targetId: solution.id }],
+    })
+
+    await expect(startNewBuildingInvestmentDecisionCycle(solution.id, { reason: "Corrected evidence", actorUserId: "user-1", expectedTerminalDecisionId: "authority-1" })).resolves.toEqual(expect.objectContaining({ id: "revision-1" }))
+    expect(prisma.reviewRequest.update).toHaveBeenCalledWith({ where: { id: "request-1" }, data: expect.objectContaining({ decisionCycle: 2, state: "PENDING", reconsidersDecisionId: "authority-1" }) })
   })
 })

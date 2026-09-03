@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockAuth, mockPrepare, mockPrepareBuilding, mockApplyBuilding, mockFreshBuilding, mockFreshPolicy, mockRecord, mockAdmit, mockQueueRelease } = vi.hoisted(() => ({
-  mockAuth: vi.fn(), mockPrepare: vi.fn(), mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(), mockFreshBuilding: vi.fn(), mockFreshPolicy: vi.fn(), mockRecord: vi.fn(), mockAdmit: vi.fn(), mockQueueRelease: vi.fn(),
+const { mockAuth, mockPrepare, mockPrepareBuilding, mockApplyBuilding, mockFreshBuilding, mockFreshPolicy, mockRecord, mockAdmit, mockQueueRelease, mockRequireEnforcement } = vi.hoisted(() => ({
+  mockAuth: vi.fn(), mockPrepare: vi.fn(), mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(), mockFreshBuilding: vi.fn(), mockFreshPolicy: vi.fn(), mockRecord: vi.fn(), mockAdmit: vi.fn(), mockQueueRelease: vi.fn(), mockRequireEnforcement: vi.fn(),
 }))
 const prisma = {
   workspace: { findFirst: vi.fn() },
@@ -12,6 +12,7 @@ const prisma = {
 vi.mock("@/auth", () => ({ auth: mockAuth }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 vi.mock("@/lib/now-commitment", () => ({ prepareNowCommitment: mockPrepare, admitRoadmapItemToNow: mockAdmit }))
+vi.mock("@/lib/now-gate-runtime", () => ({ requireEffectiveNowEnforcement: mockRequireEnforcement }))
 vi.mock("@/lib/decision-service", () => ({ recordDecision: mockRecord }))
 vi.mock("@/lib/building-investment", () => ({ prepareBuildingInvestmentReview: mockPrepareBuilding, applyBuildingInvestmentDecision: mockApplyBuilding, ensureBuildingInvestmentRevisionFresh: mockFreshBuilding }))
 vi.mock("@/lib/native-policy-activation", () => ({ applyNativePolicyActivationDecision: vi.fn(), ensureNativePolicyActivationRevisionFresh: mockFreshPolicy }))
@@ -26,6 +27,7 @@ import { decideReviewAction, requestBuildingInvestmentAction, requestNowCommitme
 describe("review actions ownership", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    process.env.NOW_DECISION_GATE_MODE = "enforce"
     mockAuth.mockResolvedValue({ user: { id: "user-1" } })
     mockFreshBuilding.mockResolvedValue({ stale: false }); mockFreshPolicy.mockResolvedValue({ stale: false })
   })
@@ -36,6 +38,7 @@ describe("review actions ownership", () => {
 
     await expect(requestNowCommitmentAction("ws-1", "item-1")).rejects.toThrow("Workspace not found")
     expect(prisma.workspace.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "ws-2" }) }))
+    expect(mockRequireEnforcement).toHaveBeenCalledWith("ws-2")
     expect(mockPrepare).not.toHaveBeenCalled()
   })
 

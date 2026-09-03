@@ -64,13 +64,13 @@ export async function generateNativeNowPolicy(workspaceId: string, database: Dat
   const revokedAuthorityIds = new Set<string>()
   for (const revocation of revocations) {
     if (revocation.revision.request.gateType !== "BUILDING_INVESTMENT_REVOCATION") continue
-    const packet = JSON.parse((revocation.revision as typeof revocation.revision & { packetJson?: string }).packetJson ?? "{}") as { authorityDecisionId?: string; solution?: { id?: string }; authority?: { subjectId?: string } }
+    const packet = JSON.parse((revocation.revision as typeof revocation.revision & { packetJson?: string }).packetJson ?? "{}") as { authorityDecisionId?: string; solution?: { id?: string } }
     const receipt = revocation.applications.find((candidate) => candidate.status === "APPLIED" && candidate.continuationKey === "REVOKE_BUILDING_INVESTMENT" && candidate.targetType === "SOLUTION" && candidate.targetId === revocation.revision.request.subjectId)
     if (revocation.workspaceId !== workspaceId || revocation.requestId !== revocation.revision.request.id || revocation.request.id !== revocation.requestId
       || revocation.request.state !== "DECIDED" || revocation.request.currentRevisionId !== revocation.revisionId || revocation.fingerprint !== revocation.revision.fingerprint
       || !revocation.revision.options.some((option) => option.id === revocation.optionId) || revocation.option.outcomeClass !== "APPROVE"
       || revocation.option.continuationKey !== "REVOKE_BUILDING_INVESTMENT" || !receipt || !packet.authorityDecisionId
-      || packet.solution?.id !== revocation.revision.request.subjectId || packet.authority?.subjectId !== revocation.revision.request.subjectId
+      || packet.solution?.id !== revocation.revision.request.subjectId
       || authoritySubjectById.get(packet.authorityDecisionId) !== revocation.revision.request.subjectId) {
       throw new NativeNowPolicyError("DECISION_INTEGRITY_FAILURE", "A Building investment revocation failed integrity verification.")
     }
@@ -139,7 +139,7 @@ export function verifyNativeNowPolicyBundle(bundle: NativeNowPolicyBundle, publi
     || bundle.selector.workspaceId !== bundle.artifact.workspaceId
     || bundle.selector.activationDecisionChecksum !== bundle.artifact.activationDecision.checksum
     || bundle.selector.supersedesArtifactId !== bundle.artifact.supersedesArtifactId
-    || bundle.selector.mode !== "enforce"
+    || !["shadow", "enforce"].includes(bundle.selector.mode)
     || bundle.artifact.portfolioPolicy.policyId !== canonical.portfolioPolicyId
     || bundle.artifact.capacityPlan.expectedState !== "ACTIVE"
     || bundle.artifact.capacityPlan.id !== canonical.capacity.planId

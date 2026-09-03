@@ -6,6 +6,7 @@ import { verifyNativeNowPolicyBundle, type NativeNowPolicyBundle } from "@/lib/n
 import { investmentAuthorityChecksum, type NativeDecisionEvidence } from "@/lib/native-decision-evidence"
 import { buildingInvestmentSourceFingerprint } from "@/lib/building-investment"
 import { configuredDecisionRouting } from "@/lib/decision-routing"
+import { deploymentNowGateMode, effectiveNowGateMode } from "@/lib/now-gate-mode"
 export { investmentAuthorityChecksum } from "@/lib/native-decision-evidence"
 
 export class NowEligibilityError extends Error {
@@ -62,7 +63,7 @@ type WorkspacePolicy = {
 type PolicyDocument = { version: 1; workspaces: Record<string, WorkspacePolicy> }
 export type NativePolicyEvidence = {
   workspaceId: string; artifactId: string; payloadHash: string; activationDecisionId: string; activationApplicationReceiptId: string; activationDecisionChecksum: string
-  selectorMode: "enforce"; selectorSignature: string; signingKeyId: string; routingFingerprint: string
+  selectorMode: "shadow" | "enforce"; selectorSignature: string; signingKeyId: string; routingFingerprint: string
   capacityPlanId: string; capacityPlanFingerprint: string; capacityPlanVersion: number; generatedAt: string
 }
 
@@ -117,7 +118,8 @@ function configuredPolicy(): PolicyDocument & { nativePolicyEvidence?: NativePol
       const bundle = parsed as NativeNowPolicyBundle
       const verified = verifyNativeNowPolicyBundle(bundle, publicKeys as Record<string, string>, new Date(), configuredDecisionRouting().fingerprint)
       assertPolicyDocument(verified)
-      return { ...verified, nativePolicyEvidence: { workspaceId: bundle.artifact.workspaceId, artifactId: bundle.artifact.artifactId, payloadHash: bundle.artifact.artifactId.slice("now-policy:v1:sha256:".length), activationDecisionId: bundle.artifact.activationDecision.recordId, activationApplicationReceiptId: bundle.artifact.activationDecision.applicationReceiptId, activationDecisionChecksum: bundle.artifact.activationDecision.checksum, selectorMode: "enforce", selectorSignature: bundle.selectorSignature, signingKeyId: bundle.artifact.signingKeyId, routingFingerprint: bundle.artifact.routingFingerprint, capacityPlanId: bundle.artifact.capacityPlan.id, capacityPlanFingerprint: bundle.artifact.capacityPlan.fingerprint, capacityPlanVersion: bundle.artifact.capacityPlan.version, generatedAt: bundle.artifact.generatedAt } }
+      effectiveNowGateMode(bundle.selector.mode)
+      return { ...verified, nativePolicyEvidence: { workspaceId: bundle.artifact.workspaceId, artifactId: bundle.artifact.artifactId, payloadHash: bundle.artifact.artifactId.slice("now-policy:v1:sha256:".length), activationDecisionId: bundle.artifact.activationDecision.recordId, activationApplicationReceiptId: bundle.artifact.activationDecision.applicationReceiptId, activationDecisionChecksum: bundle.artifact.activationDecision.checksum, selectorMode: bundle.selector.mode, selectorSignature: bundle.selectorSignature, signingKeyId: bundle.artifact.signingKeyId, routingFingerprint: bundle.artifact.routingFingerprint, capacityPlanId: bundle.artifact.capacityPlan.id, capacityPlanFingerprint: bundle.artifact.capacityPlan.fingerprint, capacityPlanVersion: bundle.artifact.capacityPlan.version, generatedAt: bundle.artifact.generatedAt } }
     }
     assertPolicyDocument(parsed)
     if (Object.values(parsed.workspaces).some((workspace) => Object.values(workspace.investmentDecisions).some((decision) => decision.authorityProvider === "COMPASS_NATIVE"))) {
@@ -129,11 +131,33 @@ function configuredPolicy(): PolicyDocument & { nativePolicyEvidence?: NativePol
   }
 }
 
+export function inspectConfiguredNowPolicy(workspaceId: string) {
+  try {
+    const configured = configuredPolicy()
+    const policy = configured.workspaces[workspaceId]
+    const evidence = configured.nativePolicyEvidence
+    if (!policy || !evidence || evidence.workspaceId !== workspaceId) return { runtimePolicyReady: false, effectiveMode: "off" as const }
+    return {
+      runtimePolicyReady: true,
+      effectiveMode: effectiveNowGateMode(evidence.selectorMode),
+      policyArtifactId: evidence.artifactId,
+      routingFingerprint: evidence.routingFingerprint,
+      capacityPlanId: evidence.capacityPlanId,
+      capacityPlanFingerprint: evidence.capacityPlanFingerprint,
+      signingKeyId: evidence.signingKeyId,
+      generatedAt: evidence.generatedAt,
+    }
+  } catch {
+    return { runtimePolicyReady: false, effectiveMode: "off" as const }
+  }
+}
+
 export async function resolveNowCommitmentEligibility(
   item: NowEligibilitySubject,
   database: ReturnType<typeof getPrisma> = getPrisma(),
   adapters: { obsidianVerifier?: ObsidianInvestmentVerifier } = { obsidianVerifier: configuredObsidianInvestmentVerifier },
 ): Promise<NowCommitmentEligibilityInputs> {
+  if (deploymentNowGateMode() === "off") throw new NowEligibilityError("NOW_GATE_OFF", "Native NOW policy is disabled for this deployment.")
   const configured = configuredPolicy()
   const policy = configured.workspaces[item.workspaceId]
   if (!policy) throw new NowEligibilityError("POLICY_CONFIGURATION_REQUIRED", "No NOW commitment policy is configured for this workspace.")
