@@ -447,6 +447,46 @@ export function parseVercelQueryEnvelopes(line: string): Array<{ platformRequest
   } catch { return []; }
 }
 
+export function parseVercelRetainedLogs(lines: string[]): {
+  schemaPath: "observed-cli-metadata" | "legacy";
+  requests: VercelRequest[];
+  queryEnvelopes: Array<{ platformRequestId: string; event: PerformanceQueryEvent }>;
+} {
+  const parsed = lines.flatMap((line) => {
+    try { return [{ line, raw: JSON.parse(line) as Record<string, unknown> }]; }
+    catch { return []; }
+  });
+  const observed = parsed.filter(({ raw }) =>
+    typeof raw.id === "string" &&
+    ["deploymentId", "projectId", "source", "environment", "domain"].some((key) => raw[key] !== undefined));
+  if (observed.length === 0) {
+    return {
+      schemaPath: "legacy",
+      requests: lines.map(parseVercelRequestLog).filter((request): request is VercelRequest => request !== null),
+      queryEnvelopes: lines.flatMap(parseVercelQueryEnvelopes),
+    };
+  }
+  const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+    return Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)));
+  });
+  const grouped = new Map<string, typeof observed>();
+  for (const item of observed) {
+    const id = String(item.raw.id);
+    grouped.set(id, [...(grouped.get(id) ?? []), item]);
+  }
+  const unique = [...grouped.entries()].map(([id, candidates]) => {
+    if (new Set(candidates.map(({ raw }) => canonical(raw))).size !== 1) {
+      throw new Error(`Platform request ${id} has conflicting retained envelopes`);
+    }
+    return candidates[0].line;
+  });
+  const requests = unique.map(parseVercelRequestLog).filter((request): request is VercelRequest => request !== null);
+  if (requests.length !== unique.length) throw new Error("Observed Vercel CLI envelope is invalid");
+  assertVercelPreviewLogContext(requests);
+  return { schemaPath: "observed-cli-metadata", requests, queryEnvelopes: unique.flatMap(parseVercelQueryEnvelopes) };
+}
+
 export function assertVercelPreviewLogContext(requests: VercelRequest[]): void {
   const fields = requests.flatMap((request) => [request.deploymentId, request.projectId, request.source, request.environment, request.domain]);
   if (fields.every((field) => field === undefined)) return;
@@ -512,8 +552,11 @@ export function groupVercelRequestLogs(requests: VercelRequest[]): VercelRequest
   const grouped = new Map<string, VercelRequest[]>();
   for (const request of requests) grouped.set(request.requestId, [...(grouped.get(request.requestId) ?? []), request]);
   return [...grouped.entries()].map(([platformRequestId, candidates]) => {
-    const signatures = new Set(candidates.map((item) =>
-      `${item.method}\0${item.path}\0${item.statusCode}\0${item.timestamp}\0${item.durationMs ?? "unavailable"}`));
+    const signatures = new Set(candidates.map((item) => JSON.stringify([
+      item.method, item.path, item.statusCode, item.timestamp, item.durationMs,
+      item.deploymentId ?? null, item.projectId ?? null, item.source ?? null,
+      item.environment ?? null, item.domain ?? null,
+    ])));
     if (signatures.size !== 1) throw new Error(`Platform request ${platformRequestId} has inconsistent invocation records`);
     return candidates[0];
   });

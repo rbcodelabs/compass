@@ -5,9 +5,7 @@ import {
   extractCorrelatedBrowserRequests,
   aggregateDsqlByPlatformRequest,
   groupVercelRequestLogs,
-  parseVercelRequestLog,
-  parseVercelQueryEnvelopes,
-  assertVercelPreviewLogContext,
+  parseVercelRetainedLogs,
   type BrowserSample,
 } from "../lib/performance-baseline.ts";
 
@@ -22,19 +20,16 @@ const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8")) as {
 };
 const browserSamples = artifact.samples ?? [...(artifact.warm ?? []), ...(artifact.cold ?? [])];
 const lines = fs.readFileSync(logsPath, "utf8").split(/\r?\n/).filter(Boolean);
-const queryEnvelopes = lines.flatMap(parseVercelQueryEnvelopes);
-const rawRequests = lines
-  .map(parseVercelRequestLog)
-  .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+const { requests: rawRequests, queryEnvelopes, schemaPath } = parseVercelRetainedLogs(lines);
 const { requests: browserRequests, cacheHits } = extractCorrelatedBrowserRequests(browserSamples);
 const logs = groupVercelRequestLogs(rawRequests);
-assertVercelPreviewLogContext(logs);
 const correlated = correlateVercelRequests(browserRequests, logs);
 const durations = correlated.flatMap(({ vercel }) => vercel.durationMs === null ? [] : [vercel.durationMs]).sort((a, b) => a - b);
 const dsql = aggregateDsqlByPlatformRequest(correlated.map(({ vercel }) => vercel.requestId), queryEnvelopes);
 const percentile = (p: number) => durations[Math.ceil(durations.length * p) - 1] ?? null;
 process.stdout.write(JSON.stringify({
   version: 1,
+  retainedLogSchemaPath: schemaPath,
   requestCount: correlated.length,
   serverDurationAvailableCount: durations.length,
   totalServerDurationMs: durations.length ? durations.reduce((sum, value) => sum + value, 0) : null,

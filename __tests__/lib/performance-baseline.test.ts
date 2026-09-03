@@ -15,6 +15,7 @@ import {
   parseVercelQueryEnvelope,
   parseVercelQueryEnvelopes,
   assertVercelPreviewLogContext,
+  parseVercelRetainedLogs,
   aggregateDsqlByRequest,
   groupVercelEnvelopes,
   groupVercelRequestLogs,
@@ -506,6 +507,30 @@ describe("query artifacts", () => {
     expect(() => assertVercelPreviewLogContext([base])).not.toThrow();
     expect(() => assertVercelPreviewLogContext([base, { ...base, requestId: "two", environment: "production" }])).toThrow(/context/);
     expect(() => assertVercelPreviewLogContext([base, { ...base, requestId: "two", projectId: undefined }])).toThrow(/context/);
+  });
+
+  it("rejects conflicting duplicate platform context before selecting a request", () => {
+    const base = { requestId: "platform", customRequestId: "", method: "GET", path: "/roadmap", timestamp: "2026-09-03T01:54:19.949Z", durationMs: null, statusCode: 200, deploymentId: "dpl_One", projectId: "prj_One", source: "serverless", environment: "preview", domain: "one.vercel.app" };
+    for (const conflict of [
+      { projectId: "prj_Two" },
+      { environment: "production" },
+      { domain: "two.vercel.app" },
+      { deploymentId: undefined },
+    ]) expect(() => groupVercelRequestLogs([base, { ...base, ...conflict }])).toThrow(/inconsistent/);
+  });
+
+  it("deduplicates complete retained envelopes before counting nested DSQL events", () => {
+    const envelope = JSON.stringify({
+      id: "platform_1", timestamp: 1788400459949, deploymentId: "dpl_One", projectId: "prj_One",
+      source: "serverless", requestMethod: "GET", requestPath: "/roadmap", responseStatusCode: 200,
+      environment: "preview", domain: "one.vercel.app",
+      logs: [{ message: `COMPASS_PERF_QUERY {"version":1,"timestamp":"2026-09-03T01:54:19.950Z","requestId":"perf_function","operation":"SELECT","durationMs":4,"fingerprint":"${"a".repeat(64)}","success":true,"rowCount":1}` }],
+    });
+    const parsed = parseVercelRetainedLogs([envelope, envelope]);
+    expect(parsed.schemaPath).toBe("observed-cli-metadata");
+    expect(parsed.requests).toHaveLength(1);
+    expect(aggregateDsqlByPlatformRequest(["platform_1"], parsed.queryEnvelopes)[0].count).toBe(1);
+    expect(() => parseVercelRetainedLogs([envelope, envelope.replace('"preview"', '"production"')])).toThrow(/conflicting retained envelopes/);
   });
 
   it("correlates a browser URL with query parameters to an exact Vercel pathname", () => {
