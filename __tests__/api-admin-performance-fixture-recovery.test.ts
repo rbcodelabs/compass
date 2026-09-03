@@ -19,7 +19,7 @@ function env() {
     AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/preview", AWS_REGION: "us-east-1",
     VERCEL_GIT_COMMIT_SHA: SHA, VERCEL_DEPLOYMENT_ID: DEPLOYMENT, VERCEL_URL: HOST, MIGRATION_SECRET: SECRET,
   });
-  for (const key of ["DATABASE_URL", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "VERCEL_OIDC_TOKEN"]) delete process.env[key];
+  for (const key of ["DATABASE_URL", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "VERCEL_OIDC_TOKEN", "COMPASS_PERF_SCHEMA"]) delete process.env[key];
 }
 
 function request(action: "cleanup" | "verify" | "diagnose" = "verify", secret = SECRET, overrides: Record<string, unknown> = {}, host = HOST) {
@@ -132,6 +132,20 @@ describe("POST /api/admin/performance-fixture-recovery", () => {
     expect(diagnosticReturn).toBeGreaterThan(0);
     expect(runtimeImport).toBeGreaterThan(diagnosticReturn);
     expect(source).not.toMatch(/from ["']@\/lib\/db|from ["']@prisma\/client|getPrisma\(/);
+  });
+
+  it("treats an invalid performance schema override as a coarse runtime failure", async () => {
+    process.env.COMPASS_PERF_SCHEMA = "invalid-schema";
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const { POST } = await import("@/app/api/admin/performance-fixture-recovery/route");
+    const response = await POST(request("diagnose"));
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('{"error":"Not found"}');
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith("PF_DIAG_RUNTIME");
+    expect(execute).not.toHaveBeenCalled();
+    log.mockRestore();
   });
 
   it("does not expose secrets, environment values, request fields, errors, or stacks in diagnostic logs", async () => {

@@ -35,13 +35,17 @@ function exactExecutor(req: NextRequest, body: RecoveryRequest): boolean {
 
 function exactRuntimeConfiguration(): boolean {
   const env = process.env;
-  return env.VERCEL_ENV === "preview" &&
-    env.COMPASS_PERF_BASELINE === "1" &&
-    env.PERF_SERVER_KIND === "vercel-preview" &&
-    !env.DATABASE_URL && !env.AWS_PROFILE && !env.AWS_ACCESS_KEY_ID && !env.AWS_SECRET_ACCESS_KEY && !env.AWS_SESSION_TOKEN &&
-    env.PGSCHEMA === "compass" && getActiveSchema() === "compass_preview" &&
-    !!env.PGHOST && /^[a-z0-9-]+\.dsql\.[a-z0-9-]+\.on\.aws$/.test(env.PGHOST) &&
-    !!env.AWS_ROLE_ARN && !!env.AWS_REGION;
+  try {
+    return env.VERCEL_ENV === "preview" &&
+      env.COMPASS_PERF_BASELINE === "1" &&
+      env.PERF_SERVER_KIND === "vercel-preview" &&
+      !env.DATABASE_URL && !env.AWS_PROFILE && !env.AWS_ACCESS_KEY_ID && !env.AWS_SECRET_ACCESS_KEY && !env.AWS_SESSION_TOKEN &&
+      env.PGSCHEMA === "compass" && getActiveSchema() === "compass_preview" &&
+      !!env.PGHOST && /^[a-z0-9-]+\.dsql\.[a-z0-9-]+\.on\.aws$/.test(env.PGHOST) &&
+      !!env.AWS_ROLE_ARN && !!env.AWS_REGION;
+  } catch {
+    return false;
+  }
 }
 
 function hasSecret(req: NextRequest): boolean {
