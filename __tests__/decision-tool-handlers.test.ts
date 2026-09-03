@@ -1,18 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockPrepare, mockPrepareBuilding, mockApplyBuilding, mockGeneratePolicy, mockPrepareRelease, mockAdmit, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision, mockFindItem, mockRequireEnforcement } = vi.hoisted(() => ({
-  mockPrepare: vi.fn(),
-  mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(), mockGeneratePolicy: vi.fn(),
+const { mockPrepareBuilding, mockApplyBuilding, mockPrepareRelease, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision } = vi.hoisted(() => ({
+  mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(),
   mockPrepareRelease: vi.fn(),
-  mockAdmit: vi.fn(),
   mockQueueRelease: vi.fn(),
   mockFindRequest: vi.fn(),
   mockListRequests: vi.fn(),
   mockFindDecision: vi.fn(),
-  mockFindItem: vi.fn(),
-  mockRequireEnforcement: vi.fn(),
 }))
-vi.mock("@/lib/now-gate-runtime", () => ({ requireEffectiveNowEnforcement: mockRequireEnforcement }))
 vi.mock("@/lib/release-authorization", () => ({
   prepareReleaseRun: mockPrepareRelease,
   queueAuthorizedRelease: mockQueueRelease,
@@ -20,46 +15,24 @@ vi.mock("@/lib/release-authorization", () => ({
 }))
 
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ kind: "USER", userId: "user-1" }) }))
-vi.mock("@/lib/now-commitment", () => ({
-  prepareNowCommitment: mockPrepare,
-  admitRoadmapItemToNow: mockAdmit,
-}))
 vi.mock("@/lib/building-investment", () => ({ prepareBuildingInvestmentReview: mockPrepareBuilding, applyBuildingInvestmentDecision: mockApplyBuilding }))
-vi.mock("@/lib/native-now-policy", () => ({ generateNativeNowPolicy: mockGeneratePolicy }))
 vi.mock("@/lib/db", () => ({
   default: () => ({
     reviewRequest: { findUnique: mockFindRequest, findMany: mockListRequests },
     decisionRecord: { findUnique: mockFindDecision },
-    roadmapItem: { findUnique: mockFindItem },
   }),
 }))
 
-import { applyRecordedDecision, getReviewRequest, inspectNativeNowPolicy, listReviewRequests, requestBuildingInvestment, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, getReviewRequest, listReviewRequests, requestBuildingInvestment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 describe("decision MCP handlers", () => {
-  beforeEach(() => { vi.resetAllMocks(); process.env.NOW_DECISION_GATE_MODE = "enforce"; mockFindItem.mockResolvedValue({ workspaceId: "workspace-1" }) })
-
-  it("returns the review request ID when preparing a NOW commitment", async () => {
-    mockPrepare.mockResolvedValue({ requestId: "request-1", id: "revision-1", fingerprint: "abc" })
-
-    const result = await requestNowCommitment({ itemId: "item-1" })
-
-    expect(result.content[0].text).toContain("ID: request-1")
-    expect(mockPrepare).toHaveBeenCalledWith("item-1", { requestedById: "user-1" })
-  })
+  beforeEach(() => { vi.resetAllMocks() })
 
   it("prepares a Building investment review without taking the decision", async () => {
     mockPrepareBuilding.mockResolvedValue({ requestId: "request-1", id: "revision-1", fingerprint: "abc" })
     const result = await requestBuildingInvestment({ solutionId: "solution-1" })
     expect(result.structuredContent.ok).toBe(true)
     expect(mockPrepareBuilding).toHaveBeenCalledWith("solution-1", { requestedById: "user-1" })
-  })
-
-  it("inspects a deterministic native policy for an authorized workspace", async () => {
-    mockGeneratePolicy.mockResolvedValue({ document: { version: 1 }, inspection: { ready: true } })
-    const result = await inspectNativeNowPolicy({ workspaceId: "workspace-1" })
-    expect(result.structuredContent.ok).toBe(true)
-    expect(mockGeneratePolicy).toHaveBeenCalledWith("workspace-1")
   })
 
   it("prepares an exact release authorization scope for human review", async () => {
@@ -94,16 +67,6 @@ describe("decision MCP handlers", () => {
 
     expect(result.content[0].text).toContain("Commit item [PENDING]")
     expect(mockListRequests).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "workspace-1", state: "PENDING" } }))
-  })
-
-  it("applies a NOW decision idempotently and returns the receipt ID", async () => {
-    mockFindDecision.mockResolvedValue({ id: "decision-1", revision: { request: { gateType: "NOW_COMMITMENT", subjectId: "item-1", workspaceId: "workspace-1" } } })
-    mockAdmit.mockResolvedValue({ id: "receipt-1", receiptKey: "decision-1:ADMIT", status: "APPLIED" })
-
-    const result = await applyRecordedDecision({ decisionId: "decision-1" })
-
-    expect(result.content[0].text).toContain("ID: receipt-1")
-    expect(mockAdmit).toHaveBeenCalledWith("item-1", "decision-1")
   })
 
   it("applies an approved Building investment decision", async () => {

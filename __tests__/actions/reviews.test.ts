@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockAuth, mockPrepare, mockPrepareBuilding, mockApplyBuilding, mockFreshBuilding, mockFreshPolicy, mockRecord, mockAdmit, mockQueueRelease, mockRequireEnforcement } = vi.hoisted(() => ({
-  mockAuth: vi.fn(), mockPrepare: vi.fn(), mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(), mockFreshBuilding: vi.fn(), mockFreshPolicy: vi.fn(), mockRecord: vi.fn(), mockAdmit: vi.fn(), mockQueueRelease: vi.fn(), mockRequireEnforcement: vi.fn(),
+const { mockAuth, mockPrepareBuilding, mockApplyBuilding, mockFreshBuilding, mockRecord, mockQueueRelease } = vi.hoisted(() => ({
+  mockAuth: vi.fn(), mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(), mockFreshBuilding: vi.fn(), mockRecord: vi.fn(), mockQueueRelease: vi.fn(),
 }))
 const prisma = {
   workspace: { findFirst: vi.fn() },
@@ -11,35 +11,21 @@ const prisma = {
 }
 vi.mock("@/auth", () => ({ auth: mockAuth }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
-vi.mock("@/lib/now-commitment", () => ({ prepareNowCommitment: mockPrepare, admitRoadmapItemToNow: mockAdmit }))
-vi.mock("@/lib/now-gate-runtime", () => ({ requireEffectiveNowEnforcement: mockRequireEnforcement }))
 vi.mock("@/lib/decision-service", () => ({ recordDecision: mockRecord }))
 vi.mock("@/lib/building-investment", () => ({ prepareBuildingInvestmentReview: mockPrepareBuilding, applyBuildingInvestmentDecision: mockApplyBuilding, ensureBuildingInvestmentRevisionFresh: mockFreshBuilding }))
-vi.mock("@/lib/native-policy-activation", () => ({ applyNativePolicyActivationDecision: vi.fn(), ensureNativePolicyActivationRevisionFresh: mockFreshPolicy }))
 vi.mock("@/lib/release-authorization", () => ({
   queueAuthorizedRelease: mockQueueRelease,
   unconfiguredReleaseSourceRevalidator: { revalidate: vi.fn() },
 }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
-import { decideReviewAction, requestBuildingInvestmentAction, requestNowCommitmentAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
+import { decideReviewAction, requestBuildingInvestmentAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
 
 describe("review actions ownership", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    process.env.NOW_DECISION_GATE_MODE = "enforce"
     mockAuth.mockResolvedValue({ user: { id: "user-1" } })
-    mockFreshBuilding.mockResolvedValue({ stale: false }); mockFreshPolicy.mockResolvedValue({ stale: false })
-  })
-
-  it("authorizes NOW preparation against the item's canonical workspace", async () => {
-    prisma.roadmapItem.findUnique.mockResolvedValue({ id: "item-1", workspaceId: "ws-2" })
-    prisma.workspace.findFirst.mockResolvedValue(null)
-
-    await expect(requestNowCommitmentAction("ws-1", "item-1")).rejects.toThrow("Workspace not found")
-    expect(prisma.workspace.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "ws-2" }) }))
-    expect(mockRequireEnforcement).toHaveBeenCalledWith("ws-2")
-    expect(mockPrepare).not.toHaveBeenCalled()
+    mockFreshBuilding.mockResolvedValue({ stale: false })
   })
 
   it("authorizes Building preparation against the Solution's canonical workspace", async () => {
@@ -56,6 +42,14 @@ describe("review actions ownership", () => {
     await expect(decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "fp", optionId: "option-1" })).rejects.toThrow("Workspace not found")
     expect(prisma.workspace.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "ws-2" }) }))
     expect(mockRecord).not.toHaveBeenCalled()
+  })
+
+  it.each(["NOW_COMMITMENT", "NOW_POLICY_ACTIVATION"])("rejects retired %s reviews before auth or mutation", async (gateType) => {
+    prisma.reviewRevision.findUnique.mockResolvedValue({ id: "rev-legacy", request: { workspaceId: "ws-1", subjectId: "item-1", gateType } })
+    await expect(decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-legacy", fingerprint: "fp", optionId: "option-1" })).rejects.toThrow("read-only")
+    expect(prisma.workspace.findFirst).not.toHaveBeenCalled()
+    expect(mockRecord).not.toHaveBeenCalled()
+    expect(prisma.reviewOption.findUnique).not.toHaveBeenCalled()
   })
 
   it("queues an approved release decision with the immutable source fingerprint", async () => {

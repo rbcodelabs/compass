@@ -12,8 +12,6 @@ import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
 import { normalizeWorkspaceRole } from "@/lib/roles"
-import { createRoadmapItemWithNowGate, transitionRoadmapItemWithNowGate } from "@/lib/now-gate-runtime"
-import { updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger"
 import {
   createFeedback,
   addFeedbackAttachment,
@@ -128,7 +126,7 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
-import { applyRecordedDecision, getReviewRequest, inspectNativeNowPolicy, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestNativePolicyActivation, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, getReviewRequest, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -1324,17 +1322,16 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const actor = getMcpActor()
-        const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "mcp.solution.promote", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
+        const item = await prisma.roadmapItem.create({ data: {
             workspaceId,
             title: solution.title,
-            horizon: initialHorizon,
+            horizon,
             sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
             solutionId,
             opportunityId: solution.opportunity.id,
             squadId: solution.opportunity.squadId ?? null,
             isPrivate: isPrivate ?? false,
-          } }) })
+          } })
         return ok(
           `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
             (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
@@ -1619,17 +1616,6 @@ const _handler = createMcpHandler(
     )
 
     register(
-      "request_now_commitment",
-      {
-        title: "Request NOW Commitment",
-        description: "Prepares or refreshes an immutable human review packet for admitting an existing Roadmap Item to NOW. This does not take the human decision.",
-        inputSchema: { itemId: z.string().uuid().describe("UUID of the Roadmap Item") },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      requestNowCommitment,
-    )
-
-    register(
       "request_release_authorization",
       {
         title: "Request Release Authorization",
@@ -1649,27 +1635,6 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       requestReleaseAuthorization,
-    )
-
-    register(
-      "request_native_policy_activation",
-      {
-        title: "Request Native Policy Activation",
-        description: "Prepares a human-admin review bound to the exact generated native policy, capacity plan, routing fingerprint, and intended mode.",
-        inputSchema: { workspaceId: z.string().uuid(), routingFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/i).optional(), mode: z.enum(["shadow", "enforce"]), expectedTerminalDecisionId: z.string().uuid().optional(), reason: z.string().min(1).optional() },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      }, requestNativePolicyActivation,
-    )
-
-    register(
-      "inspect_native_now_policy",
-      {
-        title: "Inspect Native NOW Policy",
-        description: "Fails closed unless the active capacity plan and all selected Compass-native Building approvals can produce a deterministic NOW policy.",
-        inputSchema: { workspaceId: z.string().uuid() },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      inspectNativeNowPolicy,
     )
 
     register(
@@ -1819,10 +1784,7 @@ const _handler = createMcpHandler(
             ...(isPrivate !== undefined ? { isPrivate } : {}),
             updatedAt: new Date(),
         }
-        const actor = getMcpActor()
-        let updated
-        try { updated = await transitionRoadmapItemWithNowGate({ workspaceId: item.workspaceId, roadmapItemId: itemId, currentHorizon: item.horizon, requestedHorizon: horizon ?? item.horizon, ingressKey: "mcp.roadmap.update", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null }, mutate: (database) => updateRoadmapItemWithCapacityRelease(itemId, updateData, database) }) }
-        catch (error) { return fail(error instanceof Error ? error.message : "NOW commitment decision required") }
+        const updated = await prisma.roadmapItem.update({ where: { id: itemId }, data: updateData })
         return ok(
           `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
             `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
@@ -1847,7 +1809,7 @@ const _handler = createMcpHandler(
       "add_to_roadmap",
       {
         title: "Add to Roadmap",
-        description: "Creates a Roadmap Item in NEXT, LATER, or SHIPPED. NOW requires request_now_commitment and a recorded human decision. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
+        description: "Creates a Roadmap Item in any ordinary roadmap horizon. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Title of the roadmap item"),
@@ -1874,11 +1836,10 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const actor = getMcpActor()
-        const item = await createRoadmapItemWithNowGate({ workspaceId, requestedHorizon: horizon, ingressKey: "mcp.roadmap.add", actor: actor.userId ? { kind: "USER", id: actor.userId } : { kind: "SYSTEM", id: null }, create: (database, initialHorizon) => database.roadmapItem.create({ data: {
+        const item = await prisma.roadmapItem.create({ data: {
             workspaceId,
             title: title.trim(),
-            horizon: initialHorizon,
+            horizon,
             description: description?.trim(),
             sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
             solutionId: solutionId ?? null,
@@ -1888,7 +1849,7 @@ const _handler = createMcpHandler(
             startDate: startDate ? new Date(startDate) : undefined,
             endDate: endDate ? new Date(endDate) : undefined,
             isPrivate: isPrivate ?? false,
-          } }) })
+          } })
         return ok(
           `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
             (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +

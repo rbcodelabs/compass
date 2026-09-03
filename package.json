@@ -26,8 +26,7 @@
     "test:e2e:all": "node scripts/run-functional-e2e.mjs all",
     "e2e:db:prepare": "node scripts/prepare-e2e-database.mjs",
     "e2e:db:verify-clean": "node scripts/verify-e2e-cleanup.mjs",
-    "docs:screenshots": "playwright test --project=screenshots e2e/screenshots.spec.ts",
-    "policy:generate-native": "tsx scripts/generate-native-now-policy.ts"
+    "docs:screenshots": "playwright test --project=screenshots e2e/screenshots.spec.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",

@@ -13,7 +13,6 @@ import { backfillRoadmapCommitmentProvenance } from "../../lib/dsql-backfill";
 import { seedE2E } from "./fixtures/seed-e2e";
 import { setRunToken } from "./fixtures/run-token";
 import { assertIsolatedE2EDatabase } from "./fixtures/isolated-database";
-import { signedE2ENativePolicy } from "./fixtures/native-policy-config";
 
 const schema = process.env.PGSCHEMA
   ? `${process.env.PGSCHEMA}_dev`
@@ -101,12 +100,7 @@ export default async function globalSetup() {
   const pool = new pg.Pool({ connectionString });
   try {
     await ensureFunctionalSchema(pool);
-    const seed = await seedE2E(pool, runToken);
-    if (seed.nowCommitmentPolicy && "workspaces" in seed.nowCommitmentPolicy) {
-      const policyPath = path.resolve(process.cwd(), "test-results/e2e-now-commitment-policy.json");
-      await fs.mkdir(path.dirname(policyPath), { recursive: true });
-      await fs.writeFile(policyPath, `${JSON.stringify(signedE2ENativePolicy(seed.nowCommitmentPolicy as Record<string, unknown>), null, 2)}\n`, "utf8");
-    }
+    await seedE2E(pool, runToken);
     console.log(`[e2e globalSetup] Seed complete ✓ (run ${runToken})`);
   } finally {
     await pool.end();

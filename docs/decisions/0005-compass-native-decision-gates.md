@@ -1,6 +1,7 @@
 # ADR 0005 — Compass-Native Decision Gates and Immutable Decision Ledger
 
-- **Status:** Accepted
+- **Status:** Superseded
+- **Superseded by:** Simple human decision tracking; native NOW enforcement is retired while historical records remain readable.
 - **Date:** 2026-08-31
 - **Decision owner:** Rick Bowman
 - **Scope:** Human decisions that authorize guarded Compass transitions, initially

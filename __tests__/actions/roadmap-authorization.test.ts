@@ -16,6 +16,7 @@ const keyResult = { findFirst: vi.fn() };
 const feedbackItem = { findFirst: vi.fn() };
 const portfolioCapacityReservation = { findUnique: vi.fn(), update: vi.fn() };
 const portfolioCapacityPlan = { updateMany: vi.fn() };
+const nowGateEvaluation = { create: vi.fn() };
 
 const prisma = {
   roadmapItem,
@@ -28,6 +29,7 @@ const prisma = {
   feedbackItem,
   portfolioCapacityReservation,
   portfolioCapacityPlan,
+  nowGateEvaluation,
   $transaction: vi.fn(),
 };
 
@@ -309,16 +311,10 @@ describe("rescheduleRoadmapItem", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it("releases capacity inside the same transaction when leaving NOW", async () => {
+  it("reschedules from NOW without policy, capacity, or telemetry I/O", async () => {
     roadmapItem.findFirst
       .mockResolvedValueOnce({ id: ITEM, workspaceId: WS, horizon: "NOW", status: "ACTIVE" })
       .mockResolvedValueOnce(null);
-    portfolioCapacityReservation.findUnique.mockResolvedValue({
-      id: "reservation-a",
-      planId: "plan-a",
-      state: "ACTIVE",
-      plan: { version: 2 },
-    });
 
     await rescheduleRoadmapItem(ITEM, WS, {
       horizon: "NEXT",
@@ -326,7 +322,10 @@ describe("rescheduleRoadmapItem", () => {
       endDate: new Date("2026-09-11T00:00:00.000Z"),
     });
 
-    expect(portfolioCapacityReservation.update).toHaveBeenCalled();
+    expect(portfolioCapacityReservation.findUnique).not.toHaveBeenCalled();
+    expect(portfolioCapacityReservation.update).not.toHaveBeenCalled();
+    expect(portfolioCapacityPlan.updateMany).not.toHaveBeenCalled();
+    expect(prisma.nowGateEvaluation.create).not.toHaveBeenCalled();
     expect(roadmapItem.update).toHaveBeenCalled();
   });
 
@@ -361,16 +360,7 @@ describe("rescheduleRoadmapItem", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it("does not update the item when capacity release conflicts", async () => {
-    roadmapItem.findFirst.mockResolvedValueOnce({ id: ITEM, workspaceId: WS, horizon: "NOW", status: "ACTIVE" }).mockResolvedValueOnce(null);
-    portfolioCapacityReservation.findUnique.mockResolvedValueOnce({ id: "reservation-a", planId: "plan-a", state: "ACTIVE", plan: { version: 2 } });
-    portfolioCapacityPlan.updateMany.mockResolvedValueOnce({ count: 0 });
-    await expect(rescheduleRoadmapItem(ITEM, WS, { horizon: "NEXT", startDate: null, endDate: null })).rejects.toThrow("Workspace capacity changed concurrently");
-    expect(roadmapItem.update).not.toHaveBeenCalled();
-    expect(revalidatePath).not.toHaveBeenCalled();
-  });
-
-  it("rolls back capacity release and item state together when the item update fails", async () => {
+  it("rolls back item state when the item update fails", async () => {
     const canonical = {
       item: { id: ITEM, workspaceId: WS, horizon: "NOW", status: "ACTIVE", sortOrder: 1 },
       plan: { id: "plan-a", version: 2, state: "ACTIVE" },
@@ -384,25 +374,11 @@ describe("rescheduleRoadmapItem", () => {
       Object.assign(canonical.item, data);
       throw new Error("item update failed");
     });
-    const txPlanUpdateMany = vi.fn().mockImplementation(async () => {
-      canonical.plan.version += 1;
-      return { count: 1 };
-    });
-    const txReservationUpdate = vi.fn().mockImplementation(async () => {
-      canonical.reservation.state = "RELEASED";
-      canonical.reservation.activeRoadmapItemId = null;
-      canonical.reservation.releasedAt = new Date();
-    });
     prisma.$transaction.mockImplementationOnce(async (callback: (tx: typeof prisma) => unknown) => {
       const snapshot = structuredClone(canonical);
       const tx = {
         ...prisma,
         roadmapItem: { ...roadmapItem, findFirst: txRoadmapFindFirst, update: txRoadmapUpdate },
-        portfolioCapacityPlan: { updateMany: txPlanUpdateMany },
-        portfolioCapacityReservation: {
-          findUnique: vi.fn().mockResolvedValue({ ...canonical.reservation, plan: { ...canonical.plan } }),
-          update: txReservationUpdate,
-        },
       };
       try {
         return await callback(tx);
@@ -416,8 +392,6 @@ describe("rescheduleRoadmapItem", () => {
 
     await expect(rescheduleRoadmapItem(ITEM, WS, { horizon: "NEXT", startDate: null, endDate: null })).rejects.toThrow("item update failed");
 
-    expect(txPlanUpdateMany).toHaveBeenCalledTimes(1);
-    expect(txReservationUpdate).toHaveBeenCalledTimes(1);
     expect(txRoadmapUpdate).toHaveBeenCalledTimes(1);
     expect(canonical).toEqual(before);
     expect(roadmapItem.update).not.toHaveBeenCalled();
