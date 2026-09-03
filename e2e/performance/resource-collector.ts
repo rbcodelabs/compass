@@ -19,7 +19,8 @@ export type ResourceContract = {
 
 export type ResourceExpectation =
   | { exact: number; allowCanceledOnly?: boolean }
-  | { min: number; max?: number };
+  | { min: number; max?: number }
+  | { warmRsc: true };
 
 export type ResourceSnapshot = {
   resources: ReadonlyArray<Readonly<ResourceMetric>>;
@@ -268,12 +269,16 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
       if (attributionError) throw attributionError;
       active = null;
       const requestIds = [...sample.requestIds];
-      const validCount = "exact" in expectation
+      const validCount = "warmRsc" in expectation
+        ? sample.contract.kind === "rsc"
+        : "exact" in expectation
         ? requestIds.length === expectation.exact || expectation.allowCanceledOnly === true
         : requestIds.length >= expectation.min &&
           (expectation.max === undefined || requestIds.length <= expectation.max);
       if (!validCount) {
-        const expected = "exact" in expectation
+        const expected = "warmRsc" in expectation
+          ? "a warm RSC contract"
+          : "exact" in expectation
           ? `exactly ${expectation.exact}`
           : `at least ${expectation.min}${expectation.max === undefined ? "" : ` and at most ${expectation.max}`}`;
         throw new Error(`Resource sample ${sampleId} expected ${expected} qualifying request(s), observed ${requestIds.length}`);
@@ -294,6 +299,7 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
         .map((resource) => Object.freeze({ ...resource })));
       const canceledCount = requestIds.filter((requestId) => requests.get(requestId)!.canceled).length;
       if (
+        !("warmRsc" in expectation) &&
         "exact" in expectation &&
         expectation.allowCanceledOnly &&
         requestIds.length !== expectation.exact &&
@@ -305,7 +311,7 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
         );
       }
       if (sample.contract.kind === "rsc" && requestIds.length > 0 && sampleResources.length === 0) {
-        if (!("exact" in expectation && expectation.allowCanceledOnly)) {
+        if (!("warmRsc" in expectation) && !("exact" in expectation && expectation.allowCanceledOnly)) {
           throw new Error(`Resource sample ${sampleId} had no completed RSC requests (${canceledCount} canceled)`);
         }
       }

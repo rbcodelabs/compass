@@ -172,17 +172,38 @@ describe("performance CDP resource collector lifecycle", () => {
     }));
   });
 
-  it("rejects a completed RSC when the caller observed no matching response", async () => {
+  it("classifies a completed RSC from CDP when the response observer has not settled", async () => {
     vi.useFakeTimers();
     const cdp = new FakeCdp();
     const collector = await createResourceCollector(cdp as unknown as CDPSession, []);
     collector.beginSample("perf_one", { kind: "rsc", targetPath: "/org/ws/roadmap", match: "exact" });
     cdp.emit("Network.requestWillBeSent", request("completed", "http://localhost/org/ws/roadmap", { Rsc: "1" }));
     cdp.emit("Network.loadingFinished", { requestId: "completed", encodedDataLength: 10 });
-    const closing = collector.closeSample("perf_one", { exact: 0, allowCanceledOnly: true });
-    const assertion = expect(closing).rejects.toThrow(/expected 0 completed.*observed 1 completed/);
+    const closing = collector.closeSample("perf_one", { warmRsc: true });
     await vi.advanceTimersByTimeAsync(100);
-    await assertion;
+    await expect(closing).resolves.toEqual(expect.objectContaining({
+      attemptedCount: 1,
+      completedCount: 1,
+      canceledCount: 0,
+    }));
+  });
+
+  it("retains mixed completed and canceled warm RSC fan-out", async () => {
+    vi.useFakeTimers();
+    const cdp = new FakeCdp();
+    const collector = await createResourceCollector(cdp as unknown as CDPSession, []);
+    collector.beginSample("perf_one", { kind: "rsc", targetPath: "/org/ws/roadmap", match: "exact" });
+    cdp.emit("Network.requestWillBeSent", request("completed", "http://localhost/org/ws/roadmap", { Rsc: "1" }));
+    cdp.emit("Network.loadingFinished", { requestId: "completed", encodedDataLength: 10 });
+    cdp.emit("Network.requestWillBeSent", request("canceled", "http://localhost/org/ws/roadmap", { Rsc: "1" }));
+    cdp.emit("Network.loadingFailed", { requestId: "canceled", errorText: "net::ERR_ABORTED", canceled: true });
+    const closing = collector.closeSample("perf_one", { warmRsc: true });
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(closing).resolves.toEqual(expect.objectContaining({
+      attemptedCount: 2,
+      completedCount: 1,
+      canceledCount: 1,
+    }));
   });
 
   it("waits for completion and returns an immutable snapshot without unrelated traffic", async () => {

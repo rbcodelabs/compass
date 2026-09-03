@@ -184,11 +184,8 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, collector: Awai
   const after = await cdpSnapshot(cdp);
   const client = await readClientMetrics(page, false);
   const matchedRsc = await responseObserver.settle();
-  const resourceSnapshot = await collector.closeSample(
-    requestId,
-    matchedRsc.url ? { min: 1 } : { exact: 0, allowCanceledOnly: true }
-  );
-  const networkOutcome = matchedRsc.url
+  const resourceSnapshot = await collector.closeSample(requestId, { warmRsc: true });
+  const networkOutcome = resourceSnapshot.completedCount > 0
     ? "rsc-request"
     : resourceSnapshot.canceledCount > 0
       ? "router-cache-canceled-speculative"
@@ -196,7 +193,9 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, collector: Awai
   return {
     requestId,
     method: "GET",
-    path: matchedRsc.url ? new URL(matchedRsc.url).pathname + new URL(matchedRsc.url).search : `${base}/${route}`,
+    path: resourceSnapshot.resources[0]
+      ? new URL(resourceSnapshot.resources[0].url).pathname + new URL(resourceSnapshot.resources[0].url).search
+      : `${base}/${route}`,
     networkOutcome,
     prefetchObserved,
     startedAt,
