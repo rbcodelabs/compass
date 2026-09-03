@@ -13,6 +13,8 @@ import {
   parsePerformanceQueryLog,
   parseVercelRequestLog,
   parseVercelQueryEnvelope,
+  parseVercelQueryEnvelopes,
+  assertVercelPreviewLogContext,
   aggregateDsqlByRequest,
   groupVercelEnvelopes,
   groupVercelRequestLogs,
@@ -473,6 +475,37 @@ describe("query artifacts", () => {
       method: "GET",
       path: "/acme/compass/roadmap",
     }));
+  });
+
+  it("parses the retained Vercel CLI serverless envelope without inventing duration", () => {
+    const line = JSON.stringify({
+      id: "gm98s-1788400459949-41d83ef6154b",
+      timestamp: 1788400459949,
+      deploymentId: "dpl_One",
+      projectId: "prj_One",
+      source: "serverless",
+      requestMethod: "GET",
+      requestPath: "/acme/compass/roadmap",
+      responseStatusCode: 200,
+      environment: "preview",
+      domain: "compass-preview-rbcodelabs-team.vercel.app",
+      logs: [{ message: `COMPASS_PERF_QUERY {"version":1,"timestamp":"2026-09-03T01:54:19.950Z","requestId":"perf_inv_function","operation":"SELECT","durationMs":4,"fingerprint":"${"a".repeat(64)}","success":true,"rowCount":1}` }],
+    });
+    expect(parseVercelRequestLog(line)).toEqual(expect.objectContaining({
+      requestId: "gm98s-1788400459949-41d83ef6154b",
+      durationMs: null,
+      statusCode: 200,
+    }));
+    expect(parseVercelQueryEnvelopes(line)).toEqual([
+      expect.objectContaining({ platformRequestId: "gm98s-1788400459949-41d83ef6154b", event: expect.objectContaining({ requestId: "perf_inv_function" }) }),
+    ]);
+  });
+
+  it("requires complete consistent preview context when retained CLI metadata is present", () => {
+    const base = { requestId: "one", customRequestId: "", method: "GET", path: "/roadmap", timestamp: "2026-09-03T01:54:19.949Z", durationMs: null, statusCode: 200, deploymentId: "dpl_One", projectId: "prj_One", source: "serverless", environment: "preview", domain: "compass-preview-rbcodelabs-team.vercel.app" };
+    expect(() => assertVercelPreviewLogContext([base])).not.toThrow();
+    expect(() => assertVercelPreviewLogContext([base, { ...base, requestId: "two", environment: "production" }])).toThrow(/context/);
+    expect(() => assertVercelPreviewLogContext([base, { ...base, requestId: "two", projectId: undefined }])).toThrow(/context/);
   });
 
   it("correlates a browser URL with query parameters to an exact Vercel pathname", () => {

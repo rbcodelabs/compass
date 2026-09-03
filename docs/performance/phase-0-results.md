@@ -52,6 +52,10 @@ authoritative platform invocation with the same method, exact pathname, success
 status, and start timestamp within ±500 ms. The selected platform request ID
 then binds its DSQL envelopes, which must contain exactly one internally
 consistent query request ID. Zero or multiple candidates fail closed.
+The retained Vercel CLI schema does not provide Function duration. Ingested
+server-duration fields are therefore `null` with an explicit availability
+count, never synthesized as zero; browser latency and DSQL query timing remain
+available.
 Navigation aggregates are authoritative per route and, for warm samples, per
 `networkOutcome`; overall aggregates are convenience summaries only.
 

@@ -366,8 +366,13 @@ export interface VercelRequest {
   method: string;
   path: string;
   timestamp: string;
-  durationMs: number;
+  durationMs: number | null;
   statusCode: number;
+  deploymentId?: string;
+  projectId?: string;
+  source?: string;
+  environment?: string;
+  domain?: string;
 }
 
 export function parseVercelRequestLog(line: string): VercelRequest | null {
@@ -389,21 +394,27 @@ export function parseVercelRequestLog(line: string): VercelRequest | null {
       : String(rawTimestamp ?? "");
     const functionInfo = (raw.function && typeof raw.function === "object" ? raw.function : {}) as Record<string, unknown>;
     const value = {
-      requestId: String(raw.requestId ?? raw.request_id ?? ""),
+      requestId: String(raw.id ?? raw.requestId ?? raw.request_id ?? ""),
       customRequestId: String(headers["x-compass-perf-request-id"] ?? raw.customRequestId ?? ""),
       method: String(request.method ?? proxy.method ?? raw.requestMethod ?? raw.method ?? ""),
       path: String(raw.requestPath ?? request.path ?? request.url ?? raw.path ?? ""),
       timestamp,
-      durationMs: Number(functionInfo.durationMs ?? functionInfo.duration ?? raw.durationMs ?? raw.duration ?? NaN),
-      statusCode: Number(response.statusCode ?? response.status ?? raw.statusCode ?? raw.status ?? NaN),
+      durationMs: functionInfo.durationMs !== undefined || functionInfo.duration !== undefined || raw.durationMs !== undefined || raw.duration !== undefined
+        ? Number(functionInfo.durationMs ?? functionInfo.duration ?? raw.durationMs ?? raw.duration)
+        : null,
+      statusCode: Number(response.statusCode ?? response.status ?? raw.responseStatusCode ?? raw.statusCode ?? raw.status ?? NaN),
+      deploymentId: typeof raw.deploymentId === "string" ? raw.deploymentId : undefined,
+      projectId: typeof raw.projectId === "string" ? raw.projectId : undefined,
+      source: typeof raw.source === "string" ? raw.source : undefined,
+      environment: typeof raw.environment === "string" ? raw.environment : undefined,
+      domain: typeof raw.domain === "string" ? raw.domain : undefined,
     };
     if (
       !value.requestId ||
       !/^[A-Z]+$/.test(value.method) ||
       !value.path.startsWith("/") ||
       Number.isNaN(Date.parse(value.timestamp)) ||
-      !Number.isFinite(value.durationMs) ||
-      value.durationMs < 0 ||
+      (value.durationMs !== null && (!Number.isFinite(value.durationMs) || value.durationMs < 0)) ||
       !Number.isInteger(value.statusCode)
     ) return null;
     return value;
@@ -413,13 +424,41 @@ export function parseVercelRequestLog(line: string): VercelRequest | null {
 }
 
 export function parseVercelQueryEnvelope(line: string): { platformRequestId: string; event: PerformanceQueryEvent } | null {
+  return parseVercelQueryEnvelopes(line)[0] ?? null;
+}
+
+export function parseVercelQueryEnvelopes(line: string): Array<{ platformRequestId: string; event: PerformanceQueryEvent }> {
   try {
     const raw = JSON.parse(line) as Record<string, unknown>;
-    const platformRequestId = String(raw.requestId ?? raw.request_id ?? "");
-    const message = typeof raw.message === "string" ? raw.message : typeof raw.msg === "string" ? raw.msg : "";
-    const event = parsePerformanceQueryLog(message);
-    return platformRequestId && event ? { platformRequestId, event } : null;
-  } catch { return null; }
+    const platformRequestId = String(raw.id ?? raw.requestId ?? raw.request_id ?? "");
+    if (!platformRequestId) return [];
+    const nested = Array.isArray(raw.logs) ? raw.logs : [];
+    const messages = [raw, ...nested].flatMap((entry) => {
+      if (typeof entry === "string") return [entry];
+      if (!entry || typeof entry !== "object") return [];
+      const record = entry as Record<string, unknown>;
+      const message = typeof record.message === "string" ? record.message : typeof record.msg === "string" ? record.msg : "";
+      return message ? [message] : [];
+    });
+    return messages.flatMap((message) => {
+      const event = parsePerformanceQueryLog(message);
+      return event ? [{ platformRequestId, event }] : [];
+    });
+  } catch { return []; }
+}
+
+export function assertVercelPreviewLogContext(requests: VercelRequest[]): void {
+  const fields = requests.flatMap((request) => [request.deploymentId, request.projectId, request.source, request.environment, request.domain]);
+  if (fields.every((field) => field === undefined)) return;
+  const complete = requests.every((request) => request.deploymentId && request.projectId && request.source && request.environment && request.domain);
+  const consistent = (key: "deploymentId" | "projectId" | "source" | "environment" | "domain") =>
+    new Set(requests.map((request) => request[key])).size === 1;
+  if (
+    !complete ||
+    !consistent("deploymentId") || !consistent("projectId") || !consistent("source") || !consistent("environment") || !consistent("domain") ||
+    requests[0]?.source !== "serverless" || requests[0]?.environment !== "preview" ||
+    !/^[a-z0-9-]+\.vercel\.app$/.test(requests[0]?.domain ?? "")
+  ) throw new Error("Vercel retained log context is incomplete or inconsistent");
 }
 
 export function aggregateDsqlByRequest(measuredCustomIds: string[], envelopes: Array<{ platformRequestId: string; event: PerformanceQueryEvent }>) {
@@ -474,7 +513,7 @@ export function groupVercelRequestLogs(requests: VercelRequest[]): VercelRequest
   for (const request of requests) grouped.set(request.requestId, [...(grouped.get(request.requestId) ?? []), request]);
   return [...grouped.entries()].map(([platformRequestId, candidates]) => {
     const signatures = new Set(candidates.map((item) =>
-      `${item.method}\0${item.path}\0${item.statusCode}\0${item.timestamp}\0${item.durationMs}`));
+      `${item.method}\0${item.path}\0${item.statusCode}\0${item.timestamp}\0${item.durationMs ?? "unavailable"}`));
     if (signatures.size !== 1) throw new Error(`Platform request ${platformRequestId} has inconsistent invocation records`);
     return candidates[0];
   });
