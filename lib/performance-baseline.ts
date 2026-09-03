@@ -456,10 +456,8 @@ export function parseVercelRetainedLogs(lines: string[]): {
     try { return [{ line, raw: JSON.parse(line) as Record<string, unknown> }]; }
     catch { return []; }
   });
-  const observed = parsed.filter(({ raw }) =>
-    typeof raw.id === "string" &&
-    ["deploymentId", "projectId", "source", "environment", "domain"].some((key) => raw[key] !== undefined));
-  if (observed.length === 0) {
+  const attemptedObserved = parsed.some(({ raw }) => raw.id !== undefined);
+  if (!attemptedObserved) {
     return {
       schemaPath: "legacy",
       requests: lines.map(parseVercelRequestLog).filter((request): request is VercelRequest => request !== null),
@@ -475,10 +473,12 @@ export function parseVercelRetainedLogs(lines: string[]): {
     "requestPath", "responseStatusCode", "environment", "domain",
   ];
   if (requestShaped.some(({ raw }) =>
+    typeof raw.id !== "string" ||
     observedKeys.some((key) => raw[key] === undefined) ||
     raw.requestId !== undefined || raw.request_id !== undefined)) {
     throw new Error("Vercel retained input contains mixed or incomplete observed CLI records");
   }
+  const observed = requestShaped.filter(({ raw }) => typeof raw.id === "string");
   const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return item;
     return Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)));

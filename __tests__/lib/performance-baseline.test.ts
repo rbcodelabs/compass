@@ -541,6 +541,11 @@ describe("query artifacts", () => {
     expect(() => parseVercelRetainedLogs([observed, legacy])).toThrow(/mixed or incomplete/);
   });
 
+  it("rejects a standalone partial raw.id record instead of treating it as legacy", () => {
+    const partial = JSON.stringify({ id: "platform_partial", timestamp: 1788400459950, requestMethod: "GET", requestPath: "/tasks", responseStatusCode: 200 });
+    expect(() => parseVercelRetainedLogs([partial])).toThrow(/mixed or incomplete/);
+  });
+
   it("correlates a browser URL with query parameters to an exact Vercel pathname", () => {
     const browser = {
       requestId: "perf_sample_1",
