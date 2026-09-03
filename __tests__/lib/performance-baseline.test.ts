@@ -533,6 +533,14 @@ describe("query artifacts", () => {
     expect(() => parseVercelRetainedLogs([envelope, envelope.replace('"preview"', '"production"')])).toThrow(/conflicting retained envelopes/);
   });
 
+  it("rejects partial and legacy request records mixed into observed CLI input", () => {
+    const observed = JSON.stringify({ id: "platform_1", timestamp: 1788400459949, deploymentId: "dpl_One", projectId: "prj_One", source: "serverless", requestMethod: "GET", requestPath: "/roadmap", responseStatusCode: 200, environment: "preview", domain: "one.vercel.app", logs: [] });
+    const partial = JSON.stringify({ id: "platform_2", timestamp: 1788400459950, requestMethod: "GET", requestPath: "/tasks", responseStatusCode: 200 });
+    const legacy = JSON.stringify({ requestId: "platform_3", timestamp: 1788400459951, method: "GET", path: "/capture", statusCode: 200, durationMs: 10 });
+    expect(() => parseVercelRetainedLogs([observed, partial])).toThrow(/mixed or incomplete/);
+    expect(() => parseVercelRetainedLogs([observed, legacy])).toThrow(/mixed or incomplete/);
+  });
+
   it("correlates a browser URL with query parameters to an exact Vercel pathname", () => {
     const browser = {
       requestId: "perf_sample_1",

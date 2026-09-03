@@ -466,6 +466,19 @@ export function parseVercelRetainedLogs(lines: string[]): {
       queryEnvelopes: lines.flatMap(parseVercelQueryEnvelopes),
     };
   }
+  const requestShaped = parsed.filter(({ raw }) => [
+    "id", "requestId", "request_id", "requestMethod", "requestPath",
+    "responseStatusCode", "deploymentId", "projectId", "source", "environment", "domain",
+  ].some((key) => raw[key] !== undefined));
+  const observedKeys = [
+    "id", "timestamp", "deploymentId", "projectId", "source", "requestMethod",
+    "requestPath", "responseStatusCode", "environment", "domain",
+  ];
+  if (requestShaped.some(({ raw }) =>
+    observedKeys.some((key) => raw[key] === undefined) ||
+    raw.requestId !== undefined || raw.request_id !== undefined)) {
+    throw new Error("Vercel retained input contains mixed or incomplete observed CLI records");
+  }
   const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return item;
     return Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)));
