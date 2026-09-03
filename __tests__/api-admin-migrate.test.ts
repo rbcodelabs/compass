@@ -609,6 +609,7 @@ describe("/api/admin/migrate rollout observability", () => {
 
   it.each([
     { status: "submitted", expectedStatus: 202 },
+    { status: "processing", expectedStatus: 202 },
     { status: "failed", expectedStatus: 500 },
     { status: null, expectedStatus: 500 },
   ])("keeps a $status async job from earning a finished receipt", async ({ status, expectedStatus }) => {
@@ -626,6 +627,12 @@ describe("/api/admin/migrate rollout observability", () => {
 
     const response = await POST(request("POST", { script: plan.name }))
     expect(response.status).toBe(expectedStatus)
+    if (status === "processing") {
+      await expect(response.json()).resolves.toMatchObject({ migrationProgress: { state: "WAITING", jobId: "job-1" } })
+    }
+    if (status === "failed") {
+      await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining("failed: boom") })
+    }
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET finished_at"))).toBe(false)
   })
 
