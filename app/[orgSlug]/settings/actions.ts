@@ -6,6 +6,7 @@ import { validateMetricsForFormula } from "@/lib/scoring";
 import type { ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
+import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
 
 export interface ScoringMetricInput {
   key: string;
@@ -189,6 +190,10 @@ async function deleteWorkspaceCascade(prisma: OrgPrisma, workspaceId: string) {
     where: { workspaceId },
     data: { assumptionId: null },
   });
+
+  // Decision/release/capacity aggregates reference Tasks and RoadmapItems.
+  // DSQL has no FK cascades, so clear the full child graph first.
+  await deleteWorkspaceDecisionData(prisma, workspaceId);
 
   // 3. Tasks + TaskLinks (TaskLink.task is Restrict; parentTask self-ref is
   //    safe when all rows go in a single deleteMany).

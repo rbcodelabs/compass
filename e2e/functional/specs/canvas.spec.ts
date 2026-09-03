@@ -208,6 +208,8 @@ test.describe("Canvas", () => {
     const promotePanel = page.locator('[data-slot="sheet-content"]');
     await expect(promotePanel).toBeVisible();
     await promotePanel.getByRole("button", { name: /Promote to Roadmap/i }).click();
+    await promotePanel.getByRole("combobox").filter({ hasText: "Now" }).click();
+    await page.getByRole("option", { name: "Next" }).click();
     await promotePanel.getByRole("button", { name: "→ Roadmap" }).click();
     await expect(
       promotePanel.getByRole("button", { name: /Promote to Roadmap/i })

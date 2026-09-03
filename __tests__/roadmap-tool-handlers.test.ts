@@ -46,9 +46,11 @@ const mockPrisma = {
   checklistTemplateItem: mockChecklistTemplateItem,
   launchChecklist: mockLaunchChecklist,
   launchChecklistItem: mockLaunchChecklistItem,
+  portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
+  portfolioCapacityPlan: { updateMany: vi.fn() },
   // Array-form $transaction: just resolves each promise in sequence, like the
   // real Prisma client does when given an array (not the interactive-callback form).
-  $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+  $transaction: vi.fn(),
 }
 
 vi.mock("@/lib/db", () => ({
@@ -91,7 +93,8 @@ const templateWithItems = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockPrisma.$transaction.mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops))
+  mockPrisma.$transaction.mockImplementation((operation: Promise<unknown>[] | ((database: typeof mockPrisma) => unknown)) => Array.isArray(operation) ? Promise.all(operation) : operation(mockPrisma))
+  mockPrisma.portfolioCapacityReservation.findUnique.mockResolvedValue(null)
 
   mockWorkspace.findUnique.mockResolvedValue({ id: WORKSPACE_ID })
   mockRoadmapItem.findUnique.mockResolvedValue({
@@ -277,8 +280,7 @@ describe("setLaunchTier", () => {
     const result = await setLaunchTier({ itemId: ITEM_ID, tier: "TIER_1" })
 
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
-    // Array form, not the interactive-callback form.
-    expect(Array.isArray(mockPrisma.$transaction.mock.calls[0][0])).toBe(true)
+    expect(typeof mockPrisma.$transaction.mock.calls[0][0]).toBe("function")
 
     expect(order.indexOf("launchChecklist.create")).toBeLessThan(order.indexOf("launchChecklistItem.createMany"))
     expect(order.indexOf("launchChecklistItem.createMany")).toBeLessThan(order.indexOf("roadmapItem.update"))

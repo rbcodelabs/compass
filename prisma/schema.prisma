@@ -145,6 +145,9 @@ model Workspace {
   agentConversations   AgentConversation[]
   researchStudies      ResearchStudy[]
   researchAttachments  ResearchAttachment[]
+  reviewRequests       ReviewRequest[]
+  releaseRuns          ReleaseRun[]
+  portfolioCapacityPlans PortfolioCapacityPlan[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -153,83 +156,83 @@ model Workspace {
 // ─── Capture / Research Studies ──────────────────────────────────────────────
 
 model ResearchStudy {
-  id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId    String              @map("workspace_id") @db.Uuid
-  name           String              @db.VarChar(255)
-  goal           String              @db.Text
-  studyType      String              @default("CUSTOMER_INTERVIEW") @map("study_type") @db.VarChar(30)
-  guide          String              @db.Text
-  targetMinutes  Int                 @default(15) @map("target_minutes")
-  appUrl         String?             @map("app_url") @db.Text
-  shareTokenHash String?             @unique @map("share_token_hash") @db.VarChar(64)
-  shareExpiresAt DateTime?           @map("share_expires_at")
-  status         String              @default("DRAFT") @db.VarChar(20)
-  createdAt      DateTime            @default(now()) @map("created_at")
-  updatedAt      DateTime            @default(now()) @map("updated_at")
-  createdById    String?             @map("created_by_id") @db.Uuid
-  updatedById    String?             @map("updated_by_id") @db.Uuid
-  source         String              @default("UI") @db.VarChar(20)
-  workspace      Workspace           @relation(fields: [workspaceId], references: [id])
-  sessions       ResearchSession[]
-  syntheses      ResearchSynthesis[]
+  id                String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String                     @map("workspace_id") @db.Uuid
+  name              String                     @db.VarChar(255)
+  goal              String                     @db.Text
+  studyType         String                     @default("CUSTOMER_INTERVIEW") @map("study_type") @db.VarChar(30)
+  guide             String                     @db.Text
+  targetMinutes     Int                        @default(15) @map("target_minutes")
+  appUrl            String?                    @map("app_url") @db.Text
+  shareTokenHash    String?                    @unique @map("share_token_hash") @db.VarChar(64)
+  shareExpiresAt    DateTime?                  @map("share_expires_at")
+  status            String                     @default("DRAFT") @db.VarChar(20)
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  updatedAt         DateTime                   @default(now()) @map("updated_at")
+  createdById       String?                    @map("created_by_id") @db.Uuid
+  updatedById       String?                    @map("updated_by_id") @db.Uuid
+  source            String                     @default("UI") @db.VarChar(20)
+  workspace         Workspace                  @relation(fields: [workspaceId], references: [id])
+  sessions          ResearchSession[]
+  syntheses         ResearchSynthesis[]
   participantTokens ResearchParticipantToken[]
-  attachments      ResearchAttachment[]
+  attachments       ResearchAttachment[]
 
   @@index([workspaceId, status])
   @@map("research_studies")
 }
 
 model ResearchParticipantToken {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  studyId     String    @map("study_id") @db.Uuid
-  tokenHash   String    @unique(map: "idx_research_participant_tokens_hash") @map("token_hash") @db.VarChar(64)
-  kind        String    @default("PRIMARY") @db.VarChar(30)
-  expiresAt   DateTime  @map("expires_at")
-  revokedAt   DateTime? @map("revoked_at")
-  lastUsedAt  DateTime? @map("last_used_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  createdById String?   @map("created_by_id") @db.Uuid
-  startWindowAt DateTime? @map("start_window_at")
-  startCount    Int?      @map("start_count")
-  responseWindowAt DateTime? @map("response_window_at")
-  responseCount Int?      @map("response_count")
-  agentWindowAt DateTime? @map("agent_window_at")
-  agentCallCount Int?     @map("agent_call_count")
-  study       ResearchStudy @relation(fields: [studyId], references: [id])
-  sessions    ResearchSession[]
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studyId          String            @map("study_id") @db.Uuid
+  tokenHash        String            @unique(map: "idx_research_participant_tokens_hash") @map("token_hash") @db.VarChar(64)
+  kind             String            @default("PRIMARY") @db.VarChar(30)
+  expiresAt        DateTime          @map("expires_at")
+  revokedAt        DateTime?         @map("revoked_at")
+  lastUsedAt       DateTime?         @map("last_used_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  createdById      String?           @map("created_by_id") @db.Uuid
+  startWindowAt    DateTime?         @map("start_window_at")
+  startCount       Int?              @map("start_count")
+  responseWindowAt DateTime?         @map("response_window_at")
+  responseCount    Int?              @map("response_count")
+  agentWindowAt    DateTime?         @map("agent_window_at")
+  agentCallCount   Int?              @map("agent_call_count")
+  study            ResearchStudy     @relation(fields: [studyId], references: [id])
+  sessions         ResearchSession[]
 
   @@index([studyId, kind, revokedAt], map: "idx_research_participant_tokens_study_kind")
   @@map("research_participant_tokens")
 }
 
 model ResearchSession {
-  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  studyId          String         @map("study_id") @db.Uuid
-  modality         String         @default("CHAT") @db.VarChar(10)
-  status           String         @default("PENDING") @db.VarChar(20)
-  participantTokenId String?      @map("participant_token_id") @db.Uuid
-  resumeTokenHash  String?        @unique(map: "idx_research_sessions_resume_token") @map("resume_token_hash") @db.VarChar(64)
-  participantName  String?        @map("participant_name") @db.VarChar(255)
-  participantEmail String?        @map("participant_email") @db.VarChar(255)
-  summary          String?        @db.Text
-  audioUrl         String?        @map("audio_url") @db.Text
-  startedAt        DateTime?      @map("started_at")
-  lastActiveAt     DateTime?      @map("last_active_at")
-  completedAt      DateTime?      @map("completed_at")
-  endedReason      String?        @map("ended_reason") @db.VarChar(50)
-  nextSequence     Int?           @map("next_sequence")
-  activeRequestId  String?        @map("active_request_id") @db.Uuid
-  activeRequestExpiresAt DateTime? @map("active_request_expires_at")
-  createdAt        DateTime       @default(now()) @map("created_at")
-  updatedAt        DateTime       @default(now()) @map("updated_at")
-  study            ResearchStudy  @relation(fields: [studyId], references: [id])
-  participantToken ResearchParticipantToken? @relation(fields: [participantTokenId], references: [id])
-  turns            ResearchTurn[]
-  requests         ResearchRequest[]
-  attachments      ResearchAttachment[]
-  voiceEvents      ResearchVoiceEvent[]
-  voiceLeaseId     String?        @map("voice_lease_id") @db.Uuid
-  voiceLeaseExpiresAt DateTime?    @map("voice_lease_expires_at")
+  id                     String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studyId                String                    @map("study_id") @db.Uuid
+  modality               String                    @default("CHAT") @db.VarChar(10)
+  status                 String                    @default("PENDING") @db.VarChar(20)
+  participantTokenId     String?                   @map("participant_token_id") @db.Uuid
+  resumeTokenHash        String?                   @unique(map: "idx_research_sessions_resume_token") @map("resume_token_hash") @db.VarChar(64)
+  participantName        String?                   @map("participant_name") @db.VarChar(255)
+  participantEmail       String?                   @map("participant_email") @db.VarChar(255)
+  summary                String?                   @db.Text
+  audioUrl               String?                   @map("audio_url") @db.Text
+  startedAt              DateTime?                 @map("started_at")
+  lastActiveAt           DateTime?                 @map("last_active_at")
+  completedAt            DateTime?                 @map("completed_at")
+  endedReason            String?                   @map("ended_reason") @db.VarChar(50)
+  nextSequence           Int?                      @map("next_sequence")
+  activeRequestId        String?                   @map("active_request_id") @db.Uuid
+  activeRequestExpiresAt DateTime?                 @map("active_request_expires_at")
+  createdAt              DateTime                  @default(now()) @map("created_at")
+  updatedAt              DateTime                  @default(now()) @map("updated_at")
+  study                  ResearchStudy             @relation(fields: [studyId], references: [id])
+  participantToken       ResearchParticipantToken? @relation(fields: [participantTokenId], references: [id])
+  turns                  ResearchTurn[]
+  requests               ResearchRequest[]
+  attachments            ResearchAttachment[]
+  voiceEvents            ResearchVoiceEvent[]
+  voiceLeaseId           String?                   @map("voice_lease_id") @db.Uuid
+  voiceLeaseExpiresAt    DateTime?                 @map("voice_lease_expires_at")
 
   @@index([studyId, status])
   @@index([participantTokenId, status], map: "idx_research_sessions_participant_token")
@@ -237,13 +240,13 @@ model ResearchSession {
 }
 
 model ResearchTurn {
-  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  sessionId String          @map("session_id") @db.Uuid
-  role      String          @db.VarChar(20)
-  content   String          @db.Text
-  sequence  Int
-  createdAt DateTime        @default(now()) @map("created_at")
-  session   ResearchSession @relation(fields: [sessionId], references: [id])
+  id          String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId   String               @map("session_id") @db.Uuid
+  role        String               @db.VarChar(20)
+  content     String               @db.Text
+  sequence    Int
+  createdAt   DateTime             @default(now()) @map("created_at")
+  session     ResearchSession      @relation(fields: [sessionId], references: [id])
   attachments ResearchAttachment[]
 
   @@unique([sessionId, sequence], map: "idx_research_turns_session_sequence")
@@ -702,6 +705,8 @@ model RoadmapItem {
   opportunityId    String?          @map("opportunity_id") @db.Uuid
   experimentId     String?          @map("experiment_id") @db.Uuid
   feedbackId       String?          @map("feedback_id") @db.Uuid
+  nowCommitmentProvenance String     @default("LEGACY_UNGATED") @map("now_commitment_provenance") @db.VarChar(30)
+  nowDecisionRecordId String?        @map("now_decision_record_id") @db.Uuid
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @default(now()) @map("updated_at")
   workspace        Workspace        @relation(fields: [workspaceId], references: [id])
@@ -717,8 +722,294 @@ model RoadmapItem {
   source           String           @default("UI") @map("source") @db.VarChar(20)
   launchChecklist  LaunchChecklist?
   positioningBrief Doc?
+  capacityReservation PortfolioCapacityReservation?
 
   @@map("roadmap_items")
+}
+
+// ─── Human decision gates ───────────────────────────────────────────────────
+// ReviewRequest is the mutable envelope. Revisions, options, decisions, and
+// application receipts are append-only by service contract. UUID references
+// are validated in application code because Aurora DSQL does not enforce FKs.
+
+model ReviewRequest {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String           @map("workspace_id") @db.Uuid
+  gateType           String           @map("gate_type") @db.VarChar(50)
+  subjectType        String           @map("subject_type") @db.VarChar(50)
+  subjectId          String           @map("subject_id") @db.Uuid
+  state              String           @default("DRAFT") @db.VarChar(30)
+  currentRevisionId  String?          @unique(map: "idx_review_requests_current_revision") @map("current_revision_id") @db.Uuid
+  revisionCount      Int              @default(0) @map("revision_count")
+  decisionCycle      Int              @default(1) @map("decision_cycle")
+  reopenReason       String?          @map("reopen_reason") @db.Text
+  reopenedById       String?          @map("reopened_by_id") @db.Uuid
+  reconsidersDecisionId String?       @map("reconsiders_decision_id") @db.Uuid
+  requestedById      String?          @map("requested_by_id") @db.Uuid
+  assignedToId       String?          @map("assigned_to_id") @db.Uuid
+  dueAt               DateTime?        @map("due_at")
+  expiresAt           DateTime?        @map("expires_at")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @default(now()) @map("updated_at")
+  workspace           Workspace        @relation(fields: [workspaceId], references: [id])
+  currentRevision     ReviewRevision?  @relation("CurrentReviewRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  revisions           ReviewRevision[] @relation("RequestRevisions")
+  decisions           DecisionRecord[]
+
+  @@unique([workspaceId, gateType, subjectType, subjectId], map: "idx_review_requests_subject_gate")
+  @@index([workspaceId, state], map: "idx_review_requests_workspace_state")
+  @@map("review_requests")
+}
+
+model ReviewRevision {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requestId       String          @map("request_id") @db.Uuid
+  revisionNumber  Int             @map("revision_number")
+  sourceFingerprint String?       @map("source_fingerprint") @db.VarChar(64)
+  fingerprint     String          @db.VarChar(64)
+  title           String          @db.VarChar(255)
+  summary         String?         @db.Text
+  packetJson      String          @map("packet_json") @db.Text
+  requiredRole    String          @default("ADMIN") @map("required_role") @db.VarChar(30)
+  expiresAt       DateTime?       @map("expires_at")
+  supersededAt    DateTime?       @map("superseded_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  request         ReviewRequest   @relation("RequestRevisions", fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  currentFor      ReviewRequest?  @relation("CurrentReviewRevision")
+  options         ReviewOption[]
+  decisions       DecisionRecord[]
+  evidenceRefs    DecisionEvidenceRef[]
+
+  @@unique([requestId, revisionNumber], map: "idx_review_revisions_request_number")
+  @@unique([requestId, fingerprint], map: "idx_review_revisions_request_fingerprint")
+  @@index([requestId, sourceFingerprint], map: "idx_review_revisions_request_source")
+  @@map("review_revisions")
+}
+
+model DecisionEvidenceRef {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reviewRevisionId      String         @map("review_revision_id") @db.Uuid
+  evidenceType          String         @map("evidence_type") @db.VarChar(80)
+  authorityProvider     String         @map("authority_provider") @db.VarChar(30)
+  authorityRecordId     String         @map("authority_record_id") @db.VarChar(255)
+  authorityLocator      String         @map("authority_locator") @db.Text
+  authorityChecksum     String         @map("authority_checksum") @db.Char(64)
+  subjectType           String         @map("subject_type") @db.VarChar(50)
+  subjectId             String         @map("subject_id") @db.Uuid
+  decisionOutcome       String         @map("decision_outcome") @db.VarChar(50)
+  decisionSourceVersion String         @map("decision_source_version") @db.VarChar(80)
+  applicationStatus     String         @map("application_status") @db.VarChar(30)
+  appliedAt             DateTime       @map("applied_at")
+  applicationReceiptId  String         @map("application_receipt_id") @db.VarChar(255)
+  verifiedAt            DateTime       @map("verified_at")
+  verifierVersion       String         @map("verifier_version") @db.VarChar(80)
+  createdAt             DateTime       @default(now()) @map("created_at")
+  reviewRevision        ReviewRevision @relation(fields: [reviewRevisionId], references: [id])
+
+  @@unique([reviewRevisionId, evidenceType, authorityRecordId], map: "idx_decision_evidence_refs_revision_authority")
+  @@index([subjectType, subjectId, evidenceType], map: "idx_decision_evidence_refs_subject")
+  @@map("decision_evidence_refs")
+}
+
+model ReviewOption {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  revisionId        String           @map("revision_id") @db.Uuid
+  actionKey         String           @map("action_key") @db.VarChar(50)
+  label             String           @db.VarChar(120)
+  outcomeClass      String           @map("outcome_class") @db.VarChar(30)
+  continuationKey   String           @map("continuation_key") @db.VarChar(80)
+  sortOrder         Int              @default(0) @map("sort_order")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  revision          ReviewRevision   @relation(fields: [revisionId], references: [id])
+  decisions         DecisionRecord[]
+
+  @@unique([revisionId, actionKey], map: "idx_review_options_revision_action")
+  @@map("review_options")
+}
+
+model DecisionRecord {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String                @map("workspace_id") @db.Uuid
+  requestId       String                @map("request_id") @db.Uuid
+  revisionId      String                @unique(map: "idx_decision_records_revision") @map("revision_id") @db.Uuid
+  optionId        String                @map("option_id") @db.Uuid
+  fingerprint     String                @db.VarChar(64)
+  actorUserId     String                @map("actor_user_id") @db.Uuid
+  actorRole       String                @map("actor_role") @db.VarChar(30)
+  rationale       String?               @db.Text
+  idempotencyKey  String                @unique(map: "idx_decision_records_idempotency") @map("idempotency_key") @db.VarChar(128)
+  decidedAt       DateTime              @default(now()) @map("decided_at")
+  request         ReviewRequest         @relation(fields: [requestId], references: [id])
+  revision        ReviewRevision        @relation(fields: [revisionId], references: [id])
+  option          ReviewOption          @relation(fields: [optionId], references: [id])
+  applications    DecisionApplication[]
+  authorizedReleaseRun ReleaseRun?       @relation("ReleaseAuthorizationDecision")
+  releaseDispatches    ReleaseDispatch[]
+
+  @@index([workspaceId, decidedAt], map: "idx_decision_records_workspace_decided")
+  @@map("decision_records")
+}
+
+model DecisionApplication {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  decisionId        String         @map("decision_id") @db.Uuid
+  continuationKey   String         @map("continuation_key") @db.VarChar(80)
+  targetType        String         @map("target_type") @db.VarChar(50)
+  targetId          String         @map("target_id") @db.Uuid
+  status            String         @default("PENDING") @db.VarChar(30)
+  receiptKey        String         @unique(map: "idx_decision_applications_receipt") @map("receipt_key") @db.VarChar(160)
+  attemptCount      Int            @default(0) @map("attempt_count")
+  lastError         String?        @map("last_error") @db.Text
+  appliedAt         DateTime?      @map("applied_at")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @default(now()) @map("updated_at")
+  decision          DecisionRecord @relation(fields: [decisionId], references: [id])
+
+  @@unique([decisionId, continuationKey], map: "idx_decision_applications_decision_continuation")
+  @@index([targetType, targetId], map: "idx_decision_applications_target")
+  @@map("decision_applications")
+}
+
+model PortfolioCapacityPlan {
+  id              String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String                         @map("workspace_id") @db.Uuid
+  policyId        String                         @map("policy_id") @db.VarChar(160)
+  planFingerprint String                         @map("plan_fingerprint") @db.Char(64)
+  unit            String                         @db.VarChar(80)
+  availableUnits  Int                            @map("available_units")
+  unitsPerNowItem Int                            @map("units_per_now_item")
+  nowLimit        Int                            @map("now_limit")
+  state           String                         @default("DRAFT") @db.VarChar(30)
+  activeWorkspaceId String?                      @unique(map: "idx_capacity_plans_active_workspace") @map("active_workspace_id") @db.Uuid
+  nowSnapshotFingerprint String?                 @map("now_snapshot_fingerprint") @db.Char(64)
+  nowSnapshotCount Int?                          @map("now_snapshot_count")
+  reconciledAt    DateTime?                      @map("reconciled_at")
+  version         Int                            @default(0)
+  createdAt       DateTime                       @default(now()) @map("created_at")
+  updatedAt       DateTime                       @default(now()) @map("updated_at")
+  workspace       Workspace                      @relation(fields: [workspaceId], references: [id])
+  reservations    PortfolioCapacityReservation[]
+  operations      PortfolioCapacityOperation[]
+
+  @@unique([workspaceId, policyId], map: "idx_capacity_plans_workspace_policy")
+  @@index([workspaceId, state], map: "idx_capacity_plans_workspace_state")
+  @@map("portfolio_capacity_plans")
+}
+
+model PortfolioCapacityReservation {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  planId          String                @map("plan_id") @db.Uuid
+  roadmapItemId   String                @map("roadmap_item_id") @db.Uuid
+  activeRoadmapItemId String?           @unique(map: "idx_capacity_reservations_active_item") @map("active_roadmap_item_id") @db.Uuid
+  decisionRecordId String?              @map("decision_record_id") @db.Uuid
+  units           Int
+  state           String                @default("STAGED") @db.VarChar(30)
+  releasedAt      DateTime?             @map("released_at")
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @default(now()) @map("updated_at")
+  plan            PortfolioCapacityPlan @relation(fields: [planId], references: [id])
+  roadmapItem     RoadmapItem?           @relation(fields: [activeRoadmapItemId], references: [id])
+
+  @@unique([planId, roadmapItemId], map: "idx_capacity_reservations_plan_item")
+  @@index([planId, state], map: "idx_capacity_reservations_plan_state")
+  @@index([roadmapItemId, createdAt], map: "idx_capacity_reservations_item_history")
+  @@index([decisionRecordId], map: "idx_capacity_reservations_decision")
+  @@map("portfolio_capacity_reservations")
+}
+
+model PortfolioCapacityOperation {
+  id                 String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String                @map("workspace_id") @db.Uuid
+  planId             String?               @map("plan_id") @db.Uuid
+  action             String                @db.VarChar(20)
+  idempotencyKey     String                @map("idempotency_key") @db.VarChar(160)
+  requestFingerprint String                @map("request_fingerprint") @db.Char(64)
+  status             String                @default("IN_PROGRESS") @db.VarChar(30)
+  progressCursor     String?               @map("progress_cursor") @db.Uuid
+  resultJson         String?               @map("result_json") @db.Text
+  errorCode          String?               @map("error_code") @db.VarChar(100)
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @default(now()) @map("updated_at")
+  completedAt        DateTime?             @map("completed_at")
+  plan               PortfolioCapacityPlan? @relation(fields: [planId], references: [id])
+
+  @@unique([workspaceId, idempotencyKey], map: "idx_capacity_operations_workspace_key")
+  @@index([planId, action, createdAt], map: "idx_capacity_operations_plan_action_created")
+  @@map("portfolio_capacity_operations")
+}
+
+// ─── Release authorization ledger ──────────────────────────────────────────
+// This is the normalized authorization/outbox slice from ADR-0005. Provider
+// evidence and merge/deploy/verification state are intentionally deferred;
+// creating a ReleaseDispatch never invokes external release automation.
+
+model ReleaseRun {
+  id                            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId                   String            @map("workspace_id") @db.Uuid
+  provider                      String            @default("GITHUB") @db.VarChar(30)
+  repositoryOwner               String            @map("repository_owner") @db.VarChar(255)
+  repositoryName                String            @map("repository_name") @db.VarChar(255)
+  pullRequestNumber             Int               @map("pull_request_number")
+  baseRef                       String            @map("base_ref") @db.VarChar(255)
+  headSha                       String            @map("head_sha") @db.Char(40)
+  targetEnvironment             String            @default("PRODUCTION") @map("target_environment") @db.VarChar(30)
+  releasePolicyId               String            @map("release_policy_id") @db.VarChar(160)
+  sourceFingerprint             String            @map("source_fingerprint") @db.Char(64)
+  state                         String            @default("PREPARING") @db.VarChar(30)
+  authorizationDecisionRecordId String?           @unique(map: "idx_release_runs_authorization_decision") @map("authorization_decision_record_id") @db.Uuid
+  version                       Int               @default(0)
+  lastErrorCode                 String?           @map("last_error_code") @db.VarChar(100)
+  lastError                     String?           @map("last_error") @db.Text
+  createdById                   String?           @map("created_by_id") @db.Uuid
+  createdAt                     DateTime          @default(now()) @map("created_at")
+  updatedAt                     DateTime          @default(now()) @map("updated_at")
+  workspace                     Workspace         @relation(fields: [workspaceId], references: [id])
+  authorizationDecisionRecord   DecisionRecord?   @relation("ReleaseAuthorizationDecision", fields: [authorizationDecisionRecordId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tasks                         ReleaseRunTask[]
+  dispatches                    ReleaseDispatch[]
+
+  @@unique([workspaceId, provider, repositoryOwner, repositoryName, pullRequestNumber, sourceFingerprint], map: "idx_release_runs_scope_fingerprint")
+  @@index([workspaceId, state, updatedAt], map: "idx_release_runs_workspace_state")
+  @@index([provider, repositoryOwner, repositoryName, pullRequestNumber], map: "idx_release_runs_repository_pr")
+  @@map("release_runs")
+}
+
+model ReleaseRunTask {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  releaseRunId String     @map("release_run_id") @db.Uuid
+  taskId       String     @map("task_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at")
+  releaseRun   ReleaseRun @relation(fields: [releaseRunId], references: [id])
+  task         Task       @relation(fields: [taskId], references: [id])
+
+  @@unique([releaseRunId, taskId], map: "idx_release_run_tasks_run_task")
+  @@index([taskId, releaseRunId], map: "idx_release_run_tasks_task_run")
+  @@map("release_run_tasks")
+}
+
+model ReleaseDispatch {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  releaseRunId     String         @map("release_run_id") @db.Uuid
+  decisionRecordId String         @map("decision_record_id") @db.Uuid
+  continuationKey  String         @default("DISPATCH_RELEASE_RUN") @map("continuation_key") @db.VarChar(80)
+  status           String         @default("PENDING") @db.VarChar(30)
+  idempotencyKey   String         @unique(map: "idx_release_dispatches_idempotency") @map("idempotency_key") @db.VarChar(255)
+  claimedBy        String?        @map("claimed_by") @db.VarChar(255)
+  claimExpiresAt   DateTime?      @map("claim_expires_at")
+  attemptCount     Int            @default(0) @map("attempt_count")
+  version          Int            @default(0)
+  runtimeRunId     String?        @map("runtime_run_id") @db.VarChar(255)
+  lastError        String?        @map("last_error") @db.Text
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @default(now()) @map("updated_at")
+  completedAt      DateTime?      @map("completed_at")
+  releaseRun       ReleaseRun     @relation(fields: [releaseRunId], references: [id])
+  decisionRecord   DecisionRecord @relation(fields: [decisionRecordId], references: [id])
+
+  @@unique([decisionRecordId, continuationKey], map: "idx_release_dispatches_decision_continuation")
+  @@index([status, claimExpiresAt, createdAt], map: "idx_release_dispatches_claim")
+  @@index([releaseRunId, status], map: "idx_release_dispatches_run_status")
+  @@map("release_dispatches")
 }
 
 // ─── Launch Tiers & Checklists ──────────────────────────────────────────────
@@ -1137,19 +1428,19 @@ model Artifact {
 /// Insert-only Artifact content revision. Exactly one of blobPathname or
 /// externalUrl is populated according to the parent Artifact.sourceType.
 model ArtifactRevision {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  artifactId     String    @map("artifact_id") @db.Uuid
-  revisionNumber Int       @map("revision_number")
-  blobPathname   String?   @map("blob_pathname") @db.Text
-  filename       String?   @db.VarChar(255)
-  mimeType       String?   @map("mime_type") @db.VarChar(100)
-  byteSize       Int?      @map("byte_size")
-  sha256         String?   @db.VarChar(64)
-  externalUrl    String?   @map("external_url") @db.Text
-  createdById    String?   @map("created_by_id") @db.Uuid
-  source         String    @default("UI") @db.VarChar(20)
-  createdAt      DateTime  @default(now()) @map("created_at")
-  artifact       Artifact  @relation("ArtifactRevisions", fields: [artifactId], references: [id])
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  artifactId     String     @map("artifact_id") @db.Uuid
+  revisionNumber Int        @map("revision_number")
+  blobPathname   String?    @map("blob_pathname") @db.Text
+  filename       String?    @db.VarChar(255)
+  mimeType       String?    @map("mime_type") @db.VarChar(100)
+  byteSize       Int?       @map("byte_size")
+  sha256         String?    @db.VarChar(64)
+  externalUrl    String?    @map("external_url") @db.Text
+  createdById    String?    @map("created_by_id") @db.Uuid
+  source         String     @default("UI") @db.VarChar(20)
+  createdAt      DateTime   @default(now()) @map("created_at")
+  artifact       Artifact   @relation("ArtifactRevisions", fields: [artifactId], references: [id])
   currentFor     Artifact[] @relation("CurrentArtifactRevision")
 
   @@unique([artifactId, revisionNumber])
@@ -1302,6 +1593,7 @@ model Task {
   parentTask Task?      @relation("TaskParent", fields: [parentTaskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   subtasks   Task[]     @relation("TaskParent")
   links      TaskLink[]
+  releaseRunTasks ReleaseRunTask[]
 
   createdById String? @map("created_by_id") @db.Uuid
   updatedById String? @map("updated_by_id") @db.Uuid
