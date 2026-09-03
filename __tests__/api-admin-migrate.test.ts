@@ -58,6 +58,7 @@ const RESEARCH_CLEANUP_INDEX_NAMES = [
   "idx_research_blob_cleanups_pathname",
   "idx_research_blob_cleanups_workspace_retry",
 ]
+const LIVE_DSQL_ACTOR_CHECK = "CHECK (((actor_kind)::text = ANY ((ARRAY['USER'::character varying, 'SERVICE'::character varying])::text[])) AND (actor_id IS NOT NULL) OR ((actor_kind)::text = ANY ((ARRAY['ANONYMOUS'::character varying, 'SYSTEM'::character varying])::text[])) AND (actor_id IS NULL))"
 
 function request(method: "GET" | "POST", body?: unknown, secret = "test-secret") {
   return new NextRequest("http://localhost/api/admin/migrate", {
@@ -147,6 +148,30 @@ describe("/api/admin/migrate rollout observability", () => {
     expect(normalizeConstraintDefinition('UNIQUE NULLS DISTINCT ("active_workspace_id")', "u")).toBe(normalizeConstraintDefinition('UNIQUE ("active_workspace_id")', "u"))
     expect(normalizeConstraintDefinition('UNIQUE NULLS NOT DISTINCT ("active_workspace_id")', "u")).not.toBe(normalizeConstraintDefinition('UNIQUE ("active_workspace_id")', "u"))
   })
+  it("canonicalizes only Aurora DSQL literal-array ANY renderings as equivalent CHECK membership", () => {
+    const expected = 'CHECK (("actor_kind" IN (\'USER\', \'SERVICE\') AND "actor_id" IS NOT NULL) OR ("actor_kind" IN (\'ANONYMOUS\', \'SYSTEM\') AND "actor_id" IS NULL))'
+    expect(normalizeConstraintDefinition(LIVE_DSQL_ACTOR_CHECK, "c")).toBe(normalizeConstraintDefinition(expected, "c"))
+    expect(normalizeConstraintDefinition(LIVE_DSQL_ACTOR_CHECK, "u")).not.toBe(normalizeConstraintDefinition(expected, "u"))
+  })
+
+  it.each([
+    ["changed member", "CHECK ((actor_kind = ANY ((ARRAY['USER'::text, 'ROBOT'::text])::text[])) AND actor_id IS NOT NULL)"],
+    ["changed left-hand column", "CHECK ((mode = ANY ((ARRAY['USER'::text, 'SERVICE'::text])::text[])) AND actor_id IS NOT NULL)"],
+    ["ALL with a changed operator", "CHECK ((actor_kind <> ALL ((ARRAY['USER'::text, 'SERVICE'::text])::text[])) AND actor_id IS NOT NULL)"],
+    ["runtime array", "CHECK ((actor_kind = ANY (allowed_actor_kinds)) AND actor_id IS NOT NULL)"],
+    ["mixed literal array", "CHECK ((actor_kind = ANY ((ARRAY['USER'::text, current_user])::text[])) AND actor_id IS NOT NULL)"],
+    ["NULL-bearing array", "CHECK ((actor_kind = ANY ((ARRAY['USER'::text, NULL])::text[])) AND actor_id IS NOT NULL)"],
+    ["non-simple left-hand expression", "CHECK ((lower(actor_kind) = ANY ((ARRAY['USER'::text, 'SERVICE'::text])::text[])) AND actor_id IS NOT NULL)"],
+  ])("does not canonicalize a %s as literal CHECK membership", (_case, actual) => {
+    const membership = "CHECK ((actor_kind IN ('USER', 'SERVICE')) AND actor_id IS NOT NULL)"
+    expect(normalizeConstraintDefinition(actual, "c")).not.toBe(normalizeConstraintDefinition(membership, "c"))
+  })
+
+  it("keeps actor nullability rules exact after DSQL membership canonicalization", () => {
+    const expected = "CHECK ((actor_kind IN ('USER', 'SERVICE') AND actor_id IS NOT NULL))"
+    const alteredNullRule = "CHECK (((actor_kind)::text = ANY ((ARRAY['USER'::text, 'SERVICE'::text])::text[])) AND actor_id IS NULL)"
+    expect(normalizeConstraintDefinition(alteredNullRule, "c")).not.toBe(normalizeConstraintDefinition(expected, "c"))
+  })
   it("does not expose migration preflight or index state without MIGRATION_SECRET", async () => {
     const response = await GET(request("GET", undefined, "wrong"))
 
@@ -203,7 +228,7 @@ describe("/api/admin/migrate rollout observability", () => {
         { table_name: "roadmap_items", column_name: "now_decision_record_id", data_type: "uuid", character_maximum_length: null, datetime_precision: null, is_nullable: "YES", column_default: null },
       ] }
       if (sql.includes("pg_get_indexdef")) return { rows: catalog.indexes.map((index, indexNumber) => ({ name: index.name, table_name: index.table, valid: true, unique: index.unique, key_columns: index.keyColumns, definition: indexNumber === 0 ? `CREATE INDEX ${index.name} ON compass_preview.${index.table} USING btree_index ("workspace_id", "state")` : index.definition })) }
-      if (sql.includes("FROM pg_constraint")) return { rows: catalog.constraints.map((constraint) => ({ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: true, definition: ["idx_capacity_plans_active_workspace", "idx_capacity_reservations_active_item"].includes(constraint.name) ? constraint.definition.replace("unique nulls distinct", "UNIQUE") : constraint.definition, key_columns: constraint.keyColumns })) }
+      if (sql.includes("FROM pg_constraint")) return { rows: catalog.constraints.map((constraint) => ({ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: true, definition: constraint.name === "chk_now_gate_evaluations_actor" ? LIVE_DSQL_ACTOR_CHECK : ["idx_capacity_plans_active_workspace", "idx_capacity_reservations_active_item"].includes(constraint.name) ? constraint.definition.replace("unique nulls distinct", "UNIQUE") : constraint.definition, key_columns: constraint.keyColumns })) }
       if (sql.includes("legacy_link_drift")) return { rows: [{ total: "4", null_count: "0", unknown_count: "0", legacy_link_drift: "0" }] }
       if (sql.includes("plan_violations")) return { rows: [{ plan_violations: "0", reservation_violations: "0" }] }
       return fallback(sqlValue, values)
@@ -219,6 +244,7 @@ describe("/api/admin/migrate rollout observability", () => {
     })
     expect(result.constraints.find((item: { name: string }) => item.name === "review_requests_pkey")).toMatchObject({ status: "MATCHED", expectedKeyColumns: ["id"], actualKeyColumns: ["id"] })
     expect(result.constraints.find((item: { name: string }) => item.name === "idx_capacity_plans_active_workspace")).toMatchObject({ status: "MATCHED", structureMatches: true })
+    expect(result.constraints.find((item: { name: string }) => item.name === "chk_now_gate_evaluations_actor")).toMatchObject({ status: "MATCHED", structureMatches: true })
     expect(result.indexes.find((item: { name: string }) => item.name === "idx_review_requests_workspace_state")).toMatchObject({ status: "MATCHED", expectedKeyColumns: ["workspace_id", "state"], actualKeyColumns: ["workspace_id", "state"] })
     expect(result.migrationReady).toBe(true)
     const constraintQuery = mocks.query.mock.calls.find(([sql]) => String(sql).includes("FROM pg_constraint"))
@@ -650,6 +676,47 @@ describe("/api/admin/migrate rollout observability", () => {
     const response = await POST(request("POST", { script: plan.name }))
     expect(response.status).toBe(500)
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET finished_at"))).toBe(false)
+  })
+
+  it.each([
+    { actorDefinition: LIVE_DSQL_ACTOR_CHECK, expectedStatus: 200, expectedState: "COMPLETE" },
+    { actorDefinition: LIVE_DSQL_ACTOR_CHECK.replace("'SERVICE'", "'ROBOT'"), expectedStatus: 500, expectedState: undefined },
+  ])("validates the exact catalog before terminal migration 045 receipt completion", async ({ actorDefinition, expectedStatus, expectedState }) => {
+    delete process.env.DATABASE_URL
+    const catalog = getDecisionGateExpectedCatalog()
+    const plan = catalog.plans.find((item) => item.name === "045_now_gate_shadow_evaluations")!
+    const attemptId = "00000000-0000-4000-8000-000000000045"
+    const appliedBefore045 = catalog.migrations.filter((name) => name !== plan.name)
+
+    mocks.query.mockImplementation(async (sqlValue: unknown, values?: unknown[]) => {
+      const sql = String(sqlValue)
+      if (sql.includes("SELECT migration_name FROM") && sql.includes("finished_at IS NOT NULL")) return { rows: appliedBefore045.map((migration_name) => ({ migration_name })) }
+      if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) return { rows: [{ attempt_id: attemptId, plan_fingerprint: plan.fingerprint, next_step: plan.steps.length, pending_job_id: null, pending_step: null, executing_step: null, executing_started_at: null, claim_epoch: 3 }] }
+      if (sql.includes("SET claimed_by=$2")) return { rows: [{ claim_epoch: 4 }], rowCount: 1 }
+      if (sql.includes("information_schema.tables") && Array.isArray(values?.[1]) && values[1].includes("review_requests")) return { rows: catalog.tables.map((table_name) => ({ table_name })) }
+      if (sql.includes("information_schema.columns") && sql.includes("table_name=ANY")) return { rows: catalog.columns.filter((column) => column.table === "now_gate_evaluations").map((column) => ({ table_name: column.table, column_name: column.name, data_type: column.type, character_maximum_length: column.maxLength, datetime_precision: column.datetimePrecision, is_nullable: column.nullable ? "YES" : "NO", column_default: column.default })) }
+      if (sql.includes("information_schema.columns") && sql.includes("roadmap_items")) return { rows: [
+        ...catalog.columns.map((column) => ({ table_name: column.table, column_name: column.name, data_type: column.type, character_maximum_length: column.maxLength, datetime_precision: column.datetimePrecision, is_nullable: column.nullable ? "YES" : "NO", column_default: column.default })),
+        { table_name: "roadmap_items", column_name: "now_commitment_provenance", data_type: "character varying", character_maximum_length: 30, datetime_precision: null, is_nullable: "YES", column_default: "'LEGACY_UNGATED'::character varying" },
+        { table_name: "roadmap_items", column_name: "now_decision_record_id", data_type: "uuid", character_maximum_length: null, datetime_precision: null, is_nullable: "YES", column_default: null },
+      ] }
+      if (sql.includes("pg_get_indexdef")) return { rows: catalog.indexes.map((index) => ({ name: index.name, table_name: index.table, valid: true, unique: index.unique, key_columns: index.keyColumns, definition: index.definition })) }
+      if (sql.includes("FROM pg_constraint")) return { rows: catalog.constraints.map((constraint) => ({ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: true, definition: constraint.name === "chk_now_gate_evaluations_actor" ? actorDefinition : constraint.definition, key_columns: constraint.keyColumns })) }
+      if (sql.includes("legacy_link_drift")) return { rows: [{ total: "0", null_count: "0", unknown_count: "0", legacy_link_drift: "0" }] }
+      if (sql.includes("plan_violations")) return { rows: [{ plan_violations: "0", reservation_violations: "0" }] }
+      if (sql.includes("SET claim_expires_at=CURRENT_TIMESTAMP")) return { rows: [{ migration_name: plan.name }], rowCount: 1 }
+      if (sql.includes("SET finished_at=CURRENT_TIMESTAMP")) return { rows: [{ id: attemptId }], rowCount: 1 }
+      if (sql.includes("DELETE FROM") && sql.includes("_migration_execution_state")) return { rows: [], rowCount: 1 }
+      return { rows: [], rowCount: 1 }
+    })
+
+    const response = await POST(request("POST", { script: plan.name }))
+    expect(response.status).toBe(expectedStatus)
+    if (expectedState) await expect(response.json()).resolves.toMatchObject({ migrationProgress: { state: expectedState, attemptId, nextStep: plan.steps.length } })
+    const calls = mocks.query.mock.calls.map(([sql]) => String(sql))
+    expect(calls.some((sql) => /(?:CREATE|ALTER).*(?:now_gate_evaluations|idx_now_gate_evaluations)/i.test(sql))).toBe(false)
+    expect(calls.some((sql) => sql.includes("SET finished_at=CURRENT_TIMESTAMP"))).toBe(expectedStatus === 200)
+    expect(calls.some((sql) => sql.includes("DELETE FROM") && sql.includes("_migration_execution_state"))).toBe(expectedStatus === 200)
   })
 
   it("reconciles a lost async-job persistence response without relaunching DDL, then finishes", async () => {

@@ -239,16 +239,25 @@ function decisionMigrationPlan(migration: { name: string; filePath: string }) {
   const fingerprint = createHash("sha256").update(JSON.stringify({ version: 1, name: migration.name, steps })).digest("hex")
   return { version: 1, fingerprint, steps }
 }
+function canonicalizeDsqlLiteralAny(value: string) {
+  const literal = "'(?:''|[^'])*'"
+  const literalList = `${literal}(?:\\s*,\\s*${literal})*`
+  const pattern = new RegExp(`(^|[^\\w(])\\(*\\s*"?([a-z_][a-z0-9_]*)"?\\s*\\)*\\s*=\\s*ANY\\s*\\(\\s*\\(*\\s*ARRAY\\[(${literalList})\\]\\s*\\)*\\s*\\)`, "gi")
+  return value.replace(pattern, (_match, prefix: string, identifier: string, values: string) => `${prefix}${identifier} in (${values})`)
+}
 const normalizeDefinition = (value: string) => value.toLowerCase().replace(/::(?:text|character varying)/g, "").replace(/["();]/g, "").replace(/\s+/g, " ").trim()
-export const normalizeConstraintDefinition = (value: string, type: string) => normalizeDefinition(
-  type === "p"
+export const normalizeConstraintDefinition = (value: string, type: string) => {
+  const typeSpecificDefinition = type === "p"
     ? value.replace(/\s+INCLUDE\s*\([^)]*\)\s*$/i, "")
     : type === "c"
       ? value.replace(/\s+NOT\s+VALID\s*$/i, "")
       : type === "u"
         ? value.replace(/^UNIQUE\s+NULLS\s+DISTINCT\b/i, "UNIQUE")
-        : value,
-)
+        : value
+  return normalizeDefinition(type === "c"
+    ? canonicalizeDsqlLiteralAny(typeSpecificDefinition.toLowerCase().replace(/::(?:text|character varying|varchar)(?:\[\])?/g, ""))
+    : typeSpecificDefinition)
+}
 const normalizeIndexKeys = (value: string) => normalizeDefinition(value.match(/\(([^)]*)\)(?:\s+INCLUDE|\s+WHERE|\s*$)/i)?.[1] ?? value)
 function splitTopLevel(value: string) {
   const parts: string[] = []; let depth = 0; let start = 0; let quoted = false
