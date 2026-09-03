@@ -693,6 +693,11 @@ async function advanceDecisionMigration(client: PoolClient, schema: string, migr
       const recovered = await client.query(`UPDATE "${schema}"._migration_execution_state SET executing_step=NULL, executing_started_at=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
       if (recovered.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim during zero-job recovery.`)
     }
+    if (await stepIsComplete(client, schema, migration.name, step)) {
+      const reconciled = await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
+      if (reconciled.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim while reconciling a completed step.`)
+      return { status: 202, state: "ADVANCED", attemptId: run.attempt_id, nextStep: run.next_step + 1 }
+    }
     if (step.kind === "backfill") {
       const intent = await client.query(`UPDATE "${schema}"._migration_execution_state SET executing_step=$4, executing_started_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step])
       if (intent.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim before the backfill step.`)
@@ -1140,7 +1145,16 @@ export async function POST(req: NextRequest) {
       // all-pending mode no dependent migration starts until this one reaches
       // its terminal postcondition check and receives a finished receipt.
       await client.query(`SET search_path TO "${schema}"`)
-      const repairState = decisionMigration.name === "042_native_decision_gates_repair" ? await inspectRepair039State(client, schema) : undefined
+      const existingState = decisionMigration.name === "042_native_decision_gates_repair"
+        ? (await client.query<{ attempt_id: string }>(`SELECT attempt_id FROM "${schema}"._migration_execution_state WHERE migration_name=$1`, [decisionMigration.name]).catch(() => ({ rows: [] as { attempt_id: string }[] }))).rows[0]
+        : undefined
+      // Exact partial-catalog preflight is the admission gate for creating the
+      // durable 042 attempt. Once admitted, the evolving catalog may contain
+      // intentionally building indexes; resumes rely on fenced state/job
+      // correlation and the terminal exact postconditions instead.
+      const repairState = decisionMigration.name === "042_native_decision_gates_repair" && !existingState
+        ? await inspectRepair039State(client, schema)
+        : undefined
       const progress = await advanceDecisionMigration(client, schema, decisionMigration as { name: DecisionMigrationName; filePath: string }, log, repairState)
       return NextResponse.json({ schema, migrationProgress: progress, message: log.join("\n") }, { status: progress.status })
     }

@@ -645,6 +645,7 @@ describe("/api/admin/migrate rollout observability", () => {
       repairTables.includes(constraint.table) || constraint.name === "chk_roadmap_items_commitment_provenance_not_null"
     )
     let job = 0
+    let sawPendingInvalidIndexResume = false
     let searchPathSet = false
     let loseFirstJobPersistence = true
     let run: { attempt_id: string; plan_fingerprint: string; next_step: number; pending_job_id: string | null; pending_step: number | null; executing_step: number | null } | undefined
@@ -660,11 +661,14 @@ describe("/api/admin/migrate rollout observability", () => {
       ] }
       if (sql.includes("information_schema.columns") && sql.includes("table_name=ANY")) return { rows: catalog.columns.filter((column) => repairTables.includes(column.table) && column.name !== "source_fingerprint").map((column) => ({ table_name: column.table, column_name: column.name, data_type: column.type, character_maximum_length: column.maxLength, datetime_precision: column.datetimePrecision, is_nullable: column.nullable ? "YES" : "NO", column_default: column.default })) }
       if (sql.includes("FROM pg_constraint")) return { rows: repairConstraints.map((constraint) => ({ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: true, definition: constraint.definition, key_columns: constraint.keyColumns })) }
-      if (sql.includes("pg_get_indexdef")) return { rows: repairIndexes.map((index) => ({ name: index.name, table_name: index.table, valid: true, unique: index.unique, key_columns: index.keyColumns, definition: index.definition })) }
+      if (sql.includes("pg_get_indexdef")) return { rows: repairIndexes.slice(0, job).map((index, indexNumber) => ({ name: index.name, table_name: index.table, valid: !(run?.pending_job_id && indexNumber === job - 1), unique: index.unique, key_columns: index.keyColumns, definition: index.definition })) }
       if (sql.includes("legacy_link_drift")) return { rows: [{ total: "4", null_count: "0", unknown_count: "0", legacy_link_drift: "0" }] }
       if (sql.includes("plan_violations")) return { rows: [] }
       if (sql.includes("pg_column_size")) return { rows: [] }
-      if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) return { rows: run ? [run] : [] }
+      if (sql.includes("SELECT attempt_id") && sql.includes("_migration_execution_state")) {
+        if (run?.pending_job_id) sawPendingInvalidIndexResume = true
+        return { rows: run ? [run] : [] }
+      }
       if (sql.includes("INSERT INTO") && sql.includes("_migration_execution_state")) {
         run = { attempt_id: String(values?.[1]), plan_fingerprint: String(values?.[3]), next_step: 0, pending_job_id: null, pending_step: null, executing_step: null }
         return { rows: [], rowCount: 1 }
@@ -701,6 +705,7 @@ describe("/api/admin/migrate rollout observability", () => {
     }
 
     expect(response?.status).toBe(200)
+    expect(sawPendingInvalidIndexResume).toBe(true)
     expect(searchPathSet).toBe(true)
     expect(injectedFailures).toBe(1)
     expect(job).toBe(7)
