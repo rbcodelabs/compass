@@ -321,7 +321,7 @@ export async function admitRoadmapItemToNow(
         || plan.unit !== eligibility.capacity.unit || plan.availableUnits !== eligibility.capacity.availableUnits
         || plan.unitsPerNowItem !== eligibility.capacity.unitsPerNowItem
         || plan.nowLimit !== eligibility.capacity.nowLimit
-        || plan.state !== "ACTIVE") {
+        || plan.state !== "ACTIVE" || plan.activeWorkspaceId !== item.workspaceId) {
         throw new NowCommitmentError("CAPACITY_CONFLICT", "The authoritative workspace capacity plan changed after review.")
       }
       const activeUnits = plan.reservations.reduce((sum, reservation) => sum + reservation.units, 0)
@@ -339,7 +339,7 @@ export async function admitRoadmapItemToNow(
         })
         await tx.portfolioCapacityReservation.update({
           where: { id: displacedReservation.id },
-          data: { state: "RELEASED", releasedAt: new Date(), updatedAt: new Date() },
+          data: { state: "RELEASED", activeRoadmapItemId: null, releasedAt: new Date(), updatedAt: new Date() },
         })
       }
       const resultingUnits = activeUnits - (displacedReservation?.units ?? 0) + eligibility.capacity.requestedUnits
@@ -350,11 +350,33 @@ export async function admitRoadmapItemToNow(
         data: { version: plan.version + 1, updatedAt: new Date() },
       })
       if (capacityClaim.count !== 1) throw new NowCommitmentError("CAPACITY_CONFLICT", "Another NOW admission changed capacity; retry against a fresh review.")
-      await tx.portfolioCapacityReservation.upsert({
-        where: { roadmapItemId: item.id },
-        create: { planId: plan.id, roadmapItemId: item.id, decisionRecordId: decision.id, units: eligibility.capacity.requestedUnits, state: "ACTIVE" },
-        update: { planId: plan.id, decisionRecordId: decision.id, units: eligibility.capacity.requestedUnits, state: "ACTIVE", releasedAt: null, updatedAt: new Date() },
+      const historicalReservation = await tx.portfolioCapacityReservation.findUnique({
+        where: { planId_roadmapItemId: { planId: plan.id, roadmapItemId: item.id } },
+        select: { id: true, state: true },
       })
+      if (historicalReservation) {
+        throw new NowCommitmentError(
+          "CAPACITY_PLAN_REPLACEMENT_REQUIRED",
+          "This item already has reservation history in the active plan; reconcile and activate a replacement plan before recommitting it.",
+        )
+      }
+      try {
+        await tx.portfolioCapacityReservation.create({
+          data: {
+            planId: plan.id,
+            roadmapItemId: item.id,
+            activeRoadmapItemId: item.id,
+            decisionRecordId: decision.id,
+            units: eligibility.capacity.requestedUnits,
+            state: "ACTIVE",
+          },
+        })
+      } catch (error) {
+        if ((error as { code?: string }).code === "P2002") {
+          throw new NowCommitmentError("CAPACITY_CONFLICT", "Another NOW item claimed capacity concurrently; retry against a fresh review.")
+        }
+        throw error
+      }
       await tx.roadmapItem.update({
         where: { id: item.id },
         data: { horizon: "NOW", nowCommitmentProvenance: "NATIVE_DECISION", nowDecisionRecordId: decision.id, updatedAt: new Date() },

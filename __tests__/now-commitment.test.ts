@@ -7,7 +7,7 @@ const tx = {
   decisionRecord: { findUnique: vi.fn() },
   decisionApplication: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
   portfolioCapacityPlan: { findUnique: vi.fn(), updateMany: vi.fn() },
-  portfolioCapacityReservation: { upsert: vi.fn(), update: vi.fn() },
+  portfolioCapacityReservation: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
 }
 const mockPrisma = { ...tx, $transaction: vi.fn((fn: (value: typeof tx) => unknown) => fn(tx)) }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
@@ -67,11 +67,12 @@ describe("NOW commitment", () => {
       id: eligibility.capacity.planId, workspaceId: item.workspaceId, policyId: eligibility.portfolioPolicyId,
       planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit,
       availableUnits: eligibility.capacity.availableUnits, unitsPerNowItem: eligibility.capacity.unitsPerNowItem, nowLimit: eligibility.capacity.nowLimit,
-      version: eligibility.capacity.planVersion, state: "ACTIVE",
+      version: eligibility.capacity.planVersion, state: "ACTIVE", activeWorkspaceId: item.workspaceId,
       reservations: [{ id: "reservation-now-1", roadmapItemId: "now-1", units: 1 }],
     })
     tx.portfolioCapacityPlan.updateMany.mockResolvedValue({ count: 1 })
-    tx.portfolioCapacityReservation.upsert.mockResolvedValue({})
+    tx.portfolioCapacityReservation.findUnique.mockResolvedValue(null)
+    tx.portfolioCapacityReservation.create.mockResolvedValue({})
   })
 
   it("prepares an immutable revision with explicit approve and reject options", async () => {
@@ -100,7 +101,7 @@ describe("NOW commitment", () => {
     tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
       id: configuredIds.plan, workspaceId: configuredIds.workspace, policyId: configuredEligibility.portfolioPolicyId,
       planFingerprint: configuredEligibility.capacity.planFingerprint, unit: configuredEligibility.capacity.unit,
-      availableUnits: 3, unitsPerNowItem: 1, nowLimit: 3, state: "ACTIVE", version: 1,
+      availableUnits: 3, unitsPerNowItem: 1, nowLimit: 3, state: "ACTIVE", activeWorkspaceId: configuredIds.workspace, version: 1,
       reservations: [{ roadmapItemId: configuredIds.reserved, units: 1 }],
     })
     tx.reviewRequest.findFirst.mockResolvedValue(null)
@@ -265,7 +266,7 @@ describe("NOW commitment", () => {
 
     await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver }))
       .rejects.toEqual(expect.objectContaining({ code: "CAPACITY_CONFLICT" }))
-    expect(tx.portfolioCapacityReservation.upsert).not.toHaveBeenCalled()
+    expect(tx.portfolioCapacityReservation.create).not.toHaveBeenCalled()
     expect(tx.roadmapItem.update).not.toHaveBeenCalled()
   })
 
@@ -286,15 +287,15 @@ describe("NOW commitment", () => {
     tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
       id: eligibility.capacity.planId, workspaceId: item.workspaceId, policyId: eligibility.portfolioPolicyId,
       planFingerprint: eligibility.capacity.planFingerprint, unit: eligibility.capacity.unit, availableUnits: 1, unitsPerNowItem: 1, nowLimit: 1,
-      version: eligibility.capacity.planVersion, state: "ACTIVE",
+      version: eligibility.capacity.planVersion, state: "ACTIVE", activeWorkspaceId: item.workspaceId,
       reservations: [{ id: "reservation-now-1", roadmapItemId: "now-1", units: 1 }],
     })
     tx.decisionApplication.create.mockResolvedValue({ id: "receipt-1", status: "APPLIED" })
 
     await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver: displacementResolver })).resolves.toEqual({ id: "receipt-1", status: "APPLIED" })
     expect(tx.roadmapItem.update).toHaveBeenNthCalledWith(1, expect.objectContaining({ where: { id: "now-1" }, data: expect.objectContaining({ horizon: "NEXT" }) }))
-    expect(tx.portfolioCapacityReservation.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "reservation-now-1" }, data: expect.objectContaining({ state: "RELEASED" }) }))
-    expect(tx.portfolioCapacityReservation.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ roadmapItemId: "item-1", state: "ACTIVE" }) }))
+    expect(tx.portfolioCapacityReservation.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "reservation-now-1" }, data: expect.objectContaining({ state: "RELEASED", activeRoadmapItemId: null }) }))
+    expect(tx.portfolioCapacityReservation.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ roadmapItemId: "item-1", activeRoadmapItemId: "item-1", state: "ACTIVE" }) }))
     expect(tx.roadmapItem.update).toHaveBeenNthCalledWith(2, expect.objectContaining({ where: { id: "item-1" }, data: expect.objectContaining({ horizon: "NOW" }) }))
   })
 
@@ -304,7 +305,7 @@ describe("NOW commitment", () => {
     tx.portfolioCapacityPlan.findUnique.mockResolvedValue({
       id: configuredIds.plan, workspaceId: configuredIds.workspace, policyId: configuredEligibility.portfolioPolicyId,
       planFingerprint: configuredEligibility.capacity.planFingerprint, unit: configuredEligibility.capacity.unit,
-      availableUnits: 3, unitsPerNowItem: 1, nowLimit: 3, state: "ACTIVE", version: 1,
+      availableUnits: 3, unitsPerNowItem: 1, nowLimit: 3, state: "ACTIVE", activeWorkspaceId: configuredIds.workspace, version: 1,
       reservations: [{ id: "reservation-configured", roadmapItemId: configuredIds.reserved, units: 1 }],
     })
     tx.decisionRecord.findUnique.mockResolvedValue(configuredNativeDecision)
@@ -321,6 +322,18 @@ describe("NOW commitment", () => {
     tx.decisionApplication.create.mockResolvedValue({ id: "receipt-real", status: "APPLIED" })
 
     await expect(admitRoadmapItemToNow(configuredIds.item, "decision-1")).resolves.toEqual({ id: "receipt-real", status: "APPLIED" })
+  })
+
+  it("requires a replacement plan instead of reactivating released reservation history", async () => {
+    tx.roadmapItem.findUnique.mockResolvedValue(item)
+    tx.decisionRecord.findUnique.mockResolvedValue(approvedDecision())
+    tx.decisionApplication.findUnique.mockResolvedValue(null)
+    tx.portfolioCapacityReservation.findUnique.mockResolvedValue({ id: "historical", state: "RELEASED" })
+    tx.decisionApplication.create.mockResolvedValue({ id: "blocked", status: "BLOCKED" })
+
+    await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver }))
+      .rejects.toEqual(expect.objectContaining({ code: "CAPACITY_PLAN_REPLACEMENT_REQUIRED" }))
+    expect(tx.portfolioCapacityReservation.create).not.toHaveBeenCalled()
   })
 
   it("returns an existing receipt without repeating the roadmap mutation", async () => {

@@ -150,7 +150,7 @@ export async function resolveNowCommitmentEligibility(
   if (!plan || plan.workspaceId !== item.workspaceId || plan.policyId !== policy.portfolioPolicyId
     || plan.planFingerprint !== capacity.planFingerprint || plan.unit !== capacity.unit
     || plan.availableUnits !== capacity.availableUnits || plan.unitsPerNowItem !== capacity.unitsPerNowItem
-    || plan.nowLimit !== capacity.nowLimit || plan.state !== "ACTIVE") {
+    || plan.nowLimit !== capacity.nowLimit || plan.state !== "ACTIVE" || plan.activeWorkspaceId !== item.workspaceId) {
     throw new NowEligibilityError("POLICY_CONFIGURATION_REQUIRED", "The configured capacity policy does not match an active authoritative workspace plan.")
   }
   return {

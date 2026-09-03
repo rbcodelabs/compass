@@ -20,6 +20,7 @@ const schema = process.env.PGSCHEMA
 
 async function ensureFunctionalSchema(pool: pg.Pool) {
   const migrationPaths = [
+    "prisma/migrations/028_agent_runtime_config/migration.sql",
     "prisma/migrations/034_research_capture/migration.sql",
     "prisma/migrations/035_research_agent_scope/migration.sql",
     "prisma/migrations/036_research_capture_hardening/migration.sql",
@@ -39,12 +40,12 @@ async function ensureFunctionalSchema(pool: pg.Pool) {
         .replaceAll("CREATE UNIQUE INDEX ASYNC IF NOT EXISTS ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
         .replaceAll("CREATE INDEX ASYNC IF NOT EXISTS ", "CREATE INDEX IF NOT EXISTS ")
         .replaceAll("CREATE UNIQUE INDEX ASYNC ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
-        .replaceAll("CREATE INDEX ASYNC ", "CREATE INDEX IF NOT EXISTS ");
+        .replaceAll("CREATE INDEX ASYNC ", "CREATE INDEX IF NOT EXISTS ")
+        .replaceAll("ALTER TABLE ASYNC ", "ALTER TABLE ");
       if (!relativePath.includes("039_native_decision_gates")) {
         await client.query(migration);
         continue;
       }
-
       const statements = migration
         .split(/;\s*\n/)
         .map((statement) => statement.trim())

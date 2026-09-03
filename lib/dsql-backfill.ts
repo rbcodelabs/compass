@@ -11,7 +11,6 @@ function toSafeNumber(value: unknown): number {
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : Number.MAX_SAFE_INTEGER
 }
-
 export function planDsqlWriteBatch(
   rows: DsqlBackfillRow[],
   limits: { maxRows: number; maxBytes: number },
