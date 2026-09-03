@@ -492,6 +492,9 @@ export function parseVercelRetainedLogs(lines: string[]): {
     const authoritative = candidates.filter(({ raw }) => raw.source === "serverless");
     const middleware = candidates.filter(({ raw }) => raw.source === "serverless-middleware");
     if (authoritative.length === 0) return [];
+    if (candidates.some(({ raw }) => raw.source !== "serverless" && raw.source !== "serverless-middleware")) {
+      throw new Error(`Platform request ${id} has an unsupported same-ID source`);
+    }
     const outer = authoritative.map(({ raw }) => {
       return Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "logs"));
     });

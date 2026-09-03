@@ -584,7 +584,11 @@ describe("query artifacts", () => {
     expect(() => parseVercelRetainedLogs([serverless, JSON.stringify({ ...outer, source: "serverless-middleware", requestPath: "/tasks", logs: [a] })])).toThrow(/middleware companion/);
     const extra = query("c");
     expect(() => parseVercelRetainedLogs([serverless, JSON.stringify({ ...outer, source: "serverless-middleware", logs: [a, extra] })])).toThrow(/middleware companion/);
-    expect(parseVercelRetainedLogs([serverless, JSON.stringify({ ...outer, source: "edge", logs: [a] })]).requests).toHaveLength(1);
+    for (const extra of [
+      { ...outer, source: "edge", logs: [a] },
+      { ...outer, source: "edge", requestPath: "/tasks", logs: [a] },
+    ]) expect(() => parseVercelRetainedLogs([serverless, JSON.stringify(extra)])).toThrow(/unsupported same-ID source/);
+    expect(parseVercelRetainedLogs([JSON.stringify({ ...outer, id: "noise", source: "edge", logs: [a] })]).requests).toEqual([]);
   });
 
   it("correlates a browser URL with query parameters to an exact Vercel pathname", () => {
