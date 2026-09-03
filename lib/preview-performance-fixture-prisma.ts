@@ -197,27 +197,33 @@ export class PrismaPreviewFixtureStore implements PreviewFixtureStore {
   }
 
   async deleteIds(kind: PreviewFixtureKind, ids: readonly string[]): Promise<void> {
+    await this.deleteIdsWithCount(kind, ids);
+  }
+
+  async deleteIdsWithCount(kind: PreviewFixtureKind, ids: readonly string[]): Promise<number> {
     const where = { id: { in: [...ids] } };
+    let result: { count: number };
     switch (kind) {
-      case "users": await this.prisma.user.deleteMany({ where }); break;
-      case "organizations": await this.prisma.organization.deleteMany({ where }); break;
-      case "organizationMembers": await this.prisma.organizationMember.deleteMany({ where }); break;
-      case "workspaces": await this.prisma.workspace.deleteMany({ where }); break;
-      case "workspaceMembers": await this.prisma.workspaceMember.deleteMany({ where }); break;
-      case "squads": await this.prisma.squad.deleteMany({ where }); break;
-      case "okrCycles": await this.prisma.oKRCycle.deleteMany({ where }); break;
-      case "objectives": await this.prisma.objective.deleteMany({ where }); break;
-      case "keyResults": await this.prisma.keyResult.deleteMany({ where }); break;
-      case "opportunities": await this.prisma.opportunity.deleteMany({ where }); break;
-      case "solutions": await this.prisma.solution.deleteMany({ where }); break;
-      case "assumptions": await this.prisma.assumption.deleteMany({ where }); break;
-      case "evidence": await this.prisma.evidence.deleteMany({ where }); break;
-      case "experiments": await this.prisma.experiment.deleteMany({ where }); break;
-      case "roadmapItems": await this.prisma.roadmapItem.deleteMany({ where }); break;
-      case "feedback": await this.prisma.feedbackItem.deleteMany({ where }); break;
-      case "tasks": await this.prisma.task.deleteMany({ where }); break;
-      case "sessions": await this.prisma.session.deleteMany({ where }); break;
+      case "users": result = await this.prisma.user.deleteMany({ where }); break;
+      case "organizations": result = await this.prisma.organization.deleteMany({ where }); break;
+      case "organizationMembers": result = await this.prisma.organizationMember.deleteMany({ where }); break;
+      case "workspaces": result = await this.prisma.workspace.deleteMany({ where }); break;
+      case "workspaceMembers": result = await this.prisma.workspaceMember.deleteMany({ where }); break;
+      case "squads": result = await this.prisma.squad.deleteMany({ where }); break;
+      case "okrCycles": result = await this.prisma.oKRCycle.deleteMany({ where }); break;
+      case "objectives": result = await this.prisma.objective.deleteMany({ where }); break;
+      case "keyResults": result = await this.prisma.keyResult.deleteMany({ where }); break;
+      case "opportunities": result = await this.prisma.opportunity.deleteMany({ where }); break;
+      case "solutions": result = await this.prisma.solution.deleteMany({ where }); break;
+      case "assumptions": result = await this.prisma.assumption.deleteMany({ where }); break;
+      case "evidence": result = await this.prisma.evidence.deleteMany({ where }); break;
+      case "experiments": result = await this.prisma.experiment.deleteMany({ where }); break;
+      case "roadmapItems": result = await this.prisma.roadmapItem.deleteMany({ where }); break;
+      case "feedback": result = await this.prisma.feedbackItem.deleteMany({ where }); break;
+      case "tasks": result = await this.prisma.task.deleteMany({ where }); break;
+      case "sessions": result = await this.prisma.session.deleteMany({ where }); break;
     }
+    return result.count;
   }
 
   async countResidue(manifest: PreviewFixtureManifest): Promise<number> {
@@ -240,6 +246,14 @@ export class PrismaPreviewFixtureStore implements PreviewFixtureStore {
   async countPlannedRows(manifest: PreviewFixtureManifest): Promise<number> {
     const counts = await Promise.all(SEED_ORDER.map((kind) => this.countKind(kind, manifest.plannedIds[kind])));
     return counts.reduce((total, count) => total + count, 0);
+  }
+
+  async countPlannedRowsByKind(manifest: PreviewFixtureManifest): Promise<Record<PreviewFixtureKind, number>> {
+    return Object.fromEntries(await Promise.all(SEED_ORDER.map(async (kind) => [kind, await this.countKind(kind, manifest.plannedIds[kind])]))) as Record<PreviewFixtureKind, number>;
+  }
+
+  async countIds(kind: PreviewFixtureKind, ids: readonly string[]): Promise<number> {
+    return this.countKind(kind, ids);
   }
 
   private async countKind(kind: PreviewFixtureKind, ids: readonly string[]): Promise<number> {

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   createPreviewFixtureAuthState,
   createPreviewFixtureManifest,
@@ -173,7 +174,7 @@ export async function runPreviewFixtureOrchestration(argv: readonly string[]): P
     : `${args.command} accepted: state=${String(result.state)} residue=${String(result.residue)}\n`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   runPreviewFixtureOrchestration(process.argv.slice(2)).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`${redactSensitiveText(message, [process.env.MIGRATION_SECRET, process.env.VERCEL_AUTOMATION_BYPASS_SECRET])}\n`);
