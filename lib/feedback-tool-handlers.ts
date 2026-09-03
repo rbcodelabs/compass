@@ -17,6 +17,7 @@ import {
 } from "@/lib/feedback-attachments"
 import { feedbackItemUrl } from "@/lib/compass-url"
 import type { FeedbackStatus } from "@/lib/feedback-meta"
+import { assertDirectNowWriteBlocked } from "@/lib/now-commitment"
 
 type FeedbackWorkspace = {
   slug: string
@@ -564,6 +565,7 @@ export async function promoteFeedbackToRoadmap({
   horizon: "NOW" | "NEXT" | "LATER" | "SHIPPED"
   isPrivate?: boolean
 }) {
+  assertDirectNowWriteBlocked(null, horizon)
   const prisma = getPrisma()
   const feedback = await prisma.feedbackItem.findUnique({
     where: { id: feedbackId },

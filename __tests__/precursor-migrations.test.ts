@@ -15,6 +15,7 @@ describe("decision-gate expand precursor migrations", () => {
     "040_release_authorization",
     "041_portfolio_capacity_ledger",
     "042_native_decision_gates_repair",
+    "043_decision_evidence_refs",
   ])("registers %s in the authenticated migration manifest", (name) => {
     expect(route).toContain(`name: "${name}"`)
     expect(migration(name)).toMatch(/CREATE (?:TABLE|INDEX)|ALTER TABLE/)
@@ -26,6 +27,7 @@ describe("decision-gate expand precursor migrations", () => {
       "040_release_authorization",
       "041_portfolio_capacity_ledger",
       "042_native_decision_gates_repair",
+      "043_decision_evidence_refs",
     ]) {
       const sql = migration(name)
       expect(sql).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?!ASYNC\b)/i)
@@ -60,18 +62,32 @@ describe("decision-gate expand precursor migrations", () => {
   it("requires migration-specific catalog postconditions before finishing every decision-gate receipt", () => {
     expect(route).toContain('"040_release_authorization":')
     expect(route).toContain('"041_portfolio_capacity_ledger":')
+    expect(route).toContain('"043_decision_evidence_refs":')
+    expect(route).toContain('applied.includes("043_decision_evidence_refs")')
     expect(route).toContain("assertDecisionMigrationPostconditions")
     expect(route).toContain("tables.length === expected.tables.size")
     expect(route).toContain("constraints.length === expected.constraints.size")
     expect(route).toContain("indexes.length === expected.indexes.size")
   })
 
-  it("does not add precursor models or columns to Prisma ordinary-route reads", () => {
+  it("exposes the live precursor schema to the contract release", () => {
     const schema = readFileSync(path.join(root, "prisma/schema.prisma"), "utf8")
-    expect(schema).not.toContain("model ReviewRequest")
+    expect(schema).toContain("model ReviewRequest")
     expect(schema).toContain("model PortfolioCapacityPlan")
     expect(schema).toMatch(/activeWorkspaceId\s+String\?\s+@unique\(map: "idx_capacity_plans_active_workspace"\)/)
-    expect(schema).not.toContain("nowCommitmentProvenance")
+    expect(schema).toContain("nowCommitmentProvenance")
+    expect(schema.match(/model PortfolioCapacityPlan/g)).toHaveLength(1)
+    expect(schema).toContain("model DecisionEvidenceRef")
+  })
+
+  it("uses the migration-health canonical native provenance literal at runtime", () => {
+    const commitment = readFileSync(path.join(root, "lib/now-commitment.ts"), "utf8")
+    const card = readFileSync(path.join(root, "components/roadmap/now-commitment-card.tsx"), "utf8")
+    expect(route).toContain("'LEGACY_UNGATED','NATIVE_GATED'")
+    expect(commitment).toContain('nowCommitmentProvenance: "NATIVE_GATED"')
+    expect(commitment).not.toContain('"NATIVE_DECISION"')
+    expect(card).toContain('provenance === "NATIVE_GATED"')
+    expect(card).not.toContain('"NATIVE_DECISION"')
   })
 
   it("atomically limits activation to one capacity plan per workspace", () => {

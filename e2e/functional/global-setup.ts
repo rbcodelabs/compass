@@ -29,6 +29,7 @@ async function ensureFunctionalSchema(pool: pg.Pool) {
     "prisma/migrations/039_native_decision_gates/migration.sql",
     "prisma/migrations/040_release_authorization/migration.sql",
     "prisma/migrations/041_portfolio_capacity_ledger/migration.sql",
+    "prisma/migrations/043_decision_evidence_refs/migration.sql",
   ];
 
   const client = await pool.connect();
@@ -97,7 +98,10 @@ export default async function globalSetup() {
   const pool = new pg.Pool({ connectionString });
   try {
     await ensureFunctionalSchema(pool);
-    await seedE2E(pool, runToken);
+    const seed = await seedE2E(pool, runToken);
+    const policyPath = path.resolve(process.cwd(), "test-results/e2e-now-commitment-policy.json");
+    await fs.mkdir(path.dirname(policyPath), { recursive: true });
+    await fs.writeFile(policyPath, `${JSON.stringify(seed.nowCommitmentPolicy, null, 2)}\n`, "utf8");
     console.log(`[e2e globalSetup] Seed complete ✓ (run ${runToken})`);
   } finally {
     await pool.end();

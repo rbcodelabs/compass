@@ -10,6 +10,7 @@ import { randomUUID } from "crypto";
 import getPrisma from "@/lib/db";
 import type { LaunchTier, ChecklistTemplateSnapshot, LaunchChecklistItemStatus } from "@/lib/types";
 import { DEFAULT_CHECKLIST_TEMPLATES } from "@/lib/launch-defaults";
+import { releaseNowCapacityInTransaction } from "@/lib/capacity-ledger";
 
 /** A template plus its ordered items — the shape the attach transaction needs. */
 export interface ResolvedTemplate {
@@ -41,8 +42,9 @@ export async function setLaunchTierCore(
 
   const launchChecklistId = randomUUID();
 
-  await prisma.$transaction([
-    prisma.launchChecklist.create({
+  await prisma.$transaction(async (tx) => {
+    await releaseNowCapacityInTransaction(tx as ReturnType<typeof getPrisma>, itemId)
+    await tx.launchChecklist.create({
       data: {
         id: launchChecklistId,
         roadmapItemId: itemId,
@@ -50,20 +52,20 @@ export async function setLaunchTierCore(
         tier,
         templateSnapshot: JSON.stringify(snapshot),
       },
-    }),
-    prisma.launchChecklistItem.createMany({
+    })
+    await tx.launchChecklistItem.createMany({
       data: template.items.map((i) => ({
         launchChecklistId,
         label: i.label,
         description: i.description,
         order: i.order,
       })),
-    }),
-    prisma.roadmapItem.update({
+    })
+    await tx.roadmapItem.update({
       where: { id: itemId },
       data: { horizon: "LAUNCHING", updatedAt: new Date() },
-    }),
-  ]);
+    })
+  });
 
   return { launchChecklistId, itemCount: template.items.length };
 }

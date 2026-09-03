@@ -162,6 +162,11 @@ export const TOOL_GATES: Record<string, Gate> = {
     if (x.opportunityId) await assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, x.workspaceId)
     if (x.keyResultId) await assertEntityAccess(a, "keyResult", x.keyResultId)
   },
+  request_now_commitment: async (a, x) => void (await assertEntityAccess(a, "roadmapItem", x.itemId)),
+  request_release_authorization: async (a, x) => void (await assertWorkspaceAdmin(a, x.workspaceId)),
+  get_review_request: async (a, x) => void (await assertEntityAccess(a, "reviewRequest", x.requestId)),
+  list_review_requests: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  apply_recorded_decision: async (a, x) => void (await assertEntityAccess(a, "decisionRecord", x.decisionId)),
 
   // Launch tiers / checklists ----------------------------------------------
   create_checklist_template: (a, x) => assertWorkspaceMember(a, x.workspaceId),

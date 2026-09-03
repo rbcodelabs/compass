@@ -12,6 +12,8 @@ import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
 import { normalizeWorkspaceRole } from "@/lib/roles"
+import { assertDirectNowWriteBlocked } from "@/lib/now-commitment"
+import { updateRoadmapItemWithCapacityRelease } from "@/lib/capacity-ledger"
 import {
   createFeedback,
   addFeedbackAttachment,
@@ -126,6 +128,7 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
+import { applyRecordedDecision, getReviewRequest, listReviewRequests, requestNowCommitment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -1308,6 +1311,7 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ solutionId, workspaceId, horizon, isPrivate }) => {
+        try { assertDirectNowWriteBlocked(null, horizon) } catch (error) { return fail(error instanceof Error ? error.message : "NOW commitment decision required") }
         const prisma = getPrisma()
         const solution = await prisma.solution.findUnique({
           where: { id: solutionId },
@@ -1584,6 +1588,72 @@ const _handler = createMcpHandler(
     // ════════════════════════════════════════════════════════════════
 
     register(
+      "request_now_commitment",
+      {
+        title: "Request NOW Commitment",
+        description: "Prepares or refreshes an immutable human review packet for admitting an existing Roadmap Item to NOW. This does not take the human decision.",
+        inputSchema: { itemId: z.string().uuid().describe("UUID of the Roadmap Item") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestNowCommitment,
+    )
+
+    register(
+      "request_release_authorization",
+      {
+        title: "Request Release Authorization",
+        description: "Prepares an immutable human review packet for an exact GitHub PR commit and covered Task scope. Approval only writes a durable release dispatch outbox record; it does not invoke release automation.",
+        inputSchema: {
+          workspaceId: z.string().uuid(),
+          provider: z.literal("GITHUB"),
+          repositoryOwner: z.string().min(1),
+          repositoryName: z.string().min(1),
+          pullRequestNumber: z.number().int().positive(),
+          baseRef: z.string().min(1),
+          headSha: z.string().regex(/^[a-f0-9]{40}$/i),
+          targetEnvironment: z.literal("PRODUCTION"),
+          releasePolicyId: z.string().min(1),
+          taskIds: z.array(z.string().uuid()).min(1),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestReleaseAuthorization,
+    )
+
+    register(
+      "get_review_request",
+      {
+        title: "Get Review Request",
+        description: "Reads a Compass-native review request, its current immutable revision, options, and decision state.",
+        inputSchema: { requestId: z.string().uuid().describe("UUID of the Review Request") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getReviewRequest,
+    )
+
+    register(
+      "list_review_requests",
+      {
+        title: "List Review Requests",
+        description: "Lists Compass-native review requests in a workspace.",
+        inputSchema: { workspaceId: z.string().uuid(), state: z.enum(["DRAFT", "PENDING", "DECIDED", "SUPERSEDED", "EXPIRED", "CANCELLED"]).optional() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listReviewRequests,
+    )
+
+    register(
+      "apply_recorded_decision",
+      {
+        title: "Apply Recorded Decision",
+        description: "Idempotently applies a previously recorded human decision and returns its durable receipt. Service actors may apply but cannot take decisions.",
+        inputSchema: { decisionId: z.string().uuid().describe("UUID of the immutable Decision Record") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      applyRecordedDecision,
+    )
+
+    register(
       "list_roadmap_items",
       {
         title: "List Roadmap Items",
@@ -1687,9 +1757,10 @@ const _handler = createMcpHandler(
         if (!item) {
           return fail(`Roadmap item "${itemId}" not found.`)
         }
-        const updated = await prisma.roadmapItem.update({
-          where: { id: itemId },
-          data: {
+        if (horizon) {
+          try { assertDirectNowWriteBlocked(item.horizon, horizon) } catch (error) { return fail(error instanceof Error ? error.message : "NOW commitment decision required") }
+        }
+        const updated = await updateRoadmapItemWithCapacityRelease(itemId, {
             ...(horizon ? { horizon } : {}),
             ...(status ? { status } : {}),
             ...(title ? { title: title.trim() } : {}),
@@ -1698,7 +1769,6 @@ const _handler = createMcpHandler(
             ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
             ...(isPrivate !== undefined ? { isPrivate } : {}),
             updatedAt: new Date(),
-          },
         })
         return ok(
           `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
@@ -1724,7 +1794,7 @@ const _handler = createMcpHandler(
       "add_to_roadmap",
       {
         title: "Add to Roadmap",
-        description: "Creates a Roadmap Item in the NOW, NEXT, or LATER horizon. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
+        description: "Creates a Roadmap Item in NEXT, LATER, or SHIPPED. NOW requires request_now_commitment and a recorded human decision. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Title of the roadmap item"),
@@ -1741,6 +1811,7 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId, startDate, endDate, isPrivate }) => {
+        try { assertDirectNowWriteBlocked(null, horizon) } catch (error) { return fail(error instanceof Error ? error.message : "NOW commitment decision required") }
         const prisma = getPrisma()
         const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
         if (!workspace) {
