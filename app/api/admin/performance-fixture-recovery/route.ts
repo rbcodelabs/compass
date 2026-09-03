@@ -58,6 +58,15 @@ function hasSecret(req: NextRequest): boolean {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
+function diagnostic(code: "PF_EXEC_BASE" | "PF_EXEC_SHA" | "PF_EXEC_ID" | "PF_EXEC_URL" | "PF_EXEC_PROJECT" | "PF_EXEC_READY"): NextResponse {
+  try {
+    console.info(code);
+  } catch {
+    // Observability must never change the externally indistinguishable result.
+  }
+  return hidden();
+}
+
 async function parseBody(req: NextRequest): Promise<RecoveryRequest | null> {
   const declaredText = req.headers.get("content-length");
   if (!declaredText || !/^\d+$/.test(declaredText)) return null;
@@ -94,22 +103,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // completely silent until both the secret and immutable caller identity pass.
   if (!hasSecret(req)) return hidden();
   const body = await parseBody(req);
-  if (!body || !exactExecutor(req, body)) return hidden();
+  if (!body) return hidden();
+  if (body.action === "diagnose") {
+    const env = process.env;
+    if (!exactRuntimeConfiguration()) return diagnostic("PF_EXEC_BASE");
+    if (!env.VERCEL_GIT_COMMIT_SHA || env.VERCEL_GIT_COMMIT_SHA !== body.expectedSha) return diagnostic("PF_EXEC_SHA");
+    if (!env.VERCEL_DEPLOYMENT_ID || env.VERCEL_DEPLOYMENT_ID !== body.expectedDeploymentId) return diagnostic("PF_EXEC_ID");
+    if (!env.VERCEL_URL || !/^compass-[a-z0-9]+-rbcodelabs-team\.vercel\.app$/.test(env.VERCEL_URL) || req.nextUrl.protocol !== "https:" || req.nextUrl.host !== env.VERCEL_URL) return diagnostic("PF_EXEC_URL");
+    if (env.VERCEL_PROJECT_ID !== RECOVERY_PROJECT_ID) return diagnostic("PF_EXEC_PROJECT");
+    return diagnostic("PF_EXEC_READY");
+  }
+  if (!exactExecutor(req, body)) return hidden();
   if (!exactRuntimeConfiguration()) {
-    if (body.action === "diagnose") console.info("PF_DIAG_RUNTIME");
     return hidden();
   }
   try {
-    if (!getVercelOidcTokenSync()) {
-      if (body.action === "diagnose") console.info("PF_DIAG_OIDC");
-      return hidden();
-    }
+    if (!getVercelOidcTokenSync()) return hidden();
   } catch {
-    if (body.action === "diagnose") console.info("PF_DIAG_OIDC");
-    return hidden();
-  }
-  if (body.action === "diagnose") {
-    console.info("PF_DIAG_READY");
     return hidden();
   }
   try {

@@ -90,12 +90,12 @@ describe("POST /api/admin/performance-fixture-recovery", () => {
   });
 
   it.each([
-    ["production runtime", () => { process.env.VERCEL_ENV = "production"; }, "PF_DIAG_RUNTIME"],
-    ["schema runtime", () => { process.env.PGSCHEMA = "compass_prod"; }, "PF_DIAG_RUNTIME"],
-    ["static-credential runtime", () => { process.env.AWS_ACCESS_KEY_ID = "forbidden"; }, "PF_DIAG_RUNTIME"],
-    ["DSQL runtime", () => { process.env.PGHOST = "postgres.example.com"; }, "PF_DIAG_RUNTIME"],
-    ["oidc", () => { oidc.mockReturnValue(undefined); }, "PF_DIAG_OIDC"],
-    ["ready", () => undefined, "PF_DIAG_READY"],
+    ["baseline", () => { process.env.PGSCHEMA = "compass_prod"; }, "PF_EXEC_BASE"],
+    ["SHA", () => { process.env.VERCEL_GIT_COMMIT_SHA = "b".repeat(40); }, "PF_EXEC_SHA"],
+    ["deployment ID", () => { process.env.VERCEL_DEPLOYMENT_ID = `dpl_${"B".repeat(24)}`; }, "PF_EXEC_ID"],
+    ["URL", () => { process.env.VERCEL_URL = "compass-other-rbcodelabs-team.vercel.app"; }, "PF_EXEC_URL"],
+    ["project", () => { process.env.VERCEL_PROJECT_ID = "prj_wrong"; }, "PF_EXEC_PROJECT"],
+    ["ready", () => { oidc.mockReturnValue(undefined); }, "PF_EXEC_READY"],
   ])("returns the byte-identical 404 and emits only the %s code", async (_label, mutate, code) => {
     mutate();
     const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -107,13 +107,13 @@ describe("POST /api/admin/performance-fixture-recovery", () => {
     expect(log).toHaveBeenCalledOnce();
     expect(log).toHaveBeenCalledWith(code);
     expect(execute).not.toHaveBeenCalled();
+    expect(oidc).not.toHaveBeenCalled();
     log.mockRestore();
   });
 
   it.each([
     ["missing secret", "", {}],
     ["wrong secret", "wrong", {}],
-    ["wrong SHA", SECRET, { expectedSha: "b".repeat(40) }],
     ["malformed deployment", SECRET, { expectedDeploymentId: "not-a-deployment" }],
     ["expired", SECRET, { expiresAt: new Date(Date.now() - 1_000).toISOString() }],
     ["unknown field", SECRET, { runId: "other" }],
@@ -129,22 +129,25 @@ describe("POST /api/admin/performance-fixture-recovery", () => {
     log.mockRestore();
   });
 
-  it("logs nothing for an alias host", async () => {
+  it("reports only the URL stage for an alias host", async () => {
     const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const { POST } = await import("@/app/api/admin/performance-fixture-recovery/route");
     expect((await POST(request("diagnose", SECRET, {}, "preview.example.com"))).status).toBe(404);
-    expect(log).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledWith("PF_EXEC_URL");
     expect(execute).not.toHaveBeenCalled();
     expect(oidc).not.toHaveBeenCalled();
     log.mockRestore();
   });
 
-  it("keeps diagnose ahead of and independent from every Prisma-capable runtime import", () => {
+  it("keeps diagnose ahead of and independent from OIDC and every Prisma-capable runtime import", () => {
     const source = fs.readFileSync("app/api/admin/performance-fixture-recovery/route.ts", "utf8");
-    const diagnosticReturn = source.indexOf('console.info("PF_DIAG_READY")');
+    const diagnosticReturn = source.indexOf('diagnostic("PF_EXEC_READY")');
+    const oidc = source.indexOf("getVercelOidcTokenSync()", source.indexOf("export async function POST"));
     const runtimeImport = source.indexOf('await import("@/lib/preview-performance-fixture-recovery")');
     expect(diagnosticReturn).toBeGreaterThan(0);
     expect(runtimeImport).toBeGreaterThan(diagnosticReturn);
+    expect(oidc).toBeGreaterThan(diagnosticReturn);
     expect(source).not.toMatch(/from ["']@\/lib\/db|from ["']@prisma\/client|getPrisma\(/);
   });
 
@@ -157,7 +160,7 @@ describe("POST /api/admin/performance-fixture-recovery", () => {
     expect(await response.text()).toBe('{"error":"Not found"}');
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(log).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith("PF_DIAG_RUNTIME");
+    expect(log).toHaveBeenCalledWith("PF_EXEC_BASE");
     expect(execute).not.toHaveBeenCalled();
     log.mockRestore();
   });
@@ -168,8 +171,27 @@ describe("POST /api/admin/performance-fixture-recovery", () => {
     const { POST } = await import("@/app/api/admin/performance-fixture-recovery/route");
     await POST(request("diagnose"));
     const output = JSON.stringify(log.mock.calls);
-    expect(output).toBe('[["PF_DIAG_RUNTIME"]]');
+    expect(output).toBe('[["PF_EXEC_BASE"]]');
     for (const forbidden of [SECRET, SHA, DEPLOYMENT, HOST, "PGSCHEMA", "compass_prod", "Error", "stack", "true", "false"]) expect(output).not.toContain(forbidden);
     log.mockRestore();
+  });
+
+  it("swallows diagnostic logging failures and preserves the generic response", async () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => { throw new Error("logger failed"); });
+    const { POST } = await import("@/app/api/admin/performance-fixture-recovery/route");
+    const response = await POST(request("diagnose"));
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('{"error":"Not found"}');
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(log).toHaveBeenCalledOnce();
+    expect(oidc).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("uses only fixed diagnostic literals and no dynamic console interpolation", () => {
+    const source = fs.readFileSync("app/api/admin/performance-fixture-recovery/route.ts", "utf8");
+    expect([...source.matchAll(/diagnostic\("(PF_EXEC_(?:BASE|SHA|ID|URL|PROJECT|READY))"\)/g)].map((match) => match[1])).toEqual(["PF_EXEC_BASE", "PF_EXEC_SHA", "PF_EXEC_ID", "PF_EXEC_URL", "PF_EXEC_PROJECT", "PF_EXEC_READY"]);
+    expect(source).not.toMatch(/console\.info\([^)]*[+$`]/);
   });
 });
