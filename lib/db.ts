@@ -5,6 +5,7 @@ import { getActiveSchema } from "./schema";
 import {
   formatPerformanceQueryLog,
   instrumentPgPool,
+  resolvePerformanceInvocationId,
   type PerformanceQueryEvent,
 } from "./performance-baseline";
 
@@ -82,7 +83,11 @@ function enablePerformanceObserver(pool: Pool): void {
     async () => {
       try {
         const { headers } = await import("next/headers");
-        return (await headers()).get("x-compass-perf-request-id");
+        const requestHeaders = await headers();
+        return resolvePerformanceInvocationId(
+          requestHeaders.get("x-compass-perf-request-id"),
+          requestHeaders.get("x-vercel-id")
+        );
       } catch {
         return process.env.COMPASS_PERF_REQUEST_ID ?? null;
       }

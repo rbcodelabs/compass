@@ -6,6 +6,7 @@ import {
   assertSafeAuthState,
   assertSafeLocalPerformanceDatabase,
   correlateVercelRequests,
+  extractCorrelatedBrowserRequests,
   correlateQueryEvents,
   instrumentPgPool,
   normalizeQueryFingerprint,
@@ -20,6 +21,7 @@ import {
   prismaPerformanceDbPushArgs,
   createLocalPerformanceChildEnv,
   resolvePerformanceResourceSampleId,
+  resolvePerformanceInvocationId,
 } from "@/lib/performance-baseline";
 
 describe("performance baseline safeguards", () => {
@@ -345,6 +347,31 @@ describe("pg query instrumentation", () => {
 });
 
 describe("query artifacts", () => {
+  it("derives a bounded unique invocation ID from the browser sample and Vercel request", () => {
+    const first = resolvePerformanceInvocationId("perf_sample", "iad1::first");
+    const second = resolvePerformanceInvocationId("perf_sample", "iad1::second");
+    expect(first).toMatch(/^perf_inv_[a-f0-9]{64}$/);
+    expect(second).not.toBe(first);
+    expect(resolvePerformanceInvocationId("perf_sample", null)).toBe("perf_sample");
+  });
+  it("expands each browser sample into unique platform-request correlation records", () => {
+    const base = {
+      requestId: "sample",
+      method: "GET",
+      path: "/roadmap",
+      startedAt: "2026-09-01T12:00:00.000Z",
+    };
+    const first = { ...base, requestId: "perf_first" };
+    const second = { ...base, requestId: "perf_second" };
+    expect(extractCorrelatedBrowserRequests([{
+      ...base,
+      requests: [first, second],
+    }]).requests).toEqual([first, second]);
+    expect(() => extractCorrelatedBrowserRequests([{
+      ...base,
+      requests: [first, first],
+    }])).toThrow(/unique correlation IDs/);
+  });
   it("parses only structured query log lines and aggregates timings", () => {
     const line = `COMPASS_PERF_QUERY {\"version\":1,\"timestamp\":\"2026-09-01T12:00:00.000Z\",\"requestId\":\"perf_1\",\"operation\":\"SELECT\",\"durationMs\":12.5,\"fingerprint\":\"${"a".repeat(64)}\",\"success\":true,\"rowCount\":1}`;
     const event = parsePerformanceQueryLog(line);
@@ -395,6 +422,44 @@ describe("query artifacts", () => {
       durationMs: 22,
     }));
     expect(parseVercelRequestLog("{bad")).toBeNull();
+  });
+
+  it("uses the authoritative Vercel requestPath field", () => {
+    const request = parseVercelRequestLog(JSON.stringify({
+      requestId: "platform_req_1",
+      timestamp: "2026-09-01T12:00:00.100Z",
+      durationMs: 22,
+      requestPath: "/acme/compass/roadmap",
+      requestMethod: "GET",
+      statusCode: 200,
+    }));
+    expect(request).toEqual(expect.objectContaining({
+      method: "GET",
+      path: "/acme/compass/roadmap",
+    }));
+  });
+
+  it("correlates a browser URL with query parameters to an exact Vercel pathname", () => {
+    const browser = {
+      requestId: "perf_sample_1",
+      method: "GET",
+      path: "/api/panels/entity/opportunity/one?orgSlug=acme&workspaceSlug=compass",
+      startedAt: "2026-09-01T12:00:00.000Z",
+    };
+    const candidate = {
+      requestId: "platform_req_1",
+      customRequestId: "perf_sample_1",
+      method: "GET",
+      path: "/api/panels/entity/opportunity/one",
+      timestamp: "2026-09-01T12:00:00.100Z",
+      durationMs: 20,
+      statusCode: 200,
+    };
+    expect(correlateVercelRequests([browser], [candidate])).toHaveLength(1);
+    expect(() => correlateVercelRequests([browser], [{
+      ...candidate,
+      path: "/api/panels/entity/opportunity/one-related",
+    }])).toThrow(/No Vercel request/);
   });
 
   it("parses numeric Vercel timestamps and nested function duration", () => {

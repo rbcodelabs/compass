@@ -1,6 +1,6 @@
 import { test as base, expect } from "@playwright/test";
 
-export const ROUTES = ["discovery", "roadmap", "feedback", "tasks"] as const;
+export const ROUTES = ["discovery", "roadmap", "capture", "tasks"] as const;
 export type PerformanceRoute = (typeof ROUTES)[number];
 
 export const test = base.extend<{ workspaceBase: string }>({

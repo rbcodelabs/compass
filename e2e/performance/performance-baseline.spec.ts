@@ -47,6 +47,13 @@ const groupedNavigationSummary = (samples: Array<{ route: string; durationMs: nu
     byNetworkOutcome: Object.fromEntries([...new Set(samples.filter((sample) => sample.route === route).map((sample) => sample.networkOutcome ?? "document"))].map((outcome) => [outcome, durationSummary(samples.filter((sample) => sample.route === route && (sample.networkOutcome ?? "document") === outcome).map((sample) => sample.durationMs))])),
   }]));
 
+const correlatedRequests = (resources: ReadonlyArray<ResourceMetric>) => resources.map((resource) => ({
+  requestId: resource.requestId,
+  method: resource.method,
+  path: new URL(resource.url).pathname + new URL(resource.url).search,
+  startedAt: resource.startedAt,
+}));
+
 async function installClientObservers(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const state = {
@@ -167,7 +174,7 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, collector: Awai
     `${base}/${route}`
   );
   const start = performance.now();
-  const responseObserver = createCompletedRscResponseObserver(requestId, `${base}/${route}`);
+  const responseObserver = createCompletedRscResponseObserver(`${base}/${route}`);
   page.on("response", responseObserver.observe);
   await page.locator(`a[href="${base}/${route}"]`).first().click();
   await expect(page).toHaveURL(new RegExp(`/${route}(?:\\?|$)`));
@@ -199,6 +206,7 @@ async function recordWarmNavigation(page: Page, cdp: CDPSession, collector: Awai
     completedResourceRequestCount: resourceSnapshot.completedCount,
     canceledResourceRequestCount: resourceSnapshot.canceledCount,
     resources: resourceSnapshot.resources,
+    requests: correlatedRequests(resourceSnapshot.resources),
     client,
     cdp: cdpDelta(before, after),
   };
@@ -262,6 +270,7 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
         completedResourceRequestCount: resourceSnapshot.completedCount,
         canceledResourceRequestCount: resourceSnapshot.canceledCount,
         resources: resourceSnapshot.resources,
+        requests: correlatedRequests(resourceSnapshot.resources),
         documentResource: resourceSnapshot.resources[0] ?? null,
         rscResources: [],
         client,
@@ -271,7 +280,7 @@ test("records cold and warm workspace navigation", async ({ browser, page, works
     }
   }
   const artifact = {
-    version: 1,
+    version: 2,
     recordedAt: new Date().toISOString(),
     buildSha: process.env.PERF_BUILD_SHA ?? null,
     serverKind: process.env.PERF_SERVER_KIND,
@@ -331,7 +340,7 @@ for (const panel of [
       const trigger = page.getByRole("button", { name: entityTitle, exact: true });
       await expect(trigger).toBeVisible();
       const responsePromise = page.waitForResponse((response) =>
-        response.request().headers()["x-compass-perf-request-id"] === requestId &&
+        /^perf_[0-9a-f-]{36}$/.test(response.request().headers()["x-compass-perf-request-id"] ?? "") &&
         response.url().includes(`/api/panels/entity/${panel.apiType}/`) &&
         response.ok()
       );
@@ -362,6 +371,7 @@ for (const panel of [
         canceledResourceRequestCount: resourceSnapshot.canceledCount,
         status: response.status(),
         resources: resourceSnapshot.resources,
+        requests: correlatedRequests(resourceSnapshot.resources),
         client,
         cdp: cdpDelta(before, after),
       };
@@ -371,7 +381,7 @@ for (const panel of [
     }
     await readClientMetrics(page);
     const artifact = {
-      version: 1,
+      version: 2,
       recordedAt: new Date().toISOString(),
       buildSha: process.env.PERF_BUILD_SHA ?? null,
       serverKind: process.env.PERF_SERVER_KIND,

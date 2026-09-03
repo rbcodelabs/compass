@@ -43,8 +43,13 @@ the Playwright result. Ingest an artifact with
 
 Router-cache-hit samples remain in the browser aggregate with null server and
 DSQL fields. Only samples with an observed completed request enter server/DSQL
-correlation. Each route and panel artifact is version 1 and contains real
+correlation. Each route and panel artifact is version 2 and contains real
 sample-count, median, and p95 aggregates calculated from its retained samples.
+Each sample also contains a `requests` list. A completed target request is
+identified by the hash of its browser sample ID and Vercel's per-invocation
+`x-vercel-id`; this keeps legitimate RSC fan-out one-to-one with platform and
+query-log records without changing the browser cache policy. Preview responses
+without that invocation ID fail the sample.
 Navigation aggregates are authoritative per route and, for warm samples, per
 `networkOutcome`; overall aggregates are convenience summaries only.
 
@@ -66,9 +71,11 @@ query-shape fingerprint, and disabled/enabled median/p95 plus deltas.
    vercel logs <deployment-id> --no-follow --json
    ```
 
-Every measured networked browser sample carries a unique
-`x-compass-perf-request-id`. Its authoritative Vercel invocation and DSQL
-events must reconcile to exactly the same custom+platform request pair.
+Every measured networked browser sample carries a scoped
+`x-compass-perf-request-id`; every completed target request derives a distinct
+invocation ID from that scope and Vercel's `x-vercel-id`. Its authoritative
+Vercel invocation and DSQL events must reconcile to exactly the same
+invocation+platform request pair.
 Unrelated preview traffic is excluded before reconciliation. Router Cache hits
 remain browser-only samples with null server and DSQL fields. Timestamp-only
 matching is forbidden.

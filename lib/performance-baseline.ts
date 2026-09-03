@@ -337,6 +337,29 @@ export interface BrowserRequest {
   path: string;
   startedAt: string;
 }
+
+export type BrowserSample = BrowserRequest & {
+  requests?: BrowserRequest[];
+  networkOutcome?: string;
+};
+
+export function resolvePerformanceInvocationId(sampleId: string | null, vercelRequestId: string | null): string | null {
+  if (!sampleId) return null;
+  if (!vercelRequestId) return sampleId;
+  return `perf_inv_${createHash("sha256").update(`${sampleId}\0${vercelRequestId}`).digest("hex")}`;
+}
+
+export function extractCorrelatedBrowserRequests(samples: BrowserSample[]) {
+  const cacheHits = samples.filter((sample) => sample.networkOutcome?.startsWith("router-cache"));
+  const requests = samples
+    .filter((sample) => !sample.networkOutcome?.startsWith("router-cache"))
+    .flatMap((sample) => sample.requests ?? [sample]);
+  const ids = requests.map((request) => request.requestId);
+  if (new Set(ids).size !== ids.length) {
+    throw new Error("Browser performance requests must have unique correlation IDs");
+  }
+  return { requests, cacheHits };
+}
 export interface VercelRequest {
   requestId: string;
   customRequestId: string;
@@ -368,8 +391,8 @@ export function parseVercelRequestLog(line: string): VercelRequest | null {
     const value = {
       requestId: String(raw.requestId ?? raw.request_id ?? ""),
       customRequestId: String(headers["x-compass-perf-request-id"] ?? raw.customRequestId ?? ""),
-      method: String(request.method ?? proxy.method ?? raw.method ?? ""),
-      path: String(request.path ?? request.url ?? raw.path ?? ""),
+      method: String(request.method ?? proxy.method ?? raw.requestMethod ?? raw.method ?? ""),
+      path: String(raw.requestPath ?? request.path ?? request.url ?? raw.path ?? ""),
       timestamp,
       durationMs: Number(functionInfo.durationMs ?? functionInfo.duration ?? raw.durationMs ?? raw.duration ?? NaN),
       statusCode: Number(response.statusCode ?? response.status ?? raw.statusCode ?? raw.status ?? NaN),
@@ -477,11 +500,17 @@ export function correlateVercelRequests(
   return browser.map((request) => {
     if (!request.requestId) throw new Error("Browser request is missing a requestId");
     const started = Date.parse(request.startedAt);
+    let browserPathname: string;
+    try {
+      browserPathname = new URL(request.path, "https://performance.invalid").pathname;
+    } catch {
+      throw new Error(`Browser request ${request.requestId} has an invalid path`);
+    }
     const candidates = vercel.filter(
       (candidate) =>
         candidate.customRequestId === request.requestId &&
         candidate.method === request.method &&
-        candidate.path === request.path &&
+        candidate.path === browserPathname &&
         candidate.statusCode >= 200 &&
         candidate.statusCode < 400 &&
         Math.abs(Date.parse(candidate.timestamp) - started) <= toleranceMs

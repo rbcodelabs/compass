@@ -1,8 +1,10 @@
 import type { CDPSession } from "@playwright/test";
-import { resolvePerformanceResourceSampleId } from "../../lib/performance-baseline";
-
+import { resolvePerformanceInvocationId } from "../../lib/performance-baseline";
 export type ResourceMetric = {
   sampleId: string | null;
+  requestId: string;
+  method: string;
+  startedAt: string;
   kind: "document" | "rsc" | "api";
   url: string;
   cdpEncodedDataLength: number;
@@ -30,7 +32,6 @@ export const RESOURCE_QUIESCENCE_MS = 100;
 export const RESOURCE_COMPLETION_TIMEOUT_MS = 5_000;
 
 export function createCompletedRscResponseObserver(
-  sampleId: string,
   targetPath: string,
   now: () => number = () => performance.now()
 ) {
@@ -48,7 +49,7 @@ export function createCompletedRscResponseObserver(
       const requestHeaders = normalizeHeaders(response.request().headers());
       const responseHeaders = normalizeHeaders(response.headers());
       if (
-        requestHeaders["x-compass-perf-request-id"] !== sampleId ||
+        !/^perf_[0-9a-f-]{36}$/.test(requestHeaders["x-compass-perf-request-id"] ?? "") ||
         !(requestHeaders.rsc === "1" || responseHeaders["content-type"]?.includes("text/x-component")) ||
         new URL(response.url()).pathname !== targetPath
       ) return;
@@ -87,6 +88,9 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
     url: string;
     decodedBytes: number;
     sampleId: string;
+    correlationId: string;
+    method: string;
+    startedAt: string;
     kind: Kind;
     completed: Promise<void>;
     complete: () => void;
@@ -103,6 +107,7 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
 
   const requests = new Map<string, TrackedRequest>();
   const requestHeaders = new Map<string, Record<string, string>>();
+  const requestStarts = new Map<string, { method: string; wallTime: number | undefined }>();
   const requestWindowOwners = new Map<string, string | null>();
   let active: ActiveSample | null = null;
   let attributionError: Error | null = null;
@@ -122,15 +127,37 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
       ? pathname === contract.targetPath
       : pathname.startsWith(contract.targetPath);
   };
-  const track = (requestId: string, url: string, kind: Kind, headers: Record<string, string>) => {
+  const correlationOwners = new Map<string, string>();
+  const track = (
+    requestId: string,
+    url: string,
+    kind: Kind,
+    headers: Record<string, string>,
+    method: string,
+    wallTime: number | undefined
+  ) => {
     if (!active || !qualifies(active.contract, kind, url) || requests.has(requestId)) return;
-    const headerSampleId = headers["x-compass-perf-request-id"] || null;
+    const correlationId = headers["x-compass-perf-request-id"] ?? "";
     try {
-      const sampleId = resolvePerformanceResourceSampleId(headerSampleId, active.sampleId);
-      if (!sampleId) return;
+      if (!correlationId.startsWith("perf_")) throw new Error(`Tracked target request ${requestId} is missing its performance sample ID`);
+      if (!Number.isFinite(wallTime)) {
+        throw new Error(`Tracked target request ${requestId} is missing its wall-clock start time`);
+      }
       let complete!: () => void;
       const completed = new Promise<void>((resolve) => { complete = resolve; });
-      requests.set(requestId, { url, decodedBytes: 0, sampleId, kind, completed, complete, error: null, canceled: false });
+      requests.set(requestId, {
+        url,
+        decodedBytes: 0,
+        sampleId: active.sampleId,
+        correlationId,
+        method,
+        startedAt: new Date(wallTime! * 1_000).toISOString(),
+        kind,
+        completed,
+        complete,
+        error: null,
+        canceled: false,
+      });
       active.requestIds.add(requestId);
       active.activityVersion += 1;
     } catch (error) {
@@ -138,9 +165,10 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
     }
   };
 
-  cdp.on("Network.requestWillBeSent", ({ requestId, request, type, redirectResponse }) => {
+  cdp.on("Network.requestWillBeSent", ({ requestId, request, type, redirectResponse, wallTime }) => {
     const headers = normalizeHeaders(request.headers);
     requestHeaders.set(requestId, headers);
+    requestStarts.set(requestId, { method: request.method, wallTime });
     if (!requestWindowOwners.has(requestId)) {
       requestWindowOwners.set(requestId, active?.sampleId ?? null);
     }
@@ -155,14 +183,33 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
       return;
     }
     if (requestWindowOwners.get(requestId) === active?.sampleId && kind) {
-      track(requestId, request.url, kind, headers);
+      track(requestId, request.url, kind, headers, request.method, wallTime);
     }
   });
   cdp.on("Network.responseReceived", ({ requestId, response, type }) => {
     const headers = requestHeaders.get(requestId) ?? normalizeHeaders(response.requestHeaders ?? {});
     const kind = kindFor(response.url, type, headers, String(response.mimeType));
     if (kind && requestWindowOwners.get(requestId) === active?.sampleId) {
-      track(requestId, response.url, kind, headers);
+      const start = requestStarts.get(requestId);
+      if (start) track(requestId, response.url, kind, headers, start.method, start.wallTime);
+      else attributionError = new Error(`Tracked target response ${requestId} had no request start event`);
+      const tracked = requests.get(requestId);
+      if (tracked) {
+        const responseHeaders = normalizeHeaders(response.headers ?? {});
+        const vercelRequestId = responseHeaders["x-vercel-id"] ?? null;
+        if (process.env.PERF_SERVER_KIND === "vercel-preview" && !vercelRequestId) {
+          attributionError = new Error(`Tracked preview response ${requestId} is missing its Vercel invocation ID`);
+          return;
+        }
+        const correlationId = resolvePerformanceInvocationId(tracked.correlationId, vercelRequestId)!;
+        const owner = correlationOwners.get(correlationId);
+        if (owner && owner !== requestId) {
+          attributionError = new Error(`Performance invocation ID ${correlationId} was reused by multiple requests`);
+          return;
+        }
+        correlationOwners.set(correlationId, requestId);
+        tracked.correlationId = correlationId;
+      }
     }
   });
   cdp.on("Network.dataReceived", ({ requestId, dataLength }) => {
@@ -175,6 +222,9 @@ export async function createResourceCollector(cdp: CDPSession, resources: Resour
     resources.push({
       url: request.url,
       sampleId: request.sampleId,
+      requestId: request.correlationId,
+      method: request.method,
+      startedAt: request.startedAt,
       kind: request.kind,
       cdpDecodedDataLength: request.decodedBytes,
       cdpEncodedDataLength: encodedDataLength,
