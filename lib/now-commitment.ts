@@ -39,6 +39,15 @@ export type NowCommitmentEligibilityInputs = {
     decisionOutcome: "APPROVE_BUILDING"
     applicationStatus: "APPLIED"
     applicationReceiptId: string
+    authorityLocator?: string
+    decisionSourceVersion?: string
+    appliedAt?: string
+    verifiedAt?: string
+    verifierVersion?: string
+    routingFingerprint?: string
+    sourceFileSha256?: string
+    signingKeyId?: string
+    attestationSignature?: string
   }
   capacity: {
     planId: string
@@ -96,6 +105,31 @@ function assertEligibilityConfigured(item: FingerprintItem, eligibility: NowComm
   const overLimit = capacity.reservedUnits + capacity.requestedUnits > effectiveLimit
   if (overLimit && !eligibility.displacement) throw new NowCommitmentError("DISPLACEMENT_REQUIRED", "Capacity is full; an explicit displacement item and destination are required.")
   if (!overLimit && eligibility.displacement) throw new NowCommitmentError("INVALID_DISPLACEMENT", "Displacement is only valid when the configured capacity is full.")
+}
+
+function evidenceRefsFor(eligibility: NowCommitmentEligibilityInputs) {
+  const decision = eligibility.investmentDecision
+  if (decision.authorityProvider !== "OBSIDIAN") return undefined
+  if (!decision.authorityLocator || !decision.decisionSourceVersion || !decision.appliedAt
+    || !decision.verifiedAt || !decision.verifierVersion) {
+    throw new NowCommitmentError("NO_APPLIED_INVESTMENT_DECISION", "Verified Obsidian decision evidence is incomplete.")
+  }
+  return { create: [{
+    evidenceType: "BUILDING_INVESTMENT_DECISION",
+    authorityProvider: decision.authorityProvider,
+    authorityRecordId: decision.authorityRecordId,
+    authorityLocator: decision.authorityLocator,
+    authorityChecksum: decision.authorityChecksum,
+    subjectType: "SOLUTION",
+    subjectId: decision.subjectId,
+    decisionOutcome: decision.decisionOutcome,
+    decisionSourceVersion: decision.decisionSourceVersion,
+    applicationStatus: decision.applicationStatus,
+    appliedAt: new Date(decision.appliedAt),
+    applicationReceiptId: decision.applicationReceiptId,
+    verifiedAt: new Date(decision.verifiedAt),
+    verifierVersion: decision.verifierVersion,
+  }] }
 }
 
 export function decisionReviewFingerprint(requestId: string, decisionCycle: number, revisionNumber: number, sourceFingerprint: string): string {
@@ -178,6 +212,7 @@ export async function prepareNowCommitment(itemId: string, input: { requestedByI
             { actionKey: "REQUEST_CHANGES", label: "Request changes", outcomeClass: "REQUEST_CHANGES", continuationKey: "NO_ACTION", sortOrder: 2 },
           ],
         },
+        ...(evidenceRefsFor(eligibility) ? { evidenceRefs: evidenceRefsFor(eligibility) } : {}),
       },
     })
     const requestData = { currentRevisionId: revision.id, state: "PENDING", revisionCount: revisionNumber, updatedAt: new Date() }
@@ -240,6 +275,7 @@ export async function startNewNowCommitmentDecisionCycle(
         title: `Commit ${item.title} to NOW`, summary: "Reconsider this roadmap item's authorization to consume current delivery capacity.",
         packetJson: JSON.stringify({ policyVersion: POLICY_VERSION, sourceFingerprint, portfolioPolicyId: eligibility.portfolioPolicyId, investmentDecision: eligibility.investmentDecision, capacity: eligibility.capacity, displacement: eligibility.displacement ?? null, roadmapItem: item, requestedHorizon: "NOW", reconsidersDecisionId: terminal.id, reopenReason: reason }),
         requiredRole: "ADMIN",
+        ...(evidenceRefsFor(eligibility) ? { evidenceRefs: evidenceRefsFor(eligibility) } : {}),
         options: { create: [
           { actionKey: "APPROVE_NOW", label: "Commit to NOW", outcomeClass: "APPROVE", continuationKey: "ADMIT_ROADMAP_ITEM_TO_NOW", sortOrder: 0 },
           { actionKey: "REJECT_NOW", label: "Keep out of NOW", outcomeClass: "REJECT", continuationKey: "NO_ACTION", sortOrder: 1 },
@@ -326,6 +362,7 @@ export async function admitRoadmapItemToNow(
       }
       const activeUnits = plan.reservations.reduce((sum, reservation) => sum + reservation.units, 0)
       let displacedReservation: (typeof plan.reservations)[number] | undefined
+      let displacedSortOrder: number | undefined
       if (eligibility.displacement) {
         if (eligibility.displacement.itemId === item.id) throw new NowCommitmentError("INVALID_DISPLACEMENT", "A commitment cannot displace itself.")
         const displacedItem = await tx.roadmapItem.findUnique({ where: { id: eligibility.displacement.itemId }, select: itemSelect })
@@ -333,9 +370,15 @@ export async function admitRoadmapItemToNow(
         if (!displacedItem || displacedItem.workspaceId !== item.workspaceId || displacedItem.horizon !== "NOW" || !displacedReservation) {
           throw new NowCommitmentError("INVALID_DISPLACEMENT", "The displaced item must be an actively reserved NOW item in the same workspace.")
         }
+        displacedSortOrder = displacedItem.sortOrder
+        const nextTail = await tx.roadmapItem.findFirst({
+          where: { workspaceId: item.workspaceId, horizon: "NEXT" },
+          orderBy: { sortOrder: "desc" },
+          select: { sortOrder: true },
+        })
         await tx.roadmapItem.update({
           where: { id: displacedItem.id },
-          data: { horizon: eligibility.displacement.destination, updatedAt: new Date() },
+          data: { horizon: eligibility.displacement.destination, sortOrder: (nextTail?.sortOrder ?? -1) + 1, updatedAt: new Date() },
         })
         await tx.portfolioCapacityReservation.update({
           where: { id: displacedReservation.id },
@@ -379,7 +422,7 @@ export async function admitRoadmapItemToNow(
       }
       await tx.roadmapItem.update({
         where: { id: item.id },
-        data: { horizon: "NOW", nowCommitmentProvenance: "NATIVE_DECISION", nowDecisionRecordId: decision.id, updatedAt: new Date() },
+        data: { horizon: "NOW", ...(displacedSortOrder === undefined ? {} : { sortOrder: displacedSortOrder }), nowCommitmentProvenance: "NATIVE_DECISION", nowDecisionRecordId: decision.id, updatedAt: new Date() },
       })
       const applied = { status: "APPLIED", lastError: null, appliedAt: new Date(), updatedAt: new Date() }
       return receipt

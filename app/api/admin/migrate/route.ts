@@ -200,13 +200,17 @@ const MIGRATIONS = [
     name: "042_native_decision_gates_repair",
     filePath: path.join(process.cwd(), "prisma/migrations/042_native_decision_gates_repair/migration.sql"),
   },
+  {
+    name: "043_decision_evidence_refs",
+    filePath: path.join(process.cwd(), "prisma/migrations/043_decision_evidence_refs/migration.sql"),
+  },
 ];
 
-const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"] as const;
+const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "decision_evidence_refs", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"] as const;
 const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record_id"] as const;
-const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
-const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "chk_roadmap_items_commitment_provenance_not_null", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
-const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger", "042_native_decision_gates_repair"] as const;
+const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_decision_evidence_refs_subject", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
+const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "decision_evidence_refs_pkey", "idx_decision_evidence_refs_revision_authority", "chk_roadmap_items_commitment_provenance_not_null", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
+const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger", "042_native_decision_gates_repair", "043_decision_evidence_refs"] as const;
 type DecisionMigrationName = typeof DECISION_GATE_MIGRATIONS[number]
 type DecisionMigrationStep = { id: string; sql?: string; kind: "sql" | "backfill"; async: boolean }
 const isDecisionMigration = (name: string): name is DecisionMigrationName => DECISION_GATE_MIGRATIONS.includes(name as DecisionMigrationName)
@@ -429,7 +433,7 @@ async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: s
     status: name === "039_native_decision_gates" && !applied.includes(name) && repairApplied ? "REPAIRED_BY" : applied.includes(name) ? "APPLIED" : incomplete.includes(name) ? "INCOMPLETE" : "MISSING",
     repairedBy: name === "039_native_decision_gates" && !applied.includes(name) && repairApplied ? "042_native_decision_gates_repair" : null,
   }));
-  const receiptsReady = (applied.includes("039_native_decision_gates") || repairApplied) && applied.includes("040_release_authorization") && applied.includes("041_portfolio_capacity_ledger")
+  const receiptsReady = (applied.includes("039_native_decision_gates") || repairApplied) && applied.includes("040_release_authorization") && applied.includes("041_portfolio_capacity_ledger") && applied.includes("043_decision_evidence_refs")
   const migrationReady = receiptsReady && tables.every((item) => item.present) && tableShapes.every((item) => item.structureMatches) && columnsHealthy && constraints.every((item) => item.present && item.valid && item.structureMatches) && indexes.every((item) => item.state === "ACTIVE") && provenance.available && provenance.nullCount === 0 && provenance.unknownCount === 0 && provenance.legacyLinkDrift === 0 && integrity.available && integrity.planViolations === 0 && integrity.reservationViolations === 0;
   return { migrationReceipts, tables, tableShapes, columns, constraints, indexes, provenance, integrity, migrationReady, capacityMetadataReady: false, runtimeEnforcementReady: false };
 }
@@ -483,6 +487,11 @@ const DECISION_MIGRATION_POSTCONDITIONS = {
     tables: new Set<string>(["portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"]),
     constraints: new Set<string>(["portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"]),
     indexes: new Set<string>(["idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"]),
+  },
+  "043_decision_evidence_refs": {
+    tables: new Set<string>(["decision_evidence_refs"]),
+    constraints: new Set<string>(["decision_evidence_refs_pkey", "idx_decision_evidence_refs_revision_authority"]),
+    indexes: new Set<string>(["idx_decision_evidence_refs_subject"]),
   },
 } as const
 

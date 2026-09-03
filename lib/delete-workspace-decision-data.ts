@@ -31,6 +31,7 @@ export async function deleteWorkspaceDecisionData(prisma: Prisma, workspaceId: s
 
   await prisma.decisionRecord.deleteMany({ where: { workspaceId } })
   await prisma.reviewOption.deleteMany({ where: requestScope })
+  await prisma.decisionEvidenceRef.deleteMany({ where: { reviewRevision: { request: { workspaceId } } } })
 
   // Break ReviewRequest.currentRevisionId before deleting immutable revisions.
   await prisma.reviewRequest.updateMany({

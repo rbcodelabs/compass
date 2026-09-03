@@ -99,6 +99,7 @@ const mockReleaseDispatch = { deleteMany: vi.fn() };
 const mockReleaseRunTask = { deleteMany: vi.fn() };
 const mockReleaseRun = { deleteMany: vi.fn() };
 const mockDecisionApplication = { deleteMany: vi.fn() };
+const mockDecisionEvidenceRef = { deleteMany: vi.fn() };
 const mockDecisionRecord = { deleteMany: vi.fn() };
 const mockReviewOption = { deleteMany: vi.fn() };
 const mockReviewRevision = { deleteMany: vi.fn() };
@@ -140,6 +141,7 @@ const mockPrisma = {
   releaseRunTask: mockReleaseRunTask,
   releaseRun: mockReleaseRun,
   decisionApplication: mockDecisionApplication,
+  decisionEvidenceRef: mockDecisionEvidenceRef,
   decisionRecord: mockDecisionRecord,
   reviewOption: mockReviewOption,
   reviewRevision: mockReviewRevision,
@@ -782,6 +784,7 @@ describe("deleteWorkspace", () => {
     expect(mockReleaseRunTask.deleteMany).toHaveBeenCalled();
     expect(mockReleaseRun.deleteMany).toHaveBeenCalled();
     expect(mockDecisionApplication.deleteMany).toHaveBeenCalled();
+    expect(mockDecisionEvidenceRef.deleteMany).toHaveBeenCalled();
     expect(mockDecisionRecord.deleteMany).toHaveBeenCalled();
     expect(mockReviewOption.deleteMany).toHaveBeenCalled();
     expect(mockReviewRevision.deleteMany).toHaveBeenCalled();
@@ -791,6 +794,7 @@ describe("deleteWorkspace", () => {
     expect(mockReleaseRun.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockDecisionRecord.deleteMany.mock.invocationCallOrder[0]);
     expect(mockDecisionApplication.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockDecisionRecord.deleteMany.mock.invocationCallOrder[0]);
     expect(mockReviewRequest.updateMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockDecisionEvidenceRef.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]);
     expect(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRequest.deleteMany.mock.invocationCallOrder[0]);
     expect(mockPortfolioCapacityReservation.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockRoadmapItem.deleteMany.mock.invocationCallOrder[0]);
 

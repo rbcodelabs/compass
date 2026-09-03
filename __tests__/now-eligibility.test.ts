@@ -109,13 +109,17 @@ describe("canonical NOW eligibility resolver", () => {
     await expect(resolveNowCommitmentEligibility(item)).rejects.toEqual(expect.objectContaining({ code: "NO_APPLIED_INVESTMENT_DECISION" }))
   })
 
-  it("fails closed for Obsidian authority without an explicit verifier adapter", async () => {
+  it("fails closed for Obsidian authority when the configured verifier is unavailable", async () => {
     const policy = validPolicy()
     policy.workspaces[ids.workspace].investmentDecisions[ids.solution] = {
       authorityProvider: "OBSIDIAN" as "COMPASS_NATIVE", authorityRecordId: "obsidian-note", authorityChecksum: "a".repeat(64),
       decisionOutcome: "APPROVE_BUILDING", applicationStatus: "APPLIED", applicationReceiptId: "obsidian-receipt",
-    }
+      authorityLocator: "Products/Compass/Reviews/Decisions/decision.md", decisionSourceVersion: "obsidian-decision/v1",
+      appliedAt: "2026-09-02T15:00:00.000Z", verifiedAt: "2026-09-02T15:01:00.000Z",
+      verifierVersion: "compass-obsidian-verifier/v1", routingFingerprint: `sha256:${"b".repeat(64)}`,
+      sourceFileSha256: "c".repeat(64), signingKeyId: "missing-key", attestationSignature: "dGVzdA==",
+    } as typeof policy.workspaces[typeof ids.workspace]["investmentDecisions"][typeof ids.solution] & Record<string, string>
     process.env.NOW_COMMITMENT_POLICY_JSON = JSON.stringify(policy)
-    await expect(resolveNowCommitmentEligibility(item)).rejects.toEqual(expect.objectContaining({ code: "NO_APPLIED_INVESTMENT_DECISION" }))
+    await expect(resolveNowCommitmentEligibility(item, undefined, {})).rejects.toEqual(expect.objectContaining({ code: "NO_APPLIED_INVESTMENT_DECISION" }))
   })
 })

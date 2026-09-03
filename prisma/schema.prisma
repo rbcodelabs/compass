@@ -778,11 +778,37 @@ model ReviewRevision {
   currentFor      ReviewRequest?  @relation("CurrentReviewRevision")
   options         ReviewOption[]
   decisions       DecisionRecord[]
+  evidenceRefs    DecisionEvidenceRef[]
 
   @@unique([requestId, revisionNumber], map: "idx_review_revisions_request_number")
   @@unique([requestId, fingerprint], map: "idx_review_revisions_request_fingerprint")
   @@index([requestId, sourceFingerprint], map: "idx_review_revisions_request_source")
   @@map("review_revisions")
+}
+
+model DecisionEvidenceRef {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reviewRevisionId      String         @map("review_revision_id") @db.Uuid
+  evidenceType          String         @map("evidence_type") @db.VarChar(80)
+  authorityProvider     String         @map("authority_provider") @db.VarChar(30)
+  authorityRecordId     String         @map("authority_record_id") @db.VarChar(255)
+  authorityLocator      String         @map("authority_locator") @db.Text
+  authorityChecksum     String         @map("authority_checksum") @db.Char(64)
+  subjectType           String         @map("subject_type") @db.VarChar(50)
+  subjectId             String         @map("subject_id") @db.Uuid
+  decisionOutcome       String         @map("decision_outcome") @db.VarChar(50)
+  decisionSourceVersion String         @map("decision_source_version") @db.VarChar(80)
+  applicationStatus     String         @map("application_status") @db.VarChar(30)
+  appliedAt             DateTime       @map("applied_at")
+  applicationReceiptId  String         @map("application_receipt_id") @db.VarChar(255)
+  verifiedAt            DateTime       @map("verified_at")
+  verifierVersion       String         @map("verifier_version") @db.VarChar(80)
+  createdAt             DateTime       @default(now()) @map("created_at")
+  reviewRevision        ReviewRevision @relation(fields: [reviewRevisionId], references: [id])
+
+  @@unique([reviewRevisionId, evidenceType, authorityRecordId], map: "idx_decision_evidence_refs_revision_authority")
+  @@index([subjectType, subjectId, evidenceType], map: "idx_decision_evidence_refs_subject")
+  @@map("decision_evidence_refs")
 }
 
 model ReviewOption {

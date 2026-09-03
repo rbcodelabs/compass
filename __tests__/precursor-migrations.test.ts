@@ -15,6 +15,7 @@ describe("decision-gate expand precursor migrations", () => {
     "040_release_authorization",
     "041_portfolio_capacity_ledger",
     "042_native_decision_gates_repair",
+    "043_decision_evidence_refs",
   ])("registers %s in the authenticated migration manifest", (name) => {
     expect(route).toContain(`name: "${name}"`)
     expect(migration(name)).toMatch(/CREATE (?:TABLE|INDEX)|ALTER TABLE/)
@@ -26,6 +27,7 @@ describe("decision-gate expand precursor migrations", () => {
       "040_release_authorization",
       "041_portfolio_capacity_ledger",
       "042_native_decision_gates_repair",
+      "043_decision_evidence_refs",
     ]) {
       const sql = migration(name)
       expect(sql).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?!ASYNC\b)/i)
@@ -60,6 +62,8 @@ describe("decision-gate expand precursor migrations", () => {
   it("requires migration-specific catalog postconditions before finishing every decision-gate receipt", () => {
     expect(route).toContain('"040_release_authorization":')
     expect(route).toContain('"041_portfolio_capacity_ledger":')
+    expect(route).toContain('"043_decision_evidence_refs":')
+    expect(route).toContain('applied.includes("043_decision_evidence_refs")')
     expect(route).toContain("assertDecisionMigrationPostconditions")
     expect(route).toContain("tables.length === expected.tables.size")
     expect(route).toContain("constraints.length === expected.constraints.size")
@@ -73,6 +77,7 @@ describe("decision-gate expand precursor migrations", () => {
     expect(schema).toMatch(/activeWorkspaceId\s+String\?\s+@unique\(map: "idx_capacity_plans_active_workspace"\)/)
     expect(schema).toContain("nowCommitmentProvenance")
     expect(schema.match(/model PortfolioCapacityPlan/g)).toHaveLength(1)
+    expect(schema).toContain("model DecisionEvidenceRef")
   })
 
   it("atomically limits activation to one capacity plan per workspace", () => {

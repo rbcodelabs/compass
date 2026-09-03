@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const tx = {
-  roadmapItem: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+  roadmapItem: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
   reviewRequest: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   reviewRevision: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   decisionRecord: { findUnique: vi.fn() },
@@ -18,7 +18,7 @@ import { investmentAuthorityChecksum, resolveNowCommitmentEligibility } from "@/
 const item = { id: "item-1", workspaceId: "ws-1", title: "Ship it", description: "Scope", horizon: "NEXT", status: "ACTIVE", solutionId: "sol-1", opportunityId: "opp-1", squadId: "squad-1", startDate: null, endDate: null, isPrivate: false, sortOrder: 2, updatedAt: new Date("2026-08-31T12:00:00Z"), nowCommitmentProvenance: "LEGACY_UNGATED" }
 const eligibility = {
   portfolioPolicyId: "portfolio-policy:v1:test",
-  investmentDecision: { authorityProvider: "OBSIDIAN" as const, authorityRecordId: "DEC-1", authorityChecksum: "a".repeat(64), subjectId: "sol-1", decisionOutcome: "APPROVE_BUILDING" as const, applicationStatus: "APPLIED" as const, applicationReceiptId: "receipt-1" },
+  investmentDecision: { authorityProvider: "OBSIDIAN" as const, authorityRecordId: "DEC-1", authorityLocator: "Products/Compass/Reviews/Decisions/DEC-1.md", authorityChecksum: "a".repeat(64), subjectId: "sol-1", decisionOutcome: "APPROVE_BUILDING" as const, decisionSourceVersion: "obsidian-decision/v1", applicationStatus: "APPLIED" as const, applicationReceiptId: "receipt-1", appliedAt: "2026-08-31T11:00:00Z", verifiedAt: "2026-08-31T11:01:00Z", verifierVersion: "obsidian-verifier/v1", routingFingerprint: `sha256:${"c".repeat(64)}`, sourceFileSha256: "d".repeat(64), signingKeyId: "test-key", attestationSignature: "signature" },
   capacity: { planId: "plan-1", planFingerprint: "b".repeat(64), unit: "CONFIGURED_UNIT", availableUnits: 3, requestedUnits: 1, unitsPerNowItem: 1, reservedUnits: 1, reservedRoadmapItemIds: ["now-1"], nowLimit: 3, planVersion: 1 },
 }
 const configuredIds = {
@@ -84,6 +84,7 @@ describe("NOW commitment", () => {
     const result = await prepareNowCommitment("item-1", { requestedById: "user-1", eligibility })
     expect(result).toEqual({ id: "rev-1", fingerprint: "fp-1" })
     expect(tx.reviewRevision.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ requiredRole: "ADMIN", options: { create: expect.arrayContaining([expect.objectContaining({ actionKey: "APPROVE_NOW" }), expect.objectContaining({ actionKey: "REJECT_NOW" })]) } }) }))
+    expect(tx.reviewRevision.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ evidenceRefs: { create: [expect.objectContaining({ evidenceType: "BUILDING_INVESTMENT_DECISION", authorityProvider: "OBSIDIAN" })] } }) }))
   })
 
   it("fails closed when explicit NOW policy inputs are not configured", async () => {
@@ -291,12 +292,13 @@ describe("NOW commitment", () => {
       reservations: [{ id: "reservation-now-1", roadmapItemId: "now-1", units: 1 }],
     })
     tx.decisionApplication.create.mockResolvedValue({ id: "receipt-1", status: "APPLIED" })
+    tx.roadmapItem.findFirst.mockResolvedValue({ sortOrder: 12 })
 
     await expect(admitRoadmapItemToNow("item-1", "decision-1", { eligibilityResolver: displacementResolver })).resolves.toEqual({ id: "receipt-1", status: "APPLIED" })
-    expect(tx.roadmapItem.update).toHaveBeenNthCalledWith(1, expect.objectContaining({ where: { id: "now-1" }, data: expect.objectContaining({ horizon: "NEXT" }) }))
+    expect(tx.roadmapItem.update).toHaveBeenNthCalledWith(1, expect.objectContaining({ where: { id: "now-1" }, data: expect.objectContaining({ horizon: "NEXT", sortOrder: 13 }) }))
     expect(tx.portfolioCapacityReservation.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "reservation-now-1" }, data: expect.objectContaining({ state: "RELEASED", activeRoadmapItemId: null }) }))
     expect(tx.portfolioCapacityReservation.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ roadmapItemId: "item-1", activeRoadmapItemId: "item-1", state: "ACTIVE" }) }))
-    expect(tx.roadmapItem.update).toHaveBeenNthCalledWith(2, expect.objectContaining({ where: { id: "item-1" }, data: expect.objectContaining({ horizon: "NOW" }) }))
+    expect(tx.roadmapItem.update).toHaveBeenNthCalledWith(2, expect.objectContaining({ where: { id: "item-1" }, data: expect.objectContaining({ horizon: "NOW", sortOrder: displaced.sortOrder }) }))
   })
 
   it("revalidates configured authoritative eligibility during application", async () => {
