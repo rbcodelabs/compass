@@ -61,7 +61,8 @@ export function createServerOwnedPerformanceHeaders(incoming: Headers, correlati
   return headers;
 }
 
-export function verifyDownstreamPerformanceCorrelation(
+/** Authenticates the proxy-observed pre-rewrite identity; it is not downstream path attestation. */
+export function authenticateProxyObservedPerformanceCorrelation(
   env: NodeJS.ProcessEnv, headers: Headers, now: number, method: string | null,
   pathname: string | null,
 ): string | null {

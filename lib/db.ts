@@ -7,7 +7,7 @@ import {
   instrumentPgPool,
   type PerformanceQueryEvent,
 } from "./performance-baseline";
-import { currentPerformanceInvocation, verifyDownstreamPerformanceCorrelation } from "./performance-request-correlation";
+import { authenticateProxyObservedPerformanceCorrelation, currentPerformanceInvocation } from "./performance-request-correlation";
 
 declare global {
   var __prisma: PrismaClient | undefined;
@@ -84,7 +84,7 @@ function enablePerformanceObserver(pool: Pool): void {
       try {
         const { headers } = await import("next/headers");
         const requestHeaders = await headers();
-        return currentPerformanceInvocation() ?? verifyDownstreamPerformanceCorrelation(
+        return currentPerformanceInvocation() ?? authenticateProxyObservedPerformanceCorrelation(
           process.env, new Headers(requestHeaders), Date.now(),
           requestHeaders.get("x-compass-perf-method"), requestHeaders.get("x-compass-perf-path"),
         );
