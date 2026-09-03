@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildRuntimeFixturePlan,
   executePreviewFixtureActionWithStore,
   PrismaRuntimeFixtureStore,
   type RuntimeFixtureStore,
 } from "@/lib/preview-performance-fixture-runtime";
-import { FIXTURE_COUNTS, SEED_ORDER, type PreviewFixtureManifest } from "@/lib/preview-performance-fixture";
+import { CLEANUP_ORDER, FIXTURE_COUNTS, SEED_ORDER, createPreviewFixtureManifest, type PreviewFixtureKind, type PreviewFixtureManifest } from "@/lib/preview-performance-fixture";
 
 const SHA = "a".repeat(40);
 const DEPLOYMENT_ID = `dpl_${"A".repeat(24)}`;
@@ -28,13 +28,14 @@ function mutableStore(initial = 0): RuntimeFixtureStore & { transactionCount: nu
     residue: initial,
     async inspect(manifest: PreviewFixtureManifest) {
       void manifest;
-      return { total: value.residue, complete: value.residue === 1231, exact: value.residue === 0 || value.residue === 1231 };
+      const counts = Object.fromEntries(CLEANUP_ORDER.map((kind) => [kind, value.residue === 0 ? 0 : FIXTURE_COUNTS[kind]])) as Record<PreviewFixtureKind, number>;
+      return { total: value.residue, sentinelTotal: value.residue === 0 ? 0 : 12, counts, complete: value.residue === 1231, exact: value.residue === 0 || value.residue === 1231 };
     },
+    async cleanup() { value.residue = 0; },
     async transaction(operation: Parameters<RuntimeFixtureStore["transaction"]>[0]) {
       value.transactionCount += 1;
       await operation({
         seed: async () => { value.residue = 1231; },
-        cleanup: async () => { value.residue = 0; },
       });
     },
   };
@@ -93,6 +94,8 @@ describe("preview performance fixture runtime", () => {
     const fixtureStore = mutableStore(1231);
     fixtureStore.inspect = async (_manifest, _plan, mode) => ({
       total: 1231,
+      sentinelTotal: 12,
+      counts: Object.fromEntries(CLEANUP_ORDER.map((kind) => [kind, FIXTURE_COUNTS[kind]])) as Record<PreviewFixtureKind, number>,
       complete: true,
       exact: mode === "seed-credentials" ? false : true,
     });
@@ -107,14 +110,38 @@ describe("preview performance fixture runtime", () => {
     }
   });
 
-  it("cleans in one transaction and a separate verify proves zero residue", async () => {
+  it("cleans through the chunked cleanup path and a separate verify proves zero residue", async () => {
     const fixtureStore = mutableStore(1231);
     const cleaned = await executePreviewFixtureActionWithStore(input("cleanup"), fixtureStore);
     expect(cleaned).toMatchObject({ state: "absent", residue: 0 });
-    expect(fixtureStore.transactionCount).toBe(1);
+    expect(fixtureStore.transactionCount).toBe(0);
     const verified = await executePreviewFixtureActionWithStore(input("verify"), fixtureStore);
     expect(verified).toMatchObject({ state: "absent", residue: 0 });
-    expect(fixtureStore.transactionCount).toBe(1);
+    expect(fixtureStore.transactionCount).toBe(0);
+  });
+
+  it("uses dependency-ordered recovery chunks of at most 100 for ordinary cleanup", async () => {
+    const calls: Array<{ kind: PreviewFixtureKind; size: number }> = [];
+    const { PrismaRecoveryFixtureStore } = await import("@/lib/preview-performance-fixture-recovery");
+    const deletion = vi.spyOn(PrismaRecoveryFixtureStore.prototype, "deleteChunk").mockImplementation(async (kind, ids) => {
+      calls.push({ kind, size: ids.length });
+      return ids.length;
+    });
+    const runtime = new PrismaRuntimeFixtureStore({} as never);
+    const plan = buildRuntimeFixturePlan(input("seed", "s".repeat(64)));
+    await runtime.cleanup(createPreviewFixtureManifest(plan), plan);
+    expect(calls.every(({ size }) => size <= 100)).toBe(true);
+    expect([...new Set(calls.map(({ kind }) => kind))]).toEqual(CLEANUP_ORDER);
+    deletion.mockRestore();
+  });
+
+  it("resumes cleanup from an exact monotonic subset", async () => {
+    const fixtureStore = mutableStore(1231);
+    const counts = Object.fromEntries(CLEANUP_ORDER.map((kind) => [kind, FIXTURE_COUNTS[kind]])) as Record<PreviewFixtureKind, number>;
+    counts.roadmapItems = 0;
+    fixtureStore.inspect = async () => ({ total: 1156, sentinelTotal: 12, counts, complete: false, exact: true });
+    fixtureStore.cleanup = async () => { fixtureStore.residue = 0; fixtureStore.inspect = async () => ({ total: 0, sentinelTotal: 0, counts: Object.fromEntries(CLEANUP_ORDER.map((kind) => [kind, 0])) as Record<PreviewFixtureKind, number>, complete: false, exact: true }); };
+    await expect(executePreviewFixtureActionWithStore(input("cleanup"), fixtureStore)).resolves.toMatchObject({ state: "absent", residue: 0 });
   });
 
   it("never includes the session token in results or sanitized failures", async () => {

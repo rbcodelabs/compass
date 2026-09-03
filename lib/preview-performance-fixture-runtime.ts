@@ -11,24 +11,27 @@ import {
   type PreviewFixturePlan,
 } from "@/lib/preview-performance-fixture";
 import { PrismaPreviewFixtureStore } from "@/lib/preview-performance-fixture-prisma";
+import {
+  PrismaRecoveryFixtureStore,
+  isValidMonotonicSubset,
+  type RecoveryFixtureInspection,
+} from "@/lib/preview-performance-fixture-recovery";
 import type { PreviewFixtureRequest } from "@/app/api/admin/performance-fixture/route";
 
 const TOTAL_ROWS = Object.values(FIXTURE_COUNTS).reduce((total, count) => total + count, 0);
 
-export interface RuntimeFixtureInspection {
-  total: number;
+export interface RuntimeFixtureInspection extends RecoveryFixtureInspection {
   complete: boolean;
-  exact: boolean;
 }
 
 export interface RuntimeFixtureTransaction {
   seed(plan: PreviewFixturePlan): Promise<void>;
-  cleanup(manifest: PreviewFixtureManifest): Promise<void>;
 }
 
 export interface RuntimeFixtureStore {
   inspect(manifest: PreviewFixtureManifest, plan?: PreviewFixturePlan, mode?: "ownership" | "seed-credentials"): Promise<RuntimeFixtureInspection>;
   transaction(operation: (transaction: RuntimeFixtureTransaction) => Promise<void>): Promise<void>;
+  cleanup(manifest: PreviewFixtureManifest, plan: PreviewFixturePlan): Promise<void>;
 }
 
 export function buildRuntimeFixturePlan(input: PreviewFixtureRequest): PreviewFixturePlan {
@@ -58,7 +61,9 @@ export async function executePreviewFixtureActionWithStore(
   const { manifest, plan } = stateFor(input);
   const inspectionMode = input.action === "seed" ? "seed-credentials" : "ownership";
   const before = await store.inspect(manifest, plan, inspectionMode);
-  if (!before.exact || (before.total !== 0 && !before.complete)) throw new Error("Preview fixture recovery required");
+  if (!before.exact) throw new Error("Preview fixture recovery required");
+  if (input.action === "seed" && before.total !== 0 && !before.complete) throw new Error("Preview fixture recovery required");
+  if (input.action !== "seed" && !isValidMonotonicSubset(before)) throw new Error("Preview fixture recovery required");
 
   if (input.action === "verify") {
     return { state: before.total === 0 ? "absent" : "seeded", residue: before.total };
@@ -71,10 +76,11 @@ export async function executePreviewFixtureActionWithStore(
   }
 
   try {
-    await store.transaction(async (transaction) => {
-      if (input.action === "seed") await transaction.seed(buildRuntimeFixturePlan(input));
-      else await transaction.cleanup(manifest);
-    });
+    if (input.action === "seed") {
+      await store.transaction(async (transaction) => transaction.seed(buildRuntimeFixturePlan(input)));
+    } else {
+      await store.cleanup(manifest, plan);
+    }
   } catch {
     const afterFailure = await store.inspect(manifest, plan, inspectionMode);
     if (input.action === "seed" && afterFailure.complete && afterFailure.exact) {
@@ -103,16 +109,17 @@ export class PrismaRuntimeFixtureStore implements RuntimeFixtureStore {
 
   async inspect(manifest: PreviewFixtureManifest, plan?: PreviewFixturePlan, mode: "ownership" | "seed-credentials" = "ownership"): Promise<RuntimeFixtureInspection> {
     const store = new PrismaPreviewFixtureStore(this.prisma);
-    const total = await store.countPlannedRows(manifest);
+    const counts = await store.countPlannedRowsByKind(manifest);
+    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
     const sentinelTotal = await store.countSentinelRows(manifest);
-    if (total === 0) return { total, complete: false, exact: sentinelTotal === 0 };
+    if (total === 0) return { counts, total, sentinelTotal, complete: false, exact: sentinelTotal === 0 };
     try {
       await store.verifyOwnership(manifest);
-      if (!plan) return { total, complete: false, exact: false };
+      if (!plan) return { counts, total, sentinelTotal, complete: false, exact: false };
       await store.verifyExactRows(plan, mode === "seed-credentials");
-      return { total, complete: total === TOTAL_ROWS, exact: total === TOTAL_ROWS && sentinelTotal === 12 };
+      return { counts, total, sentinelTotal, complete: total === TOTAL_ROWS, exact: true };
     } catch {
-      return { total, complete: false, exact: false };
+      return { counts, total, sentinelTotal, complete: false, exact: false };
     }
   }
 
@@ -127,28 +134,19 @@ export class PrismaRuntimeFixtureStore implements RuntimeFixtureStore {
           }
           for (const kind of SEED_ORDER) await store.insert(kind, plan.rows[kind]);
         },
-        cleanup: async (manifest) => {
-          await store.verifyOwnership(manifest);
-          const plan = stateFor(inputForManifest(manifest)).plan;
-          await store.verifyExactRows(plan);
-          if (await store.countPlannedRows(manifest) !== TOTAL_ROWS || await store.countSentinelRows(manifest) !== 12) {
-            throw new Error("Preview fixture changed before cleanup transaction");
-          }
-          for (const kind of CLEANUP_ORDER) await store.deleteIds(kind, manifest.plannedIds[kind]);
-        },
       });
     }, { maxWait: 10_000, timeout: 300_000 });
   }
-}
 
-function inputForManifest(manifest: PreviewFixtureManifest): PreviewFixtureRequest {
-  return {
-    action: "cleanup",
-    runId: manifest.identity.runId,
-    expectedSha: manifest.identity.deploymentSha,
-    expectedDeploymentId: manifest.identity.deploymentId,
-    expiresAt: manifest.identity.expiresAt,
-  };
+  async cleanup(manifest: PreviewFixtureManifest, plan: PreviewFixturePlan): Promise<void> {
+    const store = new PrismaRecoveryFixtureStore(this.prisma);
+    for (const kind of CLEANUP_ORDER) {
+      const ids = manifest.plannedIds[kind];
+      for (let offset = 0; offset < ids.length; offset += 100) {
+        await store.deleteChunk(kind, ids.slice(offset, offset + 100), manifest, plan);
+      }
+    }
+  }
 }
 
 export async function executePreviewFixtureAction(input: PreviewFixtureRequest) {

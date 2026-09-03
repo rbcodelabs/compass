@@ -14,10 +14,10 @@ import { PrismaPreviewFixtureStore } from "@/lib/preview-performance-fixture-pri
 export const RECOVERY_CHUNK_SIZE = 100;
 
 export const SOURCE_FIXTURE_IDENTITY = Object.freeze({
-  runId: "perf_preview_7389674e8e553c70cc9104450ae574d0",
-  deploymentSha: "9b646481eee6b7eba71c93981d56e292636c4260",
-  deploymentId: "dpl_52pkLvUGkTkpPZgR9NeRwDekU75d",
-  deploymentUrl: "https://compass-gjvp34s9v-rbcodelabs-team.vercel.app/",
+  runId: "perf_preview_bddc18c1097e28db66f7d8f8350948e1",
+  deploymentSha: "d3122ed2b44d68dc28eac7afb55d4f0f341a7ab0",
+  deploymentId: "dpl_AbsPX5FEaKoAk4odLWNucK4pesqW",
+  deploymentUrl: "https://compass-f19iam4a7-rbcodelabs-team.vercel.app/",
 });
 
 export interface RecoveryFixtureInspection {
@@ -43,7 +43,7 @@ function sourceState(): { manifest: PreviewFixtureManifest; plan: PreviewFixture
   return { plan, manifest: createPreviewFixtureManifest(plan) };
 }
 
-function isValidMonotonicSubset(inspection: RecoveryFixtureInspection): boolean {
+export function isValidMonotonicSubset(inspection: RecoveryFixtureInspection): boolean {
   if (!inspection.exact || inspection.total !== Object.values(inspection.counts).reduce((sum, count) => sum + count, 0)) return false;
   const expectedSentinels = inspection.counts.users + inspection.counts.organizations + inspection.counts.workspaces;
   if (inspection.sentinelTotal !== expectedSentinels) return false;
