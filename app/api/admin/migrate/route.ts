@@ -657,7 +657,7 @@ async function advanceDecisionMigration(client: PoolClient, schema: string, migr
       const jobs = await client.query<{ status: string; details: string | null }>(`SELECT status, details FROM sys.jobs WHERE job_id=$1`, [run.pending_job_id])
       const job = jobs.rows[0]
       if (!job) throw new Error(`Migration ${migration.name} async job ${run.pending_job_id} is unknown.`)
-      if (["submitted", "pending", "running", "in_progress"].includes(job.status.toLowerCase())) return { status: 202, state: "WAITING", attemptId: run.attempt_id, nextStep: run.next_step, jobId: run.pending_job_id }
+      if (["submitted", "processing", "pending", "running", "in_progress"].includes(job.status.toLowerCase())) return { status: 202, state: "WAITING", attemptId: run.attempt_id, nextStep: run.next_step, jobId: run.pending_job_id }
       if (!["succeeded", "successful", "completed"].includes(job.status.toLowerCase())) throw new Error(`Migration ${migration.name} async job ${run.pending_job_id} failed: ${job.details ?? job.status}`)
       const advanced = await client.query(`UPDATE "${schema}"._migration_execution_state SET next_step=next_step+1, pending_step=NULL, pending_job_id=NULL, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch])
       if (advanced.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim before advancing.`)
