@@ -228,12 +228,14 @@ function decisionMigrationPlan(migration: { name: string; filePath: string }) {
   return { version: 1, fingerprint, steps }
 }
 const normalizeDefinition = (value: string) => value.toLowerCase().replace(/::(?:text|character varying)/g, "").replace(/["();]/g, "").replace(/\s+/g, " ").trim()
-const normalizeConstraintDefinition = (value: string, type: string) => normalizeDefinition(
+export const normalizeConstraintDefinition = (value: string, type: string) => normalizeDefinition(
   type === "p"
     ? value.replace(/\s+INCLUDE\s*\([^)]*\)\s*$/i, "")
     : type === "c"
       ? value.replace(/\s+NOT\s+VALID\s*$/i, "")
-      : value,
+      : type === "u"
+        ? value.replace(/^UNIQUE\s+NULLS\s+DISTINCT\b/i, "UNIQUE")
+        : value,
 )
 const normalizeIndexKeys = (value: string) => normalizeDefinition(value.match(/\(([^)]*)\)(?:\s+INCLUDE|\s+WHERE|\s*$)/i)?.[1] ?? value)
 function splitTopLevel(value: string) {

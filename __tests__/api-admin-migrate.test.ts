@@ -34,7 +34,7 @@ vi.mock("@/lib/schema", () => ({
   getActiveSchema: () => "compass_preview",
 }))
 
-import { GET, POST, getDecisionGateExpectedCatalog } from "@/app/api/admin/migrate/route"
+import { GET, POST, getDecisionGateExpectedCatalog, normalizeConstraintDefinition } from "@/app/api/admin/migrate/route"
 
 const ORIGINAL_ENV = { ...process.env }
 const INDEX_NAMES = [
@@ -143,6 +143,10 @@ afterEach(() => {
 })
 
 describe("/api/admin/migrate rollout observability", () => {
+  it("canonicalizes only the default UNIQUE NULLS DISTINCT rendering", () => {
+    expect(normalizeConstraintDefinition('UNIQUE NULLS DISTINCT ("active_workspace_id")', "u")).toBe(normalizeConstraintDefinition('UNIQUE ("active_workspace_id")', "u"))
+    expect(normalizeConstraintDefinition('UNIQUE NULLS NOT DISTINCT ("active_workspace_id")', "u")).not.toBe(normalizeConstraintDefinition('UNIQUE ("active_workspace_id")', "u"))
+  })
   it("does not expose migration preflight or index state without MIGRATION_SECRET", async () => {
     const response = await GET(request("GET", undefined, "wrong"))
 
@@ -199,7 +203,7 @@ describe("/api/admin/migrate rollout observability", () => {
         { table_name: "roadmap_items", column_name: "now_decision_record_id", data_type: "uuid", character_maximum_length: null, datetime_precision: null, is_nullable: "YES", column_default: null },
       ] }
       if (sql.includes("pg_get_indexdef")) return { rows: catalog.indexes.map((index, indexNumber) => ({ name: index.name, table_name: index.table, valid: true, unique: index.unique, key_columns: index.keyColumns, definition: indexNumber === 0 ? `CREATE INDEX ${index.name} ON compass_preview.${index.table} USING btree_index ("workspace_id", "state")` : index.definition })) }
-      if (sql.includes("FROM pg_constraint")) return { rows: catalog.constraints.map((constraint) => ({ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: true, definition: constraint.definition, key_columns: constraint.keyColumns })) }
+      if (sql.includes("FROM pg_constraint")) return { rows: catalog.constraints.map((constraint) => ({ constraint_name: constraint.name, table_name: constraint.table, constraint_type: constraint.type, valid: true, definition: ["idx_capacity_plans_active_workspace", "idx_capacity_reservations_active_item"].includes(constraint.name) ? constraint.definition.replace("unique nulls distinct", "UNIQUE") : constraint.definition, key_columns: constraint.keyColumns })) }
       if (sql.includes("legacy_link_drift")) return { rows: [{ total: "4", null_count: "0", unknown_count: "0", legacy_link_drift: "0" }] }
       if (sql.includes("plan_violations")) return { rows: [{ plan_violations: "0", reservation_violations: "0" }] }
       return fallback(sqlValue, values)
@@ -214,6 +218,7 @@ describe("/api/admin/migrate rollout observability", () => {
       actualColumns: expect.arrayContaining([expect.objectContaining({ name: "revision_count", default: "0" })]),
     })
     expect(result.constraints.find((item: { name: string }) => item.name === "review_requests_pkey")).toMatchObject({ status: "MATCHED", expectedKeyColumns: ["id"], actualKeyColumns: ["id"] })
+    expect(result.constraints.find((item: { name: string }) => item.name === "idx_capacity_plans_active_workspace")).toMatchObject({ status: "MATCHED", structureMatches: true })
     expect(result.indexes.find((item: { name: string }) => item.name === "idx_review_requests_workspace_state")).toMatchObject({ status: "MATCHED", expectedKeyColumns: ["workspace_id", "state"], actualKeyColumns: ["workspace_id", "state"] })
     expect(result.migrationReady).toBe(true)
     const constraintQuery = mocks.query.mock.calls.find(([sql]) => String(sql).includes("FROM pg_constraint"))
