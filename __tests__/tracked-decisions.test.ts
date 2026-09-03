@@ -82,8 +82,8 @@ describe("tracked decisions", () => {
 
   it("reopens a decided request as a new immutable cycle linked to the terminal decision", async () => {
     prisma.feedbackItem.findUnique.mockResolvedValue({ id: "feedback-1", title: "Export", workspaceId: "ws-1" })
-    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1 })
-    prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", requestId: "request-1", revisionId: "revision-old" })
+    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1, currentRevision: { packetJson: JSON.stringify({ entity: { type: "FEEDBACK", id: "feedback-1" } }) } })
+    prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", requestId: "request-1", revisionId: "revision-old", option: { outcomeClass: "REQUEST_CHANGES" } })
 
     await reviseTrackedDecisionRequest({
       requestId: "request-1", workspaceId: "ws-1", subjectType: "FEEDBACK", subjectId: "feedback-1",
@@ -99,7 +99,7 @@ describe("tracked decisions", () => {
 
   it("requires exact historical decision identity to revise", async () => {
     prisma.feedbackItem.findUnique.mockResolvedValue({ id: "feedback-1", title: "Export", workspaceId: "ws-1" })
-    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1 })
+    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1, currentRevision: { packetJson: JSON.stringify({ entity: { type: "FEEDBACK", id: "feedback-1" } }) } })
     prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-other", requestId: "request-other" })
 
     await expect(reviseTrackedDecisionRequest({
@@ -111,10 +111,26 @@ describe("tracked decisions", () => {
 
   it("does not reopen the current cycle from an older decision", async () => {
     prisma.feedbackItem.findUnique.mockResolvedValue({ id: "feedback-1", title: "Export", workspaceId: "ws-1" })
-    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-current", revisionCount: 2, decisionCycle: 2 })
+    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-current", revisionCount: 2, decisionCycle: 2, currentRevision: { packetJson: JSON.stringify({ entity: { type: "FEEDBACK", id: "feedback-1" } }) } })
     prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-old", requestId: "request-1", revisionId: "revision-old" })
     await expect(reviseTrackedDecisionRequest({ requestId: "request-1", workspaceId: "ws-1", subjectType: "FEEDBACK", subjectId: "feedback-1", question: "Again?", context: "New context", expectedDecisionId: "decision-old", reason: "Changed" }))
       .rejects.toEqual(expect.objectContaining({ code: "DECISION_MISMATCH" }))
+  })
+
+  it("rejects switching the linked entity during revision", async () => {
+    prisma.feedbackItem.findUnique.mockResolvedValue({ id: "feedback-2", title: "Other", workspaceId: "ws-1" })
+    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1, currentRevision: { packetJson: JSON.stringify({ entity: { type: "FEEDBACK", id: "feedback-1" } }) } })
+    await expect(reviseTrackedDecisionRequest({ requestId: "request-1", workspaceId: "ws-1", subjectType: "FEEDBACK", subjectId: "feedback-2", question: "Again?", context: "New", expectedDecisionId: "decision-1", reason: "Changed" }))
+      .rejects.toEqual(expect.objectContaining({ code: "ENTITY_MISMATCH" }))
+    expect(prisma.decisionRecord.findUnique).not.toHaveBeenCalled()
+  })
+
+  it.each(["APPROVE", "REJECT"])("does not revise after %s", async (outcomeClass) => {
+    prisma.feedbackItem.findUnique.mockResolvedValue({ id: "feedback-1", title: "Export", workspaceId: "ws-1" })
+    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1, currentRevision: { packetJson: JSON.stringify({ entity: { type: "FEEDBACK", id: "feedback-1" } }) } })
+    prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", requestId: "request-1", revisionId: "revision-old", option: { outcomeClass } })
+    await expect(reviseTrackedDecisionRequest({ requestId: "request-1", workspaceId: "ws-1", subjectType: "FEEDBACK", subjectId: "feedback-1", question: "Again?", context: "New", expectedDecisionId: "decision-1", reason: "Changed" }))
+      .rejects.toEqual(expect.objectContaining({ code: "OUTCOME_NOT_REVISABLE" }))
   })
 
   it("allows many independent decisions to link to the same entity", async () => {
@@ -135,8 +151,8 @@ describe("tracked decisions", () => {
 
   it("reports a domain conflict instead of leaking a concurrent revision constraint error", async () => {
     prisma.feedbackItem.findUnique.mockResolvedValue({ id: "feedback-1", title: "Export", workspaceId: "ws-1" })
-    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1 })
-    prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", requestId: "request-1", revisionId: "revision-old" })
+    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1, currentRevision: { packetJson: JSON.stringify({ entity: { type: "FEEDBACK", id: "feedback-1" } }) } })
+    prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", requestId: "request-1", revisionId: "revision-old", option: { outcomeClass: "REQUEST_CHANGES" } })
     prisma.$transaction.mockRejectedValueOnce({ code: "P2002" })
     await expect(reviseTrackedDecisionRequest({ requestId: "request-1", workspaceId: "ws-1", subjectType: "FEEDBACK", subjectId: "feedback-1", question: "Again?", context: "New", expectedDecisionId: "decision-1", reason: "Changed" }))
       .rejects.toEqual(expect.objectContaining({ code: "REVISION_CONFLICT" }))

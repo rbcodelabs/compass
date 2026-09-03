@@ -61,11 +61,16 @@ export async function reviseTrackedDecisionRequest(input: { workspaceId: string;
   const packet: Packet = { schemaVersion: "tracked-decision/v1", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title } }
   try {
     return await prisma.$transaction(async tx => {
-      const request = await tx.reviewRequest.findUnique({ where: { id: input.requestId } })
+      const request = await tx.reviewRequest.findUnique({ where: { id: input.requestId }, include: { currentRevision: true } })
       if (!request || request.workspaceId !== input.workspaceId || request.gateType !== TRACKED_GATE) throw new TrackedDecisionError("REQUEST_NOT_FOUND", "The decision to revise was not found.")
       if (request.state !== "DECIDED" || !request.currentRevisionId) throw new TrackedDecisionError("REVISION_CONFLICT", "The decision changed before the revision could be created.")
-      const prior = await tx.decisionRecord.findUnique({ where: { id: input.expectedDecisionId } })
+      if (!request.currentRevision) throw new TrackedDecisionError("REVISION_CONFLICT", "The current decision revision is unavailable.")
+      let currentPacket: Packet
+      try { currentPacket = JSON.parse(request.currentRevision.packetJson) as Packet } catch { throw new TrackedDecisionError("INVALID_PACKET", "The current decision packet is invalid.") }
+      if (currentPacket.entity?.type !== input.subjectType || currentPacket.entity?.id !== entity.id) throw new TrackedDecisionError("ENTITY_MISMATCH", "A revised request must remain linked to the original item.")
+      const prior = await tx.decisionRecord.findUnique({ where: { id: input.expectedDecisionId }, include: { option: true } })
       if (!prior || prior.requestId !== request.id || prior.revisionId !== request.currentRevisionId) throw new TrackedDecisionError("DECISION_MISMATCH", "The selected decision does not belong to the current revision.")
+      if (prior.option.outcomeClass !== "REQUEST_CHANGES") throw new TrackedDecisionError("OUTCOME_NOT_REVISABLE", "Only a request-changes decision can be revised.")
       const revisionNumber = request.revisionCount + 1, decisionCycle = request.decisionCycle + 1
       const fingerprint = createHash("sha256").update(JSON.stringify({ requestId: request.id, decisionCycle, revisionNumber, packet })).digest("hex")
       const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, fingerprint, title: question, summary: context, packetJson: JSON.stringify(packet), requiredRole: "ADMIN", options: { create: options } } })

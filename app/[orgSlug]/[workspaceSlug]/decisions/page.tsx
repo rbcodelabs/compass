@@ -6,6 +6,7 @@ import { getWorkspace } from "@/lib/workspace"
 import { listTrackedDecisions, TRACKED_SUBJECT_TYPES, type TrackedSubjectType } from "@/lib/tracked-decisions"
 import { PageHeader } from "@/components/patterns/page-header"
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link"
+import { isOrgAdminRole } from "@/lib/roles"
 
 const LABELS: Record<string, string> = { WORKSPACE: "Workspace", OPPORTUNITY: "Opportunity", SOLUTION: "Solution", ROADMAP_ITEM: "Roadmap Item", DOC: "Doc", EXPERIMENT: "Experiment", FEEDBACK: "Feedback" }
 
@@ -36,9 +37,9 @@ export default async function DecisionsPage({ params, searchParams }: {
   const prisma = getPrisma()
   const [workspaceMembers, organizationAdmins] = await Promise.all([
     prisma.workspaceMember.findMany({ where: { workspaceId: workspace.id }, select: { userId: true, user: { select: { name: true, email: true } } }, orderBy: { user: { name: "asc" } } }),
-    prisma.organizationMember.findMany({ where: { organizationId: workspace.organizationId, role: { in: ["OWNER", "ADMIN"] } }, select: { userId: true, user: { select: { name: true, email: true } } }, orderBy: { user: { name: "asc" } } }),
+    prisma.organizationMember.findMany({ where: { organizationId: workspace.organizationId }, select: { userId: true, role: true, user: { select: { name: true, email: true } } }, orderBy: { user: { name: "asc" } } }),
   ])
-  const members = [...new Map([...workspaceMembers, ...organizationAdmins].map((member) => [member.userId, member])).values()]
+  const members = [...new Map([...workspaceMembers, ...organizationAdmins.filter((member) => isOrgAdminRole(member.role))].map((member) => [member.userId, member])).values()]
   const reviewerNames = new Map(members.map((member) => [member.userId, member.user.name ?? member.user.email]))
   const base = `/${orgSlug}/${workspaceSlug}/decisions`
   const paramsFor = (overrides: Record<string, string | undefined>) => {
