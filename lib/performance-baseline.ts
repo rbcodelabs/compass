@@ -489,10 +489,17 @@ export function parseVercelRetainedLogs(lines: string[]): {
     grouped.set(id, [...(grouped.get(id) ?? []), item]);
   }
   const unique = [...grouped.entries()].map(([id, candidates]) => {
-    if (new Set(candidates.map(({ raw }) => canonical(raw))).size !== 1) {
+    const outer = candidates.map(({ raw }) => {
+      return Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "logs"));
+    });
+    if (new Set(outer.map(canonical)).size !== 1) {
       throw new Error(`Platform request ${id} has conflicting retained envelopes`);
     }
-    return candidates[0].line;
+    const nested = new Map<string, unknown>();
+    for (const { raw } of candidates) {
+      for (const log of Array.isArray(raw.logs) ? raw.logs : []) nested.set(canonical(log), log);
+    }
+    return JSON.stringify({ ...outer[0], logs: [...nested.values()] });
   });
   const requests = unique.map(parseVercelRequestLog).filter((request): request is VercelRequest => request !== null);
   if (requests.length !== unique.length) throw new Error("Observed Vercel CLI envelope is invalid");

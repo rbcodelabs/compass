@@ -546,6 +546,24 @@ describe("query artifacts", () => {
     expect(() => parseVercelRetainedLogs([partial])).toThrow(/mixed or incomplete/);
   });
 
+  it("merges overlapping retained log slices for one immutable platform invocation", () => {
+    const query = (id: string, timestamp: string) => ({ timestamp, level: "info", message: `COMPASS_PERF_QUERY {"version":1,"timestamp":"${timestamp}","requestId":"perf_function","operation":"SELECT","durationMs":4,"fingerprint":"${id.repeat(64)}","success":true,"rowCount":1}` });
+    const a = query("a", "2026-09-03T01:54:19.950Z");
+    const b = query("b", "2026-09-03T01:54:19.951Z");
+    const c = query("c", "2026-09-03T01:54:19.952Z");
+    const outer = { id: "platform_1", timestamp: 1788400459949, deploymentId: "dpl_One", projectId: "prj_One", source: "serverless", requestMethod: "GET", requestPath: "/roadmap", responseStatusCode: 200, environment: "preview", domain: "one.vercel.app" };
+    const parsed = parseVercelRetainedLogs([
+      JSON.stringify({ ...outer, logs: [a, b] }),
+      JSON.stringify({ ...outer, logs: [b, c] }),
+    ]);
+    expect(parsed.requests).toHaveLength(1);
+    expect(aggregateDsqlByPlatformRequest(["platform_1"], parsed.queryEnvelopes)[0].count).toBe(3);
+    expect(() => parseVercelRetainedLogs([
+      JSON.stringify({ ...outer, logs: [a] }),
+      JSON.stringify({ ...outer, requestPath: "/tasks", logs: [b] }),
+    ])).toThrow(/conflicting retained envelopes/);
+  });
+
   it("correlates a browser URL with query parameters to an exact Vercel pathname", () => {
     const browser = {
       requestId: "perf_sample_1",

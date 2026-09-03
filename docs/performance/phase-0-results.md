@@ -56,6 +56,10 @@ The retained Vercel CLI schema does not provide Function duration. Ingested
 server-duration fields are therefore `null` with an explicit availability
 count, never synthesized as zero; browser latency and DSQL query timing remain
 available.
+Overlapping Vercel time-slice exports for the same platform request are merged
+only when every outer invocation field is identical. Nested log records are
+canonical-set-unioned before query parsing; an exactly repeated timestamp,
+level, and message is treated as export duplication rather than a second query.
 Navigation aggregates are authoritative per route and, for warm samples, per
 `networkOutcome`; overall aggregates are convenience summaries only.
 
