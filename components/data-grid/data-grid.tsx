@@ -158,11 +158,14 @@ export function DataGrid<TRow extends GridRowData>({
 }: DataGridProps<TRow>) {
   const isMobile = useIsMobile();
   const mobileMode = isMobile && Boolean(renderMobileRow);
-  const toolbarPortal = React.useSyncExternalStore(
+  const clientReady = React.useSyncExternalStore(
     subscribeToStaticDom,
-    () => (toolbarPortalId ? document.getElementById(toolbarPortalId) : null),
-    () => null,
+    () => true,
+    () => false,
   );
+  const toolbarPortal = clientReady && toolbarPortalId
+    ? document.getElementById(toolbarPortalId)
+    : null;
 
   // ── Optimistic overlay ────────────────────────────────────────────────────
   // A server-truth overlay, not `useOptimistic`: `useOptimistic` resets when its

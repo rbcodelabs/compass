@@ -9,6 +9,7 @@ describe("Feedback workspace layout", () => {
   it("keeps every feedback control together in the workspace header toolbar", () => {
     const page = source("app/[orgSlug]/[workspaceSlug]/feedback/page.tsx");
     const grid = source("components/feedback/feedback-grid.tsx");
+    const dataGrid = source("components/data-grid/data-grid.tsx");
     const headerActions = source("components/feedback/feedback-header-actions.tsx");
 
     expect(page).toContain("<WorkspacePage");
@@ -19,6 +20,8 @@ describe("Feedback workspace layout", () => {
     expect(grid).toContain('toolbarPortalId="feedback-header-toolbar"');
     expect(headerActions).toContain('id="feedback-header-toolbar"');
     expect(headerActions).toContain("<CreateFeedbackDialog");
+    expect(dataGrid).toContain("const clientReady = React.useSyncExternalStore(");
+    expect(dataGrid).toContain("clientReady && toolbarPortalId");
     expect(grid).toContain('placeholder: "Search feedback"');
   });
 });

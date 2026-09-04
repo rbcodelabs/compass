@@ -32,7 +32,10 @@ test.describe("In-App Feedback Submission", () => {
     await page.goto(`${base}/feedback`);
     await page.waitForLoadState("networkidle");
 
-    await page.getByRole("button", { name: "New Feedback" }).click();
+    await page
+      .locator('[data-slot="workspace-toolbar"]')
+      .getByRole("button", { name: "New Feedback" })
+      .click();
     await page.getByLabel("Title").fill(title);
     await page.getByLabel("Description (optional)").fill("Created via the New Feedback dialog.");
     // `exact: true` matters here: Playwright's `name` option is a
