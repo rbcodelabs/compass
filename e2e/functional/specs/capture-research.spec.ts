@@ -1,6 +1,45 @@
 import { test, expect } from "../fixtures/index"
 
 test.describe("Capture — research study", () => {
+  test("edits an unused protocol, locks it after participation, and manages the lifecycle", async ({ page, base, browser, baseURL }) => {
+    await page.goto(`${base}/capture/new`)
+    await page.getByLabel("Study name").fill(`E2E lifecycle ${Date.now()}`)
+    await page.getByLabel("What are you trying to learn?").fill("Understand current planning")
+    await page.getByLabel("Target duration").selectOption("20")
+    await page.getByRole("textbox", { name: "Question 1", exact: true }).fill("Tell me about your last planning session.")
+    await page.getByRole("button", { name: "Create and activate study" }).click()
+
+    await page.getByLabel("Study name").fill("E2E lifecycle edited")
+    await page.getByLabel("Research goal").fill("Understand current planning workflows")
+    await page.getByLabel("Discussion guide").fill("Tell me about the last time you planned.\nWhat was hardest?")
+    await page.getByRole("button", { name: "Save study" }).click()
+    await expect(page.getByRole("heading", { name: "E2E lifecycle edited" })).toBeVisible()
+    await expect(page.getByText("20 minutes")).toBeVisible()
+
+    await page.getByRole("button", { name: "Rotate participant link" }).click()
+    const shareUrl = await page.getByRole("textbox").first().inputValue()
+    const anonymous = await browser.newContext({ storageState: undefined })
+    const started = await anonymous.request.post(`${baseURL}/api/research/start`, {
+      data: { token: new URL(shareUrl).pathname.split("/").at(-1) },
+    })
+    expect(started.status()).toBe(200)
+    await anonymous.close()
+
+    await page.reload()
+    await expect(page.getByText(/protocol is locked/i)).toBeVisible()
+    await expect(page.getByLabel("Research goal")).toBeDisabled()
+    await expect(page.getByLabel("Study name")).toBeEnabled()
+    await page.getByRole("button", { name: "Close study" }).click()
+    await expect(page.getByText("closed", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Activate study" })).toBeVisible()
+    await page.getByRole("button", { name: "Activate study" }).click()
+    await expect(page).toHaveURL(/\?token=/)
+    await expect(page.getByText("active", { exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "Archive study" }).click()
+    await expect(page).toHaveURL(`${base}/capture`)
+    await expect(page.getByRole("heading", { name: "E2E lifecycle edited" })).not.toBeVisible()
+  })
+
   test("persists and resumes a secure anonymous interview for member review", async ({ page, base, browser, baseURL }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto(`${base}/capture/new`)

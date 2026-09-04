@@ -4,12 +4,13 @@ import { auth } from "@/auth"
 import { PageHeader } from "@/components/patterns/page-header"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { regenerateResearchLink, revokeResearchLinks } from "../../actions"
+import { activateResearchStudy, archiveResearchStudy, closeResearchStudy, regenerateResearchLink, revokeResearchLinks, updateResearchStudy } from "../../actions"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { hashResearchToken } from "@/lib/research"
 import { researchParticipantUrl } from "@/lib/compass-url"
 import { reconcileAbandonedResearchSessions } from "@/lib/research-session"
 import Image from "next/image"
+import { StudySettings } from "@/components/research/study-settings"
 
 export default async function StudyPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; studyId: string }>; searchParams: Promise<{ token?: string }> }) {
   if (!isResearchCaptureEnabled()) notFound()
@@ -61,6 +62,10 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
   const shareUrl = token && displayedToken ? researchParticipantUrl(token) : null
   const regenerate = regenerateResearchLink.bind(null, orgSlug, workspaceSlug, study.id)
   const revoke = revokeResearchLinks.bind(null, orgSlug, workspaceSlug, study.id)
+  const update = updateResearchStudy.bind(null, orgSlug, workspaceSlug, study.id)
+  const activate = activateResearchStudy.bind(null, orgSlug, workspaceSlug, study.id)
+  const close = closeResearchStudy.bind(null, orgSlug, workspaceSlug, study.id)
+  const archive = archiveResearchStudy.bind(null, orgSlug, workspaceSlug, study.id)
   const guided = study.studyType === "USABILITY_TEST"
   return (
     <main className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8">
@@ -68,12 +73,21 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
       <section className="flex max-w-3xl flex-wrap gap-x-6 gap-y-2 rounded-xl border bg-surface-panel p-4 text-sm">
         <div><span className="text-text-muted">Type</span><div className="font-medium">{guided ? "Guided usability test" : "Customer interview"}</div></div>
         <div><span className="text-text-muted">Target</span><div className="font-medium">{study.targetMinutes} minutes</div></div>
+        <div><span className="text-text-muted">Status</span><div className="font-medium capitalize">{study.status.toLowerCase()}</div></div>
         {guided && study.appUrl && <div className="min-w-0"><span className="text-text-muted">Product</span><div><a className="break-all font-medium underline" href={study.appUrl} rel="noopener noreferrer" target="_blank">{study.appUrl}</a></div></div>}
       </section>
       <section className="max-w-3xl rounded-xl border bg-surface-panel p-5">
         <h2 className="font-semibold">Participant link</h2>
         {shareUrl ? <><Input className="mt-3" readOnly value={shareUrl} /><p className="mt-2 text-xs text-text-muted">Save this link now. Compass stores only its secure hash.</p></> : <p className="mt-2 text-sm text-text-subtle">For security, Compass cannot display an existing link again. {study.participantTokens.length ? `${study.participantTokens.length} active link${study.participantTokens.length === 1 ? " is" : "s are"} available.` : "There is no active participant link."}</p>}
-        <div className="mt-3 flex gap-2"><form action={regenerate}><Button type="submit" variant="outline">{study.participantTokens.length ? "Rotate participant link" : "Generate participant link"}</Button></form>{study.participantTokens.length > 0 && <form action={revoke}><Button type="submit" variant="ghost">Revoke active links</Button></form>}</div>
+        {study.status === "ACTIVE" && <div className="mt-3 flex gap-2"><form action={regenerate}><Button type="submit" variant="outline">{study.participantTokens.length ? "Rotate participant link" : "Generate participant link"}</Button></form>{study.participantTokens.length > 0 && <form action={revoke}><Button type="submit" variant="ghost">Revoke active links</Button></form>}</div>}
+      </section>
+      {study.status === "ARCHIVED"
+        ? <p className="max-w-3xl rounded-xl border bg-surface-panel p-5 text-sm text-text-muted">This study is archived and retained for research review.</p>
+        : <StudySettings action={update} protocolLocked={study.sessions.length > 0} study={study} />}
+      <section className="flex max-w-3xl flex-wrap gap-2 rounded-xl border bg-surface-panel p-5">
+        {study.status !== "ACTIVE" && study.status !== "ARCHIVED" && <form action={activate}><Button type="submit">Activate study</Button></form>}
+        {study.status === "ACTIVE" && <form action={close}><Button type="submit" variant="outline">Close study</Button></form>}
+        {study.status !== "ARCHIVED" && <form action={archive}><Button type="submit" variant="ghost">Archive study</Button></form>}
       </section>
       <section className="max-w-3xl">
         <h2 className="mb-3 font-semibold">Sessions</h2>

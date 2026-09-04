@@ -20,7 +20,16 @@ vi.mock("@/lib/db", () => ({
   }),
 }))
 
-import { createResearchStudy, generateUsabilityTasks, regenerateResearchLink, revokeResearchLinks } from "@/app/[orgSlug]/[workspaceSlug]/capture/actions"
+import {
+  activateResearchStudy,
+  archiveResearchStudy,
+  closeResearchStudy,
+  createResearchStudy,
+  generateResearchGuide,
+  regenerateResearchLink,
+  revokeResearchLinks,
+  updateResearchStudy,
+} from "@/app/[orgSlug]/[workspaceSlug]/capture/actions"
 
 function form() {
   const data = new FormData()
@@ -41,7 +50,7 @@ describe("research study actions", () => {
     researchParticipantToken.updateMany.mockResolvedValue({ count: 1 })
   })
 
-  it("generates 5–8 realistic editable tasks through the tool-free Compass agent", async () => {
+  it("generates 5–8 realistic editable usability tasks through the tool-free Compass agent", async () => {
     runResearchInterviewAgent.mockResolvedValue(JSON.stringify([
       "Find the plan that fits a five-person team.",
       "Start creating an account for your team.",
@@ -50,7 +59,8 @@ describe("research study actions", () => {
       "Change the billing cadence to annual.",
     ]))
 
-    await expect(generateUsabilityTasks("acme", "product", {
+    await expect(generateResearchGuide("acme", "product", {
+      studyType: "USABILITY_TEST",
       goal: "Learn whether pricing makes sense",
       appUrl: "https://example.com/pricing",
       targetMinutes: 15,
@@ -63,6 +73,26 @@ describe("research study actions", () => {
     ])
     expect(runResearchInterviewAgent).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringContaining("Return only a JSON array of 5 to 8"),
+    }))
+  })
+
+  it("generates neutral editable customer-interview questions without requiring a product URL", async () => {
+    runResearchInterviewAgent.mockResolvedValue(JSON.stringify([
+      "Tell me about the last time you planned this work.",
+      "What prompted you to start?",
+      "What did you try first?",
+      "Where did the process become difficult?",
+      "What did you do next?",
+    ]))
+
+    await expect(generateResearchGuide("acme", "product", {
+      studyType: "CUSTOMER_INTERVIEW",
+      goal: "Understand existing planning behavior",
+      appUrl: "",
+      targetMinutes: 20,
+    })).resolves.toHaveLength(5)
+    expect(runResearchInterviewAgent).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining("customer discovery interview"),
     }))
   })
 
@@ -100,6 +130,17 @@ describe("research study actions", () => {
         targetMinutes: 20,
         guide: JSON.stringify([{ id: "1", text: "Find the right plan for your team." }]),
       }),
+    })
+  })
+
+  it("persists the selected duration for a customer interview", async () => {
+    const data = form()
+    data.set("targetMinutes", "30")
+
+    await createResearchStudy("acme", "product", data)
+
+    expect(researchStudy.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ targetMinutes: 30 }),
     })
   })
 
@@ -172,5 +213,79 @@ describe("research study actions", () => {
       where: { id: "study-1" },
       data: { updatedAt: expect.any(Date), updatedById: "user-1" },
     })
+  })
+
+  it("updates the full protocol before the first session", async () => {
+    researchStudy.findFirst.mockResolvedValue({
+      id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW", goal: "Old goal",
+      guide: JSON.stringify([{ id: "1", text: "Old question" }]), targetMinutes: 15, appUrl: null,
+      _count: { sessions: 0 },
+    })
+    const data = form()
+    data.set("name", "Updated interview")
+    data.set("goal", "Updated goal")
+    data.set("targetMinutes", "20")
+    data.delete("guide")
+    data.append("guide", "Updated question")
+
+    await updateResearchStudy("acme", "product", "study-1", data)
+
+    expect(researchStudy.update).toHaveBeenCalledWith({
+      where: { id: "study-1" },
+      data: expect.objectContaining({
+        name: "Updated interview", goal: "Updated goal", targetMinutes: 20,
+        guide: JSON.stringify([{ id: "1", text: "Updated question" }]),
+      }),
+    })
+  })
+
+  it("locks protocol fields after the first session while allowing the name to change", async () => {
+    researchStudy.findFirst.mockResolvedValue({
+      id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW", goal: "Locked goal",
+      guide: JSON.stringify([{ id: "1", text: "Locked question" }]), targetMinutes: 15, appUrl: null,
+      _count: { sessions: 1 },
+    })
+    const data = form()
+    data.set("name", "New display name")
+    data.set("goal", "Tampered goal")
+    data.set("targetMinutes", "30")
+
+    await updateResearchStudy("acme", "product", "study-1", data)
+
+    expect(researchStudy.update).toHaveBeenCalledWith({
+      where: { id: "study-1" },
+      data: expect.objectContaining({ name: "New display name", goal: "Locked goal", targetMinutes: 15 }),
+    })
+  })
+
+  it("closes and archives studies by revoking active participant links", async () => {
+    researchStudy.findFirst.mockResolvedValue({ id: "study-1", status: "ACTIVE" })
+
+    await closeResearchStudy("acme", "product", "study-1")
+    expect(researchStudy.update).toHaveBeenLastCalledWith({
+      where: { id: "study-1" },
+      data: expect.objectContaining({ status: "CLOSED" }),
+    })
+    await archiveResearchStudy("acme", "product", "study-1")
+    expect(researchStudy.update).toHaveBeenLastCalledWith({
+      where: { id: "study-1" },
+      data: expect.objectContaining({ status: "ARCHIVED" }),
+    })
+    expect(researchParticipantToken.updateMany).toHaveBeenCalledTimes(2)
+  })
+
+  it("reactivates a closed study with a fresh hashed participant link", async () => {
+    researchStudy.findFirst.mockResolvedValue({ id: "study-1", status: "CLOSED" })
+
+    await activateResearchStudy("acme", "product", "study-1")
+
+    expect(researchStudy.update).toHaveBeenCalledWith({
+      where: { id: "study-1" },
+      data: expect.objectContaining({ status: "ACTIVE" }),
+    })
+    expect(researchParticipantToken.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ studyId: "study-1", tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/) }),
+    })
+    expect(redirect).toHaveBeenCalledWith(expect.stringContaining("?token="))
   })
 })
