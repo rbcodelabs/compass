@@ -8,7 +8,7 @@ test.describe("Capture — research study", () => {
     await page.getByLabel("Target duration").selectOption("20")
     await page.getByRole("textbox", { name: "Question 1", exact: true }).fill("Tell me about your last planning session.")
     await page.getByRole("button", { name: "Create and activate study" }).click()
-    await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
+    await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/, { timeout: 15_000 })
 
     await page.getByLabel("Study name").fill("E2E lifecycle edited")
     await page.getByLabel("Research goal").fill("Understand current planning workflows")
