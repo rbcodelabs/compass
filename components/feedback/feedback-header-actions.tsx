@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { CreateFeedbackDialog } from "@/components/feedback/create-feedback-dialog";
@@ -15,10 +16,18 @@ export function FeedbackHeaderActions({
 }: FeedbackHeaderActionsProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const [toolbarHostReady, setToolbarHostReady] = useState(false);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setToolbarHostReady(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-      <div id="feedback-header-toolbar" className="min-w-0 flex-1" />
+      {toolbarHostReady && (
+        <div id="feedback-header-toolbar" className="min-w-0 flex-1" />
+      )}
       <CreateFeedbackDialog
         orgSlug={orgSlug}
         workspaceSlug={workspaceSlug}

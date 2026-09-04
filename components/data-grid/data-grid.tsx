@@ -156,15 +156,24 @@ export function DataGrid<TRow extends GridRowData>({
 }: DataGridProps<TRow>) {
   const isMobile = useIsMobile();
   const mobileMode = isMobile && Boolean(renderMobileRow);
-  const [clientReady, setClientReady] = React.useState(false);
-
-  React.useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setClientReady(true));
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-  const toolbarPortal = clientReady && toolbarPortalId
-    ? document.getElementById(toolbarPortalId)
-    : null;
+  const subscribeToToolbarHost = React.useCallback(
+    (onStoreChange: () => void) => {
+      if (!toolbarPortalId) return () => {};
+      const observer = new MutationObserver(onStoreChange);
+      observer.observe(document.body, { childList: true, subtree: true });
+      return () => observer.disconnect();
+    },
+    [toolbarPortalId],
+  );
+  const getToolbarHost = React.useCallback(
+    () => (toolbarPortalId ? document.getElementById(toolbarPortalId) : null),
+    [toolbarPortalId],
+  );
+  const toolbarPortal = React.useSyncExternalStore(
+    subscribeToToolbarHost,
+    getToolbarHost,
+    () => null,
+  );
 
   // ── Optimistic overlay ────────────────────────────────────────────────────
   // A server-truth overlay, not `useOptimistic`: `useOptimistic` resets when its

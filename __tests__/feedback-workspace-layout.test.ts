@@ -18,11 +18,14 @@ describe("Feedback workspace layout", () => {
     expect(page).not.toContain("PageHeader");
     expect(page).not.toContain('className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8"');
     expect(grid).toContain('toolbarPortalId="feedback-header-toolbar"');
+    expect(headerActions).toContain("const [toolbarHostReady, setToolbarHostReady] = useState(false)");
+    expect(headerActions).toContain("window.requestAnimationFrame(() => setToolbarHostReady(true))");
+    expect(headerActions).toContain("{toolbarHostReady && (");
     expect(headerActions).toContain('id="feedback-header-toolbar"');
     expect(headerActions).toContain("<CreateFeedbackDialog");
-    expect(dataGrid).toContain("const [clientReady, setClientReady] = React.useState(false)");
-    expect(dataGrid).toContain("window.requestAnimationFrame(() => setClientReady(true))");
-    expect(dataGrid).toContain("clientReady && toolbarPortalId");
+    expect(dataGrid).toContain("const observer = new MutationObserver(onStoreChange)");
+    expect(dataGrid).toContain("if (!toolbarPortalId) return () => {}");
+    expect(dataGrid).toContain("return () => observer.disconnect()");
     expect(grid).toContain('placeholder: "Search feedback"');
   });
 });
