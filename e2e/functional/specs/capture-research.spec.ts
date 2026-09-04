@@ -15,7 +15,7 @@ test.describe("Capture — research study", () => {
     await page.getByLabel("Discussion guide").fill("Tell me about the last time you planned.\nWhat was hardest?")
     await page.getByRole("button", { name: "Save study" }).click()
     await expect(page.getByRole("heading", { name: "E2E lifecycle edited" })).toBeVisible()
-    await expect(page.getByText("20 minutes")).toBeVisible()
+    await expect(page.getByText("Target", { exact: true }).locator("..").getByText("20 minutes", { exact: true })).toBeVisible()
 
     await page.getByRole("button", { name: "Rotate participant link" }).click()
     const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
@@ -175,7 +175,7 @@ test.describe("Capture — research study", () => {
     const studyId = new URL(page.url()).pathname.split("/").at(-1)!
     const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
     const participantToken = new URL(shareUrl).pathname.split("/").at(-1)!
-    await expect(page.getByText("Guided usability test")).toBeVisible()
+    await expect(page.getByText("Type", { exact: true }).locator("..").getByText("Guided usability test", { exact: true })).toBeVisible()
     await expect(page.getByRole("link", { name: "https://example.com/pricing" })).toBeVisible()
 
     const anonymous = await browser.newContext({ storageState: undefined })
