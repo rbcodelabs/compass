@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ExternalLinkIcon, ChevronRightIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { MarkdownContent } from "@/components/markdown-content";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -371,6 +372,12 @@ export function EditableText({
   }
 
   const isEmpty = !value || value.trim().length === 0;
+  if (multiline) return (
+    <div className={`group/edit relative min-w-0 rounded-md -mx-1 px-1 pr-9 ${saving ? "opacity-60" : ""} ${className ?? ""}`}>
+      {isEmpty ? <span className="text-sm text-muted-foreground italic">{placeholder ?? "Add…"}</span> : <MarkdownContent>{value}</MarkdownContent>}
+      <button type="button" onClick={begin} disabled={saving} aria-label={`Edit ${field}`} className="absolute right-1 top-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">Edit</button>
+    </div>
+  );
   return (
     <button
       type="button"

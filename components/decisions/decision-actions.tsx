@@ -35,7 +35,8 @@ export function DecisionActions({ workspaceId, revisionId, fingerprint, options 
   return <div className="space-y-3">
     <label className="block space-y-1 text-sm">
       <span className="font-medium">Rationale <span className="text-muted-foreground">(required for changes or rejection)</span></span>
-      <Textarea aria-label="Rationale" value={rationale} onChange={(event) => setRationale(event.target.value)} placeholder="Explain the reasoning behind this decision…" />
+      <Textarea aria-label="Rationale" value={rationale} onChange={(event) => setRationale(event.target.value)} placeholder="Explain the reasoning behind this decision… Markdown supported." />
+      <span className="text-xs text-muted-foreground">Markdown supported.</span>
     </label>
     {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
     <div className="flex flex-wrap gap-3">
