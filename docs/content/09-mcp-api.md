@@ -62,12 +62,11 @@ Phase 1 exposes the shared comment capability through the generic MCP tools and 
 
 #### Production migration and backfill
 
-After deploying application code containing migration `046_shared_comments`, use the authenticated admin routes from the deployed Vercel runtime. They use Vercel OIDC for Aurora DSQL, require `MIGRATION_SECRET`, and always select `getActiveSchema()` for that deployment. First apply the additive schema migration:
+After deploying application code containing migration `046_shared_comments`, run these commands from the Vercel-linked Compass main checkout (the directory containing `.vercel/project.json`). The authenticated admin routes use Vercel OIDC for Aurora DSQL, require `MIGRATION_SECRET`, and always select `getActiveSchema()` for that deployment. First apply the additive schema migration:
 
 ```bash
 vercel curl /api/admin/migrate \
   --deployment "$DEPLOYMENT_URL" \
-  --cwd /path/to/compass \
   -- --request POST \
      --header "Content-Type: application/json" \
      --header "x-migration-secret: $MIGRATION_SECRET" \
@@ -79,7 +78,6 @@ Then invoke one bounded backfill batch at a time. Repeat the same request until 
 ```bash
 vercel curl /api/admin/shared-comments-backfill \
   --deployment "$DEPLOYMENT_URL" \
-  --cwd /path/to/compass \
   -- --request POST \
      --header "Content-Type: application/json" \
      --header "x-migration-secret: $MIGRATION_SECRET" \
@@ -91,7 +89,6 @@ Finish with a read-only validation request. It succeeds only when every legacy c
 ```bash
 vercel curl /api/admin/shared-comments-backfill \
   --deployment "$DEPLOYMENT_URL" \
-  --cwd /path/to/compass \
   -- --request POST \
      --header "Content-Type: application/json" \
      --header "x-migration-secret: $MIGRATION_SECRET" \
