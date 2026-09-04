@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
+import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat";
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring";
 import type {
   OpportunityStatus,
@@ -468,6 +469,7 @@ export async function addSolutionComment(
       source: "UI",
     },
   });
+  try { await mirrorLegacySolutionComment(comment); } catch (error) { await prisma.solutionComment.delete({ where: { id: comment.id } }); throw error; }
   revalidatePath(revalidatePathStr);
   return comment;
 }
@@ -485,6 +487,7 @@ export async function updateSolutionComment(
     where: { id: commentId },
     data: { body: body.trim(), updatedAt: new Date() },
   });
+  await updateMirroredComment(commentId, comment.body);
   revalidatePath(revalidatePathStr);
   return comment;
 }
@@ -498,6 +501,7 @@ export async function deleteSolutionComment(
 
   const prisma = getPrisma();
   await prisma.solutionComment.delete({ where: { id: commentId } });
+  await deleteMirroredComment(commentId);
   revalidatePath(revalidatePathStr);
 }
 
@@ -525,6 +529,7 @@ async function setSolutionPlanStatus(
     where: { id: commentId },
     data: { planStatus, updatedAt: new Date() },
   });
+  await updateMirroredLegacyPlanStatus(commentId, planStatus);
   revalidatePath(revalidatePathStr);
   return comment;
 }

@@ -127,6 +127,7 @@ import {
   updateObjective,
 } from "@/lib/okr-tool-handlers"
 import { applyRecordedDecision, getDecision, getReviewRequest, listDecisions, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -139,7 +140,6 @@ function formatUtcDate(date: Date): string {
 
 const _handler = createMcpHandler(
   (server) => {
-
     const inlineFeedbackAttachmentSchema = z.object({
       filename: z.string().min(1).max(255).describe("Original filename shown in Compass"),
       data: z.string().min(1).describe("Raw base64 (requires fileType) or a base64 data URL"),
@@ -164,6 +164,15 @@ const _handler = createMcpHandler(
       await applyToolGate(name, getMcpActor(), args ?? {})
       return handler(args, extra)
     })
+
+    const commentTargetSchema = z.enum(["OBJECTIVE", "KEY_RESULT", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "EXPERIMENT", "ROADMAP_ITEM", "FEEDBACK_ITEM", "TASK", "DOC", "ARTIFACT", "RESEARCH_STUDY", "REVIEW_REQUEST"])
+    register("add_comment", { title: "Add Comment", description: "Adds discussion to a supported Compass object. Comments never constitute a decision or authorization.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), parentId: z.string().uuid().optional(), body: z.string().min(1), authorName: z.string().min(1) }, outputSchema: TOOL_OUTPUT_SCHEMA }, addComment)
+    register("list_comments", { title: "List Comments", description: "Lists shared comments for one supported object.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), status: z.enum(["OPEN", "RESOLVED"]).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listCommentsTool)
+    register("get_comment", { title: "Get Comment", description: "Gets one shared comment by ID.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, getCommentTool)
+    register("update_comment", { title: "Update Comment", description: "Updates discussion text without changing any decision record.", inputSchema: { commentId: z.string().uuid(), body: z.string().min(1) }, outputSchema: TOOL_OUTPUT_SCHEMA }, updateComment)
+    register("delete_comment", { title: "Delete Comment", description: "Deletes a comment and its one-level replies when it is a root.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, deleteCommentTool)
+    register("resolve_comment", { title: "Resolve Comment", description: "Marks a discussion comment resolved.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, resolveComment)
+    register("reopen_comment", { title: "Reopen Comment", description: "Reopens a resolved discussion comment.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, reopenComment)
 
     // ════════════════════════════════════════════════════════════════
     // WORKSPACE

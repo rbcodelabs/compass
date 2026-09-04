@@ -54,6 +54,61 @@ curl https://your-compass-url.vercel.app/api/mcp \
 
 The MCP server exposes tools that agents can call, grouped below by area.
 
+### Shared comments
+
+Comments are mutable discussion only. They do not approve work, authorize a release, or change a tracked Decision. `REVIEW_REQUEST` targets are accepted only for informational `TRACKED_DECISION` requests; immutable review revisions, options, Decision records/applications, legacy review gates, and release authorization are not commentable.
+
+Phase 1 exposes the shared comment capability through the generic MCP tools and the existing Doc and Solution compatibility paths. It does not add a general Comments UI to every supported object. Until Phase 2, the existing Doc and Solution experiences remain the only comment UIs.
+
+#### Production migration and backfill
+
+After deploying application code containing migration `046_shared_comments`, run these commands from the Vercel-linked Compass main checkout (the directory containing `.vercel/project.json`). The authenticated admin routes use Vercel OIDC for Aurora DSQL, require `MIGRATION_SECRET`, and always select `getActiveSchema()` for that deployment. First apply the additive schema migration:
+
+```bash
+vercel curl /api/admin/migrate \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"script":"046_shared_comments"}'
+```
+
+Then invoke one bounded backfill batch at a time. Repeat the same request until the JSON response reports `"complete": true`; a retry after a timeout or ambiguous response is safe because rows retain their legacy IDs and inserts use conflict-safe idempotency. The response contains aggregate processed and invariant counts only.
+
+```bash
+vercel curl /api/admin/shared-comments-backfill \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"operation":"backfill","batchSize":500}'
+```
+
+Finish with a read-only validation request. It succeeds only when every legacy comment has a matching shared row, required extensions exist, reply topology is valid, and no legacy row is orphaned:
+
+```bash
+vercel curl /api/admin/shared-comments-backfill \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"operation":"validate"}'
+```
+
+HTTP `409` means validation failed or the backfill cannot make safe progress. Resolve orphaned legacy data explicitly; the endpoint never fabricates workspace ownership. Rollback remains application-code-only: revert the runtime code and leave the additive shared tables in place so the unchanged legacy tables and current UIs continue to operate.
+
+Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`, `EXPERIMENT`, `ROADMAP_ITEM`, `FEEDBACK_ITEM`, `TASK`, `DOC`, `ARTIFACT`, `RESEARCH_STUDY`, and `REVIEW_REQUEST`.
+
+| Tool | Description |
+|---|---|
+| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional |
+| `list_comments` | List comments for an exact workspace and target, optionally filtered by `OPEN` or `RESOLVED` |
+| `get_comment` | Get one comment and any specialized Doc-anchor or Solution-plan metadata |
+| `update_comment` | Edit a comment body |
+| `delete_comment` | Delete a reply, or a root and its replies |
+| `resolve_comment` | Mark a comment resolved |
+| `reopen_comment` | Mark a resolved comment open |
+
 ### Workspace
 
 | Tool | Description |
@@ -103,6 +158,8 @@ The MCP server exposes tools that agents can call, grouped below by area.
 | `approve_solution_plan` | Mark a PLAN entry as APPROVED (only applies to PLAN entries, not COMMENT replies) |
 | `reject_solution_plan` | Mark a PLAN entry as REJECTED (only applies to PLAN entries, not COMMENT replies) |
 | `promote_to_roadmap` | Promote a validated Solution directly to the roadmap, creating a Roadmap Item linked back to the originating opportunity. Accepts an optional `isPrivate` flag |
+
+`approve_solution_plan` and `reject_solution_plan` preserve the legacy, reversible plan-status marker only. They do not create a tracked Decision, authorize delivery, or establish authoritative approval semantics for new plans.
 
 ### Experiments
 
