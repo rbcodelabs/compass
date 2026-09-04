@@ -787,6 +787,16 @@ describe("DataGrid pagination", () => {
 // Toolbar + selection
 // ---------------------------------------------------------------------------
 describe("DataGrid toolbar", () => {
+  it("opens an opt-in search popover with the current query", async () => {
+    renderGrid({
+      searchDisplay: "popover",
+      search: { value: "billing", onChange: vi.fn(), label: "Search feedback" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search feedback" }));
+    expect(await screen.findByDisplayValue("billing")).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Clear search" })).toBeInTheDocument();
+  });
+
   it("debounces the text filter", async () => {
     vi.useFakeTimers();
     try {
