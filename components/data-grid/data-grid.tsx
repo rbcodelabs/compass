@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import {
   DndContext,
   KeyboardSensor,
@@ -78,6 +79,10 @@ export type DataGridProps<TRow extends GridRowData> = {
   caption: string;
 
   search?: GridSearch;
+  /** Optional screen-specific control rendered before search in the toolbar. */
+  toolbarLeading?: React.ReactNode;
+  /** Moves the toolbar into an existing shell slot while the grid retains its state. */
+  toolbarPortalId?: string;
   filters?: readonly FacetedFilterGroup[];
   onClearFilters?: () => void;
   toolbarActions?: React.ReactNode;
@@ -106,6 +111,8 @@ export type DataGridProps<TRow extends GridRowData> = {
 };
 
 type OverrideEntry<TRow> = { value: Partial<TRow>; pending: boolean };
+
+const subscribeToStaticDom = () => () => {};
 
 function metaOf<TRow extends GridRowData>(
   column: GridColumnDef<TRow>,
@@ -137,6 +144,8 @@ export function DataGrid<TRow extends GridRowData>({
   onSortChange,
   caption,
   search,
+  toolbarLeading,
+  toolbarPortalId,
   filters,
   onClearFilters,
   toolbarActions,
@@ -149,6 +158,11 @@ export function DataGrid<TRow extends GridRowData>({
 }: DataGridProps<TRow>) {
   const isMobile = useIsMobile();
   const mobileMode = isMobile && Boolean(renderMobileRow);
+  const toolbarPortal = React.useSyncExternalStore(
+    subscribeToStaticDom,
+    () => (toolbarPortalId ? document.getElementById(toolbarPortalId) : null),
+    () => null,
+  );
 
   // ── Optimistic overlay ────────────────────────────────────────────────────
   // A server-truth overlay, not `useOptimistic`: `useOptimistic` resets when its
@@ -468,16 +482,26 @@ export function DataGrid<TRow extends GridRowData>({
         {liveMessage}
       </div>
 
-      <DataGridToolbar
-        search={search}
-        filters={filters}
-        onClearFilters={onClearFilters}
-        columns={columnOptions}
-        onToggleColumn={(id, visible) => preferences.toggleColumn(id, visible)}
-        onMoveColumn={preferences.moveColumn}
-        onResetColumns={preferences.reset}
-        actions={toolbarActions}
-      />
+      {(() => {
+        const toolbar = (
+          <DataGridToolbar
+            leading={toolbarLeading}
+            search={search}
+            filters={filters}
+            onClearFilters={onClearFilters}
+            columns={columnOptions}
+            onToggleColumn={(id, visible) => preferences.toggleColumn(id, visible)}
+            onMoveColumn={preferences.moveColumn}
+            onResetColumns={preferences.reset}
+            actions={toolbarActions}
+          />
+        );
+        return toolbarPortal
+          ? createPortal(toolbar, toolbarPortal)
+          : toolbarPortalId
+            ? null
+            : toolbar;
+      })()}
 
       {errorMessages.length > 0 && (
         <div

@@ -6,16 +6,19 @@ const root = process.cwd();
 const source = (path: string) => readFileSync(join(root, path), "utf8");
 
 describe("Feedback workspace layout", () => {
-  it("uses the compact workspace shell with filters and creation in the header", () => {
+  it("keeps every feedback control together in the workspace header toolbar", () => {
     const page = source("app/[orgSlug]/[workspaceSlug]/feedback/page.tsx");
     const grid = source("components/feedback/feedback-grid.tsx");
+    const headerActions = source("components/feedback/feedback-header-actions.tsx");
 
     expect(page).toContain("<WorkspacePage");
-    expect(page).toContain("<FeedbackHeaderActions");
+    expect(page).toContain("toolbar={(");
+    expect(page).not.toContain("actions={(");
     expect(page).not.toContain("PageHeader");
     expect(page).not.toContain('className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8"');
-    expect(grid).not.toContain("toolbarActions=");
-    expect(grid).not.toContain("filters={filters}");
+    expect(grid).toContain('toolbarPortalId="feedback-header-toolbar"');
+    expect(headerActions).toContain('id="feedback-header-toolbar"');
+    expect(headerActions).toContain("<CreateFeedbackDialog");
     expect(grid).toContain('placeholder: "Search feedback"');
   });
 });

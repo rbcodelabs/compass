@@ -13,6 +13,7 @@ import { ColumnOptionsMenu, type ColumnOption } from "./column-options-menu";
 import type { GridSearch } from "./types";
 
 export type DataGridToolbarProps = {
+  leading?: ReactNode;
   search?: GridSearch;
   filters?: readonly FacetedFilterGroup[];
   onClearFilters?: () => void;
@@ -80,6 +81,7 @@ function DebouncedSearchInput({ search }: { search: GridSearch }) {
 }
 
 export function DataGridToolbar({
+  leading,
   search,
   filters,
   onClearFilters,
@@ -98,7 +100,8 @@ export function DataGridToolbar({
         className,
       )}
     >
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+        {leading}
         {search && <DebouncedSearchInput search={search} />}
         {filters && filters.length > 0 && (
           <FacetedFilterMenu

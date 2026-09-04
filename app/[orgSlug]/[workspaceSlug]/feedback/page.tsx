@@ -43,7 +43,7 @@ export default async function FeedbackPage({ params, searchParams }: Props) {
     <WorkspacePage
       title="Feedback"
       description={<>Customer submissions for {workspace.name}</>}
-      actions={(
+      toolbar={(
         <Suspense>
           <FeedbackHeaderActions orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
         </Suspense>

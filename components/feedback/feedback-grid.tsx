@@ -19,6 +19,10 @@ import {
   type FeedbackQueryPatch,
 } from "@/lib/feedback-query";
 import {
+  FEEDBACK_STATUSES,
+  FEEDBACK_STATUS_META,
+  FEEDBACK_TYPES,
+  FEEDBACK_TYPE_META,
   feedbackStatusLabel,
   feedbackStatusTone,
   feedbackTypeLabel,
@@ -237,40 +241,6 @@ export function FeedbackGrid({
 
   return (
     <div className="flex flex-col gap-3">
-      {/*
-        Segmented type control. Redundant with the Type group inside the
-        Filters menu on purpose: it is the board's primary triage affordance,
-        and it is the control the existing E2E suite reaches for by
-        `getByRole("button", { name: "Bugs" })`. Unlike the old client-side
-        version it now drives `?type=` and re-runs the query server-side.
-      */}
-      <div
-        className="inline-flex w-fit self-start rounded-lg border border-border-default p-0.5"
-        data-testid="feedback-type-tabs"
-      >
-        {TYPE_TABS.map((tab) => {
-          const active = (query.type ?? null) === tab.value;
-          return (
-            <button
-              key={tab.label}
-              type="button"
-              aria-pressed={active}
-              onClick={() => applyPatch({ type: tab.value })}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                active
-                  ? "bg-surface-inset text-text-primary"
-                  : "text-text-subtle hover:text-text-primary",
-              )}
-            >
-              {tab.value === "BUG" && <Bug aria-hidden className="size-3.5" />}
-              {tab.value === "IDEA" && <Lightbulb aria-hidden className="size-3.5" />}
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-
       <DataGrid<FeedbackRow>
         gridId="feedback"
         columns={columns}
@@ -287,12 +257,63 @@ export function FeedbackGrid({
         // active column and uses each other column's natural first direction.
         onSortChange={(sortKey) => applyPatch({ sort: sortKey })}
         caption="Customer feedback, sortable and filterable. Use the column headers to sort and the Filters menu to narrow the list."
+        toolbarPortalId="feedback-header-toolbar"
+        toolbarLeading={
+          <div
+            className="inline-flex w-fit shrink-0 rounded-lg border border-border-default p-0.5"
+            data-testid="feedback-type-tabs"
+          >
+            {TYPE_TABS.map((tab) => {
+              const active = (query.type ?? null) === tab.value;
+              return (
+                <button
+                  key={tab.label}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => applyPatch({ type: tab.value })}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                    active
+                      ? "bg-surface-inset text-text-primary"
+                      : "text-text-subtle hover:text-text-primary",
+                  )}
+                >
+                  {tab.value === "BUG" && <Bug aria-hidden className="size-3.5" />}
+                  {tab.value === "IDEA" && <Lightbulb aria-hidden className="size-3.5" />}
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        }
         search={{
           value: query.q ?? "",
           onChange: (value) => applyPatch({ q: value || null }),
           placeholder: "Search feedback",
           label: "Search feedback",
         }}
+        filters={[
+          {
+            id: "status",
+            label: "Status",
+            value: query.status,
+            options: FEEDBACK_STATUSES.map((status) => ({
+              value: status,
+              label: FEEDBACK_STATUS_META[status].label,
+            })),
+            onValueChange: (value) => applyPatch({ status: value }),
+          },
+          {
+            id: "type",
+            label: "Type",
+            value: query.type,
+            options: FEEDBACK_TYPES.map((type) => ({
+              value: type,
+              label: FEEDBACK_TYPE_META[type].label,
+            })),
+            onValueChange: (value) => applyPatch({ type: value }),
+          },
+        ]}
         onClearFilters={() => applyPatch({ q: null, status: null, type: null })}
         renderMobileRow={renderMobileRow}
         rowMatchesFilters={rowMatchesFilters}
