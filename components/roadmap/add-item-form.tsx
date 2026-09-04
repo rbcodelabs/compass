@@ -36,7 +36,6 @@ type Props = {
 export function AddItemForm({
   workspaceId,
   horizon,
-  revalidatePathStr,
   onAdd,
   availableKRs,
   availableSolutions,
@@ -87,8 +86,7 @@ export function AddItemForm({
           startDate,
           endDate,
           isPrivate,
-        },
-        revalidatePathStr
+        }
       );
       const linkedExperiment = selectedExperimentId
         ? (availableExperiments?.find((e) => e.id === selectedExperimentId) ?? null)

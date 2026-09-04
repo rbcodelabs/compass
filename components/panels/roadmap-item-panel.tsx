@@ -20,6 +20,7 @@ import { LaunchChecklist, type LaunchChecklistItemData } from "./launch-checklis
 import { PositioningBriefRow } from "./positioning-brief-row";
 import { RoadmapDeliveryTasks, type RoadmapDeliveryTaskData } from "./roadmap-delivery-tasks";
 import type { MemberData } from "@/lib/types";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 type RoadmapItemData = {
   id: string;
@@ -108,6 +109,7 @@ export function RoadmapItemPanel({
         edit={edit}
         statusEdit={{ field: "horizon", options: HORIZON_ORDER, map: HORIZON }}
       />
+      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="ROADMAP_ITEM" subjectId={data.id} subjectTitle={data.title} />
 
       <EditableText
         value={data.description}
@@ -124,6 +126,7 @@ export function RoadmapItemPanel({
         <Field label="Votes">{data._count.votes}</Field>
         {data.isPrivate && <Field label="Visibility">Private (hidden from public roadmap)</Field>}
       </div>
+
 
       <Section label="Launch">
         <div className="flex flex-col gap-4">

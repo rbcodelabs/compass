@@ -8,6 +8,8 @@ section: "Core Features"
 
 # Experiments
 
+Hypotheses, methods, kill conditions, and result notes support Markdown on experiment details. Compact experiment cards remain short plain-text previews.
+
 Experiments let you test the riskiest assumptions attached to your solutions before your team commits to building. Every experiment in Compass has a structured lifecycle that forces you to define success criteria upfront — preventing you from rationalising inconclusive results as successes after the fact.
 
 ![Experiments page](/screenshots/docs/experiments.png)

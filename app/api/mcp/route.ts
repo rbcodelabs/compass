@@ -126,6 +126,7 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
+import { applyRecordedDecision, getDecision, getReviewRequest, listDecisions, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -1321,8 +1322,7 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const item = await prisma.roadmapItem.create({
-          data: {
+        const item = await prisma.roadmapItem.create({ data: {
             workspaceId,
             title: solution.title,
             horizon,
@@ -1331,8 +1331,7 @@ const _handler = createMcpHandler(
             opportunityId: solution.opportunity.id,
             squadId: solution.opportunity.squadId ?? null,
             isPrivate: isPrivate ?? false,
-          },
-        })
+          } })
         return ok(
           `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
             (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
@@ -1584,6 +1583,143 @@ const _handler = createMcpHandler(
     // ════════════════════════════════════════════════════════════════
 
     register(
+      "request_building_investment",
+      {
+        title: "Request Building Investment",
+        description: "Prepares an immutable human-admin review of Building investment in an exact Solution. This does not take the decision.",
+        inputSchema: { solutionId: z.string().uuid().describe("UUID of the Solution") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestBuildingInvestment,
+    )
+
+    register(
+      "reconsider_building_investment",
+      {
+        title: "Reconsider Building Investment",
+        description: "Starts an explicit new decision cycle after a rejected or changes-requested Building investment decision. Approved investments require a separate revocation.",
+        inputSchema: { solutionId: z.string().uuid(), expectedTerminalDecisionId: z.string().uuid(), reason: z.string().min(1) },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      reconsiderBuildingInvestment,
+    )
+
+    register(
+      "request_building_investment_revocation",
+      {
+        title: "Request Building Investment Revocation",
+        description: "Prepares an immutable human-admin correction review for an exact applied Building investment authority.",
+        inputSchema: { solutionId: z.string().uuid(), authorityDecisionId: z.string().uuid() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestBuildingInvestmentRevocation,
+    )
+
+    register(
+      "request_decision",
+      {
+        title: "Request Decision",
+        description: "Creates a tracking-only human decision request linked to a workspace or Compass item. This never changes the linked item.",
+        inputSchema: {
+          workspaceId: z.string().uuid(),
+          subjectType: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"]),
+          subjectId: z.string().uuid(),
+          question: z.string().min(1).max(255),
+          context: z.string().min(1).max(20000).describe("Decision context. Markdown supported."),
+          idempotencyKey: z.string().uuid(),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestDecision,
+    )
+
+    register(
+      "list_decisions",
+      {
+        title: "List Decisions",
+        description: "Lists tracking-only decision requests in a workspace, newest first.",
+        inputSchema: {
+          workspaceId: z.string().uuid(),
+          state: z.enum(["PENDING", "DECIDED"]).optional(),
+          subjectType: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"]).optional(),
+          outcome: z.enum(["APPROVE", "REQUEST_CHANGES", "REJECT"]).optional(),
+          reviewerId: z.string().uuid().optional(),
+          query: z.string().max(255).optional(),
+          page: z.number().int().positive().optional(),
+          pageSize: z.number().int().min(1).max(50).optional(),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listDecisions,
+    )
+
+    register(
+      "get_decision",
+      {
+        title: "Get Decision",
+        description: "Reads one tracking-only decision request and its immutable revision history.",
+        inputSchema: { workspaceId: z.string().uuid(), requestId: z.string().uuid() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getDecision,
+    )
+
+    register(
+      "request_release_authorization",
+      {
+        title: "Request Release Authorization",
+        description: "Prepares an immutable human review packet for an exact GitHub PR commit and covered Task scope. Approval only writes a durable release dispatch outbox record; it does not invoke release automation.",
+        inputSchema: {
+          workspaceId: z.string().uuid(),
+          provider: z.literal("GITHUB"),
+          repositoryOwner: z.string().min(1),
+          repositoryName: z.string().min(1),
+          pullRequestNumber: z.number().int().positive(),
+          baseRef: z.string().min(1),
+          headSha: z.string().regex(/^[a-f0-9]{40}$/i),
+          targetEnvironment: z.literal("PRODUCTION"),
+          releasePolicyId: z.string().min(1),
+          taskIds: z.array(z.string().uuid()).min(1),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestReleaseAuthorization,
+    )
+
+    register(
+      "get_review_request",
+      {
+        title: "Get Review Request",
+        description: "Reads a Compass-native review request, its current immutable revision, options, and decision state.",
+        inputSchema: { requestId: z.string().uuid().describe("UUID of the Review Request") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getReviewRequest,
+    )
+
+    register(
+      "list_review_requests",
+      {
+        title: "List Review Requests",
+        description: "Lists Compass-native review requests in a workspace.",
+        inputSchema: { workspaceId: z.string().uuid(), state: z.enum(["DRAFT", "PENDING", "DECIDED", "SUPERSEDED", "EXPIRED", "CANCELLED"]).optional() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listReviewRequests,
+    )
+
+    register(
+      "apply_recorded_decision",
+      {
+        title: "Apply Recorded Decision",
+        description: "Idempotently applies a previously recorded human decision and returns its durable receipt. Service actors may apply but cannot take decisions.",
+        inputSchema: { decisionId: z.string().uuid().describe("UUID of the immutable Decision Record") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      applyRecordedDecision,
+    )
+
+    register(
       "list_roadmap_items",
       {
         title: "List Roadmap Items",
@@ -1683,13 +1819,11 @@ const _handler = createMcpHandler(
           return fail(`Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`)
         }
         const prisma = getPrisma()
-        const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, title: true, horizon: true, status: true } })
+        const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, workspaceId: true, title: true, horizon: true, status: true } })
         if (!item) {
           return fail(`Roadmap item "${itemId}" not found.`)
         }
-        const updated = await prisma.roadmapItem.update({
-          where: { id: itemId },
-          data: {
+        const updateData = {
             ...(horizon ? { horizon } : {}),
             ...(status ? { status } : {}),
             ...(title ? { title: title.trim() } : {}),
@@ -1698,8 +1832,8 @@ const _handler = createMcpHandler(
             ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
             ...(isPrivate !== undefined ? { isPrivate } : {}),
             updatedAt: new Date(),
-          },
-        })
+        }
+        const updated = await prisma.roadmapItem.update({ where: { id: itemId }, data: updateData })
         return ok(
           `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
             `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
@@ -1724,7 +1858,7 @@ const _handler = createMcpHandler(
       "add_to_roadmap",
       {
         title: "Add to Roadmap",
-        description: "Creates a Roadmap Item in the NOW, NEXT, or LATER horizon. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
+        description: "Creates a Roadmap Item in any ordinary roadmap horizon, including NOW. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Title of the roadmap item"),
@@ -1751,8 +1885,7 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const item = await prisma.roadmapItem.create({
-          data: {
+        const item = await prisma.roadmapItem.create({ data: {
             workspaceId,
             title: title.trim(),
             horizon,
@@ -1765,8 +1898,7 @@ const _handler = createMcpHandler(
             startDate: startDate ? new Date(startDate) : undefined,
             endDate: endDate ? new Date(endDate) : undefined,
             isPrivate: isPrivate ?? false,
-          },
-        })
+          } })
         return ok(
           `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
             (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +

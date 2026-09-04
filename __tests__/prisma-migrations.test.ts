@@ -195,4 +195,15 @@ describe("schema.prisma stays DSQL-compatible", () => {
       .map((l) => l.trim());
     expect(offending).toEqual([]);
   });
+
+  it("keeps capacity plans DRAFT until reconciliation explicitly activates them", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const migration = sqlFor("041_portfolio_capacity_ledger");
+    const planModel = schema.match(/model PortfolioCapacityPlan \{[\s\S]*?\n\}/)?.[0] ?? "";
+    const planTable = migration.match(/CREATE TABLE IF NOT EXISTS "portfolio_capacity_plans" \([\s\S]*?\n\);/)?.[0] ?? "";
+
+    expect(planModel).toContain('state           String                         @default("DRAFT")');
+    expect(planTable).toContain('"state" VARCHAR(30) NOT NULL DEFAULT \'DRAFT\'');
+    expect(planTable).not.toContain('"state" VARCHAR(30) NOT NULL DEFAULT \'ACTIVE\'');
+  });
 });

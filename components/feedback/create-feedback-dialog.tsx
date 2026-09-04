@@ -23,6 +23,7 @@ import {
 import { createFeedback } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 import type { CreatedFeedbackItem } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 import type { FeedbackType } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const TYPE_LABELS: Record<FeedbackType, string> = {
   IDEA: "Idea",
@@ -94,11 +95,17 @@ export function CreateFeedbackDialog({
         type="button"
         variant={variant === "empty-state" ? "default" : "outline"}
         size="sm"
-        className="w-fit"
+        aria-label={variant === "toolbar" ? "New Feedback" : undefined}
+        className={cn(
+          "w-fit",
+          variant === "toolbar" && "size-8 p-0 sm:h-8 sm:w-fit sm:px-3",
+        )}
         onClick={() => setOpen(true)}
       >
         <PlusIcon />
-        New Feedback
+        <span className={cn(variant === "toolbar" && "hidden sm:inline")}>
+          New Feedback
+        </span>
       </Button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>

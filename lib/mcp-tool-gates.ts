@@ -61,6 +61,15 @@ const TASK_LINK_ENTITY: Record<string, WorkspaceEntityType> = {
   FEEDBACK_ITEM: "feedbackItem",
 }
 
+const DECISION_SUBJECT_ENTITY: Record<string, WorkspaceEntityType> = {
+  OPPORTUNITY: "opportunity",
+  SOLUTION: "solution",
+  ROADMAP_ITEM: "roadmapItem",
+  DOC: "doc",
+  EXPERIMENT: "experiment",
+  FEEDBACK: "feedbackItem",
+}
+
 // ── Shared cross-checks (landmine tools) ────────────────────────────────────
 
 /** The provided evidence target (exactly one of opp/sol/assumption); returns its workspaceId. */
@@ -162,6 +171,31 @@ export const TOOL_GATES: Record<string, Gate> = {
     if (x.opportunityId) await assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, x.workspaceId)
     if (x.keyResultId) await assertEntityAccess(a, "keyResult", x.keyResultId)
   },
+  request_decision: async (a, x) => {
+    await assertWorkspaceMember(a, x.workspaceId)
+    if (x.subjectType === "WORKSPACE") {
+      if (x.subjectId !== x.workspaceId) throw new McpAuthzError("Decision subject does not belong to the declared workspace.")
+      return
+    }
+    const entity = DECISION_SUBJECT_ENTITY[x.subjectType]
+    if (!entity) throw new McpAuthzError(`Unknown decision subject type: ${x.subjectType}`)
+    await assertChildInDeclaredWorkspace(a, entity, x.subjectId, x.workspaceId)
+  },
+  list_decisions: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_decision: (a, x) => assertChildInDeclaredWorkspace(a, "reviewRequest", x.requestId, x.workspaceId),
+  request_building_investment: async (a, x) => void (await assertEntityAccess(a, "solution", x.solutionId)),
+  reconsider_building_investment: async (a, x) => {
+    await assertEntityAccess(a, "solution", x.solutionId)
+    await assertEntityAccess(a, "decisionRecord", x.expectedTerminalDecisionId)
+  },
+  request_building_investment_revocation: async (a, x) => {
+    await assertEntityAccess(a, "solution", x.solutionId)
+    await assertEntityAccess(a, "decisionRecord", x.authorityDecisionId)
+  },
+  request_release_authorization: async (a, x) => void (await assertWorkspaceAdmin(a, x.workspaceId)),
+  get_review_request: async (a, x) => void (await assertEntityAccess(a, "reviewRequest", x.requestId)),
+  list_review_requests: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  apply_recorded_decision: async (a, x) => void (await assertEntityAccess(a, "decisionRecord", x.decisionId)),
 
   // Launch tiers / checklists ----------------------------------------------
   create_checklist_template: (a, x) => assertWorkspaceMember(a, x.workspaceId),

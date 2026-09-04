@@ -8,6 +8,8 @@ section: "Core Features"
 
 # Discovery
 
+Opportunity and solution descriptions support Markdown on their full detail views and panels. Use paragraphs, headings, lists, links, emphasis, code, or tables to make longer discovery context easier to scan.
+
 The Discovery section is the heart of Compass. It's where you manage your **Opportunity Solution Tree** — mapping customer problems to potential solutions and tracking their progress through your discovery funnel.
 
 ![Discovery board](/screenshots/docs/discovery-board.png)

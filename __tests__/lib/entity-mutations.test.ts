@@ -14,10 +14,17 @@ const models = {
   opportunity: { findFirst: vi.fn(), update: vi.fn() },
   solution: { findFirst: vi.fn(), update: vi.fn() },
   feedbackItem: { findFirst: vi.fn(), update: vi.fn() },
-  roadmapItem: { findFirst: vi.fn(), update: vi.fn() },
+  roadmapItem: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
 };
 
-vi.mock("@/lib/db", () => ({ default: () => models }));
+const database = {
+  ...models,
+  portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
+  portfolioCapacityPlan: { updateMany: vi.fn() },
+  $transaction: vi.fn(),
+};
+
+vi.mock("@/lib/db", () => ({ default: () => database }));
 
 import { updateEntityField, EDIT_CONFIG, TITLE_MAX_LENGTH } from "@/lib/entity-mutations";
 
@@ -27,6 +34,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   // default: entity is in the workspace
   for (const m of Object.values(models)) m.findFirst.mockResolvedValue({ id: "e1" });
+  models.roadmapItem.findUnique.mockResolvedValue({ id: "e1", horizon: "NEXT", status: "ACTIVE" });
+  database.portfolioCapacityReservation.findUnique.mockResolvedValue(null);
+  database.$transaction.mockImplementation((fn: (value: typeof database) => unknown) => fn(database));
 });
 
 describe("EDIT_CONFIG", () => {

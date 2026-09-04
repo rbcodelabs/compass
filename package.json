@@ -2,11 +2,17 @@
   "name": "compass",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": "22.x",
+    "pnpm": "10.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
     "ui:colors": "node scripts/check-ui-colors.mjs",
     "ui:primitives": "node scripts/check-ui-primitives.mjs",
     "ui:colors:baseline": "node scripts/check-ui-colors.mjs --write-baseline",
@@ -15,8 +21,11 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test --project=screenshots",
-    "test:e2e:functional": "E2E_FUNCTIONAL=1 playwright test --project=functional-setup --project=functional",
-    "test:e2e:all": "E2E_FUNCTIONAL=1 playwright test",
+    "test:e2e:functional": "node scripts/run-functional-e2e.mjs functional",
+    "test:e2e:roadmap": "node scripts/run-functional-e2e.mjs roadmap",
+    "test:e2e:all": "node scripts/run-functional-e2e.mjs all",
+    "e2e:db:prepare": "node scripts/prepare-e2e-database.mjs",
+    "e2e:db:verify-clean": "node scripts/verify-e2e-cleanup.mjs",
     "docs:screenshots": "playwright test --project=screenshots e2e/screenshots.spec.ts"
   },
   "dependencies": {
@@ -100,6 +109,7 @@
     "jsdom": "^29.1.1",
     "prisma": "^7.6.0",
     "tailwindcss": "^4",
+    "tsx": "4.23.13",
     "typescript": "^5",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^4.1.6"

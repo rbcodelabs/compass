@@ -29,6 +29,7 @@ type FacetedFilterSingleGroup = {
   value?: string | null;
   options: FacetedFilterOption[];
   onValueChange: (value: string | null) => void;
+  allLabel?: string;
 };
 
 type FacetedFilterMultiGroup = {
@@ -36,6 +37,7 @@ type FacetedFilterMultiGroup = {
   label: string;
   value?: never;
   onValueChange?: never;
+  allLabel?: never;
   values: readonly string[];
   options: FacetedFilterOption[];
   onValuesChange: (values: string[]) => void;
@@ -50,9 +52,10 @@ function isMultiGroup(group: FacetedFilterGroup): group is FacetedFilterMultiGro
 type FacetedFilterMenuProps = {
   groups: FacetedFilterGroup[];
   onClearAll: () => void;
+  compact?: boolean;
 };
 
-export function FacetedFilterMenu({ groups, onClearAll }: FacetedFilterMenuProps) {
+export function FacetedFilterMenu({ groups, onClearAll, compact }: FacetedFilterMenuProps) {
   const activeCount = groups.filter((group) =>
     isMultiGroup(group)
       ? group.values.length < group.options.length
@@ -67,7 +70,7 @@ export function FacetedFilterMenu({ groups, onClearAll }: FacetedFilterMenuProps
         }
       >
         <ListFilter />
-        Filters
+        <span className={compact ? "hidden sm:inline" : undefined}>Filters</span>
         {activeCount > 0 && (
           <span className="ml-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
             {activeCount}
@@ -107,18 +110,25 @@ export function FacetedFilterMenu({ groups, onClearAll }: FacetedFilterMenuProps
               })
             ) : (
               <DropdownMenuRadioGroup
-                value={group.value ?? ""}
-                onValueChange={(value) => group.onValueChange(value || null)}
+                value={group.value ?? (group.allLabel ? "__all__" : "")}
+                onValueChange={(value) =>
+                  group.onValueChange(value === "__all__" ? null : value || null)
+                }
               >
+                {group.allLabel && (
+                  <DropdownMenuRadioItem value="__all__">
+                    {group.allLabel}
+                  </DropdownMenuRadioItem>
+                )}
                 {group.options.map((option) => (
                   <DropdownMenuRadioItem key={option.value} value={option.value}>
-                  {option.color && (
-                    <span
-                      className="size-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: option.color }}
-                    />
-                  )}
-                  <span className="truncate">{option.label}</span>
+                    {option.color && (
+                      <span
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: option.color }}
+                      />
+                    )}
+                    <span className="truncate">{option.label}</span>
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>

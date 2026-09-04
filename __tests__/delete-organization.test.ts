@@ -43,6 +43,17 @@ const mockArtifactLink = { deleteMany: vi.fn() };
 const mockArtifactBlobCleanup = { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() };
 const mockScoringModel = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockScoringModelMetric = { deleteMany: vi.fn() };
+const mockReleaseDispatch = { deleteMany: vi.fn() };
+const mockReleaseRunTask = { deleteMany: vi.fn() };
+const mockReleaseRun = { deleteMany: vi.fn() };
+const mockDecisionApplication = { deleteMany: vi.fn() };
+const mockDecisionEvidenceRef = { deleteMany: vi.fn() };
+const mockDecisionRecord = { deleteMany: vi.fn() };
+const mockReviewOption = { deleteMany: vi.fn() };
+const mockReviewRevision = { deleteMany: vi.fn() };
+const mockReviewRequest = { updateMany: vi.fn(), deleteMany: vi.fn() };
+const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
+const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 
 const mockPrisma = {
   organization: mockOrganization,
@@ -84,6 +95,17 @@ const mockPrisma = {
   artifactBlobCleanup: mockArtifactBlobCleanup,
   scoringModel: mockScoringModel,
   scoringModelMetric: mockScoringModelMetric,
+  releaseDispatch: mockReleaseDispatch,
+  releaseRunTask: mockReleaseRunTask,
+  releaseRun: mockReleaseRun,
+  decisionApplication: mockDecisionApplication,
+  decisionEvidenceRef: mockDecisionEvidenceRef,
+  decisionRecord: mockDecisionRecord,
+  reviewOption: mockReviewOption,
+  reviewRevision: mockReviewRevision,
+  reviewRequest: mockReviewRequest,
+  portfolioCapacityReservation: mockPortfolioCapacityReservation,
+  portfolioCapacityPlan: mockPortfolioCapacityPlan,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -243,6 +265,7 @@ describe("deleteOrganization", () => {
   it("allows an ADMIN (not just OWNER) to delete", async () => {
     mockOrganizationMember.findFirst.mockResolvedValue({ role: "ADMIN", organizationId: "org-1" });
     const result = await deleteOrganization("acme", ORG_NAME);
+
     expect(result).toEqual({ redirectTo: "/dashboard" });
     expect(mockOrganization.delete).toHaveBeenCalledWith({ where: { id: "org-1" } });
   });
@@ -257,6 +280,25 @@ describe("deleteOrganization", () => {
     seedNonEmptyFindMany();
 
     const result = await deleteOrganization("acme", ORG_NAME);
+
+    expect(mockReleaseDispatch.deleteMany).toHaveBeenCalled();
+    expect(mockReleaseRunTask.deleteMany).toHaveBeenCalled();
+    expect(mockReleaseRun.deleteMany).toHaveBeenCalled();
+    expect(mockDecisionApplication.deleteMany).toHaveBeenCalled();
+    expect(mockDecisionEvidenceRef.deleteMany).toHaveBeenCalled();
+    expect(mockDecisionRecord.deleteMany).toHaveBeenCalled();
+    expect(mockReviewOption.deleteMany).toHaveBeenCalled();
+    expect(mockReviewRevision.deleteMany).toHaveBeenCalled();
+    expect(mockReviewRequest.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockPortfolioCapacityReservation.deleteMany).toHaveBeenCalled();
+    expect(mockPortfolioCapacityPlan.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockReleaseRun.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockDecisionRecord.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockDecisionApplication.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockDecisionRecord.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockReviewRequest.updateMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockDecisionEvidenceRef.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRequest.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockReleaseRunTask.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockTask.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockPortfolioCapacityReservation.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockRoadmapItem.deleteMany.mock.invocationCallOrder[0]);
 
     // ── Per-workspace: null-out steps ──
     expect(mockObjective.updateMany).toHaveBeenCalledWith({

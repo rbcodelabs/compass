@@ -1,4 +1,5 @@
 "use client";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -6,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ExternalLinkIcon } from "lucide-react";
 import { EditableText, StatusSelect, type EditContext } from "./panel-parts";
+import { MarkdownContent } from "@/components/markdown-content";
 
 type ExperimentData = {
   id: string;
@@ -140,6 +142,7 @@ export function ExperimentPanel({
           className="text-base font-semibold leading-snug w-full"
         />
       </div>
+      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="EXPERIMENT" subjectId={data.id} subjectTitle={data.title} />
 
       {/* Kill condition — prominent when active */}
       {isActive && (
@@ -147,7 +150,7 @@ export function ExperimentPanel({
           <span className="text-lg text-amber-600 shrink-0" aria-hidden="true">⚠</span>
           <div>
             <p className="text-xs font-semibold text-amber-800 mb-0.5">Kill Condition</p>
-            <p className="text-xs text-amber-900 leading-relaxed">{data.killCondition}</p>
+            <MarkdownContent className="text-xs text-amber-900">{data.killCondition}</MarkdownContent>
           </div>
         </div>
       )}
@@ -174,9 +177,7 @@ export function ExperimentPanel({
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Hypothesis
         </p>
-        <blockquote className="border-l-4 border-muted pl-3 text-sm italic text-foreground/80 leading-relaxed">
-          {data.hypothesis}
-        </blockquote>
+        <MarkdownContent className="border-l-4 border-muted pl-3 italic text-foreground/80">{data.hypothesis}</MarkdownContent>
       </div>
 
       {/* Method */}
@@ -184,9 +185,7 @@ export function ExperimentPanel({
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Method
         </p>
-        <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
-          {data.method}
-        </p>
+        <MarkdownContent className="text-foreground/80">{data.method}</MarkdownContent>
       </div>
 
       {/* Kill condition body (inactive experiments) */}
@@ -195,9 +194,7 @@ export function ExperimentPanel({
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
             <span className="text-amber-500">⚠</span> Kill Condition
           </p>
-          <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
-            {data.killCondition}
-          </p>
+          <MarkdownContent className="text-foreground/80">{data.killCondition}</MarkdownContent>
         </div>
       )}
 

@@ -119,13 +119,33 @@ The MCP server exposes tools that agents can call, grouped below by area.
 | Tool | Description |
 |---|---|
 | `list_roadmap_items` | Fetch active roadmap items for a workspace, grouped by horizon (including LAUNCHING/LAUNCHED), including start/end dates and whether each item is private (`isPrivate`) |
-| `add_to_roadmap` | Create a roadmap item in NOW/NEXT/LATER/SHIPPED, optionally with a start date and end date for the Timeline view, and an `isPrivate` flag to hide it from the public portal roadmap and block voting on it |
-| `update_roadmap_item` | Update a roadmap item's horizon, status, title, description, start/end dates, or `isPrivate` flag. Rejects `horizon: LAUNCHING`/`LAUNCHED` — use `set_launch_tier` to move an item into LAUNCHING |
+| `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
+| `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
+| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item |
+| `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state, linked item type, outcome, reviewer, or search text |
+| `get_decision` | Read one tracking-only decision and its immutable revision history |
+| `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. This operation never takes the human decision or invokes release automation |
+| `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
+| `list_review_requests` | List review requests for a workspace, optionally filtered by state |
+| `apply_recorded_decision` | Idempotently apply the authorized continuation from a recorded decision and return its application receipt |
 | `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items |
 | `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier |
 | `set_launch_tier` | Move a roadmap item into the LAUNCHING horizon by picking a launch tier; attaches a checklist cloned from an explicit or auto-resolved (most recent ACTIVE) template for that tier. Rejects items already LAUNCHING/LAUNCHED |
 | `get_launch_checklist` | Get the launch checklist for a roadmap item, including each item's status and ID |
 | `update_launch_checklist_item` | Set a launch checklist item's status (PENDING/DONE/SKIPPED) |
+
+Decision-taking is deliberately absent from MCP. A signed-in human reviewer opens
+the stable Compass review URL and chooses one option. Agents may prepare and read
+packets, then apply a recorded decision; they cannot impersonate the reviewer.
+
+`apply_recorded_decision` is queue-only for release authorization. It validates
+the authoritative provider snapshot outside the database transaction, then a
+short transaction binds the unchanged snapshot and human decision to a durable
+dispatch row. Compass does not merge, deploy, or otherwise invoke external
+release automation in this implementation. Provider validation is unconfigured
+by default and therefore fails closed (`PR_NOT_READY`); a dispatch worker must
+use a configured provider and repeat the same head/check/policy revalidation at
+the dispatch-claim boundary before any future external side effect.
 
 ### Squads
 

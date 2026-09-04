@@ -33,6 +33,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks"
 import getPrisma from "@/lib/db"
+import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 
 export type McpActor = {
   userId: string | null
@@ -111,14 +112,17 @@ export async function assertWorkspaceAdmin(actor: McpActor, workspaceId: string)
   if (isService(actor)) return
   assertActorWorkspaceScope(actor, workspaceId)
   const prisma = getPrisma()
-  const member = await prisma.workspaceMember.findFirst({
-    where: { workspaceId, userId: actor.userId! },
-    select: { role: true },
-  })
-  if (!member) {
+  const [member, orgMember] = await Promise.all([
+    prisma.workspaceMember.findFirst({ where: { workspaceId, userId: actor.userId! }, select: { role: true } }),
+    prisma.organizationMember.findFirst({
+      where: { userId: actor.userId!, organization: { workspaces: { some: { id: workspaceId } } } },
+      select: { role: true },
+    }),
+  ])
+  if (!member && !orgMember) {
     throw new McpAuthzError(`Workspace not found or access denied: ${workspaceId}`)
   }
-  if (member.role !== "ADMIN") {
+  if (normalizeWorkspaceRole(member?.role) !== "ADMIN" && !isOrgAdminRole(orgMember?.role)) {
     throw new McpAuthzError("Forbidden: workspace admin required.")
   }
 }
@@ -225,6 +229,8 @@ export type WorkspaceEntityType =
   | "evidence"
   | "opportunityScore"
   | "workspaceScoringConfig"
+  | "reviewRequest"
+  | "decisionRecord"
 
 // Each resolver walks the FK chain to the owning workspaceId in one query.
 // Relation/field names verified against prisma/schema.prisma.
@@ -295,6 +301,10 @@ const WORKSPACE_ENTITY_RESOLVERS: Record<
       ?.opportunity?.workspaceId ?? null,
   workspaceScoringConfig: async (p, id) =>
     (await p.workspaceScoringConfig.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
+  reviewRequest: async (p, id) =>
+    (await p.reviewRequest.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
+  decisionRecord: async (p, id) =>
+    (await p.decisionRecord.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
 }
 
 /**

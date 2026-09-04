@@ -24,13 +24,14 @@ function toDateInputValue(iso: string | null): string {
 
 type Props = {
   item: RoadmapCardData;
+  workspaceId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   revalidatePathStr: string;
   onSaved: (item: RoadmapCardData) => void;
 };
 
-export function EditItemDialog({ item, open, onOpenChange, revalidatePathStr, onSaved }: Props) {
+export function EditItemDialog({ item, workspaceId, open, onOpenChange, onSaved }: Props) {
   const [title, setTitle] = useState(item.title);
   const [description, setDescription] = useState(item.description ?? "");
   const [startDate, setStartDate] = useState(toDateInputValue(item.startDate));
@@ -57,14 +58,14 @@ export function EditItemDialog({ item, open, onOpenChange, revalidatePathStr, on
     startTransition(async () => {
       const updated = await updateRoadmapItem(
         item.id,
+        workspaceId,
         {
           title: trimmedTitle,
           description: description.trim() || undefined,
           startDate: startDate ? new Date(startDate) : null,
           endDate: endDate ? new Date(endDate) : null,
           isPrivate,
-        },
-        revalidatePathStr
+        }
       );
 
       onSaved({
