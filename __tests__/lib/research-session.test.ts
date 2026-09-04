@@ -34,6 +34,14 @@ function context(overrides: Record<string, unknown> = {}) {
       }),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    researchStudy: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findUnique: vi.fn().mockResolvedValue({
+        id: "study-1", workspaceId: "workspace-1", name: "Planning", goal: "Understand planning",
+        studyType: "CUSTOMER_INTERVIEW", guide: JSON.stringify([{ id: "1", text: "Tell me about the last time." }]),
+        targetMinutes: 15, appUrl: null, status: "ACTIVE",
+      }),
+    },
     researchSession: {
       count: vi.fn().mockResolvedValue(0),
       create: vi.fn().mockImplementation(async ({ data }) => ({ ...data, createdAt: new Date() })),
@@ -151,7 +159,10 @@ describe("canonical research persistence", () => {
 
     const result = await startOrResumeResearchSession(fixture.value)
 
-    expect(fixture.prisma.$transaction).toHaveBeenCalledWith(expect.any(Array))
+    expect(fixture.prisma.$transaction).toHaveBeenCalledWith(expect.any(Function))
+    expect(fixture.prisma.researchStudy.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "study-1", status: "ACTIVE" },
+    }))
     expect(fixture.prisma.researchSession.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         id: result.sessionId,
@@ -172,6 +183,7 @@ describe("canonical research persistence", () => {
     const guidedStudy = (fixture.value as unknown as { study: { studyType: string; appUrl: string | null } }).study
     guidedStudy.studyType = "USABILITY_TEST"
     guidedStudy.appUrl = "https://example.com"
+    fixture.prisma.researchStudy.findUnique.mockResolvedValue((fixture.value as unknown as { study: unknown }).study)
 
     const result = await startOrResumeResearchSession(fixture.value, undefined, "VOICE")
 

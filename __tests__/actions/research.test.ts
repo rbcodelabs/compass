@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const redirect = vi.hoisted(() => vi.fn())
 const auth = vi.hoisted(() => vi.fn())
 const workspace = { findFirst: vi.fn() }
-const researchStudy = { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() }
+const researchStudy = { create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() }
 const researchParticipantToken = { create: vi.fn(), updateMany: vi.fn() }
-const transaction = vi.fn(async (operations: Array<Promise<unknown>>) => Promise.all(operations))
+const transaction = vi.fn(async (operations: Array<Promise<unknown>> | ((tx: { researchStudy: typeof researchStudy; researchParticipantToken: typeof researchParticipantToken }) => Promise<unknown>)) => typeof operations === "function"
+  ? operations({ researchStudy, researchParticipantToken })
+  : Promise.all(operations))
 const runResearchInterviewAgent = vi.hoisted(() => vi.fn())
 
 vi.mock("next/navigation", () => ({ redirect }))
@@ -46,6 +48,7 @@ describe("research study actions", () => {
     workspace.findFirst.mockResolvedValue({ id: "workspace-1" })
     researchStudy.create.mockResolvedValue({ id: "study-1" })
     researchStudy.update.mockResolvedValue({ id: "study-1" })
+    researchStudy.updateMany.mockResolvedValue({ count: 1 })
     researchParticipantToken.create.mockResolvedValue({ id: "token-1" })
     researchParticipantToken.updateMany.mockResolvedValue({ count: 1 })
   })
@@ -94,6 +97,13 @@ describe("research study actions", () => {
     expect(runResearchInterviewAgent).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringContaining("customer discovery interview"),
     }))
+  })
+
+  it("rejects duplicate generated guide items", async () => {
+    runResearchInterviewAgent.mockResolvedValue(JSON.stringify(["Same", "Other", "Third", "Fourth", " same "]))
+    await expect(generateResearchGuide("acme", "product", {
+      studyType: "CUSTOMER_INTERVIEW", goal: "Learn", appUrl: "", targetMinutes: 15,
+    })).rejects.toThrow("invalid")
   })
 
   it("creates a study and first-class hashed PRIMARY token without persisting plaintext", async () => {
@@ -186,10 +196,9 @@ describe("research study actions", () => {
       data: expect.objectContaining({ studyId: "study-1", kind: "PRIMARY" }),
     })
     expect(transaction).toHaveBeenCalledTimes(1)
-    expect(researchStudy.update).toHaveBeenCalledWith({
-      where: { id: "study-1" },
-      data: { updatedAt: expect.any(Date), updatedById: "user-1" },
-    })
+    expect(researchStudy.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "study-1", status: "ACTIVE" },
+    }))
   })
 
   it("does not reactivate or rotate a closed study", async () => {
@@ -209,10 +218,7 @@ describe("research study actions", () => {
       data: { revokedAt: expect.any(Date) },
     })
     expect(researchParticipantToken.create).not.toHaveBeenCalled()
-    expect(researchStudy.update).toHaveBeenCalledWith({
-      where: { id: "study-1" },
-      data: { updatedAt: expect.any(Date), updatedById: "user-1" },
-    })
+    expect(researchStudy.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "study-1", status: "ACTIVE" } }))
   })
 
   it("updates the full protocol before the first session", async () => {
@@ -230,8 +236,8 @@ describe("research study actions", () => {
 
     await updateResearchStudy("acme", "product", "study-1", data)
 
-    expect(researchStudy.update).toHaveBeenCalledWith({
-      where: { id: "study-1" },
+    expect(researchStudy.updateMany).toHaveBeenCalledWith({
+      where: { id: "study-1", status: { not: "ARCHIVED" }, sessions: { none: {} } },
       data: expect.objectContaining({
         name: "Updated interview", goal: "Updated goal", targetMinutes: 20,
         guide: JSON.stringify([{ id: "1", text: "Updated question" }]),
@@ -252,25 +258,20 @@ describe("research study actions", () => {
 
     await updateResearchStudy("acme", "product", "study-1", data)
 
-    expect(researchStudy.update).toHaveBeenCalledWith({
-      where: { id: "study-1" },
-      data: expect.objectContaining({ name: "New display name", goal: "Locked goal", targetMinutes: 15 }),
+    expect(researchStudy.updateMany).toHaveBeenCalledWith({
+      where: { id: "study-1", status: { not: "ARCHIVED" } },
+      data: expect.objectContaining({ name: "New display name" }),
     })
+    expect(researchStudy.updateMany.mock.calls[0][0].data).not.toHaveProperty("goal")
   })
 
   it("closes and archives studies by revoking active participant links", async () => {
     researchStudy.findFirst.mockResolvedValue({ id: "study-1", status: "ACTIVE" })
 
     await closeResearchStudy("acme", "product", "study-1")
-    expect(researchStudy.update).toHaveBeenLastCalledWith({
-      where: { id: "study-1" },
-      data: expect.objectContaining({ status: "CLOSED" }),
-    })
+    expect(researchStudy.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "CLOSED" }) }))
     await archiveResearchStudy("acme", "product", "study-1")
-    expect(researchStudy.update).toHaveBeenLastCalledWith({
-      where: { id: "study-1" },
-      data: expect.objectContaining({ status: "ARCHIVED" }),
-    })
+    expect(researchStudy.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "ARCHIVED" }) }))
     expect(researchParticipantToken.updateMany).toHaveBeenCalledTimes(2)
   })
 
@@ -279,13 +280,46 @@ describe("research study actions", () => {
 
     await activateResearchStudy("acme", "product", "study-1")
 
-    expect(researchStudy.update).toHaveBeenCalledWith({
-      where: { id: "study-1" },
-      data: expect.objectContaining({ status: "ACTIVE" }),
-    })
+    expect(researchStudy.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "ACTIVE" }) }))
     expect(researchParticipantToken.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ studyId: "study-1", tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/) }),
     })
     expect(redirect).toHaveBeenCalledWith(expect.stringContaining("?token="))
+  })
+
+  it("does not change a protocol when a session wins the race", async () => {
+    researchStudy.findFirst.mockResolvedValue({
+      id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW", goal: "Old goal",
+      guide: JSON.stringify([{ id: "1", text: "Old" }]), targetMinutes: 15, appUrl: null,
+      _count: { sessions: 0 },
+    })
+    researchStudy.updateMany.mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 1 })
+    const data = form(); data.set("goal", "Unsafe replacement")
+
+    await updateResearchStudy("acme", "product", "study-1", data)
+
+    expect(researchStudy.updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: expect.objectContaining({ sessions: { none: {} } }),
+    }))
+    expect(researchStudy.updateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      data: expect.not.objectContaining({ goal: expect.anything() }),
+    }))
+  })
+
+  it("allows only one concurrent activation to create a participant token", async () => {
+    researchStudy.findFirst.mockResolvedValue({ id: "study-1", status: "CLOSED" })
+    researchStudy.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 })
+
+    await activateResearchStudy("acme", "product", "study-1")
+    await expect(activateResearchStudy("acme", "product", "study-1")).rejects.toThrow("changed")
+
+    expect(researchParticipantToken.create).toHaveBeenCalledTimes(1)
+  })
+
+  it("denies lifecycle mutations outside the workspace and rejects illegal states", async () => {
+    researchStudy.findFirst.mockResolvedValueOnce(null)
+    await expect(closeResearchStudy("acme", "other", "study-1")).rejects.toThrow("Study not found")
+    researchStudy.findFirst.mockResolvedValueOnce({ id: "study-1", status: "ARCHIVED" })
+    await expect(activateResearchStudy("acme", "product", "study-1")).rejects.toThrow("draft or closed")
   })
 })

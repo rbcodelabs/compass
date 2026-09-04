@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { ResearchSubmitButton } from "@/components/research/research-submit-button"
 
 type Task = { id: number; text: string }
 
@@ -114,7 +115,7 @@ export function StudyBuilder({
         <Button onClick={addItem} type="button" variant="outline"><PlusIcon data-icon="inline-start" />Add {guided ? "task" : "question"}</Button>
       </fieldset>
       {error && <p aria-live="polite" className="text-sm text-destructive" role="alert">{error}</p>}
-      <Button type="submit">Create and activate study</Button>
+      <ResearchSubmitButton pendingLabel="Creating study…">Create and activate study</ResearchSubmitButton>
     </form>
   )
 }

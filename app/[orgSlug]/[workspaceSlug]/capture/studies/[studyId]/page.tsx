@@ -3,7 +3,6 @@ import getPrisma from "@/lib/db"
 import { auth } from "@/auth"
 import { PageHeader } from "@/components/patterns/page-header"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
 import { activateResearchStudy, archiveResearchStudy, closeResearchStudy, regenerateResearchLink, revokeResearchLinks, updateResearchStudy } from "../../actions"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { hashResearchToken } from "@/lib/research"
@@ -11,6 +10,8 @@ import { researchParticipantUrl } from "@/lib/compass-url"
 import { reconcileAbandonedResearchSessions } from "@/lib/research-session"
 import Image from "next/image"
 import { StudySettings } from "@/components/research/study-settings"
+import { ResearchSubmitButton } from "@/components/research/research-submit-button"
+import { StudyLifecycleControls } from "@/components/research/study-lifecycle-controls"
 
 export default async function StudyPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; studyId: string }>; searchParams: Promise<{ token?: string }> }) {
   if (!isResearchCaptureEnabled()) notFound()
@@ -79,16 +80,12 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
       <section className="max-w-3xl rounded-xl border bg-surface-panel p-5">
         <h2 className="font-semibold">Participant link</h2>
         {shareUrl ? <><Input className="mt-3" readOnly value={shareUrl} /><p className="mt-2 text-xs text-text-muted">Save this link now. Compass stores only its secure hash.</p></> : <p className="mt-2 text-sm text-text-subtle">For security, Compass cannot display an existing link again. {study.participantTokens.length ? `${study.participantTokens.length} active link${study.participantTokens.length === 1 ? " is" : "s are"} available.` : "There is no active participant link."}</p>}
-        {study.status === "ACTIVE" && <div className="mt-3 flex gap-2"><form action={regenerate}><Button type="submit" variant="outline">{study.participantTokens.length ? "Rotate participant link" : "Generate participant link"}</Button></form>{study.participantTokens.length > 0 && <form action={revoke}><Button type="submit" variant="ghost">Revoke active links</Button></form>}</div>}
+        {study.status === "ACTIVE" && <div className="mt-3 flex gap-2"><form action={regenerate}><ResearchSubmitButton pendingLabel="Rotating…" variant="outline">{study.participantTokens.length ? "Rotate participant link" : "Generate participant link"}</ResearchSubmitButton></form>{study.participantTokens.length > 0 && <form action={revoke}><ResearchSubmitButton pendingLabel="Revoking…" variant="ghost">Revoke active links</ResearchSubmitButton></form>}</div>}
       </section>
       {study.status === "ARCHIVED"
         ? <p className="max-w-3xl rounded-xl border bg-surface-panel p-5 text-sm text-text-muted">This study is archived and retained for research review.</p>
         : <StudySettings action={update} protocolLocked={study.sessions.length > 0} study={study} />}
-      <section className="flex max-w-3xl flex-wrap gap-2 rounded-xl border bg-surface-panel p-5">
-        {study.status !== "ACTIVE" && study.status !== "ARCHIVED" && <form action={activate}><Button type="submit">Activate study</Button></form>}
-        {study.status === "ACTIVE" && <form action={close}><Button type="submit" variant="outline">Close study</Button></form>}
-        {study.status !== "ARCHIVED" && <form action={archive}><Button type="submit" variant="ghost">Archive study</Button></form>}
-      </section>
+      <StudyLifecycleControls activate={activate} archive={archive} close={close} status={study.status} />
       <section className="max-w-3xl">
         <h2 className="mb-3 font-semibold">Sessions</h2>
         {study.sessions.length ? <div className="space-y-3">{study.sessions.map((researchSession) => <article key={researchSession.id} className="rounded-lg border bg-surface-panel p-4 text-sm">

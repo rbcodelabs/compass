@@ -27,6 +27,19 @@ function validateGuide(formData: FormData) {
   return guide
 }
 
+async function retryResearchTransaction<T>(operation: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      if ((error as { code?: string }).code !== "P2034" || attempt === attempts - 1) throw error
+    }
+  }
+  throw lastError
+}
+
 export async function generateResearchGuide(
   orgSlug: string,
   workspaceSlug: string,
@@ -74,7 +87,11 @@ Write neutral, open-ended questions about concrete past behavior and real experi
     !Array.isArray(parsed) || parsed.length < 5 || parsed.length > 8 ||
     parsed.some((task) => typeof task !== "string" || !task.trim() || task.trim().length > 1_000)
   ) throw new Error("Compass generated an invalid study guide")
-  return parsed.map((task) => String(task).trim())
+  const items = parsed.map((task) => String(task).trim())
+  if (new Set(items.map((item) => item.toLocaleLowerCase())).size !== items.length) {
+    throw new Error("Compass generated an invalid study guide")
+  }
+  return items
 }
 
 export async function createResearchStudy(orgSlug: string, workspaceSlug: string, formData: FormData) {
@@ -161,10 +178,26 @@ export async function updateResearchStudy(orgSlug: string, workspaceSlug: string
     }) : null
     protocol = { studyType, goal, guide: JSON.stringify(guide), targetMinutes, appUrl }
   }
-  await prisma.researchStudy.update({
-    where: { id: study.id },
-    data: { name, ...protocol, updatedAt: new Date(), updatedById: userId },
-  })
+  const now = new Date()
+  if (study._count.sessions === 0) {
+    const result = await retryResearchTransaction(() => prisma.researchStudy.updateMany({
+      where: { id: study.id, status: { not: "ARCHIVED" }, sessions: { none: {} } },
+      data: { name, ...protocol, updatedAt: now, updatedById: userId },
+    }))
+    if (result.count === 0) {
+      const renamed = await retryResearchTransaction(() => prisma.researchStudy.updateMany({
+        where: { id: study.id, status: { not: "ARCHIVED" } },
+        data: { name, updatedAt: now, updatedById: userId },
+      }))
+      if (renamed.count === 0) throw new Error("Study changed before it could be saved")
+    }
+  } else {
+    const result = await retryResearchTransaction(() => prisma.researchStudy.updateMany({
+      where: { id: study.id, status: { not: "ARCHIVED" } },
+      data: { name, updatedAt: now, updatedById: userId },
+    }))
+    if (result.count === 0) throw new Error("Study changed before it could be saved")
+  }
   redirect(`/${orgSlug}/${workspaceSlug}/capture/studies/${study.id}`)
 }
 
@@ -174,16 +207,12 @@ async function endResearchStudy(orgSlug: string, workspaceSlug: string, studyId:
   if (study.status === "ARCHIVED") throw new Error("Archived studies cannot change lifecycle state")
   if (status === "CLOSED" && study.status !== "ACTIVE") throw new Error("Only active studies can be closed")
   const now = new Date()
-  await prisma.$transaction([
-    prisma.researchParticipantToken.updateMany({
-      where: { studyId: study.id, kind: "PRIMARY", revokedAt: null },
-      data: { revokedAt: now },
-    }),
-    prisma.researchStudy.update({
-      where: { id: study.id },
-      data: { status, updatedAt: now, updatedById: userId },
-    }),
-  ])
+  await retryResearchTransaction(() => prisma.$transaction(async (tx) => {
+    const allowed = status === "CLOSED" ? ["ACTIVE"] : ["DRAFT", "ACTIVE", "CLOSED"]
+    const changed = await tx.researchStudy.updateMany({ where: { id: study.id, status: { in: allowed } }, data: { status, updatedAt: now, updatedById: userId } })
+    if (changed.count !== 1) throw new Error("Study lifecycle changed before it could be saved")
+    await tx.researchParticipantToken.updateMany({ where: { studyId: study.id, kind: "PRIMARY", revokedAt: null }, data: { revokedAt: now } })
+  }))
   redirect(`/${orgSlug}/${workspaceSlug}/capture${status === "CLOSED" ? `/studies/${study.id}` : ""}`)
 }
 
@@ -201,81 +230,39 @@ export async function activateResearchStudy(orgSlug: string, workspaceSlug: stri
   if (study.status !== "CLOSED" && study.status !== "DRAFT") throw new Error("Only draft or closed studies can be activated")
   const { token, tokenHash } = createResearchToken()
   const now = new Date()
-  await prisma.$transaction([
-    prisma.researchParticipantToken.updateMany({
-      where: { studyId: study.id, kind: "PRIMARY", revokedAt: null },
-      data: { revokedAt: now },
-    }),
-    prisma.researchParticipantToken.create({
-      data: { studyId: study.id, tokenHash, kind: "PRIMARY", expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000), createdById: userId },
-    }),
-    prisma.researchStudy.update({
-      where: { id: study.id },
-      data: { status: "ACTIVE", updatedAt: now, updatedById: userId },
-    }),
-  ])
+  await retryResearchTransaction(() => prisma.$transaction(async (tx) => {
+    const changed = await tx.researchStudy.updateMany({ where: { id: study.id, status: { in: ["DRAFT", "CLOSED"] } }, data: { status: "ACTIVE", updatedAt: now, updatedById: userId } })
+    if (changed.count !== 1) throw new Error("Study lifecycle changed before it could be activated")
+    await tx.researchParticipantToken.updateMany({ where: { studyId: study.id, kind: "PRIMARY", revokedAt: null }, data: { revokedAt: now } })
+    await tx.researchParticipantToken.create({ data: { studyId: study.id, tokenHash, kind: "PRIMARY", expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000), createdById: userId } })
+  }))
   redirect(`/${orgSlug}/${workspaceSlug}/capture/studies/${study.id}?token=${encodeURIComponent(token)}`)
 }
 
 export async function regenerateResearchLink(orgSlug: string, workspaceSlug: string, studyId: string) {
   if (!isResearchCaptureEnabled()) throw new Error("Research capture is not enabled")
-  const session = await auth()
-  if (!session?.user?.id) throw new Error("Unauthorized")
-  const prisma = getPrisma()
-  const study = await prisma.researchStudy.findFirst({ where: { id: studyId, workspace: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } } }, select: { id: true, status: true } })
-  if (!study) throw new Error("Study not found")
+  const { prisma, userId, study } = await findMemberStudy(orgSlug, workspaceSlug, studyId)
   if (study.status !== "ACTIVE") throw new Error("Participant links can only be rotated for an active study")
   const { token, tokenHash } = createResearchToken()
   const now = new Date()
-  await prisma.$transaction([
-    prisma.researchParticipantToken.updateMany({
-      where: { studyId: study.id, kind: "PRIMARY", revokedAt: null },
-      data: { revokedAt: now },
-    }),
-    prisma.researchParticipantToken.create({
-      data: {
-        studyId: study.id,
-        tokenHash,
-        kind: "PRIMARY",
-        expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-        createdById: session.user.id,
-      },
-    }),
-    prisma.researchStudy.update({
-      where: { id: study.id },
-      data: { updatedAt: now, updatedById: session.user.id },
-    }),
-  ])
+  await retryResearchTransaction(() => prisma.$transaction(async (tx) => {
+    const active = await tx.researchStudy.updateMany({ where: { id: study.id, status: "ACTIVE" }, data: { updatedAt: now, updatedById: userId } })
+    if (active.count !== 1) throw new Error("Study lifecycle changed before its link could be rotated")
+    await tx.researchParticipantToken.updateMany({ where: { studyId: study.id, kind: "PRIMARY", revokedAt: null }, data: { revokedAt: now } })
+    await tx.researchParticipantToken.create({ data: { studyId: study.id, tokenHash, kind: "PRIMARY", expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000), createdById: userId } })
+  }))
   redirect(`/${orgSlug}/${workspaceSlug}/capture/studies/${study.id}?token=${encodeURIComponent(token)}`)
 }
 
 export async function revokeResearchLinks(orgSlug: string, workspaceSlug: string, studyId: string) {
   if (!isResearchCaptureEnabled()) throw new Error("Research capture is not enabled")
-  const session = await auth()
-  if (!session?.user?.id) throw new Error("Unauthorized")
-  const prisma = getPrisma()
-  const study = await prisma.researchStudy.findFirst({
-    where: {
-      id: studyId,
-      workspace: {
-        slug: workspaceSlug,
-        organization: { slug: orgSlug },
-        members: { some: { userId: session.user.id } },
-      },
-    },
-    select: { id: true, status: true },
-  })
-  if (!study) throw new Error("Study not found")
+  const { prisma, userId, study } = await findMemberStudy(orgSlug, workspaceSlug, studyId)
+  if (study.status !== "ACTIVE") throw new Error("Participant links can only be revoked for an active study")
   const now = new Date()
-  await prisma.$transaction([
-    prisma.researchParticipantToken.updateMany({
-      where: { studyId: study.id, kind: "PRIMARY", revokedAt: null },
-      data: { revokedAt: now },
-    }),
-    prisma.researchStudy.update({
-      where: { id: study.id },
-      data: { updatedAt: now, updatedById: session.user.id },
-    }),
-  ])
+  await retryResearchTransaction(() => prisma.$transaction(async (tx) => {
+    const active = await tx.researchStudy.updateMany({ where: { id: study.id, status: "ACTIVE" }, data: { updatedAt: now, updatedById: userId } })
+    if (active.count !== 1) throw new Error("Study lifecycle changed before its links could be revoked")
+    await tx.researchParticipantToken.updateMany({ where: { studyId: study.id, kind: "PRIMARY", revokedAt: null }, data: { revokedAt: now } })
+  }))
   redirect(`/${orgSlug}/${workspaceSlug}/capture/studies/${study.id}`)
 }

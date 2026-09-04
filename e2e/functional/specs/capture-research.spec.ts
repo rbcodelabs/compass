@@ -18,9 +18,10 @@ test.describe("Capture — research study", () => {
 
     await page.getByRole("button", { name: "Rotate participant link" }).click()
     const shareUrl = await page.getByRole("textbox").first().inputValue()
+    const firstToken = new URL(shareUrl).pathname.split("/").at(-1)!
     const anonymous = await browser.newContext({ storageState: undefined })
     const started = await anonymous.request.post(`${baseURL}/api/research/start`, {
-      data: { token: new URL(shareUrl).pathname.split("/").at(-1) },
+      data: { token: firstToken },
     })
     expect(started.status()).toBe(200)
     await anonymous.close()
@@ -31,13 +32,21 @@ test.describe("Capture — research study", () => {
     await expect(page.getByLabel("Study name")).toBeEnabled()
     await page.getByRole("button", { name: "Close study" }).click()
     await expect(page.getByText("closed", { exact: true })).toBeVisible()
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: firstToken } })).status()).toBe(404)
     await expect(page.getByRole("button", { name: "Activate study" })).toBeVisible()
     await page.getByRole("button", { name: "Activate study" }).click()
     await expect(page).toHaveURL(/\?token=/)
     await expect(page.getByText("active", { exact: true })).toBeVisible()
+    const secondToken = new URL(await page.getByRole("textbox").first().inputValue()).pathname.split("/").at(-1)!
+    expect(secondToken).not.toBe(firstToken)
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: firstToken } })).status()).toBe(404)
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: secondToken } })).status()).toBe(200)
+    page.once("dialog", (dialog) => dialog.accept())
     await page.getByRole("button", { name: "Archive study" }).click()
     await expect(page).toHaveURL(`${base}/capture`)
     await expect(page.getByRole("heading", { name: "E2E lifecycle edited" })).not.toBeVisible()
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: secondToken } })).status()).toBe(404)
+    await anonymous.close()
   })
 
   test("persists and resumes a secure anonymous interview for member review", async ({ page, base, browser, baseURL }) => {

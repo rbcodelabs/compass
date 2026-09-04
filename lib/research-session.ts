@@ -274,19 +274,26 @@ export async function startOrResumeResearchSession(
     }
   }
 
-  if (modality === "VOICE" && (context.study.studyType !== "USABILITY_TEST" || !context.study.appUrl)) {
-    throw new ResearchSessionError("Voice is only available for guided usability studies", 409)
-  }
-
   const now = new Date()
   await consumeParticipantRate(context.prisma, context.participantToken.id, "START")
 
   const sessionId = randomUUID()
   const openingTurnId = modality === "CHAT" ? randomUUID() : null
   const resumeSecret = createResumeToken()
-  const message = initialInterviewerMessage(context.study)
-  await retryDsql(() => context.prisma.$transaction([
-    context.prisma.researchSession.create({
+  let message = ""
+  await retryDsql(() => context.prisma.$transaction(async (tx) => {
+    const locked = await tx.researchStudy.updateMany({
+      where: { id: context.study.id, status: "ACTIVE" },
+      data: { updatedAt: now },
+    })
+    if (locked.count !== 1) throw new ResearchSessionError("Study not found", 404)
+    const study = await tx.researchStudy.findUnique({ where: { id: context.study.id } })
+    if (!study || study.status !== "ACTIVE") throw new ResearchSessionError("Study not found", 404)
+    if (modality === "VOICE" && (study.studyType !== "USABILITY_TEST" || !study.appUrl)) {
+      throw new ResearchSessionError("Voice is only available for guided usability studies", 409)
+    }
+    message = initialInterviewerMessage(study)
+    await tx.researchSession.create({
       data: {
         id: sessionId,
         studyId: context.study.id,
@@ -299,11 +306,11 @@ export async function startOrResumeResearchSession(
         nextSequence: modality === "CHAT" ? 1 : 0,
         updatedAt: now,
       },
-    }),
-    ...(openingTurnId ? [context.prisma.researchTurn.create({
+    })
+    if (openingTurnId) await tx.researchTurn.create({
       data: { id: openingTurnId, sessionId, role: "INTERVIEWER", content: message, sequence: 0 },
-    })] : []),
-  ]))
+    })
+  }))
   return {
     sessionId,
     resumeToken: resumeSecret.token,

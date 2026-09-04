@@ -1,11 +1,11 @@
 "use client"
 
 import { useState } from "react"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { parseResearchGuide } from "@/lib/research"
+import { deserializeResearchGuide } from "@/lib/research"
+import { ResearchSubmitButton } from "@/components/research/research-submit-button"
 
 type StudySettingsProps = {
   study: {
@@ -23,9 +23,7 @@ type StudySettingsProps = {
 export function StudySettings({ study, protocolLocked, action }: StudySettingsProps) {
   const [studyType, setStudyType] = useState(study.studyType)
   const guided = studyType === "USABILITY_TEST"
-  const guide = parseResearchGuide(study.guide.startsWith("[")
-    ? (JSON.parse(study.guide) as Array<{ text: string }>).map((item) => item.text)
-    : study.guide)
+  const guide = deserializeResearchGuide(study.guide)
 
   return <section className="max-w-3xl rounded-xl border bg-surface-panel p-5">
     <h2 className="font-semibold">Study settings</h2>
@@ -39,7 +37,7 @@ export function StudySettings({ study, protocolLocked, action }: StudySettingsPr
         <div className="space-y-2"><Label htmlFor="study-duration">Target duration</Label><select className="h-9 rounded-lg border bg-transparent px-3 text-sm" defaultValue={study.targetMinutes} id="study-duration" name="targetMinutes">{[10, 15, 20, 30].map((minutes) => <option key={minutes} value={minutes}>{minutes} minutes</option>)}</select></div>
         <div className="space-y-2"><Label htmlFor="study-guide">{guided ? "Task guide" : "Discussion guide"}</Label><Textarea aria-label={guided ? "Task guide" : "Discussion guide"} defaultValue={guide.map((item) => item.text).join("\n")} id="study-guide" name="guide" required rows={Math.max(5, guide.length)} /><p className="text-xs text-text-muted">Use one {guided ? "task" : "question"} per line.</p></div>
       </fieldset>
-      <Button type="submit">Save study</Button>
+      <ResearchSubmitButton pendingLabel="Saving…">Save study</ResearchSubmitButton>
     </form>
   </section>
 }
