@@ -54,6 +54,22 @@ curl https://your-compass-url.vercel.app/api/mcp \
 
 The MCP server exposes tools that agents can call, grouped below by area.
 
+### Shared comments
+
+Comments are mutable discussion only. They do not approve work, authorize a release, or change a tracked Decision. `REVIEW_REQUEST` targets are accepted only for informational `TRACKED_DECISION` requests; immutable review revisions, options, Decision records/applications, legacy review gates, and release authorization are not commentable.
+
+Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`, `EXPERIMENT`, `ROADMAP_ITEM`, `FEEDBACK_ITEM`, `TASK`, `DOC`, `ARTIFACT`, `RESEARCH_STUDY`, and `REVIEW_REQUEST`.
+
+| Tool | Description |
+|---|---|
+| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional |
+| `list_comments` | List comments for an exact workspace and target, optionally filtered by `OPEN` or `RESOLVED` |
+| `get_comment` | Get one comment and any specialized Doc-anchor or Solution-plan metadata |
+| `update_comment` | Edit a comment body |
+| `delete_comment` | Delete a reply, or a root and its replies |
+| `resolve_comment` | Mark a comment resolved |
+| `reopen_comment` | Mark a resolved comment open |
+
 ### Workspace
 
 | Tool | Description |

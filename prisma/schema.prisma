@@ -146,6 +146,7 @@ model Workspace {
   researchStudies      ResearchStudy[]
   researchAttachments  ResearchAttachment[]
   reviewRequests       ReviewRequest[]
+  comments             Comment[]
   releaseRuns          ReleaseRun[]
   portfolioCapacityPlans PortfolioCapacityPlan[]
 
@@ -512,6 +513,57 @@ model SolutionComment {
   solution    Solution @relation(fields: [solutionId], references: [id])
 
   @@map("solution_comments")
+}
+
+/// Shared mutable discussion record. targetType + targetId is deliberately
+/// polymorphic; lib/comments.ts is the single referential-integrity boundary.
+/// Aurora DSQL runs with relationMode=prisma, so delete ordering is explicit.
+model Comment {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String  @map("workspace_id") @db.Uuid
+  targetType String   @map("target_type") @db.VarChar(40)
+  targetId   String   @map("target_id") @db.Uuid
+  parentId   String?  @map("parent_id") @db.Uuid
+  body       String   @db.Text
+  status     String   @default("OPEN") @db.VarChar(20)
+  authorId   String?  @map("author_id") @db.Uuid
+  authorName String   @map("author_name") @db.VarChar(255)
+  authorType String   @default("HUMAN") @map("author_type") @db.VarChar(20)
+  source     String   @default("UI") @db.VarChar(20)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  parent Comment? @relation("SharedCommentReplies", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  replies Comment[] @relation("SharedCommentReplies")
+  docAnchor DocCommentAnchor?
+  solutionPlanProposal SolutionPlanProposal?
+
+  @@index([workspaceId, targetType, targetId, status], map: "idx_comments_target_status")
+  @@index([parentId], map: "idx_comments_parent")
+  @@map("comments")
+}
+
+model DocCommentAnchor {
+  commentId    String  @id @map("comment_id") @db.Uuid
+  anchorText   String  @map("anchor_text") @db.Text
+  anchorPrefix String? @map("anchor_prefix") @db.VarChar(100)
+  anchorSuffix String? @map("anchor_suffix") @db.VarChar(100)
+  anchorStart  Int?    @map("anchor_start")
+  anchorEnd    Int?    @map("anchor_end")
+  comment      Comment @relation(fields: [commentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("doc_comment_anchors")
+}
+
+model SolutionPlanProposal {
+  commentId                String  @id @map("comment_id") @db.Uuid
+  trackedDecisionRequestId String? @map("tracked_decision_request_id") @db.Uuid
+  legacyPlanStatus         String? @map("legacy_plan_status") @db.VarChar(20)
+  comment                  Comment @relation(fields: [commentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([trackedDecisionRequestId], map: "idx_solution_plan_proposals_decision")
+  @@map("solution_plan_proposals")
 }
 
 model Assumption {

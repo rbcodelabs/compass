@@ -70,6 +70,21 @@ const DECISION_SUBJECT_ENTITY: Record<string, WorkspaceEntityType> = {
   FEEDBACK: "feedbackItem",
 }
 
+const COMMENT_TARGET_ENTITY: Record<string, WorkspaceEntityType> = {
+  OBJECTIVE: "objective", KEY_RESULT: "keyResult", OPPORTUNITY: "opportunity", SOLUTION: "solution",
+  ASSUMPTION: "assumption", EXPERIMENT: "experiment", ROADMAP_ITEM: "roadmapItem",
+  FEEDBACK_ITEM: "feedbackItem", TASK: "task", DOC: "doc", ARTIFACT: "artifact",
+  RESEARCH_STUDY: "researchStudy", REVIEW_REQUEST: "reviewRequest",
+}
+
+async function assertCommentTarget(actor: McpActor, args: Args) {
+  const entity = COMMENT_TARGET_ENTITY[args.targetType]
+  if (!entity) throw new McpAuthzError(`Unknown comment targetType: ${args.targetType}`)
+  const { workspaceId } = await assertEntityAccess(actor, entity, args.targetId)
+  if (workspaceId !== args.workspaceId) throw new McpAuthzError("Comment target does not belong to the declared workspace.")
+  await assertWorkspaceMember(actor, args.workspaceId)
+}
+
 // ── Shared cross-checks (landmine tools) ────────────────────────────────────
 
 /** The provided evidence target (exactly one of opp/sol/assumption); returns its workspaceId. */
@@ -101,6 +116,13 @@ async function assertChildInDeclaredWorkspace(
 // ── The policy: every MCP tool → its gate ───────────────────────────────────
 
 export const TOOL_GATES: Record<string, Gate> = {
+  add_comment: assertCommentTarget,
+  list_comments: assertCommentTarget,
+  get_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
+  update_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
+  delete_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
+  resolve_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
+  reopen_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
   // Workspace ---------------------------------------------------------------
   get_workspace_summary: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   // list_workspaces additionally filters its results to the caller's

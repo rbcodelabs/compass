@@ -224,12 +224,14 @@ export type WorkspaceEntityType =
   | "doc"
   | "docVersion"
   | "docComment"
+  | "comment"
   | "artifact"
   | "artifactRevision"
   | "evidence"
   | "opportunityScore"
   | "workspaceScoringConfig"
   | "reviewRequest"
+  | "researchStudy"
   | "decisionRecord"
 
 // Each resolver walks the FK chain to the owning workspaceId in one query.
@@ -289,6 +291,8 @@ const WORKSPACE_ENTITY_RESOLVERS: Record<
   docComment: async (p, id) =>
     (await p.docComment.findUnique({ where: { id }, select: { doc: { select: { workspaceId: true } } } }))
       ?.doc?.workspaceId ?? null,
+  comment: async (p, id) =>
+    (await p.comment.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   artifact: async (p, id) =>
     (await p.artifact.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   artifactRevision: async (p, id) =>
@@ -303,6 +307,8 @@ const WORKSPACE_ENTITY_RESOLVERS: Record<
     (await p.workspaceScoringConfig.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   reviewRequest: async (p, id) =>
     (await p.reviewRequest.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
+  researchStudy: async (p, id) =>
+    (await p.researchStudy.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   decisionRecord: async (p, id) =>
     (await p.decisionRecord.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
 }
