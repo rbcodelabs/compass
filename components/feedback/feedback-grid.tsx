@@ -10,7 +10,6 @@ import { CreateFeedbackDialog } from "@/components/feedback/create-feedback-dial
 import { FeedbackAttachments } from "@/components/feedback/feedback-attachments";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import type { FacetedFilterGroup } from "@/components/patterns/faceted-filter-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { useUrlState } from "@/hooks/use-url-state";
 import {
@@ -20,10 +19,6 @@ import {
   type FeedbackQueryPatch,
 } from "@/lib/feedback-query";
 import {
-  FEEDBACK_STATUSES,
-  FEEDBACK_STATUS_META,
-  FEEDBACK_TYPES,
-  FEEDBACK_TYPE_META,
   feedbackStatusLabel,
   feedbackStatusTone,
   feedbackTypeLabel,
@@ -154,32 +149,6 @@ export function FeedbackGrid({
     [query.status, query.type, query.q],
   );
 
-  const filters = useMemo<FacetedFilterGroup[]>(
-    () => [
-      {
-        id: "status",
-        label: "Status",
-        value: query.status,
-        options: FEEDBACK_STATUSES.map((status) => ({
-          value: status,
-          label: FEEDBACK_STATUS_META[status].label,
-        })),
-        onValueChange: (value) => applyPatch({ status: value }),
-      },
-      {
-        id: "type",
-        label: "Type",
-        value: query.type,
-        options: FEEDBACK_TYPES.map((type) => ({
-          value: type,
-          label: FEEDBACK_TYPE_META[type].label,
-        })),
-        onValueChange: (value) => applyPatch({ type: value }),
-      },
-    ],
-    [query.status, query.type, applyPatch],
-  );
-
   const renderMobileRow = useCallback(
     (row: FeedbackRow, state: GridRowState<FeedbackRow>) => (
       <div
@@ -243,7 +212,7 @@ export function FeedbackGrid({
         )}
       </div>
     ),
-    [openPanel, opportunities, workspaceId, feedbackPath, roadmapPath],
+    [openPanel, opportunities, workspaceId, roadmapPath],
   );
 
   // A workspace with no feedback at all gets the full call-to-action empty
@@ -324,17 +293,7 @@ export function FeedbackGrid({
           placeholder: "Search feedback",
           label: "Search feedback",
         }}
-        filters={filters}
         onClearFilters={() => applyPatch({ q: null, status: null, type: null })}
-        toolbarActions={
-          <CreateFeedbackDialog
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-            revalidatePathStr={feedbackPath}
-            onCreated={() => router.refresh()}
-            variant="toolbar"
-          />
-        }
         renderMobileRow={renderMobileRow}
         rowMatchesFilters={rowMatchesFilters}
         onRefresh={() => router.refresh()}

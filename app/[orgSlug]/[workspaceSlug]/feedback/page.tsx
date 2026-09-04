@@ -14,7 +14,8 @@ import {
   type FeedbackSearchParams,
 } from "@/lib/feedback-query";
 import type { FeedbackType } from "@/lib/types";
-import { PageHeader } from "@/components/patterns/page-header";
+import { FeedbackHeaderActions } from "@/components/feedback/feedback-header-actions";
+import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export const metadata = { title: "Feedback" };
@@ -39,12 +40,15 @@ export default async function FeedbackPage({ params, searchParams }: Props) {
   if (!workspace) notFound();
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8">
-      <PageHeader
-        title="Feedback"
-        description={<>Customer submissions for {workspace.name}</>}
-      />
-
+    <WorkspacePage
+      title="Feedback"
+      description={<>Customer submissions for {workspace.name}</>}
+      actions={(
+        <Suspense>
+          <FeedbackHeaderActions orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
+        </Suspense>
+      )}
+    >
       {/*
         The grid section is suspended separately from the header so a slow
         `count()` — which has no index story for the `q` search path and can be
@@ -59,7 +63,7 @@ export default async function FeedbackPage({ params, searchParams }: Props) {
           searchParams={searchParams}
         />
       </Suspense>
-    </main>
+    </WorkspacePage>
   );
 }
 
