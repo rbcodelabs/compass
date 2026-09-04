@@ -79,7 +79,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
       </section>
       <section className="max-w-3xl rounded-xl border bg-surface-panel p-5">
         <h2 className="font-semibold">Participant link</h2>
-        {shareUrl ? <><Input className="mt-3" readOnly value={shareUrl} /><p className="mt-2 text-xs text-text-muted">Save this link now. Compass stores only its secure hash.</p></> : <p className="mt-2 text-sm text-text-subtle">For security, Compass cannot display an existing link again. {study.participantTokens.length ? `${study.participantTokens.length} active link${study.participantTokens.length === 1 ? " is" : "s are"} available.` : "There is no active participant link."}</p>}
+        {shareUrl ? <><Input aria-label="Participant link" className="mt-3" readOnly value={shareUrl} /><p className="mt-2 text-xs text-text-muted">Save this link now. Compass stores only its secure hash.</p></> : <p className="mt-2 text-sm text-text-subtle">For security, Compass cannot display an existing link again. {study.participantTokens.length ? `${study.participantTokens.length} active link${study.participantTokens.length === 1 ? " is" : "s are"} available.` : "There is no active participant link."}</p>}
         {study.status === "ACTIVE" && <div className="mt-3 flex gap-2"><form action={regenerate}><ResearchSubmitButton pendingLabel="Rotating…" variant="outline">{study.participantTokens.length ? "Rotate participant link" : "Generate participant link"}</ResearchSubmitButton></form>{study.participantTokens.length > 0 && <form action={revoke}><ResearchSubmitButton pendingLabel="Revoking…" variant="ghost">Revoke active links</ResearchSubmitButton></form>}</div>}
       </section>
       {study.status === "ARCHIVED"

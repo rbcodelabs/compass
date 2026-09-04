@@ -8,6 +8,7 @@ test.describe("Capture — research study", () => {
     await page.getByLabel("Target duration").selectOption("20")
     await page.getByRole("textbox", { name: "Question 1", exact: true }).fill("Tell me about your last planning session.")
     await page.getByRole("button", { name: "Create and activate study" }).click()
+    await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
 
     await page.getByLabel("Study name").fill("E2E lifecycle edited")
     await page.getByLabel("Research goal").fill("Understand current planning workflows")
@@ -17,7 +18,7 @@ test.describe("Capture — research study", () => {
     await expect(page.getByText("20 minutes")).toBeVisible()
 
     await page.getByRole("button", { name: "Rotate participant link" }).click()
-    const shareUrl = await page.getByRole("textbox").first().inputValue()
+    const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
     const firstToken = new URL(shareUrl).pathname.split("/").at(-1)!
     const anonymous = await browser.newContext({ storageState: undefined })
     const started = await anonymous.request.post(`${baseURL}/api/research/start`, {
@@ -36,7 +37,7 @@ test.describe("Capture — research study", () => {
     await page.getByRole("button", { name: "Activate study" }).click()
     await expect(page).toHaveURL(/\?token=/)
     await expect(page.getByText("active", { exact: true })).toBeVisible()
-    const secondToken = new URL(await page.getByRole("textbox").first().inputValue()).pathname.split("/").at(-1)!
+    const secondToken = new URL(await page.getByRole("textbox", { name: "Participant link" }).inputValue()).pathname.split("/").at(-1)!
     expect(secondToken).not.toBe(firstToken)
     expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: firstToken } })).status()).toBe(404)
     expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: secondToken } })).status()).toBe(200)
@@ -60,7 +61,7 @@ test.describe("Capture — research study", () => {
 
     await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
     const studyId = new URL(page.url()).pathname.split("/").at(-1)!
-    const shareUrl = await page.getByRole("textbox").inputValue()
+    const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
     expect(shareUrl).toContain("/research/")
     const participantToken = new URL(shareUrl).pathname.split("/").at(-1)!
 
@@ -172,7 +173,7 @@ test.describe("Capture — research study", () => {
 
     await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
     const studyId = new URL(page.url()).pathname.split("/").at(-1)!
-    const shareUrl = await page.getByRole("textbox").inputValue()
+    const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
     const participantToken = new URL(shareUrl).pathname.split("/").at(-1)!
     await expect(page.getByText("Guided usability test")).toBeVisible()
     await expect(page.getByRole("link", { name: "https://example.com/pricing" })).toBeVisible()
