@@ -83,6 +83,7 @@ export type DataGridProps<TRow extends GridRowData> = {
   toolbarLeading?: React.ReactNode;
   /** Moves the toolbar into an existing shell slot while the grid retains its state. */
   toolbarPortalId?: string;
+  searchDisplay?: "inline" | "popover";
   filters?: readonly FacetedFilterGroup[];
   onClearFilters?: () => void;
   toolbarActions?: React.ReactNode;
@@ -144,6 +145,7 @@ export function DataGrid<TRow extends GridRowData>({
   search,
   toolbarLeading,
   toolbarPortalId,
+  searchDisplay,
   filters,
   onClearFilters,
   toolbarActions,
@@ -497,6 +499,8 @@ export function DataGrid<TRow extends GridRowData>({
         const toolbar = (
           <DataGridToolbar
             leading={toolbarLeading}
+            searchDisplay={searchDisplay}
+            compact={Boolean(toolbarPortalId)}
             search={search}
             filters={filters}
             onClearFilters={onClearFilters}

@@ -24,7 +24,7 @@ export function FeedbackHeaderActions({
   }, []);
 
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+    <div className="flex items-center gap-1.5">
       {toolbarHostReady && (
         <div id="feedback-header-toolbar" className="min-w-0 flex-1" />
       )}

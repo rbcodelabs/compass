@@ -61,12 +61,6 @@ import { FeedbackActionCell } from "./feedback-action-cell";
 /** Search params this screen owns. Anything else on the URL is preserved. */
 const OWNED_PARAMS = ["q", "status", "type", "sort", "dir", "page", "per"] as const;
 
-const TYPE_TABS = [
-  { value: null, label: "All" },
-  { value: "IDEA" as const, label: "Ideas" },
-  { value: "BUG" as const, label: "Bugs" },
-];
-
 export type FeedbackGridProps = {
   orgSlug: string;
   workspaceSlug: string;
@@ -258,34 +252,7 @@ export function FeedbackGrid({
         onSortChange={(sortKey) => applyPatch({ sort: sortKey })}
         caption="Customer feedback, sortable and filterable. Use the column headers to sort and the Filters menu to narrow the list."
         toolbarPortalId="feedback-header-toolbar"
-        toolbarLeading={
-          <div
-            className="inline-flex w-fit shrink-0 rounded-lg border border-border-default p-0.5"
-            data-testid="feedback-type-tabs"
-          >
-            {TYPE_TABS.map((tab) => {
-              const active = (query.type ?? null) === tab.value;
-              return (
-                <button
-                  key={tab.label}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => applyPatch({ type: tab.value })}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                    active
-                      ? "bg-surface-inset text-text-primary"
-                      : "text-text-subtle hover:text-text-primary",
-                  )}
-                >
-                  {tab.value === "BUG" && <Bug aria-hidden className="size-3.5" />}
-                  {tab.value === "IDEA" && <Lightbulb aria-hidden className="size-3.5" />}
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-        }
+        searchDisplay="popover"
         search={{
           value: query.q ?? "",
           onChange: (value) => applyPatch({ q: value || null }),
@@ -293,6 +260,17 @@ export function FeedbackGrid({
           label: "Search feedback",
         }}
         filters={[
+          {
+            id: "type",
+            label: "Type",
+            value: query.type,
+            allLabel: "All",
+            options: FEEDBACK_TYPES.map((type) => ({
+              value: type,
+              label: FEEDBACK_TYPE_META[type].label,
+            })),
+            onValueChange: (value) => applyPatch({ type: value }),
+          },
           {
             id: "status",
             label: "Status",
@@ -303,18 +281,8 @@ export function FeedbackGrid({
             })),
             onValueChange: (value) => applyPatch({ status: value }),
           },
-          {
-            id: "type",
-            label: "Type",
-            value: query.type,
-            options: FEEDBACK_TYPES.map((type) => ({
-              value: type,
-              label: FEEDBACK_TYPE_META[type].label,
-            })),
-            onValueChange: (value) => applyPatch({ type: value }),
-          },
         ]}
-        onClearFilters={() => applyPatch({ q: null, status: null, type: null })}
+        onClearFilters={() => applyPatch({ status: null, type: null })}
         renderMobileRow={renderMobileRow}
         rowMatchesFilters={rowMatchesFilters}
         onRefresh={() => router.refresh()}

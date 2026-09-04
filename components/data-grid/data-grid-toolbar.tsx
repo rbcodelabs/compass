@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   FacetedFilterMenu,
   type FacetedFilterGroup,
@@ -23,12 +25,14 @@ export type DataGridToolbarProps = {
   onResetColumns: () => void;
   actions?: ReactNode;
   className?: string;
+  searchDisplay?: "inline" | "popover";
+  compact?: boolean;
 };
 
 const DEFAULT_DEBOUNCE_MS = 300;
 
 /** Debounced text input that still honours external (back-button) changes. */
-function DebouncedSearchInput({ search }: { search: GridSearch }) {
+function DebouncedSearchInput({ search, autoFocus }: { search: GridSearch; autoFocus?: boolean }) {
   const debounceMs = search.debounceMs ?? DEFAULT_DEBOUNCE_MS;
   const [value, setValue] = useState(search.value);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,6 +72,7 @@ function DebouncedSearchInput({ search }: { search: GridSearch }) {
         className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-text-subtle"
       />
       <Input
+        autoFocus={autoFocus}
         type="search"
         value={value}
         onChange={(event) => handleChange(event.target.value)}
@@ -76,7 +81,32 @@ function DebouncedSearchInput({ search }: { search: GridSearch }) {
         data-testid="grid-search"
         className="pl-8"
       />
+      {value && (
+        <button
+          type="button"
+          aria-label="Clear search"
+          onClick={() => handleChange("")}
+          className="absolute top-1/2 right-2 -translate-y-1/2 text-text-subtle hover:text-text-primary"
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
     </div>
+  );
+}
+
+function SearchPopover({ search }: { search: GridSearch }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="outline" size="sm" aria-label="Search feedback" />}>
+        <Search />
+        <span className="hidden sm:inline">Search</span>
+        {search.value && <span className="size-1.5 rounded-full bg-primary" aria-label="Search active" />}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-72 p-2">
+        <DebouncedSearchInput search={search} autoFocus />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -91,22 +121,25 @@ export function DataGridToolbar({
   onResetColumns,
   actions,
   className,
+  searchDisplay = "inline",
+  compact,
 }: DataGridToolbarProps) {
   return (
     <div
       data-testid="grid-toolbar"
       className={cn(
-        "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between",
+        compact ? "flex items-center gap-1.5" : "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between",
         className,
       )}
     >
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+      <div className={compact ? "flex items-center gap-1.5" : "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center"}>
         {leading}
-        {search && <DebouncedSearchInput search={search} />}
+        {search && (searchDisplay === "popover" ? <SearchPopover search={search} /> : <DebouncedSearchInput search={search} />)}
         {filters && filters.length > 0 && (
           <FacetedFilterMenu
             groups={[...filters]}
             onClearAll={() => onClearFilters?.()}
+            compact={compact}
           />
         )}
       </div>
@@ -116,6 +149,7 @@ export function DataGridToolbar({
           onToggle={onToggleColumn}
           onMove={onMoveColumn}
           onReset={onResetColumns}
+          compact={compact}
         />
         {actions}
       </div>

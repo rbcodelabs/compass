@@ -6,15 +6,16 @@ const root = process.cwd();
 const source = (path: string) => readFileSync(join(root, path), "utf8");
 
 describe("Feedback workspace layout", () => {
-  it("keeps every feedback control together in the workspace header toolbar", () => {
+  it("keeps the approved controls in one title row without a byline or toolbar", () => {
     const page = source("app/[orgSlug]/[workspaceSlug]/feedback/page.tsx");
     const grid = source("components/feedback/feedback-grid.tsx");
     const dataGrid = source("components/data-grid/data-grid.tsx");
     const headerActions = source("components/feedback/feedback-header-actions.tsx");
 
     expect(page).toContain("<WorkspacePage");
-    expect(page).toContain("toolbar={(");
-    expect(page).not.toContain("actions={(");
+    expect(page).toContain("actions={(");
+    expect(page).not.toContain("toolbar={(");
+    expect(page).not.toContain("description={");
     expect(page).not.toContain("PageHeader");
     expect(page).not.toContain('className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8"');
     expect(grid).toContain('toolbarPortalId="feedback-header-toolbar"');
@@ -27,5 +28,8 @@ describe("Feedback workspace layout", () => {
     expect(dataGrid).toContain("if (!toolbarPortalId) return () => {}");
     expect(dataGrid).toContain("return () => observer.disconnect()");
     expect(grid).toContain('placeholder: "Search feedback"');
+    expect(grid).toContain('searchDisplay="popover"');
+    expect(grid).toContain('allLabel: "All"');
+    expect(grid).toContain("onClearFilters={() => applyPatch({ status: null, type: null })}");
   });
 });

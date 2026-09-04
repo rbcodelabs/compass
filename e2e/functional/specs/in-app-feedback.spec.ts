@@ -33,7 +33,7 @@ test.describe("In-App Feedback Submission", () => {
     await page.waitForLoadState("networkidle");
 
     await page
-      .locator('[data-slot="workspace-toolbar"]')
+      .locator('[data-slot="workspace-header"]')
       .getByRole("button", { name: "New Feedback" })
       .click();
     await page.getByLabel("Title").fill(title);
