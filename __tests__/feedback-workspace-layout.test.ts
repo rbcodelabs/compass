@@ -30,6 +30,8 @@ describe("Feedback workspace layout", () => {
     expect(grid).toContain('placeholder: "Search feedback"');
     expect(grid).toContain('searchDisplay="popover"');
     expect(grid).toContain('allLabel: "All"');
+    expect(grid).toContain('{ value: "IDEA", label: "Ideas" }');
+    expect(grid).toContain('{ value: "BUG", label: "Bugs" }');
     expect(grid).toContain("onClearFilters={() => applyPatch({ status: null, type: null })}");
   });
 });

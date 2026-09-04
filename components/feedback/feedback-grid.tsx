@@ -21,8 +21,6 @@ import {
 import {
   FEEDBACK_STATUSES,
   FEEDBACK_STATUS_META,
-  FEEDBACK_TYPES,
-  FEEDBACK_TYPE_META,
   feedbackStatusLabel,
   feedbackStatusTone,
   feedbackTypeLabel,
@@ -60,6 +58,11 @@ import { FeedbackActionCell } from "./feedback-action-cell";
 
 /** Search params this screen owns. Anything else on the URL is preserved. */
 const OWNED_PARAMS = ["q", "status", "type", "sort", "dir", "page", "per"] as const;
+
+const FEEDBACK_TYPE_FILTER_OPTIONS = [
+  { value: "IDEA", label: "Ideas" },
+  { value: "BUG", label: "Bugs" },
+] as const;
 
 export type FeedbackGridProps = {
   orgSlug: string;
@@ -265,10 +268,7 @@ export function FeedbackGrid({
             label: "Type",
             value: query.type,
             allLabel: "All",
-            options: FEEDBACK_TYPES.map((type) => ({
-              value: type,
-              label: FEEDBACK_TYPE_META[type].label,
-            })),
+            options: [...FEEDBACK_TYPE_FILTER_OPTIONS],
             onValueChange: (value) => applyPatch({ type: value }),
           },
           {
