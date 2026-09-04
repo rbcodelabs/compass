@@ -60,6 +60,46 @@ Comments are mutable discussion only. They do not approve work, authorize a rele
 
 Phase 1 exposes the shared comment capability through the generic MCP tools and the existing Doc and Solution compatibility paths. It does not add a general Comments UI to every supported object. Until Phase 2, the existing Doc and Solution experiences remain the only comment UIs.
 
+#### Production migration and backfill
+
+After deploying application code containing migration `046_shared_comments`, use the authenticated admin routes from the deployed Vercel runtime. They use Vercel OIDC for Aurora DSQL, require `MIGRATION_SECRET`, and always select `getActiveSchema()` for that deployment. First apply the additive schema migration:
+
+```bash
+vercel curl /api/admin/migrate \
+  --deployment "$DEPLOYMENT_URL" \
+  --cwd /path/to/compass \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"script":"046_shared_comments"}'
+```
+
+Then invoke one bounded backfill batch at a time. Repeat the same request until the JSON response reports `"complete": true`; a retry after a timeout or ambiguous response is safe because rows retain their legacy IDs and inserts use conflict-safe idempotency. The response contains aggregate processed and invariant counts only.
+
+```bash
+vercel curl /api/admin/shared-comments-backfill \
+  --deployment "$DEPLOYMENT_URL" \
+  --cwd /path/to/compass \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"operation":"backfill","batchSize":500}'
+```
+
+Finish with a read-only validation request. It succeeds only when every legacy comment has a matching shared row, required extensions exist, reply topology is valid, and no legacy row is orphaned:
+
+```bash
+vercel curl /api/admin/shared-comments-backfill \
+  --deployment "$DEPLOYMENT_URL" \
+  --cwd /path/to/compass \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"operation":"validate"}'
+```
+
+HTTP `409` means validation failed or the backfill cannot make safe progress. Resolve orphaned legacy data explicitly; the endpoint never fabricates workspace ownership. Rollback remains application-code-only: revert the runtime code and leave the additive shared tables in place so the unchanged legacy tables and current UIs continue to operate.
+
 Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`, `EXPERIMENT`, `ROADMAP_ITEM`, `FEEDBACK_ITEM`, `TASK`, `DOC`, `ARTIFACT`, `RESEARCH_STUDY`, and `REVIEW_REQUEST`.
 
 | Tool | Description |
