@@ -5,6 +5,7 @@ import { decideReviewAction } from "../actions"
 import { canDecideReview, isOrgAdminRole } from "@/lib/roles"
 import { ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh } from "@/lib/building-investment"
 import { DecisionActions } from "@/components/decisions/decision-actions"
+import { DecisionDetailsGrid, DecisionLongForm, DecisionSummary } from "@/components/decisions/decision-long-form"
 
 export default async function ReviewRequestPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string; requestId: string }> }) {
   const { orgSlug, workspaceSlug, requestId } = await params
@@ -66,14 +67,14 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
       <div>
         <p className="text-sm text-muted-foreground">{isTracked ? "Decision" : isRelease ? "Legacy system decision · Release authorization" : isRevocation ? "Legacy system decision · Building investment revocation" : isInvestment ? "Legacy system decision · Building investment" : isPolicyActivation ? "Legacy system decision · Native policy activation" : "Legacy system decision · NOW commitment"}</p>
         <h1 className="text-2xl font-semibold">{revision.title}</h1>
-        <p className="mt-2 text-muted-foreground">{revision.summary}</p>
+        <DecisionSummary tracked={isTracked} summary={revision.summary} />
       </div>
       <section className="rounded-lg border p-4 text-sm">
-        <dl className="grid grid-cols-[10rem_1fr] gap-2">
+        <DecisionDetailsGrid>
           {isTracked ? <>
             <dt>Linked to</dt><dd>{packet.entity?.title ?? request.subjectType}</dd>
             <dt>Type</dt><dd>{packet.entity?.type ?? request.subjectType}</dd>
-            <dt>Context</dt><dd className="whitespace-pre-wrap">{packet.context ?? revision.summary}</dd>
+            <dt>Context</dt><dd><DecisionLongForm content={packet.context ?? revision.summary} /></dd>
           </> : isRelease ? <>
             <dt>Repository</dt><dd>{packet.repositoryOwner}/{packet.repositoryName}</dd>
             <dt>Pull request</dt><dd>#{packet.pullRequestNumber}</dd>
@@ -101,7 +102,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
             <dt>Policy</dt><dd>{packet.policyVersion}</dd>
           </>}
           {!isTracked && <><dt>Fingerprint</dt><dd className="break-all font-mono">{revision.fingerprint}</dd></>}
-        </dl>
+        </DecisionDetailsGrid>
       </section>
       {isRetired && !decided ? <section className="rounded-lg border p-4 text-sm"><strong>This legacy review is read-only.</strong><p className="text-muted-foreground">Historical evidence remains available for audit.</p></section> : freshness.stale ? (
         <section className="space-y-2 rounded-lg border p-4 text-sm">
@@ -114,7 +115,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
       ) : decided ? (
         <section className="space-y-2 rounded-lg border bg-status-success-surface p-4 text-sm text-status-success">
           <p>Decision recorded: <strong>{decided.option.label}</strong> by {decided.actorRole} at {decided.decidedAt.toLocaleString()}.</p>
-          {decided.rationale && <p className="whitespace-pre-wrap text-foreground">{decided.rationale}</p>}
+          <DecisionLongForm className="text-foreground" content={decided.rationale} />
           {isTracked && decided.option.outcomeClass === "REQUEST_CHANGES" && <a className="inline-block font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/decisions/new?reviseRequestId=${request.id}`}>Create revised request</a>}
         </section>
       ) : isTracked && canDecide ? (
@@ -130,7 +131,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
           ))}
         </div>
       )}
-      {isTracked && request.revisions.length > 1 && <section className="space-y-3"><h2 className="text-lg font-semibold">History</h2>{request.revisions.map((item) => <div key={item.id} className="rounded-lg border p-4 text-sm"><div className="flex justify-between gap-3"><strong>Revision {item.revisionNumber}</strong><span className="text-muted-foreground">{item.createdAt.toLocaleString()}</span></div><p className="mt-1">{item.title}</p>{item.decisions[0] && <p className="mt-2 text-muted-foreground">{item.decisions[0].option.label}{item.decisions[0].rationale ? ` — ${item.decisions[0].rationale}` : ""}</p>}</div>)}</section>}
+      {isTracked && request.revisions.length > 1 && <section className="space-y-3"><h2 className="text-lg font-semibold">History</h2>{request.revisions.map((item) => <div key={item.id} className="rounded-lg border p-4 text-sm"><div className="flex justify-between gap-3"><strong>Revision {item.revisionNumber}</strong><span className="text-muted-foreground">{item.createdAt.toLocaleString()}</span></div><p className="mt-1">{item.title}</p>{item.decisions[0] && <div className="mt-2 text-muted-foreground"><p>{item.decisions[0].option.label}</p><DecisionLongForm content={item.decisions[0].rationale} /></div>}</div>)}</section>}
     </main>
   )
 }

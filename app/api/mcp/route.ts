@@ -1625,7 +1625,7 @@ const _handler = createMcpHandler(
           subjectType: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"]),
           subjectId: z.string().uuid(),
           question: z.string().min(1).max(255),
-          context: z.string().min(1).max(20000),
+          context: z.string().min(1).max(20000).describe("Decision context. Markdown supported."),
           idempotencyKey: z.string().uuid(),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,

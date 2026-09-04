@@ -57,7 +57,7 @@ export function NewDecisionForm({ workspaceId, orgSlug, workspaceSlug, subjects,
       </select>
     </label>
     <label className="block space-y-1 text-sm"><span className="font-medium">Decision question</span><Input value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={255} placeholder="What needs to be decided?" required /></label>
-    <label className="block space-y-1 text-sm"><span className="font-medium">Context</span><Textarea value={context} onChange={(event) => setContext(event.target.value)} maxLength={20000} rows={7} placeholder="Give the reviewer enough context to decide." required /></label>
+    <label className="block space-y-1 text-sm"><span className="font-medium">Context</span><Textarea value={context} onChange={(event) => setContext(event.target.value)} maxLength={20000} rows={7} placeholder="Give the reviewer enough context to decide. Markdown supported." required /><span className="text-xs text-muted-foreground">Markdown supported.</span></label>
     {revise && <p className="rounded-md bg-muted p-3 text-sm"><strong>Revised request:</strong> {revise.reason}</p>}
     {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
     <button type="submit" disabled={pending || !subjectId} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{pending ? "Requesting…" : "Request decision"}</button>

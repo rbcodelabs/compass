@@ -41,7 +41,7 @@ You don't have to open the full page to make a quick change. In the panel you ca
 
 - **Change the status** (or a Roadmap item's horizon) from the dropdown at the top.
 - **Rename** an item — click its title and type.
-- **Edit the description** — click it and type. Press **Enter** to save a title, or click away to save a description; press **Escape** to cancel.
+- **Edit the description** — select **Edit** beside it and type. Descriptions support Markdown, including paragraphs, headings, lists, links, emphasis, code, and tables. Press **Enter** to save a title, or click away to save a description; press **Escape** to cancel.
 
 Changes save immediately. For anything deeper, use **Open full page** at the top of the panel.
 
