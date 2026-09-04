@@ -30,8 +30,9 @@ describe("ResearchVoice", () => {
 
   it("connects with an ephemeral credential and persists finalized events incrementally", async () => {
     render(<ResearchVoice token="study-token" />)
+    expect(screen.getByRole("heading", { name: "Voice interview" })).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
-    expect(await screen.findByText("Connected — think aloud as you work")).toBeVisible()
+    expect(await screen.findByText("Connected — speak naturally")).toBeVisible()
     expect(fetch).toHaveBeenNthCalledWith(3, "https://api.openai.com/v1/realtime/calls", expect.objectContaining({
       method: "POST", body: "offer-sdp", headers: expect.objectContaining({ Authorization: "Bearer short-secret", "Content-Type": "application/sdp" }),
     }))
@@ -44,7 +45,7 @@ describe("ResearchVoice", () => {
   it("uploads a screenshot, links it to the canonical transcript, and shares bytes with realtime", async () => {
     render(<ResearchVoice token="study-token" />)
     fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
-    await screen.findByText("Connected — think aloud as you work")
+    await screen.findByText("Connected — speak naturally")
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       id: "00000000-0000-4000-8000-000000000009",
       originalName: "pricing.png",
@@ -61,5 +62,34 @@ describe("ResearchVoice", () => {
       body: expect.stringContaining('"attachmentId":"00000000-0000-4000-8000-000000000009"'),
     }))
     await waitFor(() => expect(channel.send).toHaveBeenCalledWith(expect.stringContaining('"type":"input_image"')))
+  })
+
+  it("offers chat fallback after microphone permission fails without starting a session", async () => {
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: vi.fn().mockRejectedValue(new Error("Permission denied")) } })
+    const onUseChat = vi.fn()
+    render(<ResearchVoice token="study-token" onUseChat={onUseChat} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    expect(await screen.findByRole("button", { name: "Use chat instead" })).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: "Use chat instead" }))
+    expect(onUseChat).toHaveBeenCalledOnce()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("offers chat fallback when the realtime provider credential fails", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Realtime unavailable" }), { status: 503 })))
+    const onUseChat = vi.fn()
+    render(<ResearchVoice token="study-token" onUseChat={onUseChat} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    expect(await screen.findByRole("button", { name: "Use chat instead" })).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: "Use chat instead" }))
+    expect(onUseChat).toHaveBeenCalledOnce()
+  })
+
+  it("uses think-aloud copy only for guided usability voice", () => {
+    render(<ResearchVoice guided token="study-token" />)
+    expect(screen.getByRole("heading", { name: "Voice think-aloud" })).toBeVisible()
+    expect(screen.queryByRole("heading", { name: "Voice interview" })).not.toBeInTheDocument()
   })
 })

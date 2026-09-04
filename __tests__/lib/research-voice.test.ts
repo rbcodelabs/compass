@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   ResearchVoiceError,
   appendFinalResearchVoiceEvent,
+  buildCustomerInterviewVoiceInstructions,
   buildGuidedUxVoiceInstructions,
   createResearchVoiceLease,
 } from "@/lib/research-voice"
@@ -48,6 +49,47 @@ describe("guided UX realtime voice", () => {
     expect(prompt).not.toContain("Helio")
   })
 
+  it("authors discovery instructions without usability or app assumptions", () => {
+    const prompt = buildCustomerInterviewVoiceInstructions({
+      studyName: "Planning habits",
+      goal: "Understand weekly planning",
+      questions: ["Tell me about the last time you planned your week."],
+      targetMinutes: 20,
+      transcript: [],
+    })
+    expect(prompt).toContain("customer discovery interview")
+    expect(prompt).toContain("Tell me about the last time")
+    expect(prompt).toContain("one question at a time")
+    expect(prompt).not.toContain("live product")
+    expect(prompt).not.toContain("UI controls")
+  })
+
+  it("creates a customer-discovery lease with discovery instructions", async () => {
+    const { prisma, context } = fixture()
+    Object.assign(context.study, { studyType: "CUSTOMER_INTERVIEW", appUrl: null })
+    prisma.researchSession.findFirst.mockResolvedValue({
+      id: "session-1", status: "IN_PROGRESS", modality: "VOICE", nextSequence: 0,
+      voiceLeaseId: null, voiceLeaseExpiresAt: null, turns: [],
+    })
+    const result = await createResearchVoiceLease({ context: context as never, sessionId: "session-1", resumeToken: "resume-secret" })
+    expect(result.instructions).toContain("customer discovery interview")
+    expect(result.instructions).not.toContain("live product")
+  })
+
+  it("rejects a new customer-discovery lease when its production rollout gate is disabled", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    try {
+      const { prisma, context } = fixture()
+      Object.assign(context.study, { studyType: "CUSTOMER_INTERVIEW", appUrl: null })
+      await expect(createResearchVoiceLease({ context: context as never, sessionId: "session-1", resumeToken: "resume-secret" }))
+        .rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+      expect(prisma.researchSession.findFirst).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it("requires a guided session resume secret and acquires one expiring connection lease", async () => {
     const { prisma, context } = fixture()
     prisma.researchSession.findFirst.mockResolvedValue({
@@ -84,6 +126,18 @@ describe("guided UX realtime voice", () => {
     })
     await expect(createResearchVoiceLease({ context: context as never, sessionId: "session-1", resumeToken: "resume-secret" }))
       .rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+  })
+
+  it("rejects a corrupt guide before acquiring a voice lease", async () => {
+    const { prisma, context } = fixture()
+    context.study.guide = "not-json"
+    prisma.researchSession.findFirst.mockResolvedValue({
+      id: "session-1", status: "IN_PROGRESS", modality: "VOICE", nextSequence: 0,
+      voiceLeaseId: null, voiceLeaseExpiresAt: null, turns: [],
+    })
+    await expect(createResearchVoiceLease({ context: context as never, sessionId: "session-1", resumeToken: "resume-secret" }))
+      .rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+    expect(prisma.researchSession.updateMany).not.toHaveBeenCalled()
   })
 
   it("appends only finalized provider events idempotently to the canonical transcript", async () => {

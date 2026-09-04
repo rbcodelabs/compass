@@ -225,7 +225,7 @@ describe("canonical research persistence", () => {
     }
   })
 
-  it("creates a voice session over the same canonical domain for guided UX only", async () => {
+  it("creates a guided voice session over the same canonical domain", async () => {
     const fixture = context()
     const guidedStudy = (fixture.value as unknown as { study: { studyType: string; appUrl: string | null } }).study
     guidedStudy.studyType = "USABILITY_TEST"
@@ -239,6 +239,28 @@ describe("canonical research persistence", () => {
     })
     expect(fixture.prisma.researchTurn.create).not.toHaveBeenCalled()
     expect(result.turns).toEqual([])
+  })
+
+  it("creates a customer-discovery voice session when its rollout gate is enabled", async () => {
+    const fixture = context()
+    const result = await startOrResumeResearchSession(fixture.value, undefined, "VOICE")
+    expect(fixture.prisma.researchSession.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ id: result.sessionId, modality: "VOICE" }),
+    })
+    expect(fixture.prisma.researchTurn.create).not.toHaveBeenCalled()
+  })
+
+  it("rejects a new customer-discovery voice session when its production rollout gate is disabled", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    try {
+      const fixture = context()
+      await expect(startOrResumeResearchSession(fixture.value, undefined, "VOICE"))
+        .rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchSessionError>)
+      expect(fixture.prisma.researchSession.create).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it("accepts the final start in a token window and rejects the next one", async () => {

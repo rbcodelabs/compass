@@ -5,7 +5,7 @@ import "@testing-library/jest-dom/vitest"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/components/research/research-chat", () => ({ ResearchChat: ({ guided }: { guided?: boolean }) => <div data-testid="chat">{guided ? "guided-chat" : "interview-chat"}</div> }))
-vi.mock("@/components/research/research-voice", () => ({ ResearchVoice: () => <div data-testid="voice">voice</div> }))
+vi.mock("@/components/research/research-voice", () => ({ ResearchVoice: ({ onUseChat }: { onUseChat?: () => void }) => <div data-testid="voice">voice{onUseChat && <button onClick={onUseChat}>Voice fallback</button>}</div> }))
 
 import { ResearchExperience } from "@/components/research/research-experience"
 
@@ -38,9 +38,19 @@ describe("guided research participant experience", () => {
   })
 
   it("keeps customer interviews on the existing chat flow", () => {
-    render(<ResearchExperience token="study-token" studyName="Interview" studyType="CUSTOMER_INTERVIEW" appUrl={null} />)
+    render(<ResearchExperience token="study-token" studyName="Interview" studyType="CUSTOMER_INTERVIEW" appUrl={null} discoveryVoiceEnabled={false} />)
     expect(screen.getByTestId("chat")).toHaveTextContent("interview-chat")
     expect(screen.queryByRole("button", { name: /Use voice/i })).not.toBeInTheDocument()
+  })
+
+  it("offers gated customer interviews chat or voice without a product frame", () => {
+    render(<ResearchExperience token="study-token" studyName="Interview" studyType="CUSTOMER_INTERVIEW" appUrl={null} discoveryVoiceEnabled />)
+    expect(screen.getByRole("button", { name: /Use chat/i })).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: /Use voice/i }))
+    expect(screen.getByTestId("voice")).toBeVisible()
+    expect(screen.queryByTitle(/Live product/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Voice fallback" }))
+    expect(screen.getByTestId("chat")).toHaveTextContent("interview-chat")
   })
 
   it("restores the chosen modality after a participant reload", async () => {

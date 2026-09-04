@@ -30,7 +30,7 @@ function readFileDataUrl(file: File) {
   })
 }
 
-export function ResearchVoice({ token }: { token: string }) {
+export function ResearchVoice({ token, onUseChat, guided = false }: { token: string; onUseChat?: () => void; guided?: boolean }) {
   const [status, setStatus] = useState<VoiceStatus>("idle")
   const [messages, setMessages] = useState<VoiceMessage[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -108,6 +108,8 @@ export function ResearchVoice({ token }: { token: string }) {
     setError(null)
     closeMedia()
     try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
       let session = readStored(token)
       const start = await fetch("/api/research/start", {
         method: "POST",
@@ -142,8 +144,6 @@ export function ResearchVoice({ token }: { token: string }) {
       const peer = new RTCPeerConnection()
       peerRef.current = peer
       peer.ontrack = (event) => { if (audioRef.current) audioRef.current.srcObject = event.streams[0] }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      streamRef.current = stream
       for (const track of stream.getTracks()) peer.addTrack(track, stream)
       const channel = peer.createDataChannel("oai-events")
       dataChannelRef.current = channel
@@ -233,9 +233,12 @@ export function ResearchVoice({ token }: { token: string }) {
 
   if (status === "idle" || status === "error") return <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
     <div className="flex size-20 items-center justify-center rounded-full bg-muted"><MicIcon className="size-8 text-text-muted" /></div>
-    <div><h2 className="font-semibold">Voice think-aloud</h2><p className="mt-1 text-sm text-text-muted">Your microphone connects directly to the realtime moderator. Raw audio is not retained.</p></div>
+    <div><h2 className="font-semibold">{guided ? "Voice think-aloud" : "Voice interview"}</h2><p className="mt-1 text-sm text-text-muted">Your microphone connects directly to the realtime moderator. Raw audio is not retained.</p></div>
     {error && <p className="max-w-sm text-sm text-destructive" role="alert">{error}</p>}
-    <Button onClick={() => void connect()} type="button">{status === "error" && <RotateCcwIcon data-icon="inline-start" />}{status === "error" ? "Reconnect voice session" : "Start voice session"}</Button>
+    <div className="flex flex-wrap justify-center gap-2">
+      <Button onClick={() => void connect()} type="button">{status === "error" && <RotateCcwIcon data-icon="inline-start" />}{status === "error" ? "Reconnect voice session" : "Start voice session"}</Button>
+      {status === "error" && onUseChat && <Button onClick={onUseChat} type="button" variant="outline">Use chat instead</Button>}
+    </div>
   </div>
 
   return <div className="flex min-h-0 flex-1 flex-col">
@@ -244,7 +247,7 @@ export function ResearchVoice({ token }: { token: string }) {
       <div className={`flex size-20 items-center justify-center rounded-full ${status === "listening" ? "bg-primary text-primary-foreground" : status === "speaking" ? "bg-foreground text-background" : "bg-muted"}`}>
         {status === "connecting" ? <LoaderCircleIcon className="size-7 animate-spin" /> : <MicIcon className="size-7" />}
       </div>
-      <p aria-live="polite" className="text-sm text-text-muted">{status === "connecting" ? "Connecting securely…" : status === "listening" ? "Listening to you" : status === "speaking" ? "Compass is speaking" : "Connected — think aloud as you work"}</p>
+      <p aria-live="polite" className="text-sm text-text-muted">{status === "connecting" ? "Connecting securely…" : status === "listening" ? "Listening to you" : status === "speaking" ? "Compass is speaking" : guided ? "Connected — think aloud as you work" : "Connected — speak naturally"}</p>
     </div>
     <div aria-live="polite" className="min-h-0 flex-1 space-y-2 overflow-y-auto">
       {messages.map((message) => <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${message.role === "PARTICIPANT" ? "ml-auto bg-primary text-primary-foreground" : "border"}`} key={message.id}>{message.content}</div>)}

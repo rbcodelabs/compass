@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import type { PrismaClient, ResearchParticipantToken, ResearchStudy } from "@prisma/client"
 import { buildResearchAgentTurnPrompt, type ResearchGuideItem } from "@/lib/research"
+import { isResearchDiscoveryVoiceEnabled } from "@/lib/research-feature"
 
 export const MAX_RESEARCH_MESSAGE_CHARS = 4_000
 export const MAX_RESEARCH_INTERVIEWER_CHARS = 4_000
@@ -300,8 +301,11 @@ export async function startOrResumeResearchSession(
     if (!token) throw new ResearchSessionError("Study not found", 404)
     const study = await tx.researchStudy.findUnique({ where: { id: context.study.id } })
     if (!study || study.status !== "ACTIVE") throw new ResearchSessionError("Study not found", 404)
-    if (modality === "VOICE" && (study.studyType !== "USABILITY_TEST" || !study.appUrl)) {
-      throw new ResearchSessionError("Voice is only available for guided usability studies", 409)
+    if (modality === "VOICE" && (
+      (study.studyType === "CUSTOMER_INTERVIEW" && !isResearchDiscoveryVoiceEnabled()) ||
+      (study.studyType === "USABILITY_TEST" && !study.appUrl)
+    )) {
+      throw new ResearchSessionError("Voice is not available for this study", 409)
     }
     message = initialInterviewerMessage(study)
     await tx.researchSession.create({
