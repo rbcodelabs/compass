@@ -287,12 +287,13 @@ export async function startOrResumeResearchSession(
       data: { updatedAt: now },
     })
     if (locked.count !== 1) throw new ResearchSessionError("Study not found", 404)
+    const validationNow = new Date()
     const token = await tx.researchParticipantToken.findFirst({
       where: {
         id: context.participantToken.id,
         studyId: context.study.id,
         revokedAt: null,
-        expiresAt: { gt: now },
+        expiresAt: { gt: validationNow },
       },
       select: { id: true },
     })

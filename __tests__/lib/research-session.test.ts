@@ -198,6 +198,33 @@ describe("canonical research persistence", () => {
     expect(transactionCall).toBe(3)
   })
 
+  it("refreshes the token-expiry timestamp after a study-lock retry", async () => {
+    vi.useFakeTimers()
+    try {
+      const firstAttempt = new Date("2026-09-04T12:00:00.000Z")
+      const retryAttempt = new Date("2026-09-04T12:01:00.000Z")
+      vi.setSystemTime(firstAttempt)
+      const fixture = context()
+      let transactionCall = 0
+      fixture.prisma.$transaction.mockImplementation(async (operation: (tx: typeof fixture.prisma) => Promise<unknown>) => {
+        transactionCall += 1
+        if (transactionCall === 2) {
+          vi.setSystemTime(retryAttempt)
+          throw Object.assign(new Error("Concurrent study change"), { code: "P2034" })
+        }
+        return operation(fixture.prisma)
+      })
+
+      await startOrResumeResearchSession(fixture.value)
+
+      expect(fixture.prisma.researchParticipantToken.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ expiresAt: { gt: retryAttempt } }),
+      }))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("creates a voice session over the same canonical domain for guided UX only", async () => {
     const fixture = context()
     const guidedStudy = (fixture.value as unknown as { study: { studyType: string; appUrl: string | null } }).study
