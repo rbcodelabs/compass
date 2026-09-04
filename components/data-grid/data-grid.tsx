@@ -112,8 +112,6 @@ export type DataGridProps<TRow extends GridRowData> = {
 
 type OverrideEntry<TRow> = { value: Partial<TRow>; pending: boolean };
 
-const subscribeToStaticDom = () => () => {};
-
 function metaOf<TRow extends GridRowData>(
   column: GridColumnDef<TRow>,
 ): GridColumnMeta<TRow> {
@@ -158,11 +156,12 @@ export function DataGrid<TRow extends GridRowData>({
 }: DataGridProps<TRow>) {
   const isMobile = useIsMobile();
   const mobileMode = isMobile && Boolean(renderMobileRow);
-  const clientReady = React.useSyncExternalStore(
-    subscribeToStaticDom,
-    () => true,
-    () => false,
-  );
+  const [clientReady, setClientReady] = React.useState(false);
+
+  React.useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setClientReady(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
   const toolbarPortal = clientReady && toolbarPortalId
     ? document.getElementById(toolbarPortalId)
     : null;

@@ -20,7 +20,8 @@ describe("Feedback workspace layout", () => {
     expect(grid).toContain('toolbarPortalId="feedback-header-toolbar"');
     expect(headerActions).toContain('id="feedback-header-toolbar"');
     expect(headerActions).toContain("<CreateFeedbackDialog");
-    expect(dataGrid).toContain("const clientReady = React.useSyncExternalStore(");
+    expect(dataGrid).toContain("const [clientReady, setClientReady] = React.useState(false)");
+    expect(dataGrid).toContain("window.requestAnimationFrame(() => setClientReady(true))");
     expect(dataGrid).toContain("clientReady && toolbarPortalId");
     expect(grid).toContain('placeholder: "Search feedback"');
   });
