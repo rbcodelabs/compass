@@ -142,7 +142,7 @@ export function FeedbackGrid({
    */
   const rowMatchesFilters = useCallback(
     (row: FeedbackRow) => {
-      if (query.status && row.status !== query.status) return false;
+      if (!query.status.some((status) => status === row.status)) return false;
       if (query.type && row.type !== query.type) return false;
       if (query.q) {
         const needle = query.q.toLowerCase();
@@ -159,12 +159,12 @@ export function FeedbackGrid({
       {
         id: "status",
         label: "Status",
-        value: query.status,
+        values: query.status,
         options: FEEDBACK_STATUSES.map((status) => ({
           value: status,
           label: FEEDBACK_STATUS_META[status].label,
         })),
-        onValueChange: (value) => applyPatch({ status: value }),
+        onValuesChange: (values) => applyPatch({ status: values }),
       },
       {
         id: "type",

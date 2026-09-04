@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuCheckboxItem,
   DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -20,13 +21,31 @@ export type FacetedFilterOption = {
   color?: string | null;
 };
 
-export type FacetedFilterGroup = {
+type FacetedFilterSingleGroup = {
   id: string;
   label: string;
+  values?: never;
+  onValuesChange?: never;
   value?: string | null;
   options: FacetedFilterOption[];
   onValueChange: (value: string | null) => void;
 };
+
+type FacetedFilterMultiGroup = {
+  id: string;
+  label: string;
+  value?: never;
+  onValueChange?: never;
+  values: readonly string[];
+  options: FacetedFilterOption[];
+  onValuesChange: (values: string[]) => void;
+};
+
+export type FacetedFilterGroup = FacetedFilterSingleGroup | FacetedFilterMultiGroup;
+
+function isMultiGroup(group: FacetedFilterGroup): group is FacetedFilterMultiGroup {
+  return Array.isArray(group.values);
+}
 
 type FacetedFilterMenuProps = {
   groups: FacetedFilterGroup[];
@@ -34,7 +53,11 @@ type FacetedFilterMenuProps = {
 };
 
 export function FacetedFilterMenu({ groups, onClearAll }: FacetedFilterMenuProps) {
-  const activeCount = groups.filter((group) => group.value).length;
+  const activeCount = groups.filter((group) =>
+    isMultiGroup(group)
+      ? group.values.length < group.options.length
+      : Boolean(group.value),
+  ).length;
 
   return (
     <DropdownMenu>
@@ -56,12 +79,39 @@ export function FacetedFilterMenu({ groups, onClearAll }: FacetedFilterMenuProps
           <DropdownMenuGroup key={group.id}>
             {index > 0 && <DropdownMenuSeparator />}
             <DropdownMenuLabel>{group.label}</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={group.value ?? ""}
-              onValueChange={(value) => group.onValueChange(value || null)}
-            >
-              {group.options.map((option) => (
-                <DropdownMenuRadioItem key={option.value} value={option.value}>
+            {isMultiGroup(group) ? (
+              group.options.map((option) => {
+                const checked = group.values.includes(option.value);
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={option.value}
+                    checked={checked}
+                    closeOnClick={false}
+                    disabled={checked && group.values.length === 1}
+                    onCheckedChange={(nextChecked) => {
+                      const values = nextChecked
+                        ? [...group.values, option.value]
+                        : group.values.filter((value) => value !== option.value);
+                      group.onValuesChange(values);
+                    }}
+                  >
+                    {option.color && (
+                      <span
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: option.color }}
+                      />
+                    )}
+                    <span className="truncate">{option.label}</span>
+                  </DropdownMenuCheckboxItem>
+                );
+              })
+            ) : (
+              <DropdownMenuRadioGroup
+                value={group.value ?? ""}
+                onValueChange={(value) => group.onValueChange(value || null)}
+              >
+                {group.options.map((option) => (
+                  <DropdownMenuRadioItem key={option.value} value={option.value}>
                   {option.color && (
                     <span
                       className="size-2 shrink-0 rounded-full"
@@ -69,9 +119,10 @@ export function FacetedFilterMenu({ groups, onClearAll }: FacetedFilterMenuProps
                     />
                   )}
                   <span className="truncate">{option.label}</span>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            )}
           </DropdownMenuGroup>
         ))}
         {activeCount > 0 && (
