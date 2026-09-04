@@ -11,6 +11,7 @@ describe("Feedback workspace layout", () => {
     const grid = source("components/feedback/feedback-grid.tsx");
     const dataGrid = source("components/data-grid/data-grid.tsx");
     const headerActions = source("components/feedback/feedback-header-actions.tsx");
+    const createDialog = source("components/feedback/create-feedback-dialog.tsx");
 
     expect(page).toContain("<WorkspacePage");
     expect(page).toContain("actions={(");
@@ -24,6 +25,8 @@ describe("Feedback workspace layout", () => {
     expect(headerActions).toContain("{toolbarHostReady && (");
     expect(headerActions).toContain('id="feedback-header-toolbar"');
     expect(headerActions).toContain("<CreateFeedbackDialog");
+    expect(createDialog).toContain('aria-label={variant === "toolbar" ? "New Feedback" : undefined}');
+    expect(createDialog).toContain('variant === "toolbar" && "hidden sm:inline"');
     expect(dataGrid).toContain("const observer = new MutationObserver(onStoreChange)");
     expect(dataGrid).toContain("if (!toolbarPortalId) return () => {}");
     expect(dataGrid).toContain("return () => observer.disconnect()");
