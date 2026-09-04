@@ -24,7 +24,6 @@ test.describe("Capture — research study", () => {
       data: { token: firstToken },
     })
     expect(started.status()).toBe(200)
-    await anonymous.close()
 
     await page.reload()
     await expect(page.getByText(/protocol is locked/i)).toBeVisible()

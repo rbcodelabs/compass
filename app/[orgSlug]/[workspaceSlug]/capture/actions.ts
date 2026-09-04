@@ -179,25 +179,20 @@ export async function updateResearchStudy(orgSlug: string, workspaceSlug: string
     protocol = { studyType, goal, guide: JSON.stringify(guide), targetMinutes, appUrl }
   }
   const now = new Date()
-  if (study._count.sessions === 0) {
-    const result = await retryResearchTransaction(() => prisma.researchStudy.updateMany({
-      where: { id: study.id, status: { not: "ARCHIVED" }, sessions: { none: {} } },
-      data: { name, ...protocol, updatedAt: now, updatedById: userId },
-    }))
-    if (result.count === 0) {
-      const renamed = await retryResearchTransaction(() => prisma.researchStudy.updateMany({
-        where: { id: study.id, status: { not: "ARCHIVED" } },
-        data: { name, updatedAt: now, updatedById: userId },
-      }))
-      if (renamed.count === 0) throw new Error("Study changed before it could be saved")
-    }
-  } else {
-    const result = await retryResearchTransaction(() => prisma.researchStudy.updateMany({
+  await retryResearchTransaction(() => prisma.$transaction(async (tx) => {
+    const locked = await tx.researchStudy.updateMany({
       where: { id: study.id, status: { not: "ARCHIVED" } },
-      data: { name, updatedAt: now, updatedById: userId },
-    }))
-    if (result.count === 0) throw new Error("Study changed before it could be saved")
-  }
+      data: { updatedAt: now, updatedById: userId },
+    })
+    if (locked.count !== 1) throw new Error("Study changed before it could be saved")
+    const sessionCount = await tx.researchSession.count({ where: { studyId: study.id } })
+    await tx.researchStudy.update({
+      where: { id: study.id },
+      data: sessionCount === 0
+        ? { name, ...protocol, updatedAt: now, updatedById: userId }
+        : { name, updatedAt: now, updatedById: userId },
+    })
+  }))
   redirect(`/${orgSlug}/${workspaceSlug}/capture/studies/${study.id}`)
 }
 

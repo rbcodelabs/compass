@@ -33,6 +33,7 @@ function context(overrides: Record<string, unknown> = {}) {
         agentCallCount: null,
       }),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findFirst: vi.fn().mockResolvedValue({ id: "participant-token-1" }),
     },
     researchStudy: {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -163,6 +164,10 @@ describe("canonical research persistence", () => {
     expect(fixture.prisma.researchStudy.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "study-1", status: "ACTIVE" },
     }))
+    expect(fixture.prisma.researchParticipantToken.findFirst).toHaveBeenCalledWith({
+      where: { id: "participant-token-1", studyId: "study-1", revokedAt: null, expiresAt: { gt: expect.any(Date) } },
+      select: { id: true },
+    })
     expect(fixture.prisma.researchSession.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         id: result.sessionId,
@@ -176,6 +181,21 @@ describe("canonical research persistence", () => {
     })
     expect(JSON.stringify(fixture.prisma.researchSession.create.mock.calls[0][0].data))
       .not.toContain(result.resumeToken)
+  })
+
+  it.each(["rotation", "revocation"])("rejects start when token %s wins the study-row race", async () => {
+    const fixture = context()
+    let transactionCall = 0
+    fixture.prisma.$transaction.mockImplementation(async (operation: (tx: typeof fixture.prisma) => Promise<unknown>) => {
+      transactionCall += 1
+      if (transactionCall === 2) throw Object.assign(new Error("Concurrent token lifecycle"), { code: "P2034" })
+      return operation(fixture.prisma)
+    })
+    fixture.prisma.researchParticipantToken.findFirst.mockResolvedValue(null)
+
+    await expect(startOrResumeResearchSession(fixture.value)).rejects.toThrow(expect.objectContaining({ status: 404 }))
+    expect(fixture.prisma.researchSession.create).not.toHaveBeenCalled()
+    expect(transactionCall).toBe(3)
   })
 
   it("creates a voice session over the same canonical domain for guided UX only", async () => {

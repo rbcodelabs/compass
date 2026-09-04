@@ -287,6 +287,16 @@ export async function startOrResumeResearchSession(
       data: { updatedAt: now },
     })
     if (locked.count !== 1) throw new ResearchSessionError("Study not found", 404)
+    const token = await tx.researchParticipantToken.findFirst({
+      where: {
+        id: context.participantToken.id,
+        studyId: context.study.id,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      select: { id: true },
+    })
+    if (!token) throw new ResearchSessionError("Study not found", 404)
     const study = await tx.researchStudy.findUnique({ where: { id: context.study.id } })
     if (!study || study.status !== "ACTIVE") throw new ResearchSessionError("Study not found", 404)
     if (modality === "VOICE" && (study.studyType !== "USABILITY_TEST" || !study.appUrl)) {
