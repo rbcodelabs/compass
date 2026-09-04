@@ -11,6 +11,7 @@ section: "Delivery"
 Compass provides a simple shared record of decisions. A workspace member can
 ask a question, provide context, and link it to relevant product work. A
 workspace or organization administrator records the outcome and rationale.
+Decision context and rationale support Markdown, so longer reasoning can use paragraphs, headings, lists, links, code, and tables.
 
 Tracked decisions are informational. Approve, Request changes, and Reject
 record what a person decided; they do not automatically modify the linked

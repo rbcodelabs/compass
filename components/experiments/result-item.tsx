@@ -1,4 +1,5 @@
 import type { ExperimentResult } from "@prisma/client"
+import { MarkdownContent } from "@/components/markdown-content"
 
 interface ResultItemProps {
   result: ExperimentResult
@@ -29,7 +30,7 @@ export function ResultItem({ result }: ResultItemProps) {
           </span>
         )}
       </div>
-      <p className="text-sm">{result.note}</p>
+      <MarkdownContent>{result.note}</MarkdownContent>
     </div>
   )
 }
