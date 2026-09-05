@@ -6,7 +6,10 @@ import {
   MAX_RESEARCH_TURNS,
 } from "@/lib/research-session"
 import { deserializeResearchGuide } from "@/lib/research"
-import { isResearchDiscoveryVoiceEnabled } from "@/lib/research-feature"
+import {
+  isResearchDiscoveryVoiceEnabled,
+  isResearchLegacyVoiceHarnessEnabled,
+} from "@/lib/research-feature"
 
 const VOICE_LEASE_BUFFER_MS = 5 * 60 * 1000
 const MAX_VOICE_EVENT_CHARS = 4_000
@@ -96,6 +99,9 @@ ${persisted || "No finalized prior turns."}`
 }
 
 function assertVoiceStudy(study: ResearchStudy) {
+  if (!isResearchLegacyVoiceHarnessEnabled()) {
+    throw new ResearchVoiceError("Voice is not available for this study", 409)
+  }
   if (study.studyType === "CUSTOMER_INTERVIEW") return
   if (study.studyType !== "USABILITY_TEST" || !study.appUrl) {
     throw new ResearchVoiceError("Voice is not available for this study", 409)
@@ -204,7 +210,7 @@ export async function appendFinalResearchVoiceEvent({
   content: string
   attachmentId?: string
 }) {
-  assertVoiceStudy(context.study)
+  assertVoiceLeaseAllowed(context.study)
   const normalized = assertFinalEvent({ providerEventId, role, content })
   if (attachmentId && (role !== "PARTICIPANT" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attachmentId))) {
     throw new ResearchVoiceError("Invalid voice attachment", 400)
@@ -321,6 +327,7 @@ export async function releaseResearchVoiceLease({
   resumeToken: string
   leaseId: string
 }) {
+  assertVoiceLeaseAllowed(context.study)
   const now = new Date()
   const result = await context.prisma.researchSession.updateMany({
     where: {

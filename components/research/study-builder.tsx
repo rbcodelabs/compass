@@ -75,7 +75,7 @@ export function StudyBuilder({
             type="radio"
             value="USABILITY_TEST"
           />
-          <span><span className="block text-sm font-medium">Guided usability test</span><span className="text-sm text-text-muted">Watch people work through realistic goals in a live product using chat or voice.</span></span>
+          <span><span className="block text-sm font-medium">Guided usability test</span><span className="text-sm text-text-muted">Watch people work through realistic goals in a live product using chat. Voice appears only when explicitly enabled.</span></span>
         </label>
       </fieldset>
 

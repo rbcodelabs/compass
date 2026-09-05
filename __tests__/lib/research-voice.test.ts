@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   ResearchVoiceError,
   appendFinalResearchVoiceEvent,
   buildCustomerInterviewVoiceInstructions,
   buildGuidedUxVoiceInstructions,
   createResearchVoiceLease,
+  releaseResearchVoiceLease,
 } from "@/lib/research-voice"
 import { hashResearchResumeToken } from "@/lib/research-session"
 import { MAX_RESEARCH_TRANSCRIPT_CHARS, MAX_RESEARCH_TURNS } from "@/lib/research-session"
@@ -41,6 +42,55 @@ function fixture() {
 }
 
 describe("guided UX realtime voice", () => {
+  beforeEach(() => {
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
+  })
+  afterEach(() => vi.unstubAllEnvs())
+
+  it("rejects every legacy voice operation while authoritative voice is disabled", async () => {
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    const { prisma, context } = fixture()
+    const common = { context: context as never, sessionId: "session-1", resumeToken: "resume-secret" }
+
+    await expect(createResearchVoiceLease(common)).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+    await expect(appendFinalResearchVoiceEvent({
+      ...common,
+      leaseId: "00000000-0000-4000-8000-000000000001",
+      providerEventId: "disabled-event",
+      role: "PARTICIPANT",
+      content: "blocked",
+    })).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+    await expect(releaseResearchVoiceLease({
+      ...common,
+      leaseId: "00000000-0000-4000-8000-000000000001",
+    })).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+    expect(prisma.researchSession.findFirst).not.toHaveBeenCalled()
+    expect(prisma.researchSession.updateMany).not.toHaveBeenCalled()
+  })
+
+  it("rejects every legacy voice operation in production even when all flags are enabled", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "1")
+    const { prisma, context } = fixture()
+    Object.assign(context.study, { studyType: "CUSTOMER_INTERVIEW", appUrl: null })
+    const common = { context: context as never, sessionId: "session-1", resumeToken: "resume-secret" }
+
+    await expect(createResearchVoiceLease(common)).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+    await expect(appendFinalResearchVoiceEvent({
+      ...common,
+      leaseId: "00000000-0000-4000-8000-000000000001",
+      providerEventId: "production-disabled-event",
+      role: "PARTICIPANT",
+      content: "blocked",
+    })).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+    await expect(releaseResearchVoiceLease({
+      ...common,
+      leaseId: "00000000-0000-4000-8000-000000000001",
+    })).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+    expect(prisma.researchSession.findFirst).not.toHaveBeenCalled()
+    expect(prisma.researchSession.updateMany).not.toHaveBeenCalled()
+  })
   it("authors neutral tool-free instructions on the server", () => {
     const prompt = buildGuidedUxVoiceInstructions({
       studyName: "Pricing test",
@@ -84,7 +134,7 @@ describe("guided UX realtime voice", () => {
     expect(result.instructions).not.toContain("live product")
   })
 
-  it("rejects a new customer-discovery lease when its production rollout gate is disabled", async () => {
+  it("rejects every customer-discovery voice operation when its production rollout gate is disabled", async () => {
     vi.stubEnv("NODE_ENV", "production")
     vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
     try {
@@ -92,7 +142,23 @@ describe("guided UX realtime voice", () => {
       Object.assign(context.study, { studyType: "CUSTOMER_INTERVIEW", appUrl: null })
       await expect(createResearchVoiceLease({ context: context as never, sessionId: "session-1", resumeToken: "resume-secret" }))
         .rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+      await expect(appendFinalResearchVoiceEvent({
+        context: context as never,
+        sessionId: "session-1",
+        resumeToken: "resume-secret",
+        leaseId: "00000000-0000-4000-8000-000000000001",
+        providerEventId: "disabled-discovery-event",
+        role: "PARTICIPANT",
+        content: "blocked",
+      })).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+      await expect(releaseResearchVoiceLease({
+        context: context as never,
+        sessionId: "session-1",
+        resumeToken: "resume-secret",
+        leaseId: "00000000-0000-4000-8000-000000000001",
+      })).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
       expect(prisma.researchSession.findFirst).not.toHaveBeenCalled()
+      expect(prisma.researchSession.updateMany).not.toHaveBeenCalled()
     } finally {
       vi.unstubAllEnvs()
     }

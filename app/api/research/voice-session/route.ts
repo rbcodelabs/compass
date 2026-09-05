@@ -3,6 +3,7 @@ import { resolveActiveResearchStudy } from "@/lib/research-access"
 import { hashResearchToken } from "@/lib/research"
 import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
 import { createResearchVoiceLease, releaseResearchVoiceLease, ResearchVoiceError } from "@/lib/research-voice"
+import { isResearchLegacyVoiceHarnessEnabled } from "@/lib/research-feature"
 
 export const runtime = "nodejs"
 
@@ -20,6 +21,9 @@ export async function POST(request: Request) {
     Object.keys(body).some((key) => !ALLOWED_KEYS.has(key)) ||
     typeof body.token !== "string" || typeof body.sessionId !== "string" || typeof body.resumeToken !== "string"
   ) return NextResponse.json({ error: "Invalid request" }, { status: 400 })
+  if (!isResearchLegacyVoiceHarnessEnabled()) {
+    return NextResponse.json({ error: "Voice is not available for this study" }, { status: 409 })
+  }
   const resolved = await resolveActiveResearchStudy(body.token)
   if (!resolved) return NextResponse.json({ error: "Study not found" }, { status: 404 })
   try {

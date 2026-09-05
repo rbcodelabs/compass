@@ -12,7 +12,13 @@ import { ResearchExperience } from "@/components/research/research-experience"
 afterEach(() => { cleanup(); localStorage.clear() })
 
 describe("guided research participant experience", () => {
-  const props = { token: "study-token", studyType: "USABILITY_TEST" as const, appUrl: "https://example.com/app", studyName: "Navigation test" }
+  const props = { token: "study-token", studyType: "USABILITY_TEST" as const, appUrl: "https://example.com/app", studyName: "Navigation test", legacyVoiceEnabled: true }
+
+  it("keeps guided research on chat when authoritative voice is disabled", () => {
+    render(<ResearchExperience {...props} legacyVoiceEnabled={false} />)
+    expect(screen.getByTestId("chat")).toHaveTextContent("guided-chat")
+    expect(screen.queryByRole("button", { name: /Use voice/i })).not.toBeInTheDocument()
+  })
 
   it("explains think-aloud research and lets the participant choose chat or voice", () => {
     render(<ResearchExperience {...props} />)
@@ -44,13 +50,19 @@ describe("guided research participant experience", () => {
   })
 
   it("offers gated customer interviews chat or voice without a product frame", () => {
-    render(<ResearchExperience token="study-token" studyName="Interview" studyType="CUSTOMER_INTERVIEW" appUrl={null} discoveryVoiceEnabled />)
+    render(<ResearchExperience token="study-token" studyName="Interview" studyType="CUSTOMER_INTERVIEW" appUrl={null} legacyVoiceEnabled discoveryVoiceEnabled />)
     expect(screen.getByRole("button", { name: /Use chat/i })).toBeEnabled()
     fireEvent.click(screen.getByRole("button", { name: /Use voice/i }))
     expect(screen.getByTestId("voice")).toBeVisible()
     expect(screen.queryByTitle(/Live product/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Voice fallback" }))
     expect(screen.getByTestId("chat")).toHaveTextContent("interview-chat")
+  })
+
+  it("requires the global gate even when customer-discovery voice is enabled", () => {
+    render(<ResearchExperience token="study-token" studyName="Interview" studyType="CUSTOMER_INTERVIEW" appUrl={null} discoveryVoiceEnabled />)
+    expect(screen.getByTestId("chat")).toHaveTextContent("interview-chat")
+    expect(screen.queryByRole("button", { name: /Use voice/i })).not.toBeInTheDocument()
   })
 
   it("restores the chosen modality after a participant reload", async () => {

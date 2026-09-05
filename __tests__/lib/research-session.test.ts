@@ -225,6 +225,8 @@ describe("canonical research persistence", () => {
   })
 
   it("creates a guided voice session over the same canonical domain", async () => {
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
     const fixture = context()
     const guidedStudy = (fixture.value as unknown as { study: { studyType: string; appUrl: string | null } }).study
     guidedStudy.studyType = "USABILITY_TEST"
@@ -241,6 +243,8 @@ describe("canonical research persistence", () => {
   })
 
   it("creates a customer-discovery voice session when its rollout gate is enabled", async () => {
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
     const fixture = context()
     const result = await startOrResumeResearchSession(fixture.value, undefined, "VOICE")
     expect(fixture.prisma.researchSession.create).toHaveBeenCalledWith({
@@ -251,6 +255,8 @@ describe("canonical research persistence", () => {
 
   it("rejects a new customer-discovery voice session when its production rollout gate is disabled", async () => {
     vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
     vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
     try {
       const fixture = context()
@@ -264,6 +270,8 @@ describe("canonical research persistence", () => {
 
   it("does not spend the final successful start slot on an unavailable voice modality", async () => {
     vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
     vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
     try {
       const fixture = context()
@@ -289,6 +297,20 @@ describe("canonical research persistence", () => {
     } finally {
       vi.unstubAllEnvs()
     }
+  })
+
+  it("rejects guided voice before spending start quota while the global gate is disabled", async () => {
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    const fixture = context()
+    const guidedStudy = (fixture.value as unknown as { study: { studyType: string; appUrl: string | null } }).study
+    guidedStudy.studyType = "USABILITY_TEST"
+    guidedStudy.appUrl = "https://example.com"
+    fixture.prisma.researchStudy.findUnique.mockResolvedValue((fixture.value as unknown as { study: unknown }).study)
+
+    await expect(startOrResumeResearchSession(fixture.value, undefined, "VOICE"))
+      .rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchSessionError>)
+    expect(fixture.prisma.researchParticipantToken.updateMany).not.toHaveBeenCalled()
+    expect(fixture.prisma.researchSession.create).not.toHaveBeenCalled()
   })
 
   it("accepts the final start in a token window and rejects the next one", async () => {
@@ -352,6 +374,31 @@ describe("canonical research persistence", () => {
         resumeTokenHash: hashResearchResumeToken("wrong-secret"),
       }),
     }))
+  })
+
+  it("rejects a persisted voice resume in production when the request omits modality", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
+    try {
+      const fixture = context()
+      fixture.prisma.researchSession.findFirst.mockResolvedValue({
+        id: "voice-session-1",
+        modality: "VOICE",
+        status: "IN_PROGRESS",
+        startedAt: new Date(),
+        turns: [],
+      })
+
+      await expect(startOrResumeResearchSession(fixture.value, {
+        sessionId: "voice-session-1",
+        resumeToken: "resume-secret",
+      })).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchSessionError>)
+      expect(fixture.prisma.researchSession.updateMany).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it("returns only terminal status when resuming a completed interview", async () => {

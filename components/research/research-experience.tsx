@@ -11,18 +11,22 @@ export function ResearchExperience({
   studyName,
   studyType,
   appUrl,
+  legacyVoiceEnabled = false,
   discoveryVoiceEnabled = false,
 }: {
   token: string
   studyName: string
   studyType: "CUSTOMER_INTERVIEW" | "USABILITY_TEST"
   appUrl: string | null
+  legacyVoiceEnabled?: boolean
   discoveryVoiceEnabled?: boolean
 }) {
   const [modality, setModality] = useState<"CHAT" | "VOICE" | null>(null)
   const modalityStorageKey = `compass-research-modality-${token.slice(-16)}`
   const guided = studyType === "USABILITY_TEST" && Boolean(appUrl)
-  const canUseVoice = guided || (studyType === "CUSTOMER_INTERVIEW" && discoveryVoiceEnabled)
+  const canUseVoice = legacyVoiceEnabled && (
+    guided || (studyType === "CUSTOMER_INTERVIEW" && discoveryVoiceEnabled)
+  )
   useEffect(() => {
     if (!canUseVoice) return
     const restoreTimer = window.setTimeout(() => {
@@ -36,7 +40,7 @@ export function ResearchExperience({
     localStorage.setItem(modalityStorageKey, next)
     setModality(next)
   }
-  if (!canUseVoice) return <ResearchChat token={token} />
+  if (!canUseVoice) return <ResearchChat guided={guided} token={token} />
 
   if (!modality) {
     return <section className="mx-auto max-w-xl rounded-xl border bg-surface-panel p-6 sm:p-8">
