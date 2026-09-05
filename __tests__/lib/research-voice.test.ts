@@ -7,6 +7,7 @@ import {
   createResearchVoiceLease,
 } from "@/lib/research-voice"
 import { hashResearchResumeToken } from "@/lib/research-session"
+import { MAX_RESEARCH_TRANSCRIPT_CHARS, MAX_RESEARCH_TURNS } from "@/lib/research-session"
 
 function fixture() {
   const prisma = {
@@ -15,8 +16,15 @@ function fixture() {
       findUnique: vi.fn(),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
-    researchTurn: { create: vi.fn().mockImplementation(async ({ data }) => data) },
-    researchVoiceEvent: { findUnique: vi.fn(), create: vi.fn().mockImplementation(async ({ data }) => data) },
+    researchTurn: {
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockImplementation(async ({ data }) => data),
+    },
+    researchVoiceEvent: {
+      count: vi.fn().mockResolvedValue(0),
+      findUnique: vi.fn(),
+      create: vi.fn().mockImplementation(async ({ data }) => data),
+    },
     researchAttachment: { findFirst: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     $transaction: vi.fn(),
   // Test double spans generated Prisma delegate shapes.
@@ -159,6 +167,143 @@ describe("guided UX realtime voice", () => {
     expect(result).toMatchObject({ replayed: false, turn: { role: "PARTICIPANT", sequence: 4 } })
     expect(prisma.researchTurn.create).toHaveBeenCalledWith({ data: expect.objectContaining({ sessionId: "session-1", sequence: 4 }) })
     expect(prisma.researchVoiceEvent.create).toHaveBeenCalledWith({ data: expect.objectContaining({ providerEventId: "provider-item-123", turnId: expect.any(String) }) })
+  })
+
+  it("accepts the last canonical voice turn and rejects the first turn over the limit", async () => {
+    const accepted = fixture()
+    accepted.prisma.researchSession.findFirst.mockResolvedValue({ id: "session-1", nextSequence: MAX_RESEARCH_TURNS - 1 })
+    accepted.prisma.researchSession.findUnique.mockResolvedValue({ nextSequence: MAX_RESEARCH_TURNS - 1, status: "IN_PROGRESS" })
+    accepted.prisma.researchVoiceEvent.findUnique.mockResolvedValue(null)
+    accepted.prisma.researchTurn.findMany.mockResolvedValue(
+      Array.from({ length: MAX_RESEARCH_TURNS - 1 }, () => ({ content: "x" })),
+    )
+    await expect(appendFinalResearchVoiceEvent({
+      context: accepted.context as never,
+      sessionId: "session-1",
+      resumeToken: "resume-secret",
+      leaseId: "00000000-0000-4000-8000-000000000001",
+      providerEventId: "last-accepted",
+      role: "PARTICIPANT",
+      content: "accepted",
+    })).resolves.toMatchObject({ replayed: false })
+
+    const rejected = fixture()
+    rejected.prisma.researchSession.findFirst.mockResolvedValue({ id: "session-1", nextSequence: MAX_RESEARCH_TURNS })
+    rejected.prisma.researchSession.findUnique.mockResolvedValue({ nextSequence: MAX_RESEARCH_TURNS, status: "IN_PROGRESS" })
+    rejected.prisma.researchVoiceEvent.findUnique.mockResolvedValue(null)
+    rejected.prisma.researchTurn.findMany.mockResolvedValue(
+      Array.from({ length: MAX_RESEARCH_TURNS }, () => ({ content: "x" })),
+    )
+    await expect(appendFinalResearchVoiceEvent({
+      context: rejected.context as never,
+      sessionId: "session-1",
+      resumeToken: "resume-secret",
+      leaseId: "00000000-0000-4000-8000-000000000001",
+      providerEventId: "first-rejected",
+      role: "PARTICIPANT",
+      content: "rejected",
+    })).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+    expect(rejected.prisma.researchSession.updateMany).not.toHaveBeenCalled()
+  })
+
+  it("accepts the last transcript characters and rejects the first character over the limit", async () => {
+    const accepted = fixture()
+    accepted.prisma.researchSession.findFirst.mockResolvedValue({ id: "session-1", nextSequence: 1 })
+    accepted.prisma.researchSession.findUnique.mockResolvedValue({ nextSequence: 1, status: "IN_PROGRESS" })
+    accepted.prisma.researchVoiceEvent.findUnique.mockResolvedValue(null)
+    accepted.prisma.researchTurn.findMany.mockResolvedValue([{ content: "x".repeat(MAX_RESEARCH_TRANSCRIPT_CHARS - 1) }])
+    await expect(appendFinalResearchVoiceEvent({
+      context: accepted.context as never,
+      sessionId: "session-1",
+      resumeToken: "resume-secret",
+      leaseId: "00000000-0000-4000-8000-000000000001",
+      providerEventId: "last-character",
+      role: "PARTICIPANT",
+      content: "x",
+    })).resolves.toMatchObject({ replayed: false })
+
+    const rejected = fixture()
+    rejected.prisma.researchSession.findFirst.mockResolvedValue({ id: "session-1", nextSequence: 1 })
+    rejected.prisma.researchSession.findUnique.mockResolvedValue({ nextSequence: 1, status: "IN_PROGRESS" })
+    rejected.prisma.researchVoiceEvent.findUnique.mockResolvedValue(null)
+    rejected.prisma.researchTurn.findMany.mockResolvedValue([{ content: "x".repeat(MAX_RESEARCH_TRANSCRIPT_CHARS) }])
+    await expect(appendFinalResearchVoiceEvent({
+      context: rejected.context as never,
+      sessionId: "session-1",
+      resumeToken: "resume-secret",
+      leaseId: "00000000-0000-4000-8000-000000000001",
+      providerEventId: "over-character-limit",
+      role: "PARTICIPANT",
+      content: "x",
+    })).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchVoiceError>)
+  })
+
+  it("allows only one concurrent event at the final turn boundary", async () => {
+    const { prisma, context } = fixture()
+    let nextSequence = MAX_RESEARCH_TURNS - 1
+    const contents = Array.from({ length: MAX_RESEARCH_TURNS - 1 }, () => ({ content: "x" }))
+    prisma.researchSession.findFirst.mockImplementation(async () => ({ id: "session-1", nextSequence }))
+    prisma.researchSession.findUnique.mockImplementation(async () => ({ nextSequence, status: "IN_PROGRESS" }))
+    prisma.researchTurn.findMany.mockImplementation(async () => [...contents])
+    prisma.researchVoiceEvent.findUnique.mockResolvedValue(null)
+    prisma.researchSession.updateMany.mockImplementation(async ({ where, data }: {
+      where: { nextSequence: number }, data: { nextSequence: number }
+    }) => {
+      if (where.nextSequence !== nextSequence) return { count: 0 }
+      nextSequence = data.nextSequence
+      return { count: 1 }
+    })
+
+    const results = await Promise.allSettled(["concurrent-a", "concurrent-b"].map((providerEventId) =>
+      appendFinalResearchVoiceEvent({
+        context: context as never,
+        sessionId: "session-1",
+        resumeToken: "resume-secret",
+        leaseId: "00000000-0000-4000-8000-000000000001",
+        providerEventId,
+        role: "PARTICIPANT",
+        content: providerEventId,
+      })))
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+    expect(results.filter((result) => result.status === "rejected")).toEqual([
+      expect.objectContaining({ reason: expect.objectContaining({ status: 409 }) }),
+    ])
+    expect(nextSequence).toBe(MAX_RESEARCH_TURNS)
+  })
+
+  it("accepts the last per-minute voice event and rejects the first over the ingress limit", async () => {
+    const accepted = fixture()
+    accepted.prisma.researchSession.findFirst.mockResolvedValue({ id: "session-1", nextSequence: 3 })
+    accepted.prisma.researchSession.findUnique.mockResolvedValue({ nextSequence: 3, status: "IN_PROGRESS" })
+    accepted.prisma.researchVoiceEvent.findUnique.mockResolvedValue(null)
+    accepted.prisma.researchVoiceEvent.count.mockResolvedValue(29)
+    await expect(appendFinalResearchVoiceEvent({
+      context: accepted.context as never,
+      sessionId: "session-1",
+      resumeToken: "resume-secret",
+      leaseId: "00000000-0000-4000-8000-000000000001",
+      providerEventId: "last-rate-slot",
+      role: "PARTICIPANT",
+      content: "within the rate",
+    })).resolves.toMatchObject({ replayed: false })
+
+    const rejected = fixture()
+    rejected.prisma.researchSession.findFirst.mockResolvedValue({ id: "session-1", nextSequence: 3 })
+    rejected.prisma.researchSession.findUnique.mockResolvedValue({ nextSequence: 3, status: "IN_PROGRESS" })
+    rejected.prisma.researchVoiceEvent.findUnique.mockResolvedValue(null)
+    rejected.prisma.researchVoiceEvent.count.mockResolvedValue(30)
+
+    await expect(appendFinalResearchVoiceEvent({
+      context: rejected.context as never,
+      sessionId: "session-1",
+      resumeToken: "resume-secret",
+      leaseId: "00000000-0000-4000-8000-000000000001",
+      providerEventId: "rate-limited",
+      role: "PARTICIPANT",
+      content: "too fast",
+    })).rejects.toMatchObject({ status: 429 } satisfies Partial<ResearchVoiceError>)
+    expect(rejected.prisma.researchSession.updateMany).not.toHaveBeenCalled()
   })
 
   it("atomically links a ready session attachment to its finalized participant turn", async () => {

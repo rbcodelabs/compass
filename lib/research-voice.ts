@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto"
 import type { PrismaClient, ResearchStudy } from "@prisma/client"
-import { hashResearchResumeToken } from "@/lib/research-session"
+import {
+  hashResearchResumeToken,
+  MAX_RESEARCH_TRANSCRIPT_CHARS,
+  MAX_RESEARCH_TURNS,
+} from "@/lib/research-session"
 import { deserializeResearchGuide } from "@/lib/research"
 import { isResearchDiscoveryVoiceEnabled } from "@/lib/research-feature"
 
 const VOICE_LEASE_BUFFER_MS = 5 * 60 * 1000
 const MAX_VOICE_EVENT_CHARS = 4_000
+const MAX_VOICE_EVENTS_PER_MINUTE = 30
 
 type VoiceContext = {
   prisma: PrismaClient
@@ -255,6 +260,25 @@ export async function appendFinalResearchVoiceEvent({
         turnId: null,
       },
     })) throw new ResearchVoiceError("Attachment is not available", 409)
+    const recentEvents = await tx.researchVoiceEvent.count({
+      where: { sessionId, createdAt: { gte: new Date(Date.now() - 60_000) } },
+    })
+    if (recentEvents >= MAX_VOICE_EVENTS_PER_MINUTE) {
+      throw new ResearchVoiceError("Please wait before sending another finalized voice event", 429)
+    }
+    const turns = await tx.researchTurn.findMany({
+      where: { sessionId },
+      select: { content: true },
+      orderBy: { sequence: "asc" },
+      take: MAX_RESEARCH_TURNS + 1,
+    })
+    if (turns.length >= MAX_RESEARCH_TURNS) {
+      throw new ResearchVoiceError("This interview has reached its turn limit", 409)
+    }
+    const transcriptChars = turns.reduce((total, turn) => total + turn.content.length, 0)
+    if (transcriptChars + normalized.length > MAX_RESEARCH_TRANSCRIPT_CHARS) {
+      throw new ResearchVoiceError("This interview has reached its transcript limit", 409)
+    }
     const sequence = current.nextSequence ?? 0
     const now = new Date()
     const updated = await tx.researchSession.updateMany({
