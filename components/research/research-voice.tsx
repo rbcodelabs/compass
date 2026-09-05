@@ -42,6 +42,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
   const dataChannelRef = useRef<RTCDataChannel | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const persistChain = useRef<Promise<void>>(Promise.resolve())
+  const connectAttemptRef = useRef(0)
 
   function closeMedia() {
     dataChannelRef.current?.close()
@@ -50,6 +51,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
     dataChannelRef.current = null
     peerRef.current = null
     streamRef.current = null
+    if (audioRef.current) audioRef.current.srcObject = null
   }
 
   async function releaseLease() {
@@ -66,6 +68,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
   }
 
   useEffect(() => () => {
+    connectAttemptRef.current += 1
     closeMedia()
     void releaseLease()
     // Refs deliberately capture the active browser resources on unmount.
@@ -86,11 +89,12 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
         body: JSON.stringify({ token, ...session, leaseId, action: "FINAL", ...event }),
       })
       if (!response.ok) throw new Error("Finalized transcript could not be saved")
-    }).catch((caught) => {
+    }).catch(async (caught) => {
       console.error("Voice transcript persistence failed", caught)
       setError("The latest voice transcript could not be saved. Reconnect before continuing.")
       setStatus("error")
       closeMedia()
+      await releaseLease()
     })
     return persistChain.current
   }
@@ -104,26 +108,56 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
   }
 
   async function connect() {
+    const attempt = connectAttemptRef.current + 1
+    connectAttemptRef.current = attempt
+    const isCurrentAttempt = () => connectAttemptRef.current === attempt
+    const stopStream = (stream: MediaStream) => stream.getTracks().forEach((track) => track.stop())
+    const abortAttempt = async () => {
+      closeMedia()
+      await releaseLease()
+    }
     setStatus("connecting")
     setError(null)
     closeMedia()
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!isCurrentAttempt()) {
+        stopStream(stream)
+        return
+      }
       streamRef.current = stream
       let session = readStored(token)
-      const start = await fetch("/api/research/start", {
+      let start = await fetch("/api/research/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, modality: "VOICE", ...(session ?? {}) }),
       })
-      if (!start.ok && session) {
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
+      if (!start.ok && session && (start.status === 404 || start.status === 409)) {
         localStorage.removeItem(storageKey(token))
         session = null
+        start = await fetch("/api/research/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, modality: "VOICE" }),
+        })
+        if (!isCurrentAttempt()) {
+          await abortAttempt()
+          return
+        }
       }
       if (!start.ok) throw new Error("The voice session could not start")
       const started = await start.json() as StoredVoiceSession & { status: string; turns?: Array<{ id: string; role: "PARTICIPANT" | "INTERVIEWER"; content: string }> }
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
       if (started.status === "COMPLETED") {
         localStorage.removeItem(storageKey(token))
+        closeMedia()
         setStatus("complete")
         return
       }
@@ -140,6 +174,10 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
       if (!credentialResponse.ok) throw new Error("The realtime moderator could not connect")
       const credential = await credentialResponse.json() as { ephemeralToken: string; leaseId: string }
       leaseRef.current = credential.leaseId
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
 
       const peer = new RTCPeerConnection()
       peerRef.current = peer
@@ -152,21 +190,39 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
       })
       channel.addEventListener("open", () => channel.send(JSON.stringify({ type: "response.create" })))
       const offer = await peer.createOffer()
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
       await peer.setLocalDescription(offer)
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
       const sdp = await fetch("https://api.openai.com/v1/realtime/calls", {
         method: "POST",
         body: offer.sdp,
         headers: { Authorization: `Bearer ${credential.ephemeralToken}`, "Content-Type": "application/sdp" },
       })
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
       if (!sdp.ok) throw new Error("Realtime connection was rejected")
       await peer.setRemoteDescription({ type: "answer", sdp: await sdp.text() })
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
       setStatus("ready")
     } catch (caught) {
       console.error("Research voice connection failed", caught)
       closeMedia()
       await releaseLease()
-      setError(caught instanceof Error ? caught.message : "Voice connection failed")
-      setStatus("error")
+      if (isCurrentAttempt()) {
+        setError(caught instanceof Error ? caught.message : "Voice connection failed")
+        setStatus("error")
+      }
     }
   }
 
