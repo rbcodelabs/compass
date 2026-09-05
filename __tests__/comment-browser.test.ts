@@ -4,14 +4,16 @@ const auth = vi.fn()
 const resolveCommentTarget = vi.fn()
 const workspaceFindUnique = vi.fn()
 const commentFindUnique = vi.fn()
+const commentFindMany = vi.fn()
+const transaction = vi.fn()
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => auth(...args) }))
 vi.mock("@/lib/comments", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/comments")>()
   return { ...original, resolveCommentTarget: (...args: unknown[]) => resolveCommentTarget(...args) }
 })
-vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findUnique: workspaceFindUnique }, comment: { findUnique: commentFindUnique } }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findUnique: workspaceFindUnique }, comment: { findUnique: commentFindUnique, findMany: commentFindMany }, $transaction: transaction }) }))
 
-import { authorizeComment, authorizeCommentTarget, CommentHttpError, toCommentDto, toCommentThreads, type BrowserCommentRow } from "@/lib/comment-browser"
+import { authorizeComment, authorizeCommentTarget, CommentHttpError, listBrowserComments, toCommentDto, toCommentThreads, type BrowserCommentRow } from "@/lib/comment-browser"
 
 const actor = { userId: "user-1", name: "Rick", workspaceId: "workspace-1", admin: false }
 const createdAt = new Date("2026-09-04T12:00:00.000Z")
@@ -24,6 +26,7 @@ beforeEach(() => {
   auth.mockResolvedValue({ user: { id: "user-1", name: "Rick" } })
   resolveCommentTarget.mockResolvedValue({ workspaceId: "workspace-1" })
   workspaceFindUnique.mockResolvedValue({ members: [{ role: "MEMBER" }], organization: { members: [] } })
+  commentFindMany.mockResolvedValue([])
 })
 
 describe("authorizeCommentTarget", () => {
@@ -55,16 +58,25 @@ describe("authorizeCommentTarget", () => {
 
 describe("authorizeComment", () => {
   it("hides a cross-workspace comment", async () => {
-    commentFindUnique.mockResolvedValue({ authorId: "user-1", targetType: "ROADMAP_ITEM", targetId: "target-1", workspaceId: "other-workspace", parentId: null, _count: { replies: 0 } })
+    commentFindUnique.mockResolvedValue({ authorId: "user-1", targetType: "ROADMAP_ITEM", targetId: "target-1", workspaceId: "other-workspace", parentId: null, solutionPlanProposal: null, _count: { replies: 0 } })
     await expect(authorizeComment("comment-1")).rejects.toMatchObject({ status: 404 })
   })
   it("marks a human author as owner and exposes reply count", async () => {
-    commentFindUnique.mockResolvedValue({ authorId: "user-1", targetType: "ROADMAP_ITEM", targetId: "target-1", workspaceId: "workspace-1", parentId: null, _count: { replies: 2 } })
+    commentFindUnique.mockResolvedValue({ authorId: "user-1", targetType: "ROADMAP_ITEM", targetId: "target-1", workspaceId: "workspace-1", parentId: null, solutionPlanProposal: null, _count: { replies: 2 } })
     await expect(authorizeComment("comment-1")).resolves.toMatchObject({ owns: true, comment: { replyCount: 2 } })
   })
   it("never treats a null author as owner", async () => {
-    commentFindUnique.mockResolvedValue({ authorId: null, targetType: "ROADMAP_ITEM", targetId: "target-1", workspaceId: "workspace-1", parentId: null, _count: { replies: 0 } })
+    commentFindUnique.mockResolvedValue({ authorId: null, targetType: "ROADMAP_ITEM", targetId: "target-1", workspaceId: "workspace-1", parentId: null, solutionPlanProposal: null, _count: { replies: 0 } })
     await expect(authorizeComment("comment-1")).resolves.toMatchObject({ owns: false })
+  })
+})
+
+describe("browser comment queries", () => {
+  it("excludes specialized plan proposal rows from a Solution discussion at the database boundary", async () => {
+    await listBrowserComments("workspace-1", "SOLUTION", "solution-1")
+    expect(commentFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { workspaceId: "workspace-1", targetType: "SOLUTION", targetId: "solution-1", solutionPlanProposal: { is: null } },
+    }))
   })
 })
 

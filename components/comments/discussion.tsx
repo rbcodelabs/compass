@@ -50,26 +50,44 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
   const [busy, setBusy] = useState("")
   const [expandedResolved, setExpandedResolved] = useState<Set<string>>(new Set())
   const returnFocusLabel = useRef("")
+  const requestGeneration = useRef(0)
+  const activeLoad = useRef<AbortController | null>(null)
 
   const load = useCallback(async (reset = false) => {
+    activeLoad.current?.abort()
+    const controller = new AbortController()
+    activeLoad.current = controller
+    const generation = requestGeneration.current
     if (reset) {
       setItems(null)
-      setEditor(null)
+      setLoadError("")
       setActionError("")
+      setRootBody("")
+      setEditor(null)
+      setEditorBody("")
+      setBusy("")
+      setExpandedResolved(new Set())
     }
     setLoadError("")
     try {
       const query = new URLSearchParams({ targetType, targetId })
-      const payload = await responseJson<{ items: BrowserCommentDto[] }>(await fetch(`/api/comments?${query}`))
+      const payload = await responseJson<{ items: BrowserCommentDto[] }>(await fetch(`/api/comments?${query}`, { signal: controller.signal }))
+      if (generation !== requestGeneration.current) return
       setItems(chronological(payload.items))
     } catch (error) {
+      if (controller.signal.aborted || generation !== requestGeneration.current) return
       setLoadError(error instanceof Error ? error.message : "Could not load discussion.")
     }
   }, [targetId, targetType])
 
   useEffect(() => {
+    requestGeneration.current += 1
+    activeLoad.current?.abort()
     const timer = window.setTimeout(() => void load(true), 0)
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(timer)
+      activeLoad.current?.abort()
+    }
   }, [load])
 
   function closeEditor() {

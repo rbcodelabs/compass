@@ -13,6 +13,9 @@
  * this panel, matching every other entity's detail-panel pattern.
  */
 import { test, expect } from "../fixtures/index";
+import pg from "pg";
+
+const S = process.env.PGSCHEMA ? `${process.env.PGSCHEMA}_dev` : "compass_dev";
 
 test.describe("Solution Current Plan + shared Discussion", () => {
   test(
@@ -83,6 +86,22 @@ test.describe("Solution Current Plan + shared Discussion", () => {
 
       await expect(panel.getByText(commentBody)).toHaveCount(1);
       await expect(panel.getByText(planBody).first()).toBeVisible();
+
+      // Generic browser mutations must not touch the specialized plan row.
+      if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required for plan isolation verification");
+      const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+      const { rows: [persistedPlan] } = await pool.query<{ id: string; body: string }>(`
+        SELECT c.id, c.body FROM "${S}".comments c
+        JOIN "${S}".solution_plan_proposals p ON p.comment_id = c.id
+        WHERE c.body = $1
+      `, [planBody]);
+      expect(persistedPlan).toBeTruthy();
+      const genericPatch = await page.request.patch(`/api/comments/${persistedPlan.id}`, { data: { action: "edit", body: "Generic overwrite" } });
+      const genericDelete = await page.request.delete(`/api/comments/${persistedPlan.id}`);
+      expect(genericPatch.status()).toBe(404);
+      expect(genericDelete.status()).toBe(404);
+      expect((await pool.query<{ body: string }>(`SELECT body FROM "${S}".comments WHERE id = $1`, [persistedPlan.id])).rows[0].body).toBe(planBody);
+      await pool.end();
 
       // ── 9. New plans start Pending ──────────────────────────────────────────
       const planStatusBadge = panel.getByTestId("plan-status-badge");

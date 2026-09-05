@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
-import { COMMENT_TARGET_TYPES, createComment, listComments, type CommentTargetType } from "@/lib/comments"
-import { authorizeCommentTarget, CommentHttpError, toCommentDto, toCommentThreads } from "@/lib/comment-browser"
+import { COMMENT_TARGET_TYPES, createComment, type CommentTargetType } from "@/lib/comments"
+import { authorizeCommentTarget, CommentHttpError, listBrowserComments, toCommentDto, toCommentThreads } from "@/lib/comment-browser"
 
 function errorResponse(error: unknown) {
   if (error instanceof CommentHttpError) return NextResponse.json({ error: error.message }, { status: error.status })
-  if (typeof error === "object" && error && "status" in error && typeof error.status === "number") {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Request failed" }, { status: error.status })
-  }
-  return NextResponse.json({ error: error instanceof Error ? error.message : "Bad request" }, { status: 400 })
+  console.error("Unexpected comments route error", error)
+  return NextResponse.json({ error: "Internal server error" }, { status: 500 })
 }
 function parseTargetType(value: unknown): CommentTargetType {
   if (typeof value !== "string" || !COMMENT_TARGET_TYPES.some((type) => type === value)) throw new CommentHttpError(400, "Invalid targetType")
@@ -28,7 +26,7 @@ export async function GET(request: NextRequest) {
     const targetType = parseTargetType(request.nextUrl.searchParams.get("targetType"))
     const targetId = requireString(request.nextUrl.searchParams.get("targetId"), "targetId")
     const actor = await authorizeCommentTarget(targetType, targetId)
-    return NextResponse.json({ items: toCommentThreads(await listComments(actor.workspaceId, targetType, targetId), actor) })
+    return NextResponse.json({ items: toCommentThreads(await listBrowserComments(actor.workspaceId, targetType, targetId), actor) })
   } catch (error) { return errorResponse(error) }
 }
 

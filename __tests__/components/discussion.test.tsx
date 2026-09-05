@@ -48,6 +48,26 @@ describe("Discussion", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it("aborts stale loads and resets target-scoped state when the target changes", async () => {
+    let finishA: ((value: Response) => void) | undefined
+    fetchMock
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { finishA = resolve }))
+      .mockReturnValueOnce(jsonResponse({ items: [comment({ id: "root-b", targetId: "target-b", body: "Target B" })] }))
+    const { rerender } = render(<Discussion targetType="ROADMAP_ITEM" targetId="target-a" />)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByRole("textbox", { name: "Add comment" }), { target: { value: "Draft for A" } })
+
+    rerender(<Discussion targetType="ROADMAP_ITEM" targetId="target-b" />)
+    expect(await screen.findByText("Target B")).toBeVisible()
+    expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveValue("")
+    const firstSignal = fetchMock.mock.calls[0][1]?.signal as AbortSignal
+    expect(firstSignal.aborted).toBe(true)
+
+    finishA?.(await jsonResponse({ items: [comment({ body: "Late Target A" })] }))
+    await waitFor(() => expect(screen.queryByText("Late Target A")).toBeNull())
+    expect(screen.getByText("Target B")).toBeVisible()
+  })
+
   it("orders threads and replies, labels agents and edits, and collapses resolved threads", async () => {
     fetchMock.mockReturnValueOnce(jsonResponse({ items: [
       comment({ id: "later", body: "Later", createdAt: "2026-09-04T13:00:00.000Z" }),

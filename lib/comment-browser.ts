@@ -63,13 +63,42 @@ export async function authorizeComment(commentId: string) {
   const user = await requireSessionUser()
   const stored = await getPrisma().comment.findUnique({
     where: { id: commentId },
-    select: { id: true, authorId: true, targetType: true, targetId: true, workspaceId: true, parentId: true, _count: { select: { replies: true } } },
+    select: { id: true, authorId: true, targetType: true, targetId: true, workspaceId: true, parentId: true, solutionPlanProposal: { select: { commentId: true } }, _count: { select: { replies: true } } },
   })
   if (!stored || !isCommentTargetType(stored.targetType)) throw new CommentHttpError(404, "Not found")
   const actor = await authorizeTargetForUser(stored.targetType, stored.targetId, user)
   if (actor.workspaceId !== stored.workspaceId) throw new CommentHttpError(404, "Not found")
   const { _count, ...comment } = stored
-  return { ...actor, comment: { ...comment, replyCount: _count.replies }, owns: comment.authorId !== null && comment.authorId === actor.userId }
+  return { ...actor, comment: { ...comment, replyCount: _count.replies, hasPlanProposal: Boolean(comment.solutionPlanProposal) }, owns: comment.authorId !== null && comment.authorId === actor.userId }
+}
+
+export async function listBrowserComments(workspaceId: string, targetType: CommentTargetType, targetId: string) {
+  return getPrisma().comment.findMany({
+    where: { workspaceId, targetType, targetId, ...(targetType === "SOLUTION" ? { solutionPlanProposal: { is: null } } : {}) },
+    include: { docAnchor: true, solutionPlanProposal: true },
+    orderBy: { createdAt: "asc" },
+  }) as Promise<BrowserCommentRow[]>
+}
+
+export async function deleteBrowserComment(commentId: string, actor: Pick<CommentActor, "admin" | "userId">, deleteThread: boolean) {
+  return getPrisma().$transaction(async (tx) => {
+    const current = await tx.comment.findUnique({
+      where: { id: commentId },
+      select: { id: true, parentId: true, authorId: true, solutionPlanProposal: { select: { commentId: true } }, _count: { select: { replies: true } } },
+    })
+    if (!current || current.solutionPlanProposal) throw new CommentHttpError(404, "Not found")
+    const owns = current.authorId !== null && current.authorId === actor.userId
+    if (!owns && !actor.admin) throw new CommentHttpError(404, "Not found")
+    if (!current.parentId && current._count.replies > 0 && !(actor.admin && deleteThread)) {
+      throw new CommentHttpError(409, "Admin confirmation is required to delete a thread with replies.")
+    }
+    const replies = current.parentId ? [] : await tx.comment.findMany({ where: { parentId: commentId }, select: { id: true } })
+    const ids = [...replies.map(({ id }) => id), commentId]
+    await tx.docCommentAnchor.deleteMany({ where: { commentId: { in: ids } } })
+    if (replies.length) await tx.comment.deleteMany({ where: { parentId: commentId } })
+    await tx.comment.delete({ where: { id: commentId } })
+    return { id: commentId, deletedReplies: replies.length }
+  }, { isolationLevel: "Serializable" })
 }
 
 function baseDto(row: BrowserCommentRow, actor: CommentActor): BrowserCommentDto {
