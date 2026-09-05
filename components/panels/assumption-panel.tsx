@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import {
   useEntityDetail,
@@ -116,6 +117,7 @@ export function AssumptionPanel({
       <Section label="Experiments" count={data.experiments.length}>
         <RelationList items={experimentItems} empty="No experiments yet." />
       </Section>
+      <Discussion targetType="ASSUMPTION" targetId={id} />
     </PanelContainer>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import {
   useEntityDetail,
@@ -177,6 +178,7 @@ export function OpportunityPanel({
           <EvidenceList evidence={data.evidence} revalidatePathStr={fullPageHref} />
         </div>
       </Section>
+      <Discussion targetType="OPPORTUNITY" targetId={opportunityId} />
     </PanelContainer>
   );
 }

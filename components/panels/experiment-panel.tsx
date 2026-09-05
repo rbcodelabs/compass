@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 import { useEffect, useState } from "react";
@@ -234,6 +235,7 @@ export function ExperimentPanel({
           </div>
         )}
       </div>
+      <Discussion targetType="EXPERIMENT" targetId={experimentId} />
     </div>
   );
 }
