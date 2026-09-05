@@ -26,10 +26,13 @@ test.describe("Discovery table", () => {
     await expect(page).toHaveURL(/view=table/);
     await expect(page.getByRole("table", { name: "Discovery opportunities" })).toBeVisible();
 
-    const expand = page.getByRole("button", { name: `Expand ${opportunityTitle}` });
-    await expect(expand).toHaveAttribute("aria-expanded", "false");
-    await expand.click();
-    await expect(expand).toHaveAttribute("aria-expanded", "true");
+    const opportunityRow = page
+      .getByRole("row")
+      .filter({ has: page.getByRole("button", { name: opportunityTitle, exact: true }) });
+    const disclosureTrigger = opportunityRow.locator('button[aria-expanded]');
+    await expect(disclosureTrigger).toHaveAttribute("aria-expanded", "false");
+    await disclosureTrigger.click();
+    await expect(disclosureTrigger).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByRole("button", { name: solutionTitle, exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: opportunityTitle, exact: true }).click();
