@@ -1,6 +1,6 @@
 # ADR 0008: Declarative agent capability packs
 
-**Date:** 2026-09-05  
+**Date:** 2026-09-05
 **Status:** Accepted
 
 ## Context
