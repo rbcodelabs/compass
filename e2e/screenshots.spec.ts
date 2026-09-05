@@ -25,6 +25,9 @@ const WORKSPACE_BASE = FUNCTIONAL ? "/e2e-test-org/e2e-workspace" : "/rbcodelabs
 type StandardScreenshotCase = { file: string; url: string; scrollToHeading?: string };
 
 const STANDARD_PAGES: StandardScreenshotCase[] = [
+  ...(FUNCTIONAL || process.env.DOCS_SESSION_FILE
+    ? [{ file: "marketing-authenticated.png", url: "/" }]
+    : []),
   { file: "login.png",           url: "/login" },
   { file: "dashboard.png",       url: "/dashboard" },
   { file: "okrs.png",            url: `${WORKSPACE_BASE}/okrs` },
