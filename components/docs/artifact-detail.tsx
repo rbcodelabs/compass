@@ -8,6 +8,7 @@ import { ArtifactPreview } from "./artifact-preview"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { MarkdownContent } from "@/components/markdown-content"
 
 type ArtifactDetailProps = {
   artifact: { id: string; title: string; description: string | null; sourceType: string; status: string; currentRevision: { externalUrl: string | null } | null; revisions: Array<{ id: string; revisionNumber: number; filename: string | null; byteSize: number | null; externalUrl: string | null; createdAt: string }> }
@@ -27,7 +28,7 @@ export function ArtifactDetail({ artifact, html, workspaceId, basePath, solution
   const run = (fn: () => Promise<unknown>) => startTransition(async () => { try { setError(null); await fn(); router.refresh() } catch (cause) { setError(cause instanceof Error ? cause.message : "Action failed") } })
   return <div className="mx-auto max-w-5xl p-4 sm:p-8 space-y-6">
     <header className="flex items-start justify-between gap-4">
-      <div><div className="text-xs font-medium uppercase tracking-wide text-primary">Artifact · {artifact.sourceType === "EXTERNAL_LINK" ? "External" : "HTML prototype"}</div><h1 className="text-2xl font-semibold text-text-primary">{artifact.title}</h1>{artifact.description && <p className="mt-1 text-text-secondary">{artifact.description}</p>}</div>
+      <div><div className="text-xs font-medium uppercase tracking-wide text-primary">Artifact · {artifact.sourceType === "EXTERNAL_LINK" ? "External" : "HTML prototype"}</div><h1 className="text-2xl font-semibold text-text-primary">{artifact.title}</h1>{artifact.description && <MarkdownContent className="mt-1 text-text-secondary">{artifact.description}</MarkdownContent>}</div>
       {artifact.status === "ACTIVE" && <Button variant="outline" disabled={pending} onClick={() => run(() => archiveArtifact(workspaceId, artifact.id, basePath))}>Archive</Button>}
     </header>
     {artifact.status === "ARCHIVED" && <div className="rounded-md bg-status-warning-surface p-3 text-sm text-status-warning">This artifact is archived.</div>}

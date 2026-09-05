@@ -372,8 +372,8 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
     if (!ev.task.start || !ev.task.end) return;
     await updateRoadmapItem(
       ev.id,
-      { startDate: toUtcMidnight(ev.task.start), endDate: toUtcMidnight(ev.task.end) },
-      revalidatePathStr
+      workspaceId,
+      { startDate: toUtcMidnight(ev.task.start), endDate: toUtcMidnight(ev.task.end) }
     );
     router.refresh();
   }
@@ -387,7 +387,7 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
     const promoted =
       item.kind === "solution"
         ? promoteToRoadmap(item.id, workspaceId, horizon, item.squadId, item.opportunityId)
-        : promoteFeedbackToRoadmap(item.id, workspaceId, horizon, revalidatePathStr);
+        : promoteFeedbackToRoadmap(item.id, workspaceId, horizon);
     promoted.then(() => router.refresh());
   }
 

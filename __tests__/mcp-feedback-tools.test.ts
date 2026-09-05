@@ -880,17 +880,17 @@ describe("promoteFeedbackToRoadmap", () => {
     mockRoadmapItem.findFirst.mockResolvedValueOnce(null)
     mockRoadmapItem.create.mockResolvedValueOnce({ id: "item-1", title: "Login button broken" })
 
-    const result = await promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NOW" })
+    const result = await promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NEXT" })
     const text = result.content[0].text
 
-    expect(text).toContain("Promoted to roadmap (NOW)")
+    expect(text).toContain("Promoted to roadmap (NEXT)")
     expect(text).toContain("ID: item-1")
     expect(text).toContain("Login button broken")
     expect(mockRoadmapItem.create).toHaveBeenCalledWith({
       data: {
         workspaceId: WS_ID,
         title: "Login button broken",
-        horizon: "NOW",
+        horizon: "NEXT",
         sortOrder: 0,
         feedbackId: FEED_ID,
         isPrivate: false,
@@ -920,7 +920,7 @@ describe("promoteFeedbackToRoadmap", () => {
   it("returns error text when feedback item is not found", async () => {
     mockFeedbackItem.findUnique.mockResolvedValueOnce(null)
 
-    const result = await promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NOW" })
+    const result = await promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NEXT" })
 
     expect(result.content[0].text).toContain(`"${FEED_ID}" not found`)
     expect(mockRoadmapItem.create).not.toHaveBeenCalled()
@@ -934,7 +934,7 @@ describe("promoteFeedbackToRoadmap", () => {
     const result = await promoteFeedbackToRoadmap({
       feedbackId: FEED_ID,
       workspaceId: WS_ID,
-      horizon: "NOW",
+      horizon: "NEXT",
       isPrivate: true,
     })
 

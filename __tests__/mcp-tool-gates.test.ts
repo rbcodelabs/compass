@@ -21,6 +21,8 @@ const mockPrisma = {
   solution: { findUnique: vi.fn(), update: vi.fn() },
   artifact: { findUnique: vi.fn() },
   feedbackItem: { findUnique: vi.fn() },
+  doc: { findUnique: vi.fn() },
+  reviewRequest: { findUnique: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
@@ -140,6 +142,20 @@ describe("applyToolGate", () => {
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
     await expect(applyToolGate("prepare_feedback_attachment_upload", MEMBER, { workspaceId: "ws-1" }))
       .rejects.toThrow(/not found or access denied/)
+  })
+
+  it("request_decision rejects a linked entity from another workspace", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    mockPrisma.doc.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
+    await expect(applyToolGate("request_decision", MEMBER, { workspaceId: "ws-1", subjectType: "DOC", subjectId: "doc-1" }))
+      .rejects.toThrow(/does not belong to workspace/)
+  })
+
+  it("get_decision requires the request to belong to the declared workspace", async () => {
+    mockPrisma.reviewRequest.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-2" })
+    await expect(applyToolGate("get_decision", MEMBER, { workspaceId: "ws-1", requestId: "request-1" }))
+      .rejects.toThrow(/does not belong to workspace/)
   })
 
   it.each(["update_feedback", "add_feedback_attachment"])("%s denies access to another workspace's feedback", async (tool) => {

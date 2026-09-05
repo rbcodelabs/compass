@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { DocEditor } from "@/components/docs/doc-editor";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 type Props = {
   params: Promise<{
@@ -84,6 +85,7 @@ export default async function DocPage({ params }: Props) {
       versions={versions}
       comments={comments}
       revalidatePathStr={revalidatePathStr}
+      decisionAction={<RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={doc.id} subjectTitle={doc.title} />}
     />
   );
 }

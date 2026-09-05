@@ -18,6 +18,7 @@ import {
   type FeedbackQuery,
   type FeedbackSearchParams,
 } from "@/lib/feedback-query";
+import { FEEDBACK_STATUSES } from "@/lib/feedback-meta";
 
 /** Parse from a query string, exactly as Next would hand it to a page. */
 function fromUrl(search: string): FeedbackQuery {
@@ -36,13 +37,30 @@ describe("parseFeedbackQuery: defaults", () => {
     expect(fromUrl("")).toEqual(DEFAULT_FEEDBACK_QUERY);
     expect(DEFAULT_FEEDBACK_QUERY).toEqual({
       q: null,
-      status: null,
+      status: FEEDBACK_STATUSES,
       type: null,
       sort: null,
       dir: "desc",
       page: 1,
       per: 25,
     });
+  });
+
+  it("parses repeated statuses as a validated multi-select and keeps a single param compatible", () => {
+    expect(fromUrl("status=OPEN").status).toEqual(["OPEN"]);
+    expect(fromUrl("status=OPEN&status=UNDER_REVIEW").status).toEqual([
+      "OPEN",
+      "UNDER_REVIEW",
+    ]);
+    expect(fromUrl("status=OPEN&status=BOGUS&status=PLANNED").status).toEqual([
+      "OPEN",
+      "PLANNED",
+    ]);
+  });
+
+  it("uses all statuses when the URL has no valid status selection", () => {
+    expect(fromUrl("").status).toEqual(FEEDBACK_STATUSES);
+    expect(fromUrl("status=BOGUS").status).toEqual(FEEDBACK_STATUSES);
   });
 
   it("accepts a Next-shaped searchParams object as well as URLSearchParams", () => {
@@ -55,7 +73,7 @@ describe("parseFeedbackQuery: defaults", () => {
       q: "dark mode",
     };
     expect(parseFeedbackQuery(params)).toEqual(
-      query({ status: "OPEN", sort: "votes", dir: "asc", page: 3, per: 50, q: "dark mode" }),
+      query({ status: ["OPEN"], sort: "votes", dir: "asc", page: 3, per: 50, q: "dark mode" }),
     );
     expect(fromUrl("status=OPEN&sort=votes&dir=asc&page=3&per=50&q=dark+mode")).toEqual(
       parseFeedbackQuery(params),
@@ -201,22 +219,22 @@ describe("parseFeedbackQuery: hostile and malformed input", () => {
   });
 
   it("requires a whole-string allowlist match for status and type", () => {
-    expect(fromUrl("status=OPEN").status).toBe("OPEN");
+    expect(fromUrl("status=OPEN").status).toEqual(["OPEN"]);
     // partial match must NOT slip through
-    expect(fromUrl("status=OPEN,BOGUS").status).toBeNull();
-    expect(fromUrl("status=BOGUS,OPEN").status).toBeNull();
-    expect(fromUrl("status=OPEN%20").status).toBeNull();
-    expect(fromUrl("status=open").status).toBeNull();
-    expect(fromUrl("status=BOGUS").status).toBeNull();
-    expect(fromUrl("status=__proto__").status).toBeNull();
+    expect(fromUrl("status=OPEN,BOGUS").status).toEqual(FEEDBACK_STATUSES);
+    expect(fromUrl("status=BOGUS,OPEN").status).toEqual(FEEDBACK_STATUSES);
+    expect(fromUrl("status=OPEN%20").status).toEqual(FEEDBACK_STATUSES);
+    expect(fromUrl("status=open").status).toEqual(FEEDBACK_STATUSES);
+    expect(fromUrl("status=BOGUS").status).toEqual(FEEDBACK_STATUSES);
+    expect(fromUrl("status=__proto__").status).toEqual(FEEDBACK_STATUSES);
     expect(fromUrl("type=BUG").type).toBe("BUG");
     expect(fromUrl("type=IDEA,BUG").type).toBeNull();
     expect(fromUrl("type=OPEN").type).toBeNull();
   });
 
-  it("normalises array-valued params by taking the LAST value", () => {
-    expect(fromUrl("status=BOGUS&status=OPEN").status).toBe("OPEN");
-    expect(fromUrl("status=OPEN&status=BOGUS").status).toBeNull();
+  it("normalises status arrays as a multi-select and other arrays by taking the LAST value", () => {
+    expect(fromUrl("status=BOGUS&status=OPEN").status).toEqual(["OPEN"]);
+    expect(fromUrl("status=OPEN&status=BOGUS").status).toEqual(["OPEN"]);
     expect(fromUrl("page=2&page=5").page).toBe(5);
     expect(fromUrl("per=50&per=100").per).toBe(100);
     expect(fromUrl("sort=title&sort=votes").sort).toBe("votes");
@@ -234,7 +252,7 @@ describe("parseFeedbackQuery: hostile and malformed input", () => {
         q: ["x", "dark"],
       }),
     ).toEqual(
-      query({ status: "OPEN", type: "IDEA", page: 4, per: 100, sort: "created", dir: "desc", q: "dark" }),
+      query({ status: ["OPEN"], type: "IDEA", page: 4, per: 100, sort: "created", dir: "desc", q: "dark" }),
     );
 
     // empty arrays and non-string members degrade to the default
@@ -288,12 +306,23 @@ describe("parseFeedbackQuery: hostile and malformed input", () => {
   it("does not let a prototype-polluted object leak a value", () => {
     const polluted = Object.create({ status: "COMPLETED", page: "9" }) as FeedbackSearchParams;
     const parsed = parseFeedbackQuery(polluted);
-    expect(parsed.status).toBeNull();
+    expect(parsed.status).toEqual(FEEDBACK_STATUSES);
     expect(parsed.page).toBe(1);
   });
 });
 
 describe("buildFeedbackWhere", () => {
+  it("uses an IN predicate for a status subset and omits it when all are selected", () => {
+    expect(
+      buildFeedbackWhere(fromUrl("status=OPEN&status=UNDER_REVIEW"), "ws_1"),
+    ).toEqual({
+      workspaceId: "ws_1",
+      status: { in: ["OPEN", "UNDER_REVIEW"] },
+    });
+    expect(buildFeedbackWhere(DEFAULT_FEEDBACK_QUERY, "ws_1")).toEqual({
+      workspaceId: "ws_1",
+    });
+  });
   it("always scopes to the workspace", () => {
     expect(buildFeedbackWhere(DEFAULT_FEEDBACK_QUERY, "ws_1")).toEqual({
       workspaceId: "ws_1",
@@ -305,7 +334,7 @@ describe("buildFeedbackWhere", () => {
       buildFeedbackWhere(fromUrl("status=OPEN&type=BUG&q=dark"), "ws_1"),
     ).toEqual({
       workspaceId: "ws_1",
-      status: "OPEN",
+      status: { in: ["OPEN"] },
       type: "BUG",
       OR: [
         { title: { contains: "dark", mode: "insensitive" } },
@@ -340,7 +369,7 @@ describe("feedbackPageCount", () => {
 });
 
 describe("serializeFeedbackQuery: page reset invariant", () => {
-  const onPage5 = query({ page: 5, status: "OPEN", sort: "votes", dir: "desc", per: 50 });
+  const onPage5 = query({ page: 5, status: ["OPEN"], sort: "votes", dir: "desc", per: 50 });
 
   it("resets page to 1 on a FILTER change", () => {
     expect(serializeFeedbackQuery(onPage5, { status: "PLANNED" }).get("page")).toBeNull();
@@ -375,7 +404,7 @@ describe("serializeFeedbackQuery: page reset invariant", () => {
 
   it("keeps the page when a patch is a NO-OP", () => {
     // Re-selecting the already-active filter should not throw the user to page 1.
-    expect(serializeFeedbackQuery(onPage5, { status: "OPEN" }).get("page")).toBe("5");
+    expect(serializeFeedbackQuery(onPage5, { status: ["OPEN"] }).get("page")).toBe("5");
     expect(serializeFeedbackQuery(onPage5, { per: 50 }).get("page")).toBe("5");
     expect(serializeFeedbackQuery(onPage5, { sort: "votes", dir: "desc" }).get("page")).toBe("5");
   });
@@ -388,10 +417,21 @@ describe("serializeFeedbackQuery: page reset invariant", () => {
 });
 
 describe("serializeFeedbackQuery: output shape", () => {
+  it("writes status subsets as repeated params and omits the all-selected default", () => {
+    const subset = serializeFeedbackQuery(DEFAULT_FEEDBACK_QUERY, {
+      status: ["OPEN", "UNDER_REVIEW"],
+    });
+    expect(subset.getAll("status")).toEqual(["OPEN", "UNDER_REVIEW"]);
+    expect(
+      serializeFeedbackQuery(query({ status: ["OPEN"] }), {
+        status: FEEDBACK_STATUSES,
+      }).getAll("status"),
+    ).toEqual([]);
+  });
   it("omits every default so a cleared grid produces a bare URL", () => {
     expect(feedbackQueryString(DEFAULT_FEEDBACK_QUERY)).toBe("");
     expect(
-      feedbackQueryString(query({ status: "OPEN", page: 3 }), { status: null }),
+      feedbackQueryString(query({ status: ["OPEN"], page: 3 }), { status: null }),
     ).toBe("");
   });
 
@@ -424,7 +464,7 @@ describe("serializeFeedbackQuery: output shape", () => {
   it("round-trips through the parser", () => {
     const original = query({
       q: "dark mode",
-      status: "PLANNED",
+      status: ["PLANNED"],
       type: "IDEA",
       sort: "created",
       dir: "asc",

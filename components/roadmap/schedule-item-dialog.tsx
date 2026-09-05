@@ -62,7 +62,7 @@ type Props = {
 // same promote actions the Board's drag-and-drop and quick-add menu use —
 // the Gantt library has no concept of "drop position -> date" (that's not
 // part of its API), so dates are set explicitly here instead.
-export function ScheduleItemDialog({ item, workspaceId, revalidatePathStr, onOpenChange, onScheduled }: Props) {
+export function ScheduleItemDialog({ item, workspaceId, onOpenChange, onScheduled }: Props) {
   const [horizon, setHorizon] = useState<Horizon>("NOW");
   const [startDate, setStartDate] = useState(todayDateInputValue());
   const [endDate, setEndDate] = useState(addDays(todayDateInputValue(), 14));
@@ -92,7 +92,7 @@ export function ScheduleItemDialog({ item, workspaceId, revalidatePathStr, onOpe
       if (item.kind === "solution") {
         await promoteToRoadmap(item.id, workspaceId, horizon, item.squadId, item.opportunityId, dates);
       } else {
-        await promoteFeedbackToRoadmap(item.id, workspaceId, horizon, revalidatePathStr, dates);
+        await promoteFeedbackToRoadmap(item.id, workspaceId, horizon, dates);
       }
       onScheduled();
       onOpenChange(false);

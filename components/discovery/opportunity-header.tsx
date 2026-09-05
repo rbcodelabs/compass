@@ -19,6 +19,7 @@ import {
   linkOpportunityToKeyResult,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import type { OpportunityStatus, SquadData } from "@/lib/types";
+import { MarkdownContent } from "@/components/markdown-content";
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   EXPLORING: "Exploring",
@@ -144,9 +145,7 @@ export function OpportunityHeader({
 
       {/* Description */}
       {opportunity.description ? (
-        <p className="text-sm text-muted-foreground leading-relaxed max-w-2xl">
-          {opportunity.description}
-        </p>
+        <MarkdownContent className="text-muted-foreground max-w-2xl">{opportunity.description}</MarkdownContent>
       ) : (
         <p className="text-sm text-muted-foreground/50 italic">
           No description yet.

@@ -27,13 +27,17 @@ import {
 export async function setLaunchTier(
   itemId: string,
   tier: LaunchTier,
-  workspaceId: string,
-  revalidatePathStr: string
+  workspaceId: string
 ): Promise<void> {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
   const prisma = getPrisma();
+  const member = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId, userId: session.user.id } },
+    select: { id: true },
+  });
+  if (!member) throw new Error("Workspace not found");
   const item = await prisma.roadmapItem.findFirst({
     where: { id: itemId, workspaceId },
     select: { id: true, horizon: true },
@@ -46,7 +50,7 @@ export async function setLaunchTier(
   const template = await resolveOrSeedTemplate(workspaceId, tier);
   await setLaunchTierCore(item.id, tier, template);
 
-  revalidatePath(revalidatePathStr);
+  revalidatePath("/", "layout");
 }
 
 /**
@@ -57,13 +61,17 @@ export async function setLaunchTier(
 export async function updateLaunchChecklistItem(
   itemId: string,
   status: LaunchChecklistItemStatus,
-  workspaceId: string,
-  revalidatePathStr: string
+  workspaceId: string
 ): Promise<void> {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
   const prisma = getPrisma();
+  const member = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId, userId: session.user.id } },
+    select: { id: true },
+  });
+  if (!member) throw new Error("Workspace not found");
   const owned = await prisma.launchChecklistItem.findFirst({
     where: { id: itemId, launchChecklist: { roadmapItem: { workspaceId } } },
     select: { id: true },
@@ -72,5 +80,5 @@ export async function updateLaunchChecklistItem(
 
   await updateChecklistItemCore(itemId, status);
 
-  revalidatePath(revalidatePathStr);
+  revalidatePath("/", "layout");
 }

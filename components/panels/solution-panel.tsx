@@ -29,12 +29,15 @@ import { SolutionAssumptions } from "./solution-assumptions";
 import { SolutionPlanDiscussion } from "./solution-plan-discussion";
 import { SolutionArtifacts, type SolutionArtifact } from "./solution-artifacts";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import { requestBuildingInvestmentAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions";
+import { useRouter } from "next/navigation";
 import type { SolutionComment, Horizon } from "@/lib/types";
 import {
   SOLUTION_STATUS,
   SOLUTION_STATUS_ORDER,
   solutionStatusBadge,
 } from "@/lib/solution-status";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 type SolutionData = {
   id: string;
@@ -115,6 +118,7 @@ export function SolutionPanel({
         edit={edit}
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
       />
+      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="SOLUTION" subjectId={data.id} subjectTitle={data.title} />
 
       <EditableText
         value={data.description}
@@ -177,6 +181,17 @@ export function SolutionPanel({
         </div>
       </Section>
 
+      {data.opportunity && (
+        <Section label="Investment decision">
+          <BuildingInvestmentButton
+            workspaceId={data.opportunity.workspaceId}
+            solutionId={data.id}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+          />
+        </Section>
+      )}
+
       <Section label="Plan & Discussion" count={data.comments.length}>
         <SolutionPlanDiscussion
           solutionId={data.id}
@@ -201,6 +216,28 @@ export function SolutionPanel({
         </Section>
       )}
     </PanelContainer>
+  );
+}
+
+function BuildingInvestmentButton({ workspaceId, solutionId, orgSlug, workspaceSlug }: { workspaceId: string; solutionId: string; orgSlug: string; workspaceSlug: string }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="space-y-2">
+      <Button variant="outline" size="sm" disabled={isPending} onClick={() => startTransition(async () => {
+        setError(null);
+        try {
+          const review = await requestBuildingInvestmentAction(workspaceId, solutionId);
+          router.push(`/${orgSlug}/${workspaceSlug}/reviews/${review.requestId}`);
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : "Could not prepare the investment review.");
+        }
+      })}>
+        {isPending ? "Preparing review…" : "Request Building investment review"}
+      </Button>
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+    </div>
   );
 }
 

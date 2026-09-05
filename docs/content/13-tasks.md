@@ -8,6 +8,8 @@ section: "Core Features"
 
 # Tasks
 
+Task descriptions support Markdown, including paragraphs, headings, lists, links, emphasis, code, and tables.
+
 Tasks is Compass's standalone delivery/tracking entity. It's built to scale from a full engineering sprint board (replacing a Jira-style workflow) down to a lightweight list of high-priority initiatives a PM wants to keep an eye on — both use cases share the same status vocabulary and the same underlying entity, so there's nothing to migrate between them.
 
 ![Tasks](/screenshots/docs/tasks.png)

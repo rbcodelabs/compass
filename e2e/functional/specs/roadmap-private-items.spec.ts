@@ -31,7 +31,7 @@ test.describe("Roadmap — private items", () => {
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
 
-      await page.getByRole("button", { name: "Add item" }).first().click();
+      await page.getByRole("button", { name: "Add item" }).nth(1).click();
       await page.getByLabel("Title").fill(privateTitle);
       await page.getByRole("checkbox", { name: "Private (hidden from public roadmap)" }).click();
       await page.getByRole("button", { name: "Add Item", exact: true }).click();
@@ -39,7 +39,7 @@ test.describe("Roadmap — private items", () => {
       const privateCard = page.locator('[data-slot="card"]').filter({ hasText: privateTitle });
       await expect(privateCard).toBeVisible({ timeout: 10_000 });
 
-      await page.getByRole("button", { name: "Add item" }).first().click();
+      await page.getByRole("button", { name: "Add item" }).nth(1).click();
       await page.getByLabel("Title").fill(publicTitle);
       // Private checkbox defaults unchecked — leave it alone for a public item.
       await page.getByRole("button", { name: "Add Item", exact: true }).click();

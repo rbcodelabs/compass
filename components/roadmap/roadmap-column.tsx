@@ -74,6 +74,7 @@ export function RoadmapColumn({
               <RoadmapCard
                 key={item.id}
                 item={item}
+                workspaceId={workspaceId}
                 revalidatePathStr={revalidatePathStr}
                 onArchive={onArchive}
                 onUpdate={onUpdate}

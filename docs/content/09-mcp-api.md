@@ -54,6 +54,61 @@ curl https://your-compass-url.vercel.app/api/mcp \
 
 The MCP server exposes tools that agents can call, grouped below by area.
 
+### Shared comments
+
+Comments are mutable discussion only. They do not approve work, authorize a release, or change a tracked Decision. `REVIEW_REQUEST` targets are accepted only for informational `TRACKED_DECISION` requests; immutable review revisions, options, Decision records/applications, legacy review gates, and release authorization are not commentable.
+
+Phase 1 exposes the shared comment capability through the generic MCP tools and the existing Doc and Solution compatibility paths. It does not add a general Comments UI to every supported object. Until Phase 2, the existing Doc and Solution experiences remain the only comment UIs.
+
+#### Production migration and backfill
+
+After deploying application code containing migration `046_shared_comments`, run these commands from the Vercel-linked Compass main checkout (the directory containing `.vercel/project.json`). The authenticated admin routes use Vercel OIDC for Aurora DSQL, require `MIGRATION_SECRET`, and always select `getActiveSchema()` for that deployment. First apply the additive schema migration:
+
+```bash
+vercel curl /api/admin/migrate \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"script":"046_shared_comments"}'
+```
+
+Then invoke one bounded backfill batch at a time. Repeat the same request until the JSON response reports `"complete": true`; a retry after a timeout or ambiguous response is safe because rows retain their legacy IDs and inserts use conflict-safe idempotency. The response contains aggregate processed and invariant counts only.
+
+```bash
+vercel curl /api/admin/shared-comments-backfill \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"operation":"backfill","batchSize":500}'
+```
+
+Finish with a read-only validation request. It succeeds only when every legacy comment has a matching shared row, required extensions exist, reply topology is valid, and no legacy row is orphaned:
+
+```bash
+vercel curl /api/admin/shared-comments-backfill \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"operation":"validate"}'
+```
+
+HTTP `409` means validation failed or the backfill cannot make safe progress. Resolve orphaned legacy data explicitly; the endpoint never fabricates workspace ownership. Rollback remains application-code-only: revert the runtime code and leave the additive shared tables in place so the unchanged legacy tables and current UIs continue to operate.
+
+Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`, `EXPERIMENT`, `ROADMAP_ITEM`, `FEEDBACK_ITEM`, `TASK`, `DOC`, `ARTIFACT`, `RESEARCH_STUDY`, and `REVIEW_REQUEST`.
+
+| Tool | Description |
+|---|---|
+| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional |
+| `list_comments` | List comments for an exact workspace and target, optionally filtered by `OPEN` or `RESOLVED` |
+| `get_comment` | Get one comment and any specialized Doc-anchor or Solution-plan metadata |
+| `update_comment` | Edit a comment body |
+| `delete_comment` | Delete a reply, or a root and its replies |
+| `resolve_comment` | Mark a comment resolved |
+| `reopen_comment` | Mark a resolved comment open |
+
 ### Workspace
 
 | Tool | Description |
@@ -104,6 +159,8 @@ The MCP server exposes tools that agents can call, grouped below by area.
 | `reject_solution_plan` | Mark a PLAN entry as REJECTED (only applies to PLAN entries, not COMMENT replies) |
 | `promote_to_roadmap` | Promote a validated Solution directly to the roadmap, creating a Roadmap Item linked back to the originating opportunity. Accepts an optional `isPrivate` flag |
 
+`approve_solution_plan` and `reject_solution_plan` preserve the legacy, reversible plan-status marker only. They do not create a tracked Decision, authorize delivery, or establish authoritative approval semantics for new plans.
+
 ### Experiments
 
 | Tool | Description |
@@ -119,13 +176,33 @@ The MCP server exposes tools that agents can call, grouped below by area.
 | Tool | Description |
 |---|---|
 | `list_roadmap_items` | Fetch active roadmap items for a workspace, grouped by horizon (including LAUNCHING/LAUNCHED), including start/end dates and whether each item is private (`isPrivate`) |
-| `add_to_roadmap` | Create a roadmap item in NOW/NEXT/LATER/SHIPPED, optionally with a start date and end date for the Timeline view, and an `isPrivate` flag to hide it from the public portal roadmap and block voting on it |
-| `update_roadmap_item` | Update a roadmap item's horizon, status, title, description, start/end dates, or `isPrivate` flag. Rejects `horizon: LAUNCHING`/`LAUNCHED` — use `set_launch_tier` to move an item into LAUNCHING |
+| `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
+| `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
+| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item |
+| `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state, linked item type, outcome, reviewer, or search text |
+| `get_decision` | Read one tracking-only decision and its immutable revision history |
+| `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. This operation never takes the human decision or invokes release automation |
+| `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
+| `list_review_requests` | List review requests for a workspace, optionally filtered by state |
+| `apply_recorded_decision` | Idempotently apply the authorized continuation from a recorded decision and return its application receipt |
 | `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items |
 | `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier |
 | `set_launch_tier` | Move a roadmap item into the LAUNCHING horizon by picking a launch tier; attaches a checklist cloned from an explicit or auto-resolved (most recent ACTIVE) template for that tier. Rejects items already LAUNCHING/LAUNCHED |
 | `get_launch_checklist` | Get the launch checklist for a roadmap item, including each item's status and ID |
 | `update_launch_checklist_item` | Set a launch checklist item's status (PENDING/DONE/SKIPPED) |
+
+Decision-taking is deliberately absent from MCP. A signed-in human reviewer opens
+the stable Compass review URL and chooses one option. Agents may prepare and read
+packets, then apply a recorded decision; they cannot impersonate the reviewer.
+
+`apply_recorded_decision` is queue-only for release authorization. It validates
+the authoritative provider snapshot outside the database transaction, then a
+short transaction binds the unchanged snapshot and human decision to a durable
+dispatch row. Compass does not merge, deploy, or otherwise invoke external
+release automation in this implementation. Provider validation is unconfigured
+by default and therefore fails closed (`PR_NOT_READY`); a dispatch worker must
+use a configured provider and repeat the same head/check/policy revalidation at
+the dispatch-claim boundary before any future external side effect.
 
 ### Squads
 

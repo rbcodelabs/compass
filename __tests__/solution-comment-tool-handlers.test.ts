@@ -7,6 +7,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
+vi.mock("@/lib/comment-compat", () => ({
+  mirrorLegacySolutionComment: vi.fn(),
+  updateMirroredComment: vi.fn(),
+  deleteMirroredComment: vi.fn(),
+  updateMirroredLegacyPlanStatus: vi.fn(),
+}))
+
 // --- Prisma mock setup -------------------------------------------------------
 
 const mockSolution = {

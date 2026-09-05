@@ -18,6 +18,7 @@ import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evid
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import { AddSolutionForm } from "@/components/discovery/add-solution-form";
 import { solutionStatusBadge } from "@/lib/solution-status";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 type OpportunityData = {
   id: string;
@@ -105,6 +106,7 @@ export function OpportunityPanel({
         edit={edit}
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS_MAP }}
       />
+      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} subjectTitle={data.title} />
 
       <EditableText
         value={data.description}

@@ -580,16 +580,14 @@ export async function promoteFeedbackToRoadmap({
   })
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0
 
-  const item = await prisma.roadmapItem.create({
-    data: {
+  const item = await prisma.roadmapItem.create({ data: {
       workspaceId,
       title: feedback.title,
       horizon,
       sortOrder,
       feedbackId,
       isPrivate: isPrivate ?? false,
-    },
-  })
+    } })
 
   const lines = [
     `**Promoted to roadmap (${horizon})**`,
@@ -601,7 +599,7 @@ export async function promoteFeedbackToRoadmap({
   return ok(lines.join("\n"), {
     id: item.id,
     title: item.title,
-    horizon: item.horizon,
+    horizon,
     sortOrder: item.sortOrder,
     isPrivate: item.isPrivate,
     workspaceId: item.workspaceId,

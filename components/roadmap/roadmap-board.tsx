@@ -221,7 +221,7 @@ export function RoadmapBoard({
     const created =
       item.kind === "solution"
         ? await promoteToRoadmap(item.id, workspaceId, horizon, item.squadId, item.opportunityId)
-        : await promoteFeedbackToRoadmap(item.id, workspaceId, horizon, revalidatePathStr);
+        : await promoteFeedbackToRoadmap(item.id, workspaceId, horizon);
     handleItemAdded(cardDataFromPromotion(created, item, squads ?? []));
   }
 
@@ -358,7 +358,7 @@ export function RoadmapBoard({
         return;
       }
       startTransition(async () => {
-        await moveItem(activeId, currentHorizon, workspaceId, revalidatePathStr);
+        await moveItem(activeId, currentHorizon, workspaceId);
       });
     } else if (!overId.startsWith("column-") && overId !== activeId) {
       const columnItems = columns[currentHorizon];
@@ -373,7 +373,7 @@ export function RoadmapBoard({
         setColumns((prev) => ({ ...prev, [currentHorizon]: reordered }));
 
         startTransition(async () => {
-          await updateSortOrder(activeId, newIndex, revalidatePathStr);
+          await updateSortOrder(activeId, workspaceId, newIndex);
         });
       }
     }
@@ -456,6 +456,7 @@ export function RoadmapBoard({
           <div className="rotate-1 scale-105">
             <RoadmapCard
               item={activeItem}
+              workspaceId={workspaceId}
               revalidatePathStr={revalidatePathStr}
               onArchive={() => {}}
               orgSlug={orgSlug}

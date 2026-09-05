@@ -30,6 +30,7 @@ export type ColumnOptionsMenuProps = {
   onToggle: (id: string, visible: boolean) => void;
   onMove: (id: string, direction: -1 | 1) => void;
   onReset: () => void;
+  compact?: boolean;
 };
 
 /**
@@ -44,6 +45,7 @@ export function ColumnOptionsMenu({
   onToggle,
   onMove,
   onReset,
+  compact,
 }: ColumnOptionsMenuProps) {
   const movable = columns.filter((column) => column.hideable);
   const hiddenCount = columns.filter((column) => !column.visible).length;
@@ -54,7 +56,7 @@ export function ColumnOptionsMenu({
         render={<Button variant="outline" size="sm" aria-label="Columns" />}
       >
         <Columns3 />
-        Columns
+        <span className={compact ? "hidden sm:inline" : undefined}>Columns</span>
         {hiddenCount > 0 && (
           <span className="ml-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
             {hiddenCount}

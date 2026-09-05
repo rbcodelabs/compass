@@ -41,8 +41,8 @@ export async function setLaunchTierCore(
 
   const launchChecklistId = randomUUID();
 
-  await prisma.$transaction([
-    prisma.launchChecklist.create({
+  await prisma.$transaction(async (tx) => {
+    await tx.launchChecklist.create({
       data: {
         id: launchChecklistId,
         roadmapItemId: itemId,
@@ -50,20 +50,20 @@ export async function setLaunchTierCore(
         tier,
         templateSnapshot: JSON.stringify(snapshot),
       },
-    }),
-    prisma.launchChecklistItem.createMany({
+    })
+    await tx.launchChecklistItem.createMany({
       data: template.items.map((i) => ({
         launchChecklistId,
         label: i.label,
         description: i.description,
         order: i.order,
       })),
-    }),
-    prisma.roadmapItem.update({
+    })
+    await tx.roadmapItem.update({
       where: { id: itemId },
       data: { horizon: "LAUNCHING", updatedAt: new Date() },
-    }),
-  ]);
+    })
+  });
 
   return { launchChecklistId, itemCount: template.items.length };
 }

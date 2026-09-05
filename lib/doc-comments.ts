@@ -17,6 +17,7 @@
 
 import getPrisma from "@/lib/db"
 import type { DocComment } from "@prisma/client"
+import { deleteMirroredComment, mirrorLegacyDocComment, updateMirroredComment, updateMirroredDocStatus } from "@/lib/comment-compat"
 
 export type CommentStatus = "OPEN" | "RESOLVED"
 export type CommentAuthorType = "AGENT" | "HUMAN"
@@ -88,6 +89,11 @@ export async function createDocCommentCore(
     },
   })
 
+  try { await mirrorLegacyDocComment(comment) } catch (error) {
+    await prisma.docComment.delete({ where: { id: comment.id } })
+    throw error
+  }
+
   return { ok: true, comment }
 }
 
@@ -123,10 +129,12 @@ export async function updateDocCommentBodyCore(
   const prisma = getPrisma()
   const existing = await prisma.docComment.findUnique({ where: { id: commentId }, select: { id: true } })
   if (!existing) return null
-  return prisma.docComment.update({
+  const updated = await prisma.docComment.update({
     where: { id: commentId },
     data: { body: body.trim(), updatedAt: new Date() },
   })
+  await updateMirroredComment(commentId, updated.body)
+  return updated
 }
 
 /**
@@ -140,10 +148,12 @@ export async function setDocCommentStatusCore(
   const prisma = getPrisma()
   const existing = await prisma.docComment.findUnique({ where: { id: commentId }, select: { id: true } })
   if (!existing) return null
-  return prisma.docComment.update({
+  const updated = await prisma.docComment.update({
     where: { id: commentId },
     data: { status, updatedAt: new Date() },
   })
+  await updateMirroredDocStatus(commentId, status)
+  return updated
 }
 
 /**
@@ -168,6 +178,7 @@ export async function deleteDocCommentCore(
     deletedReplies = count
   }
   await prisma.docComment.delete({ where: { id: commentId } })
+  await deleteMirroredComment(commentId)
 
   return { id: existing.id, wasRoot, deletedReplies }
 }
