@@ -230,6 +230,14 @@ describe("authoritative research voice control plane migration (047)", () => {
     expect(sql).toContain("next_provider_ordinal INTEGER NOT NULL DEFAULT 0")
     expect(sql).toContain("last_provider_item_id VARCHAR(255)")
     expect(sql).toContain("status_changed_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+    for (const column of [
+      "command_pending_count INTEGER NOT NULL DEFAULT 0",
+      "command_total_count INTEGER NOT NULL DEFAULT 0",
+      "command_window_at TIMESTAMPTZ",
+      "command_window_count INTEGER NOT NULL DEFAULT 0",
+      "hangup_command_id UUID",
+      "canonical_command_id UUID",
+    ]) expect(sql).toContain(column)
   });
 
   it("uses one statement per transaction and async indexes", () => {

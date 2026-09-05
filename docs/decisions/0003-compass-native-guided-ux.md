@@ -51,6 +51,43 @@ The audio-only browser boundary removes the provider data channel and ephemeral 
 
 Cross-origin embed success remains unknowable, so the external link is first-class rather than an error-only escape hatch. Browser control, click telemetry, screen recording, and raw-audio retention are deliberately excluded.
 
+## Authoritative voice implementation gates
+
+The persistence and runtime-service foundation is an intermediate, non-routable
+slice. It does not enable participant voice: participant endpoints, authenticated
+internal callbacks, the actual provider sideband loop, and the termination saga
+must ship together before the authoritative flag can expose a call. The current
+heartbeat bootstrap alone cannot establish `READY`. Only an authenticated,
+configured sideband with event capture may do that; the SDP answer must remain
+withheld until that acknowledgement is durable.
+
+Provider creation is a one-shot operation. A retry during `PROVIDER_CREATED`
+reports provisioning in progress without stopping the original request. A known
+provider call ID must survive response-body or SDP validation failures so cleanup
+can still hang up that call. Cleanup records the provider and Sandbox identities
+and each confirmed stop before releasing the matching session lease. An ambiguous
+cleanup remains `UNKNOWN` with retryable provenance, not a successful completion.
+Before participant enablement, controller-side provider requests also need bounded
+abort deadlines. The termination saga must test a provider creation result that
+arrives after reconciliation has terminalized the attempt: preserve the newly
+discovered provider ID for cleanup without disturbing a concurrently advanced
+owner or a subsequent call.
+
+OpenAI does not provide a stateless call-status retrieval operation. Reconciliation
+uses durable sideband observations and Sandbox/command evidence, then explicitly
+attempts provider hangup and Sandbox termination. A stale heartbeat alone cannot
+prove that a call ended or justify releasing its lease. The production reconciler
+must implement that termination saga before the foundation's timing helpers are
+wired to any endpoint.
+
+Sandbox inspection must not start another execution session. With the pinned
+`@vercel/sandbox` 2.9.2 SDK, `get({ resume: false })` suppresses resumption only
+during lookup; subsequent Sandbox command methods can still auto-resume. Inspect
+the original `currentSession()` directly and preserve the distinction between a
+missing Sandbox, a missing command, and an uncertain inspection result. Network
+egress allows only OpenAI and the exact Compass callback hostname derived from
+trusted deployment configuration.
+
 ## Risks
 
 - Provider realtime event shapes and completion semantics may evolve; the sideband parser, event allowlist, response-status correlation, and provider-item ordering must remain versioned and tested.

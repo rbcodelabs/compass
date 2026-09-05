@@ -364,6 +364,8 @@ model ResearchVoiceCall {
   providerCallId      String?                  @unique(map: "idx_research_voice_calls_provider_call") @map("provider_call_id") @db.VarChar(255)
   sandboxName         String?                  @map("sandbox_name") @db.VarChar(255)
   sandboxCommandId    String?                  @map("sandbox_command_id") @db.VarChar(255)
+  providerStoppedAt   DateTime?                @map("provider_stopped_at")
+  sandboxStoppedAt    DateTime?                @map("sandbox_stopped_at")
   workerTokenHash     String                   @unique(map: "idx_research_voice_calls_worker_token") @map("worker_token_hash") @db.VarChar(64)
   status              String                   @default("PROVISIONING") @db.VarChar(30)
   attemptNumber       Int                      @map("attempt_number")
@@ -378,6 +380,11 @@ model ResearchVoiceCall {
   endReason           String?                  @map("end_reason") @db.VarChar(50)
   errorCode           String?                  @map("error_code") @db.VarChar(50)
   transcriptIntegrity String                   @default("PENDING") @map("transcript_integrity") @db.VarChar(20)
+  commandPendingCount Int                      @default(0) @map("command_pending_count")
+  commandTotalCount   Int                      @default(0) @map("command_total_count")
+  commandWindowAt     DateTime?                @map("command_window_at")
+  commandWindowCount  Int                      @default(0) @map("command_window_count")
+  hangupCommandId     String?                  @map("hangup_command_id") @db.Uuid
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @default(now()) @map("updated_at")
   session             ResearchSession          @relation(fields: [sessionId], references: [id])
@@ -404,6 +411,7 @@ model ResearchVoiceCommand {
   attemptCount   Int               @default(0) @map("attempt_count")
   claimExpiresAt DateTime?         @map("claim_expires_at")
   errorCode      String?           @map("error_code") @db.VarChar(50)
+  canonicalCommandId String?       @map("canonical_command_id") @db.Uuid
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @default(now()) @map("updated_at")
   voiceCall      ResearchVoiceCall @relation(fields: [voiceCallId], references: [id])
