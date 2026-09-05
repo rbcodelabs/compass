@@ -12,6 +12,8 @@ The Roadmap is a three-horizon view of what your team is building. It stays inte
 
 Each internal roadmap card and Timeline bar shows a delivery-status badge derived from tasks directly linked to that roadmap item. Blocked work takes precedence, followed by In Review and In Development; an item is Complete only when every non-cancelled linked task is done. Items with no active linked tasks remain Not Started. This delivery lifecycle is independent of the item's roadmap horizon.
 
+Open a Roadmap item's detail panel to discuss it with the team. Shared Discussion supports replies, editing, resolution, and safe moderated deletion; see [Detail panel](/help/14-detail-panel#discuss-work-in-context).
+
 ![Roadmap](/screenshots/docs/roadmap.png)
 
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.

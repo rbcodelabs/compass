@@ -257,6 +257,13 @@ export default async function globalTeardown() {
         [wsId]
       );
 
+      // shared comments have application-enforced references, so remove them
+      // before their workspace and targets.
+      await pool.query(
+        `DELETE FROM "${S}".comments WHERE workspace_id = $1`,
+        [wsId]
+      );
+
       // roadmap_items
       await pool.query(
         `DELETE FROM "${S}".roadmap_items WHERE workspace_id = $1`,

@@ -17,6 +17,8 @@ Tracked decisions are informational. Approve, Request changes, and Reject
 record what a person decided; they do not automatically modify the linked
 Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item.
 
+Discussion comments are deliberately different: they capture questions and working conversation on an item's detail panel, but never count as a decision or authorization. When a choice needs an accountable outcome and rationale, create a tracked Decision instead of relying on a comment thread.
+
 ## Roadmap behavior
 
 Authorized roadmap actions work directly in every ordinary horizon, including

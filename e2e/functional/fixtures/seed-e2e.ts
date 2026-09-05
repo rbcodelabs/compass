@@ -217,6 +217,25 @@ export async function seedE2E(
     RETURNING id
   `, [ws.id, squadId, solutionId, opportunityId, E2E_NOW_CANDIDATE_TITLE])).rows[0].id;
 
+  // Fixed copy and timestamps keep shared Discussion docs captures stable.
+  const { rows: [discussionRoot] } = await pool.query<{ id: string }>(`
+    INSERT INTO "${S}".comments
+      (id, workspace_id, target_type, target_id, body, status, author_id,
+       author_name, author_type, source, created_at, updated_at)
+    VALUES (gen_random_uuid(), $1, 'ROADMAP_ITEM', $2,
+      'Keep customer context attached to delivery.', 'OPEN', $3,
+      'Dev User', 'HUMAN', 'UI', '2026-09-01 13:00:00', '2026-09-01 13:00:00')
+    RETURNING id
+  `, [ws.id, candidateId, user.id]);
+  await pool.query(`
+    INSERT INTO "${S}".comments
+      (id, workspace_id, target_type, target_id, parent_id, body, status,
+       author_id, author_name, author_type, source, created_at, updated_at)
+    VALUES (gen_random_uuid(), $1, 'ROADMAP_ITEM', $2, $3,
+      'Agreed — the evidence should travel with the roadmap item.', 'OPEN',
+      $4, 'Dev User', 'HUMAN', 'UI', '2026-09-01 13:05:00', '2026-09-01 13:05:00')
+  `, [ws.id, candidateId, discussionRoot.id, user.id]);
+
   // Reset only this seeded authority chain so interrupted/retried runs remain
   // deterministic after the candidate has been admitted by a prior run.
   const priorRequests = await pool.query<{ id: string }>(`
