@@ -53,6 +53,7 @@ export function createOpenAIRealtimeProvider({ apiKey, fetcher = fetch }: { apiK
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}` },
           body: form,
+          signal: AbortSignal.timeout(15_000),
         })
       } catch {
         throw new OpenAIRealtimeProviderError("OpenAI call creation outcome is unknown", "PROVIDER_CREATE_AMBIGUOUS", true)
@@ -88,6 +89,7 @@ export function createOpenAIRealtimeProvider({ apiKey, fetcher = fetch }: { apiK
         response = await fetcher(`${OPENAI_REALTIME_CALLS_URL}/${encodeURIComponent(providerCallId)}/hangup`, {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
         })
       } catch {
         throw new OpenAIRealtimeProviderError("OpenAI hangup outcome is unknown", "PROVIDER_HANGUP_AMBIGUOUS", true)

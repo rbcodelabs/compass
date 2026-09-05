@@ -459,12 +459,14 @@ export async function appendCanonicalVoiceBatch({
   voiceCallId,
   sessionId,
   events,
+  workerToken,
   now = new Date(),
 }: {
   prisma: VoiceControlPlanePrisma
   voiceCallId: string
   sessionId: string
   events: CanonicalVoiceEvent[]
+  workerToken?: string
   now?: Date
 }) {
   validateCanonicalVoiceBatchInput(voiceCallId, sessionId, events)
@@ -474,9 +476,19 @@ export async function appendCanonicalVoiceBatch({
   return prisma.$transaction(async (tx) => {
     const call = await tx.researchVoiceCall.findFirst({
       where: { id: voiceCallId, sessionId },
-      select: { id: true, sessionId: true, status: true, transcriptIntegrity: true, nextProviderOrdinal: true, lastProviderItemId: true },
+      select: { id: true, sessionId: true, status: true, transcriptIntegrity: true, nextProviderOrdinal: true, lastProviderItemId: true, workerTokenHash: true, leaseExpiresAt: true },
     })
     if (!call) throw new ResearchVoiceControlPlaneError("Voice call not found", 404, "CALL_NOT_FOUND")
+    if (workerToken !== undefined) {
+      if (!isResearchAuthoritativeVoiceEnabled() || !voiceWorkerTokenIsBound({ rawToken: workerToken, expectedTokenHash: call.workerTokenHash, presentedCallId: voiceCallId, expectedCallId: call.id, callStatus: call.status, expiresAt: call.leaseExpiresAt, now })) {
+        throw new ResearchVoiceControlPlaneError("Invalid research voice worker token", 401, "INVALID_WORKER_TOKEN")
+      }
+      const fenced = await tx.researchVoiceCall.updateMany({
+        where: { id: voiceCallId, sessionId, status: call.status, workerTokenHash: call.workerTokenHash, leaseExpiresAt: { gt: now } },
+        data: { updatedAt: now },
+      })
+      if (fenced.count !== 1) throw new ResearchVoiceControlPlaneError("Voice callback authorization changed concurrently", 409, "CALLBACK_RACE")
+    }
     assertVoiceCallStatus(call.status)
     if (call.transcriptIntegrity !== "PENDING") {
       throw new ResearchVoiceControlPlaneError("Voice transcript is no longer appendable", 409, "TRANSCRIPT_DEGRADED")

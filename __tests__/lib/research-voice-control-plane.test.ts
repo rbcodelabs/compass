@@ -444,6 +444,13 @@ describe("authoritative research voice control plane", () => {
       prisma: prisma as never, voiceCallId: "call-1", sessionId: "session-1",
       events: [{ ...event, providerEventId: "event-race" }],
     })).rejects.toMatchObject({ code: "CALLBACK_RACE" })
+
+    tx.researchVoiceCall.findFirst.mockResolvedValue({
+      id: "call-1", sessionId: "session-1", status: "ACTIVE", transcriptIntegrity: "PENDING", nextProviderOrdinal: 0, lastProviderItemId: null,
+      workerTokenHash: hashVoiceWorkerToken("worker"), leaseExpiresAt: new Date("2026-09-05T12:00:00Z"),
+    } as never)
+    await expect(appendCanonicalVoiceBatch({ prisma: prisma as never, voiceCallId: "call-1", sessionId: "session-1", events: [event], workerToken: "worker", now: new Date("2026-09-05T12:01:00Z") }))
+      .rejects.toMatchObject({ code: "INVALID_WORKER_TOKEN" })
   })
 
   it("acknowledges exact callback replays and processes only an unseen contiguous suffix", async () => {

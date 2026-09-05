@@ -234,16 +234,18 @@ describe("research voice worker operations", () => {
     }))
   })
 
-  it("releases the pending counter once when a command completes and rejects duplicate completion", async () => {
+  it("releases the pending counter once and acknowledges an exact result retry", async () => {
     const { prisma, tx, credential, command } = fixture()
     const now = new Date("2026-09-05T12:00:00Z")
     tx.researchVoiceCommand.findUnique.mockResolvedValue({ ...command, status: "CLAIMED", attemptCount: 1, claimExpiresAt: new Date("2026-09-05T12:00:20Z") })
     const input = { prisma: prisma as never, callId: "call-1", commandId: command.id, rawToken: credential.rawToken, claimEpoch: 1, outcome: "APPLIED" as const, now }
     await expect(completeResearchVoiceCommand(input)).resolves.toEqual({ status: "APPLIED" })
-    tx.researchVoiceCommand.findUnique.mockResolvedValue({ ...command, status: "APPLIED", attemptCount: 1, claimExpiresAt: null })
-    await expect(completeResearchVoiceCommand(input)).rejects.toMatchObject({ code: "STALE_COMMAND_CLAIM" })
+    tx.researchVoiceCommand.findUnique.mockResolvedValue({ ...command, status: "APPLIED", attemptCount: 1, claimExpiresAt: null, errorCode: null })
+    await expect(completeResearchVoiceCommand(input)).resolves.toEqual({ status: "APPLIED" })
+    await expect(completeResearchVoiceCommand({ ...input, outcome: "FAILED" })).rejects.toMatchObject({ code: "STALE_COMMAND_CLAIM" })
     expect(tx.researchVoiceCall.updateMany).toHaveBeenCalledTimes(1)
     expect(tx.researchVoiceCall.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ commandPendingCount: { decrement: 1 } }) }))
+    expect(tx.researchVoiceCall.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ sessionId: "session-1", workerTokenHash: credential.tokenHash, leaseExpiresAt: { gt: now } }) }))
   })
 
   it("reads a concurrent idempotent receipt only after the failed transaction has rolled back", async () => {

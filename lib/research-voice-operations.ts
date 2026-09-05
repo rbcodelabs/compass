@@ -181,6 +181,11 @@ export async function completeResearchVoiceCommand({
   return prisma.$transaction(async (tx) => {
     const call = await authorizeResearchVoiceWorker({ prisma: tx, callId, rawToken, now })
     const command = await tx.researchVoiceCommand.findUnique({ where: { id: commandId } })
+    const finalErrorCode = outcome === "FAILED" ? (errorCode ?? "WORKER_COMMAND_FAILED") : null
+    if (command?.voiceCallId === callId && command.sessionId === call.sessionId && command.attemptCount === claimEpoch &&
+        command.status === outcome && command.errorCode === finalErrorCode && command.claimExpiresAt === null) {
+      return { status: outcome }
+    }
     if (!command || command.voiceCallId !== callId || command.sessionId !== call.sessionId ||
         command.status !== "CLAIMED" || command.attemptCount !== claimEpoch ||
         !command.claimExpiresAt || command.claimExpiresAt <= now) {
@@ -195,7 +200,7 @@ export async function completeResearchVoiceCommand({
     })
     if (updated.count !== 1) throw new ResearchVoiceControlPlaneError("Voice command claim is stale", 409, "STALE_COMMAND_CLAIM")
     const pendingUpdated = await tx.researchVoiceCall.updateMany({
-      where: { id: callId, status: call.status, commandPendingCount: call.commandPendingCount },
+      where: { id: callId, sessionId: call.sessionId, status: call.status, workerTokenHash: call.workerTokenHash, leaseExpiresAt: { gt: now }, commandPendingCount: call.commandPendingCount },
       data: { commandPendingCount: { decrement: 1 }, updatedAt: now },
     })
     if (pendingUpdated.count !== 1) throw new ResearchVoiceControlPlaneError("Voice command counters changed concurrently", 409, "STALE_COMMAND_CLAIM")

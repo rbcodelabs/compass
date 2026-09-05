@@ -142,6 +142,13 @@ describe("authoritative research voice runtime", () => {
     expect(fetcher).toHaveBeenCalledOnce()
   })
 
+  it("puts a bounded AbortSignal on provider allocation and hangup", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(audioSdp, { status: 201, headers: { location: "/v1/realtime/calls/call_1" } })).mockResolvedValueOnce(new Response(null, { status: 200 }))
+    const provider = createOpenAIRealtimeProvider({ apiKey: "key", fetcher })
+    await provider.createCall({ offerSdp: audioSdp, model: "gpt-realtime" }); await provider.hangup("call_1")
+    for (const [, options] of fetcher.mock.calls) expect(options.signal).toBeInstanceOf(AbortSignal)
+  })
+
   it("stops a possibly-created Sandbox when detached worker startup fails", async () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "http://localhost:3000")
     const stop = vi.fn().mockResolvedValue({ status: "stopped" })
