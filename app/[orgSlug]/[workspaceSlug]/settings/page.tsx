@@ -17,7 +17,7 @@ import type {
   SquadData,
   MemberData,
 } from "@/lib/types";
-import { normalizeWorkspaceRole } from "@/lib/roles";
+import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
 import { CapabilityPacksPanel, type CapabilityPackSettingsRow } from "@/components/settings/capability-packs-panel";
@@ -40,6 +40,7 @@ export default async function SettingsPage({ params }: Props) {
     select: {
       id: true,
       organizationId: true,
+      organization: { select: { members: { where: { userId: session.user?.id }, select: { role: true } } } },
       name: true,
       feedbackEnabled: true,
       roadmapPublic: true,
@@ -128,6 +129,8 @@ export default async function SettingsPage({ params }: Props) {
 
   const currentUserMembershipId =
     rawMembers.find((m) => m.userId === session.user?.id)?.id ?? null;
+  const currentWorkspaceRole = rawMembers.find((m) => m.userId === session.user?.id)?.role;
+  const canManageCapabilityPacks = normalizeWorkspaceRole(currentWorkspaceRole) === "ADMIN" || isOrgAdminRole(workspace.organization.members[0]?.role);
   const capabilityPacks: CapabilityPackSettingsRow[] = rawCapabilityPacks.map((attachment) => ({
     packId: attachment.capabilityPackVersion.capabilityPack.packId,
     displayName: attachment.capabilityPackVersion.capabilityPack.displayName,
@@ -186,9 +189,9 @@ export default async function SettingsPage({ params }: Props) {
         />
       </SettingsSection>
 
-      <SettingsSection title="Agent capability packs" description="Install validated skills-only packs for the in-app agent. Packs add instructions, never tools or credentials.">
+      {canManageCapabilityPacks && <SettingsSection title="Agent capability packs" description="Install validated skills-only packs for the in-app agent. Packs add instructions, never tools or credentials.">
         <CapabilityPacksPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} initialPacks={capabilityPacks} />
-      </SettingsSection>
+      </SettingsSection>}
 
       <SettingsSection title="Portal" description="Control which parts of this workspace are publicly accessible without login.">
         <PortalSettingsPanel
