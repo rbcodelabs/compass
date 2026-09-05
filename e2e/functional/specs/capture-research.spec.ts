@@ -172,7 +172,7 @@ test.describe("Capture — research study", () => {
     await anonymous.close()
 
     await page.goto(`${base}/capture/studies/${studyId}`)
-    await expect(page.getByText("completed")).toBeVisible()
+    await expect(page.getByText("completed", { exact: true })).toHaveCount(2)
     await expect(page.getByText("I use a spreadsheet every Monday.")).toBeVisible()
     await expect(page.getByText("What made that difficult for you?").first()).toBeVisible()
     await expect(page.getByRole("link", { name: "test-image.png" })).toBeVisible()
