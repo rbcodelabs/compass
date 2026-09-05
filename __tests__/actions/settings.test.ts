@@ -97,6 +97,8 @@ const mockArtifactLink = { deleteMany: vi.fn() };
 const mockArtifactBlobCleanup = { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() };
 const mockWorkspaceScoringConfig = { upsert: vi.fn() };
 const mockWorkspaceCapabilityPack = { deleteMany: vi.fn() };
+const mockCapabilityPack = { findMany: vi.fn(), deleteMany: vi.fn() };
+const mockCapabilityPackVersion = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockReleaseDispatch = { deleteMany: vi.fn() };
 const mockReleaseRunTask = { deleteMany: vi.fn() };
 const mockReleaseRun = { deleteMany: vi.fn() };
@@ -140,6 +142,8 @@ const mockPrisma = {
   artifactBlobCleanup: mockArtifactBlobCleanup,
   workspaceScoringConfig: mockWorkspaceScoringConfig,
   workspaceCapabilityPack: mockWorkspaceCapabilityPack,
+  capabilityPack: mockCapabilityPack,
+  capabilityPackVersion: mockCapabilityPackVersion,
   releaseDispatch: mockReleaseDispatch,
   releaseRunTask: mockReleaseRunTask,
   releaseRun: mockReleaseRun,
@@ -220,6 +224,9 @@ beforeEach(() => {
   mockArtifactLink.deleteMany.mockResolvedValue({ count: 0 });
   mockArtifactBlobCleanup.findMany.mockResolvedValue([]);
   mockArtifactBlobCleanup.upsert.mockResolvedValue({ id: "cleanup-1" });
+  mockCapabilityPack.findMany.mockResolvedValue([]);
+  mockCapabilityPackVersion.findMany.mockResolvedValue([]);
+  mockCapabilityPackVersion.findFirst.mockResolvedValue(null);
   mockWorkspaceMember.findMany.mockResolvedValue([{ role: "ADMIN" }, { role: "ADMIN" }]);
 
   // deleteWorkspace defaults. The members/organization selections are what
@@ -785,6 +792,10 @@ describe("deleteWorkspace", () => {
     mockOKRCycle.findMany.mockResolvedValue([{ id: "cycle-1" }]);
     mockObjective.findMany.mockResolvedValue([{ id: "obj-1" }]);
     mockKeyResult.findMany.mockResolvedValue([{ id: "kr-1" }]);
+    mockCapabilityPack.findMany.mockResolvedValue([{ id: "pack-1" }]);
+    mockCapabilityPackVersion.findMany.mockResolvedValue([
+      { artifactPathname: "capability-packs/shared.json" },
+    ]);
 
     // One remaining workspace after deletion
     mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
@@ -858,6 +869,15 @@ describe("deleteWorkspace", () => {
       where: { objectiveId: { in: ["obj-1"] } },
     });
     expect(mockOKRCycle.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+
+    expect(mockWorkspaceCapabilityPack.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockCapabilityPackVersion.deleteMany).toHaveBeenCalledWith({
+      where: { capabilityPackId: { in: ["pack-1"] } },
+    });
+    expect(mockCapabilityPack.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["pack-1"] } } });
+    expect(mockCapabilityPackVersion.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockCapabilityPack.deleteMany.mock.invocationCallOrder[0]
+    );
 
     // Returns a redirect to the remaining workspace
     expect(result.redirectTo).toBe("/my-org/other-ws");

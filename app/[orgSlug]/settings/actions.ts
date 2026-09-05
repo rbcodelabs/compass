@@ -7,6 +7,7 @@ import type { ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
+import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 
 export interface ScoringMetricInput {
   key: string;
@@ -342,7 +343,7 @@ async function deleteWorkspaceCascade(prisma: OrgPrisma, workspaceId: string) {
   // 12. Artifacts: links → current pointer → revisions → stable identity,
   // followed by best-effort private Blob cleanup.
   await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
-  await prisma.workspaceCapabilityPack.deleteMany({ where: { workspaceId } });
+  await deleteWorkspaceCapabilityPacks(prisma, workspaceId, getArtifactStorage());
 
   // 13. Workspace-scoped singletons (both Restrict toward Workspace).
   await prisma.workspaceScoringConfig.deleteMany({ where: { workspaceId } });
