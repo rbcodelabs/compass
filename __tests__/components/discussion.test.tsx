@@ -99,7 +99,6 @@ describe("Discussion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reply to Rick" }))
     fireEvent.change(screen.getByRole("textbox", { name: "Reply to Rick" }), { target: { value: "A reply" } })
     fetchMock.mockReturnValueOnce(jsonResponse(comment({ id: "reply-1", parentId: "root-1", body: "A reply" }), 201))
-    fetchMock.mockReturnValueOnce(jsonResponse({ items: [comment({ canDelete: false, replies: [comment({ id: "reply-1", parentId: "root-1", body: "A reply" })] })] }))
     fireEvent.click(screen.getByRole("button", { name: "Post reply" }))
     expect(await screen.findByText("A reply", { selector: "p" })).toBeVisible()
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ parentId: "root-1", body: "A reply" })

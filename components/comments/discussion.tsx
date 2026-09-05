@@ -108,7 +108,6 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
           ? { ...root, canDelete: false, replies: chronological([...root.replies, created]) }
           : root))
         closeEditor()
-        void load()
       } else {
         setItems((current) => chronological([...(current ?? []), created]))
         setRootBody("")
@@ -193,8 +192,8 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
             ) : <p className="mt-2 break-words whitespace-pre-wrap text-sm text-foreground">{comment.body}</p>}
 
             {!editing && <div className="mt-2 flex flex-wrap gap-1">
-              {isRoot && <Button type="button" variant="ghost" size="xs" aria-label={`Reply to ${comment.authorName}`} onClick={(event) => openEditor({ kind: "reply", commentId: comment.id }, "", event.currentTarget)}>Reply</Button>}
-              {comment.canEdit && <Button type="button" variant="ghost" size="xs" aria-label={`Edit comment by ${comment.authorName}`} onClick={(event) => openEditor({ kind: "edit", commentId: comment.id }, comment.body, event.currentTarget)}>Edit</Button>}
+              {isRoot && <Button type="button" variant="ghost" size="xs" aria-label={`Reply to ${comment.authorName}`} disabled={Boolean(busy)} onClick={(event) => openEditor({ kind: "reply", commentId: comment.id }, "", event.currentTarget)}>Reply</Button>}
+              {comment.canEdit && <Button type="button" variant="ghost" size="xs" aria-label={`Edit comment by ${comment.authorName}`} disabled={Boolean(busy)} onClick={(event) => openEditor({ kind: "edit", commentId: comment.id }, comment.body, event.currentTarget)}>Edit</Button>}
               {isRoot && comment.canModerate && <Button type="button" variant="ghost" size="xs" aria-label={`${resolved ? "Reopen" : "Resolve"} thread by ${comment.authorName}`} disabled={busy.endsWith(`:${comment.id}`)} onClick={() => void changeStatus(comment)}>{resolved ? "Reopen" : "Resolve"}</Button>}
               {comment.canDelete && <Button type="button" variant="ghost" size="xs" className="text-destructive" aria-label={`Delete ${isRoot && comment.replies.length ? "thread" : "comment"} by ${comment.authorName}`} disabled={busy === `delete:${comment.id}`} onClick={() => void remove(comment, isRoot)}>Delete</Button>}
             </div>}
