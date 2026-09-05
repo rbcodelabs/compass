@@ -2106,7 +2106,7 @@ const _handler = createMcpHandler(
             await prisma.experiment.update({ where: { id: objectId }, data })
             break
           case "roadmap_item":
-            await prisma.roadmapItem.update({ where: { id: objectId }, data })
+            await prisma.roadmapItem.update({ where: { id: objectId }, data: { ...data, updatedAt: new Date() } })
             break
           case "objective":
             await prisma.objective.update({ where: { id: objectId }, data })

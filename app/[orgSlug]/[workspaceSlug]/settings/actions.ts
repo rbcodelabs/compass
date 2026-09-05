@@ -73,7 +73,7 @@ export async function deleteSquad(
   await prisma.objective.updateMany({ where: { squadId }, data: { squadId: null } });
   await prisma.opportunity.updateMany({ where: { squadId }, data: { squadId: null } });
   await prisma.experiment.updateMany({ where: { squadId }, data: { squadId: null } });
-  await prisma.roadmapItem.updateMany({ where: { squadId }, data: { squadId: null } });
+  await prisma.roadmapItem.updateMany({ where: { squadId }, data: { squadId: null, updatedAt: new Date() } });
 
   await prisma.squad.delete({ where: { id: squadId } });
 
@@ -98,7 +98,7 @@ export async function assignSquad(
   } else if (objectType === "experiment") {
     await prisma.experiment.update({ where: { id: objectId }, data: { squadId } });
   } else if (objectType === "roadmapItem") {
-    await prisma.roadmapItem.update({ where: { id: objectId }, data: { squadId } });
+    await prisma.roadmapItem.update({ where: { id: objectId }, data: { squadId, updatedAt: new Date() } });
   } else if (objectType === "task") {
     await prisma.task.update({ where: { id: objectId }, data: { squadId, updatedAt: new Date() } });
   }
