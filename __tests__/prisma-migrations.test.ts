@@ -185,6 +185,96 @@ describe("research capture hardening migration (036)", () => {
   });
 });
 
+describe("authoritative research voice control plane migration (047)", () => {
+  const migrationName = "047_research_voice_control_plane";
+
+  it("is registered and creates the additive call and command stores", () => {
+    expect(registered).toContain(migrationName);
+    const sql = sqlFor(migrationName);
+
+    expect(sql).toContain("CREATE TABLE research_voice_calls");
+    expect(sql).toContain("CREATE TABLE research_voice_commands");
+    expect(sql).not.toMatch(/FOREIGN\s+KEY/i);
+  });
+
+  it("adds durable quota, transcript, and provider-ordering fields", () => {
+    const sql = sqlFor(migrationName);
+
+    for (const column of ["voice_attempt_count", "voice_turn_count", "voice_transcript_chars"]) {
+      expect(sql).toContain(`ALTER TABLE research_sessions ADD COLUMN IF NOT EXISTS ${column}`);
+    }
+    for (const column of ["voice_window_at", "voice_count", "voice_day_at", "voice_day_count"]) {
+      expect(sql).toContain(`ALTER TABLE research_participant_tokens ADD COLUMN IF NOT EXISTS ${column}`);
+    }
+    for (const column of [
+      "voice_call_id",
+      "provider_item_id",
+      "provider_response_id",
+      "provider_previous_item_id",
+      "provider_ordinal",
+      "provider_status",
+    ]) {
+      expect(sql).toContain(`ALTER TABLE research_voice_events ADD COLUMN IF NOT EXISTS ${column}`);
+    }
+    const route = readFileSync(ROUTE, "utf-8")
+    expect(route).toContain("RESEARCH_VOICE_BACKFILL_BATCH_SIZE = 2_500")
+    expect(route).toContain("backfillNullableResearchVoiceColumn")
+    for (const column of ["voice_turn_count", "voice_transcript_chars"]) {
+      expect(route).toContain(column)
+    }
+    expect(route).toContain("LIMIT $1")
+    expect(route).toContain("result.rowCount < RESEARCH_VOICE_BACKFILL_BATCH_SIZE")
+    expect(route).toContain("COUNT(*)::INTEGER FROM \"${schema}\".research_turns")
+    expect(route).toContain("SUM(char_length(content))::INTEGER FROM \"${schema}\".research_turns")
+    expect(route).toContain("modality = 'VOICE'")
+    expect(sql).toContain("next_provider_ordinal INTEGER NOT NULL DEFAULT 0")
+    expect(sql).toContain("last_provider_item_id VARCHAR(255)")
+    expect(sql).toContain("status_changed_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+  });
+
+  it("uses one statement per transaction and async indexes", () => {
+    const raw = readFileSync(path.join(MIGRATIONS_DIR, migrationName, "migration.sql"), "utf-8");
+    const ddlStatements = stripComments(raw)
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter((statement) => /^(?:CREATE|ALTER)\s/i.test(statement));
+
+    expect(ddlStatements.length).toBeGreaterThan(0);
+    expect(raw).not.toMatch(/BEGIN;[\s\S]*?\b(?:CREATE|ALTER)\b[\s\S]*?\b(?:CREATE|ALTER)\b[\s\S]*?COMMIT;/i);
+    expect(raw).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?!ASYNC\b)/i);
+  });
+
+  it("declares every uniqueness and lookup index required by the control plane", () => {
+    const sql = sqlFor(migrationName);
+    for (const index of [
+      "idx_research_voice_calls_session_key",
+      "idx_research_voice_calls_provider_call",
+      "idx_research_voice_calls_worker_token",
+      "idx_research_voice_calls_session_status",
+      "idx_research_voice_calls_status_lease",
+      "idx_research_voice_calls_status_heartbeat",
+      "idx_research_voice_calls_participant_token",
+      "idx_research_voice_commands_call_key",
+      "idx_research_voice_commands_call_status_created",
+      "idx_research_voice_commands_session",
+      "idx_research_voice_events_call_provider",
+      "idx_research_voice_events_call_ordinal",
+      "idx_research_voice_events_call_item",
+    ]) {
+      expect(sql).toContain(index);
+    }
+  });
+
+  it("waits for every remote async index and verifies catalog readiness before completion", () => {
+    const route = readFileSync(ROUTE, "utf-8")
+    expect(route).toContain('ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane"]')
+    expect(route).toContain("async DDL returned no job_id")
+    expect(route).toContain("SELECT sys.wait_for_job($1) AS succeeded")
+    expect(route).toContain("assertResearchVoiceControlPlanePostconditions")
+    expect(route).toContain("researchVoiceControlPlane")
+  })
+});
+
 describe("schema.prisma stays DSQL-compatible", () => {
   it("declares no sort: Desc on any @@index", () => {
     // Prisma turns `sort: Desc` into `("col" DESC)`, which DSQL rejects.
