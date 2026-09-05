@@ -188,14 +188,13 @@ describe("canonical research persistence", () => {
     let transactionCall = 0
     fixture.prisma.$transaction.mockImplementation(async (operation: (tx: typeof fixture.prisma) => Promise<unknown>) => {
       transactionCall += 1
-      if (transactionCall === 2) throw Object.assign(new Error("Concurrent token lifecycle"), { code: "P2034" })
       return operation(fixture.prisma)
     })
     fixture.prisma.researchParticipantToken.findFirst.mockResolvedValue(null)
 
     await expect(startOrResumeResearchSession(fixture.value)).rejects.toThrow(expect.objectContaining({ status: 404 }))
     expect(fixture.prisma.researchSession.create).not.toHaveBeenCalled()
-    expect(transactionCall).toBe(3)
+    expect(transactionCall).toBe(1)
   })
 
   it("refreshes the token-expiry timestamp after a study-lock retry", async () => {
@@ -208,7 +207,7 @@ describe("canonical research persistence", () => {
       let transactionCall = 0
       fixture.prisma.$transaction.mockImplementation(async (operation: (tx: typeof fixture.prisma) => Promise<unknown>) => {
         transactionCall += 1
-        if (transactionCall === 2) {
+        if (transactionCall === 1) {
           vi.setSystemTime(retryAttempt)
           throw Object.assign(new Error("Concurrent study change"), { code: "P2034" })
         }
@@ -258,6 +257,35 @@ describe("canonical research persistence", () => {
       await expect(startOrResumeResearchSession(fixture.value, undefined, "VOICE"))
         .rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchSessionError>)
       expect(fixture.prisma.researchSession.create).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("does not spend the final successful start slot on an unavailable voice modality", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    try {
+      const fixture = context()
+      let startCount = MAX_RESEARCH_STARTS_PER_MINUTE - 1
+      fixture.prisma.researchParticipantToken.findUnique.mockImplementation(async () => ({
+        startWindowAt: new Date(),
+        startCount,
+        responseWindowAt: null,
+        responseCount: null,
+        agentWindowAt: null,
+        agentCallCount: null,
+      }))
+      fixture.prisma.researchParticipantToken.updateMany.mockImplementation(async ({ data }: { data: { startCount?: number } }) => {
+        if (typeof data.startCount === "number") startCount = data.startCount
+        return { count: 1 }
+      })
+
+      await expect(startOrResumeResearchSession(fixture.value, undefined, "VOICE"))
+        .rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchSessionError>)
+      await expect(startOrResumeResearchSession(fixture.value, undefined, "CHAT"))
+        .resolves.toMatchObject({ status: "IN_PROGRESS" })
+      expect(startCount).toBe(MAX_RESEARCH_STARTS_PER_MINUTE)
     } finally {
       vi.unstubAllEnvs()
     }
