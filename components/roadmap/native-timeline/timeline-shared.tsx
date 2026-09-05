@@ -44,7 +44,7 @@ export function TimelineToolbar({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white px-3 py-2 shadow-sm">
       <div>
-        <p className="text-sm font-semibold text-slate-800">{engineLabel}</p>
+        <p className="text-sm font-semibold text-foreground">{engineLabel}</p>
         <p className="text-xs text-muted-foreground">Dates are inclusive</p>
       </div>
       <div className="flex items-center gap-1" aria-label="Timeline controls">
@@ -63,7 +63,7 @@ export function TimelineToolbar({
             type="button"
             size="sm"
             variant={zoom === value ? "default" : "outline"}
-            className={zoom === value ? "bg-indigo-800 text-white hover:bg-indigo-900" : undefined}
+            className={zoom === value ? "bg-primary text-primary-foreground hover:bg-primary/80" : undefined}
             aria-label={value === "month" ? "Month" : "Quarter"}
             aria-pressed={zoom === value}
             onClick={() => onZoom(value)}
@@ -104,7 +104,7 @@ export function TimelineCard({
       data-testid={`timeline-item-${item.id}`}
       data-start={start}
       data-end={end}
-      className={`group relative flex h-9 min-w-0 items-center overflow-hidden rounded-lg border border-white/40 text-xs font-medium text-white shadow-sm transition-shadow motion-reduce:transition-none hover:shadow-md focus-within:ring-2 focus-within:ring-indigo-500 focus-within:ring-offset-1 ${className}`}
+      className={`group relative flex h-9 min-w-0 items-center overflow-hidden rounded-lg border border-white/40 text-xs font-medium text-white shadow-sm transition-shadow motion-reduce:transition-none hover:shadow-md focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1 ${className}`}
       style={{ backgroundColor: ACCESSIBLE_HORIZON_COLORS[item.horizon] }}
       title={`${item.title}: ${start} through ${end}`}
     >
@@ -185,7 +185,7 @@ function EditDatesForm({ item, open, disabled, start, end, onOpenChange, onSave 
           <DialogTitle>Edit schedule</DialogTitle>
           <DialogDescription>{item.title}. Choose a planning horizon and inclusive dates.</DialogDescription>
         </DialogHeader>
-        {disabled ? <p role="status" className="rounded-md bg-amber-50 p-2 text-sm text-amber-900">Reconciliation required. Refreshing before another edit.</p> : null}
+        {disabled ? <p role="status" className="rounded-md bg-status-warning-surface p-2 text-sm text-status-warning">Reconciliation required. Refreshing before another edit.</p> : null}
         <label className="grid gap-1 text-xs font-medium">
           Horizon
           <select disabled={disabled} className="h-11 rounded-lg border px-2 text-sm" value={draftHorizon} onChange={(event) => setDraftHorizon(event.target.value as Horizon)}>

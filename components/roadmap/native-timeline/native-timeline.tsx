@@ -255,7 +255,7 @@ export function NativeTimeline(props: TimelineEngineProps) {
         stopDragPointerTracking();
       }}
     >
-      <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col gap-3 p-1 motion-reduce:[&_#unscheduled-items-panel_[data-slot=card]]:transition-none [&_#unscheduled-items-panel_.text-muted-foreground]:text-slate-700 [&_#unscheduled-items-panel_[data-slot=badge]]:border-slate-500 [&_#unscheduled-items-panel_[data-slot=badge]]:bg-white [&_#unscheduled-items-panel_[data-slot=badge]]:text-slate-800">
+      <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col gap-3 p-1 motion-reduce:[&_#unscheduled-items-panel_[data-slot=card]]:transition-none [&_#unscheduled-items-panel_.text-muted-foreground]:text-foreground [&_#unscheduled-items-panel_[data-slot=badge]]:border-border-interactive [&_#unscheduled-items-panel_[data-slot=badge]]:bg-white [&_#unscheduled-items-panel_[data-slot=badge]]:text-foreground">
         <TimelineToolbar
           engineLabel="Compass native timeline"
           zoom={controller.zoom}
@@ -266,13 +266,13 @@ export function NativeTimeline(props: TimelineEngineProps) {
         <div className="overflow-hidden rounded-xl border bg-white shadow-sm">
           <div className="grid" style={{ gridTemplateColumns: `clamp(112px, 30vw, ${LABEL_WIDTH}px) minmax(0, 1fr)` }}>
             <div className="border-r bg-white">
-              <div className="flex items-end border-b bg-slate-50 px-3 pb-2 text-xs font-semibold text-slate-500" style={{ height: HEADER_HEIGHT }}>
+              <div className="flex items-end border-b bg-muted/30 px-3 pb-2 text-xs font-semibold text-muted-foreground" style={{ height: HEADER_HEIGHT }}>
                 Horizon → Squad
               </div>
               {rows.map((row) => (
                 <div
                   key={row.id}
-                  className={row.kind === "horizon" ? "flex items-center gap-2 border-b bg-slate-100 px-3 text-xs font-bold uppercase tracking-wide text-slate-600" : "flex items-center gap-2 border-b px-5 text-sm text-slate-600"}
+                  className={row.kind === "horizon" ? "flex items-center gap-2 border-b bg-muted px-3 text-xs font-bold uppercase tracking-wide text-text-subtle" : "flex items-center gap-2 border-b px-5 text-sm text-text-subtle"}
                   style={{ height: rowHeights.get(row.id) ?? LANE_HEIGHT }}
                 >
                   <span className="size-2 shrink-0 rounded-full" style={{ background: row.color ?? "#cbd5e1" }} />
@@ -414,12 +414,12 @@ function NativeHeaders({ start, end, width }: { start: CalendarDate; end: Calend
   return (
     <div className="relative border-b bg-white" style={{ height: HEADER_HEIGHT }}>
       {quarters.map((quarter) => (
-        <div key={`q-${quarter.start}`} className="absolute top-0 flex h-8 items-center border-r bg-slate-50 px-2 text-xs font-semibold text-slate-600" style={{ left: dateToPosition(quarter.start, start, end, width), width: Math.max(1, dateToPosition(quarter.end, start, end, width) - dateToPosition(quarter.start, start, end, width)) }}>
+        <div key={`q-${quarter.start}`} className="absolute top-0 flex h-8 items-center border-r bg-muted/30 px-2 text-xs font-semibold text-text-subtle" style={{ left: dateToPosition(quarter.start, start, end, width), width: Math.max(1, dateToPosition(quarter.end, start, end, width) - dateToPosition(quarter.start, start, end, width)) }}>
           {quarter.label}
         </div>
       ))}
       {months.map((month) => (
-        <div key={month.start} className="absolute bottom-0 flex h-10 items-center border-r px-2 text-xs text-slate-500" style={{ left: dateToPosition(month.start, start, end, width), width: dateToPosition(month.end, start, end, width) - dateToPosition(month.start, start, end, width) }}>
+        <div key={month.start} className="absolute bottom-0 flex h-10 items-center border-r px-2 text-xs text-muted-foreground" style={{ left: dateToPosition(month.start, start, end, width), width: dateToPosition(month.end, start, end, width) - dateToPosition(month.start, start, end, width) }}>
           {month.label}
         </div>
       ))}
@@ -429,7 +429,7 @@ function NativeHeaders({ start, end, width }: { start: CalendarDate; end: Calend
 
 function NativeLane({ row, top, height, disabled }: { row: TimelineRow; top: number; height: number; disabled: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: row.id, disabled, data: { row } });
-  return <div ref={setNodeRef} data-testid={row.kind === "lane" ? `timeline-drop-${row.id}` : undefined} className={`absolute inset-x-0 border-b ${row.kind === "horizon" ? "bg-slate-100/70" : isOver ? "bg-indigo-50" : "bg-transparent"}`} style={{ top, height }} />;
+  return <div ref={setNodeRef} data-testid={row.kind === "lane" ? `timeline-drop-${row.id}` : undefined} className={`absolute inset-x-0 border-b ${row.kind === "horizon" ? "bg-muted/70" : isOver ? "bg-primary/5" : "bg-transparent"}`} style={{ top, height }} />;
 }
 
 function isRowValidForActiveDrag(
@@ -472,7 +472,7 @@ function NativeItem({ item, left, width, interactionWidth, top, dayWidth, track,
       {useDialogFallback ? (
         <>
           <div aria-hidden="true" className={`absolute top-0 h-9 rounded-lg ${item.hasDates ? "" : "border border-dashed"}`} style={{ width, backgroundColor: HORIZON_META[item.horizon].color }} />
-          <button type="button" disabled={disabled} aria-label={`Edit schedule for ${item.title}`} className="relative z-10 inline-flex size-11 touch-manipulation items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" onClick={onEdit}>
+          <button type="button" disabled={disabled} aria-label={`Edit schedule for ${item.title}`} className="relative z-10 inline-flex size-11 touch-manipulation items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={onEdit}>
             <span className="sr-only">Edit horizon, start date, and end date</span>
           </button>
         </>
@@ -553,5 +553,5 @@ function ResizeHandle({ edge, item, dayWidth, disabled, onResize }: { edge: "lef
 function TodayLine({ start, end, width }: { start: CalendarDate; end: CalendarDate; width: number }) {
   const value = localCalendarToday();
   if (value < start || value >= end) return null;
-  return <div aria-label="Today marker" className="pointer-events-none absolute inset-y-0 z-20 w-0.5 bg-rose-700" style={{ left: dateToPosition(value, start, end, width) }}><span className="absolute -top-5 -translate-x-1/2 rounded bg-rose-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">Today</span></div>;
+  return <div aria-label="Today marker" className="pointer-events-none absolute inset-y-0 z-20 w-0.5 bg-status-danger" style={{ left: dateToPosition(value, start, end, width) }}><span className="absolute -top-5 -translate-x-1/2 rounded bg-status-danger px-1.5 py-0.5 text-[10px] font-semibold text-white">Today</span></div>;
 }
