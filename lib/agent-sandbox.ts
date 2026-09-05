@@ -30,7 +30,7 @@ const SANDBOX_TIMEOUT_MS = 5 * 60_000
  * POST /api/admin/rebuild-agent-snapshot).
  */
 export const SANDBOX_DEPENDENCIES: Record<string, string> = {
-  "@anthropic-ai/claude-agent-sdk": "^0.3.222",
+  "@anthropic-ai/claude-agent-sdk": "0.3.224",
   "@modelcontextprotocol/sdk": "^1.29.0",
   zod: "^4.0.0",
 }
