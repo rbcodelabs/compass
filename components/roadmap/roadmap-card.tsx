@@ -33,6 +33,7 @@ export type RoadmapCardData = {
   feedbackId: string | null;
   startDate: string | null;
   endDate: string | null;
+  updatedAt: string;
   solution: { id: string; title: string } | null;
   keyResult: {
     id: string;

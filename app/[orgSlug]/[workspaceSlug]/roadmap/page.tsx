@@ -197,6 +197,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     feedbackId: item.feedbackId ?? null,
     startDate: item.startDate ? item.startDate.toISOString() : null,
     endDate: item.endDate ? item.endDate.toISOString() : null,
+    updatedAt: item.updatedAt.toISOString(),
     solution: item.solution ?? null,
     keyResult: item.keyResult
       ? {
