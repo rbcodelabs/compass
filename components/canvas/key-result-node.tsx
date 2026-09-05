@@ -32,7 +32,7 @@ function KeyResultNodeComponent({ data }: NodeProps<KeyResultNodeType>) {
   const unit = data.unit ? ` ${data.unit}` : "";
 
   return (
-    <div className="flex w-64 flex-col gap-2 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 shadow-sm">
+    <div className="flex w-64 flex-col gap-2 rounded-xl border border-status-info/20 bg-status-info-surface p-3 shadow-sm">
       <Handle type="target" position={Position.Left} className="opacity-0" />
       <div className="flex items-start gap-2">
         <TrendingUp className="mt-0.5 size-3.5 shrink-0 text-indigo-500" />

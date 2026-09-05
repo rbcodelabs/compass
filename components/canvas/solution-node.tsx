@@ -23,7 +23,7 @@ function SolutionNodeComponent({ data }: NodeProps<SolutionNodeType>) {
   const badge = SOLUTION_STATUS_BADGE[data.status];
 
   return (
-    <div className="flex w-64 items-center gap-2.5 rounded-xl border border-blue-100 bg-blue-50/60 p-3 shadow-sm">
+    <div className="flex w-64 items-center gap-2.5 rounded-xl border border-status-info/20 bg-status-info-surface p-3 shadow-sm">
       <Handle type="target" position={Position.Left} className="opacity-0" />
       <Layers className="size-3.5 shrink-0 text-blue-500" />
       <p className="flex-1 text-xs font-medium text-text-primary leading-snug truncate min-w-0" title={data.title}>

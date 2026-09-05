@@ -114,7 +114,7 @@ function ExperimentCard({
   const c = exp.conclusion ? CONCLUSION_BADGE[exp.conclusion] : null;
 
   return (
-    <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 flex items-start gap-2.5">
+    <div className="rounded-lg border border-status-success/20 bg-status-success-surface px-3 py-2 flex items-start gap-2.5">
       <FlaskConical className="size-3.5 shrink-0 mt-0.5 text-emerald-600" />
       <div className="flex-1 min-w-0">
         <Link
@@ -150,7 +150,7 @@ function AssumptionCard({
 
   return (
     <div>
-      <div className="rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2 flex items-start gap-2.5">
+      <div className="rounded-lg border border-status-warning/20 bg-status-warning-surface px-3 py-2 flex items-start gap-2.5">
         <AlertTriangle className={`size-3.5 shrink-0 mt-0.5 ${r.className}`} />
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-text-primary leading-snug">{assumption.title}</p>
@@ -203,7 +203,7 @@ function SolutionCard({
 
   return (
     <div>
-      <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2 flex items-center gap-2.5">
+      <div className="rounded-lg border border-status-info/20 bg-status-info-surface px-3 py-2 flex items-center gap-2.5">
         <Layers className="size-3.5 shrink-0 text-blue-500" />
         <p className="flex-1 text-xs font-medium text-text-primary leading-snug">{solution.title}</p>
         <Badge className={`${s.className} shrink-0`}>{s.label}</Badge>

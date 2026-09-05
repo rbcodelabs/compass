@@ -8,6 +8,7 @@
  * document or settings-content overflow.
  */
 import { test, expect } from "../fixtures/index";
+import path from "node:path";
 
 const THEME_STORAGE_KEY = "compass-theme";
 
@@ -111,7 +112,7 @@ test.describe("Workspace appearance", () => {
   for (const viewport of [
     { name: "mobile", width: 390, height: 844, mobileNavigation: true },
     { name: "tablet", width: 768, height: 1024, mobileNavigation: false },
-    { name: "desktop", width: 1440, height: 900, mobileNavigation: false },
+    { name: "desktop", width: 1280, height: 800, mobileNavigation: false },
   ]) {
     test(`${viewport.name} workspace has usable navigation, dark surfaces, and no horizontal overflow`, async ({
       page,
@@ -171,6 +172,12 @@ test.describe("Workspace appearance", () => {
           expect(box?.x).toBeGreaterThanOrEqual(0);
           expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
         }
+      }
+      if (process.env.UPDATE_APPEARANCE_SCREENSHOTS === "1") {
+        await page.screenshot({
+          path: path.join("public/screenshots/docs", `appearance-${viewport.name}.png`),
+          animations: "disabled",
+        });
       }
     });
   }
