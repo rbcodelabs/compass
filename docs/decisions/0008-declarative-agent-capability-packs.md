@@ -26,3 +26,5 @@ At turn time Compass verifies the digest, materializes the normalized plugin, an
 Pack authors can distribute cloud-compatible methodology independently, but packs cannot grant themselves capabilities. Updates create new immutable versions and require an explicit workspace selection. Private repositories, uploads, executable plugins, hooks, commands, agents, and pack-owned MCP are outside v1.
 
 The installed SDK types prove the configuration contract locally. A preview-deployed Vercel Sandbox smoke test is still required before production enablement to prove headless plugin discovery in the real runtime; failure must lead to prompt compilation, not broader tool access.
+
+Workspace and organization deletion removes pack attachments, versions, and metadata but retains immutable content-addressed Blob artifacts. Reclaiming orphaned pack artifacts requires a future global garbage collector that is safe against concurrent installation; tenant deletion does not attempt Blob cleanup in v1.

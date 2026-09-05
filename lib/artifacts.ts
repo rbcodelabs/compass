@@ -261,7 +261,6 @@ export async function retryArtifactBlobCleanup(
   prisma: {
     artifactBlobCleanup: Pick<ReturnType<typeof getPrisma>["artifactBlobCleanup"], "findMany" | "update" | "delete">
     artifactRevision: Pick<ReturnType<typeof getPrisma>["artifactRevision"], "findFirst">
-    capabilityPackVersion?: Pick<ReturnType<typeof getPrisma>["capabilityPackVersion"], "findFirst">
   },
   storage: ArtifactStorage,
   onlyPathnames?: string[]
@@ -275,12 +274,7 @@ export async function retryArtifactBlobCleanup(
     const stillReferenced = await prisma.artifactRevision.findFirst({
       where: { blobPathname: row.blobPathname }, select: { id: true },
     })
-    const stillReferencedByPack = prisma.capabilityPackVersion
-      ? await prisma.capabilityPackVersion.findFirst({
-          where: { artifactPathname: row.blobPathname }, select: { id: true },
-        })
-      : null
-    if (stillReferenced || stillReferencedByPack) continue
+    if (stillReferenced) continue
     try {
       await storage.del(row.blobPathname)
       await prisma.artifactBlobCleanup.delete({ where: { id: row.id } })

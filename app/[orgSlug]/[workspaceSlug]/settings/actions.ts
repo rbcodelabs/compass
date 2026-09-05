@@ -593,7 +593,7 @@ export async function deleteWorkspace(
 
   // ── Step 15: Delete Artifacts and private blobs ─────────────────────────────
   await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
-  await deleteWorkspaceCapabilityPacks(prisma, workspaceId, getArtifactStorage());
+  await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
 
   // ── Step 16: Delete WorkspaceMembers ────────────────────────────────────────
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
