@@ -16,14 +16,21 @@ const mockPrisma = {
   workspace: { findFirst: vi.fn() },
   agentConversation: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
   agentMessage: { create: vi.fn(), findMany: vi.fn() },
+  workspaceCapabilityPack: { findMany: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
 const mockGetGoldenSnapshotId = vi.fn()
 vi.mock("@/lib/agent-runtime-config", () => ({ getGoldenSnapshotId: () => mockGetGoldenSnapshotId() }))
 // Sandbox + key modules should never be reached in guard tests; stub them safely.
-vi.mock("@/lib/agent-sandbox", () => ({ bootSandboxFromSnapshot: vi.fn() }))
-vi.mock("@/lib/agent-mcp-key", () => ({ mintAgentMcpKey: vi.fn(), revokeAgentMcpKey: vi.fn() }))
+const mockBootSandbox = vi.fn()
+const mockMintKey = vi.fn()
+const mockRevokeKey = vi.fn()
+vi.mock("@/lib/agent-sandbox", () => ({ bootSandboxFromSnapshot: (...args: unknown[]) => mockBootSandbox(...args) }))
+vi.mock("@/lib/agent-mcp-key", () => ({ mintAgentMcpKey: (...args: unknown[]) => mockMintKey(...args), revokeAgentMcpKey: (...args: unknown[]) => mockRevokeKey(...args) }))
+const mockPreparePacks = vi.fn()
+vi.mock("@/lib/capability-pack-runtime", () => ({ prepareCapabilityPacksForTurn: (...args: unknown[]) => mockPreparePacks(...args) }))
+vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: () => ({}) }))
 
 const mockCheckLimit = vi.fn()
 vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => mockCheckLimit() }))
@@ -45,8 +52,11 @@ beforeEach(() => {
   process.env.ANTHROPIC_API_KEY = "sk-ant-test"
   mockAuth.mockResolvedValue(SESSION)
   mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+  mockPrisma.workspaceCapabilityPack.findMany.mockResolvedValue([])
   mockGetGoldenSnapshotId.mockResolvedValue("snap_abc")
   mockCheckLimit.mockResolvedValue({ allowed: true })
+  mockMintKey.mockResolvedValue({ token: "token", apiKeyId: "key-1" })
+  mockPreparePacks.mockResolvedValue({ files: [], pluginPaths: [], skillIds: [], provenanceJson: "[]", systemPromptAppendices: [] })
 })
 
 describe("agent turn route — guards", () => {
@@ -101,5 +111,16 @@ describe("agent turn route — guards", () => {
     mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
     const res = await POST(req({ workspaceId: "ws-1", message: "hi" }))
     expect(res.status).toBe(500)
+  })
+
+  it("revokes the acting-user MCP key when capability-pack preparation fails", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", name: "Test", slug: "test", organization: { slug: "org" } })
+    mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+    mockPrisma.agentMessage.findMany.mockResolvedValue([{ role: "user", content: "hi" }])
+    mockPreparePacks.mockRejectedValue(new Error("artifact digest mismatch"))
+    const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+    expect(await response.text()).toContain("artifact digest mismatch")
+    expect(mockBootSandbox).not.toHaveBeenCalled()
+    expect(mockRevokeKey).toHaveBeenCalledWith("key-1")
   })
 })

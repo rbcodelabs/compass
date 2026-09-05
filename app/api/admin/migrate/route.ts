@@ -216,6 +216,10 @@ const MIGRATIONS = [
     name: "046_shared_comments",
     filePath: path.join(process.cwd(), "prisma/migrations/046_shared_comments/migration.sql"),
   },
+  {
+    name: "047_capability_packs",
+    filePath: path.join(process.cwd(), "prisma/migrations/047_capability_packs/migration.sql"),
+  },
 ];
 
 const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "decision_evidence_refs", "now_policy_application_evidence", "now_gate_evaluations", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"] as const;

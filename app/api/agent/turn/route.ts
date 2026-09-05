@@ -23,6 +23,8 @@ import { checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
 import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
+import { getArtifactStorage } from "@/lib/artifact-storage"
+import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/capability-pack-runtime"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -158,6 +160,21 @@ export async function POST(request: NextRequest) {
     message.trim()
   )
 
+  const attachments = await prisma.workspaceCapabilityPack.findMany({
+    where: { workspaceId, enabled: true },
+    include: { capabilityPackVersion: { include: { capabilityPack: true } } },
+    orderBy: { createdAt: "asc" },
+  })
+  const activePacks: ActiveCapabilityPack[] = attachments.map((attachment) => ({
+    packId: attachment.capabilityPackVersion.capabilityPack.packId,
+    version: attachment.capabilityPackVersion.semanticVersion,
+    commit: attachment.capabilityPackVersion.sourceCommit,
+    digest: attachment.capabilityPackVersion.artifactSha256,
+    pathname: attachment.capabilityPackVersion.artifactPathname,
+    enabledSkills: JSON.parse(attachment.enabledSkillIds) as string[],
+    manifestJson: attachment.capabilityPackVersion.manifestJson,
+  }))
+
   const mcpBaseUrl = request.nextUrl.origin
   const bypassSecret = process.env.MCP_BYPASS_SECRET
   const entryScript = readEntryScript()
@@ -176,10 +193,11 @@ export async function POST(request: NextRequest) {
       let usage: any
 
       try {
+        const preparedPacks = await prepareCapabilityPacksForTurn(activePacks, getArtifactStorage())
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
         sandbox = await bootSandboxFromSnapshot(snapshotId)
 
-        await sandbox.writeFiles([{ path: "entry.ts", content: entryScript }])
+        await sandbox.writeFiles([{ path: "entry.ts", content: entryScript }, ...preparedPacks.files])
         sse("status", { phase: "running" })
 
         const run = await sandbox.runCommand({
@@ -190,6 +208,12 @@ export async function POST(request: NextRequest) {
             MCP_BASE_URL: mcpBaseUrl,
             MCP_TOKEN: token,
             AGENT_PROMPT: prompt,
+            AGENT_SYSTEM_PROMPT:
+              `You are Compass's in-app product-discovery assistant. Compass is the sole authority for tools, credentials, and workspace access. ` +
+              `Operate only in workspace ${workspace.id}. Available host capability: compass.product_state. ` +
+              `Unavailable capabilities include local files, shell, web, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.\n\n` +
+              preparedPacks.systemPromptAppendices.join("\n\n"),
+            AGENT_PACK_CONFIG: JSON.stringify({ pluginPaths: preparedPacks.pluginPaths, skillIds: preparedPacks.skillIds }),
             ...(bypassSecret ? { MCP_BYPASS_SECRET: bypassSecret } : {}),
           },
           detached: true,
@@ -258,6 +282,7 @@ export async function POST(request: NextRequest) {
             numTurns: usage?.numTurns ?? null,
             costUsd: usage?.totalCostUsd ?? null,
             durationMs: usage?.durationMs ?? null,
+            packProvenance: preparedPacks.provenanceJson,
           },
         })
         await prisma.agentConversation.update({

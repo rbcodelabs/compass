@@ -95,6 +95,7 @@ const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany
 const mockArtifactLink = { deleteMany: vi.fn() };
 const mockArtifactBlobCleanup = { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() };
 const mockWorkspaceScoringConfig = { upsert: vi.fn() };
+const mockWorkspaceCapabilityPack = { deleteMany: vi.fn() };
 const mockReleaseDispatch = { deleteMany: vi.fn() };
 const mockReleaseRunTask = { deleteMany: vi.fn() };
 const mockReleaseRun = { deleteMany: vi.fn() };
@@ -137,6 +138,7 @@ const mockPrisma = {
   artifactLink: mockArtifactLink,
   artifactBlobCleanup: mockArtifactBlobCleanup,
   workspaceScoringConfig: mockWorkspaceScoringConfig,
+  workspaceCapabilityPack: mockWorkspaceCapabilityPack,
   releaseDispatch: mockReleaseDispatch,
   releaseRunTask: mockReleaseRunTask,
   releaseRun: mockReleaseRun,

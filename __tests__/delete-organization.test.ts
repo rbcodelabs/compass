@@ -33,6 +33,7 @@ const mockOKRCycle = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockKeyResult = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockCheckIn = { deleteMany: vi.fn() };
 const mockWorkspaceScoringConfig = { deleteMany: vi.fn() };
+const mockWorkspaceCapabilityPack = { deleteMany: vi.fn() };
 const mockCanvasNodePosition = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
@@ -85,6 +86,7 @@ const mockPrisma = {
   keyResult: mockKeyResult,
   checkIn: mockCheckIn,
   workspaceScoringConfig: mockWorkspaceScoringConfig,
+  workspaceCapabilityPack: mockWorkspaceCapabilityPack,
   canvasNodePosition: mockCanvasNodePosition,
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,

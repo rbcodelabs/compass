@@ -20,6 +20,7 @@ import type {
 import { normalizeWorkspaceRole } from "@/lib/roles";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
+import { CapabilityPacksPanel, type CapabilityPackSettingsRow } from "@/components/settings/capability-packs-panel";
 
 export const metadata = { title: "Workspace Settings" };
 
@@ -56,7 +57,7 @@ export default async function SettingsPage({ params }: Props) {
 
   if (!workspace) redirect("/dashboard");
 
-  const [rawFields, rawSquads, rawApiKeys, rawMembers, rawScoringModels, scoringConfig] = await Promise.all([
+  const [rawFields, rawSquads, rawApiKeys, rawMembers, rawScoringModels, scoringConfig, rawCapabilityPacks] = await Promise.all([
     prisma.customFieldDefinition.findMany({
       where: { workspaceId: workspace.id },
       orderBy: [{ objectType: "asc" }, { order: "asc" }],
@@ -84,6 +85,11 @@ export default async function SettingsPage({ params }: Props) {
     prisma.workspaceScoringConfig.findUnique({
       where: { workspaceId: workspace.id },
       select: { scoringModelId: true },
+    }),
+    prisma.workspaceCapabilityPack.findMany({
+      where: { workspaceId: workspace.id },
+      include: { capabilityPackVersion: { include: { capabilityPack: { include: { versions: { orderBy: { createdAt: "desc" } } } } } } },
+      orderBy: { createdAt: "asc" },
     }),
   ]);
 
@@ -122,6 +128,17 @@ export default async function SettingsPage({ params }: Props) {
 
   const currentUserMembershipId =
     rawMembers.find((m) => m.userId === session.user?.id)?.id ?? null;
+  const capabilityPacks: CapabilityPackSettingsRow[] = rawCapabilityPacks.map((attachment) => ({
+    packId: attachment.capabilityPackVersion.capabilityPack.packId,
+    displayName: attachment.capabilityPackVersion.capabilityPack.displayName,
+    enabled: attachment.enabled,
+    selectedVersionId: attachment.capabilityPackVersionId,
+    enabledSkillIds: JSON.parse(attachment.enabledSkillIds) as string[],
+    versions: attachment.capabilityPackVersion.capabilityPack.versions.map((version) => ({
+      id: version.id, version: version.semanticVersion, commit: version.sourceCommit, digest: version.artifactSha256,
+      skills: (JSON.parse(version.manifestJson) as { skills: Array<{ id: string; enabledByDefault?: boolean }> }).skills,
+    })),
+  }));
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8 max-w-3xl">
@@ -167,6 +184,10 @@ export default async function SettingsPage({ params }: Props) {
           workspaceSlug={workspaceSlug}
           initialKeys={apiKeys}
         />
+      </SettingsSection>
+
+      <SettingsSection title="Agent capability packs" description="Install validated skills-only packs for the in-app agent. Packs add instructions, never tools or credentials.">
+        <CapabilityPacksPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} initialPacks={capabilityPacks} />
       </SettingsSection>
 
       <SettingsSection title="Portal" description="Control which parts of this workspace are publicly accessible without login.">

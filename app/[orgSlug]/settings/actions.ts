@@ -342,6 +342,7 @@ async function deleteWorkspaceCascade(prisma: OrgPrisma, workspaceId: string) {
   // 12. Artifacts: links → current pointer → revisions → stable identity,
   // followed by best-effort private Blob cleanup.
   await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
+  await prisma.workspaceCapabilityPack.deleteMany({ where: { workspaceId } });
 
   // 13. Workspace-scoped singletons (both Restrict toward Workspace).
   await prisma.workspaceScoringConfig.deleteMany({ where: { workspaceId } });

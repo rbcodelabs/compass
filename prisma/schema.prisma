@@ -143,6 +143,7 @@ model Workspace {
   checklistTemplates   ChecklistTemplate[]
   tasks                Task[]
   agentConversations   AgentConversation[]
+  capabilityPacks      WorkspaceCapabilityPack[]
   researchStudies      ResearchStudy[]
   researchAttachments  ResearchAttachment[]
   reviewRequests       ReviewRequest[]
@@ -1801,12 +1802,69 @@ model AgentMessage {
   numTurns       Int?     @map("num_turns")
   costUsd        Float?   @map("cost_usd")
   durationMs     Int?     @map("duration_ms")
+  /// Exact JSON-encoded pack IDs, versions, source commits, digests and enabled
+  /// skills used for this assistant turn. TEXT keeps the schema DSQL-safe.
+  packProvenance String?  @map("pack_provenance") @db.Text
   createdAt      DateTime @default(now()) @map("created_at")
 
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
 
   @@index([conversationId, createdAt])
   @@map("agent_messages")
+}
+
+// ─── Declarative agent capability packs ─────────────────────────────────────
+
+model CapabilityPack {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  packId      String   @unique(map: "idx_capability_packs_pack_id") @map("pack_id") @db.VarChar(120)
+  displayName String   @map("display_name") @db.VarChar(120)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+  versions    CapabilityPackVersion[]
+
+  @@map("capability_packs")
+}
+
+model CapabilityPackVersion {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  capabilityPackId      String   @map("capability_pack_id") @db.Uuid
+  semanticVersion       String   @map("semantic_version") @db.VarChar(80)
+  sourceRepository      String   @map("source_repository") @db.Text
+  sourceCommit          String   @map("source_commit") @db.VarChar(40)
+  sourcePath            String   @map("source_path") @db.Text
+  artifactSha256        String   @map("artifact_sha256") @db.VarChar(64)
+  artifactPathname      String   @map("artifact_pathname") @db.Text
+  sdkCompatibility      String   @map("sdk_compatibility") @db.VarChar(120)
+  manifestJson          String   @map("manifest_json") @db.Text
+  validationStatus      String   @default("VALID") @map("validation_status") @db.VarChar(20)
+  validationMessage     String?  @map("validation_message") @db.Text
+  createdById           String   @map("created_by_id") @db.Uuid
+  createdAt             DateTime @default(now()) @map("created_at")
+  capabilityPack        CapabilityPack @relation(fields: [capabilityPackId], references: [id])
+  workspaceAttachments  WorkspaceCapabilityPack[]
+
+  @@unique([capabilityPackId, semanticVersion, sourceCommit], map: "idx_capability_pack_versions_identity")
+  @@index([artifactSha256], map: "idx_capability_pack_versions_digest")
+  @@map("capability_pack_versions")
+}
+
+model WorkspaceCapabilityPack {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId             String   @map("workspace_id") @db.Uuid
+  capabilityPackId        String   @map("capability_pack_id") @db.Uuid
+  capabilityPackVersionId String   @map("capability_pack_version_id") @db.Uuid
+  enabledSkillIds         String   @map("enabled_skill_ids") @db.Text
+  enabled                 Boolean  @default(true)
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @default(now()) @map("updated_at")
+  workspace               Workspace @relation(fields: [workspaceId], references: [id])
+  capabilityPackVersion   CapabilityPackVersion @relation(fields: [capabilityPackVersionId], references: [id])
+
+  @@unique([workspaceId, capabilityPackId], map: "idx_workspace_capability_packs_workspace_pack")
+  @@index([workspaceId, enabled], map: "idx_workspace_capability_packs_enabled")
+  @@index([capabilityPackVersionId], map: "idx_workspace_capability_packs_version")
+  @@map("workspace_capability_packs")
 }
 
 /// Append-only audit trail of agent-initiated mutation tool calls (ADR 0001,
