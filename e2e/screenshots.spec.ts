@@ -30,6 +30,7 @@ const STANDARD_PAGES: StandardScreenshotCase[] = [
   { file: "okrs.png",            url: `${WORKSPACE_BASE}/okrs` },
   { file: "canvas.png",          url: `${WORKSPACE_BASE}/canvas` },
   { file: "discovery-board.png", url: `${WORKSPACE_BASE}/discovery` },
+  { file: "discovery-table.png", url: `${WORKSPACE_BASE}/discovery?view=table` },
   { file: "roadmap.png",         url: `${WORKSPACE_BASE}/roadmap` },
   { file: "roadmap-timeline.png", url: `${WORKSPACE_BASE}/roadmap?view=timeline` },
   { file: "tasks.png",           url: `${WORKSPACE_BASE}/tasks` },

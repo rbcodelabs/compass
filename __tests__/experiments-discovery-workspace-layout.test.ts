@@ -13,7 +13,11 @@ describe("Experiments and Discovery dashboard workspace layouts", () => {
     const page = source(path);
 
     expect(page).toContain("<WorkspacePage");
-    expect(page).toContain('contentClassName="p-0 sm:p-0 md:p-0"');
+    if (_name === "Discovery") {
+      expect(page).toContain('contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}');
+    } else {
+      expect(page).toContain('contentClassName="p-0 sm:p-0 md:p-0"');
+    }
     expect(page).toContain(`<${filters} squads={squads} />`);
     expect(page).not.toContain("PageHeader");
     expect(page).not.toContain("SquadFilterBar");
@@ -44,7 +48,14 @@ describe("Experiments and Discovery dashboard workspace layouts", () => {
   it("keeps Discovery archived work compact and separate from the board scroller", () => {
     const page = source("app/[orgSlug]/[workspaceSlug]/discovery/page.tsx");
 
-    expect(page).toContain('className="shrink-0 px-3 pb-3 sm:px-4 sm:pb-4"');
+    expect(page).toContain('view === "board" ? "shrink-0 px-3 pb-3 sm:px-4 sm:pb-4" : "mt-3 shrink-0"');
     expect(page.indexOf("<OpportunityBoard")).toBeLessThan(page.indexOf("<ArchivedSection"));
+  });
+
+  it("defaults unknown Discovery views to the board and gives the table normal page padding", () => {
+    const page = source("app/[orgSlug]/[workspaceSlug]/discovery/page.tsx");
+
+    expect(page).toContain('requestedView === "table" ? "table" : "board"');
+    expect(page).toContain('contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}');
   });
 });
