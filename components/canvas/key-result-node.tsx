@@ -36,7 +36,7 @@ function KeyResultNodeComponent({ data }: NodeProps<KeyResultNodeType>) {
       <Handle type="target" position={Position.Left} className="opacity-0" />
       <div className="flex items-start gap-2">
         <TrendingUp className="mt-0.5 size-3.5 shrink-0 text-indigo-500" />
-        <span className="text-xs font-medium text-slate-800 leading-snug truncate min-w-0 flex-1" title={data.title}>
+        <span className="text-xs font-medium text-text-primary leading-snug truncate min-w-0 flex-1" title={data.title}>
           {data.title}
         </span>
       </div>

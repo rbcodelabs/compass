@@ -90,7 +90,7 @@ export function SolutionPanel({
     type: "roadmapItem",
     id: r.id,
     title: r.title,
-    badge: { label: r.horizon, className: "bg-slate-100 text-slate-600" },
+    badge: { label: r.horizon, className: "bg-surface-inset text-text-secondary" },
   }));
 
   // Same fallback the old card used (revalidatePath just needs *a* path in

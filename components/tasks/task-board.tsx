@@ -197,7 +197,7 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
       {cancelledCount > 0 && (
         <button
           onClick={() => setShowCancelled((v) => !v)}
-          className="mx-3 mt-3 self-start flex shrink-0 items-center gap-1.5 text-xs text-slate-400 transition-colors hover:text-slate-600 sm:mx-4"
+          className="mx-3 mt-3 self-start flex shrink-0 items-center gap-1.5 text-xs text-text-subtle transition-colors hover:text-text-secondary sm:mx-4"
         >
           {showCancelled ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
           {showCancelled ? "Hide" : "Show"} cancelled ({cancelledCount})
