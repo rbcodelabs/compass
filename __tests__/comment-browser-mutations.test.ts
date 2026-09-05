@@ -4,7 +4,11 @@ const tx = {
   comment: { findUnique: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn(), delete: vi.fn() },
   docCommentAnchor: { deleteMany: vi.fn() },
 }
-const transaction = vi.fn(async (operation: (client: typeof tx) => unknown) => operation(tx))
+const runTransaction = async (operation: (client: typeof tx) => unknown, options?: { isolationLevel: string }) => {
+  void options
+  return operation(tx)
+}
+const transaction = vi.fn(runTransaction)
 vi.mock("@/lib/db", () => ({ default: () => ({ $transaction: transaction }) }))
 vi.mock("@/auth", () => ({ auth: vi.fn() }))
 
@@ -12,6 +16,7 @@ import { deleteBrowserComment, CommentHttpError } from "@/lib/comment-browser"
 
 beforeEach(() => {
   vi.clearAllMocks()
+  transaction.mockImplementation(runTransaction)
   tx.comment.findMany.mockResolvedValue([])
   tx.comment.deleteMany.mockResolvedValue({ count: 0 })
   tx.comment.delete.mockResolvedValue({ id: "root-1" })
@@ -42,5 +47,16 @@ describe("atomic browser comment deletion", () => {
     tx.comment.findUnique.mockResolvedValue({ id: "plan-1", parentId: null, authorId: "user-1", solutionPlanProposal: { commentId: "plan-1" }, _count: { replies: 0 } })
     await expect(deleteBrowserComment("plan-1", { userId: "user-1", admin: true }, true)).rejects.toMatchObject({ status: 404 })
     expect(tx.comment.delete).not.toHaveBeenCalled()
+  })
+
+  it("retries a DSQL serialization conflict with Serializable isolation", async () => {
+    transaction
+      .mockRejectedValueOnce(Object.assign(new Error("serialization conflict"), { code: "P2034" }))
+      .mockImplementationOnce(runTransaction)
+    tx.comment.findUnique.mockResolvedValue({ id: "reply-1", parentId: "root-1", authorId: "user-1", solutionPlanProposal: null, _count: { replies: 0 } })
+
+    await expect(deleteBrowserComment("reply-1", { userId: "user-1", admin: false }, false)).resolves.toMatchObject({ id: "reply-1" })
+    expect(transaction).toHaveBeenCalledTimes(2)
+    expect(transaction.mock.calls[1][1]).toEqual({ isolationLevel: "Serializable" })
   })
 })

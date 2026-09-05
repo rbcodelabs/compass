@@ -40,9 +40,11 @@ test.describe("Solution Current Plan + shared Discussion", () => {
 
       // ── 3. Navigate to the opportunity detail page ─────────────────────────
       await page.getByRole("button", { name: oppTitle, exact: true }).click();
-      await page.getByRole("link", { name: "Open full page" }).click();
-      await page.waitForLoadState("networkidle");
-      await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
+      const detailHref = await page.getByRole("link", { name: "Open full page" }).getAttribute("href");
+      expect(detailHref).toBeTruthy();
+      if (!detailHref) throw new Error("Opportunity detail link is missing its href");
+      await page.goto(new URL(detailHref, page.url()).toString());
+      await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible({ timeout: 10_000 });
 
       // ── 4. Add a solution ─────────────────────────────────────────────────
       await page.getByRole("button", { name: "Add Solution" }).click();

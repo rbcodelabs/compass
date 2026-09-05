@@ -109,6 +109,7 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
   }
 
   async function post(body: string, parentId: string | null) {
+    const generation = requestGeneration.current
     const key = parentId ? `reply:${parentId}` : "root"
     if (!body.trim()) {
       setActionError(parentId ? "Enter a reply." : "Enter a comment.")
@@ -121,6 +122,7 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ targetType, targetId, parentId, body }),
       }))
+      if (generation !== requestGeneration.current) return
       if (parentId) {
         setItems((current) => (current ?? []).map((root) => root.id === parentId
           ? { ...root, canDelete: false, replies: chronological([...root.replies, created]) }
@@ -131,11 +133,13 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
         setRootBody("")
       }
     } catch (error) {
+      if (generation !== requestGeneration.current) return
       setActionError(error instanceof Error ? error.message : "The comment could not be posted.")
-    } finally { setBusy("") }
+    } finally { if (generation === requestGeneration.current) setBusy("") }
   }
 
   async function edit(commentId: string) {
+    const generation = requestGeneration.current
     if (!editorBody.trim()) { setActionError("Enter a comment."); return }
     setBusy(`edit:${commentId}`)
     setActionError("")
@@ -144,14 +148,17 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "edit", body: editorBody }),
       }))
+      if (generation !== requestGeneration.current) return
       setItems((current) => updateComment(current ?? [], updated))
       closeEditor()
     } catch (error) {
+      if (generation !== requestGeneration.current) return
       setActionError(error instanceof Error ? error.message : "The edit could not be saved.")
-    } finally { setBusy("") }
+    } finally { if (generation === requestGeneration.current) setBusy("") }
   }
 
   async function changeStatus(comment: BrowserCommentDto) {
+    const generation = requestGeneration.current
     const action = comment.status === "RESOLVED" ? "reopen" : "resolve"
     setBusy(`${action}:${comment.id}`)
     setActionError("")
@@ -159,14 +166,17 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
       const updated = await responseJson<BrowserCommentDto>(await fetch(`/api/comments/${comment.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }),
       }))
+      if (generation !== requestGeneration.current) return
       setItems((current) => updateComment(current ?? [], updated))
       if (action === "resolve") setExpandedResolved((current) => { const next = new Set(current); next.delete(comment.id); return next })
     } catch (error) {
+      if (generation !== requestGeneration.current) return
       setActionError(error instanceof Error ? error.message : "The thread status could not be changed.")
-    } finally { setBusy("") }
+    } finally { if (generation === requestGeneration.current) setBusy("") }
   }
 
   async function remove(comment: BrowserCommentDto, isRoot: boolean) {
+    const generation = requestGeneration.current
     const deletesThread = isRoot && comment.replies.length > 0
     if (deletesThread && !window.confirm("Delete this comment and every reply? This cannot be undone.")) return
     setBusy(`delete:${comment.id}`)
@@ -174,10 +184,12 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
     try {
       const suffix = deletesThread ? "?deleteThread=true" : ""
       await responseJson(await fetch(`/api/comments/${comment.id}${suffix}`, { method: "DELETE" }))
+      if (generation !== requestGeneration.current) return
       setItems((current) => removeComment(current ?? [], comment.id))
     } catch (error) {
+      if (generation !== requestGeneration.current) return
       setActionError(error instanceof Error ? error.message : "The comment could not be deleted.")
-    } finally { setBusy("") }
+    } finally { if (generation === requestGeneration.current) setBusy("") }
   }
 
   const renderComment = (comment: BrowserCommentDto, isRoot: boolean) => {

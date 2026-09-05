@@ -68,6 +68,41 @@ describe("Discussion", () => {
     expect(screen.getByText("Target B")).toBeVisible()
   })
 
+  it("ignores a delayed create continuation after switching targets", async () => {
+    let finishCreate: ((value: Response) => void) | undefined
+    fetchMock
+      .mockReturnValueOnce(jsonResponse({ items: [] }))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { finishCreate = resolve }))
+      .mockReturnValueOnce(jsonResponse({ items: [comment({ id: "root-b", targetId: "target-b", body: "Target B" })] }))
+    const { rerender } = render(<Discussion targetType="ROADMAP_ITEM" targetId="target-a" />)
+    await screen.findByText("No comments yet.")
+    fireEvent.change(screen.getByRole("textbox", { name: "Add comment" }), { target: { value: "Created for A" } })
+    fireEvent.click(screen.getByRole("button", { name: "Post comment" }))
+
+    rerender(<Discussion targetType="ROADMAP_ITEM" targetId="target-b" />)
+    expect(await screen.findByText("Target B")).toBeVisible()
+    finishCreate?.(await jsonResponse(comment({ body: "Created for A" }), 201))
+    await waitFor(() => expect(screen.queryByText("Created for A")).toBeNull())
+    expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveValue("")
+  })
+
+  it("ignores a delayed destructive continuation after switching targets", async () => {
+    let finishDelete: ((value: Response) => void) | undefined
+    fetchMock
+      .mockReturnValueOnce(jsonResponse({ items: [comment({ body: "Target A" })] }))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { finishDelete = resolve }))
+      .mockReturnValueOnce(jsonResponse({ items: [comment({ id: "root-b", targetId: "target-b", body: "Target B" })] }))
+    const { rerender } = render(<Discussion targetType="ROADMAP_ITEM" targetId="target-a" />)
+    await screen.findByText("Target A")
+    fireEvent.click(screen.getByRole("button", { name: "Delete comment by Rick" }))
+
+    rerender(<Discussion targetType="ROADMAP_ITEM" targetId="target-b" />)
+    expect(await screen.findByText("Target B")).toBeVisible()
+    finishDelete?.(await jsonResponse({ id: "root-1", deletedReplies: 0 }))
+    await waitFor(() => expect(screen.getByText("Target B")).toBeVisible())
+    expect(screen.queryByText("Target A")).toBeNull()
+  })
+
   it("orders threads and replies, labels agents and edits, and collapses resolved threads", async () => {
     fetchMock.mockReturnValueOnce(jsonResponse({ items: [
       comment({ id: "later", body: "Later", createdAt: "2026-09-04T13:00:00.000Z" }),

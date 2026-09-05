@@ -76,6 +76,11 @@ describe("GET /api/comments", () => {
 })
 
 describe("POST /api/comments", () => {
+  it("returns 400 for malformed JSON", async () => {
+    const response = await POST(request("/api/comments", { method: "POST", body: "{" }))
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Request body must be valid JSON" })
+  })
   it("uses the resolved workspace and human session snapshot", async () => {
     const response = await POST(request("/api/comments", { method: "POST", body: JSON.stringify({ targetType: "ROADMAP_ITEM", targetId: "target-1", workspaceId: "evil", parentId: "parent-1", body: "  Hello  " }) }))
     expect(response.status).toBe(201)
@@ -96,6 +101,11 @@ describe("POST /api/comments", () => {
 })
 
 describe("PATCH /api/comments/[id]", () => {
+  it("returns 400 for malformed JSON", async () => {
+    const response = await PATCH(request("/api/comments/comment-1", { method: "PATCH", body: "{" }), { params: Promise.resolve({ id: "comment-1" }) })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Request body must be valid JSON" })
+  })
   it("hides edit from a non-author member", async () => {
     authorizeExisting.mockResolvedValue({ ...existing, owns: false })
     const response = await PATCH(request("/api/comments/comment-1", { method: "PATCH", body: JSON.stringify({ action: "edit", body: "Edited" }) }), { params: Promise.resolve({ id: "comment-1" }) })

@@ -32,7 +32,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const input: unknown = await request.json()
+    let input: unknown
+    try { input = await request.json() } catch { throw new CommentHttpError(400, "Request body must be valid JSON") }
     if (typeof input !== "object" || input === null || Array.isArray(input)) throw new CommentHttpError(400, "Request body must be an object")
     const values = input as Record<string, unknown>
     const targetType = parseTargetType(values.targetType)

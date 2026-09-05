@@ -81,7 +81,8 @@ export async function listBrowserComments(workspaceId: string, targetType: Comme
 }
 
 export async function deleteBrowserComment(commentId: string, actor: Pick<CommentActor, "admin" | "userId">, deleteThread: boolean) {
-  return getPrisma().$transaction(async (tx) => {
+  const prisma = getPrisma()
+  const operation = () => prisma.$transaction(async (tx) => {
     const current = await tx.comment.findUnique({
       where: { id: commentId },
       select: { id: true, parentId: true, authorId: true, solutionPlanProposal: { select: { commentId: true } }, _count: { select: { replies: true } } },
@@ -99,6 +100,16 @@ export async function deleteBrowserComment(commentId: string, actor: Pick<Commen
     await tx.comment.delete({ where: { id: commentId } })
     return { id: commentId, deletedReplies: replies.length }
   }, { isolationLevel: "Serializable" })
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try { return await operation() } catch (error) {
+      lastError = error
+      const value = error as { code?: string; meta?: { code?: string }; message?: string }
+      const retryable = value.code === "P2034" || value.code === "40001" || value.meta?.code === "40001" || /OC00\d|serialization/i.test(value.message ?? "")
+      if (!retryable || attempt === 2) throw error
+    }
+  }
+  throw lastError
 }
 
 function baseDto(row: BrowserCommentRow, actor: CommentActor): BrowserCommentDto {

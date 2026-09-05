@@ -9,7 +9,8 @@ function errorResponse(error: unknown) {
   return NextResponse.json({ error: "Internal server error" }, { status: 500 })
 }
 async function parseBody(request: NextRequest): Promise<Record<string, unknown>> {
-  const input: unknown = await request.json()
+  let input: unknown
+  try { input = await request.json() } catch { throw new CommentHttpError(400, "Request body must be valid JSON") }
   if (typeof input !== "object" || input === null || Array.isArray(input)) throw new CommentHttpError(400, "Request body must be an object")
   return input as Record<string, unknown>
 }
