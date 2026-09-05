@@ -144,6 +144,7 @@ model Workspace {
   tasks                Task[]
   agentConversations   AgentConversation[]
   capabilityPacks      WorkspaceCapabilityPack[]
+  installedCapabilityPacks CapabilityPack[]
   researchStudies      ResearchStudy[]
   researchAttachments  ResearchAttachment[]
   reviewRequests       ReviewRequest[]
@@ -1817,12 +1818,16 @@ model AgentMessage {
 
 model CapabilityPack {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  packId      String   @unique(map: "idx_capability_packs_pack_id") @map("pack_id") @db.VarChar(120)
+  workspaceId String   @map("workspace_id") @db.Uuid
+  packId      String   @map("pack_id") @db.VarChar(120)
+  sourceKey   String   @map("source_key") @db.VarChar(64)
   displayName String   @map("display_name") @db.VarChar(120)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @map("updated_at")
   versions    CapabilityPackVersion[]
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
 
+  @@unique([workspaceId, packId, sourceKey], map: "idx_capability_packs_workspace_pack_source")
   @@map("capability_packs")
 }
 
@@ -1879,6 +1884,7 @@ model AgentAuditLog {
   toolName       String   @map("tool_name") @db.VarChar(100)
   /// JSON-encoded, truncated summary of the tool input (TEXT, not a JSON column).
   argsSummary    String?  @map("args_summary") @db.Text
+  packProvenance String?  @map("pack_provenance") @db.Text
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@index([workspaceId, createdAt])

@@ -189,11 +189,14 @@ export async function POST(request: NextRequest) {
       const { token, apiKeyId } = await mintAgentMcpKey(userId)
       let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>> | undefined
       let assistantText: string | undefined
+      let packProvenance = "[]"
+      const auditRows: { toolName: string; argsSummary: string | null }[] = []
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let usage: any
 
       try {
         const preparedPacks = await prepareCapabilityPacksForTurn(activePacks, getArtifactStorage())
+        packProvenance = preparedPacks.provenanceJson
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
         sandbox = await bootSandboxFromSnapshot(snapshotId)
 
@@ -223,7 +226,6 @@ export async function POST(request: NextRequest) {
         // The entry script writes one JSON object per line, prefixed with a
         // kind. Stdout may arrive in partial chunks, so buffer and split on \n.
         // Accumulate the agent's mutation tool calls for the audit log (Phase 5).
-        const auditRows: { toolName: string; argsSummary: string | null }[] = []
         let buffer = ""
         for await (const log of run.logs()) {
           if (log.stream !== "stdout") continue
@@ -282,7 +284,7 @@ export async function POST(request: NextRequest) {
             numTurns: usage?.numTurns ?? null,
             costUsd: usage?.totalCostUsd ?? null,
             durationMs: usage?.durationMs ?? null,
-            packProvenance: preparedPacks.provenanceJson,
+            packProvenance,
           },
         })
         await prisma.agentConversation.update({
@@ -290,23 +292,24 @@ export async function POST(request: NextRequest) {
           data: { updatedAt: new Date() },
         })
 
-        // Persist the audit trail of what the agent changed this turn.
-        if (auditRows.length > 0) {
-          await prisma.agentAuditLog.createMany({
-            data: auditRows.map((r) => ({
-              userId,
-              workspaceId,
-              conversationId: conversationIdResolved,
-              toolName: r.toolName,
-              argsSummary: r.argsSummary,
-            })),
-          })
-        }
-
         sse("result", { text: assistantText ?? "", usage, conversationId: conversationIdResolved })
       } catch (err) {
-        sse("error", { message: err instanceof Error ? err.message : String(err) })
+        const message = err instanceof Error ? err.message : String(err)
+        try {
+          await prisma.agentMessage.create({
+            data: { conversationId: conversationIdResolved, role: "assistant", content: `Agent turn failed: ${message}`, packProvenance },
+          })
+          await prisma.agentConversation.update({ where: { id: conversationIdResolved }, data: { updatedAt: new Date() } })
+        } catch { /* failure history is best-effort; cleanup and audit still run */ }
+        sse("error", { message })
       } finally {
+        if (auditRows.length > 0) {
+          try {
+            await prisma.agentAuditLog.createMany({
+              data: auditRows.map((row) => ({ userId, workspaceId, conversationId: conversationIdResolved, toolName: row.toolName, argsSummary: row.argsSummary, packProvenance })),
+            })
+          } catch { /* cleanup must not be blocked by audit persistence failure */ }
+        }
         if (sandbox) {
           try {
             await sandbox.stop()

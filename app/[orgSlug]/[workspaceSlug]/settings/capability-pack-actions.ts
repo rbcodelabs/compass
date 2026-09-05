@@ -10,7 +10,7 @@ export async function installWorkspaceCapabilityPack(orgSlug: string, workspaceS
   const session = await auth()
   if (!session?.user?.id) throw new Error("Unauthorized")
   const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug)
-  const version = await installCapabilityPack({ ...input, createdById: session.user.id }, { prisma, storage: getArtifactStorage() })
+  const version = await installCapabilityPack({ ...input, createdById: session.user.id, workspaceId }, { prisma, storage: getArtifactStorage() })
   const manifest = JSON.parse(version.manifestJson) as { enabledSkills: string[] }
   await configureWorkspaceCapabilityPack({ workspaceId, packVersionId: version.id, enabledSkillIds: manifest.enabledSkills, enabled: true }, prisma)
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`)

@@ -26,7 +26,10 @@ export async function fetchGithubCapabilityPack(
     redirect: "error",
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   })
-  const treeValue = await boundedJson(await request(`https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}/git/trees/${parsed.commitSha}?recursive=1`))
+  const apiRoot = `https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`
+  const commitValue = await boundedJson(await request(`${apiRoot}/git/commits/${parsed.commitSha}`)) as { sha?: unknown; tree?: { sha?: unknown } }
+  if (commitValue.sha !== parsed.commitSha || typeof commitValue.tree?.sha !== "string") throw new Error("GitHub SHA did not resolve to the requested commit")
+  const treeValue = await boundedJson(await request(`${apiRoot}/git/trees/${commitValue.tree.sha}?recursive=1`))
   const tree = treeValue as { tree?: unknown; truncated?: unknown }
   if (tree.truncated === true) throw new Error("GitHub repository tree is truncated")
   if (!Array.isArray(tree.tree)) throw new Error("GitHub repository tree is invalid")

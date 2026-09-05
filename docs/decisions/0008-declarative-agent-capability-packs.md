@@ -9,7 +9,7 @@ Compass runs each in-app agent turn in a disposable Vercel Sandbox and owns its 
 
 ## Decision
 
-Compass accepts immutable, declarative, skills-only packs from public GitHub repositories pinned to a full commit SHA. A pack contains `compass-pack.json`, declared `skills/<id>/SKILL.md` files, and referenced read-only assets. Compass validates and normalizes the pack, generates its Claude plugin wrapper, stores it privately under its SHA-256 digest, and attaches an exact version to a workspace.
+Compass accepts immutable, declarative, skills-only packs from public GitHub repositories pinned to a full commit SHA. A pack contains `compass-pack.json`, declared `skills/<id>/SKILL.md` files, and referenced read-only assets. Compass validates and normalizes the pack, generates its Claude plugin wrapper, and stores it privately under its SHA-256 digest. Pack identities and selectable versions are scoped to one workspace; repository and pack path form part of the immutable source identity.
 
 At turn time Compass verifies the digest, materializes the normalized plugin, and starts Agent SDK 0.3.224 with an explicit skill allowlist, `tools: []`, `skipMcpDiscovery: true`, `strictMcpConfig: true`, no filesystem settings, and only Compass's acting-user MCP connection. The assistant message records exact pack provenance.
 

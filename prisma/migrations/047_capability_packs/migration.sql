@@ -5,11 +5,13 @@
 BEGIN;
 CREATE TABLE IF NOT EXISTS capability_packs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL,
   pack_id VARCHAR(120) NOT NULL,
+  source_key VARCHAR(64) NOT NULL,
   display_name VARCHAR(120) NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT idx_capability_packs_pack_id UNIQUE (pack_id)
+  CONSTRAINT idx_capability_packs_workspace_pack_source UNIQUE (workspace_id, pack_id, source_key)
 );
 COMMIT;
 
@@ -49,6 +51,10 @@ COMMIT;
 
 BEGIN;
 ALTER TABLE agent_messages ADD COLUMN IF NOT EXISTS pack_provenance TEXT;
+COMMIT;
+
+BEGIN;
+ALTER TABLE agent_audit_log ADD COLUMN IF NOT EXISTS pack_provenance TEXT;
 COMMIT;
 
 BEGIN;

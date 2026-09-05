@@ -61,6 +61,13 @@ describe("capability pack validation", () => {
     expect(() => normalizeCapabilityPack(files)).toThrow(/duplicate/i)
   })
 
+  it("requires the skill name in parsed frontmatter, not the Markdown body", () => {
+    const files = validFiles()
+    files.delete("skills/ost-workflow/assets/guide.md")
+    files.set("skills/ost-workflow/SKILL.md", new TextEncoder().encode("---\ndescription: no name\n---\nname: ost-workflow"))
+    expect(() => normalizeCapabilityPack(files)).toThrow(/frontmatter name/i)
+  })
+
   it("detects artifact corruption", () => {
     const artifact = normalizeCapabilityPack(validFiles())
     expect(() => verifyCapabilityPackArtifact(artifact.bytes, "0".repeat(64))).toThrow(/digest/i)
