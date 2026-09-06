@@ -7,6 +7,7 @@ import path from "path";
 import { createHash, randomUUID } from "node:crypto";
 import { getActiveSchema } from "@/lib/schema";
 import { backfillRoadmapCommitmentProvenance } from "@/lib/dsql-backfill";
+import { inspectVoiceMigrationCatalog, voiceMigrationCatalog } from "@/lib/research-voice-migration";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -1312,13 +1313,16 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      const rawSql = readFileSync(migration.filePath, "utf-8");
+      const voiceCatalog = migration.name === "047_research_voice_control_plane" ? voiceMigrationCatalog(rawSql) : undefined;
+      // Admit partial 047 only when every existing object has the intended
+      // definition. A previous unfinished receipt remains forensic evidence.
+      const voiceExisting = voiceCatalog ? await inspectVoiceMigrationCatalog(client, schema, voiceCatalog) : undefined;
       const attemptId = randomUUID()
       await client.query(
         `INSERT INTO "${schema}"._prisma_migrations (id, migration_name) VALUES ($1, $2)`,
         [attemptId, migration.name],
       )
-
-      const rawSql = readFileSync(migration.filePath, "utf-8");
 
       // Strip all SQL line comments (-- ...) before splitting, so a leading
       // comment on a CREATE statement can't cause the whole statement to be
@@ -1341,6 +1345,12 @@ export async function POST(req: NextRequest) {
       let pendingRoadmapCommitmentProvenanceBackfill = false;
       for (const stmt of statements) {
         try {
+          const existingTable = stmt.match(/^CREATE TABLE (\w+) /)?.[1];
+          const existingIndex = stmt.match(/^CREATE (?:UNIQUE )?INDEX ASYNC (\w+) /)?.[1];
+          if (voiceExisting && ((existingTable && voiceExisting.tables.includes(existingTable)) || (existingIndex && voiceExisting.indexes.some((index) => index.name === existingIndex)))) {
+            log.push("  ~ verified matching 047 object already exists (skipped)");
+            continue;
+          }
           // ASYNC is mandatory on DSQL and unsupported by local PostgreSQL.
           // DATABASE_URL is the worktree-bootstrap local-mode signal.
           const executableStmt = process.env.DATABASE_URL
@@ -1365,8 +1375,9 @@ export async function POST(req: NextRequest) {
           if (!process.env.DATABASE_URL && ASYNC_WAIT_MIGRATIONS.includes(migration.name as typeof ASYNC_WAIT_MIGRATIONS[number]) && /(?:CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC|ALTER\s+TABLE\s+ASYNC)/i.test(stmt)) {
             const jobId = result.rows[0]?.job_id
             if (!jobId) throw new Error(`Migration ${migration.name} async DDL returned no job_id.`)
-            const waited = await client.query<{ succeeded: boolean }>("SELECT sys.wait_for_job($1) AS succeeded", [jobId])
-            if (waited.rows[0]?.succeeded !== true) throw new Error(`Aurora DSQL async DDL job ${jobId} did not complete successfully.`)
+            await client.query("CALL sys.wait_for_job($1)", [jobId])
+            const waited = await client.query<{ status: string }>("SELECT status FROM sys.jobs WHERE job_id = $1", [jobId])
+            if (waited.rows[0]?.status !== "completed") throw new Error(`Aurora DSQL async DDL job ${jobId} did not complete successfully.`)
           }
           if ((migration.name === "039_native_decision_gates" || migration.name === "042_native_decision_gates_repair") && /ALTER\s+COLUMN\s+"?now_commitment_provenance"?\s+SET\s+DEFAULT/i.test(executableStmt)) {
             pendingRoadmapCommitmentProvenanceBackfill = true;
@@ -1388,7 +1399,7 @@ export async function POST(req: NextRequest) {
           log.push(`  ✓ ${label}…`);
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e);
-          if (msg.includes("already exists")) {
+          if (!voiceCatalog && msg.includes("already exists")) {
             log.push(`  ~ already exists (skipped)`);
           } else {
             log.push(`  ✗ Error: ${msg}`);
@@ -1399,6 +1410,7 @@ export async function POST(req: NextRequest) {
 
       await assertDecisionMigrationPostconditions(client, schema, migration.name)
       if (migration.name === "047_research_voice_control_plane") {
+        await inspectVoiceMigrationCatalog(client, schema, voiceCatalog!, true)
         await assertResearchVoiceControlPlanePostconditions(client, schema)
       }
 
