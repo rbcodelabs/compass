@@ -7,6 +7,13 @@ const mocks = vi.hoisted(() => ({
   end: vi.fn(),
   connect: vi.fn(),
   pool: vi.fn(),
+  repairMigration: vi.fn(),
+}))
+
+vi.mock("@/lib/migrations/legacy-decision-review-repair", () => ({
+  getLegacyDecisionReviewRepairStatus: mocks.repairMigration,
+  applyLegacyDecisionReviewRepair: mocks.repairMigration,
+  LEGACY_DECISION_REVIEW_REPAIR_MIGRATION: "048_legacy_decision_review_repair",
 }))
 
 vi.mock("pg", () => ({
@@ -138,6 +145,7 @@ beforeEach(() => {
   mocks.connect.mockResolvedValue({ query: mocks.query, release: mocks.release })
   mocks.end.mockResolvedValue(undefined)
   installQueryResponses()
+  mocks.repairMigration.mockResolvedValue({ workspaceStatus: "NOT_PRESENT", requests: [] })
 })
 
 afterEach(() => {
@@ -145,6 +153,35 @@ afterEach(() => {
 })
 
 describe("/api/admin/migrate rollout observability", () => {
+  it("finishes the legacy review repair receipt only after its data hook succeeds", async () => {
+    const response = await applyMigrations(
+      { connect: mocks.connect } as never,
+      "compass_preview",
+      "048_legacy_decision_review_repair",
+    )
+
+    expect(response.status).toBe(200)
+    expect(mocks.repairMigration).toHaveBeenCalledOnce()
+    const finishedReceipt = mocks.query.mock.calls.find(([sql]) => String(sql).includes("SET finished_at"))
+    expect(finishedReceipt).toBeDefined()
+    const receiptCall = mocks.query.mock.calls.findIndex(([sql]) => String(sql).includes("SET finished_at"))
+    expect(mocks.repairMigration.mock.invocationCallOrder[0]).toBeLessThan(mocks.query.mock.invocationCallOrder[receiptCall])
+  })
+
+  it("leaves an unfinished receipt when the legacy review repair hook fails", async () => {
+    mocks.repairMigration.mockRejectedValueOnce(new Error("allowlisted request changed"))
+
+    const response = await applyMigrations(
+      { connect: mocks.connect } as never,
+      "compass_preview",
+      "048_legacy_decision_review_repair",
+    )
+
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toMatchObject({ error: "allowlisted request changed" })
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET finished_at"))).toBe(false)
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("_prisma_migrations") && String(sql).includes("INSERT INTO"))).toBe(true)
+  })
   it("does not create schemas in the pre-provisioned worker path", async () => {
     await applyMigrations({ connect: mocks.connect } as never, "compass_preview", undefined, { preProvisionedSchema: true })
     expect(mocks.query.mock.calls.some(([sql]) => /CREATE SCHEMA/i.test(sql))).toBe(false)

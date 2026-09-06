@@ -4,6 +4,12 @@ import { readFileSync } from "fs";
 import path from "path";
 import { createHash, randomUUID } from "node:crypto";
 import { backfillRoadmapCommitmentProvenance } from "@/lib/dsql-backfill";
+import {
+  applyLegacyDecisionReviewRepair,
+  getLegacyDecisionReviewRepairStatus,
+  LEGACY_DECISION_REVIEW_REPAIR_MIGRATION,
+} from "@/lib/migrations/legacy-decision-review-repair";
+import type { LegacyDecisionRepairManifest } from "@/lib/legacy-decision-repair";
 
 
 
@@ -215,6 +221,10 @@ const MIGRATIONS = [
   {
     name: "047_preview_automation",
     filePath: path.join(process.cwd(), "prisma/migrations/047_preview_automation/migration.sql"),
+  },
+  {
+    name: "048_legacy_decision_review_repair",
+    filePath: path.join(process.cwd(), "prisma/migrations/048_legacy_decision_review_repair/migration.sql"),
   },
 ];
 
@@ -1057,12 +1067,13 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
     `).catch(() => ({ rows: [] as { name: string; applied?: boolean }[] }));
     const appliedNames = rows.filter((row) => row.applied !== false).map((row) => row.name)
     const incompleteNames = rows.filter((row) => row.applied === false).map((row) => row.name)
-    const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup, decisionGateInfrastructure, decisionMigrationProgress] = await Promise.all([
+    const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup, decisionGateInfrastructure, decisionMigrationProgress, legacyDecisionReviewRepair] = await Promise.all([
       getResearchCaptureHardeningReport(client, schema),
       getResearchGuidedUxReport(client, schema),
       getResearchBlobCleanupReport(client, schema),
       getDecisionGateInfrastructureHealth(client, schema, appliedNames, incompleteNames),
       client.query(`SELECT migration_name, attempt_id, plan_version, plan_fingerprint, next_step, executing_step, executing_started_at, pending_step, pending_job_id, claim_epoch, claimed_by IS NOT NULL AND claim_expires_at >= CURRENT_TIMESTAMP AS claimed, last_error, updated_at FROM "${schema}"._migration_execution_state ORDER BY updated_at DESC`).then(({ rows }) => rows).catch(() => []),
+      getLegacyDecisionReviewRepairStatus(pool, schema),
     ]);
 
     return NextResponse.json({
@@ -1075,6 +1086,7 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       researchBlobCleanup,
       decisionGateInfrastructure,
       decisionMigrationProgress,
+      legacyDecisionReviewRepair,
     });
   } finally {
     client.release();
@@ -1083,7 +1095,7 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 // POST — apply a migration (or all pending)
-export async function applyMigrations(pool: Pool, schema: string, targetScript?: string, options: { preProvisionedSchema?: boolean } = {}) {
+export async function applyMigrations(pool: Pool, schema: string, targetScript?: string, options: { preProvisionedSchema?: boolean; legacyDecisionRepairManifest?: LegacyDecisionRepairManifest } = {}) {
   const client = await pool.connect();
   const log: string[] = [`Using schema: ${schema}`];
   const researchCaptureAsyncIndexJobIds: string[] = [];
@@ -1264,6 +1276,11 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
             throw e;
           }
         }
+      }
+
+      if (migration.name === LEGACY_DECISION_REVIEW_REPAIR_MIGRATION) {
+        const repair = await applyLegacyDecisionReviewRepair(pool, schema, options.legacyDecisionRepairManifest)
+        log.push(`  ✓ legacy review repair: ${repair.workspaceStatus === "NOT_PRESENT" ? "target workspace not present" : repair.requests.map(({ status }) => status).join(", ")}`)
       }
 
       await assertDecisionMigrationPostconditions(client, schema, migration.name)

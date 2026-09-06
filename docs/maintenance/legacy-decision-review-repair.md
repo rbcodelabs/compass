@@ -1,58 +1,39 @@
 # Legacy decision review presentation repair
 
-This maintenance command appends a readable `tracked-decision/v2` revision to explicitly allowlisted legacy review requests. It preserves the request ID and URL, leaves the decision cycle pending, and keeps the original revision content and all human records unchanged. The original revision receives only the normal `supersededAt` marker.
+Migration `048_legacy_decision_review_repair` appends a readable `tracked-decision/v2` revision to an exact, packaged allowlist of legacy review requests. It preserves each request ID and URL, leaves the same decision cycle pending, and preserves all human records. The original revision content and metadata remain unchanged except for the normal `supersededAt` marker.
 
-It is intentionally not a general migration. It recognizes only the historical Source IDs/Source version, ACTIVE Opportunity IDs, and Current NEXT IDs patterns. Every UUID in the old context must have an explicitly typed reference in the manifest, and every referenced object must resolve inside the selected workspace.
+This is not a general backfill. The migration recognizes only the historical Source IDs/Source version, ACTIVE Opportunity IDs, and Current NEXT IDs formats found in the allowlist. Every UUID has an explicitly typed reference, and every reference must resolve inside the selected workspace. Manifest order controls source cards; list order in the original context controls numbered lists.
 
-## Manifest
+The repair is registered in Compass’s authenticated migration runner. It does not use a local database command, AWS login, or a separate production credential.
 
-```json
-{
-  "workspaceId": "00000000-0000-4000-8000-000000000001",
-  "requests": [
-    {
-      "requestId": "00000000-0000-4000-8000-000000000002",
-      "expectedRevisionId": "00000000-0000-4000-8000-000000000003",
-      "expectedFingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      "references": [
-        { "type": "EXPERIMENT", "id": "00000000-0000-4000-8000-000000000004" },
-        { "type": "ASSUMPTION", "id": "00000000-0000-4000-8000-000000000005" },
-        { "type": "EXPERIMENT_RESULT", "id": "00000000-0000-4000-8000-000000000006" }
-      ]
-    }
-  ]
-}
-```
+## Preflight
 
-Supported reference types are `WORKSPACE`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`, `ROADMAP_ITEM`, `DOC`, `EXPERIMENT`, `FEEDBACK`, `EVIDENCE`, `TASK`, and `EXPERIMENT_RESULT`. Manifest order controls source-card presentation; the original context order controls numbered lists. The tool never infers a type or changes the original list order.
-
-## Run a dry-run
-
-Dry-run is the default and performs no transaction or write:
+After deploying the code containing migration 048, inspect authenticated status:
 
 ```bash
-pnpm maintenance:repair-legacy-decisions -- \
-  --manifest /absolute/path/to/manifest.json \
-  --schema compass_prod \
-  --env-file /absolute/path/to/non-committed.env
+curl -s https://compass.rbcodelabs.com/api/admin/migrate \
+  -H "x-migration-secret: $COMPASS_PRODUCTION_MIGRATION_SECRET"
 ```
 
-Use `DATABASE_URL` for local PostgreSQL. For Aurora DSQL, provide `PGHOST`, `PGUSER`, and `AWS_REGION`; the command uses the normal AWS credential chain to mint short-lived DSQL tokens. The schema is always an explicit command argument to prevent an environment default from selecting the wrong tenant schema.
+Confirm the intended `schema`, that `manifest` contains migration 048, and that `legacyDecisionReviewRepair` reports the target workspace as `PRESENT`. Review every allowlisted plan: before application each must be `READY`, `ALREADY_APPLIED`, or `SKIPPED_DECIDED`. The authenticated preflight includes the proposed bounded packet/context so operators can inspect the actual readable result before writing; it never includes the original legacy packet.
 
-Review every result. `READY` is eligible, `SKIPPED_DECIDED` is intentionally untouched, and `ALREADY_APPLIED` is an idempotent success. `ERROR` and `NOT_ELIGIBLE` produce a non-zero exit.
+## Apply only migration 048
 
-## Apply
-
-Only after reviewing a clean dry-run, repeat the exact command with `--apply`:
+Do not apply all pending migrations. Production may contain unrelated pending work. Target the repair by name:
 
 ```bash
-pnpm maintenance:repair-legacy-decisions -- \
-  --manifest /absolute/path/to/manifest.json \
-  --schema compass_prod \
-  --env-file /absolute/path/to/non-committed.env \
-  --apply
+curl -s -X POST https://compass.rbcodelabs.com/api/admin/migrate \
+  -H "x-migration-secret: $COMPASS_PRODUCTION_MIGRATION_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"script":"048_legacy_decision_review_repair"}'
 ```
 
-Each request is repaired in its own transaction. Immediately before writing, the command rechecks workspace, gate, `PENDING` state, v1 packet, revision ID, fingerprint, revision count, decision cycle, and absence of recorded decisions. A concurrent decision or edit causes the transaction to roll back. Repeating the same manifest reports `ALREADY_APPLIED` without adding another revision.
+The runner creates an unfinished receipt, executes the data hook, verifies terminal per-request results, and only then marks that receipt finished. An unexpected packet, missing reference, stale revision/fingerprint, or conflicting concurrent edit leaves the attempt unfinished and returns a failure. A human decision is a successful `SKIPPED_DECIDED` terminal result and remains untouched. A retry is safe: already repaired requests report `ALREADY_APPLIED` and never receive duplicate revisions.
 
-The new revision copies the original title, required role, expiry, source fingerprint, and option definitions. Its summary and packet context contain the readable linked presentation. Source-version and source-fingerprint text moves into repair audit metadata, while the exact original packet, summary, fingerprint, and source prose remain on the superseded revision.
+Schemas where the exact production workspace does not exist are an explicit no-op, permitting normal dev and preview migration parity. If the workspace exists, missing or mismatched allowlisted requests fail closed.
+
+## Verify
+
+Repeat the authenticated GET and verify that `appliedMigrations` contains migration 048 and the repair plans contain only `ALREADY_APPLIED` and `SKIPPED_DECIDED` results. `incompleteMigrations` is forensic attempt history rather than a grouped current state, so an earlier failed 048 attempt can remain listed after a successful retry; the finished receipt and terminal readback are authoritative.
+
+Then read back the allowlisted requests through the normal review API/UI. The nine still-pending requests should retain their URLs and decision cycles while showing readable linked context. The already decided request must remain unchanged.
