@@ -1,11 +1,11 @@
 /**
- * Roadmap "Not yet on the roadmap" functional spec.
+ * Roadmap "Not scheduled" functional spec.
  *
  * Journey:
  *   1. Create a validated Solution via Discovery and a Bug via the public
  *      portal — neither is on the roadmap yet.
- *   2. On the roadmap Board, confirm both appear in the "Not yet on the
- *      roadmap" panel.
+ *   2. On the roadmap Board, confirm both appear in the final "Not scheduled"
+ *      Kanban column after Shipped.
  *   3. Drag the Solution card onto the LATER column — confirm it lands there
  *      and disappears from the unscheduled panel.
  *   4. Use the Bug card's quick-add menu (no drag) to add it to NEXT —
@@ -20,21 +20,51 @@
  * dragTo (which doesn't reliably trigger pointer-sensor-based DnD).
  */
 import { test, expect } from "../fixtures/index";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
-async function dragTo(page: Page, source: ReturnType<Page["locator"]>, targetBox: { x: number; y: number; width: number; height: number }) {
+async function dragTo(page: Page, source: Locator, target: Locator, scrollContainer?: Locator) {
+  await source.scrollIntoViewIfNeeded();
   const sourceBox = await source.boundingBox();
   if (!sourceBox) throw new Error("drag source has no bounding box");
 
   const startX = sourceBox.x + sourceBox.width / 2;
   const startY = sourceBox.y + sourceBox.height / 2;
-  const endX = targetBox.x + targetBox.width / 2;
-  const endY = targetBox.y + targetBox.height / 2;
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
   // Small initial move past dnd-kit's PointerSensor activation distance (8px).
   await page.mouse.move(startX + 15, startY + 15, { steps: 10 });
+
+  // The source and destination can live in distant columns of the horizontally
+  // scrolling board. Hold the pointer at the board edge so dnd-kit's normal
+  // auto-scroll updates its collision geometry as the destination comes into
+  // view; an instant scroll jump leaves dnd-kit aiming at stale column rects.
+  if (scrollContainer) {
+    const scrollBox = await scrollContainer.boundingBox();
+    if (!scrollBox) throw new Error("drag scroll container has no bounding box");
+
+    const edgeY = Math.min(Math.max(startY, scrollBox.y + 16), scrollBox.y + scrollBox.height - 16);
+    await expect
+      .poll(
+        async () => {
+          const box = await target.boundingBox();
+          if (!box) return false;
+          if (box.x >= scrollBox.x && box.x + box.width <= scrollBox.x + scrollBox.width) return true;
+
+          const edgeX = box.x < scrollBox.x ? scrollBox.x + 8 : scrollBox.x + scrollBox.width - 8;
+          await page.mouse.move(edgeX, edgeY, { steps: 5 });
+          return false;
+        },
+        { timeout: 10_000 }
+      )
+      .toBe(true);
+  }
+
+  const targetBox = await target.boundingBox();
+  if (!targetBox) throw new Error("drag target has no bounding box");
+  const endX = targetBox.x + targetBox.width / 2;
+  const endY = targetBox.y + targetBox.height / 2;
+
   await page.mouse.move(endX, endY, { steps: 40 });
   await page.mouse.up();
 }
@@ -124,12 +154,14 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
 
-      await expect(page.getByText("Not yet on the roadmap")).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByRole("heading", { name: "Not scheduled" })).toBeVisible({ timeout: 10_000 });
+      const boardColumns = page.locator('[data-slot="roadmap-board-track"] > *');
+      await expect(boardColumns.last()).toHaveAttribute("data-testid", "roadmap-unscheduled-column");
       // Scoped to the panel specifically — dnd-kit's DragOverlay renders a
       // second (briefly-persisting, drop-animating) clone of the dragged
       // card elsewhere in the DOM, which would otherwise make these
       // locators ambiguous right after a drop.
-      const unscheduledPanel = page.locator("#unscheduled-items-panel");
+      const unscheduledPanel = page.getByTestId("roadmap-unscheduled-column");
       const solutionUnscheduledCard = unscheduledPanel
         .locator('[data-slot="card"]')
         .filter({ hasText: solTitle });
@@ -139,12 +171,11 @@ test.describe("Roadmap — not yet on the roadmap", () => {
 
       // ── 3. Drag the solution onto LATER (NOW is decision-gated) ─────────────
       const dragHandle = solutionUnscheduledCard.getByLabel("Drag to schedule");
-      const laterColumnBox = await page.locator("#roadmap-column-LATER").boundingBox();
-      if (!laterColumnBox) throw new Error("LATER column not found");
-      await dragTo(page, dragHandle, laterColumnBox);
+      const laterColumn = page.locator("#roadmap-column-LATER");
+      const roadmapBoard = page.getByRole("region", { name: "Roadmap board" });
+      await dragTo(page, dragHandle, laterColumn, roadmapBoard);
 
       await expect(solutionUnscheduledCard).not.toBeVisible({ timeout: 10_000 });
-      const laterColumn = page.locator("#roadmap-column-LATER");
       // .first() — the promoted item's own title AND its "Solution" link
       // chip both show the same solution title, so this text appears twice
       // on the card; either occurrence confirms it landed here.
@@ -164,16 +195,16 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await expect(page).toHaveURL(/view=timeline/);
       await page.waitForLoadState("networkidle");
 
-      const sol2UnscheduledCard = unscheduledPanel.locator('[data-slot="card"]').filter({ hasText: sol2Title });
+      const timelineUnscheduledPanel = page.locator("#unscheduled-items-panel");
+      const sol2UnscheduledCard = timelineUnscheduledPanel
+        .locator('[data-slot="card"]')
+        .filter({ hasText: sol2Title });
       await expect(sol2UnscheduledCard).toBeVisible({ timeout: 10_000 });
 
       const dialog = page.getByRole("dialog");
       const scheduleHeading = dialog.getByRole("heading", { name: "Schedule on the roadmap" });
       const dropZone = page.locator("#gantt-drop-zone");
-      await sol2UnscheduledCard.scrollIntoViewIfNeeded();
-      const dropZoneBox = await dropZone.boundingBox();
-      if (!dropZoneBox) throw new Error("Gantt drop zone not found");
-      await dragTo(page, sol2UnscheduledCard.getByLabel("Drag to schedule"), dropZoneBox);
+      await dragTo(page, sol2UnscheduledCard.getByLabel("Drag to schedule"), dropZone);
 
       await expect(scheduleHeading).toBeVisible({ timeout: 10_000 });
       await expect(dialog.getByText(sol2Title)).toBeVisible();
@@ -193,6 +224,9 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await page.getByRole("tab", { name: "Board" }).click();
       const scheduledCard = page.locator('[data-slot="card"]').filter({ hasText: sol2Title });
       await expect(scheduledCard.getByText(/Oct/)).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByTestId("roadmap-unscheduled-column")).toContainText(
+        "No items waiting to be scheduled."
+      );
     }
   );
 });

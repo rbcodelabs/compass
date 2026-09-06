@@ -132,15 +132,18 @@ describe("ResearchChat", () => {
     expect(screen.queryByText("Persisted answer")).not.toBeInTheDocument()
   })
 
-  it("uploads guided evidence first and links its ID to the next answer", async () => {
+  it.each([
+    ["customer interview", false, "Start interview"],
+    ["guided usability", true, "Start session"],
+  ])("uploads evidence in a %s and links its ID to the next answer", async (_label, guided, startLabel) => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] }), { status: 200, headers: { "Content-Type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: "00000000-0000-4000-8000-000000000001", status: "READY", originalName: "screen.png", mimeType: "image/png", sizeBytes: 3 }), { status: 200, headers: { "Content-Type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: "What did you expect?" }), { status: 200, headers: { "Content-Type": "application/json" } }))
     vi.stubGlobal("fetch", fetchMock)
 
-    render(<ResearchChat guided token="study-token" />)
-    fireEvent.click(screen.getByRole("button", { name: "Start session" }))
+    render(<ResearchChat guided={guided} token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: startLabel }))
     await screen.findByRole("textbox", { name: "Your response" })
     fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), { target: { files: [new File([new Uint8Array([1, 2, 3])], "screen.png", { type: "image/png" })] } })
     expect(await screen.findByText("screen.png")).toBeVisible()

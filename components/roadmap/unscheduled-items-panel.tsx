@@ -6,6 +6,7 @@ import { GripVertical, Layers, Bug, MoreHorizontal } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
+import { BoardColumn, EmptyState } from "@/components/patterns";
 import { HORIZON_META, QUICK_ADD_HORIZONS } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
 
@@ -98,12 +99,56 @@ export function UnscheduledItemsPanel({
   );
 }
 
-function UnscheduledItemCard({ item, onQuickAdd, allowedHorizons, pending, interactionMode }: {
+export function UnscheduledItemsColumn({
+  items,
+  onQuickAdd,
+  allowedHorizons = QUICK_ADD_HORIZONS,
+  pendingItemKeys = NO_PENDING_ITEMS,
+  interactionMode = "compact",
+}: Props) {
+  return (
+    <BoardColumn
+      title="Not scheduled"
+      count={items.length}
+      accent="neutral"
+      data-testid="roadmap-unscheduled-column"
+      className="min-w-[280px] flex-1 overflow-hidden md:h-full"
+      bodyId="unscheduled-items-column"
+      bodyClassName="min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"
+    >
+      {items.length === 0 ? (
+        <EmptyState compact title="No items waiting to be scheduled." />
+      ) : (
+        items.map((item) => (
+          <UnscheduledItemCard
+            key={unscheduledDragId(item)}
+            item={item}
+            onQuickAdd={onQuickAdd}
+            allowedHorizons={allowedHorizons}
+            pending={pendingItemKeys.has(unscheduledDragId(item))}
+            interactionMode={interactionMode}
+            fullWidth
+          />
+        ))
+      )}
+    </BoardColumn>
+  );
+}
+
+function UnscheduledItemCard({
+  item,
+  onQuickAdd,
+  allowedHorizons,
+  pending,
+  interactionMode,
+  fullWidth = false,
+}: {
   item: UnscheduledItem;
   onQuickAdd: Props["onQuickAdd"];
   allowedHorizons: readonly Horizon[];
   pending: boolean;
   interactionMode: NonNullable<Props["interactionMode"]>;
+  fullWidth?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
     id: unscheduledDragId(item),
@@ -121,7 +166,7 @@ function UnscheduledItemCard({ item, onQuickAdd, allowedHorizons, pending, inter
       style={style}
       data-testid={`unscheduled-item-${item.kind}:${item.id}`}
       aria-busy={pending || undefined}
-      className={`${interactionMode === "touch-safe" ? "touch-pan-y" : "touch-none"} w-56`}
+      className={`${interactionMode === "touch-safe" ? "touch-pan-y" : "touch-none"} ${fullWidth ? "w-full" : "w-56"}`}
     >
       <Card
         size="sm"

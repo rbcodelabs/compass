@@ -67,6 +67,47 @@ jobs:
             test-results
             public/screenshots/docs/native-timeline-*.png
 
+  authenticated-capture:
+    needs: checks
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: compass_e2e
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d compass_e2e"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      AUTH_SECRET: compass-ci-auth-secret-not-for-production
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/compass_e2e?sslmode=disable
+      E2E_ISOLATED_DATABASE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e:functional -- e2e/functional/specs/capture-research.spec.ts
+      - run: pnpm e2e:db:verify-clean
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: compass-authenticated-capture-e2e
+          path: test-results
+
   screenshots:
     if: ${{ vars.COMPASS_SCREENSHOT_BASE_URL != '' }}
     runs-on: ubuntu-latest

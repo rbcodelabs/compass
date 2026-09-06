@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildResearchAgentTurnPrompt, buildResearchPrompt, createResearchToken, hashResearchToken, normalizeResearchAppUrl, parseResearchGuide } from "@/lib/research"
+import { buildResearchAgentTurnPrompt, buildResearchPrompt, createResearchToken, deserializeResearchGuide, hashResearchToken, normalizeResearchAppUrl, parseResearchGuide } from "@/lib/research"
 
 describe("research capture helpers", () => {
   it("creates an opaque token and stores only its SHA-256 hash", () => {
@@ -23,6 +23,10 @@ describe("research capture helpers", () => {
       { id: "1", text: "First question" },
       { id: "2", text: "Second question" },
     ])
+  })
+
+  it("returns an empty guide instead of crashing on corrupt stored JSON", () => {
+    expect(deserializeResearchGuide("[{broken")).toEqual([])
   })
 
   it("builds a neutral one-question-at-a-time interview prompt", () => {
