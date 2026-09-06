@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import {
   useEntityDetail,
@@ -138,6 +139,7 @@ export function KeyResultPanel({
       <Section label="Roadmap" count={data.roadmapItems.length}>
         <RelationList items={roadmapItems} empty="Not on the roadmap." />
       </Section>
+      <Discussion targetType="KEY_RESULT" targetId={id} />
     </PanelContainer>
   );
 }

@@ -38,4 +38,18 @@ describe("guided UX screenshot coverage", () => {
     expect(cases.map((entry) => entry.file)).toContain("guided-study-create.png")
     expect(cases.some((entry) => entry.file.startsWith("guided-participant-"))).toBe(false)
   })
+
+  it("defines deterministic desktop and mobile shared Discussion captures", () => {
+    const cases = buildScreenshotCases({
+      workspaceBase: "/e2e-test-org/e2e-workspace",
+      includeGuidedUx: false,
+      includeSharedDiscussion: true,
+      researchToken: null,
+    })
+
+    expect(cases).toEqual([
+      expect.objectContaining({ file: "shared-discussion-desktop.png", prepare: "roadmap-discussion", viewport: { width: 1280, height: 800 } }),
+      expect.objectContaining({ file: "shared-discussion-mobile.png", prepare: "roadmap-discussion", viewport: { width: 390, height: 844 } }),
+    ])
+  })
 })

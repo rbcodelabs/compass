@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import { useState, useTransition } from "react";
 import {
@@ -192,10 +193,13 @@ export function SolutionPanel({
         </Section>
       )}
 
-      <Section label="Plan & Discussion" count={data.comments.length}>
+      <Section
+        label="Current Plan"
+        count={data.comments.filter((comment) => comment.commentType === "PLAN").length}
+      >
         <SolutionPlanDiscussion
           solutionId={data.id}
-          comments={data.comments}
+          comments={data.comments.filter((comment) => comment.commentType === "PLAN")}
           revalidatePathStr={revalidatePathStr}
           onChanged={refresh}
         />
@@ -215,6 +219,7 @@ export function SolutionPanel({
           />
         </Section>
       )}
+      <Discussion targetType="SOLUTION" targetId={id} />
     </PanelContainer>
   );
 }

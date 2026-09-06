@@ -21,6 +21,7 @@ import { PositioningBriefRow } from "./positioning-brief-row";
 import { RoadmapDeliveryTasks, type RoadmapDeliveryTaskData } from "./roadmap-delivery-tasks";
 import type { MemberData } from "@/lib/types";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { Discussion } from "@/components/comments/discussion";
 import { usePanelContext } from "./panel-context";
 
 type RoadmapItemData = {
@@ -178,6 +179,7 @@ export function RoadmapItemPanel({
           onChanged={refresh}
         />
       </Section>
+      <Discussion targetType="ROADMAP_ITEM" targetId={id} />
     </PanelContainer>
   );
 }

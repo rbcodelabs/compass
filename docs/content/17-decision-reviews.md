@@ -24,6 +24,8 @@ Tracked decisions are informational. Approve, Request changes, and Reject
 record what a person decided; they do not automatically modify the linked
 Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item.
 
+Discussion comments are deliberately different: they capture questions and working conversation on an item's detail panel, but never count as a decision or authorization. When a choice needs an accountable outcome and rationale, create a tracked Decision instead of relying on a comment thread.
+
 Agents can attach up to 12 supporting sources when requesting a decision. Compass
 validates that every source belongs to the same workspace and snapshots its
 title and version date into the immutable review packet. Renaming or removing a
