@@ -70,8 +70,11 @@ test.describe("Capture — research study", () => {
     await participant.setViewportSize({ width: 390, height: 844 })
     await participant.goto(shareUrl.replace(/^https?:\/\/[^/]+/, baseURL!))
     await expect(participant.getByRole("heading", { name: /E2E interview/ })).toBeVisible()
+    await participant.getByRole("button", { name: /Use chat/ }).click()
     await participant.getByRole("button", { name: "Start interview" }).click()
     await expect(participant.getByText("Tell me about the last time you planned your week.")).toBeVisible()
+    await participant.getByLabel("Share screenshot or PDF").setInputFiles("e2e/fixtures/test-image.png")
+    await expect(participant.getByText("test-image.png")).toBeVisible()
     await participant.getByRole("textbox", { name: "Your response" }).fill("I use a spreadsheet every Monday.")
     await participant.getByRole("button", { name: "Send" }).click()
     await expect(participant.getByText("What made that difficult for you?")).toBeVisible()
@@ -138,12 +141,43 @@ test.describe("Capture — research study", () => {
     })
     const singleFlightTurns = (await singleFlightResume.json()).turns as Array<{ role: string; content: string }>
     expect(singleFlightTurns.filter((turn) => turn.role === "PARTICIPANT")).toHaveLength(1)
+
+    const voiceStart = await anonymous.request.post(`${baseURL}/api/research/start`, {
+      data: { token: participantToken, modality: "VOICE" },
+    })
+    expect(voiceStart.status()).toBe(200)
+    const voiceStarted = await voiceStart.json() as { sessionId: string; resumeToken: string }
+    const voiceSession = { sessionId: voiceStarted.sessionId, resumeToken: voiceStarted.resumeToken }
+    const voiceCredential = await anonymous.request.post(`${baseURL}/api/research/voice-session`, {
+      data: { token: participantToken, ...voiceSession },
+    })
+    expect(voiceCredential.status()).toBe(200)
+    const { leaseId } = await voiceCredential.json() as { leaseId: string }
+    expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: {
+      token: participantToken, ...voiceSession, leaseId, action: "FINAL",
+      providerEventId: "e2e-discovery-participant-1", role: "PARTICIPANT",
+      content: "I plan every Monday because the rest of the week changes quickly.",
+    } })).status()).toBe(200)
+    expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: {
+      token: participantToken, ...voiceSession, leaseId, action: "FINAL",
+      providerEventId: "e2e-discovery-interviewer-1", role: "INTERVIEWER",
+      content: "Tell me about the last time that plan had to change.",
+    } })).status()).toBe(200)
+    expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: {
+      token: participantToken, ...voiceSession, leaseId, action: "DISCONNECT",
+    } })).status()).toBe(200)
+    expect((await anonymous.request.post(`${baseURL}/api/research/complete`, { data: {
+      token: participantToken, ...voiceSession,
+    } })).status()).toBe(200)
     await anonymous.close()
 
     await page.goto(`${base}/capture/studies/${studyId}`)
-    await expect(page.getByText("completed")).toBeVisible()
+    await expect(page.getByText("completed", { exact: true })).toHaveCount(2)
     await expect(page.getByText("I use a spreadsheet every Monday.")).toBeVisible()
     await expect(page.getByText("What made that difficult for you?").first()).toBeVisible()
+    await expect(page.getByRole("link", { name: "test-image.png" })).toBeVisible()
+    await expect(page.getByText("Voice session")).toBeVisible()
+    await expect(page.getByText("I plan every Monday because the rest of the week changes quickly.")).toBeVisible()
 
     const crossWorkspace = await page.goto(`/rbcodelabs/compass/capture/studies/${studyId}`)
     expect(crossWorkspace?.status()).toBe(404)

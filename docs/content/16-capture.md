@@ -22,7 +22,9 @@ Study settings remain editable until the first participant session starts. After
 
 ![Guided usability study creation](/screenshots/docs/guided-study-create.png)
 
-For guided usability tests, the participant first chooses Chat or Voice. On desktop the live product appears beside the neutral moderator; on smaller screens it uses a constrained stacked layout. An **Open product** action is always available when a site blocks embedding. The moderator presents one task at a time, asks the participant to think aloud, and probes expectations without identifying controls or rescuing them.
+Participants use Chat by default. The legacy browser-authoritative Voice path is unavailable in production, even when `COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED=1`; that flag is reserved for the replacement authoritative transport. The legacy path can run only in the non-production functional E2E harness when the flag and `E2E_FUNCTIONAL=1` are both set. Customer-interview voice additionally requires `COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED=1` in production. Chat remains available regardless of voice configuration.
+
+For guided usability tests, the live product appears beside the neutral moderator on desktop and uses a constrained stacked layout on smaller screens. An **Open product** action is always available when a site blocks embedding. The moderator presents one task at a time, asks the participant to think aloud, and probes expectations without identifying controls or rescuing them.
 
 ![Guided participant experience on desktop](/screenshots/docs/guided-participant-desktop.png)
 

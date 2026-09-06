@@ -25,6 +25,8 @@ function request(path: string, body: unknown) {
 describe("research voice APIs", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
     vi.stubEnv("OPENAI_API_KEY", "long-lived-secret")
     resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1" }, prisma: {} })
     createResearchVoiceLease.mockResolvedValue({
@@ -33,20 +35,44 @@ describe("research voice APIs", () => {
   })
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 
-  it("mints only a short-lived tool-free realtime credential from server-authored policy", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ value: "ephemeral-secret", expires_at: 123 }), { status: 200 }))
+  it("rejects credential and event APIs while authoritative voice is disabled", async () => {
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    const credential = await createVoice(request("/api/research/voice-session", {
+      token: "study-token", sessionId: "session-1", resumeToken: "resume-secret",
+    }))
+    const event = await persistVoice(request("/api/research/voice-event", {
+      token: "study-token", sessionId: "session-1", resumeToken: "resume-secret", leaseId: "lease-1",
+      action: "DISCONNECT",
+    }))
+    expect(credential.status).toBe(409)
+    expect(event.status).toBe(409)
+    expect(resolveActiveResearchStudy).not.toHaveBeenCalled()
+  })
+
+  it("keeps legacy credential and event APIs closed in production even when the authoritative flag is enabled", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    const credential = await createVoice(request("/api/research/voice-session", {
+      token: "study-token", sessionId: "session-1", resumeToken: "resume-secret",
+    }))
+    const event = await persistVoice(request("/api/research/voice-event", {
+      token: "study-token", sessionId: "session-1", resumeToken: "resume-secret", leaseId: "lease-1",
+      action: "DISCONNECT",
+    }))
+    expect(credential.status).toBe(409)
+    expect(event.status).toBe(409)
+    expect(resolveActiveResearchStudy).not.toHaveBeenCalled()
+  })
+
+  it("does not expose paid legacy provider credentials outside the E2E harness", async () => {
+    vi.stubEnv("E2E_FUNCTIONAL", "")
+    const fetchMock = vi.fn()
     vi.stubGlobal("fetch", fetchMock)
     const response = await createVoice(request("/api/research/voice-session", {
       token: "study-token", sessionId: "session-1", resumeToken: "resume-secret",
     }))
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toMatchObject({ ephemeralToken: "ephemeral-secret", leaseId: "lease-1" })
-    const providerBody = JSON.parse(fetchMock.mock.calls[0][1].body as string)
-    expect(providerBody.session).toMatchObject({
-      type: "realtime", model: expect.any(String), instructions: "SERVER GUIDED INSTRUCTIONS", tools: [],
-      audio: { input: { transcription: { model: expect.any(String) } }, output: { voice: expect.any(String) } },
-    })
-    expect(JSON.stringify(providerBody)).not.toContain("resume-secret")
+    expect(response.status).toBe(409)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(createResearchVoiceLease).not.toHaveBeenCalled()
   })
 
   it("rejects client model, prompt, voice, or tool overrides", async () => {
