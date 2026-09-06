@@ -142,6 +142,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result |
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
 | `create_opportunity` | Create a new opportunity with title, description, status |
+| `update_opportunity` | Update an existing opportunity's title and/or description; pass `null` to clear its description |
 | `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
 | `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (or clear the link) |
 | `add_solution` | Add a proposed Solution to an Opportunity |
@@ -178,7 +179,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `list_roadmap_items` | Fetch active roadmap items for a workspace, grouped by horizon (including LAUNCHING/LAUNCHED), including start/end dates and whether each item is private (`isPrivate`) |
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
 | `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
-| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item |
+| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
 | `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state, linked item type, outcome, reviewer, or search text |
 | `get_decision` | Read one tracking-only decision and its immutable revision history |
 | `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. This operation never takes the human decision or invokes release automation |
@@ -194,6 +195,15 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 Decision-taking is deliberately absent from MCP. A signed-in human reviewer opens
 the stable Compass review URL and chooses one option. Agents may prepare and read
 packets, then apply a recorded decision; they cannot impersonate the reviewer.
+
+`request_decision.sources` is an optional array of `{ type, id }` references.
+Supported types are `WORKSPACE`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`,
+`ROADMAP_ITEM`, `DOC`, `EXPERIMENT`, `FEEDBACK`, and `EVIDENCE`. Compass removes
+duplicates and the primary linked item, validates every reference within the
+declared workspace, and snapshots the source title and `updatedAt` version into
+the immutable packet. If any source is missing or belongs to another workspace,
+the whole request fails and no review is created. Put readable reasoning in the
+Markdown `context`; do not embed source UUIDs there.
 
 `apply_recorded_decision` is queue-only for release authorization. It validates
 the authoritative provider snapshot outside the database transaction, then a

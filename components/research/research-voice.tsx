@@ -30,7 +30,7 @@ function readFileDataUrl(file: File) {
   })
 }
 
-export function ResearchVoice({ token }: { token: string }) {
+export function ResearchVoice({ token, onUseChat, guided = false }: { token: string; onUseChat?: () => void; guided?: boolean }) {
   const [status, setStatus] = useState<VoiceStatus>("idle")
   const [messages, setMessages] = useState<VoiceMessage[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -42,6 +42,7 @@ export function ResearchVoice({ token }: { token: string }) {
   const dataChannelRef = useRef<RTCDataChannel | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const persistChain = useRef<Promise<void>>(Promise.resolve())
+  const connectAttemptRef = useRef(0)
 
   function closeMedia() {
     dataChannelRef.current?.close()
@@ -50,6 +51,7 @@ export function ResearchVoice({ token }: { token: string }) {
     dataChannelRef.current = null
     peerRef.current = null
     streamRef.current = null
+    if (audioRef.current) audioRef.current.srcObject = null
   }
 
   async function releaseLease() {
@@ -66,6 +68,7 @@ export function ResearchVoice({ token }: { token: string }) {
   }
 
   useEffect(() => () => {
+    connectAttemptRef.current += 1
     closeMedia()
     void releaseLease()
     // Refs deliberately capture the active browser resources on unmount.
@@ -86,11 +89,12 @@ export function ResearchVoice({ token }: { token: string }) {
         body: JSON.stringify({ token, ...session, leaseId, action: "FINAL", ...event }),
       })
       if (!response.ok) throw new Error("Finalized transcript could not be saved")
-    }).catch((caught) => {
+    }).catch(async (caught) => {
       console.error("Voice transcript persistence failed", caught)
       setError("The latest voice transcript could not be saved. Reconnect before continuing.")
       setStatus("error")
       closeMedia()
+      await releaseLease()
     })
     return persistChain.current
   }
@@ -104,24 +108,56 @@ export function ResearchVoice({ token }: { token: string }) {
   }
 
   async function connect() {
+    const attempt = connectAttemptRef.current + 1
+    connectAttemptRef.current = attempt
+    const isCurrentAttempt = () => connectAttemptRef.current === attempt
+    const stopStream = (stream: MediaStream) => stream.getTracks().forEach((track) => track.stop())
+    const abortAttempt = async () => {
+      closeMedia()
+      await releaseLease()
+    }
     setStatus("connecting")
     setError(null)
     closeMedia()
     try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!isCurrentAttempt()) {
+        stopStream(stream)
+        return
+      }
+      streamRef.current = stream
       let session = readStored(token)
-      const start = await fetch("/api/research/start", {
+      let start = await fetch("/api/research/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, modality: "VOICE", ...(session ?? {}) }),
       })
-      if (!start.ok && session) {
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
+      if (!start.ok && session && (start.status === 404 || start.status === 409)) {
         localStorage.removeItem(storageKey(token))
         session = null
+        start = await fetch("/api/research/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, modality: "VOICE" }),
+        })
+        if (!isCurrentAttempt()) {
+          await abortAttempt()
+          return
+        }
       }
       if (!start.ok) throw new Error("The voice session could not start")
       const started = await start.json() as StoredVoiceSession & { status: string; turns?: Array<{ id: string; role: "PARTICIPANT" | "INTERVIEWER"; content: string }> }
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
       if (started.status === "COMPLETED") {
         localStorage.removeItem(storageKey(token))
+        closeMedia()
         setStatus("complete")
         return
       }
@@ -138,12 +174,14 @@ export function ResearchVoice({ token }: { token: string }) {
       if (!credentialResponse.ok) throw new Error("The realtime moderator could not connect")
       const credential = await credentialResponse.json() as { ephemeralToken: string; leaseId: string }
       leaseRef.current = credential.leaseId
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
 
       const peer = new RTCPeerConnection()
       peerRef.current = peer
       peer.ontrack = (event) => { if (audioRef.current) audioRef.current.srcObject = event.streams[0] }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      streamRef.current = stream
       for (const track of stream.getTracks()) peer.addTrack(track, stream)
       const channel = peer.createDataChannel("oai-events")
       dataChannelRef.current = channel
@@ -152,21 +190,39 @@ export function ResearchVoice({ token }: { token: string }) {
       })
       channel.addEventListener("open", () => channel.send(JSON.stringify({ type: "response.create" })))
       const offer = await peer.createOffer()
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
       await peer.setLocalDescription(offer)
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
       const sdp = await fetch("https://api.openai.com/v1/realtime/calls", {
         method: "POST",
         body: offer.sdp,
         headers: { Authorization: `Bearer ${credential.ephemeralToken}`, "Content-Type": "application/sdp" },
       })
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
       if (!sdp.ok) throw new Error("Realtime connection was rejected")
       await peer.setRemoteDescription({ type: "answer", sdp: await sdp.text() })
+      if (!isCurrentAttempt()) {
+        await abortAttempt()
+        return
+      }
       setStatus("ready")
     } catch (caught) {
       console.error("Research voice connection failed", caught)
       closeMedia()
       await releaseLease()
-      setError(caught instanceof Error ? caught.message : "Voice connection failed")
-      setStatus("error")
+      if (isCurrentAttempt()) {
+        setError(caught instanceof Error ? caught.message : "Voice connection failed")
+        setStatus("error")
+      }
     }
   }
 
@@ -233,9 +289,12 @@ export function ResearchVoice({ token }: { token: string }) {
 
   if (status === "idle" || status === "error") return <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
     <div className="flex size-20 items-center justify-center rounded-full bg-muted"><MicIcon className="size-8 text-text-muted" /></div>
-    <div><h2 className="font-semibold">Voice think-aloud</h2><p className="mt-1 text-sm text-text-muted">Your microphone connects directly to the realtime moderator. Raw audio is not retained.</p></div>
+    <div><h2 className="font-semibold">{guided ? "Voice think-aloud" : "Voice interview"}</h2><p className="mt-1 text-sm text-text-muted">Your microphone connects directly to the realtime moderator. Raw audio is not retained.</p></div>
     {error && <p className="max-w-sm text-sm text-destructive" role="alert">{error}</p>}
-    <Button onClick={() => void connect()} type="button">{status === "error" && <RotateCcwIcon data-icon="inline-start" />}{status === "error" ? "Reconnect voice session" : "Start voice session"}</Button>
+    <div className="flex flex-wrap justify-center gap-2">
+      <Button onClick={() => void connect()} type="button">{status === "error" && <RotateCcwIcon data-icon="inline-start" />}{status === "error" ? "Reconnect voice session" : "Start voice session"}</Button>
+      {status === "error" && onUseChat && <Button onClick={onUseChat} type="button" variant="outline">Use chat instead</Button>}
+    </div>
   </div>
 
   return <div className="flex min-h-0 flex-1 flex-col">
@@ -244,7 +303,7 @@ export function ResearchVoice({ token }: { token: string }) {
       <div className={`flex size-20 items-center justify-center rounded-full ${status === "listening" ? "bg-primary text-primary-foreground" : status === "speaking" ? "bg-foreground text-background" : "bg-muted"}`}>
         {status === "connecting" ? <LoaderCircleIcon className="size-7 animate-spin" /> : <MicIcon className="size-7" />}
       </div>
-      <p aria-live="polite" className="text-sm text-text-muted">{status === "connecting" ? "Connecting securely…" : status === "listening" ? "Listening to you" : status === "speaking" ? "Compass is speaking" : "Connected — think aloud as you work"}</p>
+      <p aria-live="polite" className="text-sm text-text-muted">{status === "connecting" ? "Connecting securely…" : status === "listening" ? "Listening to you" : status === "speaking" ? "Compass is speaking" : guided ? "Connected — think aloud as you work" : "Connected — speak naturally"}</p>
     </div>
     <div aria-live="polite" className="min-h-0 flex-1 space-y-2 overflow-y-auto">
       {messages.map((message) => <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${message.role === "PARTICIPANT" ? "ml-auto bg-primary text-primary-foreground" : "border"}`} key={message.id}>{message.content}</div>)}

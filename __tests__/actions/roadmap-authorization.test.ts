@@ -61,7 +61,10 @@ beforeEach(() => {
     where.id ? Promise.resolve({ id: where.id, workspaceId: WS, horizon: "NEXT", status: "ACTIVE" }) : Promise.resolve(null),
   );
   roadmapItem.create.mockResolvedValue({ id: ITEM });
-  roadmapItem.update.mockResolvedValue({ id: ITEM });
+  roadmapItem.update.mockResolvedValue({
+    id: ITEM, horizon: "LATER", startDate: new Date("2026-09-07T00:00:00.000Z"),
+    endDate: new Date("2026-09-11T00:00:00.000Z"), updatedAt: new Date("2026-09-05T12:00:00.000Z"),
+  });
   solution.findFirst.mockResolvedValue({ title: "Solution", opportunityId: "opp-a" });
   opportunity.findFirst.mockResolvedValue({ id: "opp-a" });
   squad.findFirst.mockResolvedValue({ id: "squad-a" });
@@ -246,7 +249,7 @@ describe("rescheduleRoadmapItem", () => {
       .mockResolvedValueOnce({ id: ITEM, workspaceId: WS, horizon: "NEXT", status: "ACTIVE" })
       .mockResolvedValueOnce({ sortOrder: 3 });
 
-    await rescheduleRoadmapItem(ITEM, WS, { horizon: "LATER", startDate, endDate });
+    const result = await rescheduleRoadmapItem(ITEM, WS, { horizon: "LATER", startDate, endDate });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(roadmapItem.update).toHaveBeenCalledWith({
@@ -254,6 +257,10 @@ describe("rescheduleRoadmapItem", () => {
       data: expect.objectContaining({ horizon: "LATER", startDate, endDate, sortOrder: 4 }),
     });
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
+    expect(result).toEqual({
+      id: ITEM, horizon: "LATER", startDate: "2026-09-07T00:00:00.000Z",
+      endDate: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-05T12:00:00.000Z",
+    });
   });
 
   it("admits direct entry to NOW transactionally while the native gate is OFF", async () => {

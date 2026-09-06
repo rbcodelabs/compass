@@ -1,6 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import type { PrismaClient, ResearchParticipantToken, ResearchStudy } from "@prisma/client"
 import { buildResearchAgentTurnPrompt, type ResearchGuideItem } from "@/lib/research"
+import {
+  isResearchDiscoveryVoiceEnabled,
+  isResearchLegacyVoiceHarnessEnabled,
+} from "@/lib/research-feature"
 
 export const MAX_RESEARCH_MESSAGE_CHARS = 4_000
 export const MAX_RESEARCH_INTERVIEWER_CHARS = 4_000
@@ -96,23 +100,22 @@ async function retryDsql<T>(
   throw lastError
 }
 
-async function consumeParticipantRate(
-  prisma: PrismaClient,
+async function consumeParticipantRateOnClient(
+  prisma: Pick<PrismaClient, "researchParticipantToken">,
   tokenId: string,
   kind: "START" | "RESPONSE",
 ) {
-  await retryDsql(() => prisma.$transaction(async (tx) => {
-    const token = await tx.researchParticipantToken.findUnique({
-      where: { id: tokenId },
-      select: {
-        startWindowAt: true,
-        startCount: true,
-        responseWindowAt: true,
-        responseCount: true,
-        agentWindowAt: true,
-        agentCallCount: true,
-      },
-    })
+  const token = await prisma.researchParticipantToken.findUnique({
+    where: { id: tokenId },
+    select: {
+      startWindowAt: true,
+      startCount: true,
+      responseWindowAt: true,
+      responseCount: true,
+      agentWindowAt: true,
+      agentCallCount: true,
+    },
+  })
     if (!token) throw new ResearchSessionError("Study not found", 404)
     const now = new Date()
     if (kind === "START") {
@@ -121,7 +124,7 @@ async function consumeParticipantRate(
       if (count >= MAX_RESEARCH_STARTS_PER_MINUTE) {
         throw new ResearchSessionError("Too many interview starts. Please wait and try again.", 429)
       }
-      const updated = await tx.researchParticipantToken.updateMany({
+      const updated = await prisma.researchParticipantToken.updateMany({
         where: { id: tokenId, startWindowAt: token.startWindowAt, startCount: token.startCount },
         data: active
           ? { startCount: count + 1 }
@@ -141,7 +144,7 @@ async function consumeParticipantRate(
     if (dayCount >= MAX_RESEARCH_AGENT_CALLS_PER_DAY) {
       throw new ResearchSessionError("This participant link has reached its daily interview limit.", 429)
     }
-    const updated = await tx.researchParticipantToken.updateMany({
+    const updated = await prisma.researchParticipantToken.updateMany({
       where: {
         id: tokenId,
         responseWindowAt: token.responseWindowAt,
@@ -159,7 +162,16 @@ async function consumeParticipantRate(
       },
     })
     if (updated.count !== 1) throw Object.assign(new Error("Concurrent research response quota update"), { code: "P2034" })
-  }))
+}
+
+async function consumeParticipantRate(
+  prisma: PrismaClient,
+  tokenId: string,
+  kind: "START" | "RESPONSE",
+) {
+  await retryDsql(() => prisma.$transaction((tx) =>
+    consumeParticipantRateOnClient(tx, tokenId, kind),
+  ))
 }
 
 function initialInterviewerMessage(study: ResearchStudy): string {
@@ -265,6 +277,9 @@ export async function startOrResumeResearchSession(
     const session = await loadParticipantSession(context, resume.sessionId, resume.resumeToken, {
       allowCompleted: true,
     })
+    if (session.modality === "VOICE" && !isResearchLegacyVoiceHarnessEnabled()) {
+      throw new ResearchSessionError("Voice is not available for this study", 409)
+    }
     return {
       sessionId: session.id,
       resumeToken: resume.resumeToken,
@@ -274,19 +289,40 @@ export async function startOrResumeResearchSession(
     }
   }
 
-  if (modality === "VOICE" && (context.study.studyType !== "USABILITY_TEST" || !context.study.appUrl)) {
-    throw new ResearchSessionError("Voice is only available for guided usability studies", 409)
-  }
-
   const now = new Date()
-  await consumeParticipantRate(context.prisma, context.participantToken.id, "START")
-
   const sessionId = randomUUID()
   const openingTurnId = modality === "CHAT" ? randomUUID() : null
   const resumeSecret = createResumeToken()
-  const message = initialInterviewerMessage(context.study)
-  await retryDsql(() => context.prisma.$transaction([
-    context.prisma.researchSession.create({
+  let message = ""
+  await retryDsql(() => context.prisma.$transaction(async (tx) => {
+    const locked = await tx.researchStudy.updateMany({
+      where: { id: context.study.id, status: "ACTIVE" },
+      data: { updatedAt: now },
+    })
+    if (locked.count !== 1) throw new ResearchSessionError("Study not found", 404)
+    const validationNow = new Date()
+    const token = await tx.researchParticipantToken.findFirst({
+      where: {
+        id: context.participantToken.id,
+        studyId: context.study.id,
+        revokedAt: null,
+        expiresAt: { gt: validationNow },
+      },
+      select: { id: true },
+    })
+    if (!token) throw new ResearchSessionError("Study not found", 404)
+    const study = await tx.researchStudy.findUnique({ where: { id: context.study.id } })
+    if (!study || study.status !== "ACTIVE") throw new ResearchSessionError("Study not found", 404)
+    if (modality === "VOICE" && (
+      !isResearchLegacyVoiceHarnessEnabled() ||
+      (study.studyType === "CUSTOMER_INTERVIEW" && !isResearchDiscoveryVoiceEnabled()) ||
+      (study.studyType === "USABILITY_TEST" && !study.appUrl)
+    )) {
+      throw new ResearchSessionError("Voice is not available for this study", 409)
+    }
+    await consumeParticipantRateOnClient(tx, context.participantToken.id, "START")
+    message = initialInterviewerMessage(study)
+    await tx.researchSession.create({
       data: {
         id: sessionId,
         studyId: context.study.id,
@@ -299,11 +335,11 @@ export async function startOrResumeResearchSession(
         nextSequence: modality === "CHAT" ? 1 : 0,
         updatedAt: now,
       },
-    }),
-    ...(openingTurnId ? [context.prisma.researchTurn.create({
+    })
+    if (openingTurnId) await tx.researchTurn.create({
       data: { id: openingTurnId, sessionId, role: "INTERVIEWER", content: message, sequence: 0 },
-    })] : []),
-  ]))
+    })
+  }))
   return {
     sessionId,
     resumeToken: resumeSecret.token,

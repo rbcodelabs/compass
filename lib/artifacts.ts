@@ -347,7 +347,8 @@ type WorkspaceArtifactCleanupClient = {
 export async function deleteWorkspaceArtifacts(
   prisma: WorkspaceArtifactCleanupClient,
   workspaceId: string,
-  storage: ArtifactStorage
+  storage: ArtifactStorage,
+  retryCleanup = true
 ) {
   const artifacts = await prisma.artifact.findMany({ where: { workspaceId }, select: { id: true } })
   const artifactIds = artifacts.map((artifact) => artifact.id)
@@ -362,5 +363,5 @@ export async function deleteWorkspaceArtifacts(
     await prisma.artifactRevision.deleteMany({ where: { artifactId: { in: artifactIds } } })
   }
   await prisma.artifact.deleteMany({ where: { workspaceId } })
-  await retryArtifactBlobCleanup(prisma, storage)
+  if (retryCleanup) await retryArtifactBlobCleanup(prisma, storage)
 }

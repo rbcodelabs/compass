@@ -67,6 +67,7 @@ export default defineConfig({
       env: {
         PORT: String(FUNCTIONAL_PORT),
         COMPASS_RESEARCH_CAPTURE_ENABLED: "1",
+        COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED: "1",
         // Deterministic test-only key; production must provide its own secret.
         SSO_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
       },

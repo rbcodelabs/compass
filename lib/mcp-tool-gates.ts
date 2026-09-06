@@ -152,6 +152,7 @@ export const TOOL_GATES: Record<string, Gate> = {
   list_opportunities: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_opportunity: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   create_opportunity: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  update_opportunity: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   update_opportunity_status: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   link_opportunity_to_kr: async (a, x) => {
     await assertEntityAccess(a, "opportunity", x.opportunityId)

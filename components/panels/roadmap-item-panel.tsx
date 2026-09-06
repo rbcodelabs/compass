@@ -21,6 +21,7 @@ import { PositioningBriefRow } from "./positioning-brief-row";
 import { RoadmapDeliveryTasks, type RoadmapDeliveryTaskData } from "./roadmap-delivery-tasks";
 import type { MemberData } from "@/lib/types";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { usePanelContext } from "./panel-context";
 
 type RoadmapItemData = {
   id: string;
@@ -32,6 +33,7 @@ type RoadmapItemData = {
   isPrivate: boolean;
   startDate: string | null;
   endDate: string | null;
+  updatedAt: string;
   squad: { id: string; name: string; color: string } | null;
   solution: { id: string; title: string } | null;
   keyResult: { id: string; title: string } | null;
@@ -66,6 +68,7 @@ export function RoadmapItemPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
+  const { notifyEntityMutated } = usePanelContext();
   const { data, error, mutate, refresh } = useEntityDetail<RoadmapItemData>(
     "roadmapItem",
     id,
@@ -83,7 +86,11 @@ export function RoadmapItemPanel({
     id,
     orgSlug,
     workspaceSlug,
-    onSaved: (d) => mutate(d as RoadmapItemData),
+    onSaved: (d) => {
+      const saved = d as RoadmapItemData;
+      mutate(saved);
+      notifyEntityMutated("roadmapItem", saved.id, { horizon: saved.horizon as import("@/lib/types").Horizon, updatedAt: saved.updatedAt });
+    },
   };
 
   // The five possible origins collapse into one "linked" list.

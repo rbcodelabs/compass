@@ -28,7 +28,7 @@ export async function setLaunchTier(
   itemId: string,
   tier: LaunchTier,
   workspaceId: string
-): Promise<void> {
+) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
@@ -50,7 +50,13 @@ export async function setLaunchTier(
   const template = await resolveOrSeedTemplate(workspaceId, tier);
   await setLaunchTierCore(item.id, tier, template);
 
+  const updated = await prisma.roadmapItem.findUniqueOrThrow({
+    where: { id: item.id },
+    select: { id: true, horizon: true, updatedAt: true },
+  });
+
   revalidatePath("/", "layout");
+  return { ...updated, updatedAt: updated.updatedAt.toISOString() };
 }
 
 /**
