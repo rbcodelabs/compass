@@ -31,6 +31,7 @@ const mockExperiment = {
   update: vi.fn(),
 };
 const mockRoadmapItem = {
+  update: vi.fn(),
   updateMany: vi.fn(),
   findMany: vi.fn(),
   deleteMany: vi.fn(),
@@ -368,7 +369,7 @@ describe("deleteSquad", () => {
     });
     expect(mockRoadmapItem.updateMany).toHaveBeenCalledWith({
       where: { squadId: "squad-1" },
-      data: { squadId: null },
+      data: { squadId: null, updatedAt: expect.any(Date) },
     });
 
     expect(mockSquad.delete).toHaveBeenCalledWith({ where: { id: "squad-1" } });
@@ -391,6 +392,14 @@ describe("assignSquad", () => {
     expect(mockObjective.update).toHaveBeenCalledWith({
       where: { id: "obj-1" },
       data: { squadId: "squad-1" },
+    });
+  });
+
+  it("bumps the roadmap item revision when assigning a squad", async () => {
+    await assignSquad("roadmapItem", "roadmap-1", "squad-1", "/path");
+    expect(mockRoadmapItem.update).toHaveBeenCalledWith({
+      where: { id: "roadmap-1" },
+      data: { squadId: "squad-1", updatedAt: expect.any(Date) },
     });
   });
 

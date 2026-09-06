@@ -71,7 +71,9 @@ describe("researcher study access", () => {
       id: "study-1",
       name: "Planning interviews",
       goal: "Understand planning",
+      guide: JSON.stringify([{ id: "1", text: "Canonical question" }]),
       studyType: "USABILITY_TEST",
+      status: "ACTIVE",
       appUrl: "https://example.com/pricing",
       targetMinutes: 15,
       participantTokens: [],
@@ -90,11 +92,16 @@ describe("researcher study access", () => {
 
     render(await StudyPage(props))
 
-    expect(screen.getByText("Canonical question")).toBeVisible()
+    expect(screen.getAllByText("Canonical question").at(-1)).toBeVisible()
     expect(screen.getByText("Canonical answer")).toBeVisible()
-    expect(screen.getByText("Guided usability test")).toBeVisible()
+    expect(screen.getAllByText("Guided usability test")[0]).toBeVisible()
     expect(screen.getByRole("link", { name: "https://example.com/pricing" })).toHaveAttribute("rel", "noopener noreferrer")
-    expect(screen.getByText("15 minutes")).toBeVisible()
+    expect(screen.getAllByText("15 minutes")[0]).toBeVisible()
+    expect(screen.getByText("active")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Close study" })).toBeVisible()
+    expect(screen.getByText(/protocol is locked/i)).toBeVisible()
+    expect(screen.getByLabelText("Research goal")).toBeDisabled()
+    expect(screen.getByLabelText("Study name")).toBeEnabled()
     expect(screen.getByText("Voice session")).toBeVisible()
     expect(screen.getByRole("link", { name: "pricing.png" })).toHaveAttribute("href", "/api/research/member-attachments/attachment-1")
     expect(reconcileAbandonedResearchSessions).toHaveBeenCalledWith(expect.anything(), "study-1")

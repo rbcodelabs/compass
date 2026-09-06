@@ -91,6 +91,18 @@ beforeEach(() => {
   mockPrisma.$transaction.mockImplementation((operation: Promise<unknown>[] | ((database: typeof mockPrisma) => unknown)) => Array.isArray(operation) ? Promise.all(operation) : operation(mockPrisma))
 })
 
+describe("assign_squad MCP roadmap revision", () => {
+  it("bumps updatedAt when assigning a roadmap item", async () => {
+    vi.clearAllMocks()
+    mockPrisma.roadmapItem.update.mockResolvedValue({ id: "item-1" })
+    await getHandler("assign_squad")({ objectType: "roadmap_item", objectId: "item-1", squadId: "squad-1" })
+    expect(mockPrisma.roadmapItem.update).toHaveBeenCalledWith({
+      where: { id: "item-1" },
+      data: { squadId: "squad-1", updatedAt: expect.any(Date) },
+    })
+  })
+})
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("add_to_roadmap MCP tool — dates", () => {

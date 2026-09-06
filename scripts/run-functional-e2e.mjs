@@ -15,6 +15,7 @@ const modes = {
     "--project=functional",
     "e2e/functional/specs/roadmap-timeline.spec.ts",
     "e2e/functional/specs/roadmap-unscheduled-items.spec.ts",
+    "e2e/functional/specs/native-timeline-rollout.spec.ts",
   ],
   functional: ["--project=functional-setup", "--project=functional"],
   all: [],

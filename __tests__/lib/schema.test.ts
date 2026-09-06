@@ -81,4 +81,27 @@ describe("getActiveSchema", () => {
     delete process.env.PGSCHEMA;
     expect(getActiveSchema()).toBe("compass_dev");
   });
+
+  it("isolates enabled previews by numeric PR and immutable revision", () => {
+    process.env.PREVIEW_AUTOMATION_ENABLED = "1";
+    process.env.VERCEL_ENV = "preview";
+    process.env.VERCEL_GIT_PULL_REQUEST_ID = "156";
+    process.env.VERCEL_GIT_COMMIT_SHA = "a".repeat(40);
+    expect(getActiveSchema()).toBe("compass_pr_156_aaaaaaaaaaaa");
+  });
+
+  it.each([undefined, "", "../prod", "0"])("fails closed for invalid PR metadata %s", (pr) => {
+    process.env.PREVIEW_AUTOMATION_ENABLED = "1";
+    process.env.VERCEL_ENV = "preview";
+    if (pr === undefined) delete process.env.VERCEL_GIT_PULL_REQUEST_ID;
+    else process.env.VERCEL_GIT_PULL_REQUEST_ID = pr;
+    process.env.VERCEL_GIT_COMMIT_SHA = "a".repeat(40);
+    expect(() => getActiveSchema()).toThrow(/preview/i);
+  });
+
+  it("does not enable automation schemas outside preview", () => {
+    process.env.PREVIEW_AUTOMATION_ENABLED = "1";
+    process.env.VERCEL_ENV = "production";
+    expect(() => getActiveSchema()).toThrow(/preview/i);
+  });
 });

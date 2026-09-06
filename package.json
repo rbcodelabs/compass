@@ -24,6 +24,13 @@
     "test:e2e:functional": "node scripts/run-functional-e2e.mjs functional",
     "test:e2e:roadmap": "node scripts/run-functional-e2e.mjs roadmap",
     "test:e2e:all": "node scripts/run-functional-e2e.mjs all",
+    "preview:validate": "tsx scripts/preview-automation/validate.ts",
+    "preview:provision": "tsx scripts/preview-automation/provision.ts",
+    "preview:migrate": "tsx scripts/preview-automation/migrate.ts",
+    "preview:test": "tsx scripts/preview-automation/run.ts",
+    "preview:cleanup": "tsx scripts/preview-automation/cleanup.ts",
+    "preview:flow": "tsx scripts/preview-automation/lifecycle.ts",
+    "preview:probe": "tsx scripts/preview-automation/probe.ts",
     "e2e:db:prepare": "node scripts/prepare-e2e-database.mjs",
     "e2e:db:verify-clean": "node scripts/verify-e2e-cleanup.mjs",
     "docs:screenshots": "playwright test --project=screenshots e2e/screenshots.spec.ts"

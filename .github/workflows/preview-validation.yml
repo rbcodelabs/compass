@@ -1,0 +1,172 @@
+name: Authenticated preview validation
+on:
+  workflow_run:
+    workflows: [Preview deployment relay]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      deployment_id:
+        description: Immutable Vercel deployment ID
+        required: true
+        type: string
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+concurrency:
+  group: compass-preview-validation
+  cancel-in-progress: false
+env:
+  PREVIEW_DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+  PREVIEW_VERCEL_PROJECT_ID: ${{ vars.PREVIEW_VERCEL_PROJECT_ID }}
+  PREVIEW_VERCEL_TEAM_ID: ${{ vars.PREVIEW_VERCEL_TEAM_ID }}
+jobs:
+  validate:
+    if: ${{ vars.PREVIEW_AUTOMATION_ENABLED == '1' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == 'rbcodelabs/compass')) }}
+    runs-on: ubuntu-latest
+    environment: preview-tests
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+      schema: ${{ steps.target.outputs.schema }}
+      deploymentId: ${{ steps.target.outputs.deploymentId }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.34.5 }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .node-version, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        if: github.event_name == 'workflow_run'
+        with:
+          name: preview-target
+          path: relay-input
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - id: target
+        run: pnpm preview:validate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIEW_VERCEL_TOKEN: ${{ secrets.PREVIEW_VERCEL_TOKEN }}
+          PREVIEW_RELAY_FILE: ${{ github.event_name == 'workflow_run' && 'relay-input/preview-target.json' || '' }}
+  pending:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: node --experimental-strip-types scripts/preview-automation/status.ts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIEW_STATUS_SHA: ${{ needs.validate.outputs.sha }}
+          PREVIEW_STATUS_STATE: pending
+  provision:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: preview-provisioning
+    outputs:
+      leaseReceipt: ${{ steps.provision.outputs.leaseReceipt }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.34.5 }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .node-version, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - id: provision
+        run: pnpm preview:provision
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIEW_VERCEL_TOKEN: ${{ secrets.PREVIEW_VERCEL_TOKEN }}
+          PREVIEW_CONTROLLER_TRUSTED_REF: refs/heads/main
+          PREVIEW_DEPLOYMENT_ID: ${{ needs.validate.outputs.deploymentId }}
+          PREVIEW_DSQL_HOST: ${{ vars.PREVIEW_DSQL_HOST }}
+          PREVIEW_RUNTIME_IAM_ROLE: ${{ vars.PREVIEW_RUNTIME_IAM_ROLE }}
+          PREVIEW_MIGRATION_IAM_ROLE: ${{ vars.PREVIEW_MIGRATION_IAM_ROLE }}
+          AWS_REGION: ${{ vars.PREVIEW_AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.PREVIEW_PROVISION_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.PREVIEW_PROVISION_SECRET_ACCESS_KEY }}
+          PREVIEW_AUTOMATION_PRIVATE_KEY: ${{ secrets.PREVIEW_AUTOMATION_PRIVATE_KEY }}
+  migrate:
+    needs: [validate, provision]
+    runs-on: ubuntu-latest
+    environment: preview-migrations
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.34.5 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm preview:migrate
+        env:
+          PREVIEW_SCHEMA: ${{ needs.validate.outputs.schema }}
+          PGUSER: ${{ needs.validate.outputs.schema }}_migrate
+          PGHOST: ${{ vars.PREVIEW_DSQL_HOST }}
+          AWS_REGION: ${{ vars.PREVIEW_AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.PREVIEW_MIGRATION_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.PREVIEW_MIGRATION_SECRET_ACCESS_KEY }}
+  test:
+    needs: [validate, provision, migrate]
+    runs-on: ubuntu-latest
+    environment: preview-tests
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.34.5 }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .node-version, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm preview:probe
+        env:
+          PREVIEW_SCHEMA: ${{ needs.validate.outputs.schema }}
+          PGHOST: ${{ vars.PREVIEW_DSQL_HOST }}
+          AWS_REGION: ${{ vars.PREVIEW_AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.PREVIEW_RUNTIME_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.PREVIEW_RUNTIME_SECRET_ACCESS_KEY }}
+      - run: pnpm preview:test
+        env:
+          PREVIEW_DEPLOYMENT_ID: ${{ needs.validate.outputs.deploymentId }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIEW_VERCEL_TOKEN: ${{ secrets.PREVIEW_VERCEL_TOKEN }}
+          PREVIEW_AUTOMATION_PRIVATE_KEY: ${{ secrets.PREVIEW_AUTOMATION_PRIVATE_KEY }}
+          PREVIEW_AUTOMATION_PUBLIC_KEY: ${{ vars.PREVIEW_AUTOMATION_PUBLIC_KEY }}
+          PREVIEW_PROVISION_RECEIPT: ${{ needs.provision.outputs.leaseReceipt }}
+          PREVIEW_PROTECTION_BYPASS: ${{ secrets.PREVIEW_PROTECTION_BYPASS }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: preview-validation
+          path: |
+            preview-report/summary.json
+            preview-report/*.png
+          retention-days: 7
+  result:
+    if: ${{ always() && needs.validate.result == 'success' }}
+    needs: [validate, pending, provision, migrate, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: node --experimental-strip-types scripts/preview-automation/status.ts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIEW_STATUS_SHA: ${{ needs.validate.outputs.sha }}
+          PREVIEW_STATUS_STATE: ${{ needs.test.result == 'success' && 'success' || 'failure' }}

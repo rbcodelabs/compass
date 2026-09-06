@@ -3,7 +3,7 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
 import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, prepareBuildingInvestmentReview, prepareBuildingInvestmentRevocationReview, startNewBuildingInvestmentDecisionCycle } from "@/lib/building-investment"
-import { createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
 
 export async function requestDecision(input: {
   workspaceId: string
@@ -12,6 +12,7 @@ export async function requestDecision(input: {
   question: string
   context: string
   idempotencyKey: string
+  sources?: TrackedDecisionSourceInput[]
 }) {
   const actor = getMcpActor()
   try {
