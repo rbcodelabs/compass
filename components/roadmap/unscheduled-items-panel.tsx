@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useDraggable } from "@dnd-kit/core";
-import { GripVertical, Layers, Bug } from "lucide-react";
+import { GripVertical, Layers, Bug, MoreHorizontal } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
@@ -56,9 +56,20 @@ const HORIZON_LABELS: Record<Horizon, string> = Object.fromEntries(
 type Props = {
   items: UnscheduledItem[];
   onQuickAdd: (item: UnscheduledItem, horizon: Horizon) => void;
+  allowedHorizons?: readonly Horizon[];
+  pendingItemKeys?: ReadonlySet<string>;
+  interactionMode?: "compact" | "touch-safe";
 };
 
-export function UnscheduledItemsPanel({ items, onQuickAdd }: Props) {
+const NO_PENDING_ITEMS: ReadonlySet<string> = new Set();
+
+export function UnscheduledItemsPanel({
+  items,
+  onQuickAdd,
+  allowedHorizons = QUICK_ADD_HORIZONS,
+  pendingItemKeys = NO_PENDING_ITEMS,
+  interactionMode = "compact",
+}: Props) {
   if (items.length === 0) return null;
 
   return (
@@ -72,16 +83,29 @@ export function UnscheduledItemsPanel({ items, onQuickAdd }: Props) {
       <p className="text-xs text-muted-foreground mb-3">
         Drag an item onto a horizon (or the timeline) to schedule it, or use its menu.
       </p>
-      <div className="flex flex-wrap gap-2">
+      <div className={`flex flex-wrap gap-2 ${interactionMode === "touch-safe" ? "max-h-72 overflow-y-auto overscroll-contain touch-pan-y" : ""}`}>
         {items.map((item) => (
-          <UnscheduledItemCard key={unscheduledDragId(item)} item={item} onQuickAdd={onQuickAdd} />
+          <UnscheduledItemCard
+            key={unscheduledDragId(item)}
+            item={item}
+            onQuickAdd={onQuickAdd}
+            allowedHorizons={allowedHorizons}
+            pending={pendingItemKeys.has(unscheduledDragId(item))}
+            interactionMode={interactionMode}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-export function UnscheduledItemsColumn({ items, onQuickAdd }: Props) {
+export function UnscheduledItemsColumn({
+  items,
+  onQuickAdd,
+  allowedHorizons = QUICK_ADD_HORIZONS,
+  pendingItemKeys = NO_PENDING_ITEMS,
+  interactionMode = "compact",
+}: Props) {
   return (
     <BoardColumn
       title="Not scheduled"
@@ -100,6 +124,9 @@ export function UnscheduledItemsColumn({ items, onQuickAdd }: Props) {
             key={unscheduledDragId(item)}
             item={item}
             onQuickAdd={onQuickAdd}
+            allowedHorizons={allowedHorizons}
+            pending={pendingItemKeys.has(unscheduledDragId(item))}
+            interactionMode={interactionMode}
             fullWidth
           />
         ))
@@ -111,15 +138,22 @@ export function UnscheduledItemsColumn({ items, onQuickAdd }: Props) {
 function UnscheduledItemCard({
   item,
   onQuickAdd,
+  allowedHorizons,
+  pending,
+  interactionMode,
   fullWidth = false,
 }: {
   item: UnscheduledItem;
   onQuickAdd: Props["onQuickAdd"];
+  allowedHorizons: readonly Horizon[];
+  pending: boolean;
+  interactionMode: NonNullable<Props["interactionMode"]>;
   fullWidth?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
     id: unscheduledDragId(item),
     data: { unscheduledItem: item },
+    disabled: pending,
   });
 
   const style: React.CSSProperties = transform
@@ -127,7 +161,13 @@ function UnscheduledItemCard({
     : {};
 
   return (
-    <div ref={setNodeRef} style={style} className={fullWidth ? "touch-none w-full" : "touch-none w-56"}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      data-testid={`unscheduled-item-${item.kind}:${item.id}`}
+      aria-busy={pending || undefined}
+      className={`${interactionMode === "touch-safe" ? "touch-pan-y" : "touch-none"} ${fullWidth ? "w-full" : "w-56"}`}
+    >
       <Card
         size="sm"
         className="w-full bg-white shadow-sm transition-opacity duration-150 data-[dragging=true]:opacity-40"
@@ -138,7 +178,8 @@ function UnscheduledItemCard({
             ref={setActivatorNodeRef}
             {...attributes}
             {...listeners}
-            className="mt-0.5 shrink-0 cursor-grab touch-none text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+            disabled={pending}
+            className={`mt-0.5 inline-flex shrink-0 touch-none cursor-grab items-center justify-center rounded text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-50 ${interactionMode === "touch-safe" ? "size-11" : "size-6"}`}
             aria-label="Drag to schedule"
           >
             <GripVertical className="size-3.5" />
@@ -146,12 +187,21 @@ function UnscheduledItemCard({
 
           <CardTitle className="flex-1 text-sm leading-snug">{item.title}</CardTitle>
 
-          <CardMenu
-            items={QUICK_ADD_HORIZONS.map((h) => ({
-              label: `Add to ${HORIZON_LABELS[h]}`,
-              onClick: () => onQuickAdd(item, h),
-            }))}
-          />
+          {pending ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground">Scheduling…</span> : null}
+
+          {pending ? (
+            <button type="button" disabled aria-label="Card actions" className={`inline-flex items-center justify-center rounded opacity-50 ${interactionMode === "touch-safe" ? "size-11" : "size-6"}`}>
+              <MoreHorizontal className="size-3.5" />
+            </button>
+          ) : (
+            <CardMenu
+              className={interactionMode === "touch-safe" ? "size-11 opacity-100" : undefined}
+              items={allowedHorizons.map((h) => ({
+                label: `Add to ${HORIZON_LABELS[h]}`,
+                onClick: () => onQuickAdd(item, h),
+              }))}
+            />
+          )}
         </CardHeader>
 
         <UnscheduledItemBody item={item} />

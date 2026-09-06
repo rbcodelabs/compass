@@ -16,6 +16,10 @@ The Discovery section is the heart of Compass. It's where you manage your **Oppo
 
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
 
+Use the **Board | Table** toggle in the page header to choose how you scan active opportunities. Board view supports drag-and-drop workflow management. Table view provides a compact overview of status, squad, customer segment, evidence, and solution count.
+
+In Table view, select the chevron next to an opportunity to reveal its child solutions. Each solution row shows its lifecycle status, evidence count, and assumption count. Select an opportunity or solution title to open its detail panel.
+
 ## The Opportunity Board
 
 Opportunities move through four columns on the kanban board:

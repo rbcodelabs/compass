@@ -42,7 +42,27 @@ The linked metadata appears as small icon badges on each card, giving stakeholde
 
 ## Timeline View
 
-Toggle between **Board** and **Timeline** at the top of the Roadmap page. Use **Filters** beside the view control to focus either view on a squad. Timeline renders every roadmap item as a bar on a Gantt-style chart, colored by horizon, so you can see what's planned to run concurrently and spot scheduling conflicts. Items that don't have a start and end date yet still appear — as a dashed, outlined bar starting today — so you can drag or resize them directly to set real dates instead of hunting for the Edit dialog. A count above the chart calls out how many items are still on placeholder dates.
+Toggle between **Board** and **Timeline** at the top of the Roadmap page. Board remains the default. Use **Filters** beside the view control to focus either view on a squad. The Timeline view is linkable: `?view=timeline` takes you straight there, and the squad filter carries over from the Board.
+
+### Native timeline preview — Compass workspace only
+
+The `rbcodelabs/compass` workspace uses the **Compass native timeline** by default when you select Timeline. Other workspaces continue to use the classic timeline. This initial rollout is tied to the workspace's identity; adding a URL parameter cannot enable it in another workspace.
+
+The native chart groups items by horizon and squad, with separate tracks for overlapping bars. Use **Month** or **Quarter** to change the visible planning range, **Previous / Next** to navigate, and **Today** to return to the current period. Scroll horizontally to reach dates outside the visible area.
+
+Drag a bar to move its dates or use its resize controls to adjust the range. Keyboard controls and an **Edit dates** dialog offer alternatives to dragging; narrow bars use the dialog when there is not enough space for separate controls. Dates are inclusive, and changes save immediately. Items without dates use placeholder dates until scheduled. Launching and Launched items are display-only in this chart; use the existing launch workflow to manage them.
+
+Select **Use classic timeline** above the chart to switch back at any time, or **Use native timeline** to return. These links preserve the selected squad. The classic fallback is also directly linkable with `?view=timeline&timelineEngine=classic`.
+
+![Native timeline on desktop](/screenshots/docs/native-timeline-1280.png)
+
+![Native timeline on mobile](/screenshots/docs/native-timeline-390.png)
+
+**Preview limitation:** this rollout is intended for single-writer use. An item deleted elsewhere can remain visible during the current session. Conflicting edits can disable further editing of an item. Reload the browser page before continuing in either case; a background refresh is not sufficient. This preview does not provide full multi-user synchronization.
+
+### Classic timeline
+
+The classic timeline remains available in every workspace. It renders every roadmap item as a bar on a Gantt-style chart, colored by horizon, so you can see what's planned to run concurrently and spot scheduling conflicts. Items that don't have a start and end date yet still appear — as a dashed, outlined bar starting today — so you can drag or resize them directly to set real dates instead of hunting for the Edit dialog. A count above the chart calls out how many items are still on placeholder dates.
 
 Drag a bar to shift its dates, or resize it from either edge to change its start or end date — changes save immediately. The Timeline view is linkable: `?view=timeline` in the URL takes you straight there, and the squad filter carries over from the Board.
 
@@ -55,7 +75,8 @@ Use **Group by** to cluster items into collapsible sections instead of one flat 
 Compass surfaces validated or in-delivery Solutions from Discovery, and Bug-type Feedback items, that don't have a roadmap item yet. These are the same items that already have a "Promote to roadmap" action on the Discovery solution card or the Feedback board; this is a second entry point that lets you schedule them without leaving the roadmap.
 
 - **On the Board** — these candidates live in an always-visible **Not scheduled** Kanban column after Shipped. Drag a card from it onto any roadmap horizon to schedule it there, or use its **⋯** menu to add it directly to Now/Next/Later without dragging. The column remains visible when empty so the board layout stays consistent.
-- **On the Timeline** — candidates remain in the **Not yet on the roadmap** panel below the chart. Drag a card onto the chart area to open a small dialog for setting its horizon and start/end dates, since the Gantt chart has no way to infer a date purely from where you drop something. The panel's quick-add menu still works here too — it schedules the item without dates, which now shows up immediately on both the Board and the Timeline (as a dashed placeholder bar you can drag to set real dates).
+- **On the classic Timeline** — candidates remain in the **Not yet on the roadmap** panel below the chart. Drag a card onto the chart area to open a small dialog for setting its horizon and start/end dates, since the Gantt chart has no way to infer a date purely from where you drop something. The panel's quick-add menu still works here too — it schedules the item without dates, which now shows up immediately on both the Board and the Timeline (as a dashed placeholder bar you can drag to set real dates).
+- **On the native Timeline preview** — the same **Not yet on the roadmap** panel remains below the chart. Drop a card on a compatible Now, Next, or Later lane to schedule it at the drop date, or use the panel's quick-add menu without dragging. Squad-linked solutions must stay in their own squad's lane. Pending items cannot be submitted again while their save is in progress.
 
 Ideas (as opposed to Bugs) aren't included in this panel — they're expected to go through Opportunity → Solution discovery first, same as everywhere else in Compass.
 

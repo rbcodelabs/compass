@@ -78,6 +78,7 @@ function cardDataFromPromotion(
     startDate: Date | null;
     endDate: Date | null;
     isPrivate: boolean;
+    updatedAt: Date;
   },
   source: UnscheduledItem,
   squads: SquadData[]
@@ -106,6 +107,7 @@ function cardDataFromPromotion(
     feedbackId: created.feedbackId ?? null,
     startDate: created.startDate ? created.startDate.toISOString() : null,
     endDate: created.endDate ? created.endDate.toISOString() : null,
+    updatedAt: created.updatedAt.toISOString(),
     solution: source.kind === "solution" ? { id: source.id, title: source.title } : null,
     keyResult: null,
     opportunity:

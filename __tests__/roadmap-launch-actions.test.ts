@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockRoadmapItem = { findFirst: vi.fn() };
+const mockRoadmapItem = { findFirst: vi.fn(), findUniqueOrThrow: vi.fn() };
 const mockLaunchChecklistItem = { findFirst: vi.fn() };
 const mockWorkspaceMember = { findUnique: vi.fn() };
 const mockPrisma = { roadmapItem: mockRoadmapItem, launchChecklistItem: mockLaunchChecklistItem, workspaceMember: mockWorkspaceMember };
@@ -45,6 +45,7 @@ beforeEach(() => {
   mockAuth.mockResolvedValue({ user: { id: "user-1" } } as Session);
   mockWorkspaceMember.findUnique.mockResolvedValue({ id: "member-1" });
   mockRoadmapItem.findFirst.mockResolvedValue({ id: ITEM_ID, horizon: "NOW" });
+  mockRoadmapItem.findUniqueOrThrow.mockResolvedValue({ id: ITEM_ID, horizon: "LAUNCHING", updatedAt: new Date("2026-09-05T12:00:00.000Z") });
   mockLaunchChecklistItem.findFirst.mockResolvedValue({ id: "lci-1" });
   vi.mocked(resolveOrSeedTemplate).mockResolvedValue({
     id: "tmpl-1",
