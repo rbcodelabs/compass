@@ -75,7 +75,7 @@ export function KeyResultPanel({
     type: "roadmapItem",
     id: r.id,
     title: r.title,
-    badge: { label: r.horizon, className: "bg-slate-100 text-slate-600" },
+    badge: { label: r.horizon, className: "bg-surface-inset text-text-secondary" },
   }));
   const supportingItems: RelationItem[] = data.supportingObjectives.map((objective) => {
     const progress = objective.keyResults.length

@@ -81,7 +81,7 @@ export default async function DocsLayout({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Mobile-only toolbar: Pages drawer trigger */}
-      <div className="flex md:hidden items-center px-3 py-2 border-b border-slate-200 bg-white shrink-0">
+      <div className="flex md:hidden items-center px-3 py-2 border-b border-border-default bg-surface-panel shrink-0">
         <DocsMobileDrawer
           docs={tree}
           orgSlug={orgSlug}
@@ -93,7 +93,7 @@ export default async function DocsLayout({
 
       <div className="flex flex-1 overflow-hidden">
         {/* Doc tree sidebar — hidden on mobile, visible on md+ */}
-        <div className="hidden md:flex w-60 shrink-0 flex-col border-r border-slate-200 overflow-y-auto bg-white p-2">
+        <div className="hidden md:flex w-60 shrink-0 flex-col border-r border-border-default overflow-y-auto bg-surface-panel p-2">
           <DocTreeSidebar
             docs={tree}
             orgSlug={orgSlug}

@@ -32,7 +32,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_CLASS: Record<string, string> = {
-  DESIGNING: "bg-slate-100 text-slate-700",
+  DESIGNING: "bg-surface-inset text-text-secondary",
   RUNNING: "bg-blue-100 text-blue-700",
   COMPLETE: "bg-green-100 text-green-700",
   KILLED: "bg-red-100 text-red-700",
@@ -165,7 +165,7 @@ export function ExperimentPanel({
             Testing Assumption
           </p>
           <div className="flex items-start gap-2">
-            <Badge className={`${RISK_CLASS[data.assumption.riskLevel] ?? "bg-slate-100 text-slate-700"} shrink-0 text-xs`}>
+            <Badge className={`${RISK_CLASS[data.assumption.riskLevel] ?? "bg-surface-inset text-text-secondary"} shrink-0 text-xs`}>
               {data.assumption.riskLevel}
             </Badge>
             <p className="text-sm leading-snug">{data.assumption.title}</p>

@@ -78,7 +78,7 @@ export function DiscoveryRail({
 
   if (variant === "sidebar" && collapsed) {
     return (
-      <div className="hidden md:flex w-12 shrink-0 flex-col items-center border-r border-slate-200 bg-white py-3">
+      <div className="hidden md:flex w-12 shrink-0 flex-col items-center border-r border-border-default bg-surface-panel py-3">
         <Button
           type="button"
           variant="ghost"
@@ -98,12 +98,12 @@ export function DiscoveryRail({
       className={cn(
         "flex flex-col overflow-hidden",
         variant === "sidebar"
-          ? "hidden md:flex w-64 shrink-0 border-r border-slate-200 bg-white"
+          ? "hidden md:flex w-64 shrink-0 border-r border-border-default bg-surface-panel"
           : "min-h-0 flex-1"
       )}
     >
       {/* Search + collapse toggle */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 p-3">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border-default p-3">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -181,7 +181,7 @@ export function DiscoveryRail({
       </div>
 
       {/* New opportunity */}
-      <div className="shrink-0 border-t border-slate-200 p-2">
+      <div className="shrink-0 border-t border-border-default p-2">
         <CreateOpportunityForm
           workspaceId={workspaceId}
           squads={squads}
@@ -214,7 +214,7 @@ function RailRow({
         "relative flex items-start gap-1.5 rounded-lg px-2 py-1.5 text-xs transition-colors",
         isActive
           ? "bg-indigo-50 text-indigo-900"
-          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          : "text-text-secondary hover:bg-surface-inset hover:text-text-primary"
       )}
     >
       {isActive && (

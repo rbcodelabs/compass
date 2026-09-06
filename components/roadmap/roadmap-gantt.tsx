@@ -13,7 +13,7 @@ const RoadmapGanttChart = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-300/70 py-16 text-sm text-slate-400">
+      <div className="flex items-center justify-center rounded-xl border border-dashed border-border-strong/70 py-16 text-sm text-text-subtle">
         Loading timeline…
       </div>
     ),

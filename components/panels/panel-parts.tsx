@@ -170,7 +170,7 @@ export function PanelTitle({
         />
       ) : (
         status && (
-          <Badge className={status.className ?? "bg-slate-100 text-slate-700"}>
+          <Badge className={status.className ?? "bg-surface-inset text-text-secondary"}>
             {status.label}
           </Badge>
         )
@@ -270,7 +270,7 @@ export function RelationList({
         >
           {item.badge && (
             <Badge
-              className={`${item.badge.className ?? "bg-slate-100 text-slate-600"} shrink-0 text-xs`}
+              className={`${item.badge.className ?? "bg-surface-inset text-text-secondary"} shrink-0 text-xs`}
             >
               {item.badge.label}
             </Badge>
@@ -446,7 +446,7 @@ export function StatusSelect({
     <Select value={value} onValueChange={onChange} disabled={saving}>
       <SelectTrigger
         size="sm"
-        className={`w-fit border-0 ${map[value]?.className ?? "bg-slate-100 text-slate-700"}`}
+        className={`w-fit border-0 ${map[value]?.className ?? "bg-surface-inset text-text-secondary"}`}
       >
         <span className="text-xs font-medium">{map[value]?.label ?? value}</span>
       </SelectTrigger>

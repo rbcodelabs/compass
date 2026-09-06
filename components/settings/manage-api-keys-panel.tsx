@@ -107,7 +107,7 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
             Copy this key now — it will never be shown again.
           </p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs bg-white border border-emerald-200 rounded px-2 py-1 font-mono break-all">
+            <code className="flex-1 text-xs bg-surface-panel border border-emerald-200 rounded px-2 py-1 font-mono break-all">
               {newKey}
             </code>
             <Button
@@ -136,24 +136,24 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
       {activeKeys.length > 0 && (
         <div className="rounded-md border border-border overflow-hidden">
           <Table>
-            <TableHeader className="bg-slate-50">
-              <TableRow className="hover:bg-slate-50">
-                <TableHead className="px-3 py-2 text-xs text-slate-500">Name</TableHead>
-                <TableHead className="px-3 py-2 text-xs text-slate-500">Prefix</TableHead>
-                <TableHead className="px-3 py-2 text-xs text-slate-500">Created</TableHead>
-                <TableHead className="px-3 py-2 text-xs text-slate-500">Last used</TableHead>
+            <TableHeader className="bg-surface-app">
+              <TableRow className="hover:bg-surface-app">
+                <TableHead className="px-3 py-2 text-xs text-text-subtle">Name</TableHead>
+                <TableHead className="px-3 py-2 text-xs text-text-subtle">Prefix</TableHead>
+                <TableHead className="px-3 py-2 text-xs text-text-subtle">Created</TableHead>
+                <TableHead className="px-3 py-2 text-xs text-text-subtle">Last used</TableHead>
                 <TableHead className="px-3 py-2"><span className="sr-only">Actions</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {activeKeys.map((k) => (
-                <TableRow key={k.id} className="bg-white">
-                  <TableCell className="px-3 py-2 font-medium text-slate-900">{k.name}</TableCell>
-                  <TableCell className="px-3 py-2 font-mono text-slate-500">cmp_{k.keyPrefix}…</TableCell>
-                  <TableCell className="px-3 py-2 text-slate-500">
+                <TableRow key={k.id} className="bg-surface-panel">
+                  <TableCell className="px-3 py-2 font-medium text-text-primary">{k.name}</TableCell>
+                  <TableCell className="px-3 py-2 font-mono text-text-subtle">cmp_{k.keyPrefix}…</TableCell>
+                  <TableCell className="px-3 py-2 text-text-subtle">
                     {k.createdAt.toLocaleDateString()}
                   </TableCell>
-                  <TableCell className="px-3 py-2 text-slate-500">
+                  <TableCell className="px-3 py-2 text-text-subtle">
                     {k.lastUsedAt ? k.lastUsedAt.toLocaleDateString() : "Never"}
                   </TableCell>
                   <TableCell className="px-3 py-2 text-right">
@@ -194,9 +194,9 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
               <TableBody>
                 {revokedKeys.map((k) => (
                   <TableRow key={k.id} className="bg-muted opacity-60">
-                    <TableCell className="px-3 py-2 font-medium line-through text-slate-500">{k.name}</TableCell>
-                    <TableCell className="px-3 py-2 font-mono text-slate-400">cmp_{k.keyPrefix}…</TableCell>
-                    <TableCell className="px-3 py-2 text-slate-400">
+                    <TableCell className="px-3 py-2 font-medium line-through text-text-subtle">{k.name}</TableCell>
+                    <TableCell className="px-3 py-2 font-mono text-text-subtle">cmp_{k.keyPrefix}…</TableCell>
+                    <TableCell className="px-3 py-2 text-text-subtle">
                       Revoked {k.revokedAt?.toLocaleDateString()}
                     </TableCell>
                   </TableRow>

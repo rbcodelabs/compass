@@ -105,7 +105,7 @@ export function RoadmapItemPanel({
   if (data.keyResult)
     linked.push({ type: "keyResult", id: data.keyResult.id, title: data.keyResult.title, badge: { label: "Key Result", className: "bg-indigo-100 text-indigo-700" } });
   if (data.feedback)
-    linked.push({ type: "feedback", id: data.feedback.id, title: data.feedback.title, badge: { label: "Feedback", className: "bg-slate-100 text-slate-600" } });
+    linked.push({ type: "feedback", id: data.feedback.id, title: data.feedback.title, badge: { label: "Feedback", className: "bg-surface-inset text-text-secondary" } });
 
   return (
     <PanelContainer>
