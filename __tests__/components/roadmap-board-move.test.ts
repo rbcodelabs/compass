@@ -21,6 +21,7 @@ function card(id: string, horizon: RoadmapCardData["horizon"], sortOrder = 0): R
     feedbackId: null,
     startDate: null,
     endDate: null,
+    updatedAt: "2026-09-05T00:00:00.000Z",
     solution: null,
     keyResult: null,
     opportunity: null,

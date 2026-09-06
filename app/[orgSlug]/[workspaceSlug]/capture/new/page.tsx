@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/patterns/page-header"
 import { StudyBuilder } from "@/components/research/study-builder"
-import { createResearchStudy, generateUsabilityTasks } from "../actions"
+import { createResearchStudy, generateResearchGuide } from "../actions"
 import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
@@ -18,7 +18,7 @@ export default async function NewStudyPage({ params }: { params: Promise<{ orgSl
   })
   if (!workspace) notFound()
   const action = createResearchStudy.bind(null, orgSlug, workspaceSlug)
-  const taskAction = generateUsabilityTasks.bind(null, orgSlug, workspaceSlug)
+  const guideAction = generateResearchGuide.bind(null, orgSlug, workspaceSlug)
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8">
@@ -26,7 +26,7 @@ export default async function NewStudyPage({ params }: { params: Promise<{ orgSl
         title="New research study"
         description="Create a customer interview or guided usability test with chat and voice."
       />
-      <StudyBuilder action={action} generateTasks={taskAction} />
+      <StudyBuilder action={action} generateGuide={guideAction} />
     </main>
   )
 }

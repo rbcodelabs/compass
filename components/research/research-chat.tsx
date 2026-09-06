@@ -67,7 +67,7 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
       const response = await fetch("/api/research/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, ...(guided && !resume ? { modality: "CHAT" } : {}), ...(resume ?? {}) }),
+        body: JSON.stringify({ token, ...(!resume ? { modality: "CHAT" } : {}), ...(resume ?? {}) }),
       })
       if (!response.ok) {
         if (resume && response.status === 404) localStorage.removeItem(storageKey(token))
@@ -252,14 +252,14 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
         <div ref={transcriptEnd} />
       </div>
 
-      {guided && attachments.length > 0 && <div className="mt-4 flex flex-wrap gap-2">
+      {attachments.length > 0 && <div className="mt-4 flex flex-wrap gap-2">
         {attachments.map((attachment) => <span className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs" key={attachment.id}>
           {attachment.originalName}
           <button aria-label={`Remove ${attachment.originalName}`} onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))} type="button"><XIcon className="size-3" /></button>
         </span>)}
       </div>}
       <div className="mt-6 flex gap-2">
-        {guided && <label className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border hover:bg-muted" title="Share screenshot or PDF">
+        <label className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border hover:bg-muted" title="Share screenshot or PDF">
           {uploading ? <LoaderCircleIcon className="size-4 animate-spin" /> : <PaperclipIcon className="size-4" />}
           <input
             accept="image/png,image/jpeg,image/webp,application/pdf"
@@ -269,7 +269,7 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
             onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = "" }}
             type="file"
           />
-        </label>}
+        </label>
         <Input
           aria-label="Your response"
           value={input}

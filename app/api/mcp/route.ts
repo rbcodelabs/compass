@@ -76,6 +76,7 @@ import {
   rejectSolutionPlan,
 } from "@/lib/solution-comment-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
+import { updateOpportunity } from "@/lib/opportunity-tool-handlers"
 import {
   listScoringModels,
   getScoringModel,
@@ -1034,6 +1035,24 @@ const _handler = createMcpHandler(
           },
         )
       }
+    )
+
+    register(
+      "update_opportunity",
+      {
+        title: "Update Opportunity",
+        description: "Partially updates an Opportunity's title and/or description. Use null to clear the description.",
+        inputSchema: z.object({
+          opportunityId: z.string().uuid().describe("UUID of the opportunity"),
+          title: z.string().trim().min(1).max(255).optional().describe("New title for the opportunity"),
+          description: z.string().trim().min(1).nullable().optional().describe("New description, or null to clear it"),
+        }).strict().refine(
+          ({ title, description }) => title !== undefined || description !== undefined,
+          { message: "Provide at least one editable field: title or description." },
+        ),
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      updateOpportunity,
     )
 
     register(
@@ -2110,7 +2129,7 @@ const _handler = createMcpHandler(
             await prisma.experiment.update({ where: { id: objectId }, data })
             break
           case "roadmap_item":
-            await prisma.roadmapItem.update({ where: { id: objectId }, data })
+            await prisma.roadmapItem.update({ where: { id: objectId }, data: { ...data, updatedAt: new Date() } })
             break
           case "objective":
             await prisma.objective.update({ where: { id: objectId }, data })
