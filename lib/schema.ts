@@ -11,6 +11,14 @@
  * Examples with PGSCHEMA=compass: compass_dev, compass_preview, compass_prod
  */
 export function getActiveSchema(): string {
+  if (process.env.PREVIEW_AUTOMATION_ENABLED === "1") {
+    const pr = process.env.VERCEL_GIT_PULL_REQUEST_ID ?? "";
+    const sha = process.env.VERCEL_GIT_COMMIT_SHA ?? "";
+    if (process.env.VERCEL_ENV !== "preview" || !/^[1-9]\d{0,9}$/.test(pr) || !/^[a-f0-9]{40}$/.test(sha)) {
+      throw new Error("Invalid preview automation deployment metadata");
+    }
+    return `compass_pr_${pr}_${sha.slice(0, 12)}`;
+  }
   const prefix = process.env.PGSCHEMA ?? "compass";
 
   if (process.env.NODE_ENV === "development") return `${prefix}_dev`;

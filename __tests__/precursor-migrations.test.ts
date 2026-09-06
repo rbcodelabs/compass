@@ -3,7 +3,7 @@ import path from "node:path"
 import { describe, expect, it } from "vitest"
 
 const root = process.cwd()
-const route = readFileSync(path.join(root, "app/api/admin/migrate/route.ts"), "utf8")
+const route = readFileSync(path.join(root, "lib/migrations/runner.ts"), "utf8")
 
 function migration(name: string) {
   return readFileSync(path.join(root, "prisma/migrations", name, "migration.sql"), "utf8")
