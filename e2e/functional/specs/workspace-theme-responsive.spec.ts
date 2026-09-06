@@ -30,7 +30,13 @@ test.describe("Workspace appearance", () => {
       if (localStorage.getItem(storageKey) === null) {
         localStorage.setItem(storageKey, "dark");
       }
-      requestAnimationFrame(() => {
+      const captureFirstWorkspaceFrame = () => {
+        // Streaming can paint an empty document before the authenticated layout
+        // arrives. Check the first frame with workspace content, not that blank.
+        if (!document.querySelector(".workspace-theme-scope")) {
+          requestAnimationFrame(captureFirstWorkspaceFrame);
+          return;
+        }
         (
           window as typeof window & {
             __firstFrameThemeSnapshot?: FirstFrameTheme;
@@ -40,14 +46,15 @@ test.describe("Workspace appearance", () => {
           dataTheme: document.documentElement.dataset.theme,
           colorScheme: document.documentElement.style.colorScheme,
         };
-      });
+      };
+      requestAnimationFrame(captureFirstWorkspaceFrame);
     }, { storageKey: THEME_STORAGE_KEY });
 
     await page.goto(`${base}/settings`);
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
     // The server-rendered inline initializer must apply the stored theme before
-    // the first animation frame, rather than waiting for React hydration.
+    // the first workspace animation frame, rather than waiting for hydration.
     await expect
       .poll(() =>
         page.evaluate(
@@ -165,6 +172,7 @@ test.describe("Workspace appearance", () => {
       // supported workspace width.
       const themeButtons = page.getByRole("group", { name: "Color theme" }).getByRole("button");
       await expect(themeButtons).toHaveCount(3);
+      await expect(page.getByRole("button", { name: "Dark", exact: true })).toHaveAttribute("aria-pressed", "true");
       if (viewport.mobileNavigation) {
         for (const button of await themeButtons.all()) {
           const box = await button.boundingBox();
