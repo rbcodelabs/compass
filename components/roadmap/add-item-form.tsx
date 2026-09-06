@@ -103,6 +103,7 @@ export function AddItemForm({
         opportunityId: item.opportunityId ?? null,
         experimentId: item.experimentId ?? null,
         feedbackId: null,
+        updatedAt: item.updatedAt.toISOString(),
         startDate: item.startDate ? item.startDate.toISOString() : null,
         endDate: item.endDate ? item.endDate.toISOString() : null,
         solution: null,

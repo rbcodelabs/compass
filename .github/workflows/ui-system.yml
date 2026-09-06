@@ -60,10 +60,12 @@ jobs:
       - run: pnpm e2e:db:verify-clean
         if: always()
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: compass-authenticated-roadmap-e2e
-          path: test-results
+          path: |
+            test-results
+            public/screenshots/docs/native-timeline-*.png
 
   authenticated-capture:
     needs: checks

@@ -242,5 +242,11 @@ export async function rescheduleRoadmapItem(
     });
   });
   revalidateRoadmap();
-  return item;
+  return {
+    id: item.id,
+    horizon: item.horizon,
+    startDate: item.startDate?.toISOString() ?? null,
+    endDate: item.endDate?.toISOString() ?? null,
+    updatedAt: item.updatedAt.toISOString(),
+  };
 }
