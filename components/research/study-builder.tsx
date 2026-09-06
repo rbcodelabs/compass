@@ -6,15 +6,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { ResearchSubmitButton } from "@/components/research/research-submit-button"
 
 type Task = { id: number; text: string }
 
 export function StudyBuilder({
   action,
-  generateTasks,
+  generateGuide,
 }: {
   action: (data: FormData) => void | Promise<void>
-  generateTasks: (input: { goal: string; appUrl: string; targetMinutes: number }) => Promise<string[]>
+  generateGuide: (input: { studyType: "CUSTOMER_INTERVIEW" | "USABILITY_TEST"; goal: string; appUrl: string; targetMinutes: number }) => Promise<string[]>
 }) {
   const nextId = useRef(2)
   const [studyType, setStudyType] = useState<"CUSTOMER_INTERVIEW" | "USABILITY_TEST">("CUSTOMER_INTERVIEW")
@@ -42,10 +43,10 @@ export function StudyBuilder({
     setError(null)
     startGenerating(async () => {
       try {
-        const tasks = await generateTasks({ goal, appUrl, targetMinutes })
+        const tasks = await generateGuide({ studyType, goal, appUrl, targetMinutes })
         setItems(tasks.map((text) => ({ id: nextId.current++, text })))
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Compass could not generate tasks")
+        setError(caught instanceof Error ? caught.message : "Compass could not generate a study guide")
       }
     })
   }
@@ -81,23 +82,23 @@ export function StudyBuilder({
       <div className="space-y-2"><Label htmlFor="name">Study name</Label><Input id="name" name="name" required /></div>
       <div className="space-y-2"><Label htmlFor="goal">What are you trying to learn?</Label><Textarea id="goal" name="goal" onChange={(event) => setGoal(event.target.value)} required value={goal} /></div>
 
-      {guided && <>
+      {guided &&
         <div className="space-y-2">
           <Label htmlFor="appUrl">Live product URL</Label>
           <Input id="appUrl" name="appUrl" onChange={(event) => setAppUrl(event.target.value)} placeholder="https://app.example.com" required type="url" value={appUrl} />
           <p className="text-sm text-text-muted">Compass never fetches this URL. Participants can open it beside the moderator or in a separate tab.</p>
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="targetMinutes">Target duration</Label>
-          <select className="h-9 rounded-lg border bg-transparent px-3 text-sm" id="targetMinutes" name="targetMinutes" onChange={(event) => setTargetMinutes(Number(event.target.value))} value={targetMinutes}>
-            {[10, 15, 20, 30].map((minutes) => <option key={minutes} value={minutes}>{minutes} minutes</option>)}
-          </select>
-        </div>
-        <Button disabled={generating} onClick={generate} type="button" variant="outline">
-          {generating ? <LoaderCircleIcon className="animate-spin" data-icon="inline-start" /> : <SparklesIcon data-icon="inline-start" />}
-          {generating ? "Generating tasks…" : "Generate tasks with Compass"}
-        </Button>
-      </>}
+      }
+      <div className="space-y-2">
+        <Label htmlFor="targetMinutes">Target duration</Label>
+        <select className="h-9 rounded-lg border bg-transparent px-3 text-sm" id="targetMinutes" name="targetMinutes" onChange={(event) => setTargetMinutes(Number(event.target.value))} value={targetMinutes}>
+          {[10, 15, 20, 30].map((minutes) => <option key={minutes} value={minutes}>{minutes} minutes</option>)}
+        </select>
+      </div>
+      <Button disabled={generating} onClick={generate} type="button" variant="outline">
+        {generating ? <LoaderCircleIcon className="animate-spin" data-icon="inline-start" /> : <SparklesIcon data-icon="inline-start" />}
+        {generating ? `Generating ${guided ? "tasks" : "questions"}…` : `Generate ${guided ? "tasks" : "questions"} with Compass`}
+      </Button>
 
       <fieldset className="space-y-3">
         <div className="space-y-1">
@@ -114,7 +115,7 @@ export function StudyBuilder({
         <Button onClick={addItem} type="button" variant="outline"><PlusIcon data-icon="inline-start" />Add {guided ? "task" : "question"}</Button>
       </fieldset>
       {error && <p aria-live="polite" className="text-sm text-destructive" role="alert">{error}</p>}
-      <Button type="submit">Create and activate study</Button>
+      <ResearchSubmitButton pendingLabel="Creating study…">Create and activate study</ResearchSubmitButton>
     </form>
   )
 }

@@ -1,6 +1,54 @@
 import { test, expect } from "../fixtures/index"
 
 test.describe("Capture — research study", () => {
+  test("edits an unused protocol, locks it after participation, and manages the lifecycle", async ({ page, base, browser, baseURL }) => {
+    await page.goto(`${base}/capture/new`)
+    await page.getByLabel("Study name").fill(`E2E lifecycle ${Date.now()}`)
+    await page.getByLabel("What are you trying to learn?").fill("Understand current planning")
+    await page.getByLabel("Target duration").selectOption("20")
+    await page.getByRole("textbox", { name: "Question 1", exact: true }).fill("Tell me about your last planning session.")
+    await page.getByRole("button", { name: "Create and activate study" }).click()
+    await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/, { timeout: 15_000 })
+
+    await page.getByLabel("Study name").fill("E2E lifecycle edited")
+    await page.getByLabel("Research goal").fill("Understand current planning workflows")
+    await page.getByLabel("Discussion guide").fill("Tell me about the last time you planned.\nWhat was hardest?")
+    await page.getByRole("button", { name: "Save study" }).click()
+    await expect(page.getByRole("heading", { name: "E2E lifecycle edited" })).toBeVisible()
+    await expect(page.getByText("Target", { exact: true }).locator("..").getByText("20 minutes", { exact: true })).toBeVisible()
+
+    await page.getByRole("button", { name: "Rotate participant link" }).click()
+    const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
+    const firstToken = new URL(shareUrl).pathname.split("/").at(-1)!
+    const anonymous = await browser.newContext({ storageState: undefined })
+    const started = await anonymous.request.post(`${baseURL}/api/research/start`, {
+      data: { token: firstToken },
+    })
+    expect(started.status()).toBe(200)
+
+    await page.reload()
+    await expect(page.getByText(/protocol is locked/i)).toBeVisible()
+    await expect(page.getByLabel("Research goal")).toBeDisabled()
+    await expect(page.getByLabel("Study name")).toBeEnabled()
+    await page.getByRole("button", { name: "Close study" }).click()
+    await expect(page.getByText("closed", { exact: true })).toBeVisible()
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: firstToken } })).status()).toBe(404)
+    await expect(page.getByRole("button", { name: "Activate study" })).toBeVisible()
+    await page.getByRole("button", { name: "Activate study" }).click()
+    await expect(page).toHaveURL(/\?token=/)
+    await expect(page.getByText("active", { exact: true })).toBeVisible()
+    const secondToken = new URL(await page.getByRole("textbox", { name: "Participant link" }).inputValue()).pathname.split("/").at(-1)!
+    expect(secondToken).not.toBe(firstToken)
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: firstToken } })).status()).toBe(404)
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: secondToken } })).status()).toBe(200)
+    page.once("dialog", (dialog) => dialog.accept())
+    await page.getByRole("button", { name: "Archive study" }).click()
+    await expect(page).toHaveURL(`${base}/capture`)
+    await expect(page.getByRole("heading", { name: "E2E lifecycle edited" })).not.toBeVisible()
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: secondToken } })).status()).toBe(404)
+    await anonymous.close()
+  })
+
   test("persists and resumes a secure anonymous interview for member review", async ({ page, base, browser, baseURL }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto(`${base}/capture/new`)
@@ -13,7 +61,7 @@ test.describe("Capture — research study", () => {
 
     await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
     const studyId = new URL(page.url()).pathname.split("/").at(-1)!
-    const shareUrl = await page.getByRole("textbox").inputValue()
+    const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
     expect(shareUrl).toContain("/research/")
     const participantToken = new URL(shareUrl).pathname.split("/").at(-1)!
 
@@ -125,9 +173,9 @@ test.describe("Capture — research study", () => {
 
     await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
     const studyId = new URL(page.url()).pathname.split("/").at(-1)!
-    const shareUrl = await page.getByRole("textbox").inputValue()
+    const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
     const participantToken = new URL(shareUrl).pathname.split("/").at(-1)!
-    await expect(page.getByText("Guided usability test")).toBeVisible()
+    await expect(page.getByText("Type", { exact: true }).locator("..").getByText("Guided usability test", { exact: true })).toBeVisible()
     await expect(page.getByRole("link", { name: "https://example.com/pricing" })).toBeVisible()
 
     const anonymous = await browser.newContext({ storageState: undefined })
