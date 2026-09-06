@@ -21,7 +21,7 @@ import path from "node:path";
 
 const ROOT = process.cwd();
 const MIGRATIONS_DIR = path.join(ROOT, "prisma/migrations");
-const ROUTE = path.join(ROOT, "app/api/admin/migrate/route.ts");
+const ROUTE = path.join(ROOT, "lib/migrations/runner.ts");
 
 /** Names registered in the migrate route's MIGRATIONS manifest, in order. */
 function registeredMigrations(): string[] {

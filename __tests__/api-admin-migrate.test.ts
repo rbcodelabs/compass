@@ -35,6 +35,7 @@ vi.mock("@/lib/schema", () => ({
 }))
 
 import { GET, POST, getDecisionGateExpectedCatalog, normalizeConstraintDefinition } from "@/app/api/admin/migrate/route"
+import { applyMigrations } from "@/lib/migrations/runner"
 
 const ORIGINAL_ENV = { ...process.env }
 const INDEX_NAMES = [
@@ -144,6 +145,17 @@ afterEach(() => {
 })
 
 describe("/api/admin/migrate rollout observability", () => {
+  it("does not create schemas in the pre-provisioned worker path", async () => {
+    await applyMigrations({ connect: mocks.connect } as never, "compass_preview", undefined, { preProvisionedSchema: true })
+    expect(mocks.query.mock.calls.some(([sql]) => /CREATE SCHEMA/i.test(sql))).toBe(false)
+  })
+  it("disables legacy admin migration access in automation previews", async () => {
+    process.env.PREVIEW_AUTOMATION_ENABLED = "1"
+    process.env.VERCEL_ENV = "preview"
+    expect((await GET(request("GET"))).status).toBe(404)
+    expect((await POST(request("POST"))).status).toBe(404)
+    expect(mocks.pool).not.toHaveBeenCalled()
+  })
   it("canonicalizes only the default UNIQUE NULLS DISTINCT rendering", () => {
     expect(normalizeConstraintDefinition('UNIQUE NULLS DISTINCT ("active_workspace_id")', "u")).toBe(normalizeConstraintDefinition('UNIQUE ("active_workspace_id")', "u"))
     expect(normalizeConstraintDefinition('UNIQUE NULLS NOT DISTINCT ("active_workspace_id")', "u")).not.toBe(normalizeConstraintDefinition('UNIQUE ("active_workspace_id")', "u"))
