@@ -5,7 +5,10 @@ const tx = {
   docCommentAnchor: { deleteMany: vi.fn() },
 }
 const runTransaction = async (operation: (client: typeof tx) => unknown, options?: { isolationLevel: string }) => {
-  void options
+  // Match production DSQL rather than silently accepting PostgreSQL-only modes.
+  if (options?.isolationLevel !== "RepeatableRead") {
+    throw Object.assign(new Error("Unsupported isolation level: SERIALIZABLE"), { code: "0A000" })
+  }
   return operation(tx)
 }
 const transaction = vi.fn(runTransaction)
@@ -24,6 +27,15 @@ beforeEach(() => {
 })
 
 describe("atomic browser comment deletion", () => {
+  it("deletes an author's standalone comment using DSQL-supported isolation", async () => {
+    tx.comment.findUnique.mockResolvedValue({ id: "root-1", parentId: null, authorId: "user-1", solutionPlanProposal: null, _count: { replies: 0 } })
+
+    await expect(deleteBrowserComment("root-1", { userId: "user-1", admin: false }, false))
+      .resolves.toEqual({ id: "root-1", deletedReplies: 0 })
+    expect(tx.comment.delete).toHaveBeenCalledWith({ where: { id: "root-1" } })
+    expect(transaction).toHaveBeenCalledTimes(1)
+  })
+
   it("rechecks replies inside the transaction and blocks an author after a concurrent reply arrives", async () => {
     tx.comment.findUnique.mockResolvedValue({ id: "root-1", parentId: null, authorId: "user-1", solutionPlanProposal: null, _count: { replies: 1 } })
 
@@ -49,7 +61,7 @@ describe("atomic browser comment deletion", () => {
     expect(tx.comment.delete).not.toHaveBeenCalled()
   })
 
-  it("retries a DSQL serialization conflict with Serializable isolation", async () => {
+  it("retries a DSQL write conflict with supported isolation", async () => {
     transaction
       .mockRejectedValueOnce(Object.assign(new Error("serialization conflict"), { code: "P2034" }))
       .mockImplementationOnce(runTransaction)
@@ -57,6 +69,6 @@ describe("atomic browser comment deletion", () => {
 
     await expect(deleteBrowserComment("reply-1", { userId: "user-1", admin: false }, false)).resolves.toMatchObject({ id: "reply-1" })
     expect(transaction).toHaveBeenCalledTimes(2)
-    expect(transaction.mock.calls[1][1]).toEqual({ isolationLevel: "Serializable" })
+    expect(transaction.mock.calls[1][1]).toEqual({ isolationLevel: "RepeatableRead" })
   })
 })

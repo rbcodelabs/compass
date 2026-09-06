@@ -99,7 +99,9 @@ export async function deleteBrowserComment(commentId: string, actor: Pick<Commen
     if (replies.length) await tx.comment.deleteMany({ where: { parentId: commentId } })
     await tx.comment.delete({ where: { id: commentId } })
     return { id: commentId, deletedReplies: replies.length }
-  }, { isolationLevel: "Serializable" })
+  // Aurora DSQL supports Repeatable Read, not Serializable. Keep the checks and
+  // dependent deletes in one transaction so failures roll back the whole delete.
+  }, { isolationLevel: "RepeatableRead" })
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try { return await operation() } catch (error) {
