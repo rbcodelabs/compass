@@ -6,10 +6,13 @@ const prisma = {
   decisionRecord: { findUnique: vi.fn() },
   opportunity: { findUnique: vi.fn() },
   solution: { findUnique: vi.fn() },
+  assumption: { findUnique: vi.fn() },
   roadmapItem: { findUnique: vi.fn() },
   doc: { findUnique: vi.fn() },
   experiment: { findUnique: vi.fn() },
   feedbackItem: { findUnique: vi.fn() },
+  evidence: { findUnique: vi.fn() },
+  workspace: { findUnique: vi.fn() },
   $transaction: vi.fn(),
 }
 
@@ -60,6 +63,127 @@ describe("tracked decisions", () => {
     }) })
     expect(prisma.reviewRequest.create).toHaveBeenCalledWith({ data: expect.objectContaining({ subjectType: "TRACKED_DECISION", subjectId: key1 }) })
     expect(prisma.reviewRequest.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ state: "PENDING", currentRevisionId: "revision-1" }) }))
+  })
+
+  it("snapshots, deduplicates, and canonically orders supporting sources in a v2 packet", async () => {
+    const capturedAt = new Date("2026-09-04T12:00:00.000Z")
+    prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Brand test", workspaceId: "ws-1", updatedAt: capturedAt })
+    prisma.assumption.findUnique.mockResolvedValue({ id: "assumption-1", title: "People understand the brand", updatedAt: capturedAt, solution: { opportunity: { workspaceId: "ws-1" } } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Brand concepts", updatedAt: capturedAt, opportunity: { workspaceId: "ws-1" } })
+
+    await createTrackedDecisionRequest({
+      workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
+      question: "Ready to run?", context: "## Recommendation\nKeep designing.", idempotencyKey: key1,
+      sources: [
+        { type: "SOLUTION", id: "solution-1" },
+        { type: "ASSUMPTION", id: "assumption-1" },
+        { type: "SOLUTION", id: "solution-1" },
+        { type: "EXPERIMENT", id: "experiment-1" },
+      ],
+    })
+
+    const packet = JSON.parse(prisma.reviewRevision.create.mock.calls[0][0].data.packetJson)
+    expect(packet).toEqual(expect.objectContaining({
+      schemaVersion: "tracked-decision/v2",
+      entity: expect.objectContaining({ type: "EXPERIMENT", id: "experiment-1", title: "Brand test", updatedAt: capturedAt.toISOString() }),
+      sources: [
+        { type: "ASSUMPTION", id: "assumption-1", title: "People understand the brand", updatedAt: capturedAt.toISOString() },
+        { type: "SOLUTION", id: "solution-1", title: "Brand concepts", updatedAt: capturedAt.toISOString() },
+      ],
+    }))
+  })
+
+  it("rejects an invalid supporting source before creating any request", async () => {
+    prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Brand test", workspaceId: "ws-1", updatedAt: new Date() })
+    prisma.doc.findUnique.mockResolvedValue({ id: "doc-1", title: "Private plan", workspaceId: "ws-other", updatedAt: new Date() })
+
+    await expect(createTrackedDecisionRequest({
+      workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
+      question: "Ready?", context: "Review it.", idempotencyKey: key1,
+      sources: [{ type: "DOC", id: "doc-1" }],
+    })).rejects.toEqual(expect.objectContaining({ code: "ENTITY_NOT_FOUND" }))
+    expect(prisma.reviewRequest.create).not.toHaveBeenCalled()
+  })
+
+  it("limits supporting sources to twelve", async () => {
+    await expect(createTrackedDecisionRequest({
+      workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
+      question: "Ready?", context: "Review it.", idempotencyKey: key1,
+      sources: Array.from({ length: 13 }, (_, index) => ({ type: "DOC" as const, id: `doc-${index}` })),
+    })).rejects.toEqual(expect.objectContaining({ code: "INVALID_INPUT" }))
+    expect(prisma.experiment.findUnique).not.toHaveBeenCalled()
+  })
+
+  it("treats normalized sources as part of idempotency equality", async () => {
+    const updatedAt = new Date("2026-09-04T12:00:00.000Z")
+    prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Brand test", workspaceId: "ws-1", updatedAt })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Brand concepts", updatedAt, opportunity: { workspaceId: "ws-1" } })
+    const packetJson = JSON.stringify({ schemaVersion: "tracked-decision/v2", question: "Ready?", context: "Review it.", entity: { type: "EXPERIMENT", id: "experiment-1", title: "Brand test", updatedAt: updatedAt.toISOString() }, sources: [] })
+    prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: { packetJson } })
+
+    await expect(createTrackedDecisionRequest({
+      workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
+      question: "Ready?", context: "Review it.", idempotencyKey: key1,
+      sources: [{ type: "SOLUTION", id: "solution-1" }],
+    })).rejects.toEqual(expect.objectContaining({ code: "IDEMPOTENCY_KEY_CONFLICT" }))
+  })
+
+  it("replays after primary and supporting source snapshots change", async () => {
+    const originalAt = "2026-09-04T12:00:00.000Z"
+    const currentRevision = { id: "revision-current", packetJson: JSON.stringify({
+      schemaVersion: "tracked-decision/v2", question: "Ready?", context: "Review it.",
+      entity: { type: "EXPERIMENT", id: "experiment-1", title: "Original test", updatedAt: originalAt },
+      sources: [{ type: "SOLUTION", id: "solution-1", title: "Original concepts", updatedAt: originalAt }],
+    }) }
+    prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision })
+    prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Renamed test", workspaceId: "ws-1", updatedAt: new Date("2026-09-05T12:00:00.000Z") })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Renamed concepts", updatedAt: new Date("2026-09-05T12:00:00.000Z"), opportunity: { workspaceId: "ws-1" } })
+
+    await expect(createTrackedDecisionRequest({
+      workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
+      question: "Ready?", context: "Review it.", idempotencyKey: key1,
+      sources: [{ type: "SOLUTION", id: "solution-1" }],
+    })).resolves.toBe(currentRevision)
+  })
+
+  it("replays reordered and duplicated source inputs by canonical identity", async () => {
+    const updatedAt = new Date("2026-09-04T12:00:00.000Z")
+    const currentRevision = { id: "revision-current", packetJson: JSON.stringify({
+      schemaVersion: "tracked-decision/v2", question: "Ready?", context: "Review it.",
+      entity: { type: "EXPERIMENT", id: "experiment-1", title: "Test", updatedAt: updatedAt.toISOString() },
+      sources: [
+        { type: "ASSUMPTION", id: "assumption-1", title: "Assumption", updatedAt: updatedAt.toISOString() },
+        { type: "SOLUTION", id: "solution-1", title: "Concepts", updatedAt: updatedAt.toISOString() },
+      ],
+    }) }
+    prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision })
+    prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Test", workspaceId: "ws-1", updatedAt })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Concepts", updatedAt, opportunity: { workspaceId: "ws-1" } })
+    prisma.assumption.findUnique.mockResolvedValue({ id: "assumption-1", title: "Assumption", updatedAt, solution: { opportunity: { workspaceId: "ws-1" } } })
+
+    await expect(createTrackedDecisionRequest({
+      workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
+      question: "Ready?", context: "Review it.", idempotencyKey: key1,
+      sources: [
+        { type: "SOLUTION", id: "solution-1" },
+        { type: "ASSUMPTION", id: "assumption-1" },
+        { type: "SOLUTION", id: "solution-1" },
+      ],
+    })).resolves.toBe(currentRevision)
+  })
+
+  it("preserves v2 supporting sources when revising", async () => {
+    const updatedAt = new Date("2026-09-04T12:00:00.000Z")
+    const sources = [{ type: "SOLUTION", id: "solution-1", title: "Brand concepts", updatedAt: updatedAt.toISOString() }]
+    prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Brand test", workspaceId: "ws-1", updatedAt })
+    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1, currentRevision: { packetJson: JSON.stringify({ schemaVersion: "tracked-decision/v2", entity: { type: "EXPERIMENT", id: "experiment-1" }, sources }) } })
+    prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", requestId: "request-1", revisionId: "revision-old", option: { outcomeClass: "REQUEST_CHANGES" } })
+
+    await reviseTrackedDecisionRequest({ requestId: "request-1", workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1", question: "Ready now?", context: "Updated.", expectedDecisionId: "decision-1", reason: "Prototype added" })
+
+    const packet = JSON.parse(prisma.reviewRevision.create.mock.calls[0][0].data.packetJson)
+    expect(packet.schemaVersion).toBe("tracked-decision/v2")
+    expect(packet.sources).toEqual(sources)
   })
 
   it("rejects cross-workspace entity references before creating a request", async () => {

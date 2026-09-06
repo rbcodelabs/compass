@@ -1635,6 +1635,10 @@ const _handler = createMcpHandler(
           subjectId: z.string().uuid(),
           question: z.string().min(1).max(255),
           context: z.string().min(1).max(20000).describe("Decision context. Markdown supported."),
+          sources: z.array(z.object({
+            type: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK", "EVIDENCE"]),
+            id: z.string().uuid(),
+          })).max(12).optional().describe("Supporting Compass objects to snapshot and show alongside the primary linked item."),
           idempotencyKey: z.string().uuid(),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,

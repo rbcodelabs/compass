@@ -6,6 +6,11 @@ import { canDecideReview, isOrgAdminRole } from "@/lib/roles"
 import { ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh } from "@/lib/building-investment"
 import { DecisionActions } from "@/components/decisions/decision-actions"
 import { DecisionDetailsGrid, DecisionLongForm, DecisionSummary } from "@/components/decisions/decision-long-form"
+import { DecisionSources, parseTrackedDecisionPacket } from "@/components/decisions/decision-sources"
+
+function parsePacket(raw: string): Record<string, unknown> {
+  try { return JSON.parse(raw) as Record<string, unknown> } catch { return {} }
+}
 
 export default async function ReviewRequestPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string; requestId: string }> }) {
   const { orgSlug, workspaceSlug, requestId } = await params
@@ -33,7 +38,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
       : request.gateType === "BUILDING_INVESTMENT_REVOCATION"
         ? await ensureBuildingInvestmentRevocationRevisionFresh(revision.id)
       : { stale: Boolean(revision.supersededAt) }
-  const packet = JSON.parse(revision.packetJson) as {
+  const packet = parsePacket(revision.packetJson) as {
     roadmapItem?: { title?: string; solutionId?: string | null; opportunityId?: string | null; squadId?: string | null }
     policyVersion?: string
     repositoryOwner?: string
@@ -59,23 +64,28 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
   const isRevocation = request.gateType === "BUILDING_INVESTMENT_REVOCATION"
   const isPolicyActivation = request.gateType === "NOW_POLICY_ACTIVATION"
   const isTracked = request.gateType === "TRACKED_DECISION"
+  const trackedPacket = isTracked ? parseTrackedDecisionPacket(revision.packetJson) : null
   const isRetired = request.gateType === "NOW_COMMITMENT" || isPolicyActivation
   const canDecide = canDecideReview(request.workspace.members[0]?.role, request.workspace.organization.members[0]?.role)
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
+    <main className="mx-auto w-full min-w-0 max-w-3xl space-y-6 overflow-x-hidden p-4 sm:p-6">
       <div>
-        <p className="text-sm text-muted-foreground">{isTracked ? "Decision" : isRelease ? "Legacy system decision · Release authorization" : isRevocation ? "Legacy system decision · Building investment revocation" : isInvestment ? "Legacy system decision · Building investment" : isPolicyActivation ? "Legacy system decision · Native policy activation" : "Legacy system decision · NOW commitment"}</p>
-        <h1 className="text-2xl font-semibold">{revision.title}</h1>
+        <p className="text-sm text-muted-foreground">{isTracked ? "Decision" : isRelease ? "Legacy system decision · Release authorization" : isRevocation ? "Legacy system decision · Building investment revocation" : isInvestment ? "Building investment review" : isPolicyActivation ? "Legacy system decision · Native policy activation" : "Legacy system decision · NOW commitment"}</p>
+        <h1 className="break-words [overflow-wrap:anywhere] text-2xl font-semibold">{revision.title}</h1>
         <DecisionSummary tracked={isTracked} summary={revision.summary} />
       </div>
-      <section className="rounded-lg border p-4 text-sm">
-        <DecisionDetailsGrid>
-          {isTracked ? <>
-            <dt>Linked to</dt><dd>{packet.entity?.title ?? request.subjectType}</dd>
-            <dt>Type</dt><dd>{packet.entity?.type ?? request.subjectType}</dd>
-            <dt>Context</dt><dd><DecisionLongForm content={packet.context ?? revision.summary} /></dd>
-          </> : isRelease ? <>
+      <section className="min-w-0 max-w-full rounded-lg border p-4 text-sm">
+        {isTracked ? <div className="space-y-5">
+          {trackedPacket
+            ? <DecisionSources orgSlug={orgSlug} workspaceSlug={workspaceSlug} entity={trackedPacket.entity} sources={trackedPacket.sources} />
+            : <div><h2 className="text-sm font-medium">Linked to</h2><p className="mt-2 text-muted-foreground">{request.subjectType.replaceAll("_", " ").toLowerCase()}</p></div>}
+          <div className="border-t pt-4">
+            <h2 className="mb-2 text-sm font-medium">Context</h2>
+            <DecisionLongForm content={trackedPacket?.context ?? revision.summary} />
+          </div>
+        </div> : <DecisionDetailsGrid>
+          {isRelease ? <>
             <dt>Repository</dt><dd>{packet.repositoryOwner}/{packet.repositoryName}</dd>
             <dt>Pull request</dt><dd>#{packet.pullRequestNumber}</dd>
             <dt>Reviewed commit</dt><dd className="break-all font-mono">{packet.headSha}</dd>
@@ -101,8 +111,8 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
             <dt>Owning squad</dt><dd>{packet.roadmapItem?.squadId ?? "Unassigned"}</dd>
             <dt>Policy</dt><dd>{packet.policyVersion}</dd>
           </>}
-          {!isTracked && <><dt>Fingerprint</dt><dd className="break-all font-mono">{revision.fingerprint}</dd></>}
-        </DecisionDetailsGrid>
+          <><dt>Fingerprint</dt><dd className="break-all font-mono">{revision.fingerprint}</dd></>
+        </DecisionDetailsGrid>}
       </section>
       {isRetired && !decided ? <section className="rounded-lg border p-4 text-sm"><strong>This legacy review is read-only.</strong><p className="text-muted-foreground">Historical evidence remains available for audit.</p></section> : freshness.stale ? (
         <section className="space-y-2 rounded-lg border p-4 text-sm">
