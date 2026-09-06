@@ -76,6 +76,12 @@ describe("TimelineCard reduced motion", () => {
 });
 
 describe("EditDatesDialog save failures", () => {
+  it("tells users to reload the page when reconciliation has locked editing", () => {
+    const item = { id: "item-1", title: "Conflict", horizon: "NEXT" } as RoadmapCardData;
+    render(<EditDatesDialog item={item} open disabled start="2026-09-01" end="2026-09-14" onOpenChange={vi.fn()} onSave={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Reload this page before another edit");
+    expect(screen.getByRole("button", { name: "Save schedule" })).toBeDisabled();
+  });
   it("edits horizon and both inclusive dates through explicit controls", async () => {
     const item = { id: "item-1", title: "Keyboard schedule", horizon: "NEXT", isPrivate: false, deliveryStatus: "NOT_STARTED" } as RoadmapCardData;
     const onSave = vi.fn().mockResolvedValue(undefined);

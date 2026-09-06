@@ -126,6 +126,7 @@ describe("useTimelineController scheduling failures", () => {
     await act(async () => { await expect(save).rejects.toThrow("failed"); });
     expect(result.current.items[0]).toMatchObject({ horizon: "NEXT", viewStart: "2026-09-01", viewEnd: "2026-09-14" });
     expect(result.current.reconciliationRequiredIds).toContain("item-1");
+    expect(result.current.announcement).toContain("Reload this page before another edit");
   });
 
   it("applies panel roadmap mutations when no local save is active", () => {
