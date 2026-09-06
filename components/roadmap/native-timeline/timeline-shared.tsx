@@ -185,7 +185,7 @@ function EditDatesForm({ item, open, disabled, start, end, onOpenChange, onSave 
           <DialogTitle>Edit schedule</DialogTitle>
           <DialogDescription>{item.title}. Choose a planning horizon and inclusive dates.</DialogDescription>
         </DialogHeader>
-        {disabled ? <p role="status" className="rounded-md bg-status-warning-surface p-2 text-sm text-status-warning">Reconciliation required. Refreshing before another edit.</p> : null}
+        {disabled ? <p role="status" className="rounded-md bg-status-warning-surface p-2 text-sm text-status-warning">Reconciliation required. Reload this page before another edit.</p> : null}
         <label className="grid gap-1 text-xs font-medium">
           Horizon
           <select disabled={disabled} className="h-11 rounded-lg border px-2 text-sm" value={draftHorizon} onChange={(event) => setDraftHorizon(event.target.value as Horizon)}>
