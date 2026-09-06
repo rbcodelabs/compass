@@ -6,6 +6,7 @@ import { GripVertical, Layers, Bug } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
+import { BoardColumn, EmptyState } from "@/components/patterns";
 import { HORIZON_META, QUICK_ADD_HORIZONS } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
 
@@ -80,7 +81,42 @@ export function UnscheduledItemsPanel({ items, onQuickAdd }: Props) {
   );
 }
 
-function UnscheduledItemCard({ item, onQuickAdd }: { item: UnscheduledItem; onQuickAdd: Props["onQuickAdd"] }) {
+export function UnscheduledItemsColumn({ items, onQuickAdd }: Props) {
+  return (
+    <BoardColumn
+      title="Not scheduled"
+      count={items.length}
+      accent="neutral"
+      data-testid="roadmap-unscheduled-column"
+      className="min-w-[280px] flex-1 overflow-hidden md:h-full"
+      bodyId="unscheduled-items-column"
+      bodyClassName="min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"
+    >
+      {items.length === 0 ? (
+        <EmptyState compact title="No items waiting to be scheduled." />
+      ) : (
+        items.map((item) => (
+          <UnscheduledItemCard
+            key={unscheduledDragId(item)}
+            item={item}
+            onQuickAdd={onQuickAdd}
+            fullWidth
+          />
+        ))
+      )}
+    </BoardColumn>
+  );
+}
+
+function UnscheduledItemCard({
+  item,
+  onQuickAdd,
+  fullWidth = false,
+}: {
+  item: UnscheduledItem;
+  onQuickAdd: Props["onQuickAdd"];
+  fullWidth?: boolean;
+}) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
     id: unscheduledDragId(item),
     data: { unscheduledItem: item },
@@ -91,7 +127,7 @@ function UnscheduledItemCard({ item, onQuickAdd }: { item: UnscheduledItem; onQu
     : {};
 
   return (
-    <div ref={setNodeRef} style={style} className="touch-none w-56">
+    <div ref={setNodeRef} style={style} className={fullWidth ? "touch-none w-full" : "touch-none w-56"}>
       <Card
         size="sm"
         className="w-full bg-white shadow-sm transition-opacity duration-150 data-[dragging=true]:opacity-40"

@@ -26,7 +26,7 @@ import {
 import { RoadmapColumn } from "./roadmap-column";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
 import {
-  UnscheduledItemsPanel,
+  UnscheduledItemsColumn,
   UnscheduledItemPreview,
   parseUnscheduledDragId,
   type UnscheduledItem,
@@ -442,12 +442,9 @@ export function RoadmapBoard({
                 availableExperiments={availableExperiments}
               />
             ))}
+            <UnscheduledItemsColumn items={unscheduled} onQuickAdd={handleQuickAdd} />
           </div>
         </Board>
-
-        <div className="shrink-0">
-          <UnscheduledItemsPanel items={unscheduled} onQuickAdd={handleQuickAdd} />
-        </div>
       </div>
 
       {/* DragOverlay renders the card being dragged at its cursor position */}
