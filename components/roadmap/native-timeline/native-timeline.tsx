@@ -14,6 +14,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 import { createTimelineLaneKey, packTimelineIntervals } from "@/lib/roadmap-timeline/lane-packing";
 import { HORIZON_META, HORIZON_ORDER } from "@/lib/roadmap";
 import { UnscheduledItemsPanel, parseUnscheduledDragId } from "../unscheduled-items-panel";
@@ -42,9 +43,11 @@ const LABEL_WIDTH = 176;
 const HEADER_HEIGHT = 72;
 const HORIZON_HEIGHT = 34;
 const LANE_HEIGHT = 50;
-// Four independent keyboard/touch targets (left resize, move, edit, right
-// resize) need 24px each plus separation; packing uses this same geometry.
+// Very short bars retain one 44px schedule-dialog target. Wider bars keep
+// four separate 24px targets inside their exact date geometry.
 const MIN_INTERACTION_WIDTH = 44;
+// Four 24px controls, a 24px details target, and the card's two borders.
+const MIN_INLINE_WIDTH = 122;
 
 type NativeItemLayout = {
   item: TimelineItemView;
@@ -453,7 +456,7 @@ function NativeItem({ item, left, width, interactionWidth, top, dayWidth, track,
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `timeline:item:${item.id}`, disabled });
   const style = { left, top, width: interactionWidth, transform: CSS.Translate.toString(transform), zIndex: isDragging ? 30 : 5 };
   const displayOnly = item.horizon === "LAUNCHING" || item.horizon === "LAUNCHED";
-  const useDialogFallback = !displayOnly && width < 108;
+  const useDialogFallback = !displayOnly && width < MIN_INLINE_WIDTH;
   return (
     <div
       ref={setNodeRef}
@@ -476,10 +479,10 @@ function NativeItem({ item, left, width, interactionWidth, top, dayWidth, track,
             <span className="sr-only">Edit horizon, start date, and end date</span>
           </button>
         </>
-      ) : <TimelineCard item={item} start={item.viewStart} end={item.viewEnd} overlapCount={overlapCount} onOpen={onOpen} onEditDates={onEdit} editable={!displayOnly && !disabled} editControlClassName="mr-7" className={item.hasDates ? "" : "border-dashed"}>
+      ) : <TimelineCard item={item} start={item.viewStart} end={item.viewEnd} overlapCount={overlapCount} onOpen={onOpen} onEditDates={onEdit} editable={!displayOnly && !disabled} editControlClassName="mr-6" className={item.hasDates ? "" : "border-dashed"}>
         {!displayOnly ? <><button
           type="button" {...attributes} {...listeners} disabled={disabled} aria-label={`Move ${item.title}`}
-          className="ml-7 mr-1 h-full w-6 shrink-0 touch-none cursor-grab bg-black/10 hover:bg-black/20 focus:bg-black/20 disabled:cursor-wait disabled:opacity-60"
+          className="ml-6 inline-flex h-full w-6 shrink-0 touch-none cursor-grab items-center justify-center text-white/70 hover:bg-white/10 hover:text-white focus-visible:bg-white/20 focus-visible:text-white focus-visible:outline-none disabled:cursor-wait disabled:opacity-60"
           onKeyDown={(event) => {
             if (event.key.toLowerCase() === "d") { event.preventDefault(); onEdit(); return; }
             if (!event.altKey) return;
@@ -499,7 +502,9 @@ function NativeItem({ item, left, width, interactionWidth, top, dayWidth, track,
               if (candidate) onKeyboardMove(0, candidate);
             }
           }}
-        />
+        >
+          <GripVertical aria-hidden="true" className="size-3.5" />
+        </button>
         <ResizeHandle edge="left" item={item} dayWidth={dayWidth} disabled={disabled} onResize={onResize} />
         <ResizeHandle edge="right" item={item} dayWidth={dayWidth} disabled={disabled} onResize={onResize} /></> : null}
       </TimelineCard>}
@@ -521,7 +526,7 @@ function ResizeHandle({ edge, item, dayWidth, disabled, onResize }: { edge: "lef
       type="button"
       aria-label={`Resize ${edge} edge of ${item.title}`}
       disabled={disabled}
-      className={`absolute inset-y-0 z-10 w-6 touch-none cursor-ew-resize bg-white/0 hover:bg-white/30 focus:bg-white/30 disabled:cursor-wait ${edge === "left" ? "left-0" : "right-0"}`}
+      className={`absolute inset-y-0 z-10 w-6 touch-none cursor-ew-resize focus-visible:bg-white/20 focus-visible:outline-none disabled:cursor-wait ${edge === "left" ? "left-0" : "right-0"}`}
       onKeyDown={(event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();
@@ -546,7 +551,13 @@ function ResizeHandle({ edge, item, dayWidth, disabled, onResize }: { edge: "lef
         target.addEventListener("pointercancel", cancel);
         target.addEventListener("lostpointercapture", cancel);
       }}
-    />
+    >
+      <span
+        aria-hidden="true"
+        data-resize-grip={edge}
+        className={`pointer-events-none absolute inset-y-2 w-0.5 rounded-full bg-white/60 group-hover:bg-white group-focus-within:bg-white ${edge === "left" ? "left-0" : "right-0"}`}
+      />
+    </button>
   );
 }
 

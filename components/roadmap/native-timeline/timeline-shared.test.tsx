@@ -60,6 +60,9 @@ describe("TimelineCard reduced motion", () => {
     expect(screen.getByRole("button", { name: "Edit dates for Native validation" })).toHaveClass(
       "motion-reduce:transition-none", "size-6",
     );
+    expect(screen.getByRole("button", { name: "Edit dates for Native validation" })).toHaveClass(
+      "[@media(pointer:coarse)]:opacity-100",
+    );
   });
 
   it("communicates inclusive dates and overlap without relying on color", () => {
@@ -72,6 +75,11 @@ describe("TimelineCard reduced motion", () => {
 
     expect(screen.getByRole("button", { name: /Open details for Concurrent work.*2026-09-01 through 2026-09-14.*overlaps 1 other item/i })).toBeInTheDocument();
     expect(screen.getByText("2 overlapping")).toBeInTheDocument();
+    expect(screen.getByText("2 overlapping")).toHaveClass("hidden", "@[240px]/timeline-card:inline-flex");
+    expect(screen.getByRole("button", { name: /Open details for Concurrent work/ })).toHaveClass("overflow-hidden");
+    expect(screen.getByRole("button", { name: /Open details for Concurrent work/ })).toHaveAccessibleName(/Delivery status: Not Started/);
+    expect(screen.getByTestId("timeline-item-item-1")).toHaveClass("@container/timeline-card");
+    expect(screen.getByLabelText("Delivery status: Not Started")).toHaveClass("min-[900px]:@[240px]/timeline-card:inline-flex");
   });
 });
 
