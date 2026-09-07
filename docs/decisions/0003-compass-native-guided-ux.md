@@ -1,12 +1,51 @@
 # ADR-0003: Compass-Native Guided UX with Chat and Realtime Voice
 
 **Date:** 2026-08-30
-**Amended:** 2026-09-04
+**Amended:** 2026-09-07
 **Status:** Accepted
+
+## Accepted browser-parity amendment (2026-09-07)
+
+For Helio feature parity, the approved participant path uses browser-managed
+WebRTC with a short-lived provider client credential and data channel. Initial
+instructions remain server-authored. The browser can override provider settings,
+so its claimed speaker, event order, captions, and transcript content are
+**participant-submitted research evidence**, not provider-authenticated evidence.
+This explicitly supersedes the server-authoritative-only requirement below for
+the browser-parity path. Historical sideband decisions and probe receipts remain
+preserved; the authoritative control plane remains dormant and unchanged.
+
+`COMPASS_RESEARCH_BROWSER_VOICE_ENABLED=1` is a separate default-off gate for
+both discovery interviews and guided usability tests. Migration
+`049_research_participant_voice` adds separate browser event storage linked to
+append-only ResearchTurns. Tenant, active participant link, resume secret, lease,
+stable client event ID, reported ordinal, and exact attachment replay are checked
+before an atomic save. The source is never promoted to provider authority.
+
+Five lease claims per session permit an initial connection plus four reconnects;
+ambiguous issuance failures consume a claim. Credentials expire after 60 seconds
+for new connections. This bounds Compass issuance, **not provider spending**:
+credentials can establish multiple sessions while valid and existing calls can
+outlive credential expiry. Closing local media or clearing a Compass lease is
+not proof of provider hangup. No new worker or remote call-control infrastructure
+is required by this parity choice.
+
+Failed saves remain sticky and retryable while the page remains open. Finish
+stops capture, allows a bounded final-event drain, freezes intake, and waits for
+all saves before requesting completion. Failure never becomes a saved/complete
+claim. Browser closure before successful saving can still lose unsaved speech;
+raw audio is not recorded. Live/production activation requires separate release
+approval and is not implied by this implementation.
+
+Alternatives considered: keep server-authenticated sideband (stronger provider
+provenance, substantially more lifecycle infrastructure); copy Helio unchanged
+(less work, weak save/tenant boundaries); reuse browser behavior with Compass
+authorization and explicit participant provenance (chosen). Revisit only when a
+concrete requirement demands provider-authenticated records or remote shutdown.
 
 ## Context
 
-Compass must replace Helio's guided usability-testing experience without creating a second research system or importing Helio's public blob URLs, client-authored prompts, replaceable transcripts, and weak tenant boundaries. The existing Capture domain already provides workspace-scoped studies, hashed participant and resume tokens, append-only turns, request idempotency, and a tool-free paid model runtime.
+Compass must replace Helio's guided usability-testing experience without creating a second research system or importing its weak attachment/tenant boundaries and replaceable transcripts. Helio's initial voice prompts are server-authored, though browser credentials permit later overrides. The existing Capture domain already provides workspace-scoped studies, hashed participant and resume tokens, append-only turns, request idempotency, and a tool-free paid model runtime.
 
 The migration must support a live product, realistic task guide, chat, realtime voice, screenshots and PDFs, reload/resume, and researcher review. Target products may deny iframe embedding through CSP or `X-Frame-Options`, and Compass cannot reliably detect that denial across origins.
 

@@ -275,7 +275,7 @@ describe("authoritative research voice control plane migration (047)", () => {
 
   it("waits for every remote async index and verifies catalog readiness before completion", () => {
     const route = readFileSync(ROUTE, "utf-8")
-    expect(route).toContain('ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane"]')
+    expect(route).toContain('ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_research_participant_voice"]')
     expect(route).toContain("async DDL returned no job_id")
     expect(route).toContain("CALL sys.wait_for_job($1)")
     expect(route).not.toContain("SELECT sys.wait_for_job")

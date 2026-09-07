@@ -1,5 +1,9 @@
 import { test, expect } from "../fixtures/index"
 
+function voiceEventIdentity(evidenceMode: string | undefined, id: string, ordinal: number) {
+  return evidenceMode === "PARTICIPANT_SUBMITTED" ? { clientEventId: id, reportedOrdinal: ordinal } : { providerEventId: id }
+}
+
 test.describe("Capture — research study", () => {
   test("edits an unused protocol, locks it after participation, and manages the lifecycle", async ({ page, base, browser, baseURL }) => {
     await page.goto(`${base}/capture/new`)
@@ -176,15 +180,15 @@ test.describe("Capture — research study", () => {
       data: { token: participantToken, ...voiceSession },
     })
     expect(voiceCredential.status()).toBe(200)
-    const { leaseId } = await voiceCredential.json() as { leaseId: string }
+    const { leaseId, evidenceMode } = await voiceCredential.json() as { leaseId: string; evidenceMode?: string }
     expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: {
       token: participantToken, ...voiceSession, leaseId, action: "FINAL",
-      providerEventId: "e2e-discovery-participant-1", role: "PARTICIPANT",
+      ...voiceEventIdentity(evidenceMode, "e2e-discovery-participant-1", 0), role: "PARTICIPANT",
       content: "I plan every Monday because the rest of the week changes quickly.",
     } })).status()).toBe(200)
     expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: {
       token: participantToken, ...voiceSession, leaseId, action: "FINAL",
-      providerEventId: "e2e-discovery-interviewer-1", role: "INTERVIEWER",
+      ...voiceEventIdentity(evidenceMode, "e2e-discovery-interviewer-1", 1), role: "INTERVIEWER",
       content: "Tell me about the last time that plan had to change.",
     } })).status()).toBe(200)
     expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: {
@@ -296,10 +300,10 @@ test.describe("Capture — research study", () => {
       data: { token: participantToken, ...voiceSession },
     })
     expect(voiceCredential.status()).toBe(200)
-    const { leaseId } = await voiceCredential.json() as { leaseId: string }
+    const { leaseId, evidenceMode } = await voiceCredential.json() as { leaseId: string; evidenceMode?: string }
     const participantEvent = {
       token: participantToken, ...voiceSession, leaseId, action: "FINAL",
-      providerEventId: "e2e-participant-final-1", role: "PARTICIPANT",
+      ...voiceEventIdentity(evidenceMode, "e2e-participant-final-1", 0), role: "PARTICIPANT",
       content: "I expected the comparison to explain the tradeoffs.",
     }
     expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: participantEvent })).status()).toBe(200)
@@ -307,7 +311,7 @@ test.describe("Capture — research study", () => {
     expect((await replay.json()).replayed).toBe(true)
     expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: {
       token: participantToken, ...voiceSession, leaseId, action: "FINAL",
-      providerEventId: "e2e-interviewer-final-1", role: "INTERVIEWER",
+      ...voiceEventIdentity(evidenceMode, "e2e-interviewer-final-1", 1), role: "INTERVIEWER",
       content: "What tradeoff did you expect to see explained?",
     } })).status()).toBe(200)
     const resumedVoice = await anonymous.request.post(`${baseURL}/api/research/start`, {

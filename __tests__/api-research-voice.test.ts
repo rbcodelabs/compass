@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const resolveActiveResearchStudy = vi.hoisted(() => vi.fn())
+const resolveResearchVoiceCleanupStudy = vi.hoisted(() => vi.fn())
 const createResearchVoiceLease = vi.hoisted(() => vi.fn())
 const appendFinalResearchVoiceEvent = vi.hoisted(() => vi.fn())
 const releaseResearchVoiceLease = vi.hoisted(() => vi.fn())
+const verifyParticipantVoiceLease = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/research-participant-voice", () => ({ verifyParticipantVoiceLease, appendParticipantVoiceEvent: vi.fn() }))
 
-vi.mock("@/lib/research-access", () => ({ resolveActiveResearchStudy }))
+vi.mock("@/lib/research-access", () => ({ resolveActiveResearchStudy, resolveResearchVoiceCleanupStudy }))
 vi.mock("@/lib/research-voice", () => ({
   ResearchVoiceError: class ResearchVoiceError extends Error { constructor(message: string, readonly status: number) { super(message) } },
   createResearchVoiceLease,
@@ -34,6 +37,57 @@ describe("research voice APIs", () => {
     })
   })
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
+
+  it("allows the separately enabled browser path in production with a short-lived credential", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ value: "ephemeral-only", expires_at: Math.floor(Date.now() / 1000) + 60 }))
+    vi.stubGlobal("fetch", fetchMock)
+    const response = await createVoice(request("/api/research/voice-session", {
+      token: "study-token", sessionId: "session-1", resumeToken: "resume-secret",
+    }))
+    expect(response.status).toBe(200)
+    expect(response.headers.get("cache-control")).toBe("no-store")
+    const providerBody = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(providerBody.expires_after).toEqual({ anchor: "created_at", seconds: 60 })
+    expect(providerBody.session.instructions).toBe("SERVER GUIDED INSTRUCTIONS")
+    expect(await response.text()).not.toContain("long-lived-secret")
+  })
+
+  it.each(["revoked", "expired", "closed"])("permits only cleanup through a %s participant link", async () => {
+    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    resolveActiveResearchStudy.mockResolvedValue(null)
+    const context = { study: { id: "original-study" }, participantToken: { id: "original-token" }, prisma: {} }
+    resolveResearchVoiceCleanupStudy.mockResolvedValue(context)
+    releaseResearchVoiceLease.mockResolvedValue({ released: true })
+    const base = { token: "original-token-secret", sessionId: "original-session", resumeToken: "resume-secret", leaseId: "exact-lease" }
+    const response = await persistVoice(request("/api/research/voice-event", { ...base, action: "DISCONNECT" }))
+    expect(response.status).toBe(200)
+    expect(releaseResearchVoiceLease).toHaveBeenCalledWith({ context, sessionId: base.sessionId, resumeToken: base.resumeToken, leaseId: base.leaseId })
+    expect(resolveActiveResearchStudy).not.toHaveBeenCalled()
+    const final = await persistVoice(request("/api/research/voice-event", { ...base, action: "FINAL", clientEventId: "one", reportedOrdinal: 0, role: "PARTICIPANT", content: "Forbidden new write" }))
+    expect(final.status).toBe(404)
+  })
+
+  it("releases the claimed lease when the credential request throws", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unavailable")))
+    const response = await createVoice(request("/api/research/voice-session", {
+      token: "study-token", sessionId: "session-1", resumeToken: "resume-secret",
+    }))
+    expect(response.status).toBe(502)
+    expect(releaseResearchVoiceLease).toHaveBeenCalledWith(expect.objectContaining({ leaseId: "lease-1" }))
+  })
+  it("does not release credentials after authorization was revoked during provider creation", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ value: "ephemeral-only", expires_at: Math.floor(Date.now() / 1000) + 60 })))
+    verifyParticipantVoiceLease.mockRejectedValueOnce(new Error("revoked"))
+    const response = await createVoice(request("/api/research/voice-session", { token: "study-token", sessionId: "session-1", resumeToken: "resume-secret" }))
+    expect(response.status).toBe(502)
+    expect(await response.text()).not.toContain("ephemeral-only")
+  })
 
   it("rejects credential and event APIs while authoritative voice is disabled", async () => {
     vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
