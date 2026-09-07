@@ -175,6 +175,110 @@ and [OpenAI's generated server-event types](https://github.com/openai/openai-nod
 
 ## Risks
 
+### Controlled feasibility probe checkpoint — 2026-09-07
+
+The approved probe is deliberately separate from application behavior: scripts
+under `scripts/research-voice`, no database, callback, schema, participant route,
+flag change, or production write. Live execution still requires independent
+review and explicit operator go-ahead; local verification is not live evidence.
+
+The architect accepted exact development pins `undici@7.28.0` and
+`esbuild@0.28.2`, already present transitively. Options considered were native
+WebSocket (no supported authorization-header option), a new `ws` dependency
+(additional transport), and bundled Undici (existing pinned implementation with
+headers). The latter is packaged locally as a Node22 CommonJS artifact with only
+Node built-ins external. No runtime package installation or additional Sandbox
+egress is allowed. The complete artifact is loaded under Node22 before allocation.
+
+One fixed exclusive journal claim is fsynced before any allocation at
+`~/.geode/probes/compass-research-voice-feasibility-v1.jsonl`. Do not remove or reset
+it to rerun: failure consumes the attempt, including ambiguous creation. The
+actual SDK fetch dispatch is guarded because SDK2.9.2 retries otherwise; create
+and detached-command POST each dispatch at most once, without redirects. Only
+the original Sandbox Session is used, never auto-resume. Existing explicit
+project/team CLI credentials are read in memory, without scope inference.
+
+The absolute 120-second budget starts before provider allocation, reserves
+30 seconds for cleanup, and permits one nonpersistent one-vCPU/two-GB Sandbox
+with only `api.openai.com` egress. The provider model is explicitly
+`gpt-realtime-2.1`, with automatic response creation disabled from allocation and
+only one explicit response capped at 128 tokens. A conservative estimate of
+$1.383 includes 120 seconds of audio input, 8192 text-input tokens, worst-case
+audio/text output, separate transcription and Sandbox reserves, and a $1
+contingency. It must remain below $5 before allocation. This is not an account
+spend limit or a guaranteed invoice cap. Sources checked: [pricing](https://developers.openai.com/api/docs/pricing),
+[Realtime token accounting](https://developers.openai.com/api/docs/guides/realtime-costs),
+and [Sandbox pricing](https://vercel.com/docs/sandbox/pricing).
+
+The browser holds its SDP answer until the authenticated sideband observes the
+full configured policy for the matching session/nonce AND the sole assistant
+greeting yields a genuine explicit-null provider root and a completed canonical
+interviewer event. An empty parser or missing predecessor never proves root.
+Only then does an audio-only headless peer play locally generated synthetic
+speech (maximum 15 seconds, no microphone). A linked final participant transcript
+must pass the existing parser; there is no second assistant response. Failure
+dominates readiness/completion; final proof waits for the complete worker log
+stream and its independent provider-stop receipt. A pre-media timeout means
+initialization was **not demonstrated**, not that the provider cannot support it.
+
+The worker has its own absolute deadline and bounded provider hangup in finally;
+the controller independently hangs up and stops the Sandbox. Numeric HTTP status
+and redacted hashes/order metadata are recorded, never SDP, tokens, raw audio,
+full provider errors, tracing, HAR, or video. Known identities are retained before
+body reads/journal failures, and cleanup passes are bounded and independent.
+Arbitrary 404 is not stop proof. Missing identity after ambiguous creation, late
+results beyond the cleanup reserve, or failed browser closure remain unresolved
+and require operator investigation using the journal; no automatic new allocation
+or inferred absence is permitted.
+
+Local-only entry point (macOS offline `say`/`afconvert`, Node22):
+`fnm exec --using=v22.23.2 node scripts/research-voice/run.mjs --check`.
+This packages/loads the worker and prepares real Chromium audio SDP without
+credentials, a journal claim, or live resources. The explicit browser regression
+gate is `RUN_RESEARCH_VOICE_PROBE_BROWSER=1 pnpm vitest run __tests__/research-voice-probe-browser.test.ts`;
+it additionally connects two local peers, plays the fixture through source-ended,
+and rejects repeat SDP release. Default unit CI does not claim that opt-in browser
+coverage. The separate `--live-approved` mode is reserved for the reviewed operator
+invocation. Temporary generated speech/bundles are removed by the wrapper.
+
+Even a successful probe does not demonstrate that the participant heard the
+pre-media greeting, Function-return survival, durable READY, 40-minute sessions,
+normal completion, attachment ordering, or production readiness. These remain
+separate rollout gates; authoritative participant voice stays disabled.
+
+#### Single approved live attempt — observed outcome
+
+On 2026-09-07 at 16:51:50 UTC, the reviewed probe consumed its one attempt
+(`c344d6b2-602c-4942-8ba2-fc0e0a46a8fc`). Provider allocation returned HTTP201;
+the nonpersistent Sandbox and detached worker started. The worker then failed
+closed with `POLICY_MISMATCH` during `PREMEDIA_INITIALIZATION`. Total elapsed
+time through cleanup was 8,540 ms. No successful policy/root acknowledgement,
+canonical exchange, browser SDP release, participant audio, or assistant response
+was observed. This is **not demonstrated**, not a successful feasibility result
+and not evidence that pre-media initialization is impossible.
+
+The redacted journal did not capture the mismatched field or source event kind.
+The current comparator checks both session policy and session identity; therefore
+the exact mismatch cannot be determined from retained evidence. No policy field
+was relaxed and no guessed fix was applied. Any future diagnostic improvement or
+new live attempt requires separate approval; the existing claim must never be
+deleted/reset to enable a retry.
+
+Cleanup evidence was positive for all three resources: the worker recorded a
+successful provider hangup, the controller recorded provider/Sandbox/browser
+stopped, and the operator independently inspected the original Sandbox with
+`resume:false`, confirming `status:stopped` and `persistent:false`. This verifies
+cleanup for this attempt, not every possible crash or ambiguous-creation path.
+
+Audit identifiers (not credentials): provider
+`rtc_u2_ELWrPal4wad2DQIaMMwQZ`; Sandbox
+`compass-voice-probe-c344d6b2-602c-4942-8ba2-fc0e0a46a8fc`; command
+`cmd_fe511d5e7bee4b618aa5c6b254df`; packaged worker SHA256
+`1c103f4432c6aca9126cf315841bf56ee6bbd15ecaf6abd7567d20eb8df6721b`.
+The durable local journal remains at the fixed claim path above. The $1.383
+preflight figure is an estimate, not measured billed cost. No application,
+database, production flag, or participant runtime was changed by the probe.
+
 - Provider realtime event shapes and completion semantics may evolve; the sideband parser, event allowlist, response-status correlation, and provider-item ordering must remain versioned and tested.
 - Vercel Sandbox duration, detached-process, egress-policy, or outbound-WebSocket behavior may differ by plan or change over time. Production enablement is blocked on the live Compass-plan spike; failure of that prerequisite requires a small managed container service rather than weakening the provider-authoritative boundary.
 - A Sandbox or sideband connection can fail before all finalized events are persisted. Bounded retry, heartbeat reconciliation, explicit provider hangup, and a visible degraded-integrity state prevent such a gap from being mistaken for a complete canonical transcript.
