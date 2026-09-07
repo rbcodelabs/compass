@@ -11,6 +11,15 @@ function savedReply(message: string) {
 }
 
 describe("ResearchChat", () => {
+  it("explains how to recover when a browser supplies no HEIC MIME type", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ sessionId: "session-1", resumeToken: "secret", status: "IN_PROGRESS", turns: [] })))
+    render(<ResearchChat token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
+    await screen.findByRole("textbox", { name: "Your response" })
+    fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), { target: { files: [new File(["abc"], "photo.heic")] } })
+    expect(await screen.findByRole("alert")).toHaveTextContent(/another browser/)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
   it.each(["image/gif", "image/heic"])("allows uploading preserved %s evidence", async (mimeType) => {
     URL.createObjectURL = vi.fn(() => "blob:pending")
     URL.revokeObjectURL = vi.fn()

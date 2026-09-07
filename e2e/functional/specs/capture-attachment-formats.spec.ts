@@ -2,10 +2,12 @@ import { createHash, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { Pool } from "pg"
 import { test, expect } from "../fixtures/index"
+import { assertIsolatedE2EDatabase } from "../fixtures/isolated-database"
 
 // Real private storage, routes, database and Chromium. The functional runner's
 // synthetic interviewer is used; no paid model or voice resource is created.
 test("GIF and HEIC originals remain private and downloadable after resume", async ({ browser, page: member, baseURL, base }) => {
+  await assertIsolatedE2EDatabase()
   const pool = new Pool({ connectionString: process.env.DATABASE_URL })
   const studyId = randomUUID()
   const token = randomUUID().replaceAll("-", "").repeat(2)
@@ -27,7 +29,9 @@ test("GIF and HEIC originals remain private and downloadable after resume", asyn
     for (const [index, format] of formats.entries()) {
       const bytes = readFileSync(`e2e/fixtures/${format.name}`)
       const uploaded = page.waitForResponse(response => response.url().endsWith("/api/research/attachments") && response.request().method() === "POST")
-      await page.getByLabel("Share screenshot or PDF").setInputFiles({ ...format, buffer: bytes })
+      // Select the actual file path: do not inject a MIME type that a native
+      // browser chooser might not report for the format.
+      await page.getByLabel("Share screenshot or PDF").setInputFiles(`e2e/fixtures/${format.name}`)
       const response = await uploaded
       expect(response.status()).toBe(200)
       const attachment = await response.json()

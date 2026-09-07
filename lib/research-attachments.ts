@@ -62,6 +62,7 @@ export function validateResearchAttachmentUpload({
 }) {
   if (bytes.length === 0) throw new Error("Attachment cannot be empty")
   if (bytes.length > MAX_RESEARCH_ATTACHMENT_BYTES) throw new Error("Attachment exceeds 10 MiB")
+  if (!mimeType) throw new Error("This browser did not identify the file type. Try another browser or share a PNG, JPEG or PDF instead.")
   const name = originalName.trim()
   if (!name || name.length > 255 || name.includes("/") || name.includes("\\") || name === "." || name === "..") {
     throw new Error("Attachment filename is invalid")

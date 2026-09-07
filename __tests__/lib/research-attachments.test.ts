@@ -9,6 +9,9 @@ const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])
 const pdf = new TextEncoder().encode("%PDF-1.7\ncontent")
 
 describe("research attachment validation", () => {
+  it("rejects missing MIME with an actionable browser message instead of trusting the extension", () => {
+    expect(() => validateResearchAttachmentUpload({ bytes: png, mimeType: "", originalName: "photo.heic" })).toThrow(/another browser/)
+  })
   it.each(["GIF87a", "GIF89a"])("accepts the %s signature as a private GIF original", (signature) => {
     const bytes = new TextEncoder().encode(signature + "\u0001\u0000\u0001\u0000\u0000\u0000\u0000;")
     expect(validateResearchAttachmentUpload({ bytes, mimeType: "image/gif", originalName: "screen.gif" })).toMatchObject({ extension: "gif", mimeType: "image/gif" })

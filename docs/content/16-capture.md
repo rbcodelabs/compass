@@ -70,6 +70,9 @@ send evidence without typing an answer, and remove pending evidence before
 sending. Supported browser images show previews; when decoding fails, the original
 download remains available. HEIC files use an explicit download fallback, not a
 converted preview. PDFs open through a private, authorized link.
+The browser must identify the file's MIME type. If it supplies no type, Compass
+rejects the upload with guidance to try another browser or a supported alternative;
+it never trusts a `.heic` filename alone.
 Saved evidence remains visible with its answer after a reload. Temporary preview
 URLs are released when the preview closes; storage paths and session credentials
 are never placed in download URLs.
