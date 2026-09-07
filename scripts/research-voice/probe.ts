@@ -10,7 +10,7 @@ import { probeBudget } from "./budget"
 import { ProbeJournal, singleDispatchFetch } from "./journal"
 import { executeProbe, failureCode } from "./lifecycle"
 import { createProbeCall } from "./provider"
-import { WorkerEvidence } from "./evidence"
+import { collectWorkerLogs, WorkerEvidence } from "./evidence"
 
 export async function runProbe(mode: string, directory: string) {
   if (!["--check", "--live-approved"].includes(mode)) throw new Error("LIVE_APPROVAL_REQUIRED")
@@ -35,7 +35,8 @@ export async function runProbe(mode: string, directory: string) {
     const runId = randomUUID(); const sandboxName = `compass-voice-probe-${runId}`
     const journalDirectory = join(homedir(), ".geode/probes")
     mkdirSync(journalDirectory, { recursive: true, mode: 0o700 })
-    journal = new ProbeJournal(join(journalDirectory, "compass-research-voice-feasibility-v1.jsonl"))
+    // One separately approved diagnostic attempt. Never reset or overwrite v1.
+    journal = new ProbeJournal(join(journalDirectory, "compass-research-voice-feasibility-v2.jsonl"))
     const record = (entry: Record<string, unknown>) => journal!.record(entry)
     record({ kind: "preflight", runId, estimatedUsd: budget.estimatedUsd, durationMs: prepared.durationMs, bytes: worker.length, sha256: createHash("sha256").update(worker).digest("hex") })
     const started = Date.now(); const deadline = started + 120_000
@@ -71,23 +72,8 @@ export async function runProbe(mode: string, directory: string) {
         const command = await session.runCommand({ cmd: "node", args: ["worker.cjs"], detached: true,
           env: { OPENAI_API_KEY: key, PROBE_CALL_ID: providerCallId!, PROBE_RUN_ID: runId, PROBE_DEADLINE_MS: String(deadline - 30_000) }, signal })
         record({ kind: "resource", commandId: command.cmdId })
-        logTask = (async () => {
-          let buffered = ""; let bytes = 0
-          for await (const line of command.logs({ signal: logAbort.signal })) {
-            if (line.stream !== "stdout") continue // raw provider/runtime errors never forwarded
-            bytes += Buffer.byteLength(line.data)
-            if (bytes > 64 * 1024) throw new Error("WORKER_LOG_OVERFLOW")
-            buffered += line.data
-            let newline: number
-            while ((newline = buffered.indexOf("\n")) >= 0) {
-              const entry = JSON.parse(buffered.slice(0, newline)) as Record<string, unknown>
-              buffered = buffered.slice(newline + 1)
-              record(entry)
-              evidence.accept(entry)
-            }
-          }
-          if (buffered || !evidence.complete()) throw new Error("WORKER_EXITED_WITHOUT_PROOF")
-        })().catch((error) => { evidence.fail(error) }).finally(() => { logsSettled = true })
+        logTask = collectWorkerLogs(command.logs({ signal: logAbort.signal }), record, evidence)
+          .catch((error) => { evidence.fail(error) }).finally(() => { logsSettled = true })
       },
       waitReady: (signal) => waitFor(() => evidence.ready(), signal),
       releaseBrowser: async () => { if (!evidence.ready()) throw new Error("PREMEDIA_NOT_DEMONSTRATED"); await releaseSyntheticBrowser(page, answer); answer = "" },

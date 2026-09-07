@@ -279,6 +279,36 @@ The durable local journal remains at the fixed claim path above. The $1.383
 preflight figure is an estimate, not measured billed cost. No application,
 database, production flag, or participant runtime was changed by the probe.
 
+#### Separately authorized v2 diagnostic attempt — pending execution
+
+After reviewing that inconclusive failure, the user explicitly authorized safe
+field-level diagnostics and **one additional** controlled live attempt. The
+current `--live-approved` entry point therefore claims only
+`~/.geode/probes/compass-research-voice-feasibility-v2.jsonl` with exclusive creation.
+There is no attempt-number/path override or reset mechanism. The consumed v1
+journal, its worker hash, and the observed v1 outcome above remain unchanged;
+v2 execution/evidence must be recorded separately after independent review.
+
+The policy comparator, configured policy, pre-media root requirements, deadlines,
+allocation limits, and conservative sub-$5 preflight ceiling are unchanged.
+Diagnostics run only on a rejected policy/session identity and cannot acknowledge
+readiness. They use a fixed schema-owned path allowlist and only `missing`,
+`type`, or `value` mismatch kinds. Known harmless enums, bounded numeric limits,
+and boolean flags can be compared directly; unknown strings become `REDACTED`.
+Tools emit counts only. Instructions and session identifiers emit equality/type
+information, never their text. Provider-owned extra keys are not traversed or
+logged. Diagnostic records are validated again when the controller persists the
+worker's bounded stdout stream; no raw provider payload/error, audio, SDP, or
+credentials enter the journal. The existing 64-KiB log and 128-record journal
+bounds remain in force.
+
+Local regression coverage includes strict failure on each diagnosed mismatch,
+nested voice/automatic-response fields, redaction and forged journal records,
+split worker stdout through the real controller collector into a temporary
+journal, and distinct non-reusable v1/v2 claims. This diagnostic change is not a
+policy fix or a successful live proof. Voice remains disabled and PR167 remains
+unmerged pending the separately controlled review/execution workflow.
+
 - Provider realtime event shapes and completion semantics may evolve; the sideband parser, event allowlist, response-status correlation, and provider-item ordering must remain versioned and tested.
 - Vercel Sandbox duration, detached-process, egress-policy, or outbound-WebSocket behavior may differ by plan or change over time. Production enablement is blocked on the live Compass-plan spike; failure of that prerequisite requires a small managed container service rather than weakening the provider-authoritative boundary.
 - A Sandbox or sideband connection can fail before all finalized events are persisted. Bounded retry, heartbeat reconciliation, explicit provider hangup, and a visible degraded-integrity state prevent such a gap from being mistaken for a complete canonical transcript.

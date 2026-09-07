@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { ResearchVoiceSidebandBuffer } from "../../lib/research-voice-sideband"
+import { policyDiagnostics } from "./diagnostics"
 
 export function probePolicy(runId: string) {
   return {
@@ -41,12 +42,18 @@ export class ProbeProtocol {
     try { event = object(JSON.parse(raw)) } catch { throw new Error("INVALID_PROVIDER_EVENT") }
     if (event.type === "session.created" || event.type === "session.updated") {
       const session = object(event.session)
-      if (!matches(session, probePolicy(this.runId)) || typeof session.id !== "string") throw new Error("POLICY_MISMATCH")
+      const expected = probePolicy(this.runId)
+      const rejectPolicy = () => {
+        const identityMatches = event.type === "session.updated" || this.sessionId !== null ? session.id === this.sessionId : undefined
+        for (const entry of policyDiagnostics(session, expected, event.type as "session.created" | "session.updated", identityMatches)) this.record(entry)
+        throw new Error("POLICY_MISMATCH")
+      }
+      if (!matches(session, expected) || typeof session.id !== "string") rejectPolicy()
       if (event.type === "session.created") {
-        if (this.sessionId && this.sessionId !== session.id) throw new Error("POLICY_MISMATCH")
-        this.sessionId = session.id
+        if (this.sessionId && this.sessionId !== session.id) rejectPolicy()
+        this.sessionId = session.id as string
       } else {
-        if (session.id !== this.sessionId) throw new Error("POLICY_MISMATCH")
+        if (session.id !== this.sessionId) rejectPolicy()
         this.acknowledged = true
       }
       return
