@@ -71,11 +71,11 @@ Research goal: ${goal}
 Product URL (context only; do not fetch or open it): ${appUrl}
 Target duration: ${input.targetMinutes} minutes
 
-Write realistic participant goals, not UI instructions. Avoid naming buttons, menus, or page locations. Each task must be distinct, concise, observable, neutral, and possible to attempt in the product. Return only a JSON array of 5 to 8 strings with no markdown or explanation.` : `You are helping a researcher prepare a customer discovery interview.
+Write realistic participant goals, not UI instructions. Avoid naming buttons, menus, or page locations. Cover the core journey and relevant edge cases without assuming an implementation. Do not invent product capabilities from the URL. Each task must be distinct, concise, observable, neutral, and possible to attempt in the product. Return only a JSON array of 5 to 8 strings with no markdown or explanation.` : `You are helping a researcher prepare a customer discovery interview.
 Research goal: ${goal}
 Target duration: ${input.targetMinutes} minutes
 
-Write neutral, open-ended questions about concrete past behavior and real experiences. Do not validate assumptions, pitch solutions, ask leading questions, or combine multiple questions. Each question must be distinct, concise, and conversational. Return only a JSON array of 5 to 8 strings with no markdown or explanation.`
+Write neutral, open-ended questions about concrete past behavior and real experiences. Cover current workarounds and unmet needs before inviting a description of an ideal experience, grounded in those experiences rather than hypothetical purchase intent. Do not validate assumptions, pitch solutions, ask leading questions, or combine multiple questions. Each question must be distinct, concise, and conversational. Return only a JSON array of 5 to 8 strings with no markdown or explanation.`
   const response = await runResearchInterviewAgent({ prompt, baseUrl: "https://compass.local" })
   let parsed: unknown
   try {
