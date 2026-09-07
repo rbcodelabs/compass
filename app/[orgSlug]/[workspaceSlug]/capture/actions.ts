@@ -13,7 +13,7 @@ async function actor() {
   return { userId: session.user.id, source: "UI" as const }
 }
 function input(form: FormData): studies.ResearchStudyInput {
-  return { name: String(form.get("name") ?? ""), goal: String(form.get("goal") ?? ""), studyType: String(form.get("studyType") ?? "CUSTOMER_INTERVIEW"), targetMinutes: Number(form.get("targetMinutes") ?? 15), appUrl: String(form.get("appUrl") ?? ""), guide: form.getAll("guide").map(String) }
+  return { name: String(form.get("name") ?? ""), goal: String(form.get("goal") ?? ""), studyType: form.has("studyType") ? String(form.get("studyType")) : undefined, targetMinutes: Number(form.get("targetMinutes") ?? 15), appUrl: String(form.get("appUrl") ?? ""), guide: form.getAll("guide").map(String) }
 }
 function studyUrl(orgSlug: string, workspaceSlug: string, id: string, token?: string) {
   return `/${orgSlug}/${workspaceSlug}/capture/studies/${id}${token ? `?token=${encodeURIComponent(token)}` : ""}`
