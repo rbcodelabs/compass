@@ -63,14 +63,31 @@ after any upload and pending reply are resolved.
 
 ![Guided participant chat on mobile](/screenshots/docs/research-guided-chat-mobile.png)
 
-Participants can share a screenshot or PDF as research evidence. Files are signature-checked, bounded, stored privately, and delivered only through an authorized session or workspace-member request. If private storage fails partway through an upload, Compass records cleanup in a research-owned retry queue without exposing the private pathname. Chat sends bounded file bytes to the isolated interviewer. Voice can share an image directly with the realtime moderator; PDFs are represented only by a safe, untrusted description. Raw voice audio is not retained.
+Participants can share images or PDFs as research evidence. Files are signature-checked, bounded, stored privately, and delivered only through an authorized session or workspace-member request. Signature recognition is not a guarantee that a file will decode successfully. If private storage fails partway through an upload, Compass records cleanup in a research-owned retry queue without exposing the private pathname. Raw voice audio is not retained.
 
-Choose or drag in a PNG, JPEG, WebP image or PDF (up to 10 MiB per file). You can
+Choose or drag in a PNG, JPEG, WebP, GIF, HEIC image or PDF (up to 10 MiB per file). You can
 send evidence without typing an answer, and remove pending evidence before
-sending. Images show previews; PDFs open through a private, authorized link.
+sending. Supported browser images show previews; when decoding fails, the original
+download remains available. HEIC files use an explicit download fallback, not a
+converted preview. PDFs open through a private, authorized link.
 Saved evidence remains visible with its answer after a reload. Temporary preview
 URLs are released when the preview closes; storage paths and session credentials
 are never placed in download URLs.
+
+| Evidence format | Chat moderator | Voice moderator |
+| --- | --- | --- |
+| PNG, JPEG, WebP | Image contents | Image contents after the evidence is saved |
+| GIF | First frame only, never animation | Original preserved; contents not sent |
+| HEIC | Original preserved; contents not sent | Original preserved; contents not sent |
+| PDF | Document contents | Original preserved; contents not sent |
+
+The moderator is told when contents were not supplied and must not infer them
+from the filename. Researchers can retrieve the original privately from the
+session detail view, including after participant reload. There is no conversion
+service. GIF first-frame handling follows [Claude's documented vision support](https://platform.claude.com/docs/en/build-with-claude/vision).
+Although [Realtime supports image inputs](https://developers.openai.com/api/docs/guides/realtime-conversations),
+Compass does not assume GIF animation or HEIC support and preserves those files
+without sending their contents to voice.
 
 Compass saves each finalized participant and interviewer turn as the session progresses. If a participant reloads or briefly closes the tab, the same browser can safely resume its own in-progress Chat or Voice session. Finishing removes that browser's resume credential. Completed and abandoned sessions, their canonical transcripts, modality, and authorized attachments remain attached to the study and its workspace for member review.
 

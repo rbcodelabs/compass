@@ -24,7 +24,7 @@ function detectedType(bytes: Uint8Array): ApprovedAttachment | null {
     if (boxSize >= 16 && boxSize <= Math.min(bytes.length, 4096) && boxSize % 4 === 0) {
       const brands = [String.fromCharCode(...bytes.slice(8, 12))]
       for (let offset = 16; offset < boxSize; offset += 4) brands.push(String.fromCharCode(...bytes.slice(offset, offset + 4)))
-      if (brands.some((brand) => brand === "heic" || brand === "heix")) return { kind: "SCREENSHOT", extension: "heic" }
+      if (["heic", "heix", "mif1"].includes(brands[0]) && brands.some((brand) => brand === "heic" || brand === "heix")) return { kind: "SCREENSHOT", extension: "heic" }
     }
     return null
   }

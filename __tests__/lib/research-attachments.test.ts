@@ -34,6 +34,21 @@ describe("research attachment validation", () => {
       .toMatchObject({ kind: "DOCUMENT", extension: "pdf" })
   })
 
+  it.each(["avif", "isom", "hevc"])("rejects a %s primary container even with a claimed HEIC compatible brand", (brand) => {
+    const bytes = new Uint8Array(20)
+    new DataView(bytes.buffer).setUint32(0, 20)
+    bytes.set(new TextEncoder().encode(`ftyp${brand}`), 4)
+    bytes.set(new TextEncoder().encode("heic"), 16)
+    expect(() => validateResearchAttachmentUpload({ bytes, mimeType: "image/heic", originalName: "other.heic" })).toThrow()
+  })
+
+  it.each([0, 1, 12, 18, 4097])("rejects unsupported or malformed HEIC box size %s", (size) => {
+    const bytes = new Uint8Array(24)
+    new DataView(bytes.buffer).setUint32(0, size)
+    bytes.set(new TextEncoder().encode("ftypheic"), 4)
+    expect(() => validateResearchAttachmentUpload({ bytes, mimeType: "image/heic", originalName: "bad.heic" })).toThrow()
+  })
+
   it.each([
     { bytes: new Uint8Array(), mimeType: "image/png", originalName: "empty.png" },
     { bytes: pdf, mimeType: "image/png", originalName: "spoofed.png" },

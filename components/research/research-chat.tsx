@@ -233,7 +233,7 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
   async function upload(file: File) {
     if (!sessionId || !resumeToken || uploadLock.current || busy || pending || attachments.length >= 3) return
     if (!file.size || file.size > 10 * 1024 * 1024 || !["image/png", "image/jpeg", "image/webp", "image/gif", "image/heic", "application/pdf"].includes(file.type)) {
-      setError("Use a PNG, JPEG, WebP or PDF no larger than 10 MiB.")
+      setError("Use a PNG, JPEG, WebP, GIF, HEIC or PDF no larger than 10 MiB.")
       return
     }
     uploadLock.current = true

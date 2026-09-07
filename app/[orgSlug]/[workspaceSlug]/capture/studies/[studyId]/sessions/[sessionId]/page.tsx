@@ -1,5 +1,5 @@
 import Link from "next/link"
-import Image from "next/image"
+import { ResearchAttachmentLink } from "@/components/research/research-attachment-link"
 import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
@@ -38,7 +38,7 @@ export default async function ResearchSessionPage({ params, searchParams }: { pa
     <section className="max-w-3xl"><h2 className="font-semibold">Saved transcript</h2><ol className="mt-3 space-y-3">{turns.slice(0, 50).map(turn => <li id={`turn-${turn.id}`} key={turn.id} className="scroll-mt-20 rounded-lg border bg-surface-panel p-4 text-sm"><span className="font-medium">{turn.role === "PARTICIPANT" ? "Participant" : "Interviewer"}:</span><p className="mt-1 whitespace-pre-wrap break-words">{turn.content || "Attachment shared"}</p></li>)}</ol>
       <nav aria-label="Transcript pages" className="mt-4 flex gap-4 text-sm">{page > 1 && <Link className="underline" href={`${url}?page=${page - 1}&attachmentPage=${attachmentPage}`}>Previous turns</Link>}<span>Page {page}</span>{turns.length > 50 && <Link className="underline" href={`${url}?page=${page + 1}&attachmentPage=${attachmentPage}`}>Next turns</Link>}</nav>
     </section>
-    <section className="max-w-3xl"><h2 className="font-semibold">Attachments</h2><div className="mt-3 flex flex-wrap gap-3">{attachments.slice(0, 20).map(attachment => { const href = `/api/research/member-attachments/${attachment.id}`; return <a key={attachment.id} href={href} target="_blank" rel="noopener noreferrer" className="rounded-lg border p-3 text-sm">{attachment.mimeType.startsWith("image/") && <Image src={href} alt="" width={160} height={96} unoptimized className="mb-2 h-24 w-40 object-cover" />}<span className="block max-w-40 truncate underline">{attachment.originalName}</span></a> })}</div>
+    <section className="max-w-3xl"><h2 className="font-semibold">Attachments</h2><div className="mt-3 flex flex-wrap gap-3">{attachments.slice(0, 20).map(attachment => <div key={attachment.id} className="max-w-64 rounded-lg border p-3 text-sm"><ResearchAttachmentLink url={`/api/research/member-attachments/${attachment.id}`} originalName={attachment.originalName} mimeType={attachment.mimeType} /></div>)}</div>
       <nav aria-label="Attachment pages" className="mt-4 flex gap-4 text-sm">{attachmentPage > 1 && <Link className="underline" href={`${url}?page=${page}&attachmentPage=${attachmentPage - 1}`}>Previous attachments</Link>}{attachments.length > 20 && <Link className="underline" href={`${url}?page=${page}&attachmentPage=${attachmentPage + 1}`}>Next attachments</Link>}</nav>
     </section>
   </main>
