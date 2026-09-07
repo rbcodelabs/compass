@@ -20,10 +20,12 @@ function readEntryScript(): string {
 export async function runResearchInterviewAgent({
   prompt,
   attachments = [],
+  onDelta,
 }: {
   prompt: string
   baseUrl: string
   attachments?: Array<{ mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf"; originalName: string; bytes: Uint8Array }>
+  onDelta?: (text: string) => void
 }): Promise<string> {
   const snapshotId = await getGoldenSnapshotId()
   if (!snapshotId) {
@@ -65,6 +67,7 @@ export async function runResearchInterviewAgent({
     let buffer = ""
     let responseText: string | undefined
     let agentError: string | undefined
+    let provisionalChars = 0
     for await (const log of run.logs()) {
       if (log.stream !== "stdout") continue
       buffer += log.data
@@ -76,12 +79,20 @@ export async function runResearchInterviewAgent({
         const separator = line.indexOf(" ")
         const kind = separator === -1 ? line : line.slice(0, separator)
         const payload = separator === -1 ? "" : line.slice(separator + 1)
-        if (kind === "AGENT_RESULT") {
+        if (kind === "AGENT_DELTA") {
+          const text = (JSON.parse(payload) as { text?: unknown }).text
+          if (typeof text !== "string" || (onDelta && provisionalChars + text.length > 4_000)) {
+            throw new Error("Research provisional response exceeded its limit")
+          }
+          provisionalChars += text.length
+          onDelta?.(text)
+        } else if (kind === "AGENT_RESULT") {
           responseText = (JSON.parse(payload) as { text?: string }).text
         } else if (kind === "AGENT_ERROR") {
           agentError = (JSON.parse(payload) as { message?: string }).message
         }
       }
+      if (buffer.length > 64 * 1024) throw new Error("Research agent frame exceeded its limit")
     }
 
     const result = await run.wait()

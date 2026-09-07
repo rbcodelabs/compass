@@ -57,6 +57,35 @@ describe("runResearchInterviewAgent", () => {
     })).rejects.toBeInstanceOf(ResearchAgentUnavailableError)
   })
 
+  it("delivers bounded provisional deltas before the authoritative successful result", async () => {
+    const onDelta = vi.fn()
+    async function* logs() {
+      yield { stream: "stdout", data: 'AGENT_DELTA {"text":"What "}\nAGENT_DEL' }
+      expect(onDelta).toHaveBeenCalledWith("What ")
+      yield { stream: "stdout", data: 'TA {"text":"happened?"}\nAGENT_RESULT {"text":"What happened?"}\n' }
+    }
+    const writeFiles = vi.fn()
+    bootSandboxFromSnapshot.mockResolvedValue({ writeFiles, runCommand: vi.fn().mockResolvedValue({ logs, wait: vi.fn().mockResolvedValue({ exitCode: 0 }) }), stop: vi.fn() })
+    await expect(runResearchInterviewAgent({ prompt: "Prompt", baseUrl: "https://example.test", onDelta })).resolves.toBe("What happened?")
+    expect(onDelta.mock.calls.flat()).toEqual(["What ", "happened?"])
+    expect(writeFiles.mock.calls[0][0][0].content).toContain("includePartialMessages: true")
+  })
+
+  it("does not treat provisional output as a final reply on runtime failure", async () => {
+    const onDelta = vi.fn()
+    async function* logs() { yield { stream: "stdout", data: 'AGENT_DELTA {"text":"Unfinished"}\n' } }
+    bootSandboxFromSnapshot.mockResolvedValue({ writeFiles: vi.fn(), runCommand: vi.fn().mockResolvedValue({ logs, wait: vi.fn().mockResolvedValue({ exitCode: 1 }) }), stop: vi.fn() })
+    await expect(runResearchInterviewAgent({ prompt: "Prompt", baseUrl: "https://example.test", onDelta })).rejects.toThrow()
+    expect(onDelta).toHaveBeenCalledWith("Unfinished")
+  })
+
+  it("preserves longer nonstream guide generation instead of applying the interview delta limit", async () => {
+    const text = "x".repeat(5000)
+    async function* logs() { yield { stream: "stdout", data: `AGENT_DELTA ${JSON.stringify({ text })}\nAGENT_RESULT ${JSON.stringify({ text })}\n` } }
+    bootSandboxFromSnapshot.mockResolvedValue({ writeFiles: vi.fn(), runCommand: vi.fn().mockResolvedValue({ logs, wait: vi.fn().mockResolvedValue({ exitCode: 0 }) }), stop: vi.fn() })
+    await expect(runResearchInterviewAgent({ prompt: "Guide", baseUrl: "https://example.test" })).resolves.toBe(text)
+  })
+
   it("sends bounded attachment bytes as multimodal blocks without private URLs or tools", async () => {
     async function* logs() { yield { stream: "stdout", data: 'AGENT_RESULT {"text":"What did you expect there?"}\n' } }
     const runCommand = vi.fn().mockResolvedValue({ logs, wait: vi.fn().mockResolvedValue({ exitCode: 0 }) })
