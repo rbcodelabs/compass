@@ -58,8 +58,11 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
   const pendingSpeechRef = useRef(false)
   const connectAttemptRef = useRef(0)
   const startupAbortRef = useRef<AbortController | null>(null)
+  const startupCleanupRef = useRef<(() => void) | null>(null)
 
   function closeMedia() {
+    startupCleanupRef.current?.()
+    startupCleanupRef.current = null
     startupAbortRef.current?.abort()
     startupAbortRef.current = null
     if (pacingRef.current) clearInterval(pacingRef.current)
@@ -73,9 +76,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
     if (audioRef.current) audioRef.current.srcObject = null
   }
 
-  async function releaseLease() {
-    const session = sessionRef.current
-    const leaseId = leaseRef.current
+  async function releaseLease(session = sessionRef.current, leaseId = leaseRef.current) {
     if (!session || !leaseId) return
     const response = await fetch("/api/research/voice-event", {
       method: "POST",
@@ -169,6 +170,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
     }
     const stopStream = (stream: MediaStream) => stream.getTracks().forEach((track) => track.stop())
     const abortAttempt = async () => {
+      if (!isCurrentAttempt()) return
       closeMedia()
       await releaseLease()
     }
@@ -182,6 +184,21 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
       const startupAbort = new AbortController()
       startupAbortRef.current = startupAbort
       const startupSignal = AbortSignal.any([startupAbort.signal, AbortSignal.timeout(30_000)])
+      const onStartupDeadline = () => {
+        if (!isCurrentAttempt()) return
+        // The browser's RTC promises are not abortable. Invalidate their owner
+        // immediately so late resolutions cannot restore media or READY state.
+        connectAttemptRef.current += 1
+        acceptingEventsRef.current = false
+        closeMedia()
+        setError("Voice connection timed out. Your microphone is stopped; you can retry.")
+        setStatus("error")
+        void releaseLease().catch((releaseError) => {
+          if (connectAttemptRef.current === attempt + 1) setError(releaseError instanceof Error ? releaseError.message : "Connection release failed")
+        })
+      }
+      startupSignal.addEventListener("abort", onStartupDeadline, { once: true })
+      startupCleanupRef.current = () => startupSignal.removeEventListener("abort", onStartupDeadline)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       if (!isCurrentAttempt()) {
         stopStream(stream)
@@ -242,6 +259,10 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
         throw new Error(failure?.error || "The realtime moderator could not connect")
       }
       const credential = await credentialResponse.json() as { ephemeralToken: string; leaseId: string; evidenceMode?: string; targetMinutes?: number }
+      if (!isCurrentAttempt()) {
+        await releaseLease(session, credential.leaseId)
+        return
+      }
       leaseRef.current = credential.leaseId
       browserEvidenceRef.current = credential.evidenceMode === "PARTICIPANT_SUBMITTED"
       ordinalRef.current = 0
@@ -257,11 +278,12 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
 
       const peer = new RTCPeerConnection()
       peerRef.current = peer
-      peer.ontrack = (event) => { if (audioRef.current) audioRef.current.srcObject = event.streams[0] }
+      peer.ontrack = (event) => { if (isCurrentAttempt() && peerRef.current === peer && audioRef.current) audioRef.current.srcObject = event.streams[0] }
       for (const track of stream.getTracks()) peer.addTrack(track, stream)
       const channel = peer.createDataChannel("oai-events")
       dataChannelRef.current = channel
       channel.addEventListener("message", (message) => {
+        if (!isCurrentAttempt() || peerRef.current !== peer) return
         let event: Record<string, unknown>
         try { event = JSON.parse(String(message.data)) as Record<string, unknown> } catch { return }
         try { handleProviderEvent(event) } catch {
@@ -272,6 +294,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
         }
       })
       channel.addEventListener("open", () => {
+        if (!isCurrentAttempt() || peerRef.current !== peer) return
         channel.send(JSON.stringify({ type: "response.create" }))
         startTimeRef.current = Date.now()
         pacingRef.current = setInterval(() => {
@@ -282,7 +305,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
         }, 120_000)
       })
       peer.onconnectionstatechange = () => {
-        if (peer.connectionState === "failed" && !finishingRef.current) {
+        if (isCurrentAttempt() && peerRef.current === peer && peer.connectionState === "failed" && !finishingRef.current) {
           acceptingEventsRef.current = false
           closeMedia()
           setError("The voice connection was lost. Saved transcript remains available; reconnect to continue.")
@@ -315,9 +338,13 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
         await abortAttempt()
         return
       }
+      startupCleanupRef.current?.()
+      startupCleanupRef.current = null
+      startupAbortRef.current = null
       setStatus("ready")
     } catch (caught) {
       console.error("Research voice connection failed", caught)
+      if (!isCurrentAttempt()) return
       closeMedia()
       try { await releaseLease() } catch (releaseError) { setError(releaseError instanceof Error ? releaseError.message : "Connection release failed") }
       if (isCurrentAttempt()) {

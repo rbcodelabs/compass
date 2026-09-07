@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchVoice } from "@/components/research/research-voice"
@@ -234,9 +234,59 @@ describe("ResearchVoice", () => {
       fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
       await waitFor(() => expect(requested).toBe(true))
       deadline.abort()
-      expect(await screen.findByRole("alert")).toHaveTextContent("Startup deadline")
+      expect(await screen.findByRole("alert")).toHaveTextContent("timed out")
       expect(stopTrack).toHaveBeenCalled()
       expect(fetch).toHaveBeenCalledTimes(2)
+    } finally { timeout.mockRestore() }
+  })
+
+  it.each(["createOffer", "setRemoteDescription"] as const)("stops owned media when %s stalls and rejects late readiness", async (stage) => {
+    vi.useFakeTimers()
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(new Error("Startup deadline exceeded")), milliseconds)
+      return controller.signal
+    })
+    let resolveStage!: (value?: unknown) => void
+    peer[stage].mockImplementationOnce(() => new Promise((resolve) => { resolveStage = resolve }))
+    try {
+      render(<ResearchVoice token="study-token" />)
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start voice session" })) })
+      expect(peer[stage]).toHaveBeenCalled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_001) })
+      expect(stopTrack).toHaveBeenCalled()
+      expect(peer.close).toHaveBeenCalled()
+      expect(screen.getByRole("alert")).toHaveTextContent("timed out")
+      expect(fetch).toHaveBeenCalledWith("/api/research/voice-event", expect.objectContaining({ body: expect.stringContaining('"action":"DISCONNECT"') }))
+      vi.mocked(fetch).mockImplementation(async (url) => {
+        if (url === "/api/research/start") return Response.json({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] })
+        if (url === "/api/research/voice-session") return Response.json({ ephemeralToken: "new-short-secret", leaseId: "lease-2" })
+        return new Response("answer-sdp", { status: 200 })
+      })
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Reconnect voice session" })) })
+      expect(screen.getByText("Connected — speak naturally")).toBeVisible()
+      const closes = peer.close.mock.calls.length
+      await act(async () => { resolveStage({ type: "offer", sdp: "late-offer" }) })
+      expect(screen.getByText("Connected — speak naturally")).toBeVisible()
+      expect(peer.close).toHaveBeenCalledTimes(closes)
+    } finally { cleanup(); timeout.mockRestore(); vi.useRealTimers() }
+  })
+
+  it("stops a microphone permission result arriving after the startup deadline", async () => {
+    const deadline = new AbortController()
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal)
+    let resolveMedia!: (stream: { getTracks: () => Array<{ stop: () => void }> }) => void
+    const getUserMedia = vi.fn(() => new Promise((resolve) => { resolveMedia = resolve }))
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } })
+    try {
+      render(<ResearchVoice token="study-token" />)
+      fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+      await waitFor(() => expect(getUserMedia).toHaveBeenCalled())
+      deadline.abort()
+      expect(await screen.findByRole("alert")).toHaveTextContent("timed out")
+      await act(async () => { resolveMedia({ getTracks: () => [{ stop: stopTrack }] }) })
+      expect(stopTrack).toHaveBeenCalledOnce()
+      expect(fetch).not.toHaveBeenCalled()
     } finally { timeout.mockRestore() }
   })
 
