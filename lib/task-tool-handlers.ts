@@ -210,6 +210,8 @@ export async function listTasks({
   linkedType,
   linkedId,
   includeSubtasks,
+  updatedSince,
+  updatedBefore,
 }: {
   workspaceId: string
   status?: TaskStatus
@@ -220,6 +222,8 @@ export async function listTasks({
   linkedType?: TaskLinkedType
   linkedId?: string
   includeSubtasks?: boolean
+  updatedSince?: string
+  updatedBefore?: string
 }) {
   const prisma = getPrisma()
 
@@ -237,19 +241,41 @@ export async function listTasks({
     ...(assigneeUserId ? { assigneeUserId } : {}),
     ...(parentTaskId !== undefined ? { parentTaskId } : {}),
     ...(linkedType && linkedId ? { links: { some: { linkedType, linkedId } } } : {}),
+    ...(updatedSince || updatedBefore
+      ? {
+          updatedAt: {
+            ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
+            ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
+          },
+        }
+      : {}),
   }
 
-  const tasks = await prisma.task.findMany({
+  const matchingTasks = await prisma.task.findMany({
     where,
     include: { _count: { select: { subtasks: true } } },
-    orderBy: [{ status: "asc" }, { sortOrder: "asc" }],
+    orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
   })
 
-  if (!tasks.length) {
+  if (!matchingTasks.length) {
     return fail("No tasks found.")
   }
 
   if (includeSubtasks) {
+    const matchingIds = new Set(matchingTasks.map((task) => task.id))
+    const missingParentIds = [...new Set(
+      matchingTasks
+        .map((task) => task.parentTaskId)
+        .filter((parentId): parentId is string => typeof parentId === "string" && !matchingIds.has(parentId)),
+    )].sort()
+    const missingParents = missingParentIds.length
+      ? await prisma.task.findMany({
+          where: { workspaceId, id: { in: missingParentIds } },
+          include: { _count: { select: { subtasks: true } } },
+          orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
+        })
+      : []
+    const tasks = [...missingParents, ...matchingTasks]
     const topLevel = tasks.filter((t) => !t.parentTaskId)
     const childrenByParent = new Map<string, typeof tasks>()
     for (const t of tasks) {
@@ -262,7 +288,9 @@ export async function listTasks({
       const children = childrenByParent.get(t.id) ?? []
       const childLines = children.map((c) => `    ↳ [${c.status}] ${c.title} — ID: ${c.id}`)
       return [
-        `• [${t.status}] **${t.title}** (${t.priority})\n  ID: ${t.id}`,
+        `• [${t.status}] **${t.title}** (${t.priority})` +
+          (t.updatedAt ? `\n  Updated: ${t.updatedAt.toISOString()}` : "") +
+          `\n  ID: ${t.id}`,
         ...childLines,
       ].join("\n")
     })
@@ -272,26 +300,37 @@ export async function listTasks({
         status: t.status,
         title: t.title,
         priority: t.priority,
-        subtasks: (childrenByParent.get(t.id) ?? []).map((c) => ({ id: c.id, status: c.status, title: c.title })),
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+        subtasks: (childrenByParent.get(t.id) ?? []).map((c) => ({
+          id: c.id,
+          status: c.status,
+          title: c.title,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+        })),
       })),
       count: topLevel.length,
     })
   }
 
-  const lines = tasks.map((t) =>
+  const lines = matchingTasks.map((t) =>
     `• [${t.status}] **${t.title}** (${t.priority})` +
     (t._count.subtasks ? ` — ${t._count.subtasks} subtask(s)` : "") +
+    (t.updatedAt ? `\n  Updated: ${t.updatedAt.toISOString()}` : "") +
     `\n  ID: ${t.id}`
   )
   return ok(lines.join("\n\n"), {
-    items: tasks.map((t) => ({
+    items: matchingTasks.map((t) => ({
       id: t.id,
       status: t.status,
       title: t.title,
       priority: t.priority,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
       subtaskCount: t._count.subtasks,
     })),
-    count: tasks.length,
+    count: matchingTasks.length,
   })
 }
 

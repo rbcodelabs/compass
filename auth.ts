@@ -5,6 +5,7 @@ import Credentials from "next-auth/providers/credentials";
 import getPrisma from "@/lib/db";
 import { authConfig } from "@/auth.config";
 import { createLazyPrismaAuthAdapter } from "@/lib/lazy-prisma-auth-adapter";
+import { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "@/lib/preview-automation/cookies";
 
 /**
  * Auth.js setup — two distinct configurations:
@@ -91,4 +92,7 @@ export const { handlers, auth, signIn, signOut } = isDev
         }),
       ],
       adapter: createLazyPrismaAuthAdapter(),
+      ...(process.env.VERCEL_ENV === "preview" && process.env.PREVIEW_AUTOMATION_ENABLED === "1" ? {
+        cookies: { sessionToken: { name: PREVIEW_SESSION_COOKIE, options: PREVIEW_SESSION_OPTIONS } },
+      } : {}),
     });

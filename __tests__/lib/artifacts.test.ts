@@ -268,6 +268,14 @@ describe("artifact lifecycle", () => {
     expect(prisma.artifactBlobCleanup.delete).not.toHaveBeenCalled()
   })
 
+  it("can remove synthetic workspace records without draining other runs' blob cleanup queue", async () => {
+    prisma.artifact.findMany.mockResolvedValue([])
+    const storage = { put: vi.fn(), get: vi.fn(), del: vi.fn() }
+    await deleteWorkspaceArtifacts(prisma, "preview-workspace", storage, false)
+    expect(prisma.artifactBlobCleanup.findMany).not.toHaveBeenCalled()
+    expect(storage.del).not.toHaveBeenCalled()
+  })
+
   it("safe-maps the Artifact detail DTO without private Blob pathnames", () => {
     const dto = toArtifactDetailDto({
       id: "art-1", title: "Prototype", description: null, sourceType: "HTML_UPLOAD", status: "ACTIVE",

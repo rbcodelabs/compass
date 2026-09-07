@@ -17,7 +17,7 @@ const mockPrisma = {
   workspaceMember: { findFirst: vi.fn() },
   organization: { findUnique: vi.fn() },
   organizationMember: { findFirst: vi.fn() },
-  opportunity: { findUnique: vi.fn() },
+  opportunity: { findUnique: vi.fn(), update: vi.fn() },
   solution: { findUnique: vi.fn(), update: vi.fn() },
   artifact: { findUnique: vi.fn() },
   feedbackItem: { findUnique: vi.fn() },
@@ -90,6 +90,16 @@ describe("applyToolGate", () => {
     )
   })
 
+  it.each(["list_solutions", "list_assumptions", "list_release_runs"])(
+    "%s denies discovery outside the caller's workspace membership",
+    async (tool) => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(
+        /not found or access denied/,
+      )
+    },
+  )
+
   it("get_opportunity: denies a non-member", async () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null) // not a member
@@ -102,6 +112,19 @@ describe("applyToolGate", () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     await expect(applyToolGate("get_opportunity", MEMBER, { opportunityId: "opp-1" })).resolves.toBeUndefined()
+  })
+
+  it("update_opportunity: denies a cross-workspace caller before the handler writes", async () => {
+    mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+
+    await expect(callTool("update_opportunity", MEMBER, {
+      opportunityId: "opp-1",
+      title: "New title",
+    })).rejects.toThrow(/not found or access denied/)
+
+    expect(mockPrisma.opportunity.findUnique).toHaveBeenCalledTimes(1)
+    expect(mockPrisma.opportunity.update).not.toHaveBeenCalled()
   })
 
   it("update_solution_status preserves the solution workspace boundary", async () => {

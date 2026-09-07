@@ -1,5 +1,6 @@
 # dependencies
 node_modules
+preview-report/
 .pnp
 .pnp.js
 

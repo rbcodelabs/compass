@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import {
   useEntityDetail,
@@ -74,7 +75,7 @@ export function KeyResultPanel({
     type: "roadmapItem",
     id: r.id,
     title: r.title,
-    badge: { label: r.horizon, className: "bg-slate-100 text-slate-600" },
+    badge: { label: r.horizon, className: "bg-surface-inset text-text-secondary" },
   }));
   const supportingItems: RelationItem[] = data.supportingObjectives.map((objective) => {
     const progress = objective.keyResults.length
@@ -138,6 +139,7 @@ export function KeyResultPanel({
       <Section label="Roadmap" count={data.roadmapItems.length}>
         <RelationList items={roadmapItems} empty="Not on the roadmap." />
       </Section>
+      <Discussion targetType="KEY_RESULT" targetId={id} />
     </PanelContainer>
   );
 }

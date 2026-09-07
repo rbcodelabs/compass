@@ -3,31 +3,65 @@ import getPrisma from "@/lib/db"
 
 export const TRACKED_SUBJECT_TYPES = ["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"] as const
 export type TrackedSubjectType = (typeof TRACKED_SUBJECT_TYPES)[number]
+export const TRACKED_SOURCE_TYPES = ["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK", "EVIDENCE"] as const
+export type TrackedSourceType = (typeof TRACKED_SOURCE_TYPES)[number]
+export type TrackedDecisionSourceInput = { type: TrackedSourceType; id: string }
 const TRACKED_GATE = "TRACKED_DECISION"
 
 export class TrackedDecisionError extends Error {
   constructor(public readonly code: string, message: string) { super(message); this.name = "TrackedDecisionError" }
 }
 
-type EntitySummary = { id: string; title: string; workspaceId: string }
-type Packet = { schemaVersion: "tracked-decision/v1"; question: string; context: string; entity: { type: TrackedSubjectType; id: string; title: string } }
+export type TrackedDecisionSourceSnapshot = { type: TrackedSourceType; id: string; title: string; updatedAt: string }
+type EntitySummary = { id: string; title: string; workspaceId: string; updatedAt: Date }
+type PacketV1 = { schemaVersion: "tracked-decision/v1"; question: string; context: string; entity: { type: TrackedSubjectType; id: string; title: string } }
+type PacketV2 = { schemaVersion: "tracked-decision/v2"; question: string; context: string; entity: TrackedDecisionSourceSnapshot & { type: TrackedSubjectType }; sources: TrackedDecisionSourceSnapshot[] }
+type Packet = PacketV1 | PacketV2
 
-async function resolveEntity(prisma: ReturnType<typeof getPrisma>, workspaceId: string, type: TrackedSubjectType, id: string): Promise<EntitySummary> {
+async function resolveEntity(prisma: ReturnType<typeof getPrisma>, workspaceId: string, type: TrackedSourceType, id: string): Promise<EntitySummary> {
   let entity: EntitySummary | null = null
-  if (type === "WORKSPACE") { const row = await prisma.workspace.findUnique({ where: { id }, select: { id: true, name: true } }); entity = row ? { id: row.id, title: row.name, workspaceId: row.id } : null }
-  else if (type === "OPPORTUNITY") entity = await prisma.opportunity.findUnique({ where: { id }, select: { id: true, title: true, workspaceId: true } })
-  else if (type === "SOLUTION") { const row = await prisma.solution.findUnique({ where: { id }, select: { id: true, title: true, opportunity: { select: { workspaceId: true } } } }); entity = row ? { id: row.id, title: row.title, workspaceId: row.opportunity.workspaceId } : null }
-  else if (type === "ROADMAP_ITEM") entity = await prisma.roadmapItem.findUnique({ where: { id }, select: { id: true, title: true, workspaceId: true } })
-  else if (type === "DOC") entity = await prisma.doc.findUnique({ where: { id }, select: { id: true, title: true, workspaceId: true } })
-  else if (type === "EXPERIMENT") entity = await prisma.experiment.findUnique({ where: { id }, select: { id: true, title: true, workspaceId: true } })
-  else entity = await prisma.feedbackItem.findUnique({ where: { id }, select: { id: true, title: true, workspaceId: true } })
+  if (type === "WORKSPACE") { const row = await prisma.workspace.findUnique({ where: { id }, select: { id: true, name: true, updatedAt: true } }); entity = row ? { id: row.id, title: row.name, workspaceId: row.id, updatedAt: row.updatedAt } : null }
+  else if (type === "OPPORTUNITY") entity = await prisma.opportunity.findUnique({ where: { id }, select: { id: true, title: true, workspaceId: true, updatedAt: true } })
+  else if (type === "SOLUTION") { const row = await prisma.solution.findUnique({ where: { id }, select: { id: true, title: true, updatedAt: true, opportunity: { select: { workspaceId: true } } } }); entity = row ? { id: row.id, title: row.title, workspaceId: row.opportunity.workspaceId, updatedAt: row.updatedAt } : null }
+  else if (type === "ASSUMPTION") { const row = await prisma.assumption.findUnique({ where: { id }, select: { id: true, title: true, updatedAt: true, solution: { select: { opportunity: { select: { workspaceId: true } } } } } }); entity = row ? { id: row.id, title: row.title, workspaceId: row.solution.opportunity.workspaceId, updatedAt: row.updatedAt } : null }
+  else if (type === "ROADMAP_ITEM") entity = await prisma.roadmapItem.findUnique({ where: { id }, select: { id: true, title: true, workspaceId: true, updatedAt: true } })
+  else if (type === "DOC") entity = await prisma.doc.findUnique({ where: { id }, select: { id: true, title: true, workspaceId: true, updatedAt: true } })
+  else if (type === "EXPERIMENT") entity = await prisma.experiment.findUnique({ where: { id }, select: { id: true, title: true, workspaceId: true, updatedAt: true } })
+  else if (type === "FEEDBACK") entity = await prisma.feedbackItem.findUnique({ where: { id }, select: { id: true, title: true, workspaceId: true, updatedAt: true } })
+  else { const row = await prisma.evidence.findUnique({ where: { id }, select: { id: true, excerpt: true, workspaceId: true, updatedAt: true } }); entity = row ? { id: row.id, title: row.excerpt.replace(/\s+/g, " ").trim() || "Evidence", workspaceId: row.workspaceId, updatedAt: row.updatedAt } : null }
   if (!entity || entity.workspaceId !== workspaceId) throw new TrackedDecisionError("ENTITY_NOT_FOUND", "Linked item not found or access denied.")
   return entity
 }
 
 function required(value: string, label: string, max: number) { const v = value.trim(); if (!v) throw new TrackedDecisionError("INVALID_INPUT", `${label} is required.`); if (v.length > max) throw new TrackedDecisionError("INVALID_INPUT", `${label} must be ${max} characters or fewer.`); return v }
 function uuid(value: string, label: string) { if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new TrackedDecisionError("INVALID_INPUT", `${label} must be a UUID.`); return value }
-function samePacket(raw: string, packet: Packet) { try { const p = JSON.parse(raw) as Packet; return p.question === packet.question && p.context === packet.context && p.entity?.type === packet.entity.type && p.entity?.id === packet.entity.id } catch { return false } }
+function samePacket(raw: string, packet: Packet) {
+  try {
+    const p = JSON.parse(raw) as Packet
+    const coreMatches = p.question === packet.question && p.context === packet.context && p.entity?.type === packet.entity.type && p.entity?.id === packet.entity.id
+    if (!coreMatches) return false
+    if (p.schemaVersion !== "tracked-decision/v2" || packet.schemaVersion !== "tracked-decision/v2") return p.schemaVersion !== "tracked-decision/v2" && packet.schemaVersion === "tracked-decision/v2" && packet.sources.length === 0
+    const identities = (sources: TrackedDecisionSourceSnapshot[]) => [...new Set(sources.map((source) => `${source.type}:${source.id}`))].sort()
+    return JSON.stringify(identities(p.sources)) === JSON.stringify(identities(packet.sources))
+  } catch { return false }
+}
+function normalizeSourceInputs(sources: TrackedDecisionSourceInput[] | undefined, primary: TrackedDecisionSourceInput) {
+  if ((sources?.length ?? 0) > 12) throw new TrackedDecisionError("INVALID_INPUT", "Sources must contain 12 items or fewer.")
+  const valid = new Set<string>(TRACKED_SOURCE_TYPES)
+  const unique = new Map<string, TrackedDecisionSourceInput>()
+  for (const source of sources ?? []) {
+    if (!valid.has(source.type) || !source.id) throw new TrackedDecisionError("INVALID_INPUT", "Each source must have a supported type and an id.")
+    if (source.type === primary.type && source.id === primary.id) continue
+    unique.set(`${source.type}:${source.id}`, source)
+  }
+  return [...unique.values()].sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id))
+}
+async function resolveSources(prisma: ReturnType<typeof getPrisma>, workspaceId: string, inputs: TrackedDecisionSourceInput[]) {
+  return Promise.all(inputs.map(async ({ type, id }): Promise<TrackedDecisionSourceSnapshot> => {
+    const entity = await resolveEntity(prisma, workspaceId, type, id)
+    return { type, id: entity.id, title: entity.title, updatedAt: entity.updatedAt?.toISOString?.() ?? new Date(0).toISOString() }
+  }))
+}
 function isUnique(error: unknown) { return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002" }
 const options = [
   { actionKey: "APPROVE", label: "Approve", outcomeClass: "APPROVE", continuationKey: "NO_ACTION", sortOrder: 0 },
@@ -35,10 +69,11 @@ const options = [
   { actionKey: "REJECT", label: "Reject", outcomeClass: "REJECT", continuationKey: "NO_ACTION", sortOrder: 2 },
 ]
 
-export async function createTrackedDecisionRequest(input: { workspaceId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; idempotencyKey: string; requestedById?: string | null; assignedToId?: string | null }) {
+export async function createTrackedDecisionRequest(input: { workspaceId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; idempotencyKey: string; sources?: TrackedDecisionSourceInput[]; requestedById?: string | null; assignedToId?: string | null }) {
   const question = required(input.question, "Question", 255), context = required(input.context, "Context", 20_000), identity = uuid(input.idempotencyKey, "Idempotency key")
-  const prisma = getPrisma(), entity = await resolveEntity(prisma, input.workspaceId, input.subjectType, input.subjectId)
-  const packet: Packet = { schemaVersion: "tracked-decision/v1", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title } }
+  const normalizedSourceInputs = normalizeSourceInputs(input.sources, { type: input.subjectType, id: input.subjectId })
+  const prisma = getPrisma(), [entity, sources] = await Promise.all([resolveEntity(prisma, input.workspaceId, input.subjectType, input.subjectId), resolveSources(prisma, input.workspaceId, normalizedSourceInputs)])
+  const packet: PacketV2 = { schemaVersion: "tracked-decision/v2", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title, updatedAt: entity.updatedAt?.toISOString?.() ?? new Date(0).toISOString() }, sources }
   const identityWhere = { workspaceId: input.workspaceId, gateType: TRACKED_GATE, subjectType: TRACKED_GATE, subjectId: identity }
   const replay = async () => { const found = await prisma.reviewRequest.findFirst({ where: identityWhere, include: { currentRevision: true } }); if (found?.currentRevision && samePacket(found.currentRevision.packetJson, packet)) return found.currentRevision; throw new TrackedDecisionError("IDEMPOTENCY_KEY_CONFLICT", "That idempotency key belongs to a different decision request.") }
   const existing = await prisma.reviewRequest.findFirst({ where: identityWhere, include: { currentRevision: true } })
@@ -58,7 +93,7 @@ export async function createTrackedDecisionRequest(input: { workspaceId: string;
 export async function reviseTrackedDecisionRequest(input: { workspaceId: string; requestId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; expectedDecisionId: string; reason: string; requestedById?: string | null; assignedToId?: string | null }) {
   const question = required(input.question, "Question", 255), context = required(input.context, "Context", 20_000), reason = required(input.reason, "Revision reason", 2_000)
   const prisma = getPrisma(), entity = await resolveEntity(prisma, input.workspaceId, input.subjectType, input.subjectId)
-  const packet: Packet = { schemaVersion: "tracked-decision/v1", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title } }
+  let packet: Packet
   try {
     return await prisma.$transaction(async tx => {
       const request = await tx.reviewRequest.findUnique({ where: { id: input.requestId }, include: { currentRevision: true } })
@@ -68,6 +103,10 @@ export async function reviseTrackedDecisionRequest(input: { workspaceId: string;
       let currentPacket: Packet
       try { currentPacket = JSON.parse(request.currentRevision.packetJson) as Packet } catch { throw new TrackedDecisionError("INVALID_PACKET", "The current decision packet is invalid.") }
       if (currentPacket.entity?.type !== input.subjectType || currentPacket.entity?.id !== entity.id) throw new TrackedDecisionError("ENTITY_MISMATCH", "A revised request must remain linked to the original item.")
+      if (currentPacket.schemaVersion === "tracked-decision/v2" && !Array.isArray(currentPacket.sources)) throw new TrackedDecisionError("INVALID_PACKET", "The current decision packet is invalid.")
+      packet = currentPacket.schemaVersion === "tracked-decision/v2"
+        ? { schemaVersion: "tracked-decision/v2", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title, updatedAt: entity.updatedAt?.toISOString?.() ?? new Date(0).toISOString() }, sources: currentPacket.sources }
+        : { schemaVersion: "tracked-decision/v1", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title } }
       const prior = await tx.decisionRecord.findUnique({ where: { id: input.expectedDecisionId }, include: { option: true } })
       if (!prior || prior.requestId !== request.id || prior.revisionId !== request.currentRevisionId) throw new TrackedDecisionError("DECISION_MISMATCH", "The selected decision does not belong to the current revision.")
       if (prior.option.outcomeClass !== "REQUEST_CHANGES") throw new TrackedDecisionError("OUTCOME_NOT_REVISABLE", "Only a request-changes decision can be revised.")

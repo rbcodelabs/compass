@@ -1,4 +1,4 @@
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import path from "path";
 import fs from "fs";
 import {
@@ -22,14 +22,27 @@ fs.mkdirSync(OUT, { recursive: true });
 const FUNCTIONAL = process.env.E2E_FUNCTIONAL === "1";
 const WORKSPACE_BASE = FUNCTIONAL ? "/e2e-test-org/e2e-workspace" : "/rbcodelabs/compass";
 
-type StandardScreenshotCase = { file: string; url: string; scrollToHeading?: string };
+type StandardScreenshotCase = {
+  file: string;
+  url: string;
+  scrollToHeading?: string;
+  prepare?: "expand-first-opportunity";
+};
 
 const STANDARD_PAGES: StandardScreenshotCase[] = [
+  ...(FUNCTIONAL || process.env.DOCS_SESSION_FILE
+    ? [{ file: "marketing-authenticated.png", url: "/" }]
+    : []),
   { file: "login.png",           url: "/login" },
   { file: "dashboard.png",       url: "/dashboard" },
   { file: "okrs.png",            url: `${WORKSPACE_BASE}/okrs` },
   { file: "canvas.png",          url: `${WORKSPACE_BASE}/canvas` },
   { file: "discovery-board.png", url: `${WORKSPACE_BASE}/discovery` },
+  {
+    file: "discovery-table.png",
+    url: `${WORKSPACE_BASE}/discovery?view=table`,
+    prepare: "expand-first-opportunity",
+  },
   { file: "roadmap.png",         url: `${WORKSPACE_BASE}/roadmap` },
   { file: "roadmap-timeline.png", url: `${WORKSPACE_BASE}/roadmap?view=timeline` },
   { file: "tasks.png",           url: `${WORKSPACE_BASE}/tasks` },
@@ -56,12 +69,36 @@ const STANDARD_PAGES: StandardScreenshotCase[] = [
 const GUIDED_PAGES = buildScreenshotCases({
   workspaceBase: WORKSPACE_BASE,
   includeGuidedUx: FUNCTIONAL || process.env.DOCS_GUIDED_UX_SCREENSHOTS === "1",
+  includeSharedDiscussion: FUNCTIONAL,
   researchToken: process.env.DOCS_RESEARCH_TOKEN || (FUNCTIONAL ? GUIDED_UX_SCREENSHOT_TOKEN : null),
 });
 
 const PAGES: Array<StandardScreenshotCase | ScreenshotCase> = [...STANDARD_PAGES, ...GUIDED_PAGES];
 
-async function prepareGuidedScreenshot(page: import("@playwright/test").Page, entry: ScreenshotCase) {
+async function prepareScreenshot(
+  page: import("@playwright/test").Page,
+  entry: StandardScreenshotCase | ScreenshotCase,
+) {
+  if (!entry.prepare) return;
+
+  if (entry.prepare === "roadmap-discussion") {
+    await page.getByRole("button", { name: "E2E Native NOW Policy Candidate" }).click();
+    const panel = page.locator('[data-slot="sheet-content"]');
+    await panel.getByRole("heading", { name: "Discussion" }).scrollIntoViewIfNeeded();
+    await panel.getByText("Keep customer context attached to delivery.").waitFor();
+    return;
+  }
+  if (entry.prepare === "expand-first-opportunity") {
+    const disclosure = page
+      .getByRole("table", { name: "Discovery opportunities" })
+      .locator('button[aria-expanded]')
+      .first();
+    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await disclosure.click();
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    return;
+  }
+
   if (entry.prepare === "guided-builder") {
     await page.getByRole("radio", { name: "Guided usability test" }).check();
     await page.getByLabel("Study name").fill("Plan selection usability test");
@@ -109,10 +146,15 @@ test.describe("docs screenshots", () => {
       }
       await page.goto(url);
       await page.waitForLoadState("networkidle");
+      if (FUNCTIONAL) {
+        // Local screenshots run against Next's dev server; omit its floating
+        // issue indicator from product documentation captures.
+        await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
+      }
       if ("scrollToHeading" in entry && entry.scrollToHeading) {
         await page.getByRole("heading", { name: entry.scrollToHeading }).scrollIntoViewIfNeeded();
       }
-      if ("prepare" in entry) await prepareGuidedScreenshot(page, entry);
+      if ("prepare" in entry && entry.prepare) await prepareScreenshot(page, entry);
       // Give dynamic content a moment to settle
       await page.waitForTimeout(800);
       await page.screenshot({

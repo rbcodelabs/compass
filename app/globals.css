@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* ── Design tokens ────────────────────────────────────────────────────── */
 :root {
   /* Backgrounds */
@@ -96,6 +98,42 @@
   --space-page-y: clamp(1.25rem, 3vw, 2rem);
   --shadow-card: 0 1px 2px oklch(0.129 0.042 264.1 / 0.06), 0 1px 3px oklch(0.129 0.042 264.1 / 0.08);
   --shadow-panel: 0 8px 24px oklch(0.129 0.042 264.1 / 0.12);
+}
+
+html.dark:has(.workspace-theme-scope) {
+  --background: oklch(0.145 0.018 264.2);
+  --foreground: oklch(0.93 0.008 264.5);
+  --card: oklch(0.19 0.022 264.2);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.205 0.025 264.2);
+  --popover-foreground: var(--foreground);
+  --secondary: oklch(0.245 0.024 264.3);
+  --secondary-foreground: oklch(0.91 0.01 264.5);
+  --muted: oklch(0.235 0.021 264.3);
+  --muted-foreground: oklch(0.7 0.016 264.4);
+  --accent: oklch(0.265 0.027 264.3);
+  --accent-foreground: oklch(0.94 0.008 264.5);
+  --border: oklch(0.31 0.024 264.2);
+  --input: oklch(0.31 0.024 264.2);
+  --surface-navigation: oklch(0.115 0.018 264.2);
+  --surface-navigation-active: oklch(0.225 0.028 264.3);
+  --surface-interactive-hover: oklch(0.3 0.027 264.3);
+  --surface-overlay: oklch(0.05 0.01 264.1 / 0.68);
+  --text-secondary: oklch(0.78 0.015 264.4);
+  --text-disabled: oklch(0.54 0.015 264.4);
+  --border-strong: oklch(0.45 0.025 264.3);
+  --status-neutral: oklch(0.77 0.025 256.8);
+  --status-neutral-surface: oklch(0.27 0.025 264.7);
+  --status-info: oklch(0.72 0.14 264.4);
+  --status-info-surface: oklch(0.25 0.06 264.4);
+  --status-success: oklch(0.72 0.13 151.3);
+  --status-success-surface: oklch(0.25 0.05 151.3);
+  --status-warning: oklch(0.79 0.14 80);
+  --status-warning-surface: oklch(0.27 0.055 80);
+  --status-danger: oklch(0.72 0.18 27.3);
+  --status-danger-surface: oklch(0.25 0.065 27.3);
+  --shadow-card: 0 1px 2px oklch(0.04 0.01 264.1 / 0.3);
+  --shadow-panel: 0 10px 30px oklch(0.04 0.01 264.1 / 0.5);
 }
 
 @theme inline {

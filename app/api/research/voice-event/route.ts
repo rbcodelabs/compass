@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { resolveActiveResearchStudy } from "@/lib/research-access"
 import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
 import { appendFinalResearchVoiceEvent, releaseResearchVoiceLease, ResearchVoiceError } from "@/lib/research-voice"
+import { isResearchLegacyVoiceHarnessEnabled } from "@/lib/research-feature"
 
 const BASE_KEYS = ["token", "sessionId", "resumeToken", "leaseId", "action"] as const
 
@@ -21,6 +22,9 @@ export async function POST(request: Request) {
   if (body.action === "FINAL") ["providerEventId", "role", "content", "attachmentId"].forEach((key) => allowed.add(key))
   if (Object.keys(body).some((key) => !allowed.has(key))) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 })
+  }
+  if (!isResearchLegacyVoiceHarnessEnabled()) {
+    return NextResponse.json({ error: "Voice is not available for this study" }, { status: 409 })
   }
   const resolved = await resolveActiveResearchStudy(body.token as string)
   if (!resolved) return NextResponse.json({ error: "Study not found" }, { status: 404 })

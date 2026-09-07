@@ -1,6 +1,14 @@
 import getPrisma from "@/lib/db"
 import type { Organization, Workspace } from "@prisma/client"
 
+export type UserWorkspace = {
+  id: string
+  name: string
+  slug: string
+  orgSlug: string
+  orgName: string
+}
+
 export async function getWorkspace(
   orgSlug: string,
   workspaceSlug: string,
@@ -42,7 +50,7 @@ export async function getOrgWorkspaces(
 
 export async function getUserWorkspaces(
   userId: string
-): Promise<Array<{ id: string; name: string; slug: string; orgSlug: string }>> {
+): Promise<UserWorkspace[]> {
   const prisma = await getPrisma()
   const memberships = await prisma.workspaceMember.findMany({
     where: { userId },
@@ -58,5 +66,6 @@ export async function getUserWorkspaces(
     name: workspace.name,
     slug: workspace.slug,
     orgSlug: workspace.organization.slug,
+    orgName: workspace.organization.name,
   }))
 }
