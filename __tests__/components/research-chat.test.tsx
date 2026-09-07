@@ -11,6 +11,19 @@ function savedReply(message: string) {
 }
 
 describe("ResearchChat", () => {
+  it.each(["image/gif", "image/heic"])("allows uploading preserved %s evidence", async (mimeType) => {
+    URL.createObjectURL = vi.fn(() => "blob:pending")
+    URL.revokeObjectURL = vi.fn()
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ sessionId: "session-1", resumeToken: "secret", status: "IN_PROGRESS", turns: [] }))
+      .mockResolvedValueOnce(Response.json({ id: "attachment-1", originalName: "original", mimeType, sizeBytes: 3 })))
+    render(<ResearchChat token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
+    await screen.findByRole("textbox", { name: "Your response" })
+    fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), { target: { files: [new File(["abc"], "original", { type: mimeType })] } })
+    expect(await screen.findByRole("link", { name: "original" })).toHaveAttribute("download", "original")
+    expect(fetch).toHaveBeenCalledWith("/api/research/attachments", expect.objectContaining({ method: "POST" }))
+  })
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn()
     const values = new Map<string, string>()

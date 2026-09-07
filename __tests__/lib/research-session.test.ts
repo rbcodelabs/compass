@@ -484,7 +484,12 @@ describe("canonical research persistence", () => {
       .toBeGreaterThanOrEqual(RESEARCH_REQUEST_LEASE_MS)
   })
 
-  it.each(["This screen confused me.", ""])("atomically links authorized READY attachments including attachment-only answer %j", async (answer) => {
+  it.each([
+    { answer: "This screen confused me.", mimeType: "image/png" },
+    { answer: "", mimeType: "image/png" },
+    { answer: "", mimeType: "image/gif" },
+    { answer: "", mimeType: "image/heic" },
+  ])("atomically links authorized evidence and sends only supported model bytes %j", async ({ answer, mimeType }) => {
     const fixture = context()
     const now = new Date()
     fixture.prisma.researchSession.findFirst.mockResolvedValue({
@@ -499,7 +504,7 @@ describe("canonical research persistence", () => {
       .mockResolvedValueOnce({ nextSequence: 1 })
     fixture.prisma.researchTurn.findMany.mockResolvedValue([{ id: "participant-turn", role: "PARTICIPANT", content: "This screen confused me.", sequence: 0 }])
     const attachmentId = "00000000-0000-4000-8000-000000000001"
-    const attachment = { id: attachmentId, status: "READY", turnId: null, workspaceId: "workspace-1", studyId: "study-1", sessionId: "session-1", blobPathname: "private/path", originalName: "screen.png", mimeType: "image/png", sizeBytes: 3 }
+    const attachment = { id: attachmentId, status: "READY", turnId: null, workspaceId: "workspace-1", studyId: "study-1", sessionId: "session-1", blobPathname: "private/path", originalName: "evidence", mimeType, sizeBytes: 3 }
     fixture.prisma.researchAttachment.findMany.mockResolvedValue([attachment])
     const loadAttachmentBytes = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]))
     const runAgent = vi.fn().mockResolvedValue("What did you expect to happen?")
@@ -514,7 +519,10 @@ describe("canonical research persistence", () => {
       where: { id: { in: [attachmentId] }, sessionId: "session-1", status: "READY", turnId: null },
       data: { turnId: expect.any(String) },
     })
-    expect(runAgent).toHaveBeenCalledWith(expect.objectContaining({ attachments: [{ mimeType: "image/png", originalName: "screen.png", bytes: expect.any(Uint8Array) }] }))
+    if (mimeType === "image/heic") {
+      expect(loadAttachmentBytes).not.toHaveBeenCalled()
+      expect(runAgent).toHaveBeenCalledWith(expect.objectContaining({ attachments: [], prompt: expect.stringContaining("not sent") }))
+    } else expect(runAgent).toHaveBeenCalledWith(expect.objectContaining({ attachments: [{ mimeType, originalName: "evidence", bytes: expect.any(Uint8Array) }] }))
     expect(runAgent.mock.calls[0][0]).not.toHaveProperty("blobPathname")
   })
 

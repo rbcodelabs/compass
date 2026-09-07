@@ -9,6 +9,24 @@ const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])
 const pdf = new TextEncoder().encode("%PDF-1.7\ncontent")
 
 describe("research attachment validation", () => {
+  it.each(["GIF87a", "GIF89a"])("accepts the %s signature as a private GIF original", (signature) => {
+    const bytes = new TextEncoder().encode(signature + "\u0001\u0000\u0001\u0000\u0000\u0000\u0000;")
+    expect(validateResearchAttachmentUpload({ bytes, mimeType: "image/gif", originalName: "screen.gif" })).toMatchObject({ extension: "gif", mimeType: "image/gif" })
+  })
+  it("recognizes a bounded HEIC-specific ftyp brand, not generic HEIF or AVIF", () => {
+    const bytes = new Uint8Array(24)
+    new DataView(bytes.buffer).setUint32(0, 24)
+    bytes.set(new TextEncoder().encode("ftypheic"), 4)
+    bytes.set(new TextEncoder().encode("mif1heic"), 16)
+    expect(validateResearchAttachmentUpload({ bytes, mimeType: "image/heic", originalName: "photo.heic" })).toMatchObject({ extension: "heic", mimeType: "image/heic" })
+    for (const major of ["mif1", "avif", "isom"]) {
+      const wrong = bytes.slice(); wrong.set(new TextEncoder().encode(major), 8); wrong.set(new TextEncoder().encode("mif1avif"), 16)
+      expect(() => validateResearchAttachmentUpload({ bytes: wrong, mimeType: "image/heic", originalName: "fake.heic" })).toThrow()
+    }
+    const truncated = bytes.slice(); new DataView(truncated.buffer).setUint32(0, 128)
+    expect(() => validateResearchAttachmentUpload({ bytes: truncated, mimeType: "image/heic", originalName: "cut.heic" })).toThrow()
+    expect(() => validateResearchAttachmentUpload({ bytes, mimeType: "image/jpeg", originalName: "fake.jpg" })).toThrow()
+  })
   it("accepts matching bounded image and PDF signatures", () => {
     expect(validateResearchAttachmentUpload({ bytes: png, mimeType: "image/png", originalName: "screen.png" }))
       .toMatchObject({ kind: "SCREENSHOT", extension: "png", sizeBytes: png.length, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) })

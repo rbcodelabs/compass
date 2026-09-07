@@ -8,7 +8,7 @@ import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { hashResearchToken } from "@/lib/research"
 import { researchParticipantUrl } from "@/lib/compass-url"
 import { reconcileAbandonedResearchSessions } from "@/lib/research-session"
-import Image from "next/image"
+import { ResearchAttachmentLink } from "@/components/research/research-attachment-link"
 import { StudySettings } from "@/components/research/study-settings"
 import { ResearchSubmitButton } from "@/components/research/research-submit-button"
 import { StudyLifecycleControls } from "@/components/research/study-lifecycle-controls"
@@ -93,7 +93,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
           {researchSession.turns.length > 0 && <ol className="mt-3 space-y-2 border-t pt-3">{researchSession.turns.map((turn) => <li key={turn.id}><span className="font-medium">{turn.role === "INTERVIEWER" ? "Interviewer" : "Participant"}:</span> <span className="text-text-subtle">{turn.content}</span></li>)}</ol>}
           {researchSession.attachments.length > 0 && <div className="mt-4 border-t pt-3"><h3 className="text-xs font-medium uppercase tracking-wide text-text-muted">Attachments</h3><div className="mt-2 flex flex-wrap gap-3">{researchSession.attachments.map((attachment) => {
             const href = `/api/research/member-attachments/${attachment.id}`
-            return <a className="block rounded-lg border p-2 hover:bg-muted" href={href} key={attachment.id} target="_blank" rel="noopener noreferrer">{attachment.mimeType.startsWith("image/") && <Image alt="" className="mb-2 h-24 w-40 rounded object-cover" height={96} src={href} unoptimized width={160} />}<span className="block max-w-40 truncate text-xs underline">{attachment.originalName}</span></a>
+            return <div className="max-w-48 rounded-lg border p-2" key={attachment.id}><ResearchAttachmentLink url={href} originalName={attachment.originalName} mimeType={attachment.mimeType} /></div>
           })}</div></div>}
         </article>)}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-text-subtle">No participant sessions yet.</p>}
       </section>

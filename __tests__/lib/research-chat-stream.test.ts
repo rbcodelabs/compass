@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { readResearchChatStream } from "@/lib/research-chat-stream"
+import { readResearchChatStream, researchAttachmentMetadata } from "@/lib/research-chat-stream"
 
 const final = { type: "final", result: { message: "Saved", turn: { id: "turn", role: "INTERVIEWER", content: "Saved", sequence: 2 }, replayed: false } }
 function response(frames: unknown[]) {
@@ -7,6 +7,11 @@ function response(frames: unknown[]) {
 }
 
 describe("research provisional stream", () => {
+  it.each(["image/gif", "image/heic"])("accepts saved %s metadata without allowing private paths", (mimeType) => {
+    const metadata = { id: "attachment", originalName: "evidence", mimeType, sizeBytes: 24 }
+    expect(researchAttachmentMetadata.parse(metadata)).toEqual(metadata)
+    expect(researchAttachmentMetadata.safeParse({ ...metadata, blobPathname: "private/path" }).success).toBe(false)
+  })
   it("returns only committed final and delivers provisional text separately", async () => {
     const onDelta = vi.fn()
     expect(await readResearchChatStream(response([{ type: "delta", text: "Draft" }, final]), onDelta)).toEqual(final.result)
