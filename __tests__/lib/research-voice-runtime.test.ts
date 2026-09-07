@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { spawnSync } from "node:child_process"
+import { Sandbox } from "@vercel/sandbox"
 import {
   OpenAIRealtimeProviderError,
   createOpenAIRealtimeProvider,
@@ -9,10 +10,11 @@ import {
   inspectResearchVoiceSandbox,
   launchResearchVoiceSandbox,
   runResearchVoiceWorkerHeartbeatLoop,
+  stopResearchVoiceSandbox,
 } from "@/lib/research-voice-sandbox"
 import { provisionAllocatedResearchVoiceCall } from "@/lib/research-voice-provisioning"
 
-afterEach(() => vi.unstubAllEnvs())
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
 
 describe("authoritative research voice runtime", () => {
   const audioSdp = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"
@@ -21,6 +23,7 @@ describe("authoritative research voice runtime", () => {
     const call: Record<string, unknown> = {
       id: "call-1", sessionId: "session-1", status: "PROVISIONING", providerCallId: null,
       sandboxName: null, sandboxCommandId: null, statusChangedAt: new Date(0), answerSdp: null,
+      updatedAt: new Date(0), providerStoppedAt: null, sandboxStoppedAt: null,
     }
     const tx = {
       researchVoiceCall: {
@@ -40,12 +43,13 @@ describe("authoritative research voice runtime", () => {
   }
 
   it("persists provider provenance and cleanup evidence when response failure hangup is ambiguous", async () => {
-    const { call, provider, input } = provisioningFixture()
+    const { call, tx, provider, input } = provisioningFixture()
     provider.createCall.mockRejectedValue(new OpenAIRealtimeProviderError("bad body", "PROVIDER_RESPONSE_AMBIGUOUS", true, undefined, "provider-1"))
     provider.hangup.mockRejectedValue(new Error("network"))
     await expect(provisionAllocatedResearchVoiceCall(input)).rejects.toMatchObject({ code: "PROVIDER_RESPONSE_AMBIGUOUS" })
     expect(call).toMatchObject({ status: "UNKNOWN", providerCallId: "provider-1", sandboxName: "compass-research-voice-call-1", sandboxStoppedAt: expect.any(Date) })
     expect(call.providerStoppedAt).toBeNull()
+    expect(tx.researchSession.updateMany).not.toHaveBeenCalled()
   })
 
   it.each(["provider", "worker"])("compensates a failed %s state write after establishing durable ownership", async (stage) => {
@@ -77,6 +81,43 @@ describe("authoritative research voice runtime", () => {
     await expect(provisionAllocatedResearchVoiceCall(input)).rejects.toThrow()
     expect(provider.hangup).not.toHaveBeenCalled()
     expect(stopSandbox).not.toHaveBeenCalled()
+    expect(tx.researchSession.updateMany).not.toHaveBeenCalled()
+  })
+
+  it.each(["FAILED", "EXPIRED", "UNKNOWN"])("cleans late provider identity after %s without resurrecting the attempt", async (status) => {
+    const { call, tx, provider, launcher, input } = provisioningFixture()
+    provider.createCall.mockImplementation(async () => {
+      call.status = status
+      call.providerStoppedAt = new Date(0) // stale absence proof must not transfer
+      tx.researchVoiceCall.updateMany.mockResolvedValueOnce({ count: 0 })
+      return { answerSdp: audioSdp, providerCallId: "late-provider" }
+    })
+    provider.hangup.mockImplementation(async (id) => {
+      expect(id).toBe("late-provider")
+      expect(call).toMatchObject({ providerCallId: id, status: "UNKNOWN", answerSdp: null, providerStoppedAt: null })
+      return { definite: true }
+    })
+    await expect(provisionAllocatedResearchVoiceCall(input)).rejects.toMatchObject({ code: "PROVISIONING_RACE" })
+    expect(provider.hangup).toHaveBeenCalledOnce()
+    expect(launcher).not.toHaveBeenCalled()
+    expect(call).toMatchObject({ status: status === "EXPIRED" ? "EXPIRED" : "FAILED", providerCallId: "late-provider", providerStoppedAt: expect.any(Date), sandboxStoppedAt: expect.any(Date) })
+  })
+
+  it("does not seize an advanced worker owner during failed provider persistence", async () => {
+    const { call, tx, provider, input } = provisioningFixture()
+    tx.researchVoiceCall.updateMany.mockImplementationOnce(async () => {
+      Object.assign(call, { status: "ACTIVE", providerCallId: "provider-1" })
+      return { count: 0 }
+    })
+    await expect(provisionAllocatedResearchVoiceCall(input)).rejects.toMatchObject({ code: "PROVISIONING_RACE" })
+    expect(provider.hangup).not.toHaveBeenCalled()
+  })
+
+  it("retains the lease after ambiguous Sandbox creation even when lookup currently reports absence", async () => {
+    const { call, tx, launcher, input } = provisioningFixture()
+    launcher.mockRejectedValue(new Error("lost create response"))
+    await expect(provisionAllocatedResearchVoiceCall(input)).rejects.toThrow("lost create response")
+    expect(call).toMatchObject({ status: "UNKNOWN", providerStoppedAt: expect.any(Date), sandboxStoppedAt: null })
     expect(tx.researchSession.updateMany).not.toHaveBeenCalled()
   })
 
@@ -243,6 +284,32 @@ describe("authoritative research voice runtime", () => {
     expect(resume).not.toHaveBeenCalled()
   })
 
+  it("bounds Sandbox lookup and stop without resuming, and rejects a stop-stage 404", async () => {
+    const stop = vi.fn().mockRejectedValue({ response: { status: 404 } })
+    const get = vi.spyOn(Sandbox, "get").mockResolvedValue({ status: "running", stop } as never)
+    await expect(stopResearchVoiceSandbox("sandbox-1")).rejects.toMatchObject({ response: { status: 404 } })
+    expect(get).toHaveBeenCalledWith({ name: "sandbox-1", resume: false, signal: expect.any(AbortSignal) })
+    expect(stop).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) })
+    get.mockRejectedValueOnce({ response: { status: 404 } })
+    await expect(stopResearchVoiceSandbox("sandbox-1")).resolves.toMatchObject({ alreadyStopped: true })
+  })
+
+  it("does not turn an acknowledged but still-stopping Sandbox response into stop evidence", async () => {
+    vi.spyOn(Sandbox, "get").mockResolvedValue({ status: "running", stop: vi.fn().mockResolvedValue({ status: "stopping" }) } as never)
+    await expect(stopResearchVoiceSandbox("sandbox-1")).rejects.toThrow()
+  })
+
+  it("does not claim definite launch compensation until Sandbox stop reports stopped", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://compass.example")
+    const stop = vi.fn().mockResolvedValue({ status: "stopping" })
+    await expect(launchResearchVoiceSandbox({
+      createSandbox: vi.fn().mockResolvedValue({ runCommand: vi.fn().mockRejectedValue(new Error("command failed")), stop }),
+      callId: "call-1", providerCallId: "provider-1", workerToken: "token",
+      leaseExpiresAt: new Date(Date.now() + 60_000), openAIApiKey: "key",
+    })).rejects.toMatchObject({ cleanupDefinite: false })
+    expect(stop).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) })
+  })
+
   it("launches a named nonpersistent sandbox with only OpenAI and the trusted callback host", async () => {
     vi.stubEnv("VERCEL_ENV", "production")
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://compass.example")
@@ -286,9 +353,12 @@ describe("authoritative research voice runtime", () => {
     }
   })
 
-  it("marks an ambiguous provider allocation UNKNOWN and releases only the matching lease", async () => {
+  it("marks an ambiguous provider allocation UNKNOWN and retains the matching lease", async () => {
     const tx = {
-      researchVoiceCall: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      researchVoiceCall: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue({ id: "call-1", sessionId: "session-1", status: "PROVISIONING", statusChangedAt: new Date(0), updatedAt: new Date(0) }),
+      },
       researchSession: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     }
     const prisma = { ...tx, $transaction: vi.fn(async (fn: (value: typeof tx) => Promise<unknown>) => fn(tx)) }
@@ -318,10 +388,7 @@ describe("authoritative research voice runtime", () => {
       where: expect.objectContaining({ id: "call-1", sessionId: "session-1" }),
       data: expect.objectContaining({ status: "UNKNOWN", transcriptIntegrity: "DEGRADED" }),
     }))
-    expect(tx.researchSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "session-1", voiceLeaseId: "call-1" },
-      data: expect.objectContaining({ voiceLeaseId: null, voiceLeaseExpiresAt: null }),
-    }))
+    expect(tx.researchSession.updateMany).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -334,6 +401,7 @@ describe("authoritative research voice runtime", () => {
         findUnique: vi.fn().mockResolvedValue({
           id: "call-1", sessionId: "session-1", status: "PROVIDER_CREATED", providerCallId: "provider-1",
           sandboxName: null, sandboxCommandId: null, statusChangedAt: new Date(0),
+          updatedAt: new Date(0), providerStoppedAt: null, sandboxStoppedAt: null,
         }),
       },
       researchSession: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
@@ -359,8 +427,8 @@ describe("authoritative research voice runtime", () => {
       model: "gpt-realtime", offerSdp: audioSdp,
     })).rejects.toThrow()
     expect(provider.hangup).toHaveBeenCalledWith("provider-1")
-    expect(tx.researchVoiceCall.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: expectedStatus, transcriptIntegrity: "DEGRADED" }),
+    expect(tx.researchVoiceCall.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: expectedStatus }),
     }))
   })
 

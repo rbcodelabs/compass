@@ -129,6 +129,45 @@ stopped after the check. No live provider call, Sandbox allocation, database
 migration, or participant E2E journey was exercised by this checkpoint; those
 remain required at their corresponding rollout gates.
 
+### Cleanup-first termination checkpoint
+
+The internal termination service performs one bounded cleanup pass. It commits
+an exact call-state, resource-identity, heartbeat, and timestamp fence before
+external I/O, immediately withholds SDP and worker authorization, and records
+provider and Sandbox stop receipts independently. A failed receipt write retains
+the lease; a retry targets the same immutable resource and never transfers an
+absence receipt to a newly discovered identity. Timestamp versions advance
+monotonically, including multiple state changes in the same millisecond.
+
+Only two durable stop/definite-not-created receipts allow the final transaction
+to release the session lease, and that update always matches the original call
+ID. A newer session lease remains untouched. Generic terminal transitions and
+timing-only reconciliation no longer release a lease without those receipts.
+`UNKNOWN` denies worker access but remains eligible for bounded cleanup retries.
+Finalized transcript integrity and provider ordering are preserved.
+
+A late provider or Sandbox result is attached to the original terminated attempt
+before cleanup; it cannot reopen media or seize an advanced live owner. Missing
+provider identity after ambiguous creation remains unresolved. Likewise, a
+missing Sandbox command is not evidence that creation settled: a lookup returning
+404 while creation may still be in flight cannot authorize release. Definite
+not-created evidence comes only from the actual one-shot create outcome or a
+known not-invoked path. If that outcome is lost in a process crash, schema 047
+cannot prove absence; retain UNKNOWN and its lease for a future explicitly
+designed operational reconciliation path, never clear it on elapsed time.
+
+Sandbox cleanup uses `get({ resume: false })` and a shared 10-second abort
+deadline for lookup/stop. A lookup 404 is distinct from a stop-endpoint 404;
+the latter remains ambiguous. A stop acknowledgement still reporting `stopping`
+is not a stop receipt. Provider hangup remains bounded and requires a successful
+provider response; no arbitrary provider 404 is accepted as proof of termination.
+
+This checkpoint adds no scheduler, endpoint, migration, dependency, or enabled
+runtime. Actual provider sideband execution, readiness, normal successful
+transcript completion, participant transport, and attachment ordering remain
+separate rollout gates. Local verification uses mocked external adapters and
+isolated PostgreSQL CAS/rollback/concurrency tests, not live provider resources.
+
 Reference contracts checked on 2026-09-05: [server controls](https://developers.openai.com/api/docs/guides/realtime-server-controls),
 [conversation lifecycle](https://developers.openai.com/api/docs/guides/realtime-conversations),
 [transcription](https://developers.openai.com/api/docs/guides/realtime-transcription),
