@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { resolveActiveResearchStudy } from "@/lib/research-access"
+import { resolveActiveResearchStudy, resolveResearchVoiceCleanupStudy } from "@/lib/research-access"
 import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
 import { appendFinalResearchVoiceEvent, releaseResearchVoiceLease, ResearchVoiceError } from "@/lib/research-voice"
 import { isResearchBrowserVoiceEnabled, isResearchParticipantVoiceEnabled } from "@/lib/research-feature"
@@ -27,7 +27,9 @@ export async function POST(request: Request) {
   if (!isResearchParticipantVoiceEnabled()) {
     return NextResponse.json({ error: "Voice is not available for this study" }, { status: 409 })
   }
-  const resolved = await resolveActiveResearchStudy(body.token as string)
+  const resolved = await (body.action === "DISCONNECT" && isResearchBrowserVoiceEnabled()
+    ? resolveResearchVoiceCleanupStudy(body.token as string)
+    : resolveActiveResearchStudy(body.token as string))
   if (!resolved) return NextResponse.json({ error: "Study not found" }, { status: 404 })
   try {
     if (body.action === "DISCONNECT") {

@@ -75,5 +75,6 @@ export function reduceVoiceCaption(state: VoiceCaption[], event: Record<string, 
   const prior = state.find((caption) => caption.id === id)
   if (prior && !prior.partial) return state
   const next: VoiceCaption = { id, role: input ? "PARTICIPANT" : "INTERVIEWER", content: final ? text.trim() : (prior?.content ?? "") + text, partial: !final }
+  if (next.content.length + state.reduce((size, caption) => size + (caption.id === id ? 0 : caption.content.length), 0) > 80_000) throw new Error("Voice caption limit reached")
   return prior ? state.map((caption) => caption.id === id ? next : caption) : [...state, next]
 }

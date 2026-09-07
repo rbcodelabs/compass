@@ -57,6 +57,16 @@ run("participant voice persistence on owned real PostgreSQL", () => {
     await claimParticipantVoiceLease(common)
     await expect(releaseParticipantVoiceLease(common)).rejects.toThrow("different voice connection")
   })
+  it.each(["revoked", "expired", "closed"])("releases the matching lease after %s without authorizing new evidence", async (condition) => {
+    const common = await fixture()
+    if (condition === "closed") await prisma.researchStudy.update({ where: { id: common.context.study.id }, data: { status: "CLOSED", updatedAt: new Date() } })
+    else await prisma.researchParticipantToken.update({ where: { id: common.context.participantToken.id }, data: condition === "revoked" ? { revokedAt: new Date() } : { expiresAt: new Date(0) } })
+    await expect(appendParticipantVoiceEvent({ ...common, clientEventId: "forbidden", reportedOrdinal: 0, role: "PARTICIPANT", content: "No new evidence" })).rejects.toThrow("not authorized")
+    await expect(releaseParticipantVoiceLease({ ...common, resumeToken: "wrong" })).rejects.toThrow("not authorized")
+    await expect(releaseParticipantVoiceLease({ ...common, sessionId: randomUUID() })).rejects.toThrow("not authorized")
+    await expect(releaseParticipantVoiceLease({ ...common, leaseId: randomUUID() })).rejects.toThrow("different voice connection")
+    expect(await releaseParticipantVoiceLease(common)).toEqual({ released: true })
+  })
   it("serializes competing event writes without duplicate canonical turns", async () => {
     const common = await fixture()
     const input = { ...common, clientEventId: "race", reportedOrdinal: 0, role: "PARTICIPANT" as const, content: "One canonical turn" }

@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest"
 import { voiceMigrationCatalog } from "@/lib/research-voice-migration"
 
 describe("participant voice migration contract", () => {
+  it("names the actual migration in unsupported DDL errors", () => {
+    expect(() => voiceMigrationCatalog("DROP TABLE anything;", "049_research_participant_voice")).toThrow("049_research_participant_voice")
+  })
   it("uses the canonical resumable grammar, separate evidence table and all four validatable indexes", () => {
     const sql = readFileSync(new URL("../prisma/migrations/049_research_participant_voice/migration.sql", import.meta.url), "utf8")
     const catalog = voiceMigrationCatalog(sql)

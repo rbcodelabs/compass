@@ -1285,7 +1285,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       }
 
       const rawSql = readFileSync(migration.filePath, "utf-8");
-      const voiceCatalog = ["047_research_voice_control_plane", "049_research_participant_voice"].includes(migration.name) ? voiceMigrationCatalog(rawSql) : undefined;
+      const voiceCatalog = ["047_research_voice_control_plane", "049_research_participant_voice"].includes(migration.name) ? voiceMigrationCatalog(rawSql, migration.name) : undefined;
       // Admit partial 047 only when every existing object has the intended
       // definition. A previous unfinished receipt remains forensic evidence.
       const voiceExisting = voiceCatalog ? await inspectVoiceMigrationCatalog(client, schema, voiceCatalog) : undefined;

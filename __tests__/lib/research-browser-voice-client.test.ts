@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest"
 import { VoiceSaveQueue, VoiceFinalOrder, reduceVoiceCaption } from "@/lib/research-browser-voice-client"
 
 describe("browser voice evidence queue", () => {
+  it("caps cumulative partial captions before retaining oversized provider data", () => {
+    expect(() => reduceVoiceCaption([], { type: "response.output_audio_transcript.delta", item_id: "large", delta: "x".repeat(80_001) })).toThrow("caption limit")
+  })
   it("releases an empty final without inventing transcript evidence", async () => {
     const persist = vi.fn().mockResolvedValue(undefined)
     const order = new VoiceFinalOrder(persist)

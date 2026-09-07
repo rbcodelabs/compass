@@ -57,8 +57,11 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
   const startTimeRef = useRef(0)
   const pendingSpeechRef = useRef(false)
   const connectAttemptRef = useRef(0)
+  const startupAbortRef = useRef<AbortController | null>(null)
 
   function closeMedia() {
+    startupAbortRef.current?.abort()
+    startupAbortRef.current = null
     if (pacingRef.current) clearInterval(pacingRef.current)
     pacingRef.current = null
     dataChannelRef.current?.close()
@@ -147,6 +150,23 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
     const attempt = connectAttemptRef.current + 1
     connectAttemptRef.current = attempt
     const isCurrentAttempt = () => connectAttemptRef.current === attempt
+    // A connection loss must not abandon the old lease's queued or ordered work.
+    // Freeze intake before inspecting it; only acknowledged, gap-free work may
+    // cross the reconnect boundary.
+    acceptingEventsRef.current = false
+    closeMedia()
+    setStatus("connecting")
+    try {
+      if (queueRef.current) await queueRef.current.flush()
+      if (!isCurrentAttempt()) return
+      if (pendingSpeechRef.current || orderRef.current?.unresolved || captionsRef.current.some((caption) => caption.partial)) {
+        throw new Error("An unresolved voice transcript is retained. Reconnect is blocked; keep this page open and contact the researcher.")
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The previous transcript is not saved")
+      setStatus("error")
+      return
+    }
     const stopStream = (stream: MediaStream) => stream.getTracks().forEach((track) => track.stop())
     const abortAttempt = async () => {
       closeMedia()
@@ -159,6 +179,9 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
       await releaseLease()
       acceptingEventsRef.current = true
       finishingRef.current = false
+      const startupAbort = new AbortController()
+      startupAbortRef.current = startupAbort
+      const startupSignal = AbortSignal.any([startupAbort.signal, AbortSignal.timeout(30_000)])
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       if (!isCurrentAttempt()) {
         stopStream(stream)
@@ -170,6 +193,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, modality: "VOICE", ...(session ?? {}) }),
+        signal: startupSignal,
       })
       if (!isCurrentAttempt()) {
         await abortAttempt()
@@ -182,6 +206,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ token, modality: "VOICE" }),
+          signal: startupSignal,
         })
         if (!isCurrentAttempt()) {
           await abortAttempt()
@@ -210,6 +235,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, ...session }),
+        signal: startupSignal,
       })
       if (!credentialResponse.ok) {
         const failure = await credentialResponse.json().catch(() => null) as { error?: string } | null
@@ -257,6 +283,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
       })
       peer.onconnectionstatechange = () => {
         if (peer.connectionState === "failed" && !finishingRef.current) {
+          acceptingEventsRef.current = false
           closeMedia()
           setError("The voice connection was lost. Saved transcript remains available; reconnect to continue.")
           setStatus("error")
@@ -276,6 +303,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
         method: "POST",
         body: offer.sdp,
         headers: { Authorization: `Bearer ${credential.ephemeralToken}`, "Content-Type": "application/sdp" },
+        signal: startupSignal,
       })
       if (!isCurrentAttempt()) {
         await abortAttempt()

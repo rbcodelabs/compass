@@ -36,8 +36,9 @@ describe("ResearchVoice", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
     expect(await screen.findByText("Connected — speak naturally")).toBeVisible()
     expect(fetch).toHaveBeenNthCalledWith(3, "https://api.openai.com/v1/realtime/calls", expect.objectContaining({
-      method: "POST", body: "offer-sdp", headers: expect.objectContaining({ Authorization: "Bearer short-secret", "Content-Type": "application/sdp" }),
+      method: "POST", body: "offer-sdp", signal: expect.any(AbortSignal), headers: expect.objectContaining({ Authorization: "Bearer short-secret", "Content-Type": "application/sdp" }),
     }))
+    expect(fetch).toHaveBeenNthCalledWith(2, "/api/research/voice-session", expect.objectContaining({ signal: expect.any(AbortSignal) }))
 
     channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "conversation.item.input_audio_transcription.completed", item_id: "user-1", transcript: "I expected pricing here." }) }))
     expect(await screen.findByText("I expected pricing here.")).toBeVisible()
@@ -183,6 +184,60 @@ describe("ResearchVoice", () => {
     expect(stopTrack).toHaveBeenCalled()
     expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent("not marked complete")
     expect(fetch).not.toHaveBeenCalledWith("/api/research/complete", expect.anything())
+  })
+
+  it("does not release a lease for reconnect while its final save is still pending", async () => {
+    render(<ResearchVoice token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    await screen.findByText("Connected — speak naturally")
+    let rejectSave!: (error: Error) => void
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>((_, reject) => { rejectSave = reject }))
+    channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "conversation.item.input_audio_transcription.completed", item_id: "delayed", transcript: "Retain this answer" }) }))
+    const connectedPeer = peer as typeof peer & { connectionState: string; onconnectionstatechange: () => void }
+    connectedPeer.connectionState = "failed"
+    connectedPeer.onconnectionstatechange()
+    fireEvent.click(await screen.findByRole("button", { name: "Reconnect voice session" }))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(fetch).not.toHaveBeenCalledWith("/api/research/voice-event", expect.objectContaining({ body: expect.stringContaining('"action":"DISCONNECT"') }))
+    rejectSave(new Error("save unavailable"))
+    expect(await screen.findByRole("button", { name: "Retry saving transcript" })).toBeVisible()
+  })
+
+  it("blocks reconnect when a finalized answer is buffered behind an unresolved earlier item", async () => {
+    render(<ResearchVoice token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    await screen.findByText("Connected — speak naturally")
+    for (const event of [
+      { type: "conversation.item.added", item: { id: "earlier", role: "user", content: [{ type: "input_audio" }] } },
+      { type: "response.output_audio_transcript.done", item_id: "later", transcript: "A finalized later question" },
+    ]) channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(event) }))
+    const connectedPeer = peer as typeof peer & { connectionState: string; onconnectionstatechange: () => void }
+    connectedPeer.connectionState = "failed"
+    connectedPeer.onconnectionstatechange()
+    fireEvent.click(await screen.findByRole("button", { name: "Reconnect voice session" }))
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("unresolved"))
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+
+  it("stops the microphone when a stalled credential request reaches its startup deadline", async () => {
+    const deadline = new AbortController()
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal)
+    let requested = false
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] }))
+      .mockImplementationOnce((_url: string, init: RequestInit) => {
+        requested = true
+        return new Promise<Response>((_, reject) => init.signal!.addEventListener("abort", () => reject(new Error("Startup deadline exceeded"))))
+      }))
+    try {
+      render(<ResearchVoice token="study-token" />)
+      fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+      await waitFor(() => expect(requested).toBe(true))
+      deadline.abort()
+      expect(await screen.findByRole("alert")).toHaveTextContent("Startup deadline")
+      expect(stopTrack).toHaveBeenCalled()
+      expect(fetch).toHaveBeenCalledTimes(2)
+    } finally { timeout.mockRestore() }
   })
 
   it("uses think-aloud copy only for guided usability voice", () => {
