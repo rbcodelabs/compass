@@ -6,6 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchChat } from "@/components/research/research-chat"
 import { StrictMode } from "react"
 
+function savedReply(message: string) {
+  return { message, turn: { id: "interviewer-1", role: "INTERVIEWER", content: message, sequence: 2 }, replayed: false }
+}
+
 describe("ResearchChat", () => {
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn()
@@ -49,6 +53,10 @@ describe("ResearchChat", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("This interview isn’t available yet")
     expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Finish interview" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Finish interview" }))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(localStorage.getItem("compass-research-session-study-token-pending")).not.toBeNull()
     expect(screen.getByText("I use a spreadsheet.")).toBeVisible()
 
     const firstRespondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string)
@@ -160,7 +168,7 @@ describe("ResearchChat", () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] })))
       .mockResolvedValueOnce(new Response(JSON.stringify(attachment)))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "What does this show?" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify(savedReply("What does this show?"))))
       .mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { headers: { "Content-Type": "image/png" } })))
     URL.createObjectURL = vi.fn().mockReturnValue("blob:private-preview")
     URL.revokeObjectURL = vi.fn()
@@ -187,7 +195,7 @@ describe("ResearchChat", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] })))
       .mockResolvedValueOnce(new Response(stream, { headers: { "Content-Type": "application/x-ndjson" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Saved retry" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify(savedReply("Saved retry"))))
     vi.stubGlobal("fetch", fetchMock)
     render(<ResearchChat token="study-token" />)
     fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
@@ -211,7 +219,7 @@ describe("ResearchChat", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] }), { status: 200, headers: { "Content-Type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: "00000000-0000-4000-8000-000000000001", status: "READY", originalName: "screen.png", mimeType: "image/png", sizeBytes: 3 }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "What did you expect?" }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(savedReply("What did you expect?")), { status: 200, headers: { "Content-Type": "application/json" } }))
     vi.stubGlobal("fetch", fetchMock)
 
     render(<ResearchChat guided={guided} token="study-token" />)
@@ -229,19 +237,99 @@ describe("ResearchChat", () => {
     expect(respondBody.attachmentIds).toEqual(["00000000-0000-4000-8000-000000000001"])
   })
 
-  it("restores an interrupted request key after reload without duplicating the saved answer", async () => {
+  it.each(["Saved answer", ("a\n").repeat(1999) + "a"])("restores the original request key including escaped answers %#", async (answer) => {
     localStorage.setItem("compass-research-session-study-token", JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret" }))
-    const pending = { answer: "Saved answer", idempotencyKey: "originalrequest1234", attachmentIds: [] }
-    localStorage.setItem("compass-research-session-study-token-pending", JSON.stringify({ sessionId: "session-1", request: pending }))
+    const pending = { answer, idempotencyKey: "originalrequest1234", attachmentIds: [] }
+    localStorage.setItem("compass-research-session-study-token-pending", JSON.stringify({ sessionId: "session-1", request: pending, expiresAt: Date.now() + 60_000 }))
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [{ id: "p-1", role: "PARTICIPANT", content: "Saved answer", sequence: 1 }] })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Recovered final" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [{ id: "p-1", role: "PARTICIPANT", content: answer, sequence: 1 }] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify(savedReply("Recovered final"))))
     vi.stubGlobal("fetch", fetchMock)
     render(<ResearchChat token="study-token" />)
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }))
     await screen.findByText("Recovered final")
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject(pending)
-    expect(screen.getAllByText("Saved answer")).toHaveLength(1)
+    expect(screen.getAllByText(answer, { normalizer: (value) => value })).toHaveLength(1)
     expect(localStorage.getItem("compass-research-session-study-token-pending")).toBeNull()
+  })
+
+  it("does not finish while a private evidence upload is unresolved", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] })))
+      .mockImplementationOnce(() => new Promise(() => {}))
+    vi.stubGlobal("fetch", fetchMock)
+    render(<ResearchChat token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
+    await screen.findByRole("textbox", { name: "Your response" })
+    fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), { target: { files: [new File(["abc"], "screen.png", { type: "image/png" })] } })
+    expect(screen.getByRole("button", { name: "Finish interview" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Finish interview" }))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([-1, 3 * 60 * 60 * 1000])("purges pending recovery outside the session retention window (%i)", async (offset) => {
+    localStorage.setItem("compass-research-session-study-token", JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret" }))
+    localStorage.setItem("compass-research-session-study-token-pending", JSON.stringify({ sessionId: "session-1", expiresAt: Date.now() + offset, request: { answer: "Private", idempotencyKey: "originalrequest1234", attachmentIds: [] } }))
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] }))))
+    render(<ResearchChat token="study-token" />)
+    await screen.findByRole("textbox", { name: "Your response" })
+    expect(localStorage.getItem("compass-research-session-study-token-pending")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument()
+  })
+
+  it("purges pending answer when its stored session is rejected", async () => {
+    localStorage.setItem("compass-research-session-study-token", JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret" }))
+    localStorage.setItem("compass-research-session-study-token-pending", JSON.stringify({ sessionId: "session-1", expiresAt: Date.now() + 60_000, request: { answer: "Private", idempotencyKey: "originalrequest1234", attachmentIds: [] } }))
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 404 })))
+    render(<ResearchChat token="study-token" />)
+    await screen.findByRole("alert")
+    expect(localStorage.getItem("compass-research-session-study-token-pending")).toBeNull()
+  })
+
+  it("purges expired pending recovery even when its resume credential is gone", async () => {
+    localStorage.setItem("compass-research-session-study-token-pending", JSON.stringify({ sessionId: "session-1", expiresAt: Date.now() - 1, request: { answer: "Private", idempotencyKey: "originalrequest1234", attachmentIds: [] } }))
+    render(<ResearchChat token="study-token" />)
+    await waitFor(() => expect(localStorage.getItem("compass-research-session-study-token-pending")).toBeNull())
+  })
+
+  it("removes expired pending text while the participant page stays open", async () => {
+    vi.useFakeTimers()
+    try {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] })))
+        .mockResolvedValueOnce(new Response("{}", { status: 502 })))
+      render(<ResearchChat token="study-token" />)
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start interview" })) })
+      fireEvent.change(screen.getByRole("textbox", { name: "Your response" }), { target: { value: "Private pending answer" } })
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send" })) })
+      expect(localStorage.getItem("compass-research-session-study-token-pending")).not.toBeNull()
+      await act(async () => { await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000 + 1) })
+      expect(localStorage.getItem("compass-research-session-study-token-pending")).toBeNull()
+      expect(screen.getByRole("alert")).toHaveTextContent("recovery window has expired")
+    } finally { vi.useRealTimers() }
+  })
+
+  it("does not accept a JSON reply without the matching committed turn", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Unconfirmed final" }))))
+    render(<ResearchChat token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
+    fireEvent.change(await screen.findByRole("textbox", { name: "Your response" }), { target: { value: "Answer" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await screen.findByRole("button", { name: "Try again" })
+    expect(screen.queryByText("Unconfirmed final")).not.toBeInTheDocument()
+  })
+
+  it("does not delete another tab's newer pending request when an older reply commits", async () => {
+    let finish!: (value: Response) => void
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] })))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve })))
+    render(<ResearchChat token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
+    fireEvent.change(await screen.findByRole("textbox", { name: "Your response" }), { target: { value: "Older answer" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    const newer = JSON.stringify({ sessionId: "session-1", expiresAt: Date.now() + 60_000, request: { answer: "Newer answer", idempotencyKey: "newerrequest123456", attachmentIds: [] } })
+    localStorage.setItem("compass-research-session-study-token-pending", newer)
+    await act(async () => { finish(new Response(JSON.stringify({ message: "Saved", turn: { id: "i-1", role: "INTERVIEWER", content: "Saved", sequence: 2 }, replayed: false }))) })
+    await screen.findByText("Saved")
+    expect(localStorage.getItem("compass-research-session-study-token-pending")).toBe(newer)
   })
 })

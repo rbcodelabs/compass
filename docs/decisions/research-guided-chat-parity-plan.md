@@ -30,8 +30,12 @@ flags, migrations, cloud resources, push or merge are authorized in this slice.
 ## Deliberate boundaries
 
 An unconfirmed chat request is retained in this browser's local storage with its
-session binding and original idempotency key, then removed after confirmation or
-completion. Provisional interviewer text is never retained there or promoted to
+session binding and original idempotency key. Recovery expires after two hours,
+matching the server session maximum; an open-page timer deletes expired pending
+storage, and reopening/rejected resume purges it. Closed browsers cannot execute
+deletion, so physical cleanup then occurs on next access. Successful receipts
+remove only their matching request, preserving another tab's newer payload.
+Finishing is blocked while an upload or reply is unresolved. Provisional interviewer text is never retained there or promoted to
 the canonical transcript. Loss of the streaming consumer must not cancel the
 server's final save; the functional regression observes that save through resume
 before issuing a replay request.

@@ -32,6 +32,10 @@ appears as a clearly labeled draft while it is generated; it becomes part of the
 saved transcript only after Compass confirms the final reply. If the connection
 fails, **Try again** safely reuses the same request. Reloading restores saved
 turns and lets you retry an unconfirmed request without duplicating the answer.
+An unconfirmed answer is temporarily kept in this browser for recovery, for up
+to the two-hour session window. An open page clears it on expiry; a closed
+browser clears expired recovery data when reopened. Finish becomes available
+after any upload and pending reply are resolved.
 
 ![Guided participant chat on desktop](/screenshots/docs/research-guided-chat-desktop.png)
 

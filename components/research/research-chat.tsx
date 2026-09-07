@@ -5,7 +5,7 @@ import { AlertCircleIcon, LoaderCircleIcon, PaperclipIcon, SendIcon, XIcon } fro
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ResearchAttachmentPreview } from "@/components/research/research-attachment-preview"
-import { readResearchChatStream, type ResearchChatAttachment } from "@/lib/research-chat-stream"
+import { parseResearchChatReply, readResearchChatStream, type ResearchChatAttachment } from "@/lib/research-chat-stream"
 
 type Message = { id?: string; role: "INTERVIEWER" | "PARTICIPANT"; content: string; sequence?: number; attachments?: ResearchChatAttachment[] }
 type StoredSession = { sessionId: string; resumeToken: string }
@@ -13,6 +13,8 @@ type UploadedAttachment = ResearchChatAttachment & { file?: File }
 type PendingReply = { answer: string; idempotencyKey: string; attachmentIds: string[] }
 
 const fallbackError = "We couldn’t confirm the interviewer’s reply. Retrying is safe and won’t duplicate your answer."
+// Matches the server's maximum research session lifetime, not a new session TTL.
+const PENDING_RETENTION_MS = 2 * 60 * 60 * 1000
 
 function storageKey(token: string) {
   return `compass-research-session-${token.slice(-16)}`
@@ -31,18 +33,38 @@ function readStoredSession(token: string): StoredSession | null {
   }
 }
 
-function readPendingReply(token: string, sessionId: string): PendingReply | null {
+function removePendingReply(token: string, sessionId: string, request: PendingReply) {
   try {
-    const raw = localStorage.getItem(`${storageKey(token)}-pending`)
-    if (!raw || raw.length > 6000) return null
-    const stored = JSON.parse(raw) as { sessionId?: unknown; request?: Partial<PendingReply> }
+    const key = `${storageKey(token)}-pending`
+    const raw = localStorage.getItem(key)
+    if (!raw || raw.length > 32 * 1024) return
+    const stored = JSON.parse(raw)
+    if (stored.sessionId === sessionId && stored.request?.idempotencyKey === request.idempotencyKey &&
+        stored.request?.answer === request.answer && JSON.stringify(stored.request?.attachmentIds) === JSON.stringify(request.attachmentIds)) localStorage.removeItem(key)
+  } catch { /* Recovery storage can be unavailable in private browsing. */ }
+}
+
+function readPendingReply(token: string, sessionId: string): { request: PendingReply; expiresAt: number } | null {
+  const key = `${storageKey(token)}-pending`
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return null
+    // A UTF-16 character can require six JSON characters; 4000 escaped
+    // characters plus bounded metadata fit within 32 KiB of serialized text.
+    if (raw.length > 32 * 1024) throw new Error("Invalid pending recovery")
+    const stored = JSON.parse(raw) as { sessionId?: unknown; request?: Partial<PendingReply>; expiresAt?: unknown }
+    if (typeof stored.expiresAt !== "number" || !Number.isFinite(stored.expiresAt) || stored.expiresAt <= Date.now() || stored.expiresAt > Date.now() + PENDING_RETENTION_MS) throw new Error("Expired pending recovery")
+    if (stored.sessionId !== sessionId) return null
     const request = stored.request
-    if (stored.sessionId !== sessionId || !request || typeof request.answer !== "string" || request.answer.length > 4000 ||
+    if (!request || typeof request.answer !== "string" || request.answer.length > 4000 ||
         typeof request.idempotencyKey !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(request.idempotencyKey) ||
         !Array.isArray(request.attachmentIds) || request.attachmentIds.length > 3 ||
-        request.attachmentIds.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id))) return null
-    return { answer: request.answer, idempotencyKey: request.idempotencyKey, attachmentIds: request.attachmentIds }
-  } catch { return null }
+        request.attachmentIds.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id))) throw new Error("Invalid pending recovery")
+    return { request: { answer: request.answer, idempotencyKey: request.idempotencyKey, attachmentIds: request.attachmentIds }, expiresAt: stored.expiresAt }
+  } catch {
+    try { localStorage.removeItem(key) } catch { /* Storage is unavailable. */ }
+    return null
+  }
 }
 
 async function responseError(response: Response) {
@@ -83,6 +105,7 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
     resumeAttempted.current = true
     setBusy(true)
     setError(null)
+    const recovering = resume ? readPendingReply(token, resume.sessionId) : null
     try {
       const response = await fetch("/api/research/start", {
         method: "POST",
@@ -90,7 +113,10 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
         body: JSON.stringify({ token, ...(!resume ? { modality: "CHAT" } : {}), ...(resume ?? {}) }),
       })
       if (!response.ok) {
-        if (resume && response.status === 404) localStorage.removeItem(storageKey(token))
+        if (resume && [400, 401, 403, 404, 409, 410].includes(response.status)) {
+          localStorage.removeItem(storageKey(token))
+          if (recovering) removePendingReply(token, resume.sessionId, recovering.request)
+        }
         setError("The interview couldn’t start. Please try again.")
         return
       }
@@ -107,10 +133,10 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
       setResumeToken(data.resumeToken)
       setMessages(data.turns)
       setComplete(data.status === "COMPLETED")
-      if (data.status === "COMPLETED") localStorage.removeItem(`${storageKey(token)}-pending`)
+      if (data.status === "COMPLETED" && recovering) removePendingReply(token, data.sessionId, recovering.request)
       else {
         const interrupted = readPendingReply(token, data.sessionId)
-        if (interrupted) { setPending(interrupted); setError(fallbackError) }
+        if (interrupted) { setPending(interrupted.request); setError(fallbackError) }
       }
     } catch {
       setError("The interview couldn’t start. Please check your connection and try again.")
@@ -124,12 +150,25 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
       if (resumeAttempted.current) return
       resumeAttempted.current = true
       const stored = readStoredSession(token)
+      readPendingReply(token, stored?.sessionId ?? "")
       if (stored) void start(stored)
     }, 0)
     return () => window.clearTimeout(resumeTimer)
     // start is intentionally scoped to this token's initial mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
+
+  useEffect(() => {
+    if (!pending || !sessionId) return
+    const stored = readPendingReply(token, sessionId)
+    if (!stored) return
+    const timer = window.setTimeout(() => {
+      removePendingReply(token, sessionId, stored.request)
+      setPending(null)
+      setError("The recovery window has expired. Please contact the research team before continuing.")
+    }, Math.max(0, stored.expiresAt - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [pending, sessionId, token])
 
   async function requestReply(request: { answer: string; idempotencyKey: string; attachmentIds: string[] }) {
     if (!sessionId || !resumeToken) return
@@ -140,7 +179,9 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
     try {
       // Retain only the unconfirmed request until a durable receipt arrives.
       // A reload retries this same key, never a fresh paid model request.
-      localStorage.setItem(`${storageKey(token)}-pending`, JSON.stringify({ sessionId, request }))
+      const prior = readPendingReply(token, sessionId)
+      const expiresAt = prior?.request.idempotencyKey === request.idempotencyKey ? prior.expiresAt : Date.now() + PENDING_RETENTION_MS
+      localStorage.setItem(`${storageKey(token)}-pending`, JSON.stringify({ sessionId, request, expiresAt }))
       const response = await fetch("/api/research/respond", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
@@ -159,7 +200,7 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
       }
       const data = response.headers.get("content-type")?.includes("application/x-ndjson")
         ? await readResearchChatStream(response, (text) => setProvisional((current) => current + text))
-        : await response.json() as { message?: string; turn?: Message }
+        : parseResearchChatReply(await response.json())
       if (!data.message?.trim()) {
         setError(fallbackError)
         return
@@ -167,7 +208,7 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
       const interviewer = data.turn ?? { role: "INTERVIEWER" as const, content: data.message.trim() }
       setMessages((current) => interviewer.id && current.some((turn) => turn.id === interviewer.id) ? current : [...current, interviewer])
       setPending(null)
-      localStorage.removeItem(`${storageKey(token)}-pending`)
+      removePendingReply(token, sessionId, request)
       setAttachments([])
     } catch {
       setError("The interviewer couldn’t respond. Please check your connection and try again.")
@@ -219,7 +260,7 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
   }
 
   async function finish() {
-    if (!sessionId || !resumeToken || busy) return
+    if (!sessionId || !resumeToken || busy || pending || uploading) return
     setBusy(true)
     setError(null)
     try {
@@ -233,7 +274,6 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
         return
       }
       localStorage.removeItem(storageKey(token))
-      localStorage.removeItem(`${storageKey(token)}-pending`)
       setComplete(true)
     } catch {
       setError("Your interview couldn’t be completed. Please check your connection and try again.")
@@ -340,7 +380,7 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
           Send
         </Button>
       </div>
-      <Button className="mt-3 self-end" variant="ghost" onClick={finish} disabled={busy}>
+      <Button className="mt-3 self-end" variant="ghost" onClick={finish} disabled={busy || Boolean(pending) || uploading}>
         Finish interview
       </Button>
     </div>
