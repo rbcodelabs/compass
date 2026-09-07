@@ -279,15 +279,16 @@ The durable local journal remains at the fixed claim path above. The $1.383
 preflight figure is an estimate, not measured billed cost. No application,
 database, production flag, or participant runtime was changed by the probe.
 
-#### Separately authorized v2 diagnostic attempt — pending execution
+#### Separately authorized v2 diagnostic attempt — observed outcome
 
 After reviewing that inconclusive failure, the user explicitly authorized safe
 field-level diagnostics and **one additional** controlled live attempt. The
 current `--live-approved` entry point therefore claims only
 `~/.geode/probes/compass-research-voice-feasibility-v2.jsonl` with exclusive creation.
 There is no attempt-number/path override or reset mechanism. The consumed v1
-journal, its worker hash, and the observed v1 outcome above remain unchanged;
-v2 execution/evidence must be recorded separately after independent review.
+journal, its worker hash, and the observed v1 outcome above remain unchanged.
+The v2 claim is now also consumed; neither claim may be reset or deleted, and no
+further live attempt is authorized.
 
 The policy comparator, configured policy, pre-media root requirements, deadlines,
 allocation limits, and conservative sub-$5 preflight ceiling are unchanged.
@@ -307,7 +308,43 @@ nested voice/automatic-response fields, redaction and forged journal records,
 split worker stdout through the real controller collector into a temporary
 journal, and distinct non-reusable v1/v2 claims. This diagnostic change is not a
 policy fix or a successful live proof. Voice remains disabled and PR167 remains
-unmerged pending the separately controlled review/execution workflow.
+unmerged pending the separately controlled review workflow.
+
+The operator executed the sole v2 attempt on 2026-09-07 at 17:30:10 UTC using
+reviewed commit `ed18d69a6bde142fa42f0aea56db5c9687c1a3d3`, run
+`8b1df5ae-2868-47c2-a4e8-8fe1bd8ca87f`. Provider allocation returned HTTP201 and
+the Sandbox/worker started. The only field diagnostic was
+`session.updated` → `session.id`, mismatch `value`, `equal:false`; the probe
+failed closed with `POLICY_MISMATCH` during `PREMEDIA_INITIALIZATION`. Total
+elapsed time through cleanup was 8,949 ms. No policy/root acknowledgement,
+canonical exchange, browser SDP release, participant audio, or assistant response
+was observed. The worker reported provider stop success, the controller reported
+provider/Sandbox/browser stopped, and the operator independently inspected the
+exact Sandbox with `resume:false`, confirming stopped and nonpersistent.
+
+This evidence does **not** establish that the provider changed session IDs.
+The same diagnostic occurs if `session.updated` arrives before a matching
+`session.created` has established the parser's local identity (still `null`),
+or if a prior identity exists and differs. Its `expectedType:string` describes
+the required identity contract, not the observed type of that local baseline.
+The journal did not retain event history or baseline-presence evidence, so those
+cases cannot be distinguished. This is another inconclusive pre-media result,
+not provider infeasibility or a demonstrated voice exchange. No implementation
+or acceptance rule was changed in response.
+
+V2 audit identifiers: provider `rtc_u1_ELXSVVRcKvp3AEXYGGIZ6`; Sandbox
+`compass-voice-probe-8b1df5ae-2868-47c2-a4e8-8fe1bd8ca87f`; command
+`cmd_c7fe3a72eb3e435cae0cc5a01d35`; worker SHA256
+`79e526c35520f89ea32cb13d94a16b4918ee3b4a6161297dcf7a3d6cdcf40400`.
+The unchanged $1.383 preflight estimate is not measured billed cost.
+
+The next investigation should remain offline/read-only: compare fixtures for
+update-before-created versus a genuinely different known identity, and verify
+the documented sideband-attachment initialization contract before proposing any
+handshake change. If separately approved later, safe diagnostics could include
+`createdObserved`/`identityBaselinePresent` booleans and bounded event-kind
+sequence counters, never session identifiers. Do not infer or accept an identity
+merely to pass the current gate; any contract adjustment needs evidence and review.
 
 - Provider realtime event shapes and completion semantics may evolve; the sideband parser, event allowlist, response-status correlation, and provider-item ordering must remain versioned and tested.
 - Vercel Sandbox duration, detached-process, egress-policy, or outbound-WebSocket behavior may differ by plan or change over time. Production enablement is blocked on the live Compass-plan spike; failure of that prerequisite requires a small managed container service rather than weakening the provider-authoritative boundary.
