@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ study: vi.fn(), session: vi.fn(), update: vi.fn(), agent: vi.fn() }))
 vi.mock("@/lib/db", () => ({ default: () => ({ researchStudy: { findFirst: mocks.study }, researchSession: { findFirst: mocks.session, updateMany: mocks.update } }) }))
 vi.mock("@/lib/research-analysis-agent", () => ({ runResearchAnalysisAgent: mocks.agent }))
@@ -12,6 +12,7 @@ beforeEach(() => {
   mocks.update.mockResolvedValue({ count: 1 })
   mocks.agent.mockResolvedValue('{"summary":"Slow process","evidenceTurnIds":["turn"]}')
 })
+afterEach(() => vi.unstubAllEnvs())
 describe("saved research analysis", () => {
   it("authorizes membership before reading transcripts or running a model", async () => {
     mocks.study.mockResolvedValue(null)
@@ -67,6 +68,16 @@ describe("saved research analysis", () => {
     mocks.session.mockResolvedValue({ ...session, summary: JSON.stringify({ version: 1, pending: { id: "old", startedAt: "2000-01-01T00:00:00Z" } }) })
     expect(await generateSessionAnalysis({ studyId: "study", sessionId: "session", kind: "summary", automatic: true })).toBeNull()
     expect(mocks.agent).not.toHaveBeenCalled()
+    await generateSessionAnalysis({ studyId: "study", sessionId: "session", kind: "summary", userId: "member" })
+    expect(mocks.agent).toHaveBeenCalledTimes(1)
+  })
+  it("uses deterministic analysis only in explicitly isolated non-production functional runs", async () => {
+    vi.stubEnv("NODE_ENV", "development")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
+    vi.stubEnv("E2E_ISOLATED_DATABASE", "1")
+    expect(await generateSessionAnalysis({ studyId: "study", sessionId: "session", kind: "summary", userId: "member" })).toMatchObject({ summary: "Test analysis: participant described their experience." })
+    expect(mocks.agent).not.toHaveBeenCalled()
+    vi.stubEnv("NODE_ENV", "production")
     await generateSessionAnalysis({ studyId: "study", sessionId: "session", kind: "summary", userId: "member" })
     expect(mocks.agent).toHaveBeenCalledTimes(1)
   })
