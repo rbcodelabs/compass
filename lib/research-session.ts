@@ -3,7 +3,7 @@ import type { PrismaClient, ResearchParticipantToken, ResearchStudy } from "@pri
 import { buildResearchAgentTurnPrompt, type ResearchGuideItem } from "@/lib/research"
 import {
   isResearchDiscoveryVoiceEnabled,
-  isResearchLegacyVoiceHarnessEnabled,
+  isResearchParticipantVoiceEnabled,
 } from "@/lib/research-feature"
 
 export const MAX_RESEARCH_MESSAGE_CHARS = 4_000
@@ -183,6 +183,18 @@ function publicTurns(turns: CanonicalTurn[]) {
   return turns.map(({ id, role, content, sequence }) => ({ id, role, content, sequence }))
 }
 
+async function participantTurns(context: ResearchContext, sessionId: string, turns: CanonicalTurn[]) {
+  const attachments = turns.length ? await context.prisma.researchAttachment.findMany({
+    where: { workspaceId: context.study.workspaceId, studyId: context.study.id, sessionId,
+      turnId: { in: turns.map((turn) => turn.id) }, status: "READY", deletedAt: null },
+    select: { id: true, turnId: true, originalName: true, mimeType: true, sizeBytes: true },
+    orderBy: { createdAt: "asc" },
+  }) : []
+  return publicTurns(turns).map((turn) => ({ ...turn, attachments: attachments
+    .filter((attachment) => attachment.turnId === turn.id)
+    .map(({ id, originalName, mimeType, sizeBytes }) => ({ id, originalName, mimeType, sizeBytes })) }))
+}
+
 function assertCanonicalCapacity(turns: CanonicalTurn[], missingTurns: number, missingContentChars: number) {
   if (turns.length + missingTurns > MAX_RESEARCH_TURNS) {
     throw new ResearchSessionError("This interview has reached its turn limit", 409)
@@ -277,14 +289,14 @@ export async function startOrResumeResearchSession(
     const session = await loadParticipantSession(context, resume.sessionId, resume.resumeToken, {
       allowCompleted: true,
     })
-    if (session.modality === "VOICE" && !isResearchLegacyVoiceHarnessEnabled()) {
+    if (session.modality === "VOICE" && !isResearchParticipantVoiceEnabled()) {
       throw new ResearchSessionError("Voice is not available for this study", 409)
     }
     return {
       sessionId: session.id,
       resumeToken: resume.resumeToken,
       status: session.status,
-      turns: session.status === "COMPLETED" ? [] : publicTurns(session.turns as CanonicalTurn[]),
+      turns: session.status === "COMPLETED" ? [] : await participantTurns(context, session.id, session.turns as CanonicalTurn[]),
       startedAt: session.startedAt,
     }
   }
@@ -314,7 +326,7 @@ export async function startOrResumeResearchSession(
     const study = await tx.researchStudy.findUnique({ where: { id: context.study.id } })
     if (!study || study.status !== "ACTIVE") throw new ResearchSessionError("Study not found", 404)
     if (modality === "VOICE" && (
-      !isResearchLegacyVoiceHarnessEnabled() ||
+      !isResearchParticipantVoiceEnabled() ||
       (study.studyType === "CUSTOMER_INTERVIEW" && !isResearchDiscoveryVoiceEnabled()) ||
       (study.studyType === "USABILITY_TEST" && !study.appUrl)
     )) {
@@ -561,7 +573,7 @@ async function releaseRequestLease(prisma: PrismaClient, sessionId: string, requ
 
 export async function respondToResearchSession({
   context, sessionId, resumeToken, idempotencyKey: idempotencyValue,
-  answer: answerValue, attachmentIds: attachmentIdValues = [], loadAttachmentBytes, runAgent, baseUrl,
+  answer: answerValue, attachmentIds: attachmentIdValues = [], loadAttachmentBytes, runAgent, baseUrl, onDelta,
 }: {
   context: ResearchContext
   sessionId: string
@@ -570,10 +582,10 @@ export async function respondToResearchSession({
   answer: unknown
   attachmentIds?: unknown
   loadAttachmentBytes?: (pathname: string) => Promise<Uint8Array | null>
-  runAgent: (input: { prompt: string; baseUrl: string; attachments?: Array<{ mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf"; originalName: string; bytes: Uint8Array }> }) => Promise<string>
+  runAgent: (input: { prompt: string; baseUrl: string; onDelta?: (text: string) => void; attachments?: Array<{ mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf"; originalName: string; bytes: Uint8Array }> }) => Promise<string>
   baseUrl: string
+  onDelta?: (text: string) => void
 }) {
-  const answer = assertResearchAnswer(answerValue)
   const idempotencyKey = assertIdempotencyKey(idempotencyValue)
   if (!Array.isArray(attachmentIdValues) || attachmentIdValues.length > 3 ||
     attachmentIdValues.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) ||
@@ -581,6 +593,10 @@ export async function respondToResearchSession({
     throw new ResearchSessionError("Use at most three valid attachments", 400)
   }
   const attachmentIds = attachmentIdValues as string[]
+  // Empty text is meaningful only when backed by authorized evidence; the
+  // attachment ownership/linkage checks still run before any model invocation.
+  const answer = typeof answerValue === "string" && !answerValue.trim() && attachmentIds.length > 0
+    ? "" : assertResearchAnswer(answerValue)
   if (attachmentIds.length > 0 && !loadAttachmentBytes) {
     throw new ResearchSessionError("Attachment storage is unavailable", 503)
   }
@@ -709,7 +725,7 @@ export async function respondToResearchSession({
     }))
     const canonicalTranscriptChars = canonicalTurns.reduce((total, turn) => total + turn.content.length, 0)
     const message = assertResearchInterviewerReply(
-      await runAgent({ prompt, baseUrl, attachments: modelAttachments }),
+      await runAgent({ prompt, baseUrl, attachments: modelAttachments, ...(onDelta ? { onDelta } : {}) }),
       canonicalTranscriptChars,
     )
     const interviewerTurn = await appendInterviewerTurnAndCompleteRequest(

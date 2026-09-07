@@ -18,6 +18,8 @@ describe("guided research participant experience", () => {
     render(<ResearchExperience {...props} legacyVoiceEnabled={false} />)
     expect(screen.getByTestId("chat")).toHaveTextContent("guided-chat")
     expect(screen.queryByRole("button", { name: /Use voice/i })).not.toBeInTheDocument()
+    expect(screen.getByTitle("Live product for Navigation test")).toHaveAttribute("src", props.appUrl)
+    expect(screen.getByRole("link", { name: /Open product/i })).toHaveAttribute("rel", "noopener noreferrer")
   })
 
   it("explains think-aloud research and lets the participant choose chat or voice", () => {

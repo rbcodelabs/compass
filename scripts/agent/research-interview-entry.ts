@@ -4,7 +4,7 @@
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import { readFileSync } from "node:fs"
 
-function emit(kind: "AGENT_RESULT" | "AGENT_ERROR", payload: unknown): void {
+function emit(kind: "AGENT_DELTA" | "AGENT_RESULT" | "AGENT_ERROR", payload: unknown): void {
   process.stdout.write(`${kind} ${JSON.stringify(payload)}\n`)
 }
 
@@ -52,8 +52,13 @@ async function main(): Promise<void> {
       model: "claude-sonnet-5",
       tools: [],
       maxTurns: 1,
+      includePartialMessages: true,
     },
   })) {
+    if (message.type === "stream_event" && message.parent_tool_use_id === null &&
+        message.event.type === "content_block_delta" && message.event.delta.type === "text_delta") {
+      emit("AGENT_DELTA", { text: message.event.delta.text })
+    }
     if (message.type !== "result") continue
     if (message.subtype !== "success") {
       throw new Error(`Research query ended with subtype: ${message.subtype}`)

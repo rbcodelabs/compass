@@ -13,6 +13,7 @@ import { generateSsoSecret } from "@/lib/portal-sso";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
+import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import type {
   CustomFieldType,
   CustomFieldObjectType,
@@ -592,6 +593,7 @@ export async function deleteWorkspace(
 
   // ── Step 15: Delete Artifacts and private blobs ─────────────────────────────
   await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
+  await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
 
   // ── Step 16: Delete WorkspaceMembers ────────────────────────────────────────
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });

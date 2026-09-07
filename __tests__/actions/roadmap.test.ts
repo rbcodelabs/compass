@@ -50,6 +50,7 @@ import {
   promoteFeedbackToRoadmap,
   updateSortOrder,
   updateRoadmapItem,
+  editRoadmapItem,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 
 beforeEach(() => {
@@ -511,5 +512,167 @@ describe("updateRoadmapItem", () => {
     await updateRoadmapItem("item-1", "ws-1", { isPrivate: false });
     const call = mockRoadmapItem.update.mock.calls[0][0];
     expect(call.data.isPrivate).toBe(false);
+  });
+});
+
+// ─── editRoadmapItem ─────────────────────────────────────────────────────────
+
+describe("editRoadmapItem", () => {
+  const editData = {
+    title: "Renamed",
+    description: "Updated description",
+    startDate: null,
+    endDate: null,
+    isPrivate: true,
+    opportunityId: "opp-2",
+  };
+
+  beforeEach(() => {
+    mockRoadmapItem.findFirst.mockResolvedValue({
+      id: "item-1",
+      startDate: null,
+      endDate: null,
+      opportunityId: "opp-1",
+      opportunity: { id: "opp-1", title: "Existing" },
+    });
+    mockRoadmapItem.update.mockResolvedValue({
+      id: "item-1",
+      title: "Renamed",
+      description: "Updated description",
+      startDate: null,
+      endDate: null,
+      isPrivate: true,
+      opportunityId: "opp-2",
+    });
+    mockOpportunity.findFirst.mockResolvedValue({ id: "opp-2", title: "Retention friction" });
+  });
+
+  it("rejects an unauthenticated caller before querying roadmap data", async () => {
+    mockAuth.mockResolvedValue(null);
+
+    await expect(editRoadmapItem("item-1", "ws-1", editData)).rejects.toThrow("Unauthorized");
+
+    expect(mockWorkspaceMember.findUnique).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-member before querying roadmap data", async () => {
+    mockWorkspaceMember.findUnique.mockResolvedValue(null);
+
+    await expect(editRoadmapItem("item-1", "ws-1", editData)).rejects.toThrow("Workspace not found");
+
+    expect(mockRoadmapItem.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("does not reveal an item from another workspace", async () => {
+    mockRoadmapItem.findFirst.mockResolvedValue(null);
+
+    await expect(editRoadmapItem("item-secret", "ws-1", editData)).rejects.toThrow("Roadmap item not found");
+
+    expect(mockRoadmapItem.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "item-secret", workspaceId: "ws-1" },
+    }));
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it.each(["opp-missing", "opp-foreign"])(
+    "rejects unavailable opportunity %s without committing scalar edits",
+    async (opportunityId) => {
+      mockOpportunity.findFirst.mockResolvedValue(null);
+
+      await expect(
+        editRoadmapItem("item-1", "ws-1", { ...editData, opportunityId }),
+      ).rejects.toThrow("Opportunity not found");
+
+      expect(mockOpportunity.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: opportunityId,
+          workspaceId: "ws-1",
+          status: { not: "ARCHIVED" },
+        },
+        select: { id: true, title: true },
+      });
+      expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects newly linking an archived opportunity without committing scalar edits", async () => {
+    mockOpportunity.findFirst.mockResolvedValue(null);
+
+    await expect(
+      editRoadmapItem("item-1", "ws-1", { ...editData, opportunityId: "opp-archived" }),
+    ).rejects.toThrow("Opportunity not found");
+
+    expect(mockOpportunity.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "opp-archived",
+        workspaceId: "ws-1",
+        status: { not: "ARCHIVED" },
+      },
+      select: { id: true, title: true },
+    });
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("atomically updates scalar fields and the opportunity relation", async () => {
+    const result = await editRoadmapItem("item-1", "ws-1", editData);
+
+    const call = mockRoadmapItem.update.mock.calls[0][0];
+    expect(call.where).toEqual({ id: "item-1" });
+    expect(call.data).toMatchObject({
+      title: "Renamed",
+      description: "Updated description",
+      isPrivate: true,
+      opportunityId: "opp-2",
+      updatedAt: expect.any(Date),
+    });
+    expect(call.data).not.toHaveProperty("solutionId");
+    expect(call.data).not.toHaveProperty("experimentId");
+    expect(call.data).not.toHaveProperty("keyResultId");
+    expect(call.data).not.toHaveProperty("feedbackId");
+    expect(result).toMatchObject({
+      opportunityId: "opp-2",
+      opportunity: { id: "opp-2", title: "Retention friction" },
+    });
+  });
+
+  it("clears an opportunity without looking it up", async () => {
+    mockRoadmapItem.update.mockResolvedValue({
+      id: "item-1",
+      title: "Renamed",
+      description: "Updated description",
+      startDate: null,
+      endDate: null,
+      isPrivate: true,
+      opportunityId: null,
+    });
+
+    const result = await editRoadmapItem("item-1", "ws-1", { ...editData, opportunityId: null });
+
+    expect(mockOpportunity.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.update.mock.calls[0][0].data).toMatchObject({ opportunityId: null });
+    expect(result).toMatchObject({ opportunityId: null, opportunity: null });
+  });
+
+  it("preserves an archived current opportunity without a redundant lookup or relation write", async () => {
+    const currentOpportunity = { id: "opp-archived", title: "Archived opportunity" };
+    mockRoadmapItem.findFirst.mockResolvedValue({
+      id: "item-1",
+      startDate: null,
+      endDate: null,
+      opportunityId: currentOpportunity.id,
+      opportunity: currentOpportunity,
+    });
+
+    const result = await editRoadmapItem("item-1", "ws-1", {
+      ...editData,
+      opportunityId: currentOpportunity.id,
+    });
+
+    expect(mockOpportunity.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.update.mock.calls[0][0].data).not.toHaveProperty("opportunityId");
+    expect(result.opportunity).toEqual(currentOpportunity);
   });
 });

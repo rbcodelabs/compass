@@ -80,6 +80,9 @@ describe("research study actions", () => {
     expect(runResearchInterviewAgent).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringContaining("Return only a JSON array of 5 to 8"),
     }))
+    const prompt = runResearchInterviewAgent.mock.calls[0][0].prompt
+    expect(prompt).toContain("edge cases")
+    expect(prompt).toContain("Do not invent product capabilities")
   })
 
   it("generates neutral editable customer-interview questions without requiring a product URL", async () => {
@@ -100,6 +103,9 @@ describe("research study actions", () => {
     expect(runResearchInterviewAgent).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringContaining("customer discovery interview"),
     }))
+    const prompt = runResearchInterviewAgent.mock.calls[0][0].prompt
+    expect(prompt).toContain("workarounds")
+    expect(prompt).toContain("ideal experience")
   })
 
   it("rejects duplicate generated guide items", async () => {

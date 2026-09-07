@@ -40,9 +40,10 @@ export function ResearchExperience({
     localStorage.setItem(modalityStorageKey, next)
     setModality(next)
   }
-  if (!canUseVoice) return <ResearchChat guided={guided} token={token} />
+  if (!canUseVoice && !guided) return <ResearchChat token={token} />
+  const selectedModality = canUseVoice ? modality : "CHAT"
 
-  if (!modality) {
+  if (!selectedModality) {
     return <section className="mx-auto max-w-xl rounded-xl border bg-surface-panel p-6 sm:p-8">
       <h2 className="text-lg font-semibold">Choose how you’d like to participate</h2>
       <p className="mt-2 text-sm leading-relaxed text-text-subtle">{guided
@@ -63,7 +64,7 @@ export function ResearchExperience({
 
   if (!guided) {
     return <section className="mx-auto flex min-h-[32rem] w-full max-w-2xl flex-col rounded-xl border bg-surface-panel p-4 sm:p-6">
-      {modality === "CHAT"
+      {selectedModality === "CHAT"
         ? <ResearchChat token={token} />
         : <ResearchVoice onUseChat={() => chooseModality("CHAT")} token={token} />}
     </section>
@@ -87,7 +88,7 @@ export function ResearchExperience({
       />
     </section>
     <section className="flex min-h-[32rem] flex-col p-4 sm:p-5 lg:min-h-0">
-      {modality === "CHAT"
+      {selectedModality === "CHAT"
         ? <ResearchChat guided token={token} />
         : <ResearchVoice guided onUseChat={() => chooseModality("CHAT")} token={token} />}
     </section>

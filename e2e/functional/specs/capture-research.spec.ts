@@ -116,6 +116,30 @@ test.describe("Capture — research study", () => {
     const idempotentTurns = idempotentResumeBody.turns as Array<{ role: string; content: string }>
     expect(idempotentTurns.filter((turn) => turn.content === duplicateBody.answer)).toHaveLength(1)
 
+    const disconnectedBody = { ...duplicateBody, idempotencyKey: "e2edisconnectedstream0001", answer: "Save this answer even when the display disconnects." }
+    const provisional = await participant.evaluate(async (body) => {
+      const response = await fetch("/api/research/respond", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" }, body: JSON.stringify(body) })
+      const reader = response.body!.getReader()
+      const first = await reader.read()
+      await reader.cancel()
+      return new TextDecoder().decode(first.value)
+    }, disconnectedBody)
+    expect(provisional).toContain('"type":"delta"')
+    await expect.poll(async () => {
+      // Read-only resume must observe persistence before any respond retry can
+      // run another model invocation and conceal a cancellation failure.
+      const resumed = await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: participantToken, ...idempotentSession } })
+      if (resumed.status() !== 200) return -1
+      const turns = (await resumed.json()).turns as Array<{ role: string }>
+      return turns.filter((turn) => turn.role === "INTERVIEWER").length
+    }, { timeout: 15_000 }).toBe(idempotentTurns.filter((turn) => turn.role === "INTERVIEWER").length + 1)
+    const disconnectedReplay = await anonymous.request.post(`${baseURL}/api/research/respond`, { data: disconnectedBody })
+    expect(disconnectedReplay.status()).toBe(200)
+    expect((await disconnectedReplay.json()).replayed).toBe(true)
+    const afterDisconnect = await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: participantToken, ...idempotentSession } })
+    const disconnectedTurns = (await afterDisconnect.json()).turns as Array<{ content: string }>
+    expect(disconnectedTurns.filter((turn) => turn.content === disconnectedBody.answer)).toHaveLength(1)
+
     const singleFlightStart = await anonymous.request.post(`${baseURL}/api/research/start`, {
       data: { token: participantToken },
     })
@@ -213,6 +237,12 @@ test.describe("Capture — research study", () => {
     await expect(page.getByRole("link", { name: "https://example.com/pricing" })).toBeVisible()
 
     const anonymous = await browser.newContext({ storageState: undefined })
+    // Controlled external-product fixture; no dependency on a live site's
+    // availability, and screenshots clearly show synthetic study content.
+    await anonymous.route("https://example.com/pricing", (route) => route.fulfill({
+      contentType: "text/html; charset=utf-8",
+      body: '<!doctype html><html><body style="font-family:system-ui;padding:24px;background:#f8fafc;color:#172554"><p>Example product · research fixture</p><h1>Plans for your team</h1><h2>Starter</h2><p>$12 per person / month</p><h2>Team</h2><p>$20 per person / month</p><p>Compare plans, billing and support.</p></body></html>',
+    }))
     const participant = await anonymous.newPage()
     await participant.setViewportSize({ width: 390, height: 844 })
     await participant.goto(shareUrl.replace(/^https?:\/\/[^/]+/, baseURL!))
@@ -224,11 +254,20 @@ test.describe("Capture — research study", () => {
     await expect(participant.locator("iframe")).toHaveAttribute("referrerpolicy", "no-referrer")
     await participant.getByRole("button", { name: "Start session" }).click()
     await expect(participant.getByText(tasks[0])).toBeVisible()
-    await participant.getByLabel("Share screenshot or PDF").setInputFiles("e2e/fixtures/test-image.png")
+    await expect(participant.frameLocator("iframe").getByRole("heading", { name: "Plans for your team" })).toBeVisible()
+    const evidence = await participant.locator("iframe").screenshot()
+    await participant.getByLabel("Share screenshot or PDF").setInputFiles({ name: "test-image.png", mimeType: "image/png", buffer: evidence })
     await expect(participant.getByText("test-image.png")).toBeVisible()
+    // Evidence-only answers and real provisional transport are participant
+    // behavior; the local runner still uses its no-cost agent implementation.
+    await participant.getByRole("button", { name: "Send" }).click()
+    await expect(participant.getByText("Draft — not saved yet")).toBeVisible()
+    await expect(participant.getByText("What made that difficult for you?")).toBeVisible()
+    await expect(participant.getByRole("img", { name: "test-image.png" })).toBeVisible()
+    await expect.poll(() => participant.getByRole("img", { name: "test-image.png" }).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
     await participant.getByRole("textbox", { name: "Your response" }).fill("I expected the team price to be clearer here.")
     await participant.getByRole("button", { name: "Send" }).click()
-    await expect(participant.getByText("What made that difficult for you?")).toBeVisible()
+    await expect(participant.getByText("What made that difficult for you?")).toHaveCount(2)
     const storedChatSession = await participant.evaluate((key) => localStorage.getItem(key), `compass-research-session-${participantToken.slice(-16)}`)
     expect(storedChatSession).not.toBeNull()
     const resumeResponsePromise = participant.waitForResponse((response) => response.url().endsWith("/api/research/start") && response.request().method() === "POST")
@@ -237,7 +276,13 @@ test.describe("Capture — research study", () => {
     const resumeBody = await resumeResponse.json()
     expect(resumeResponse.status(), JSON.stringify(resumeBody)).toBe(200)
     await expect(participant.getByText("I expected the team price to be clearer here.")).toBeVisible()
+    await expect(participant.getByRole("img", { name: "test-image.png" })).toBeVisible()
     expect(await participant.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    if (process.env.RESEARCH_QA_SCREENSHOTS === "1") {
+      await participant.screenshot({ path: "public/screenshots/docs/research-guided-chat-mobile.png", fullPage: true })
+      await participant.setViewportSize({ width: 1280, height: 800 })
+      await participant.screenshot({ path: "public/screenshots/docs/research-guided-chat-desktop.png", fullPage: true })
+    }
     await participant.getByRole("button", { name: "Finish interview" }).click()
     await expect(participant.getByRole("heading", { name: "Thank you" })).toBeVisible()
 

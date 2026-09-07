@@ -175,6 +175,8 @@ model Workspace {
   checklistTemplates   ChecklistTemplate[]
   tasks                Task[]
   agentConversations   AgentConversation[]
+  capabilityPacks      WorkspaceCapabilityPack[]
+  installedCapabilityPacks CapabilityPack[]
   researchStudies      ResearchStudy[]
   researchAttachments  ResearchAttachment[]
   reviewRequests       ReviewRequest[]
@@ -269,6 +271,7 @@ model ResearchSession {
   requests               ResearchRequest[]
   attachments            ResearchAttachment[]
   voiceEvents            ResearchVoiceEvent[]
+  participantVoiceEvents ResearchParticipantVoiceEvent[]
   voiceCalls             ResearchVoiceCall[]
   voiceCommands          ResearchVoiceCommand[]
   voiceLeaseId           String?                   @map("voice_lease_id") @db.Uuid
@@ -291,6 +294,8 @@ model ResearchTurn {
   createdAt   DateTime             @default(now()) @map("created_at")
   session     ResearchSession      @relation(fields: [sessionId], references: [id])
   attachments ResearchAttachment[]
+
+  participantVoiceEvent ResearchParticipantVoiceEvent?
 
   @@unique([sessionId, sequence], map: "idx_research_turns_session_sequence")
   @@map("research_turns")
@@ -358,6 +363,27 @@ model ResearchBlobCleanup {
 
   @@index([workspaceId, status, nextAttemptAt], map: "idx_research_blob_cleanups_workspace_retry")
   @@map("research_blob_cleanups")
+}
+
+// Browser-reported transcript evidence, never provider-authenticated provenance.
+model ResearchParticipantVoiceEvent {
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String @map("workspace_id") @db.Uuid
+  sessionId       String @map("session_id") @db.Uuid
+  leaseId         String @map("lease_id") @db.Uuid
+  clientEventId   String @map("client_event_id") @db.VarChar(255)
+  reportedOrdinal Int @map("reported_ordinal")
+  claimedSpeaker  String @map("claimed_speaker") @db.VarChar(20)
+  content         String @db.Text
+  turnId          String @unique(map: "idx_participant_voice_turn") @map("turn_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  session         ResearchSession @relation(fields: [sessionId], references: [id])
+  turn            ResearchTurn @relation(fields: [turnId], references: [id])
+
+  @@unique([sessionId, clientEventId], map: "idx_participant_voice_client_event")
+  @@unique([sessionId, leaseId, reportedOrdinal], map: "idx_participant_voice_ordinal")
+  @@index([workspaceId, sessionId], map: "idx_participant_voice_workspace_session")
+  @@map("research_participant_voice_events")
 }
 
 model ResearchVoiceEvent {
@@ -1922,12 +1948,73 @@ model AgentMessage {
   numTurns       Int?     @map("num_turns")
   costUsd        Float?   @map("cost_usd")
   durationMs     Int?     @map("duration_ms")
+  /// Exact JSON-encoded pack IDs, versions, source commits, digests and enabled
+  /// skills used for this assistant turn. TEXT keeps the schema DSQL-safe.
+  packProvenance String?  @map("pack_provenance") @db.Text
   createdAt      DateTime @default(now()) @map("created_at")
 
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
 
   @@index([conversationId, createdAt])
   @@map("agent_messages")
+}
+
+// ─── Declarative agent capability packs ─────────────────────────────────────
+
+model CapabilityPack {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  packId      String   @map("pack_id") @db.VarChar(120)
+  sourceKey   String   @map("source_key") @db.VarChar(64)
+  displayName String   @map("display_name") @db.VarChar(120)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+  versions    CapabilityPackVersion[]
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@unique([workspaceId, packId, sourceKey], map: "idx_capability_packs_workspace_pack_source")
+  @@map("capability_packs")
+}
+
+model CapabilityPackVersion {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  capabilityPackId      String   @map("capability_pack_id") @db.Uuid
+  semanticVersion       String   @map("semantic_version") @db.VarChar(80)
+  sourceRepository      String   @map("source_repository") @db.Text
+  sourceCommit          String   @map("source_commit") @db.VarChar(40)
+  sourcePath            String   @map("source_path") @db.Text
+  artifactSha256        String   @map("artifact_sha256") @db.VarChar(64)
+  artifactPathname      String   @map("artifact_pathname") @db.Text
+  sdkCompatibility      String   @map("sdk_compatibility") @db.VarChar(120)
+  manifestJson          String   @map("manifest_json") @db.Text
+  validationStatus      String   @default("VALID") @map("validation_status") @db.VarChar(20)
+  validationMessage     String?  @map("validation_message") @db.Text
+  createdById           String   @map("created_by_id") @db.Uuid
+  createdAt             DateTime @default(now()) @map("created_at")
+  capabilityPack        CapabilityPack @relation(fields: [capabilityPackId], references: [id])
+  workspaceAttachments  WorkspaceCapabilityPack[]
+
+  @@unique([capabilityPackId, semanticVersion, sourceCommit], map: "idx_capability_pack_versions_identity")
+  @@index([artifactSha256], map: "idx_capability_pack_versions_digest")
+  @@map("capability_pack_versions")
+}
+
+model WorkspaceCapabilityPack {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId             String   @map("workspace_id") @db.Uuid
+  capabilityPackId        String   @map("capability_pack_id") @db.Uuid
+  capabilityPackVersionId String   @map("capability_pack_version_id") @db.Uuid
+  enabledSkillIds         String   @map("enabled_skill_ids") @db.Text
+  enabled                 Boolean  @default(true)
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @default(now()) @map("updated_at")
+  workspace               Workspace @relation(fields: [workspaceId], references: [id])
+  capabilityPackVersion   CapabilityPackVersion @relation(fields: [capabilityPackVersionId], references: [id])
+
+  @@unique([workspaceId, capabilityPackId], map: "idx_workspace_capability_packs_workspace_pack")
+  @@index([workspaceId, enabled], map: "idx_workspace_capability_packs_enabled")
+  @@index([capabilityPackVersionId], map: "idx_workspace_capability_packs_version")
+  @@map("workspace_capability_packs")
 }
 
 /// Append-only audit trail of agent-initiated mutation tool calls (ADR 0001,
@@ -1942,6 +2029,7 @@ model AgentAuditLog {
   toolName       String   @map("tool_name") @db.VarChar(100)
   /// JSON-encoded, truncated summary of the tool input (TEXT, not a JSON column).
   argsSummary    String?  @map("args_summary") @db.Text
+  packProvenance String?  @map("pack_provenance") @db.Text
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@index([workspaceId, createdAt])

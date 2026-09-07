@@ -120,6 +120,84 @@ export async function updateRoadmapItem(
   return item;
 }
 
+/**
+ * Save the roadmap card edit form, including its opportunity relation, through
+ * one authenticated workspace-scoped boundary. Relation validation completes
+ * before the single update so scalar fields cannot persist when a requested
+ * opportunity is missing or belongs to another workspace.
+ */
+export async function editRoadmapItem(
+  itemId: string,
+  workspaceId: string,
+  data: {
+    title?: string;
+    description?: string;
+    startDate?: Date | null;
+    endDate?: Date | null;
+    isPrivate?: boolean;
+    opportunityId: string | null;
+  },
+) {
+  await requireWorkspaceMember(workspaceId);
+  const prisma = getPrisma();
+  const current = await prisma.roadmapItem.findFirst({
+    where: { id: itemId, workspaceId },
+    select: {
+      id: true,
+      startDate: true,
+      endDate: true,
+      opportunityId: true,
+      opportunity: { select: { id: true, title: true } },
+    },
+  });
+  if (!current) throw new Error(ROADMAP_ITEM_NOT_FOUND);
+
+  validateInclusiveDates(
+    data.startDate === undefined ? current.startDate : data.startDate,
+    data.endDate === undefined ? current.endDate : data.endDate,
+  );
+
+  const opportunityChanged = data.opportunityId !== current.opportunityId;
+  const opportunity = opportunityChanged && data.opportunityId
+    ? await prisma.opportunity.findFirst({
+        where: {
+          id: data.opportunityId,
+          workspaceId,
+          status: { not: "ARCHIVED" },
+        },
+        select: { id: true, title: true },
+      })
+    : opportunityChanged
+      ? null
+      : current.opportunity;
+  if (data.opportunityId && !opportunity) {
+    throw new Error("Opportunity not found");
+  }
+
+  const updateData: {
+    title?: string;
+    description?: string;
+    startDate?: Date | null;
+    endDate?: Date | null;
+    isPrivate?: boolean;
+    opportunityId?: string | null;
+    updatedAt: Date;
+  } = { updatedAt: new Date() };
+  if (data.title !== undefined) updateData.title = data.title;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.startDate !== undefined) updateData.startDate = data.startDate;
+  if (data.endDate !== undefined) updateData.endDate = data.endDate;
+  if (data.isPrivate !== undefined) updateData.isPrivate = data.isPrivate;
+  if (opportunityChanged) updateData.opportunityId = data.opportunityId;
+
+  const updated = await prisma.roadmapItem.update({
+    where: { id: current.id },
+    data: updateData,
+  });
+  revalidateRoadmap();
+  return { ...updated, opportunity };
+}
+
 export async function moveItem(itemId: string, horizon: Horizon, workspaceId: string) {
   await requireWorkspaceMember(workspaceId);
   assertDirectLaunchWriteBlocked(horizon);
