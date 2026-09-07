@@ -62,7 +62,9 @@ export default defineConfig({
     globalTeardown: "./e2e/functional/global-teardown.ts",
     webServer: {
       command: "pnpm dev",
-      port: FUNCTIONAL_PORT,
+      // TCP can listen before Next has made the login route available.
+      // Probe the actual auth entry point; a 404 must not admit the tests.
+      url: `${FUNCTIONAL_BASE_URL}/login`,
       reuseExistingServer: !process.env.CI,
       env: {
         PORT: String(FUNCTIONAL_PORT),
