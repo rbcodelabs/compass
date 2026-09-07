@@ -1,11 +1,34 @@
 import pg from "pg";
 import { test, expect } from "../fixtures/index";
 import { assertIsolatedE2EDatabase, isolatedE2EConnectionString } from "../fixtures/isolated-database";
+import type { Locator, Page } from "@playwright/test";
 
 const nativeId = "3eaf938a-782c-4073-a452-070d54156896";
 const nativeBase = "/e2e-test-org/native-dogfood";
 const start = new Date().toISOString().slice(0, 8) + "01";
 const end = new Date().toISOString().slice(0, 8) + "28";
+
+function shiftDate(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+async function targetBounds(target: Locator) {
+  const bounds = await target.boundingBox();
+  expect(bounds).not.toBeNull();
+  return bounds!;
+}
+
+async function scrollToFixtureMonth(page: Page) {
+  const month = new Date(`${start}T12:00:00Z`);
+  const viewportStart = new Date(month);
+  viewportStart.setUTCMonth(viewportStart.getUTCMonth() - 2);
+  const offset = (month.getTime() - viewportStart.getTime()) / 86_400_000 * 12;
+  // The virtualized chart initially starts two months before today. Scroll
+  // the real date region before querying cards outside its render window.
+  await page.getByTestId("native-timeline-scroll").evaluate((element, left) => { element.scrollLeft = left; }, offset);
+}
 
 test.describe("Native timeline limited rollout", () => {
   test.beforeAll(async () => {
@@ -67,6 +90,7 @@ test.describe("Native timeline limited rollout", () => {
     await page.keyboard.press("Escape");
     for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport);
+      await scrollToFixtureMonth(page);
       await page.screenshot({ path: `public/screenshots/docs/native-timeline-${viewport.width}.png`, fullPage: true, style: "nextjs-portal { display: none }" });
     }
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -99,10 +123,137 @@ test.describe("Native timeline limited rollout", () => {
     await expect(page.getByRole("button", { name: /Open details for Beta delivery/ })).toHaveCount(0);
   });
 
+  test("compact border grips and dotted handle preserve independent pointer and keyboard edits", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${nativeBase}/roadmap?view=timeline`);
+    await scrollToFixtureMonth(page);
+    const move = page.getByRole("button", { name: "Move Alpha delivery", exact: true });
+    const left = page.getByRole("button", { name: "Resize left edge of Alpha delivery", exact: true });
+    const right = page.getByRole("button", { name: "Resize right edge of Alpha delivery", exact: true });
+    const details = page.getByRole("button", { name: /Open details for Alpha delivery/ });
+    const edit = page.getByRole("button", { name: "Edit dates for Alpha delivery", exact: true });
+    const card = page.locator('[data-testid^="timeline-item-"][data-start]').filter({ has: move });
+    await expect(move.locator("svg.lucide-grip-vertical")).toBeVisible();
+    await move.scrollIntoViewIfNeeded();
+
+    const [leftBox, moveBox, detailsBox, editBox, rightBox] = await Promise.all(
+      [left, move, details, edit, right].map(targetBounds),
+    );
+    expect(leftBox.width).toBe(24);
+    expect(moveBox.width).toBe(24);
+    expect(rightBox.width).toBe(24);
+    expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(moveBox.x);
+    expect(moveBox.x + moveBox.width).toBeLessThanOrEqual(detailsBox.x);
+    expect(detailsBox.x + detailsBox.width).toBeLessThanOrEqual(editBox.x);
+    expect(editBox.x + editBox.width).toBeLessThanOrEqual(rightBox.x);
+    // Previously the move gutter was 28 + 24 + 4px and the edit gutter
+    // 24 + 28px. Four adjacent 24px targets now reserve 96 rather than 108px.
+    expect(moveBox.x + moveBox.width - leftBox.x + rightBox.x + rightBox.width - editBox.x).toBe(96);
+
+    const initialStart = (await card.getAttribute("data-start"))!;
+    const initialEnd = (await card.getAttribute("data-end"))!;
+    async function drag(target: Locator, pixels: number) {
+      await target.scrollIntoViewIfNeeded();
+      const box = await targetBounds(target);
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + pixels, box.y + box.height / 2, { steps: 6 });
+      await page.mouse.up();
+    }
+    await drag(left, 12);
+    await expect(card).toHaveAttribute("data-start", shiftDate(initialStart, 1));
+    await expect(move).toBeEnabled();
+    await drag(right, 12);
+    await expect(card).toHaveAttribute("data-end", shiftDate(initialEnd, 1));
+    await expect(move).toBeEnabled();
+    await drag(move, 12);
+    await expect(card).toHaveAttribute("data-start", shiftDate(initialStart, 2));
+    await expect(card).toHaveAttribute("data-end", shiftDate(initialEnd, 2));
+    await expect(move).toBeEnabled();
+    await page.reload();
+    await expect(card).toHaveAttribute("data-start", shiftDate(initialStart, 2));
+    await expect(card).toHaveAttribute("data-end", shiftDate(initialEnd, 2));
+
+    await move.focus();
+    await page.keyboard.press("Alt+ArrowLeft");
+    await expect(card).toHaveAttribute("data-start", shiftDate(initialStart, 1));
+    await expect(move).toBeEnabled();
+    await right.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(card).toHaveAttribute("data-end", initialEnd);
+    await expect(move).toBeEnabled();
+    await move.focus();
+    await page.keyboard.press("d");
+    await expect(page.getByRole("dialog").getByLabel("Start", { exact: true })).toHaveValue(shiftDate(initialStart, 1));
+    await page.keyboard.press("Escape");
+    await details.click();
+    await expect(page).toHaveURL(/detail=roadmapItem/);
+    const detailPanel = page.getByRole("dialog", { name: "Roadmap Item", exact: true });
+    await expect(detailPanel.getByRole("button", { name: "Alpha delivery", exact: true })).toBeVisible({ timeout: 30_000 });
+    await page.keyboard.press("Escape");
+    await expect(page).not.toHaveURL(/detail=/);
+    await expect(detailPanel).not.toBeVisible();
+    await expect(details).toBeFocused();
+    await expect(card).toHaveAttribute("data-start", shiftDate(initialStart, 1));
+    await expect(card).toHaveAttribute("data-end", initialEnd);
+
+    await edit.click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Start", { exact: true }).fill(initialStart);
+    await dialog.getByLabel("End", { exact: true }).fill(shiftDate(initialStart, 10));
+    await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(move).toBeEnabled();
+    expect((await targetBounds(card)).width).toBe(132);
+    expect((await targetBounds(details)).width).toBeGreaterThanOrEqual(24);
+    await expect(details).toHaveCSS("overflow", "hidden");
+    await expect(details.getByLabel("Delivery status: Not Started", { exact: true })).not.toBeVisible();
+    expect((await targetBounds(details.locator("[data-timeline-title]"))).width).toBeGreaterThan(0);
+    await page.screenshot({ path: "public/screenshots/docs/native-timeline-narrow-1280.png", fullPage: true, style: "nextjs-portal { display: none }" });
+    await edit.click();
+    await dialog.getByLabel("End", { exact: true }).fill(shiftDate(initialStart, 9));
+    await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit schedule for Alpha delivery", exact: true })).toBeVisible();
+    await expect(move).toHaveCount(0);
+  });
+
   test("query cannot opt another workspace into native", async ({ page, base }) => {
     await page.goto(`${base}/roadmap?view=timeline&timelineEngine=native`);
     await expect(page.getByRole("tab", { name: "Year", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Use classic timeline" })).toHaveCount(0);
+  });
+
+  test.describe("touch targets", () => {
+    test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
+
+    test("narrow-looking grips retain independent targets and a tappable date dialog", async ({ page }) => {
+      await page.goto(`${nativeBase}/roadmap?view=timeline`);
+      await scrollToFixtureMonth(page);
+      const move = page.getByRole("button", { name: "Move Beta delivery", exact: true });
+      const left = page.getByRole("button", { name: "Resize left edge of Beta delivery", exact: true });
+      const right = page.getByRole("button", { name: "Resize right edge of Beta delivery", exact: true });
+      const details = page.getByRole("button", { name: /Open details for Beta delivery/ });
+      const edit = page.getByRole("button", { name: "Edit dates for Beta delivery", exact: true });
+      const [leftBox, moveBox, detailsBox, editBox, rightBox] = await Promise.all(
+        [left, move, details, edit, right].map(targetBounds),
+      );
+      for (const box of [leftBox, moveBox, editBox, rightBox]) {
+        expect(box.width).toBeGreaterThanOrEqual(24);
+        expect(box.height).toBeGreaterThanOrEqual(24);
+      }
+      expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(moveBox.x);
+      expect(moveBox.x + moveBox.width).toBeLessThanOrEqual(detailsBox.x);
+      expect(detailsBox.x + detailsBox.width).toBeLessThanOrEqual(editBox.x);
+      expect(editBox.x + editBox.width).toBeLessThanOrEqual(rightBox.x);
+      expect((await targetBounds(left.locator("[data-resize-grip]"))).width).toBe(2);
+      await expect(edit).toHaveCSS("opacity", "1");
+      await edit.tap();
+      await expect(page.getByRole("dialog").getByLabel("Start", { exact: true })).toHaveValue(start);
+      await expect(page.getByRole("dialog").getByLabel("End", { exact: true })).toHaveValue(end);
+      await page.getByRole("button", { name: "Close", exact: true }).first().tap();
+      await expect(page.getByRole("dialog")).not.toBeVisible();
+    });
   });
 
   test("native backlog quick-add persists on the roadmap", async ({ page }) => {

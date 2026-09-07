@@ -7,6 +7,10 @@ declare global {
   var __prisma: PrismaClient | undefined;
 }
 
+export function getDatabaseUser(): string {
+  return process.env.PREVIEW_AUTOMATION_ENABLED === "1" ? `${getActiveSchema()}_runtime` : process.env.PGUSER ?? "admin";
+}
+
 /**
  * Creates a PrismaClient.
  *
@@ -15,6 +19,10 @@ declare global {
  */
 export function createPrismaClient(): PrismaClient {
   const schema = getActiveSchema();
+  const automationPreview = process.env.PREVIEW_AUTOMATION_ENABLED === "1";
+  if (automationPreview && process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is forbidden in automation previews");
+  }
 
   // ── Local dev path ────────────────────────────────────────────────────────
   if (process.env.DATABASE_URL) {
@@ -52,9 +60,9 @@ export function createPrismaClient(): PrismaClient {
 
   const pool = new Pool({
     host,
-    user: process.env.PGUSER ?? "admin",
+    user: getDatabaseUser(),
     database: process.env.PGDATABASE ?? "postgres",
-    password: () => signer.getDbConnectAdminAuthToken(),
+    password: () => automationPreview ? signer.getDbConnectAuthToken() : signer.getDbConnectAdminAuthToken(),
     port: 5432,
     ssl: true,
     max: 20,

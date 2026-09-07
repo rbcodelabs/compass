@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import {
   useEntityDetail,
@@ -47,7 +48,7 @@ const STATUS_MAP: Record<string, { label: string; className: string }> = {
   VALIDATING: { label: "Validating", className: "bg-blue-100 text-blue-700" },
   PRIORITIZED: { label: "Prioritized", className: "bg-indigo-100 text-indigo-700" },
   ACTIVE: { label: "Active", className: "bg-green-100 text-green-700" },
-  ARCHIVED: { label: "Archived", className: "bg-slate-100 text-slate-500" },
+  ARCHIVED: { label: "Archived", className: "bg-surface-inset text-text-subtle" },
 };
 const STATUS_ORDER = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"] as const;
 
@@ -177,6 +178,7 @@ export function OpportunityPanel({
           <EvidenceList evidence={data.evidence} revalidatePathStr={fullPageHref} />
         </div>
       </Section>
+      <Discussion targetType="OPPORTUNITY" targetId={opportunityId} />
     </PanelContainer>
   );
 }

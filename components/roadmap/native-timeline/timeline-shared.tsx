@@ -104,7 +104,7 @@ export function TimelineCard({
       data-testid={`timeline-item-${item.id}`}
       data-start={start}
       data-end={end}
-      className={`group relative flex h-9 min-w-0 items-center overflow-hidden rounded-lg border border-white/40 text-xs font-medium text-white shadow-sm transition-shadow motion-reduce:transition-none hover:shadow-md focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1 ${className}`}
+      className={`group @container/timeline-card relative flex h-9 min-w-0 items-center overflow-hidden rounded-lg border border-white/40 text-xs font-medium text-white shadow-sm transition-shadow motion-reduce:transition-none hover:shadow-md focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1 ${className}`}
       style={{ backgroundColor: ACCESSIBLE_HORIZON_COLORS[item.horizon] }}
       title={`${item.title}: ${start} through ${end}`}
     >
@@ -112,8 +112,8 @@ export function TimelineCard({
       <span
         role="button"
         tabIndex={0}
-        aria-label={`Open details for ${item.title}, ${start} through ${end}${overlapCount > 1 ? `, overlaps ${overlapCount - 1} other ${overlapCount === 2 ? "item" : "items"}` : ""}`}
-        className="flex min-w-0 flex-1 items-center gap-1 self-stretch px-2 text-left outline-none"
+        aria-label={`Open details for ${item.title}, ${start} through ${end}${overlapCount > 1 ? `, overlaps ${overlapCount - 1} other ${overlapCount === 2 ? "item" : "items"}` : ""}, Delivery status: ${ROADMAP_DELIVERY_STATUS_LABELS[item.deliveryStatus]}`}
+        className="flex min-w-0 flex-1 items-center gap-1 self-stretch overflow-hidden px-2 text-left outline-none"
         onClick={onOpen}
         onKeyDown={(event: KeyboardEvent<HTMLSpanElement>) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -123,15 +123,15 @@ export function TimelineCard({
         }}
       >
         {item.isPrivate ? <Lock className="size-3 shrink-0" aria-label="Private" /> : null}
-        <span className="hidden shrink-0 rounded-full border border-white/50 px-1.5 py-0.5 text-[10px] text-white min-[900px]:inline-flex" aria-label={`Delivery status: ${ROADMAP_DELIVERY_STATUS_LABELS[item.deliveryStatus]}`}>
+        <span className="hidden shrink-0 rounded-full border border-white/50 px-1.5 py-0.5 text-[10px] text-white min-[900px]:@[240px]/timeline-card:inline-flex" aria-label={`Delivery status: ${ROADMAP_DELIVERY_STATUS_LABELS[item.deliveryStatus]}`}>
           {ROADMAP_DELIVERY_STATUS_LABELS[item.deliveryStatus]}
         </span>
-        <span className="min-w-0 flex-1 truncate">{item.title}</span>
-        {overlapCount > 1 ? <span className="shrink-0 rounded border border-white/60 px-1 text-[10px]">{overlapCount} overlapping</span> : null}
+        <span data-timeline-title className="min-w-0 flex-1 truncate">{item.title}</span>
+        {overlapCount > 1 ? <span className="hidden shrink-0 rounded border border-white/60 px-1 text-[10px] @[240px]/timeline-card:inline-flex">{overlapCount} overlapping</span> : null}
       </span>
       {editable ? <button
         type="button"
-        className={`inline-flex size-6 shrink-0 items-center justify-center rounded bg-white/20 opacity-0 transition-opacity motion-reduce:transition-none hover:bg-white/30 focus:opacity-100 group-hover:opacity-100 ${editControlClassName}`}
+        className={`inline-flex size-6 shrink-0 items-center justify-center rounded bg-white/20 opacity-0 transition-opacity motion-reduce:transition-none hover:bg-white/30 focus:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100 ${editControlClassName}`}
         aria-label={`Edit dates for ${item.title}`}
         onClick={(event) => {
           event.stopPropagation();

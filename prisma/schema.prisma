@@ -61,6 +61,38 @@ model Session {
   @@map("sessions")
 }
 
+model PreviewAutomationSession {
+  sessionToken String @id @map("session_token") @db.VarChar(512)
+  runId        String @map("run_id") @db.Uuid
+
+  @@map("preview_automation_sessions")
+}
+
+model PreviewAutomationRun {
+  id                  String    @id @db.Uuid
+  deploymentId        String    @map("deployment_id") @db.VarChar(255)
+  orgId               String    @map("org_id") @db.Uuid
+  workspaceId         String    @map("workspace_id") @db.Uuid
+  isolatedWorkspaceId String    @map("isolated_workspace_id") @db.Uuid
+  ownerUserId         String    @map("owner_user_id") @db.Uuid
+  viewerUserId        String    @map("viewer_user_id") @db.Uuid
+  expiresAt           DateTime  @map("expires_at")
+  revokedAt           DateTime? @map("revoked_at")
+  cleanedAt           DateTime? @map("cleaned_at")
+  sessionNonce        String?   @map("session_nonce") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  @@map("preview_automation_runs")
+}
+
+model PreviewAutomationNonce {
+  nonce     String   @id @db.Uuid
+  runId     String   @map("run_id") @db.Uuid
+  expiresAt DateTime @map("expires_at")
+
+  @@map("preview_automation_nonces")
+}
+
 model VerificationToken {
   identifier String   @db.VarChar(255)
   token      String   @db.VarChar(512)

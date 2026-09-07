@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import { useState, useTransition } from "react";
 import {
@@ -93,7 +94,7 @@ export function SolutionPanel({
     type: "roadmapItem",
     id: r.id,
     title: r.title,
-    badge: { label: r.horizon, className: "bg-slate-100 text-slate-600" },
+    badge: { label: r.horizon, className: "bg-surface-inset text-text-secondary" },
   }));
 
   // Same fallback the old card used (revalidatePath just needs *a* path in
@@ -192,10 +193,13 @@ export function SolutionPanel({
         </Section>
       )}
 
-      <Section label="Plan & Discussion" count={data.comments.length}>
+      <Section
+        label="Current Plan"
+        count={data.comments.filter((comment) => comment.commentType === "PLAN").length}
+      >
         <SolutionPlanDiscussion
           solutionId={data.id}
-          comments={data.comments}
+          comments={data.comments.filter((comment) => comment.commentType === "PLAN")}
           revalidatePathStr={revalidatePathStr}
           onChanged={refresh}
         />
@@ -215,6 +219,7 @@ export function SolutionPanel({
           />
         </Section>
       )}
+      <Discussion targetType="SOLUTION" targetId={id} />
     </PanelContainer>
   );
 }

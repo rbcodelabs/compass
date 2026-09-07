@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import {
   useEntityDetail,
@@ -141,6 +142,7 @@ export function FeedbackPanel({
           </div>
         )}
       </Section>
+      <Discussion targetType="FEEDBACK_ITEM" targetId={id} />
     </PanelContainer>
   );
 }

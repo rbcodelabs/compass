@@ -48,6 +48,8 @@ Beyond the core OST workflow, Compass includes:
 
 Compass supports email magic-link sign-in by default — enter your email and click the link sent to your inbox. In production, you can also sign in with **Continue with Google**. Development environments don't register a Google provider, so local sign-in instead shows a **Dev Login** button for instant access.
 
+When you return to the Compass homepage while signed in, the header provides a direct path back to your work. A single-workspace account gets a Dashboard shortcut; accounts with multiple workspaces can choose one from the workspace menu; and new accounts can continue workspace setup. Your avatar menu also includes Dashboard or setup, Help, and Sign out.
+
 ## Getting Started
 
 The fastest path to value is:

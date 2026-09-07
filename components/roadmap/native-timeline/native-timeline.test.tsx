@@ -133,6 +133,23 @@ afterEach(() => {
 });
 
 describe("NativeTimeline", () => {
+  it("shows a dotted move affordance and slim grips on both date borders", () => {
+    harness.controller.items = [{ id: "item-1", title: "Compact controls", horizon: "NEXT", squad: null, viewStart: "2026-07-10", viewEnd: "2026-07-28", hasDates: true }];
+    renderTimeline();
+
+    const move = screen.getByRole("button", { name: "Move Compact controls" });
+    expect(move.querySelector("svg.lucide-grip-vertical")).toBeInTheDocument();
+    expect(move).not.toHaveClass("bg-black/10");
+    expect(move).toHaveClass("ml-6", "w-6");
+    expect(move).not.toHaveClass("mr-1");
+    expect(screen.getByRole("button", { name: "Edit dates control" })).toHaveClass("mr-6");
+    for (const edge of ["left", "right"]) {
+      const resize = screen.getByRole("button", { name: `Resize ${edge} edge of Compact controls` });
+      expect(resize).toHaveClass("w-6");
+      expect(resize.querySelector('[data-resize-grip]')).toHaveAttribute("aria-hidden", "true");
+    }
+  });
+
   it("resolves backlog drop lanes from the pointer instead of the translated card rectangle", () => {
     renderTimeline();
 
@@ -563,14 +580,18 @@ describe("NativeTimeline", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("Edit dates for Touch targets");
   });
 
-  it("uses the single 44px dialog control until all four inline controls fit", () => {
+  it.each([
+    ["2026-07-17", "96"],
+    ["2026-07-18", "108"],
+    ["2026-07-19", "120"],
+  ])("uses the single dialog until the four controls and details target fit (%s)", (viewEnd, width) => {
     harness.controller.items = [{
       id: "item-1", title: "Narrow controls", horizon: "NOW", squad: null,
-      viewStart: "2026-07-10", viewEnd: "2026-07-17", hasDates: true,
+      viewStart: "2026-07-10", viewEnd, hasDates: true,
     }];
     renderTimeline();
 
-    expect(screen.getByTestId("timeline-item-position-item-1")).toHaveAttribute("data-visual-width", "96");
+    expect(screen.getByTestId("timeline-item-position-item-1")).toHaveAttribute("data-visual-width", width);
     expect(screen.getByRole("button", { name: "Edit schedule for Narrow controls" })).toHaveClass("size-11");
     expect(screen.queryByRole("button", { name: "Move Narrow controls" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resize right edge of Narrow controls" })).not.toBeInTheDocument();

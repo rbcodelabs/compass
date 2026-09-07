@@ -30,6 +30,9 @@ type StandardScreenshotCase = {
 };
 
 const STANDARD_PAGES: StandardScreenshotCase[] = [
+  ...(FUNCTIONAL || process.env.DOCS_SESSION_FILE
+    ? [{ file: "marketing-authenticated.png", url: "/" }]
+    : []),
   { file: "login.png",           url: "/login" },
   { file: "dashboard.png",       url: "/dashboard" },
   { file: "okrs.png",            url: `${WORKSPACE_BASE}/okrs` },
@@ -66,6 +69,7 @@ const STANDARD_PAGES: StandardScreenshotCase[] = [
 const GUIDED_PAGES = buildScreenshotCases({
   workspaceBase: WORKSPACE_BASE,
   includeGuidedUx: FUNCTIONAL || process.env.DOCS_GUIDED_UX_SCREENSHOTS === "1",
+  includeSharedDiscussion: FUNCTIONAL,
   researchToken: process.env.DOCS_RESEARCH_TOKEN || (FUNCTIONAL ? GUIDED_UX_SCREENSHOT_TOKEN : null),
 });
 
@@ -77,6 +81,13 @@ async function prepareScreenshot(
 ) {
   if (!entry.prepare) return;
 
+  if (entry.prepare === "roadmap-discussion") {
+    await page.getByRole("button", { name: "E2E Native NOW Policy Candidate" }).click();
+    const panel = page.locator('[data-slot="sheet-content"]');
+    await panel.getByRole("heading", { name: "Discussion" }).scrollIntoViewIfNeeded();
+    await panel.getByText("Keep customer context attached to delivery.").waitFor();
+    return;
+  }
   if (entry.prepare === "expand-first-opportunity") {
     const disclosure = page
       .getByRole("table", { name: "Discovery opportunities" })
@@ -135,6 +146,11 @@ test.describe("docs screenshots", () => {
       }
       await page.goto(url);
       await page.waitForLoadState("networkidle");
+      if (FUNCTIONAL) {
+        // Local screenshots run against Next's dev server; omit its floating
+        // issue indicator from product documentation captures.
+        await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
+      }
       if ("scrollToHeading" in entry && entry.scrollToHeading) {
         await page.getByRole("heading", { name: entry.scrollToHeading }).scrollIntoViewIfNeeded();
       }

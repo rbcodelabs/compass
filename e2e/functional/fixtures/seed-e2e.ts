@@ -16,6 +16,7 @@ import {
 
 export const E2E_ORG_SLUG = "e2e-test-org";
 export const E2E_WORKSPACE_SLUG = "e2e-workspace";
+export const E2E_SECOND_WORKSPACE_SLUG = "e2e-planning";
 export const E2E_USER_EMAIL = "dev@localhost.dev";
 export const E2E_NOW_CANDIDATE_TITLE = "E2E Native NOW Policy Candidate";
 
@@ -89,6 +90,22 @@ export async function seedE2E(
     VALUES (gen_random_uuid(), $1, $2, 'ADMIN', NOW())
     ON CONFLICT (workspace_id, user_id) DO NOTHING
   `, [ws.id, user.id]);
+
+  // A second membership makes the marketing homepage exercise its workspace
+  // selector instead of the single-workspace shortcut.
+  const { rows: [secondWorkspace] } = await pool.query<{ id: string }>(`
+    INSERT INTO "${S}".workspaces
+      (id, organization_id, slug, name, roadmap_public, feedback_enabled, created_at, updated_at)
+    VALUES (gen_random_uuid(), $1, $2, 'E2E Planning', false, false, NOW(), NOW())
+    ON CONFLICT (organization_id, slug) DO UPDATE SET name = EXCLUDED.name
+    RETURNING id
+  `, [org.id, E2E_SECOND_WORKSPACE_SLUG]);
+
+  await pool.query(`
+    INSERT INTO "${S}".workspace_members (id, workspace_id, user_id, role, created_at)
+    VALUES (gen_random_uuid(), $1, $2, 'ADMIN', NOW())
+    ON CONFLICT (workspace_id, user_id) DO NOTHING
+  `, [secondWorkspace.id, user.id]);
 
   // ── Deterministic guided UX screenshot fixture ──────────────────────────
   // This public token exists only in the disposable functional workspace.
@@ -216,6 +233,25 @@ export async function seedE2E(
     WHERE workspace_id = $1 AND title = $5
     RETURNING id
   `, [ws.id, squadId, solutionId, opportunityId, E2E_NOW_CANDIDATE_TITLE])).rows[0].id;
+
+  // Fixed copy and timestamps keep shared Discussion docs captures stable.
+  const { rows: [discussionRoot] } = await pool.query<{ id: string }>(`
+    INSERT INTO "${S}".comments
+      (id, workspace_id, target_type, target_id, body, status, author_id,
+       author_name, author_type, source, created_at, updated_at)
+    VALUES (gen_random_uuid(), $1, 'ROADMAP_ITEM', $2,
+      'Keep customer context attached to delivery.', 'OPEN', $3,
+      'Dev User', 'HUMAN', 'UI', '2026-09-01 13:00:00', '2026-09-01 13:00:00')
+    RETURNING id
+  `, [ws.id, candidateId, user.id]);
+  await pool.query(`
+    INSERT INTO "${S}".comments
+      (id, workspace_id, target_type, target_id, parent_id, body, status,
+       author_id, author_name, author_type, source, created_at, updated_at)
+    VALUES (gen_random_uuid(), $1, 'ROADMAP_ITEM', $2, $3,
+      'Agreed — the evidence should travel with the roadmap item.', 'OPEN',
+      $4, 'Dev User', 'HUMAN', 'UI', '2026-09-01 13:05:00', '2026-09-01 13:05:00')
+  `, [ws.id, candidateId, discussionRoot.id, user.id]);
 
   // Reset only this seeded authority chain so interrupted/retried runs remain
   // deterministic after the candidate has been admitted by a prior run.

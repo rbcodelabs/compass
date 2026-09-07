@@ -7,6 +7,7 @@
  */
 export function isPublicPath(pathname: string): boolean {
   return (
+    ["/api/preview-automation/bootstrap", "/api/preview-automation/session", "/api/preview-automation/teardown"].includes(pathname) ||
     pathname === "/" ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/api/auth") ||

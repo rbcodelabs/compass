@@ -445,7 +445,7 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
 
         <GanttDropZone>
           {tasks.length === 0 ? (
-            <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-300/70 py-16 text-sm text-slate-400">
+            <div className="flex items-center justify-center rounded-xl border border-dashed border-border-strong/70 py-16 text-sm text-text-subtle">
               No items on the roadmap yet. Drag an item from below onto this area to schedule it.
             </div>
           ) : (
