@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import {
   Sheet,
   SheetContent,
@@ -31,10 +33,41 @@ const PANEL_TITLES: Record<string, string> = {
 
 export function PanelShell() {
   const { panel, closePanel, orgSlug, workspaceSlug } = usePanelContext();
+  const [hydrated, setHydrated] = useState(false);
   const common = { orgSlug, workspaceSlug };
 
+  // A deep link is already present during SSR. Opening Base UI's modal Sheet
+  // before hydration completes applies aria-hidden to the server-rendered
+  // workspace tree before React compares it, producing a hydration mismatch.
+  // Keep the controlled Sheet closed for the identical server/first-client
+  // render, then honor the URL immediately after hydration.
+  useEffect(() => {
+    // Parent layout effects can run while a streamed page Suspense subtree is
+    // still hydrating. Wait for the document load boundary and the browser's
+    // next idle period before the modal applies aria-hidden to its siblings.
+    // This is tied to hydration-relevant browser state, not a timing guess.
+    let idleId: number | undefined;
+    let frameId: number | undefined;
+    const activateWhenIdle = () => {
+      if (typeof window.requestIdleCallback === "function") {
+        idleId = window.requestIdleCallback(() => setHydrated(true));
+      } else {
+        frameId = window.requestAnimationFrame(() => setHydrated(true));
+      }
+    };
+
+    if (document.readyState === "complete") activateWhenIdle();
+    else window.addEventListener("load", activateWhenIdle, { once: true });
+
+    return () => {
+      window.removeEventListener("load", activateWhenIdle);
+      if (idleId !== undefined) window.cancelIdleCallback(idleId);
+      if (frameId !== undefined) window.cancelAnimationFrame(frameId);
+    };
+  }, []);
+
   return (
-    <Sheet open={panel !== null} onOpenChange={(open) => { if (!open) closePanel(); }}>
+    <Sheet open={hydrated && panel !== null} onOpenChange={(open) => { if (!open) closePanel(); }}>
       <SheetContent
         side="right"
         className="w-full sm:max-w-md flex flex-col gap-0 p-0 z-[60]"

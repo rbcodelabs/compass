@@ -52,7 +52,7 @@ test.describe("Roadmap delivery status", () => {
 
     await page.goto(`${base}/roadmap`);
     await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: "Add item" }).first().click();
+    await page.getByRole("button", { name: "Add item" }).nth(1).click();
     await page.getByLabel("Title").fill(roadmapTitle);
     await page.getByRole("button", { name: "Add Item", exact: true }).click();
 

@@ -12,7 +12,7 @@ import { Rocket } from "lucide-react";
 import { DEFAULT_CHECKLIST_TEMPLATES } from "@/lib/launch-defaults";
 import { setLaunchTier } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/launch-actions";
 import { usePanelContext } from "./panel-context";
-import type { LaunchTier } from "@/lib/types";
+import type { Horizon, LaunchTier } from "@/lib/types";
 
 const TIERS: { tier: LaunchTier; blurb: string }[] = [
   { tier: "TIER_1", blurb: "Major launch — full go-to-market push" },
@@ -23,7 +23,6 @@ const TIERS: { tier: LaunchTier; blurb: string }[] = [
 export function LaunchTierPicker({
   itemId,
   workspaceId,
-  revalidatePathStr,
   onDone,
 }: {
   itemId: string;
@@ -40,13 +39,13 @@ export function LaunchTierPicker({
     setChosen(tier);
     startTransition(async () => {
       try {
-        await setLaunchTier(itemId, tier, workspaceId, revalidatePathStr);
+        const updated = await setLaunchTier(itemId, tier, workspaceId);
         // The panel's own refresh (onDone) only updates the panel's local
         // data — it never reaches the roadmap board, which lives outside the
         // panel and holds its own optimistic column state. Without this, the
         // board keeps showing the item in its pre-drag column until a full
         // page reload. See roadmap-board.tsx's subscribeEntityMutated effect.
-        notifyEntityMutated("roadmapItem", itemId, { horizon: "LAUNCHING" });
+        notifyEntityMutated("roadmapItem", itemId, { horizon: updated.horizon as Horizon, updatedAt: updated.updatedAt });
         await onDone();
       } catch {
         setChosen(null);

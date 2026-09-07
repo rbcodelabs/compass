@@ -28,6 +28,7 @@ const item: RoadmapCardData = {
   feedbackId: "feedback-1",
   startDate: null,
   endDate: null,
+  updatedAt: "2026-09-07T00:00:00.000Z",
   solution: { id: "solution-1", title: "Guided setup" },
   keyResult: {
     id: "kr-1",
@@ -58,6 +59,7 @@ function renderDialog(
   render(
     <EditItemDialog
       item={item}
+      workspaceId="ws-1"
       open
       onOpenChange={onOpenChange}
       revalidatePathStr="/rbcodelabs/compass/roadmap"
@@ -115,8 +117,8 @@ describe("EditItemDialog opportunity link", () => {
     await waitFor(() => {
       expect(editRoadmapItemMock).toHaveBeenCalledWith(
         "item-1",
+        "ws-1",
         expect.objectContaining({ opportunityId: "opp-2", title: "Improve onboarding" }),
-        "/rbcodelabs/compass/roadmap",
       );
       expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({
         opportunityId: "opp-2",
@@ -143,8 +145,8 @@ describe("EditItemDialog opportunity link", () => {
     await waitFor(() => {
       expect(editRoadmapItemMock).toHaveBeenCalledWith(
         "item-1",
+        "ws-1",
         expect.objectContaining({ opportunityId: null }),
-        "/rbcodelabs/compass/roadmap",
       );
       expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({
         opportunityId: null,

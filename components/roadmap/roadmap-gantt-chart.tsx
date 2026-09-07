@@ -372,8 +372,8 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
     if (!ev.task.start || !ev.task.end) return;
     await updateRoadmapItem(
       ev.id,
-      { startDate: toUtcMidnight(ev.task.start), endDate: toUtcMidnight(ev.task.end) },
-      revalidatePathStr
+      workspaceId,
+      { startDate: toUtcMidnight(ev.task.start), endDate: toUtcMidnight(ev.task.end) }
     );
     router.refresh();
   }
@@ -387,7 +387,7 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
     const promoted =
       item.kind === "solution"
         ? promoteToRoadmap(item.id, workspaceId, horizon, item.squadId, item.opportunityId)
-        : promoteFeedbackToRoadmap(item.id, workspaceId, horizon, revalidatePathStr);
+        : promoteFeedbackToRoadmap(item.id, workspaceId, horizon);
     promoted.then(() => router.refresh());
   }
 
@@ -445,7 +445,7 @@ export function RoadmapGanttChart({ items, workspaceId, unscheduledItems, revali
 
         <GanttDropZone>
           {tasks.length === 0 ? (
-            <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-300/70 py-16 text-sm text-slate-400">
+            <div className="flex items-center justify-center rounded-xl border border-dashed border-border-strong/70 py-16 text-sm text-text-subtle">
               No items on the roadmap yet. Drag an item from below onto this area to schedule it.
             </div>
           ) : (

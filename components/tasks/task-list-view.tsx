@@ -24,6 +24,7 @@ function formatDueDate(iso: string | null): string | null {
 // followed immediately by its own children), tagging each row with its
 // hierarchy depth so titles can be indented in the table.
 function flattenByHierarchy(tasks: TaskCardData[]): { task: TaskCardData; depth: number }[] {
+  const taskIds = new Set(tasks.map((task) => task.id));
   const byParent = new Map<string | null, TaskCardData[]>();
   for (const task of tasks) {
     const key = task.parentTaskId;
@@ -33,14 +34,21 @@ function flattenByHierarchy(tasks: TaskCardData[]): { task: TaskCardData; depth:
   }
 
   const result: { task: TaskCardData; depth: number }[] = [];
-  function walk(parentId: string | null, depth: number) {
+  function walk(parentId: string, depth: number) {
     const children = (byParent.get(parentId) ?? []).sort((a, b) => a.sortOrder - b.sortOrder);
     for (const task of children) {
       result.push({ task, depth });
       walk(task.id, depth + 1);
     }
   }
-  walk(null, 0);
+
+  const roots = tasks
+    .filter((task) => task.parentTaskId === null || !taskIds.has(task.parentTaskId))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  for (const task of roots) {
+    result.push({ task, depth: 0 });
+    walk(task.id, 1);
+  }
   return result;
 }
 

@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import {
   useEntityDetail,
@@ -28,7 +29,7 @@ type AssumptionData = {
 };
 
 const STATUS: Record<string, { label: string; className: string }> = {
-  UNTESTED: { label: "Untested", className: "bg-slate-100 text-slate-600" },
+  UNTESTED: { label: "Untested", className: "bg-surface-inset text-text-secondary" },
   TESTING: { label: "Testing", className: "bg-blue-100 text-blue-700" },
   VALIDATED: { label: "Validated", className: "bg-green-100 text-green-700" },
   INVALIDATED: { label: "Invalidated", className: "bg-red-100 text-red-700" },
@@ -43,7 +44,7 @@ const RISK: Record<string, string> = {
 };
 
 const EXP_STATUS: Record<string, string> = {
-  DESIGNING: "bg-slate-100 text-slate-600",
+  DESIGNING: "bg-surface-inset text-text-secondary",
   RUNNING: "bg-blue-100 text-blue-700",
   COMPLETE: "bg-green-100 text-green-700",
   KILLED: "bg-red-100 text-red-700",
@@ -83,7 +84,7 @@ export function AssumptionPanel({
     type: "experiment",
     id: e.id,
     title: e.title,
-    badge: { label: e.status, className: EXP_STATUS[e.status] ?? "bg-slate-100 text-slate-600" },
+    badge: { label: e.status, className: EXP_STATUS[e.status] ?? "bg-surface-inset text-text-secondary" },
   }));
 
   return (
@@ -103,7 +104,7 @@ export function AssumptionPanel({
 
       <Field label="Risk level">
         <span
-          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${RISK[data.riskLevel] ?? "bg-slate-100 text-slate-600"}`}
+          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${RISK[data.riskLevel] ?? "bg-surface-inset text-text-secondary"}`}
         >
           {data.riskLevel}
         </span>
@@ -116,6 +117,7 @@ export function AssumptionPanel({
       <Section label="Experiments" count={data.experiments.length}>
         <RelationList items={experimentItems} empty="No experiments yet." />
       </Section>
+      <Discussion targetType="ASSUMPTION" targetId={id} />
     </PanelContainer>
   );
 }

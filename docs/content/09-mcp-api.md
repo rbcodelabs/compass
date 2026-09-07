@@ -28,9 +28,86 @@ Authorization: Bearer compass_your_api_key_here
 
 API keys are workspace-scoped. A key can read and write all data in the workspace it was created for. Treat API keys like passwords — rotate them in Settings if one is compromised.
 
+## Required Request Headers
+
+Every **POST** request must include these headers:
+
+```http
+Authorization: Bearer compass_your_api_key_here
+Content-Type: application/json
+Accept: application/json, text/event-stream
+```
+
+The Streamable HTTP transport can respond with either JSON or a server-sent event stream, so the `Accept` header must include **both** media types. A POST request missing either `application/json` or `text/event-stream` from `Accept` returns HTTP 406; a POST request without a JSON `Content-Type` returns HTTP 415. Standard MCP clients, including `mcp-remote`, set the transport headers automatically; add them yourself only when calling the endpoint directly.
+
+For example, this raw request sends an MCP initialize request:
+
+```bash
+curl https://your-compass-url.vercel.app/api/mcp \
+  --header "Authorization: Bearer compass_your_api_key_here" \
+  --header "Content-Type: application/json" \
+  --header "Accept: application/json, text/event-stream" \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl-example","version":"1.0.0"}}}'
+```
+
 ## What Agents Can Do
 
 The MCP server exposes tools that agents can call, grouped below by area.
+
+### Shared comments
+
+Comments are mutable discussion only. They do not approve work, authorize a release, or change a tracked Decision. `REVIEW_REQUEST` targets are accepted only for informational `TRACKED_DECISION` requests; immutable review revisions, options, Decision records/applications, legacy review gates, and release authorization are not commentable.
+
+Phase 1 exposes the shared comment capability through the generic MCP tools and the existing Doc and Solution compatibility paths. It does not add a general Comments UI to every supported object. Until Phase 2, the existing Doc and Solution experiences remain the only comment UIs.
+
+#### Production migration and backfill
+
+After deploying application code containing migration `046_shared_comments`, run these commands from the Vercel-linked Compass main checkout (the directory containing `.vercel/project.json`). The authenticated admin routes use Vercel OIDC for Aurora DSQL, require `MIGRATION_SECRET`, and always select `getActiveSchema()` for that deployment. First apply the additive schema migration:
+
+```bash
+vercel curl /api/admin/migrate \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"script":"046_shared_comments"}'
+```
+
+Then invoke one bounded backfill batch at a time. Repeat the same request until the JSON response reports `"complete": true`; a retry after a timeout or ambiguous response is safe because rows retain their legacy IDs and inserts use conflict-safe idempotency. The response contains aggregate processed and invariant counts only.
+
+```bash
+vercel curl /api/admin/shared-comments-backfill \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"operation":"backfill","batchSize":500}'
+```
+
+Finish with a read-only validation request. It succeeds only when every legacy comment has a matching shared row, required extensions exist, reply topology is valid, and no legacy row is orphaned:
+
+```bash
+vercel curl /api/admin/shared-comments-backfill \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"operation":"validate"}'
+```
+
+HTTP `409` means validation failed or the backfill cannot make safe progress. Resolve orphaned legacy data explicitly; the endpoint never fabricates workspace ownership. Rollback remains application-code-only: revert the runtime code and leave the additive shared tables in place so the unchanged legacy tables and current UIs continue to operate.
+
+Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`, `EXPERIMENT`, `ROADMAP_ITEM`, `FEEDBACK_ITEM`, `TASK`, `DOC`, `ARTIFACT`, `RESEARCH_STUDY`, and `REVIEW_REQUEST`.
+
+| Tool | Description |
+|---|---|
+| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional |
+| `list_comments` | List comments for an exact workspace and target, optionally filtered by `OPEN` or `RESOLVED` |
+| `get_comment` | Get one comment and any specialized Doc-anchor or Solution-plan metadata |
+| `update_comment` | Edit a comment body |
+| `delete_comment` | Delete a reply, or a root and its replies |
+| `resolve_comment` | Mark a comment resolved |
+| `reopen_comment` | Mark a resolved comment open |
 
 ### Workspace
 
@@ -62,12 +139,16 @@ The MCP server exposes tools that agents can call, grouped below by area.
 
 | Tool | Description |
 |---|---|
-| `list_opportunities` | Fetch all opportunities in the workspace |
+| `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result |
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
+| `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment |
+| `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts |
 | `create_opportunity` | Create a new opportunity with title, description, status |
+| `update_opportunity` | Update an existing opportunity's title and/or description; pass `null` to clear its description |
 | `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
 | `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (or clear the link) |
 | `add_solution` | Add a proposed Solution to an Opportunity |
+| `update_solution_status` | Update a Solution's lifecycle status (IDEA/VALIDATED/IN_DELIVERY/SHIPPED/KILLED); any valid status may transition directly to any other valid status |
 | `add_assumption` | Add a testable Assumption to a Solution, with a risk level (HIGH/MEDIUM/LOW); starts UNTESTED |
 | `update_assumption` | Update an Assumption's title, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |
 | `delete_assumption` | Permanently delete an Assumption; unlinks (does not delete) any Experiments or Evidence that referenced it |
@@ -81,11 +162,13 @@ The MCP server exposes tools that agents can call, grouped below by area.
 | `reject_solution_plan` | Mark a PLAN entry as REJECTED (only applies to PLAN entries, not COMMENT replies) |
 | `promote_to_roadmap` | Promote a validated Solution directly to the roadmap, creating a Roadmap Item linked back to the originating opportunity. Accepts an optional `isPrivate` flag |
 
+`approve_solution_plan` and `reject_solution_plan` preserve the legacy, reversible plan-status marker only. They do not create a tracked Decision, authorize delivery, or establish authoritative approval semantics for new plans.
+
 ### Experiments
 
 | Tool | Description |
 |---|---|
-| `list_experiments` | Fetch all experiments |
+| `list_experiments` | Fetch experiments with optional status, squad, logged-result-presence, `updatedSince`, and recorded `endBefore` filters; summaries include dates, timestamps, result count/latest-result time, and stable Assumption/Solution/Opportunity IDs |
 | `get_experiment` | Return full details for a single experiment: hypothesis, method, kill condition, linked assumption, all logged results, and conclusion |
 | `create_experiment` | Create a new experiment with hypothesis and method (starts in DESIGNING status) |
 | `log_experiment_result` | Record an observation or data point for a running experiment |
@@ -95,14 +178,50 @@ The MCP server exposes tools that agents can call, grouped below by area.
 
 | Tool | Description |
 |---|---|
-| `list_roadmap_items` | Fetch active roadmap items for a workspace, grouped by horizon (including LAUNCHING/LAUNCHED), including start/end dates and whether each item is private (`isPrivate`) |
-| `add_to_roadmap` | Create a roadmap item in NOW/NEXT/LATER/SHIPPED, optionally with a start date and end date for the Timeline view, and an `isPrivate` flag to hide it from the public portal roadmap and block voting on it |
-| `update_roadmap_item` | Update a roadmap item's horizon, status, title, description, start/end dates, or `isPrivate` flag. Rejects `horizon: LAUNCHING`/`LAUNCHED` — use `set_launch_tier` to move an item into LAUNCHING |
+| `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs |
+| `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
+| `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
+| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
+| `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state, linked item type, outcome, reviewer, or search text |
+| `get_decision` | Read one tracking-only decision and its immutable revision history |
+| `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. This operation never takes the human decision or invokes release automation |
+| `list_release_runs` | List recorded release-authorization runs by ledger state, covered Task, or `updatedSince`, including exact repository/PR/head SHA, Task IDs, authorization Decision ID, dispatch state, and a stable GitHub PR URL |
+| `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
+| `list_review_requests` | List review requests for a workspace, optionally filtered by state |
+| `apply_recorded_decision` | Idempotently apply the authorized continuation from a recorded decision and return its application receipt |
 | `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items |
 | `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier |
 | `set_launch_tier` | Move a roadmap item into the LAUNCHING horizon by picking a launch tier; attaches a checklist cloned from an explicit or auto-resolved (most recent ACTIVE) template for that tier. Rejects items already LAUNCHING/LAUNCHED |
 | `get_launch_checklist` | Get the launch checklist for a roadmap item, including each item's status and ID |
 | `update_launch_checklist_item` | Set a launch checklist item's status (PENDING/DONE/SKIPPED) |
+
+Decision-taking is deliberately absent from MCP. A signed-in human reviewer opens
+the stable Compass review URL and chooses one option. Agents may prepare and read
+packets, then apply a recorded decision; they cannot impersonate the reviewer.
+
+`request_decision.sources` is an optional array of `{ type, id }` references.
+Supported types are `WORKSPACE`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`,
+`ROADMAP_ITEM`, `DOC`, `EXPERIMENT`, `FEEDBACK`, and `EVIDENCE`. Compass removes
+duplicates and the primary linked item, validates every reference within the
+declared workspace, and snapshots the source title and `updatedAt` version into
+the immutable packet. If any source is missing or belongs to another workspace,
+the whole request fails and no review is created. Put readable reasoning in the
+Markdown `context`; do not embed source UUIDs there.
+
+`apply_recorded_decision` is queue-only for release authorization. It validates
+the authoritative provider snapshot outside the database transaction, then a
+short transaction binds the unchanged snapshot and human decision to a durable
+dispatch row. Compass does not merge, deploy, or otherwise invoke external
+release automation in this implementation. Provider validation is unconfigured
+by default and therefore fails closed (`PR_NOT_READY`); a dispatch worker must
+use a configured provider and repeat the same head/check/policy revalidation at
+the dispatch-claim boundary before any future external side effect.
+
+`list_release_runs` reports Compass ledger facts only. A release-run state does
+not prove that GitHub merged the PR, that a deployment reached production, or
+that feature smoke tests passed. Completion workflows must re-read those facts
+from the configured GitHub and deployment providers before changing lifecycle
+state.
 
 ### Squads
 
@@ -122,7 +241,7 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 |---|---|
 | `create_task` | Create a Task with a title (required); optionally description, status (default TODO), priority (default MEDIUM), squad, parent task (to create a Subtask), assignee, freeform owner name, story points, due date, or iteration label |
 | `get_task` | Return full detail for a Task: fields, parent Epic (if any), subtasks, and resolved links to other Compass objects |
-| `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), or a linked object; optionally nest subtasks under their parent |
+| `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), a linked object, `updatedSince`, or `updatedBefore`; summaries include created/updated timestamps and can optionally nest subtasks |
 | `update_task` | Update a Task's title, description, priority, assignee, owner, story points, due date, or iteration — does not accept status |
 | `move_task_status` | Dedicated status-transition tool for a Task, including moving it into or out of BLOCKED |
 | `link_task` | Link a Task to another Compass object; idempotent — re-linking the same pair is a no-op |
@@ -134,7 +253,7 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 | Tool | Description |
 |---|---|
 | `create_feedback` | Create a new feedback item directly via MCP. Accepts 1–5 optional inline attachments with a combined decoded limit of 3 MiB; defaults to type IDEA |
-| `list_feedback` | Fetch customer feedback items for a workspace, with vote counts, type, status, and canonical Compass URLs |
+| `list_feedback` | Fetch customer feedback items with vote counts, type, status, linked Opportunity ID, timestamps, and canonical Compass URLs. Pass `updatedSince` to start a stable incremental scan and the returned opaque `cursor` for each later page |
 | `get_feedback_item` | Fetch full details for a single feedback item, including attachments, its linked opportunity, and its canonical Compass URL |
 | `update_feedback` | Update a feedback item's title and/or description; pass `description: null` to clear it |
 | `update_feedback_status` | Update a feedback item's status (OPEN, UNDER_REVIEW, PLANNED, IN_PROGRESS, COMPLETED, DECLINED), with an optional note. Legacy CLOSED remains temporarily accepted but is deprecated |
@@ -145,6 +264,15 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 | `promote_feedback_to_roadmap` | Promote a feedback item (typically a BUG) directly to the roadmap, skipping discovery entirely. Accepts an optional `isPrivate` flag (e.g. for a security-flagged bug) |
 
 Feedback create, read, list, update, status, type, link, and attachment responses include absolute canonical URLs that agents can give directly to users. Preview MCP responses point to the active Vercel branch/deployment URL, while production uses the configured Compass custom domain. Every feedback mutation also includes its affected entity ID on a plain `ID: <uuid>` line.
+
+Without scan arguments, `list_feedback` keeps its legacy vote-count/recency
+ordering and default limit of 50. That ranked batch is not proof the queue is
+exhausted. For complete or incremental retrieval, pass an ISO `updatedSince`
+timestamp (use the Unix epoch for a full historical scan), then follow
+`nextCursor` until `hasMore` is false. The first page freezes an `asOf` upper
+watermark, so records changed later appear in the next scan instead of shifting
+between pages. A cursor is bound to its original workspace and normalized status
+filter; pass a cursor by itself rather than combining it with `updatedSince`.
 
 For screenshots and other small files, pass a base64 data URL (or raw base64 plus `fileType`) directly to `create_feedback` or `add_feedback_attachment`. Compass validates the encoded length before decoding and rejects the entire create request if any attachment cannot be uploaded; it never silently creates text-only feedback.
 
@@ -240,14 +368,22 @@ Add this to your Claude Desktop `claude_desktop_config.json`:
   "mcpServers": {
     "compass": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://your-compass-url.vercel.app/api/mcp"],
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://your-compass-url.vercel.app/api/mcp",
+        "--header",
+        "Authorization:${MCP_AUTH_HEADER}"
+      ],
       "env": {
-        "MCP_AUTH_HEADER": "Authorization: Bearer compass_your_api_key"
+        "MCP_AUTH_HEADER": "Bearer compass_your_api_key"
       }
     }
   }
 }
 ```
+
+`mcp-remote` supplies the Streamable HTTP transport headers, but callers must configure the `Authorization` header as shown above. Keeping the header value in `env` also avoids argument parsing problems with spaces in some MCP clients.
 
 ## Use Cases
 

@@ -56,7 +56,7 @@ function decodePanel(raw: string | null): PanelState {
 /** The subset of an entity's fields a mutation notification can carry. Kept
  * narrow on purpose — this isn't a general data-sync channel, just enough for
  * a listener to apply the one change it cares about optimistically. */
-export type EntityMutationPatch = { horizon?: Horizon };
+export type EntityMutationPatch = { horizon?: Horizon; updatedAt?: string };
 
 type EntityMutationListener = (id: string, patch?: EntityMutationPatch) => void;
 

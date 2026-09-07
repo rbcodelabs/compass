@@ -5,6 +5,7 @@
 
 import getPrisma from "@/lib/db"
 import { randomUUID } from "node:crypto"
+import { z } from "zod"
 import { validateFeedbackInput } from "@/lib/feedback"
 import { ok, fail } from "@/lib/mcp-output"
 import {
@@ -16,7 +17,17 @@ import {
   verifyCompletedFeedbackUpload,
 } from "@/lib/feedback-attachments"
 import { feedbackItemUrl } from "@/lib/compass-url"
-import type { FeedbackStatus } from "@/lib/feedback-meta"
+import { FEEDBACK_STATUSES, type FeedbackStatus } from "@/lib/feedback-meta"
+
+const feedbackCursorSchema = z.object({
+  v: z.literal(1),
+  workspaceId: z.string().min(1),
+  status: z.enum([...FEEDBACK_STATUSES, "CLOSED"]).nullable(),
+  updatedSince: z.string().datetime(),
+  asOf: z.string().datetime(),
+  afterUpdatedAt: z.string().datetime(),
+  afterId: z.string().min(1),
+}).strict()
 
 type FeedbackWorkspace = {
   slug: string
@@ -188,25 +199,97 @@ export async function listFeedback({
   workspaceId,
   status,
   limit,
+  updatedSince,
+  cursor,
 }: {
   workspaceId: string
   status?: FeedbackStatus | "CLOSED"
   limit?: number
+  updatedSince?: string
+  cursor?: string
 }) {
+  if (updatedSince !== undefined && cursor !== undefined) {
+    return fail("Provide either updatedSince or cursor, not both.")
+  }
+
+  const normalizedStatus = status ?? null
+  let decodedCursor: z.infer<typeof feedbackCursorSchema> | null = null
+  if (cursor !== undefined) {
+    try {
+      decodedCursor = feedbackCursorSchema.parse(JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")))
+    } catch {
+      return fail("Invalid feedback cursor.")
+    }
+    if (decodedCursor.workspaceId !== workspaceId || decodedCursor.status !== normalizedStatus) {
+      return fail("Feedback cursor does not match the requested workspace or status.")
+    }
+  }
+
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
     select: { id: true, slug: true, organization: { select: { slug: true } } },
   })
   if (!workspace) return fail(`No workspace found with id "${workspaceId}".`)
+  const scanMode = updatedSince !== undefined || cursor !== undefined
+  let scan: {
+    updatedSince: Date
+    asOf: Date
+    after?: { updatedAt: Date; id: string }
+  } | null = null
+  if (scanMode) {
+    try {
+      if (decodedCursor) {
+        scan = {
+          updatedSince: new Date(decodedCursor.updatedSince),
+          asOf: new Date(decodedCursor.asOf),
+          after: { updatedAt: new Date(decodedCursor.afterUpdatedAt), id: decodedCursor.afterId },
+        }
+      } else {
+        scan = { updatedSince: new Date(updatedSince!), asOf: new Date() }
+      }
+      if (Number.isNaN(scan.updatedSince.getTime()) || Number.isNaN(scan.asOf.getTime()) ||
+          (scan.after && Number.isNaN(scan.after.updatedAt.getTime()))) {
+        throw new Error("Invalid feedback cursor dates")
+      }
+      if (scan.updatedSince > scan.asOf ||
+          (scan.after && (scan.after.updatedAt < scan.updatedSince || scan.after.updatedAt > scan.asOf))) {
+        throw new Error("Invalid feedback cursor bounds")
+      }
+    } catch {
+      return fail("Invalid feedback cursor.")
+    }
+  }
+  const resolvedLimit = limit ?? 50
+  const scanBounds = scan
+    ? [
+        { updatedAt: { gte: scan.updatedSince, lte: scan.asOf } },
+        ...(scan.after
+          ? [{
+              OR: [
+                { updatedAt: { gt: scan.after.updatedAt } },
+                { updatedAt: scan.after.updatedAt, id: { gt: scan.after.id } },
+              ],
+            }]
+          : []),
+      ]
+    : undefined
   const items = await prisma.feedbackItem.findMany({
-    where: { workspaceId, ...(status ? { status } : {}) },
-    include: { opportunity: { select: { title: true } } },
-    orderBy: [{ voteCount: "desc" }, { createdAt: "desc" }],
-    take: limit ?? 50,
+    where: {
+      workspaceId,
+      ...(status ? { status } : {}),
+      ...(scanBounds ? { AND: scanBounds } : {}),
+    },
+    include: { opportunity: { select: { id: true, title: true } } },
+    orderBy: scan
+      ? [{ updatedAt: "asc" as const }, { id: "asc" as const }]
+      : [{ voteCount: "desc" as const }, { createdAt: "desc" as const }, { id: "asc" as const }],
+    take: scan ? resolvedLimit + 1 : resolvedLimit,
   })
-  if (!items.length) return fail("No feedback found.")
-  const withUrls = items.map((item) => ({
+  if (!items.length && !scan) return fail("No feedback found.")
+  const hasMore = scan ? items.length > resolvedLimit : false
+  const pageItems = hasMore ? items.slice(0, resolvedLimit) : items
+  const withUrls = pageItems.map((item) => ({
     item,
     url: canonicalFeedbackUrl(workspace, item.id),
   }))
@@ -226,11 +309,31 @@ export async function listFeedback({
       status: item.status,
       voteCount: item.voteCount,
       description: item.description,
+      opportunityId: item.opportunityId,
       opportunity: item.opportunity?.title ?? null,
       submitterName: item.submitterName,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
       url,
     })),
-    count: items.length,
+    count: pageItems.length,
+    ...(scan
+      ? {
+          hasMore,
+          nextCursor: hasMore
+            ? Buffer.from(JSON.stringify({
+                v: 1,
+                workspaceId,
+                status: normalizedStatus,
+                updatedSince: scan.updatedSince.toISOString(),
+                asOf: scan.asOf.toISOString(),
+                afterUpdatedAt: pageItems.at(-1)!.updatedAt.toISOString(),
+                afterId: pageItems.at(-1)!.id,
+              })).toString("base64url")
+            : null,
+          asOf: scan.asOf.toISOString(),
+        }
+      : {}),
   })
 }
 
@@ -580,16 +683,14 @@ export async function promoteFeedbackToRoadmap({
   })
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0
 
-  const item = await prisma.roadmapItem.create({
-    data: {
+  const item = await prisma.roadmapItem.create({ data: {
       workspaceId,
       title: feedback.title,
       horizon,
       sortOrder,
       feedbackId,
       isPrivate: isPrivate ?? false,
-    },
-  })
+    } })
 
   const lines = [
     `**Promoted to roadmap (${horizon})**`,
@@ -601,7 +702,7 @@ export async function promoteFeedbackToRoadmap({
   return ok(lines.join("\n"), {
     id: item.id,
     title: item.title,
-    horizon: item.horizon,
+    horizon,
     sortOrder: item.sortOrder,
     isPrivate: item.isPrivate,
     workspaceId: item.workspaceId,

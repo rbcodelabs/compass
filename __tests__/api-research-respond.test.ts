@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const resolveActiveResearchStudy = vi.hoisted(() => vi.fn())
 const runResearchInterviewAgent = vi.hoisted(() => vi.fn())
 const respondToResearchSession = vi.hoisted(() => vi.fn())
+const storage = vi.hoisted(() => ({ get: vi.fn() }))
 
 vi.mock("@/lib/research-access", () => ({ resolveActiveResearchStudy }))
 vi.mock("@/lib/research-agent", () => ({
@@ -15,6 +16,7 @@ vi.mock("@/lib/research-session", () => ({
   },
   respondToResearchSession,
 }))
+vi.mock("@/lib/artifact-storage", () => ({ getResearchArtifactStorage: () => storage }))
 
 import { POST } from "@/app/api/research/respond/route"
 import { ResearchAgentUnavailableError } from "@/lib/research-agent"
@@ -87,6 +89,55 @@ describe("research interviewer response", () => {
       idempotencyKey: "clientturnid0001",
       resumeToken: "resume-secret",
     }))
+  })
+
+  it("forwards only attachment IDs and a private byte loader to canonical session handling", async () => {
+    respondToResearchSession.mockResolvedValue({ message: "What did you expect?", replayed: false })
+    const body = {
+      token: "study-token", sessionId: "session-1", resumeToken: "resume-secret",
+      idempotencyKey: "clientturnid0001", answer: "This was confusing.",
+      attachmentIds: ["00000000-0000-4000-8000-000000000001"],
+    }
+    const response = await POST(new Request("http://localhost/api/research/respond", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }))
+    expect(response.status).toBe(200)
+    expect(respondToResearchSession).toHaveBeenCalledWith(expect.objectContaining({
+      attachmentIds: body.attachmentIds,
+      loadAttachmentBytes: expect.any(Function),
+    }))
+  })
+
+  it("forwards private attachment bytes from session handling into the paid interviewer", async () => {
+    const attachments = [{
+      mimeType: "image/png" as const,
+      originalName: "study-create.png",
+      bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    }, {
+      mimeType: "application/pdf" as const,
+      originalName: "study-notes.pdf",
+      bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]),
+    }]
+    runResearchInterviewAgent.mockResolvedValue("What on this screen felt unclear?")
+    respondToResearchSession.mockImplementation(async ({ runAgent }: {
+      runAgent: (input: { prompt: string; baseUrl: string; attachments: typeof attachments }) => Promise<string>
+    }) => ({
+      message: await runAgent({
+        prompt: "moderate the next turn",
+        baseUrl: "https://compass.test",
+        attachments,
+      }),
+      replayed: false,
+    }))
+
+    const response = await POST(request())
+
+    expect(response.status).toBe(200)
+    expect(runResearchInterviewAgent).toHaveBeenCalledWith({
+      prompt: "moderate the next turn",
+      baseUrl: "https://compass.test",
+      attachments,
+    })
   })
 
   it("uses a deterministic no-cost agent only for local functional E2E", async () => {

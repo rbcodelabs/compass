@@ -33,6 +33,7 @@ export type RoadmapCardData = {
   feedbackId: string | null;
   startDate: string | null;
   endDate: string | null;
+  updatedAt: string;
   solution: { id: string; title: string } | null;
   keyResult: {
     id: string;
@@ -67,6 +68,7 @@ function formatDateRange(startIso: string | null, endIso: string | null): string
 }
 
 type Props = {
+  workspaceId: string;
   item: RoadmapCardData;
   revalidatePathStr: string;
   onArchive: (itemId: string) => void;
@@ -76,15 +78,7 @@ type Props = {
   availableOpportunities?: Array<{ id: string; title: string }>;
 };
 
-export function RoadmapCard({
-  item,
-  revalidatePathStr,
-  onArchive,
-  onUpdate,
-  orgSlug,
-  workspaceSlug,
-  availableOpportunities,
-}: Props) {
+export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, onUpdate, orgSlug, workspaceSlug, availableOpportunities }: Props) {
   const [isArchiving, startArchiveTransition] = useTransition();
   const [editOpen, setEditOpen] = useState(false);
   const { openPanel } = usePanelContext();
@@ -113,7 +107,7 @@ export function RoadmapCard({
   function handleArchive() {
     onArchive(item.id);
     startArchiveTransition(async () => {
-      await archiveItem(item.id, revalidatePathStr);
+      await archiveItem(item.id, workspaceId);
     });
   }
 
@@ -314,6 +308,7 @@ export function RoadmapCard({
 
       <EditItemDialog
         item={item}
+        workspaceId={workspaceId}
         open={editOpen}
         onOpenChange={setEditOpen}
         revalidatePathStr={revalidatePathStr}

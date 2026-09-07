@@ -26,7 +26,7 @@ import {
 import { RoadmapColumn } from "./roadmap-column";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
 import {
-  UnscheduledItemsPanel,
+  UnscheduledItemsColumn,
   UnscheduledItemPreview,
   parseUnscheduledDragId,
   type UnscheduledItem,
@@ -78,6 +78,7 @@ function cardDataFromPromotion(
     startDate: Date | null;
     endDate: Date | null;
     isPrivate: boolean;
+    updatedAt: Date;
   },
   source: UnscheduledItem,
   squads: SquadData[]
@@ -106,6 +107,7 @@ function cardDataFromPromotion(
     feedbackId: created.feedbackId ?? null,
     startDate: created.startDate ? created.startDate.toISOString() : null,
     endDate: created.endDate ? created.endDate.toISOString() : null,
+    updatedAt: created.updatedAt.toISOString(),
     solution: source.kind === "solution" ? { id: source.id, title: source.title } : null,
     keyResult: null,
     opportunity:
@@ -221,7 +223,7 @@ export function RoadmapBoard({
     const created =
       item.kind === "solution"
         ? await promoteToRoadmap(item.id, workspaceId, horizon, item.squadId, item.opportunityId)
-        : await promoteFeedbackToRoadmap(item.id, workspaceId, horizon, revalidatePathStr);
+        : await promoteFeedbackToRoadmap(item.id, workspaceId, horizon);
     handleItemAdded(cardDataFromPromotion(created, item, squads ?? []));
   }
 
@@ -358,7 +360,7 @@ export function RoadmapBoard({
         return;
       }
       startTransition(async () => {
-        await moveItem(activeId, currentHorizon, workspaceId, revalidatePathStr);
+        await moveItem(activeId, currentHorizon, workspaceId);
       });
     } else if (!overId.startsWith("column-") && overId !== activeId) {
       const columnItems = columns[currentHorizon];
@@ -373,7 +375,7 @@ export function RoadmapBoard({
         setColumns((prev) => ({ ...prev, [currentHorizon]: reordered }));
 
         startTransition(async () => {
-          await updateSortOrder(activeId, newIndex, revalidatePathStr);
+          await updateSortOrder(activeId, workspaceId, newIndex);
         });
       }
     }
@@ -442,12 +444,9 @@ export function RoadmapBoard({
                 availableExperiments={availableExperiments}
               />
             ))}
+            <UnscheduledItemsColumn items={unscheduled} onQuickAdd={handleQuickAdd} />
           </div>
         </Board>
-
-        <div className="shrink-0">
-          <UnscheduledItemsPanel items={unscheduled} onQuickAdd={handleQuickAdd} />
-        </div>
       </div>
 
       {/* DragOverlay renders the card being dragged at its cursor position */}
@@ -456,6 +455,7 @@ export function RoadmapBoard({
           <div className="rotate-1 scale-105">
             <RoadmapCard
               item={activeItem}
+              workspaceId={workspaceId}
               revalidatePathStr={revalidatePathStr}
               onArchive={() => {}}
               orgSlug={orgSlug}

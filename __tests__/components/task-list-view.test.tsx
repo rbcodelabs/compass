@@ -1,0 +1,82 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+
+import { TaskListView } from "@/components/tasks/task-list-view";
+import type { TaskCardData } from "@/components/tasks/task-card";
+
+function task(overrides: Partial<TaskCardData> & Pick<TaskCardData, "id" | "title">): TaskCardData {
+  return {
+    description: null,
+    status: "TODO",
+    priority: "MEDIUM",
+    sortOrder: 0,
+    squadId: null,
+    squad: null,
+    assigneeUserId: null,
+    ownerName: null,
+    storyPoints: null,
+    dueDate: null,
+    iteration: null,
+    parentTaskId: null,
+    subtaskCount: 0,
+    links: [],
+    ...overrides,
+  };
+}
+
+function renderList(tasks: TaskCardData[]) {
+  return render(
+    <TaskListView
+      tasks={tasks}
+      orgSlug="rbcodelabs"
+      workspaceSlug="compass"
+      members={[]}
+    />
+  );
+}
+
+describe("TaskListView hierarchy", () => {
+  afterEach(() => cleanup());
+
+  it("renders every task in a partial forest whose shared parent is absent", () => {
+    renderList([
+      task({ id: "child-4", title: "Fourth child", parentTaskId: "missing-parent", sortOrder: 4 }),
+      task({ id: "child-2", title: "Second child", parentTaskId: "missing-parent", sortOrder: 2 }),
+      task({ id: "child-1", title: "First child", parentTaskId: "missing-parent", sortOrder: 1 }),
+      task({ id: "child-3", title: "Third child", parentTaskId: "missing-parent", sortOrder: 3 }),
+    ]);
+
+    expect(screen.queryByText("No tasks match the current filters.")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
+      "First child",
+      "Second child",
+      "Third child",
+      "Fourth child",
+    ]);
+  });
+
+  it("preserves ordering and indentation for a complete parent-child tree", () => {
+    renderList([
+      task({ id: "child-2", title: "Second child", parentTaskId: "parent", sortOrder: 2 }),
+      task({ id: "sibling", title: "Second root", sortOrder: 2 }),
+      task({ id: "parent", title: "First root", sortOrder: 1 }),
+      task({ id: "child-1", title: "First child", parentTaskId: "parent", sortOrder: 1 }),
+    ]);
+
+    const links = screen.getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual([
+      "First root",
+      "First child",
+      "Second child",
+      "Second root",
+    ]);
+
+    expect(within(links[0].closest("td")!).getByRole("link")).toHaveTextContent("First root");
+    expect(links[0].closest("td")).toHaveStyle({ paddingLeft: "12px" });
+    expect(links[1].closest("td")).toHaveStyle({ paddingLeft: "32px" });
+    expect(links[2].closest("td")).toHaveStyle({ paddingLeft: "32px" });
+    expect(links[3].closest("td")).toHaveStyle({ paddingLeft: "12px" });
+  });
+});

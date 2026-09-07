@@ -29,11 +29,11 @@ test.describe("Roadmap Timeline", () => {
       const datedTitle = `E2E Timeline Item ${ts}`;
       const editedTitle = `E2E Dateless Item ${ts}`;
 
-      // ── 1. Add a roadmap item with dates in the NOW column ─────────────────
+      // ── 1. Add a roadmap item with dates in NEXT (NOW is decision-gated) ───
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
 
-      await page.getByRole("button", { name: "Add item" }).first().click();
+      await page.getByRole("button", { name: "Add item" }).nth(1).click();
       await page.getByLabel("Title").fill(datedTitle);
       await page.getByLabel("Start date (optional)").fill("2026-07-01");
       await page.getByLabel("End date (optional)").fill("2026-09-30");
@@ -51,7 +51,7 @@ test.describe("Roadmap Timeline", () => {
       await expect(datedCard).toBeVisible({ timeout: 10_000 });
 
       // Also add a second, dateless item we'll edit later.
-      await page.getByRole("button", { name: "Add item" }).first().click();
+      await page.getByRole("button", { name: "Add item" }).nth(1).click();
       await page.getByLabel("Title").fill(editedTitle);
       await page.getByRole("button", { name: "Add Item", exact: true }).click();
       await expect(

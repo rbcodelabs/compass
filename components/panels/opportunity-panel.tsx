@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import {
   useEntityDetail,
@@ -18,6 +19,7 @@ import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evid
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import { AddSolutionForm } from "@/components/discovery/add-solution-form";
 import { solutionStatusBadge } from "@/lib/solution-status";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 type OpportunityData = {
   id: string;
@@ -46,7 +48,7 @@ const STATUS_MAP: Record<string, { label: string; className: string }> = {
   VALIDATING: { label: "Validating", className: "bg-blue-100 text-blue-700" },
   PRIORITIZED: { label: "Prioritized", className: "bg-indigo-100 text-indigo-700" },
   ACTIVE: { label: "Active", className: "bg-green-100 text-green-700" },
-  ARCHIVED: { label: "Archived", className: "bg-slate-100 text-slate-500" },
+  ARCHIVED: { label: "Archived", className: "bg-surface-inset text-text-subtle" },
 };
 const STATUS_ORDER = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"] as const;
 
@@ -105,6 +107,7 @@ export function OpportunityPanel({
         edit={edit}
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS_MAP }}
       />
+      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} subjectTitle={data.title} />
 
       <EditableText
         value={data.description}
@@ -175,6 +178,7 @@ export function OpportunityPanel({
           <EvidenceList evidence={data.evidence} revalidatePathStr={fullPageHref} />
         </div>
       </Section>
+      <Discussion targetType="OPPORTUNITY" targetId={opportunityId} />
     </PanelContainer>
   );
 }

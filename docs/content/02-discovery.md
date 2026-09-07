@@ -8,11 +8,17 @@ section: "Core Features"
 
 # Discovery
 
+Opportunity and solution descriptions support Markdown on their full detail views and panels. Use paragraphs, headings, lists, links, emphasis, code, or tables to make longer discovery context easier to scan.
+
 The Discovery section is the heart of Compass. It's where you manage your **Opportunity Solution Tree** — mapping customer problems to potential solutions and tracking their progress through your discovery funnel.
 
 ![Discovery board](/screenshots/docs/discovery-board.png)
 
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
+
+Use the **Board | Table** toggle in the page header to choose how you scan active opportunities. Board view supports drag-and-drop workflow management. Table view provides a compact overview of status, squad, customer segment, evidence, and solution count.
+
+In Table view, select the chevron next to an opportunity to reveal its child solutions. Each solution row shows its lifecycle status, evidence count, and assumption count. Select an opportunity or solution title to open its detail panel.
 
 ## The Opportunity Board
 
@@ -53,13 +59,15 @@ Solutions have a title, description, squad assignment, and a list of assumptions
 Expand any solution card and scroll to **Plan & Discussion** to track how a solution is actually going to be built, and to leave a running commentary alongside it. There are two entry types:
 
 - **Plan** — a proposed implementation/engineering plan. Posting a new plan supersedes the previous one, which is pinned at the top of the section as the **Current Plan** so anyone opening the card immediately sees the latest thinking.
-- **Comment** — a reply in the thread: a question, a status update, a decision. Comments don't supersede anything and just accumulate in order.
+- **Comment** — a reply in the thread: a question, observation, or status update. Comments don't supersede anything and just accumulate in order; they are discussion, not a Compass Decision.
 
 Click **+ Add Comment**, write the body, and choose **Comment** or **Plan update** from the type selector before posting. Both humans (via the UI) and agents (via the `add_solution_plan` / `add_solution_comment` MCP tools — see [MCP API](/help/09-mcp-api)) can post to the same thread, so an agent's proposed plan and a teammate's feedback on it show up side by side.
 
 ### Approving or rejecting a plan
 
-The pinned **Current Plan** carries a status — **Pending**, **Approved**, or **Rejected** — shown as a badge next to it. Use the **Approve** / **Reject** buttons on the Current Plan box to record a decision; either humans (via the UI) or agents (via the `approve_solution_plan` / `reject_solution_plan` MCP tools) can do this. A decision can be changed at any time by clicking the other button. This is purely a status marker — approving or rejecting a plan doesn't change the Solution's own status or trigger anything else automatically.
+The pinned **Current Plan** carries a legacy status — **Pending**, **Approved**, or **Rejected** — shown as a badge next to it. The existing **Approve** / **Reject** buttons and `approve_solution_plan` / `reject_solution_plan` MCP tools change this reversible `planStatus` marker. It is not a tracked Compass Decision, does not authorize delivery or release, and does not change the Solution's status or trigger anything else automatically.
+
+Phase 3 will route reviews of new Solution Plans through tracked Decisions. Until that capability ships, treat legacy plan status as non-authoritative review context rather than a Decision or authorization.
 
 ## Assumptions
 

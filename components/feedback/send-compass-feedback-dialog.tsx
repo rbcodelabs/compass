@@ -83,7 +83,7 @@ export function SendCompassFeedbackDialog({ compact = false }: Props) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors"
+          className="flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 text-text-subtle hover:bg-slate-800/60 hover:text-slate-200 transition-colors"
           aria-label={TRIGGER_LABEL}
         >
           <MessageSquarePlus className="w-3.5 h-3.5" aria-hidden="true" />
@@ -93,9 +93,9 @@ export function SendCompassFeedbackDialog({ compact = false }: Props) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-slate-400 transition-all duration-150 hover:bg-slate-800/50 hover:text-slate-200"
+          className="relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-text-subtle transition-all duration-150 hover:bg-slate-800/50 hover:text-slate-200"
         >
-          <MessageSquarePlus className="w-4 h-4 shrink-0 text-slate-500" aria-hidden="true" />
+          <MessageSquarePlus className="w-4 h-4 shrink-0 text-text-subtle" aria-hidden="true" />
           {TRIGGER_LABEL}
         </button>
       )}
@@ -108,7 +108,7 @@ export function SendCompassFeedbackDialog({ compact = false }: Props) {
 
           {submitted ? (
             <div className="flex flex-col gap-3">
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-text-secondary">
                 Thanks — your feedback was sent to the Compass team.
               </p>
               <DialogFooter>

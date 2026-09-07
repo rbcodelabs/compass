@@ -549,12 +549,12 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
   if (totalEntityCount === 0) {
     return (
       <div className="flex w-full h-full flex-col items-center justify-center gap-4 text-center">
-        <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center">
-          <Waypoints className="w-7 h-7 text-slate-400" />
+        <div className="w-14 h-14 rounded-2xl bg-surface-inset flex items-center justify-center">
+          <Waypoints className="w-7 h-7 text-text-subtle" />
         </div>
         <div>
-          <p className="font-semibold text-slate-800">Nothing to show yet</p>
-          <p className="text-sm text-slate-500 mt-1 max-w-xs mx-auto">
+          <p className="font-semibold text-text-primary">Nothing to show yet</p>
+          <p className="text-sm text-text-subtle mt-1 max-w-xs mx-auto">
             Add Objectives and Key Results from the OKRs page to see them
             here.
           </p>

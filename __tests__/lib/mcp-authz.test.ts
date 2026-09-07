@@ -40,6 +40,7 @@ const RESEARCH = { userId: "user-1", purpose: "RESEARCH" as const, scopeWorkspac
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
 })
 
 describe("actor context (ALS)", () => {
@@ -94,6 +95,15 @@ describe("assertWorkspaceAdmin", () => {
 
     mockPrisma.workspaceMember.findFirst.mockResolvedValueOnce(null)
     await expect(assertWorkspaceAdmin(USER, "ws-1")).rejects.toThrow(/not found or access denied/)
+  })
+
+  it("normalizes legacy owner roles and inherits organization admin access", async () => {
+    mockPrisma.workspaceMember.findFirst.mockResolvedValueOnce({ role: "owner" })
+    await expect(assertWorkspaceAdmin(USER, "ws-1")).resolves.toBeUndefined()
+
+    mockPrisma.workspaceMember.findFirst.mockResolvedValueOnce(null)
+    mockPrisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "ADMIN" })
+    await expect(assertWorkspaceAdmin(USER, "ws-1")).resolves.toBeUndefined()
   })
 })
 

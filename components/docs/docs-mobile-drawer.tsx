@@ -37,7 +37,7 @@ export function DocsMobileDrawer({
         variant="ghost"
         size="sm"
         onClick={() => setOpen(true)}
-        className="md:hidden text-slate-600 hover:text-slate-900"
+        className="md:hidden text-text-secondary hover:text-text-primary"
         aria-label="Open docs navigation"
       >
         <PanelLeft className="w-4 h-4" />
@@ -48,7 +48,7 @@ export function DocsMobileDrawer({
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="left" className="w-72 p-0 flex flex-col">
           <SheetHeader className="px-4 pt-4 pb-2 border-b border-slate-100 shrink-0">
-            <SheetTitle className="text-sm font-semibold text-slate-700">
+            <SheetTitle className="text-sm font-semibold text-text-secondary">
               Docs
             </SheetTitle>
           </SheetHeader>

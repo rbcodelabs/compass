@@ -1,7 +1,10 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { MarketingNavigation } from "@/components/marketing/marketing-navigation";
+import { getMarketingViewer } from "@/lib/marketing-viewer";
 
-export default function MarketingLayout({ children }: { children: ReactNode }) {
+export default async function MarketingLayout({ children }: { children: ReactNode }) {
+  const viewer = await getMarketingViewer();
   return (
     <>
       {/* Marketing nav */}
@@ -13,12 +16,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
           >
             Compass
           </Link>
-          <Link
-            href="/login"
-            className="text-sm text-slate-600 hover:text-slate-900 transition-colors"
-          >
-            Sign in
-          </Link>
+          <MarketingNavigation viewer={viewer} />
         </div>
       </header>
 

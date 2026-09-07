@@ -36,4 +36,16 @@ describe("Tasks dashboard workspace layout", () => {
     expect(column).toContain("md:max-h-none");
     expect(column).toContain("md:overflow-y-auto");
   });
+
+  it("bulk-loads task relations while retaining workspace and facet filters", () => {
+    const page = source("app/[orgSlug]/[workspaceSlug]/tasks/page.tsx");
+
+    expect(page).toContain("workspaceId: workspace.id");
+    expect(page).toContain("...(squadFilter ? { squadId: squadFilter } : {})");
+    expect(page).toContain("...(assigneeFilter ? { assigneeUserId: assigneeFilter } : {})");
+    expect(page).toContain("...(priorityFilter ? { priority: priorityFilter } : {})");
+    expect(page).toContain("prisma.taskLink.findMany({ where: { taskId: { in: taskIds } }");
+    expect(page).toContain("prisma.task.groupBy({");
+    expect(page).not.toContain("_count: { select: { subtasks: true } }");
+  });
 });

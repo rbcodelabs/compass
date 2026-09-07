@@ -71,11 +71,17 @@ describe("researcher study access", () => {
       id: "study-1",
       name: "Planning interviews",
       goal: "Understand planning",
+      guide: JSON.stringify([{ id: "1", text: "Canonical question" }]),
+      studyType: "USABILITY_TEST",
+      status: "ACTIVE",
+      appUrl: "https://example.com/pricing",
+      targetMinutes: 15,
       participantTokens: [],
       sessions: [{
         id: "session-1",
-        modality: "CHAT",
+        modality: "VOICE",
         status: "COMPLETED",
+        attachments: [{ id: "attachment-1", originalName: "pricing.png", mimeType: "image/png", sizeBytes: 2048, turnId: "turn-2" }],
         turns: [
           { id: "turn-1", role: "INTERVIEWER", content: "Canonical question" },
           { id: "turn-2", role: "PARTICIPANT", content: "Canonical answer" },
@@ -86,14 +92,27 @@ describe("researcher study access", () => {
 
     render(await StudyPage(props))
 
-    expect(screen.getByText("Canonical question")).toBeVisible()
+    expect(screen.getAllByText("Canonical question").at(-1)).toBeVisible()
     expect(screen.getByText("Canonical answer")).toBeVisible()
+    expect(screen.getAllByText("Guided usability test")[0]).toBeVisible()
+    expect(screen.getByRole("link", { name: "https://example.com/pricing" })).toHaveAttribute("rel", "noopener noreferrer")
+    expect(screen.getAllByText("15 minutes")[0]).toBeVisible()
+    expect(screen.getByText("active")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Close study" })).toBeVisible()
+    expect(screen.getByText(/protocol is locked/i)).toBeVisible()
+    expect(screen.getByLabelText("Research goal")).toBeDisabled()
+    expect(screen.getByLabelText("Study name")).toBeEnabled()
+    expect(screen.getByText("Voice session")).toBeVisible()
+    expect(screen.getByRole("link", { name: "pricing.png" })).toHaveAttribute("href", "/api/research/member-attachments/attachment-1")
     expect(reconcileAbandonedResearchSessions).toHaveBeenCalledWith(expect.anything(), "study-1")
     expect(researchStudy.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({
         sessions: expect.objectContaining({
           take: 50,
-          include: { turns: { orderBy: { sequence: "asc" }, take: 200 } },
+          include: {
+            turns: { orderBy: { sequence: "asc" }, take: 200 },
+            attachments: { where: { status: "READY" }, orderBy: { createdAt: "asc" }, take: 100 },
+          },
         }),
       }),
     }))

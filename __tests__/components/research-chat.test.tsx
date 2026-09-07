@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchChat } from "@/components/research/research-chat"
+import { StrictMode } from "react"
 
 describe("ResearchChat", () => {
   beforeEach(() => {
@@ -78,7 +79,7 @@ describe("ResearchChat", () => {
     }), { status: 200, headers: { "Content-Type": "application/json" } }))
     vi.stubGlobal("fetch", fetchMock)
 
-    render(<ResearchChat token="study-token" />)
+    render(<StrictMode><ResearchChat token="study-token" /></StrictMode>)
 
     expect(await screen.findByText("Persisted answer")).toBeVisible()
     expect(fetchMock).toHaveBeenCalledWith("/api/research/start", expect.objectContaining({
@@ -129,5 +130,30 @@ describe("ResearchChat", () => {
     expect(await screen.findByText("Thank you")).toBeVisible()
     expect(localStorage.getItem("compass-research-session-study-token")).toBeNull()
     expect(screen.queryByText("Persisted answer")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["customer interview", false, "Start interview"],
+    ["guided usability", true, "Start session"],
+  ])("uploads evidence in a %s and links its ID to the next answer", async (_label, guided, startLabel) => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "00000000-0000-4000-8000-000000000001", status: "READY", originalName: "screen.png", mimeType: "image/png", sizeBytes: 3 }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "What did you expect?" }), { status: 200, headers: { "Content-Type": "application/json" } }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(<ResearchChat guided={guided} token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: startLabel }))
+    await screen.findByRole("textbox", { name: "Your response" })
+    fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), { target: { files: [new File([new Uint8Array([1, 2, 3])], "screen.png", { type: "image/png" })] } })
+    expect(await screen.findByText("screen.png")).toBeVisible()
+    fireEvent.change(screen.getByRole("textbox", { name: "Your response" }), { target: { value: "This was confusing." } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await screen.findByText("What did you expect?")
+    const startBody = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(startBody.modality).toBe("CHAT")
+    const respondBody = JSON.parse(fetchMock.mock.calls[2][1].body as string)
+    expect(respondBody.attachmentIds).toEqual(["00000000-0000-4000-8000-000000000001"])
   })
 })

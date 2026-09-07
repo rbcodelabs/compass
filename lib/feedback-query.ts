@@ -9,8 +9,8 @@
  *  - **Every value is allowlist-validated.** Hostile or malformed input
  *    silently falls back to the default. This module never throws, never
  *    signals a 400, and never lets a raw request string reach Prisma.
- *  - Next hands over `string | string[] | undefined`; a repeated param is
- *    normalised by taking the **last** value.
+ *  - Repeated `status` params are a multi-select; every other repeated param
+ *    is normalised by taking the **last** value.
  *  - **Every `orderBy` ends with `{ id: "asc" }`.** `status`, `type` and
  *    `voteCount` are non-unique, so without a unique tiebreak `skip`/`take`
  *    silently duplicates and drops rows across pages.
@@ -20,6 +20,7 @@ import type { Prisma } from "@prisma/client";
 import {
   isFeedbackStatus,
   isFeedbackType,
+  FEEDBACK_STATUSES,
   type FeedbackStatus,
   type FeedbackTypeValue,
 } from "@/lib/feedback-meta";
@@ -86,7 +87,7 @@ export type FeedbackSearchParams = Record<
 export type FeedbackQuery = {
   /** Trimmed, capped, and at least `MIN_FEEDBACK_Q_LENGTH` long, else `null`. */
   q: string | null;
-  status: FeedbackStatus | null;
+  status: FeedbackStatus[];
   type: FeedbackTypeValue | null;
   /** `null` means "the default ordering", which is not a single column. */
   sort: FeedbackSortKey | null;
@@ -99,7 +100,7 @@ export type FeedbackQuery = {
 /** The query a bare `/feedback` URL means. */
 export const DEFAULT_FEEDBACK_QUERY: FeedbackQuery = {
   q: null,
-  status: null,
+  status: [...FEEDBACK_STATUSES],
   type: null,
   sort: null,
   dir: "desc",
@@ -141,6 +142,20 @@ function readParam(
   return lastValue((source as FeedbackSearchParams)[key]);
 }
 
+/** Read every value of a repeated param from either supported input shape. */
+function readParams(
+  source: FeedbackSearchParams | URLSearchParams,
+  key: string,
+): string[] {
+  if (typeof URLSearchParams !== "undefined" && source instanceof URLSearchParams) {
+    return source.getAll(key);
+  }
+  if (!Object.prototype.hasOwnProperty.call(source, key)) return [];
+  const raw = (source as FeedbackSearchParams)[key];
+  if (Array.isArray(raw)) return raw.filter((value): value is string => typeof value === "string");
+  return typeof raw === "string" ? [raw] : [];
+}
+
 /**
  * Strict non-negative decimal integer. Deliberately rejects `"1e9"`, `"0x10"`,
  * `"1.5"`, `" 3"`, `"-1"` and `"Infinity"` — `Number()` would accept several of
@@ -173,9 +188,13 @@ export function parseFeedbackQuery(
     q = trimmed.length >= MIN_FEEDBACK_Q_LENGTH ? trimmed : null;
   }
 
-  // status / type: whole-string allowlist match. "OPEN,BOGUS" is not "OPEN".
-  const rawStatus = readParam(source, "status");
-  const status = isFeedbackStatus(rawStatus) ? rawStatus : null;
+  // status: repeated, independently allowlisted values. Canonical ordering
+  // makes equality and shareable URLs deterministic. No valid selection means
+  // the default (all statuses), including malformed URLs.
+  const requestedStatuses = new Set(readParams(source, "status").filter(isFeedbackStatus));
+  const status = requestedStatuses.size > 0
+    ? FEEDBACK_STATUSES.filter((value) => requestedStatuses.has(value))
+    : [...FEEDBACK_STATUSES];
 
   const rawType = readParam(source, "type");
   const type = isFeedbackType(rawType) ? rawType : null;
@@ -227,7 +246,9 @@ export function buildFeedbackWhere(
   workspaceId: string,
 ): Prisma.FeedbackItemWhereInput {
   const where: Prisma.FeedbackItemWhereInput = { workspaceId };
-  if (query.status) where.status = query.status;
+  if (query.status.length < FEEDBACK_STATUSES.length) {
+    where.status = { in: query.status };
+  }
   if (query.type) where.type = query.type;
   if (query.q) {
     where.OR = [
@@ -284,7 +305,7 @@ export function feedbackPageCount(query: FeedbackQuery, total: number): number {
  */
 export type FeedbackQueryPatch = Partial<{
   q: string | null;
-  status: FeedbackStatus | string | null;
+  status: readonly (FeedbackStatus | string)[] | FeedbackStatus | string | null;
   type: FeedbackTypeValue | string | null;
   sort: FeedbackSortKey | string | null;
   dir: SortDirection | string | null;
@@ -294,6 +315,16 @@ export type FeedbackQueryPatch = Partial<{
 
 /** Keys that invalidate the current offset when they change. */
 const PAGE_RESETTING_KEYS = ["q", "status", "type", "sort", "dir", "per"] as const;
+
+function queryValuesEqual(
+  left: FeedbackQuery[keyof FeedbackQuery],
+  right: FeedbackQuery[keyof FeedbackQuery],
+): boolean {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+  }
+  return left === right;
+}
 
 /**
  * Apply `patch` to `current` and produce the params for the next URL.
@@ -328,8 +359,12 @@ export function serializeFeedbackQuery(
     q: patch.q !== undefined ? (patch.q ?? undefined) : (current.q ?? undefined),
     status:
       patch.status !== undefined
-        ? (patch.status ?? undefined)
-        : (current.status ?? undefined),
+        ? (typeof patch.status === "string"
+            ? patch.status
+            : patch.status
+              ? [...patch.status]
+              : undefined)
+        : current.status,
     type:
       patch.type !== undefined
         ? (patch.type ?? undefined)
@@ -349,13 +384,15 @@ export function serializeFeedbackQuery(
 
   // Invariant 1: did anything page-resetting actually change?
   const resets = PAGE_RESETTING_KEYS.some(
-    (key) => key in patch && merged[key] !== current[key],
+    (key) => key in patch && !queryValuesEqual(merged[key], current[key]),
   );
   const page = resets ? 1 : merged.page;
 
   const params = new URLSearchParams();
   if (merged.q) params.set("q", merged.q);
-  if (merged.status) params.set("status", merged.status);
+  if (merged.status.length < FEEDBACK_STATUSES.length) {
+    for (const status of merged.status) params.append("status", status);
+  }
   if (merged.type) params.set("type", merged.type);
   if (merged.sort) {
     params.set("sort", merged.sort);

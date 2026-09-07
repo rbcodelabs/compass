@@ -1,0 +1,39 @@
+name: Preview recovery
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: compass-preview-validation
+  cancel-in-progress: false
+jobs:
+  recover:
+    if: ${{ vars.PREVIEW_AUTOMATION_ENABLED == '1' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: preview-provisioning
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.34.5 }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .node-version, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm preview:cleanup
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIEW_CONTROLLER_TRUSTED_REF: refs/heads/main
+          PREVIEW_DSQL_HOST: ${{ vars.PREVIEW_DSQL_HOST }}
+          PREVIEW_RUNTIME_IAM_ROLE: ${{ vars.PREVIEW_RUNTIME_IAM_ROLE }}
+          PREVIEW_MIGRATION_IAM_ROLE: ${{ vars.PREVIEW_MIGRATION_IAM_ROLE }}
+          AWS_REGION: ${{ vars.PREVIEW_AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.PREVIEW_PROVISION_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.PREVIEW_PROVISION_SECRET_ACCESS_KEY }}
+          PREVIEW_AUTOMATION_PRIVATE_KEY: ${{ secrets.PREVIEW_AUTOMATION_PRIVATE_KEY }}
+          PREVIEW_PROTECTION_BYPASS: ${{ secrets.PREVIEW_PROTECTION_BYPASS }}
+          PREVIEW_VERCEL_TOKEN: ${{ secrets.PREVIEW_VERCEL_TOKEN }}
+          PREVIEW_VERCEL_PROJECT_ID: ${{ vars.PREVIEW_VERCEL_PROJECT_ID }}
+          PREVIEW_VERCEL_TEAM_ID: ${{ vars.PREVIEW_VERCEL_TEAM_ID }}

@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import { useState, useTransition } from "react";
 import {
@@ -29,12 +30,15 @@ import { SolutionAssumptions } from "./solution-assumptions";
 import { SolutionPlanDiscussion } from "./solution-plan-discussion";
 import { SolutionArtifacts, type SolutionArtifact } from "./solution-artifacts";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import { requestBuildingInvestmentAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions";
+import { useRouter } from "next/navigation";
 import type { SolutionComment, Horizon } from "@/lib/types";
 import {
   SOLUTION_STATUS,
   SOLUTION_STATUS_ORDER,
   solutionStatusBadge,
 } from "@/lib/solution-status";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 type SolutionData = {
   id: string;
@@ -90,7 +94,7 @@ export function SolutionPanel({
     type: "roadmapItem",
     id: r.id,
     title: r.title,
-    badge: { label: r.horizon, className: "bg-slate-100 text-slate-600" },
+    badge: { label: r.horizon, className: "bg-surface-inset text-text-secondary" },
   }));
 
   // Same fallback the old card used (revalidatePath just needs *a* path in
@@ -115,6 +119,7 @@ export function SolutionPanel({
         edit={edit}
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
       />
+      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="SOLUTION" subjectId={data.id} subjectTitle={data.title} />
 
       <EditableText
         value={data.description}
@@ -177,10 +182,24 @@ export function SolutionPanel({
         </div>
       </Section>
 
-      <Section label="Plan & Discussion" count={data.comments.length}>
+      {data.opportunity && (
+        <Section label="Investment decision">
+          <BuildingInvestmentButton
+            workspaceId={data.opportunity.workspaceId}
+            solutionId={data.id}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+          />
+        </Section>
+      )}
+
+      <Section
+        label="Current Plan"
+        count={data.comments.filter((comment) => comment.commentType === "PLAN").length}
+      >
         <SolutionPlanDiscussion
           solutionId={data.id}
-          comments={data.comments}
+          comments={data.comments.filter((comment) => comment.commentType === "PLAN")}
           revalidatePathStr={revalidatePathStr}
           onChanged={refresh}
         />
@@ -200,7 +219,30 @@ export function SolutionPanel({
           />
         </Section>
       )}
+      <Discussion targetType="SOLUTION" targetId={id} />
     </PanelContainer>
+  );
+}
+
+function BuildingInvestmentButton({ workspaceId, solutionId, orgSlug, workspaceSlug }: { workspaceId: string; solutionId: string; orgSlug: string; workspaceSlug: string }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="space-y-2">
+      <Button variant="outline" size="sm" disabled={isPending} onClick={() => startTransition(async () => {
+        setError(null);
+        try {
+          const review = await requestBuildingInvestmentAction(workspaceId, solutionId);
+          router.push(`/${orgSlug}/${workspaceSlug}/reviews/${review.requestId}`);
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : "Could not prepare the investment review.");
+        }
+      })}>
+        {isPending ? "Preparing review…" : "Request Building investment review"}
+      </Button>
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+    </div>
   );
 }
 

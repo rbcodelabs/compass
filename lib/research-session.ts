@@ -1,6 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import type { PrismaClient, ResearchParticipantToken, ResearchStudy } from "@prisma/client"
 import { buildResearchAgentTurnPrompt, type ResearchGuideItem } from "@/lib/research"
+import {
+  isResearchDiscoveryVoiceEnabled,
+  isResearchLegacyVoiceHarnessEnabled,
+} from "@/lib/research-feature"
 
 export const MAX_RESEARCH_MESSAGE_CHARS = 4_000
 export const MAX_RESEARCH_INTERVIEWER_CHARS = 4_000
@@ -96,23 +100,22 @@ async function retryDsql<T>(
   throw lastError
 }
 
-async function consumeParticipantRate(
-  prisma: PrismaClient,
+async function consumeParticipantRateOnClient(
+  prisma: Pick<PrismaClient, "researchParticipantToken">,
   tokenId: string,
   kind: "START" | "RESPONSE",
 ) {
-  await retryDsql(() => prisma.$transaction(async (tx) => {
-    const token = await tx.researchParticipantToken.findUnique({
-      where: { id: tokenId },
-      select: {
-        startWindowAt: true,
-        startCount: true,
-        responseWindowAt: true,
-        responseCount: true,
-        agentWindowAt: true,
-        agentCallCount: true,
-      },
-    })
+  const token = await prisma.researchParticipantToken.findUnique({
+    where: { id: tokenId },
+    select: {
+      startWindowAt: true,
+      startCount: true,
+      responseWindowAt: true,
+      responseCount: true,
+      agentWindowAt: true,
+      agentCallCount: true,
+    },
+  })
     if (!token) throw new ResearchSessionError("Study not found", 404)
     const now = new Date()
     if (kind === "START") {
@@ -121,7 +124,7 @@ async function consumeParticipantRate(
       if (count >= MAX_RESEARCH_STARTS_PER_MINUTE) {
         throw new ResearchSessionError("Too many interview starts. Please wait and try again.", 429)
       }
-      const updated = await tx.researchParticipantToken.updateMany({
+      const updated = await prisma.researchParticipantToken.updateMany({
         where: { id: tokenId, startWindowAt: token.startWindowAt, startCount: token.startCount },
         data: active
           ? { startCount: count + 1 }
@@ -141,7 +144,7 @@ async function consumeParticipantRate(
     if (dayCount >= MAX_RESEARCH_AGENT_CALLS_PER_DAY) {
       throw new ResearchSessionError("This participant link has reached its daily interview limit.", 429)
     }
-    const updated = await tx.researchParticipantToken.updateMany({
+    const updated = await prisma.researchParticipantToken.updateMany({
       where: {
         id: tokenId,
         responseWindowAt: token.responseWindowAt,
@@ -159,7 +162,16 @@ async function consumeParticipantRate(
       },
     })
     if (updated.count !== 1) throw Object.assign(new Error("Concurrent research response quota update"), { code: "P2034" })
-  }))
+}
+
+async function consumeParticipantRate(
+  prisma: PrismaClient,
+  tokenId: string,
+  kind: "START" | "RESPONSE",
+) {
+  await retryDsql(() => prisma.$transaction((tx) =>
+    consumeParticipantRateOnClient(tx, tokenId, kind),
+  ))
 }
 
 function initialInterviewerMessage(study: ResearchStudy): string {
@@ -259,11 +271,15 @@ async function loadParticipantSession(
 export async function startOrResumeResearchSession(
   context: ResearchContext,
   resume?: { sessionId: string; resumeToken: string },
+  modality: "CHAT" | "VOICE" = "CHAT",
 ) {
   if (resume) {
     const session = await loadParticipantSession(context, resume.sessionId, resume.resumeToken, {
       allowCompleted: true,
     })
+    if (session.modality === "VOICE" && !isResearchLegacyVoiceHarnessEnabled()) {
+      throw new ResearchSessionError("Voice is not available for this study", 409)
+    }
     return {
       sessionId: session.id,
       resumeToken: resume.resumeToken,
@@ -274,36 +290,61 @@ export async function startOrResumeResearchSession(
   }
 
   const now = new Date()
-  await consumeParticipantRate(context.prisma, context.participantToken.id, "START")
-
   const sessionId = randomUUID()
-  const openingTurnId = randomUUID()
+  const openingTurnId = modality === "CHAT" ? randomUUID() : null
   const resumeSecret = createResumeToken()
-  const message = initialInterviewerMessage(context.study)
-  await retryDsql(() => context.prisma.$transaction([
-    context.prisma.researchSession.create({
+  let message = ""
+  await retryDsql(() => context.prisma.$transaction(async (tx) => {
+    const locked = await tx.researchStudy.updateMany({
+      where: { id: context.study.id, status: "ACTIVE" },
+      data: { updatedAt: now },
+    })
+    if (locked.count !== 1) throw new ResearchSessionError("Study not found", 404)
+    const validationNow = new Date()
+    const token = await tx.researchParticipantToken.findFirst({
+      where: {
+        id: context.participantToken.id,
+        studyId: context.study.id,
+        revokedAt: null,
+        expiresAt: { gt: validationNow },
+      },
+      select: { id: true },
+    })
+    if (!token) throw new ResearchSessionError("Study not found", 404)
+    const study = await tx.researchStudy.findUnique({ where: { id: context.study.id } })
+    if (!study || study.status !== "ACTIVE") throw new ResearchSessionError("Study not found", 404)
+    if (modality === "VOICE" && (
+      !isResearchLegacyVoiceHarnessEnabled() ||
+      (study.studyType === "CUSTOMER_INTERVIEW" && !isResearchDiscoveryVoiceEnabled()) ||
+      (study.studyType === "USABILITY_TEST" && !study.appUrl)
+    )) {
+      throw new ResearchSessionError("Voice is not available for this study", 409)
+    }
+    await consumeParticipantRateOnClient(tx, context.participantToken.id, "START")
+    message = initialInterviewerMessage(study)
+    await tx.researchSession.create({
       data: {
         id: sessionId,
         studyId: context.study.id,
         participantTokenId: context.participantToken.id,
         resumeTokenHash: resumeSecret.tokenHash,
-        modality: "CHAT",
+        modality,
         status: "IN_PROGRESS",
         startedAt: now,
         lastActiveAt: now,
-        nextSequence: 1,
+        nextSequence: modality === "CHAT" ? 1 : 0,
         updatedAt: now,
       },
-    }),
-    context.prisma.researchTurn.create({
+    })
+    if (openingTurnId) await tx.researchTurn.create({
       data: { id: openingTurnId, sessionId, role: "INTERVIEWER", content: message, sequence: 0 },
-    }),
-  ]))
+    })
+  }))
   return {
     sessionId,
     resumeToken: resumeSecret.token,
     status: "IN_PROGRESS",
-    turns: [{ id: openingTurnId, role: "INTERVIEWER", content: message, sequence: 0 }],
+    turns: openingTurnId ? [{ id: openingTurnId, role: "INTERVIEWER", content: message, sequence: 0 }] : [],
     startedAt: now,
   }
 }
@@ -313,6 +354,8 @@ async function appendParticipantTurnAndLinkRequest(
   sessionId: string,
   requestId: string,
   turn: { id: string; role: "PARTICIPANT" | "INTERVIEWER"; content: string },
+  attachmentIds: string[],
+  attachmentScope: { workspaceId: string; studyId: string },
 ) {
   return retryDsql(async () => {
     return prisma.$transaction(async (tx) => {
@@ -343,6 +386,22 @@ async function appendParticipantTurnAndLinkRequest(
         select: { id: true, role: true, content: true, sequence: true },
       }) as CanonicalTurn[]
       assertCanonicalCapacity(currentTurns, 2, turn.content.length)
+      if (attachmentIds.length > 0) {
+        const attachments = await tx.researchAttachment.findMany({
+          where: {
+            id: { in: attachmentIds },
+            workspaceId: attachmentScope.workspaceId,
+            studyId: attachmentScope.studyId,
+            sessionId,
+            status: "READY",
+            turnId: null,
+          },
+          select: { id: true },
+        })
+        if (attachments.length !== attachmentIds.length) {
+          throw new ResearchSessionError("One or more attachments are unavailable", 409)
+        }
+      }
       const sequence = session.nextSequence ?? 0
       const updated = await tx.researchSession.updateMany({
         where: {
@@ -365,6 +424,15 @@ async function appendParticipantTurnAndLinkRequest(
         throw Object.assign(new Error("Concurrent research turn sequence update"), { code: "P2034" })
       }
       const created = await tx.researchTurn.create({ data: { ...turn, sessionId, sequence } })
+      if (attachmentIds.length > 0) {
+        const linked = await tx.researchAttachment.updateMany({
+          where: { id: { in: attachmentIds }, sessionId, status: "READY", turnId: null },
+          data: { turnId: created.id },
+        })
+        if (linked.count !== attachmentIds.length) {
+          throw new ResearchSessionError("One or more attachments changed while sending", 409)
+        }
+      }
       const requestUpdated = await tx.researchRequest.updateMany({
         where: { id: requestId, sessionId, status: "PROCESSING", participantTurnId: null },
         data: { participantTurnId: created.id, updatedAt: now },
@@ -417,17 +485,34 @@ async function loadCompletedReply(
   prisma: PrismaClient,
   request: { participantTurnId: string | null; interviewerTurnId: string | null },
   answer: string,
+  attachmentIds: string[],
 ) {
   if (!request.participantTurnId) throw new ResearchSessionError("Stored participant answer is unavailable", 502)
-  const participantTurn = await prisma.researchTurn.findUnique({ where: { id: request.participantTurnId } })
-  if (!participantTurn) throw new ResearchSessionError("Stored participant answer is unavailable", 502)
-  if (participantTurn.content !== answer) {
-    throw new ResearchSessionError("Idempotency key was already used for a different answer", 409)
-  }
+  await assertParticipantTurnPayload(prisma, request.participantTurnId, answer, attachmentIds)
   if (!request.interviewerTurnId) throw new ResearchSessionError("Stored reply is unavailable", 502)
   const turn = await prisma.researchTurn.findUnique({ where: { id: request.interviewerTurnId } })
   if (!turn) throw new ResearchSessionError("Stored reply is unavailable", 502)
   return { message: turn.content, turn: publicTurns([turn as CanonicalTurn])[0], replayed: true }
+}
+
+async function assertParticipantTurnPayload(
+  prisma: PrismaClient,
+  turnId: string,
+  answer: string,
+  attachmentIds: string[],
+) {
+  const participantTurn = await prisma.researchTurn.findUnique({ where: { id: turnId } })
+  if (!participantTurn) throw new ResearchSessionError("Stored participant answer is unavailable", 502)
+  if (participantTurn.content !== answer) {
+    throw new ResearchSessionError("Idempotency key was already used for a different answer", 409)
+  }
+  const linked = await prisma.researchAttachment.findMany({ where: { turnId }, select: { id: true } })
+  const expected = [...attachmentIds].sort()
+  const actual = linked.map((attachment) => attachment.id).sort()
+  if (expected.length !== actual.length || expected.some((id, index) => id !== actual[index])) {
+    throw new ResearchSessionError("Idempotency key was already used with different attachments", 409)
+  }
+  return participantTurn
 }
 
 async function acquireRequestLease(prisma: PrismaClient, sessionId: string, requestId: string, now: Date) {
@@ -476,24 +561,35 @@ async function releaseRequestLease(prisma: PrismaClient, sessionId: string, requ
 
 export async function respondToResearchSession({
   context, sessionId, resumeToken, idempotencyKey: idempotencyValue,
-  answer: answerValue, runAgent, baseUrl,
+  answer: answerValue, attachmentIds: attachmentIdValues = [], loadAttachmentBytes, runAgent, baseUrl,
 }: {
   context: ResearchContext
   sessionId: string
   resumeToken: string
   idempotencyKey: unknown
   answer: unknown
-  runAgent: (input: { prompt: string; baseUrl: string }) => Promise<string>
+  attachmentIds?: unknown
+  loadAttachmentBytes?: (pathname: string) => Promise<Uint8Array | null>
+  runAgent: (input: { prompt: string; baseUrl: string; attachments?: Array<{ mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf"; originalName: string; bytes: Uint8Array }> }) => Promise<string>
   baseUrl: string
 }) {
   const answer = assertResearchAnswer(answerValue)
   const idempotencyKey = assertIdempotencyKey(idempotencyValue)
+  if (!Array.isArray(attachmentIdValues) || attachmentIdValues.length > 3 ||
+    attachmentIdValues.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) ||
+    new Set(attachmentIdValues).size !== attachmentIdValues.length) {
+    throw new ResearchSessionError("Use at most three valid attachments", 400)
+  }
+  const attachmentIds = attachmentIdValues as string[]
+  if (attachmentIds.length > 0 && !loadAttachmentBytes) {
+    throw new ResearchSessionError("Attachment storage is unavailable", 503)
+  }
   const session = await loadParticipantSession(context, sessionId, resumeToken)
   const prisma = context.prisma
   let existing = await prisma.researchRequest.findUnique({
     where: { sessionId_idempotencyKey: { sessionId, idempotencyKey } },
   })
-  if (existing?.status === "COMPLETED") return loadCompletedReply(prisma, existing, answer)
+  if (existing?.status === "COMPLETED") return loadCompletedReply(prisma, existing, answer, attachmentIds)
   if (existing?.status === "PROCESSING") {
     const now = new Date()
     const ownLeaseIsFresh = session.activeRequestId === existing.id && Boolean(
@@ -543,7 +639,7 @@ export async function respondToResearchSession({
       const winner = await prisma.researchRequest.findUnique({
         where: { sessionId_idempotencyKey: { sessionId, idempotencyKey } },
       })
-      if (winner?.status === "COMPLETED") return loadCompletedReply(prisma, winner, answer)
+      if (winner?.status === "COMPLETED") return loadCompletedReply(prisma, winner, answer, attachmentIds)
       throw new ResearchSessionError("This answer is already being processed", 409)
     }
   }
@@ -553,7 +649,7 @@ export async function respondToResearchSession({
     let participantTurn: CanonicalTurn | null = null
     if (request.participantTurnId) {
       await acquireRequestLease(prisma, sessionId, request.id, now)
-      participantTurn = await prisma.researchTurn.findUnique({ where: { id: request.participantTurnId } }) as CanonicalTurn | null
+      participantTurn = await assertParticipantTurnPayload(prisma, request.participantTurnId, answer, attachmentIds) as CanonicalTurn
       const freshTurns = await prisma.researchTurn.findMany({
         where: { sessionId }, orderBy: { sequence: "asc" },
         select: { id: true, role: true, content: true, sequence: true },
@@ -562,7 +658,7 @@ export async function respondToResearchSession({
     } else {
       participantTurn = await appendParticipantTurnAndLinkRequest(prisma, sessionId, request.id, {
         id: randomUUID(), role: "PARTICIPANT", content: answer,
-      })
+      }, attachmentIds, { workspaceId: context.study.workspaceId, studyId: context.study.id })
     }
     if (!participantTurn) throw new ResearchSessionError("Stored participant answer is unavailable", 502)
     if (participantTurn.content !== answer) {
@@ -582,10 +678,38 @@ export async function respondToResearchSession({
       messages: canonicalTurns.map((turn) => ({
         role: turn.role as "INTERVIEWER" | "PARTICIPANT", content: turn.content,
       })),
+      studyType: context.study.studyType as "CUSTOMER_INTERVIEW" | "USABILITY_TEST",
+      appUrl: context.study.appUrl,
     })
+    const attachmentRows = attachmentIds.length === 0 ? [] : await prisma.researchAttachment.findMany({
+      where: {
+        id: { in: attachmentIds },
+        workspaceId: context.study.workspaceId,
+        studyId: context.study.id,
+        sessionId,
+        turnId: participantTurn.id,
+        status: "READY",
+        deletedAt: null,
+      },
+      select: { id: true, blobPathname: true, originalName: true, mimeType: true },
+    })
+    if (attachmentRows.length !== attachmentIds.length) {
+      throw new ResearchSessionError("One or more attachments are unavailable", 409)
+    }
+    const rowsById = new Map(attachmentRows.map((attachment) => [attachment.id, attachment]))
+    const modelAttachments = await Promise.all(attachmentIds.map(async (id) => {
+      const attachment = rowsById.get(id)!
+      const bytes = await loadAttachmentBytes!(attachment.blobPathname)
+      if (!bytes) throw new ResearchSessionError("Attachment bytes are unavailable", 502)
+      return {
+        mimeType: attachment.mimeType as "image/png" | "image/jpeg" | "image/webp" | "application/pdf",
+        originalName: attachment.originalName,
+        bytes,
+      }
+    }))
     const canonicalTranscriptChars = canonicalTurns.reduce((total, turn) => total + turn.content.length, 0)
     const message = assertResearchInterviewerReply(
-      await runAgent({ prompt, baseUrl }),
+      await runAgent({ prompt, baseUrl, attachments: modelAttachments }),
       canonicalTranscriptChars,
     )
     const interviewerTurn = await appendInterviewerTurnAndCompleteRequest(

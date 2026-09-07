@@ -1,12 +1,13 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { AlertCircleIcon, LoaderCircleIcon, SendIcon } from "lucide-react"
+import { AlertCircleIcon, LoaderCircleIcon, PaperclipIcon, SendIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 type Message = { id?: string; role: "INTERVIEWER" | "PARTICIPANT"; content: string; sequence?: number }
 type StoredSession = { sessionId: string; resumeToken: string }
+type UploadedAttachment = { id: string; originalName: string; mimeType: string; sizeBytes: number }
 
 const fallbackError = "We couldn’t confirm the interviewer’s reply. Retrying is safe and won’t duplicate your answer."
 
@@ -40,7 +41,7 @@ async function responseError(response: Response) {
   return fallbackError
 }
 
-export function ResearchChat({ token }: { token: string }) {
+export function ResearchChat({ token, guided = false }: { token: string; guided?: boolean }) {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [resumeToken, setResumeToken] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -48,7 +49,9 @@ export function ResearchChat({ token }: { token: string }) {
   const [busy, setBusy] = useState(false)
   const [complete, setComplete] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState<{ answer: string; idempotencyKey: string } | null>(null)
+  const [pending, setPending] = useState<{ answer: string; idempotencyKey: string; attachmentIds: string[] } | null>(null)
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([])
+  const [uploading, setUploading] = useState(false)
   const transcriptEnd = useRef<HTMLDivElement | null>(null)
   const resumeAttempted = useRef(false)
 
@@ -57,13 +60,14 @@ export function ResearchChat({ token }: { token: string }) {
   }, [messages, busy, error])
 
   async function start(resume?: StoredSession) {
+    resumeAttempted.current = true
     setBusy(true)
     setError(null)
     try {
       const response = await fetch("/api/research/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, ...(resume ?? {}) }),
+        body: JSON.stringify({ token, ...(!resume ? { modality: "CHAT" } : {}), ...(resume ?? {}) }),
       })
       if (!response.ok) {
         if (resume && response.status === 404) localStorage.removeItem(storageKey(token))
@@ -91,17 +95,18 @@ export function ResearchChat({ token }: { token: string }) {
   }
 
   useEffect(() => {
-    if (resumeAttempted.current) return
-    resumeAttempted.current = true
-    const stored = readStoredSession(token)
-    if (!stored) return
-    const resumeTimer = window.setTimeout(() => void start(stored), 0)
+    const resumeTimer = window.setTimeout(() => {
+      if (resumeAttempted.current) return
+      resumeAttempted.current = true
+      const stored = readStoredSession(token)
+      if (stored) void start(stored)
+    }, 0)
     return () => window.clearTimeout(resumeTimer)
     // start is intentionally scoped to this token's initial mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
-  async function requestReply(request: { answer: string; idempotencyKey: string }) {
+  async function requestReply(request: { answer: string; idempotencyKey: string; attachmentIds: string[] }) {
     if (!sessionId || !resumeToken) return
     setBusy(true)
     setError(null)
@@ -116,6 +121,7 @@ export function ResearchChat({ token }: { token: string }) {
           resumeToken,
           answer: request.answer,
           idempotencyKey: request.idempotencyKey,
+          attachmentIds: request.attachmentIds,
         }),
       })
       if (!response.ok) {
@@ -130,6 +136,7 @@ export function ResearchChat({ token }: { token: string }) {
       const interviewer = data.turn ?? { role: "INTERVIEWER" as const, content: data.message.trim() }
       setMessages((current) => [...current, interviewer])
       setPending(null)
+      setAttachments([])
     } catch {
       setError("The interviewer couldn’t respond. Please check your connection and try again.")
     } finally {
@@ -140,10 +147,35 @@ export function ResearchChat({ token }: { token: string }) {
   async function send() {
     if (!input.trim() || !sessionId || !resumeToken || busy || error) return
     const answer = input.trim()
-    const request = { answer, idempotencyKey: crypto.randomUUID().replaceAll("-", "") }
+    const request = { answer, idempotencyKey: crypto.randomUUID().replaceAll("-", ""), attachmentIds: attachments.map((attachment) => attachment.id) }
     setMessages((current) => [...current, { role: "PARTICIPANT", content: answer }])
     setInput("")
     await requestReply(request)
+  }
+
+  async function upload(file: File) {
+    if (!sessionId || !resumeToken || uploading || attachments.length >= 3) return
+    setUploading(true)
+    setError(null)
+    try {
+      const form = new FormData()
+      form.set("token", token)
+      form.set("sessionId", sessionId)
+      form.set("resumeToken", resumeToken)
+      form.set("idempotencyKey", crypto.randomUUID().replaceAll("-", ""))
+      form.set("file", file)
+      const response = await fetch("/api/research/attachments", { method: "POST", body: form })
+      if (!response.ok) {
+        setError(response.status === 413 ? "That attachment is too large." : "The attachment couldn’t be uploaded. Please try again.")
+        return
+      }
+      const attachment = await response.json() as UploadedAttachment
+      setAttachments((current) => [...current, attachment])
+    } catch {
+      setError("The attachment couldn’t be uploaded. Please check your connection and try again.")
+    } finally {
+      setUploading(false)
+    }
   }
 
   async function finish() {
@@ -183,7 +215,7 @@ export function ResearchChat({ token }: { token: string }) {
       <div className="space-y-3">
         <Button onClick={() => start()} disabled={busy}>
           {busy && <LoaderCircleIcon className="animate-spin" data-icon="inline-start" />}
-          {busy ? "Starting…" : "Start interview"}
+          {busy ? "Starting…" : guided ? "Start session" : "Start interview"}
         </Button>
         {error && <ErrorMessage message={error} />}
       </div>
@@ -204,7 +236,7 @@ export function ResearchChat({ token }: { token: string }) {
         {busy && (
           <div className="flex w-fit items-center gap-2 rounded-xl border bg-surface-panel px-4 py-3 text-sm text-text-muted">
             <LoaderCircleIcon className="size-4 animate-spin" />
-            Compass is listening…
+            Compass is preparing the next question…
           </div>
         )}
         {error && (
@@ -220,7 +252,24 @@ export function ResearchChat({ token }: { token: string }) {
         <div ref={transcriptEnd} />
       </div>
 
+      {attachments.length > 0 && <div className="mt-4 flex flex-wrap gap-2">
+        {attachments.map((attachment) => <span className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs" key={attachment.id}>
+          {attachment.originalName}
+          <button aria-label={`Remove ${attachment.originalName}`} onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))} type="button"><XIcon className="size-3" /></button>
+        </span>)}
+      </div>}
       <div className="mt-6 flex gap-2">
+        <label className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border hover:bg-muted" title="Share screenshot or PDF">
+          {uploading ? <LoaderCircleIcon className="size-4 animate-spin" /> : <PaperclipIcon className="size-4" />}
+          <input
+            accept="image/png,image/jpeg,image/webp,application/pdf"
+            aria-label="Share screenshot or PDF"
+            className="sr-only"
+            disabled={uploading || busy || attachments.length >= 3}
+            onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = "" }}
+            type="file"
+          />
+        </label>
         <Input
           aria-label="Your response"
           value={input}

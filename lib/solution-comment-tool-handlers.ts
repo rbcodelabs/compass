@@ -15,6 +15,7 @@
 
 import getPrisma from "@/lib/db"
 import { ok, fail } from "@/lib/mcp-output"
+import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat"
 
 type CommentType = "PLAN" | "COMMENT"
 type AuthorType = "AGENT" | "HUMAN"
@@ -55,6 +56,7 @@ export async function addSolutionPlan({
       source: "MCP",
     },
   })
+  try { await mirrorLegacySolutionComment(comment) } catch (error) { await prisma.solutionComment.delete({ where: { id: comment.id } }); throw error }
 
   return ok(
     `**Plan added** to solution "${solution.title}"\n` +
@@ -98,6 +100,7 @@ export async function addSolutionComment({
       source: "MCP",
     },
   })
+  try { await mirrorLegacySolutionComment(comment) } catch (error) { await prisma.solutionComment.delete({ where: { id: comment.id } }); throw error }
 
   return ok(
     `**Comment added** to solution "${solution.title}"\n` +
@@ -196,6 +199,7 @@ export async function updateSolutionComment({
     where: { id: commentId },
     data: { body: body.trim(), updatedAt: new Date() },
   })
+  await updateMirroredComment(commentId, updated.body)
 
   return ok(
     `**Comment updated**\n` +
@@ -222,6 +226,7 @@ export async function deleteSolutionComment({ commentId }: { commentId: string }
   // SolutionComment has no dependent rows (no experiments/evidence attach to
   // it), so — unlike deleteAssumption — there's nothing to null out first.
   await prisma.solutionComment.delete({ where: { id: commentId } })
+  await deleteMirroredComment(commentId)
 
   return ok(
     `**Comment deleted**\n` +
@@ -255,6 +260,7 @@ async function setSolutionPlanStatus(commentId: string, planStatus: PlanStatus) 
     where: { id: commentId },
     data: { planStatus, updatedAt: new Date() },
   })
+  await updateMirroredLegacyPlanStatus(commentId, planStatus)
 
   return ok(
     `**Plan ${planStatus === "APPROVED" ? "approved" : "rejected"}**\n` +

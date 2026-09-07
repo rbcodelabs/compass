@@ -31,6 +31,7 @@ const mockExperiment = {
   update: vi.fn(),
 };
 const mockRoadmapItem = {
+  update: vi.fn(),
   updateMany: vi.fn(),
   findMany: vi.fn(),
   deleteMany: vi.fn(),
@@ -95,6 +96,17 @@ const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany
 const mockArtifactLink = { deleteMany: vi.fn() };
 const mockArtifactBlobCleanup = { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() };
 const mockWorkspaceScoringConfig = { upsert: vi.fn() };
+const mockReleaseDispatch = { deleteMany: vi.fn() };
+const mockReleaseRunTask = { deleteMany: vi.fn() };
+const mockReleaseRun = { deleteMany: vi.fn() };
+const mockDecisionApplication = { deleteMany: vi.fn() };
+const mockDecisionEvidenceRef = { deleteMany: vi.fn() };
+const mockDecisionRecord = { deleteMany: vi.fn() };
+const mockReviewOption = { deleteMany: vi.fn() };
+const mockReviewRevision = { deleteMany: vi.fn() };
+const mockReviewRequest = { updateMany: vi.fn(), deleteMany: vi.fn() };
+const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
+const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 
 const mockPrisma = {
   squad: mockSquad,
@@ -126,6 +138,17 @@ const mockPrisma = {
   artifactLink: mockArtifactLink,
   artifactBlobCleanup: mockArtifactBlobCleanup,
   workspaceScoringConfig: mockWorkspaceScoringConfig,
+  releaseDispatch: mockReleaseDispatch,
+  releaseRunTask: mockReleaseRunTask,
+  releaseRun: mockReleaseRun,
+  decisionApplication: mockDecisionApplication,
+  decisionEvidenceRef: mockDecisionEvidenceRef,
+  decisionRecord: mockDecisionRecord,
+  reviewOption: mockReviewOption,
+  reviewRevision: mockReviewRevision,
+  reviewRequest: mockReviewRequest,
+  portfolioCapacityReservation: mockPortfolioCapacityReservation,
+  portfolioCapacityPlan: mockPortfolioCapacityPlan,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -346,7 +369,7 @@ describe("deleteSquad", () => {
     });
     expect(mockRoadmapItem.updateMany).toHaveBeenCalledWith({
       where: { squadId: "squad-1" },
-      data: { squadId: null },
+      data: { squadId: null, updatedAt: expect.any(Date) },
     });
 
     expect(mockSquad.delete).toHaveBeenCalledWith({ where: { id: "squad-1" } });
@@ -369,6 +392,14 @@ describe("assignSquad", () => {
     expect(mockObjective.update).toHaveBeenCalledWith({
       where: { id: "obj-1" },
       data: { squadId: "squad-1" },
+    });
+  });
+
+  it("bumps the roadmap item revision when assigning a squad", async () => {
+    await assignSquad("roadmapItem", "roadmap-1", "squad-1", "/path");
+    expect(mockRoadmapItem.update).toHaveBeenCalledWith({
+      where: { id: "roadmap-1" },
+      data: { squadId: "squad-1", updatedAt: expect.any(Date) },
     });
   });
 
@@ -757,6 +788,24 @@ describe("deleteWorkspace", () => {
     mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
 
     const result = await deleteWorkspace("org", "ws");
+
+    expect(mockReleaseDispatch.deleteMany).toHaveBeenCalled();
+    expect(mockReleaseRunTask.deleteMany).toHaveBeenCalled();
+    expect(mockReleaseRun.deleteMany).toHaveBeenCalled();
+    expect(mockDecisionApplication.deleteMany).toHaveBeenCalled();
+    expect(mockDecisionEvidenceRef.deleteMany).toHaveBeenCalled();
+    expect(mockDecisionRecord.deleteMany).toHaveBeenCalled();
+    expect(mockReviewOption.deleteMany).toHaveBeenCalled();
+    expect(mockReviewRevision.deleteMany).toHaveBeenCalled();
+    expect(mockReviewRequest.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockPortfolioCapacityReservation.deleteMany).toHaveBeenCalled();
+    expect(mockPortfolioCapacityPlan.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockReleaseRun.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockDecisionRecord.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockDecisionApplication.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockDecisionRecord.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockReviewRequest.updateMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockDecisionEvidenceRef.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRequest.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockPortfolioCapacityReservation.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockRoadmapItem.deleteMany.mock.invocationCallOrder[0]);
 
     // Workspace deleted
     expect(mockWorkspace.delete).toHaveBeenCalledWith({ where: { id: "ws-1" } });

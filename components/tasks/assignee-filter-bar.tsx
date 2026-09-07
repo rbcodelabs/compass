@@ -20,11 +20,11 @@ export function AssigneeFilterBar({ members }: AssigneeProps) {
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
-      <span className="text-xs text-slate-400 font-medium mr-1">Assignee:</span>
+      <span className="text-xs text-text-subtle font-medium mr-1">Assignee:</span>
       <button
         onClick={() => setFilter(null)}
         className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
-          !activeAssignee ? "bg-slate-800 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+          !activeAssignee ? "bg-slate-800 text-white shadow-sm" : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
         }`}
       >
         All
@@ -36,7 +36,7 @@ export function AssigneeFilterBar({ members }: AssigneeProps) {
           className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
             activeAssignee === member.userId
               ? "bg-slate-800 text-white shadow-sm"
-              : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+              : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
           }`}
         >
           {member.name || member.email}
@@ -59,11 +59,11 @@ export function PriorityFilterBar() {
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
-      <span className="text-xs text-slate-400 font-medium mr-1">Priority:</span>
+      <span className="text-xs text-text-subtle font-medium mr-1">Priority:</span>
       <button
         onClick={() => setFilter(null)}
         className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
-          !activePriority ? "bg-slate-800 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+          !activePriority ? "bg-slate-800 text-white shadow-sm" : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
         }`}
       >
         All
@@ -75,7 +75,7 @@ export function PriorityFilterBar() {
           className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
             activePriority === priority
               ? "bg-slate-800 text-white shadow-sm"
-              : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+              : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
           }`}
         >
           {priority}

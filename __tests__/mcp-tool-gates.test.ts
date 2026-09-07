@@ -17,10 +17,12 @@ const mockPrisma = {
   workspaceMember: { findFirst: vi.fn() },
   organization: { findUnique: vi.fn() },
   organizationMember: { findFirst: vi.fn() },
-  opportunity: { findUnique: vi.fn() },
-  solution: { findUnique: vi.fn() },
+  opportunity: { findUnique: vi.fn(), update: vi.fn() },
+  solution: { findUnique: vi.fn(), update: vi.fn() },
   artifact: { findUnique: vi.fn() },
   feedbackItem: { findUnique: vi.fn() },
+  doc: { findUnique: vi.fn() },
+  reviewRequest: { findUnique: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
@@ -88,6 +90,16 @@ describe("applyToolGate", () => {
     )
   })
 
+  it.each(["list_solutions", "list_assumptions", "list_release_runs"])(
+    "%s denies discovery outside the caller's workspace membership",
+    async (tool) => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(
+        /not found or access denied/,
+      )
+    },
+  )
+
   it("get_opportunity: denies a non-member", async () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null) // not a member
@@ -100,6 +112,28 @@ describe("applyToolGate", () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     await expect(applyToolGate("get_opportunity", MEMBER, { opportunityId: "opp-1" })).resolves.toBeUndefined()
+  })
+
+  it("update_opportunity: denies a cross-workspace caller before the handler writes", async () => {
+    mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+
+    await expect(callTool("update_opportunity", MEMBER, {
+      opportunityId: "opp-1",
+      title: "New title",
+    })).rejects.toThrow(/not found or access denied/)
+
+    expect(mockPrisma.opportunity.findUnique).toHaveBeenCalledTimes(1)
+    expect(mockPrisma.opportunity.update).not.toHaveBeenCalled()
+  })
+
+  it("update_solution_status preserves the solution workspace boundary", async () => {
+    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+
+    await expect(
+      applyToolGate("update_solution_status", MEMBER, { solutionId: "sol-1", status: "SHIPPED" })
+    ).rejects.toThrow(/not found or access denied/)
   })
 
   it("create_workspace: requires org admin (plain member denied)", async () => {
@@ -133,6 +167,20 @@ describe("applyToolGate", () => {
       .rejects.toThrow(/not found or access denied/)
   })
 
+  it("request_decision rejects a linked entity from another workspace", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    mockPrisma.doc.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
+    await expect(applyToolGate("request_decision", MEMBER, { workspaceId: "ws-1", subjectType: "DOC", subjectId: "doc-1" }))
+      .rejects.toThrow(/does not belong to workspace/)
+  })
+
+  it("get_decision requires the request to belong to the declared workspace", async () => {
+    mockPrisma.reviewRequest.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-2" })
+    await expect(applyToolGate("get_decision", MEMBER, { workspaceId: "ws-1", requestId: "request-1" }))
+      .rejects.toThrow(/does not belong to workspace/)
+  })
+
   it.each(["update_feedback", "add_feedback_attachment"])("%s denies access to another workspace's feedback", async (tool) => {
     mockPrisma.feedbackItem.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
@@ -145,6 +193,19 @@ describe("applyToolGate", () => {
 // the gate before the handler. Drives a captured, gated handler under a
 // per-user actor scope — no direct applyToolGate call.
 describe("register() wrapper enforces gates end-to-end", () => {
+  it("denies update_solution_status before its handler can read or write", async () => {
+    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+
+    await expect(callTool("update_solution_status", MEMBER, {
+      solutionId: "sol-1",
+      status: "SHIPPED",
+    })).rejects.toThrow(/not found or access denied/)
+
+    expect(mockPrisma.solution.findUnique).toHaveBeenCalledTimes(1)
+    expect(mockPrisma.solution.update).not.toHaveBeenCalled()
+  })
+
   it("denies a non-member calling get_opportunity (gate runs before the handler)", async () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null) // not a member

@@ -1,32 +1,44 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const { mockAuth } = vi.hoisted(() => ({ mockAuth: vi.fn() }));
+
 const mockRoadmapItem = {
   create: vi.fn(),
   update: vi.fn(),
   findFirst: vi.fn(),
-};
-const mockOpportunity = {
-  findFirst: vi.fn(),
+  findUnique: vi.fn(),
 };
 const mockSolution = {
-  findUnique: vi.fn(),
+  findFirst: vi.fn(),
 };
 const mockFeedbackItem = {
-  findUnique: vi.fn(),
+  findFirst: vi.fn(),
 };
+const mockWorkspaceMember = { findUnique: vi.fn() };
+const mockOpportunity = { findFirst: vi.fn() };
+const mockSquad = { findFirst: vi.fn() };
+const mockExperiment = { findFirst: vi.fn() };
+const mockKeyResult = { findFirst: vi.fn() };
 
 const mockPrisma = {
   roadmapItem: mockRoadmapItem,
-  opportunity: mockOpportunity,
   solution: mockSolution,
   feedbackItem: mockFeedbackItem,
+  workspaceMember: mockWorkspaceMember,
+  opportunity: mockOpportunity,
+  squad: mockSquad,
+  experiment: mockExperiment,
+  keyResult: mockKeyResult,
+  portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
+  portfolioCapacityPlan: { updateMany: vi.fn() },
+  $transaction: vi.fn(),
 };
-
-vi.mock("@/auth", () => ({ auth: vi.fn() }));
 
 vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),
 }));
+
+vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -40,43 +52,54 @@ import {
   updateRoadmapItem,
   editRoadmapItem,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
-import { auth } from "@/auth";
-
-const mockAuth = vi.mocked(auth);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockAuth.mockResolvedValue(
-    { user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T> ? T : never,
-  );
   mockRoadmapItem.create.mockResolvedValue({ id: "item-1", title: "Test Item" });
   mockRoadmapItem.update.mockResolvedValue({ id: "item-1" });
-  mockRoadmapItem.findFirst.mockResolvedValue(null);
-  mockOpportunity.findFirst.mockResolvedValue(null);
-  mockSolution.findUnique.mockResolvedValue({ title: "My Solution" });
-  mockFeedbackItem.findUnique.mockResolvedValue({ title: "Login button is broken" });
+  mockRoadmapItem.findFirst.mockImplementation(({ where }: { where: { id?: string } }) =>
+    where.id
+      ? Promise.resolve({ id: where.id, workspaceId: "ws-1", horizon: "NEXT", status: "ACTIVE" })
+      : Promise.resolve(null),
+  );
+  mockRoadmapItem.findUnique.mockResolvedValue({ id: "item-1", horizon: "NEXT", status: "ACTIVE" });
+  mockPrisma.portfolioCapacityReservation.findUnique.mockResolvedValue(null);
+  mockPrisma.$transaction.mockImplementation((fn: (database: typeof mockPrisma) => unknown) => fn(mockPrisma));
+  mockSolution.findFirst.mockResolvedValue({ id: "sol-1", title: "My Solution", opportunity: { id: "opp-1", squadId: null } });
+  mockWorkspaceMember.findUnique.mockResolvedValue({ id: "member-1" });
+  mockOpportunity.findFirst.mockResolvedValue({ id: "opp-1" });
+  mockSquad.findFirst.mockResolvedValue({ id: "squad-1" });
+  mockExperiment.findFirst.mockResolvedValue({ id: "exp-1" });
+  mockKeyResult.findFirst.mockResolvedValue({ id: "kr-1" });
+  mockAuth.mockResolvedValue({ user: { id: "user-1" } });
+  mockFeedbackItem.findFirst.mockResolvedValue({ title: "Login button is broken" });
 });
 
 // ─── addRoadmapItem ───────────────────────────────────────────────────────────
 
 describe("addRoadmapItem", () => {
+  it("rejects a non-member before roadmap reads or writes", async () => {
+    mockWorkspaceMember.findUnique.mockResolvedValue(null);
+    await expect(addRoadmapItem("other-workspace", { title: "Forbidden", horizon: "NOW" })).rejects.toThrow("Workspace not found");
+    expect(mockRoadmapItem.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled();
+  });
   it("creates an item at sortOrder 0 when column is empty", async () => {
-    mockRoadmapItem.findFirst.mockResolvedValue(null);
+    mockRoadmapItem.findFirst.mockResolvedValueOnce(null);
     const result = await addRoadmapItem(
       "ws-1",
-      { title: "Ship payments", horizon: "NOW" },
-      "/path"
+      { title: "Ship payments", horizon: "NEXT" }
     );
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.sortOrder).toBe(0);
-    expect(data.horizon).toBe("NOW");
+    expect(data.horizon).toBe("NEXT");
     expect(data.title).toBe("Ship payments");
     expect(result).toMatchObject({ id: "item-1" });
   });
 
   it("places item after the last item in the horizon", async () => {
     mockRoadmapItem.findFirst.mockResolvedValue({ sortOrder: 4 });
-    await addRoadmapItem("ws-1", { title: "Feature X", horizon: "NEXT" }, "/path");
+    await addRoadmapItem("ws-1", { title: "Feature X", horizon: "NEXT" });
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.sortOrder).toBe(5);
   });
@@ -84,8 +107,7 @@ describe("addRoadmapItem", () => {
   it("passes through optional solutionId", async () => {
     await addRoadmapItem(
       "ws-1",
-      { title: "Feature Y", horizon: "LATER", solutionId: "sol-99" },
-      "/path"
+      { title: "Feature Y", horizon: "LATER", solutionId: "sol-99" }
     );
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.solutionId).toBe("sol-99");
@@ -94,8 +116,7 @@ describe("addRoadmapItem", () => {
   it("passes through optional keyResultId", async () => {
     await addRoadmapItem(
       "ws-1",
-      { title: "Feature Z", horizon: "NOW", keyResultId: "kr-5" },
-      "/path"
+      { title: "Feature Z", horizon: "NEXT", keyResultId: "kr-5" }
     );
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.keyResultId).toBe("kr-5");
@@ -104,7 +125,7 @@ describe("addRoadmapItem", () => {
   it("propagates DB errors", async () => {
     mockRoadmapItem.create.mockRejectedValue(new Error("DB error"));
     await expect(
-      addRoadmapItem("ws-1", { title: "Fail", horizon: "NOW" }, "/path")
+      addRoadmapItem("ws-1", { title: "Fail", horizon: "NEXT" })
     ).rejects.toThrow("DB error");
   });
 
@@ -113,8 +134,7 @@ describe("addRoadmapItem", () => {
     const endDate = new Date("2026-09-30");
     await addRoadmapItem(
       "ws-1",
-      { title: "Timed feature", horizon: "NOW", startDate, endDate },
-      "/path"
+      { title: "Timed feature", horizon: "NEXT", startDate, endDate }
     );
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.startDate).toBe(startDate);
@@ -122,7 +142,7 @@ describe("addRoadmapItem", () => {
   });
 
   it("defaults isPrivate to false when not provided", async () => {
-    await addRoadmapItem("ws-1", { title: "Public by default", horizon: "NOW" }, "/path");
+    await addRoadmapItem("ws-1", { title: "Public by default", horizon: "NEXT" });
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.isPrivate).toBe(false);
   });
@@ -130,8 +150,7 @@ describe("addRoadmapItem", () => {
   it("passes through isPrivate: true", async () => {
     await addRoadmapItem(
       "ws-1",
-      { title: "Security fix", horizon: "NOW", isPrivate: true },
-      "/path"
+      { title: "Security fix", horizon: "NEXT", isPrivate: true }
     );
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.isPrivate).toBe(true);
@@ -141,24 +160,36 @@ describe("addRoadmapItem", () => {
 // ─── moveItem ─────────────────────────────────────────────────────────────────
 
 describe("moveItem", () => {
+  it("rejects a non-member before item lookup or telemetry", async () => {
+    mockWorkspaceMember.findUnique.mockResolvedValue(null);
+    await expect(moveItem("item-1", "NOW", "other-workspace")).rejects.toThrow("Workspace not found");
+    expect(mockRoadmapItem.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
   it("changes horizon and places at sortOrder 0 when destination empty", async () => {
-    mockRoadmapItem.findFirst.mockResolvedValue(null);
-    await moveItem("item-1", "LATER", "ws-1", "/path");
+    mockRoadmapItem.findFirst
+      .mockResolvedValueOnce({ id: "item-1", workspaceId: "ws-1", horizon: "NEXT", status: "ACTIVE" })
+      .mockResolvedValueOnce(null);
+    await moveItem("item-1", "LATER", "ws-1");
     const data = mockRoadmapItem.update.mock.calls[0][0].data;
     expect(data.horizon).toBe("LATER");
     expect(data.sortOrder).toBe(0);
   });
 
   it("places item after last existing item in destination horizon", async () => {
-    mockRoadmapItem.findFirst.mockResolvedValue({ sortOrder: 7 });
-    await moveItem("item-1", "NEXT", "ws-1", "/path");
+    mockRoadmapItem.findFirst
+      .mockResolvedValueOnce({ id: "item-1", workspaceId: "ws-1", horizon: "LATER", status: "ACTIVE" })
+      .mockResolvedValueOnce({ sortOrder: 7 });
+    await moveItem("item-1", "NEXT", "ws-1");
     const data = mockRoadmapItem.update.mock.calls[0][0].data;
     expect(data.sortOrder).toBe(8);
   });
 
   it("moves an item to the SHIPPED horizon", async () => {
-    mockRoadmapItem.findFirst.mockResolvedValue(null);
-    await moveItem("item-1", "SHIPPED", "ws-1", "/path");
+    mockRoadmapItem.findFirst
+      .mockResolvedValueOnce({ id: "item-1", workspaceId: "ws-1", horizon: "NEXT", status: "ACTIVE" })
+      .mockResolvedValueOnce(null);
+    await moveItem("item-1", "SHIPPED", "ws-1");
     const data = mockRoadmapItem.update.mock.calls[0][0].data;
     expect(data.horizon).toBe("SHIPPED");
   });
@@ -168,25 +199,30 @@ describe("moveItem", () => {
 
 describe("archiveItem", () => {
   it("sets status to ARCHIVED", async () => {
-    await archiveItem("item-1", "/path");
-    expect(mockRoadmapItem.update).toHaveBeenCalledWith({
+    await archiveItem("item-1", "ws-1");
+    expect(mockRoadmapItem.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "item-1" },
-      data: { status: "ARCHIVED" },
-    });
+      data: expect.objectContaining({ status: "ARCHIVED" }),
+    }));
   });
 
   it("propagates DB errors", async () => {
     mockRoadmapItem.update.mockRejectedValue(new Error("not found"));
-    await expect(archiveItem("item-999", "/path")).rejects.toThrow("not found");
+    await expect(archiveItem("item-999", "ws-1")).rejects.toThrow("not found");
   });
 });
 
 // ─── promoteToRoadmap ─────────────────────────────────────────────────────────
 
 describe("promoteToRoadmap", () => {
+  it("rejects a Solution outside the authorized workspace before roadmap mutation", async () => {
+    mockSolution.findFirst.mockResolvedValue(null);
+    await expect(promoteToRoadmap("foreign-solution", "ws-1", "NOW", null, null)).rejects.toThrow("Solution not found");
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled();
+  });
   it("creates a roadmap item using the solution title", async () => {
-    mockSolution.findUnique.mockResolvedValue({ title: "Great Solution" });
-    const result = await promoteToRoadmap("sol-1", "ws-1", "NOW", null, null);
+    mockSolution.findFirst.mockResolvedValue({ title: "Great Solution", opportunity: { id: "opp-1", squadId: null } });
+    const result = await promoteToRoadmap("sol-1", "ws-1", "NEXT", null, null);
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.title).toBe("Great Solution");
     expect(data.solutionId).toBe("sol-1");
@@ -194,9 +230,9 @@ describe("promoteToRoadmap", () => {
   });
 
   it("throws when solution is not found", async () => {
-    mockSolution.findUnique.mockResolvedValue(null);
+    mockSolution.findFirst.mockResolvedValue(null);
     await expect(
-      promoteToRoadmap("sol-999", "ws-1", "NOW", null, null)
+      promoteToRoadmap("sol-999", "ws-1", "NEXT", null, null)
     ).rejects.toThrow("Solution not found");
   });
 
@@ -215,7 +251,8 @@ describe("promoteToRoadmap", () => {
   });
 
   it("passes through squadId and opportunityId", async () => {
-    await promoteToRoadmap("sol-1", "ws-1", "NOW", "squad-1", "opp-1");
+    mockSolution.findFirst.mockResolvedValue({ title: "My Solution", opportunity: { id: "opp-1", squadId: "squad-1" } });
+    await promoteToRoadmap("sol-1", "ws-1", "NEXT", "squad-1", "opp-1");
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.squadId).toBe("squad-1");
     expect(data.opportunityId).toBe("opp-1");
@@ -224,27 +261,27 @@ describe("promoteToRoadmap", () => {
   it("passes through optional dates when scheduled directly onto the timeline", async () => {
     const startDate = new Date("2026-07-01");
     const endDate = new Date("2026-09-30");
-    await promoteToRoadmap("sol-1", "ws-1", "NOW", null, null, { startDate, endDate });
+    await promoteToRoadmap("sol-1", "ws-1", "NEXT", null, null, { startDate, endDate });
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.startDate).toBe(startDate);
     expect(data.endDate).toBe(endDate);
   });
 
   it("creates without dates when not scheduled with a timeframe", async () => {
-    await promoteToRoadmap("sol-1", "ws-1", "NOW", null, null);
+    await promoteToRoadmap("sol-1", "ws-1", "NEXT", null, null);
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.startDate).toBeUndefined();
     expect(data.endDate).toBeUndefined();
   });
 
   it("defaults isPrivate to false when not provided", async () => {
-    await promoteToRoadmap("sol-1", "ws-1", "NOW", null, null);
+    await promoteToRoadmap("sol-1", "ws-1", "NEXT", null, null);
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.isPrivate).toBe(false);
   });
 
   it("passes through isPrivate: true", async () => {
-    await promoteToRoadmap("sol-1", "ws-1", "NOW", null, null, undefined, true);
+    await promoteToRoadmap("sol-1", "ws-1", "NEXT", null, null, undefined, true);
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.isPrivate).toBe(true);
   });
@@ -253,76 +290,126 @@ describe("promoteToRoadmap", () => {
 // ─── promoteFeedbackToRoadmap ─────────────────────────────────────────────────
 
 describe("promoteFeedbackToRoadmap", () => {
-  it("creates a roadmap item using the feedback title", async () => {
-    mockFeedbackItem.findUnique.mockResolvedValue({ title: "Login button is broken" });
-    const result = await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path");
+  it("rejects an unauthenticated caller without writing", async () => {
+    mockAuth.mockResolvedValue(null);
+
+    await expect(
+      promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT")
+    ).rejects.toThrow("Unauthorized");
+
+    expect(mockFeedbackItem.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-member without writing", async () => {
+    mockWorkspaceMember.findUnique.mockResolvedValue(null);
+
+    await expect(
+      promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT")
+    ).rejects.toThrow("Workspace not found");
+
+    expect(mockFeedbackItem.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects feedback from another workspace without writing", async () => {
+    mockFeedbackItem.findFirst.mockResolvedValue(null);
+
+    await expect(
+      promoteFeedbackToRoadmap("fb-other", "ws-1", "NEXT")
+    ).rejects.toThrow("Feedback item not found");
+
+    expect(mockFeedbackItem.findFirst).toHaveBeenCalledWith({
+      where: { id: "fb-other", workspaceId: "ws-1" },
+      select: { title: true },
+    });
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled();
+  });
+
+  it("creates a roadmap item for an authorized same-workspace member", async () => {
+    const result = await promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT");
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.title).toBe("Login button is broken");
     expect(data.feedbackId).toBe("fb-1");
     expect(data.workspaceId).toBe("ws-1");
-    expect(data.horizon).toBe("NOW");
+    expect(data.horizon).toBe("NEXT");
     expect(result).toMatchObject({ id: "item-1" });
   });
 
+  it("uses the authorized workspace for roadmap creation", async () => {
+    await promoteFeedbackToRoadmap("fb-1", "ws-authorized", "NEXT");
+
+    expect(mockFeedbackItem.findFirst).toHaveBeenCalledWith({
+      where: { id: "fb-1", workspaceId: "ws-authorized" },
+      select: { title: true },
+    });
+    expect(mockRoadmapItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        workspaceId: "ws-authorized",
+        feedbackId: "fb-1",
+      }),
+    });
+  });
+
   it("throws when feedback item is not found", async () => {
-    mockFeedbackItem.findUnique.mockResolvedValue(null);
+    mockFeedbackItem.findFirst.mockResolvedValue(null);
     await expect(
-      promoteFeedbackToRoadmap("fb-999", "ws-1", "NOW", "/path")
+      promoteFeedbackToRoadmap("fb-999", "ws-1", "NEXT")
     ).rejects.toThrow("Feedback item not found");
     expect(mockRoadmapItem.create).not.toHaveBeenCalled();
   });
 
   it("places item at sortOrder 0 when horizon is empty", async () => {
     mockRoadmapItem.findFirst.mockResolvedValue(null);
-    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT", "/path");
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT");
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.sortOrder).toBe(0);
   });
 
   it("places item after last item in horizon", async () => {
     mockRoadmapItem.findFirst.mockResolvedValue({ sortOrder: 3 });
-    await promoteFeedbackToRoadmap("fb-1", "ws-1", "LATER", "/path");
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "LATER");
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.sortOrder).toBe(4);
   });
 
-  it("calls revalidatePath with the passed-in path", async () => {
+  it("revalidates the trusted application layout", async () => {
     const { revalidatePath } = await import("next/cache");
-    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/custom/roadmap/path");
-    expect(revalidatePath).toHaveBeenCalledWith("/custom/roadmap/path");
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT");
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 
   it("propagates DB errors", async () => {
     mockRoadmapItem.create.mockRejectedValue(new Error("DB error"));
     await expect(
-      promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path")
+      promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT")
     ).rejects.toThrow("DB error");
   });
 
   it("passes through optional dates when scheduled directly onto the timeline", async () => {
     const startDate = new Date("2026-08-01");
     const endDate = new Date("2026-08-15");
-    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path", { startDate, endDate });
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT", { startDate, endDate });
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.startDate).toBe(startDate);
     expect(data.endDate).toBe(endDate);
   });
 
   it("creates without dates when not scheduled with a timeframe", async () => {
-    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path");
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT");
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.startDate).toBeUndefined();
     expect(data.endDate).toBeUndefined();
   });
 
   it("defaults isPrivate to false when not provided", async () => {
-    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path");
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT");
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.isPrivate).toBe(false);
   });
 
   it("passes through isPrivate: true (e.g. a security-flagged bug)", async () => {
-    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NOW", "/path", undefined, true);
+    await promoteFeedbackToRoadmap("fb-1", "ws-1", "NEXT", undefined, true);
     const data = mockRoadmapItem.create.mock.calls[0][0].data;
     expect(data.isPrivate).toBe(true);
   });
@@ -332,10 +419,10 @@ describe("promoteFeedbackToRoadmap", () => {
 
 describe("updateSortOrder", () => {
   it("updates the sort order directly", async () => {
-    await updateSortOrder("item-1", 9, "/path");
+    await updateSortOrder("item-1", "ws-1", 9);
     expect(mockRoadmapItem.update).toHaveBeenCalledWith({
       where: { id: "item-1" },
-      data: { sortOrder: 9 },
+      data: { sortOrder: 9, updatedAt: expect.any(Date) },
     });
   });
 });
@@ -343,13 +430,42 @@ describe("updateSortOrder", () => {
 // ─── updateRoadmapItem ────────────────────────────────────────────────────────
 
 describe("updateRoadmapItem", () => {
+  it("rejects a partial effective date range", async () => {
+    mockRoadmapItem.findFirst.mockResolvedValueOnce({
+      id: "item-1", workspaceId: "ws-1", horizon: "NEXT", status: "ACTIVE",
+      startDate: null, endDate: null,
+    });
+    await expect(updateRoadmapItem("item-1", "ws-1", {
+      startDate: new Date("2026-09-10T00:00:00.000Z"),
+    })).rejects.toThrow(/inclusive range/);
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reversed effective date range", async () => {
+    mockRoadmapItem.findFirst.mockResolvedValueOnce({
+      id: "item-1", workspaceId: "ws-1", horizon: "NEXT", status: "ACTIVE",
+      startDate: new Date("2026-09-01T00:00:00.000Z"), endDate: new Date("2026-09-05T00:00:00.000Z"),
+    });
+    await expect(updateRoadmapItem("item-1", "ws-1", {
+      startDate: new Date("2026-09-08T00:00:00.000Z"),
+    })).rejects.toThrow(/inclusive range/);
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("allows clearing both dates", async () => {
+    await updateRoadmapItem("item-1", "ws-1", { startDate: null, endDate: null });
+    expect(mockRoadmapItem.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ startDate: null, endDate: null }),
+    }));
+  });
+
   it("updates only the provided fields and always sets updatedAt explicitly", async () => {
     const startDate = new Date("2026-08-01");
     const endDate = new Date("2026-08-15");
     await updateRoadmapItem(
       "item-1",
-      { title: "Renamed", startDate, endDate },
-      "/path"
+      "ws-1",
+      { title: "Renamed", startDate, endDate }
     );
     const call = mockRoadmapItem.update.mock.calls[0][0];
     expect(call.where).toEqual({ id: "item-1" });
@@ -363,8 +479,8 @@ describe("updateRoadmapItem", () => {
   it("leaves fields untouched when not provided (undefined) but clears when explicitly null", async () => {
     await updateRoadmapItem(
       "item-1",
-      { description: "New description", startDate: null, endDate: null },
-      "/path"
+      "ws-1",
+      { description: "New description", startDate: null, endDate: null }
     );
     const call = mockRoadmapItem.update.mock.calls[0][0];
     expect(call.data.title).toBeUndefined();
@@ -376,24 +492,24 @@ describe("updateRoadmapItem", () => {
   it("propagates DB errors for a missing item id", async () => {
     mockRoadmapItem.update.mockRejectedValue(new Error("Record to update not found"));
     await expect(
-      updateRoadmapItem("item-missing", { title: "X" }, "/path")
+      updateRoadmapItem("item-missing", "ws-1", { title: "X" })
     ).rejects.toThrow("Record to update not found");
   });
 
   it("leaves isPrivate untouched when not provided", async () => {
-    await updateRoadmapItem("item-1", { title: "Renamed" }, "/path");
+    await updateRoadmapItem("item-1", "ws-1", { title: "Renamed" });
     const call = mockRoadmapItem.update.mock.calls[0][0];
     expect(call.data.isPrivate).toBeUndefined();
   });
 
   it("sets isPrivate when explicitly provided", async () => {
-    await updateRoadmapItem("item-1", { isPrivate: true }, "/path");
+    await updateRoadmapItem("item-1", "ws-1", { isPrivate: true });
     const call = mockRoadmapItem.update.mock.calls[0][0];
     expect(call.data.isPrivate).toBe(true);
   });
 
   it("can toggle isPrivate back to false", async () => {
-    await updateRoadmapItem("item-1", { isPrivate: false }, "/path");
+    await updateRoadmapItem("item-1", "ws-1", { isPrivate: false });
     const call = mockRoadmapItem.update.mock.calls[0][0];
     expect(call.data.isPrivate).toBe(false);
   });
@@ -411,107 +527,96 @@ describe("editRoadmapItem", () => {
     opportunityId: "opp-2",
   };
 
-  it("rejects an unauthenticated caller before querying roadmap data", async () => {
-    mockAuth.mockResolvedValue(null as never);
+  beforeEach(() => {
+    mockRoadmapItem.findFirst.mockResolvedValue({
+      id: "item-1",
+      startDate: null,
+      endDate: null,
+      opportunityId: "opp-1",
+      opportunity: { id: "opp-1", title: "Existing" },
+    });
+    mockRoadmapItem.update.mockResolvedValue({
+      id: "item-1",
+      title: "Renamed",
+      description: "Updated description",
+      startDate: null,
+      endDate: null,
+      isPrivate: true,
+      opportunityId: "opp-2",
+    });
+    mockOpportunity.findFirst.mockResolvedValue({ id: "opp-2", title: "Retention friction" });
+  });
 
-    await expect(
-      editRoadmapItem("item-1", editData, "/path")
-    ).rejects.toThrow("Unauthorized");
+  it("rejects an unauthenticated caller before querying roadmap data", async () => {
+    mockAuth.mockResolvedValue(null);
+
+    await expect(editRoadmapItem("item-1", "ws-1", editData)).rejects.toThrow("Unauthorized");
+
+    expect(mockWorkspaceMember.findUnique).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.findFirst).not.toHaveBeenCalled();
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-member before querying roadmap data", async () => {
+    mockWorkspaceMember.findUnique.mockResolvedValue(null);
+
+    await expect(editRoadmapItem("item-1", "ws-1", editData)).rejects.toThrow("Workspace not found");
 
     expect(mockRoadmapItem.findFirst).not.toHaveBeenCalled();
     expect(mockRoadmapItem.update).not.toHaveBeenCalled();
   });
 
-  it("does not reveal whether an item exists to a caller outside its workspace", async () => {
+  it("does not reveal an item from another workspace", async () => {
     mockRoadmapItem.findFirst.mockResolvedValue(null);
 
-    await expect(
-      editRoadmapItem("item-secret", editData, "/path")
-    ).rejects.toThrow("Roadmap item not found or access denied");
+    await expect(editRoadmapItem("item-secret", "ws-1", editData)).rejects.toThrow("Roadmap item not found");
 
-    expect(mockRoadmapItem.findFirst).toHaveBeenCalledWith({
-      where: {
-        id: "item-secret",
-        workspace: { members: { some: { userId: "user-1" } } },
-      },
-      select: {
-        id: true,
-        workspaceId: true,
-        opportunityId: true,
-        opportunity: { select: { id: true, title: true } },
-      },
-    });
+    expect(mockRoadmapItem.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "item-secret", workspaceId: "ws-1" },
+    }));
     expect(mockRoadmapItem.update).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["missing", "opp-missing"],
-    ["foreign-workspace", "opp-foreign"],
-  ])("rejects a %s opportunity without committing scalar edits", async (_scenario, opportunityId) => {
-    mockRoadmapItem.findFirst.mockResolvedValue({
-      id: "item-1",
-      workspaceId: "ws-1",
-      opportunityId: "opp-1",
-      opportunity: { id: "opp-1", title: "Existing" },
-    });
-    mockOpportunity.findFirst.mockResolvedValue(null);
+  it.each(["opp-missing", "opp-foreign"])(
+    "rejects unavailable opportunity %s without committing scalar edits",
+    async (opportunityId) => {
+      mockOpportunity.findFirst.mockResolvedValue(null);
 
-    await expect(
-      editRoadmapItem("item-1", { ...editData, opportunityId }, "/path")
-    ).rejects.toThrow("Opportunity not found or access denied");
+      await expect(
+        editRoadmapItem("item-1", "ws-1", { ...editData, opportunityId }),
+      ).rejects.toThrow("Opportunity not found");
 
-    expect(mockOpportunity.findFirst).toHaveBeenCalledWith({
-      where: { id: opportunityId, workspaceId: "ws-1" },
-      select: { id: true, title: true },
-    });
-    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
-  });
+      expect(mockOpportunity.findFirst).toHaveBeenCalledWith({
+        where: { id: opportunityId, workspaceId: "ws-1" },
+        select: { id: true, title: true },
+      });
+      expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+    },
+  );
 
-  it("links or changes an opportunity while leaving every other relation untouched", async () => {
-    mockRoadmapItem.findFirst.mockResolvedValue({
-      id: "item-1",
-      workspaceId: "ws-1",
-      opportunityId: "opp-1",
-      opportunity: { id: "opp-1", title: "Existing" },
-    });
-    mockOpportunity.findFirst.mockResolvedValue({ id: "opp-2", title: "Retention friction" });
-    mockRoadmapItem.update.mockResolvedValue({
-      id: "item-1",
-      title: "Renamed",
-      description: "Updated description",
-      startDate: null,
-      endDate: null,
-      isPrivate: true,
-      opportunityId: "opp-2",
-    });
-
-    const result = await editRoadmapItem("item-1", editData, "/path");
+  it("atomically updates scalar fields and the opportunity relation", async () => {
+    const result = await editRoadmapItem("item-1", "ws-1", editData);
 
     const call = mockRoadmapItem.update.mock.calls[0][0];
     expect(call.where).toEqual({ id: "item-1" });
-    expect(call.data.title).toBe("Renamed");
-    expect(call.data.description).toBe("Updated description");
-    expect(call.data.isPrivate).toBe(true);
-    expect(call.data.opportunityId).toBe("opp-2");
-    expect(call.data.updatedAt).toBeInstanceOf(Date);
+    expect(call.data).toMatchObject({
+      title: "Renamed",
+      description: "Updated description",
+      isPrivate: true,
+      opportunityId: "opp-2",
+      updatedAt: expect.any(Date),
+    });
     expect(call.data).not.toHaveProperty("solutionId");
     expect(call.data).not.toHaveProperty("experimentId");
     expect(call.data).not.toHaveProperty("keyResultId");
     expect(call.data).not.toHaveProperty("feedbackId");
     expect(result).toMatchObject({
-      title: "Renamed",
       opportunityId: "opp-2",
       opportunity: { id: "opp-2", title: "Retention friction" },
     });
   });
 
-  it("clears an opportunity without requiring an opportunity lookup", async () => {
-    mockRoadmapItem.findFirst.mockResolvedValue({
-      id: "item-1",
-      workspaceId: "ws-1",
-      opportunityId: "opp-1",
-      opportunity: { id: "opp-1", title: "Existing" },
-    });
+  it("clears an opportunity without looking it up", async () => {
     mockRoadmapItem.update.mockResolvedValue({
       id: "item-1",
       title: "Renamed",
@@ -522,44 +627,27 @@ describe("editRoadmapItem", () => {
       opportunityId: null,
     });
 
-    const result = await editRoadmapItem(
-      "item-1",
-      { ...editData, opportunityId: null },
-      "/path",
-    );
+    const result = await editRoadmapItem("item-1", "ws-1", { ...editData, opportunityId: null });
 
     expect(mockOpportunity.findFirst).not.toHaveBeenCalled();
-    expect(mockRoadmapItem.update.mock.calls[0][0].data).toMatchObject({
-      title: "Renamed",
-      opportunityId: null,
-      updatedAt: expect.any(Date),
-    });
+    expect(mockRoadmapItem.update.mock.calls[0][0].data).toMatchObject({ opportunityId: null });
     expect(result).toMatchObject({ opportunityId: null, opportunity: null });
   });
 
-  it("preserves the current opportunity without a redundant relation lookup or write", async () => {
+  it("preserves an archived current opportunity without a redundant lookup or relation write", async () => {
     const currentOpportunity = { id: "opp-archived", title: "Archived opportunity" };
     mockRoadmapItem.findFirst.mockResolvedValue({
       id: "item-1",
-      workspaceId: "ws-1",
+      startDate: null,
+      endDate: null,
       opportunityId: currentOpportunity.id,
       opportunity: currentOpportunity,
     });
-    mockRoadmapItem.update.mockResolvedValue({
-      id: "item-1",
-      title: "Renamed",
-      description: "Updated description",
-      startDate: null,
-      endDate: null,
-      isPrivate: true,
+
+    const result = await editRoadmapItem("item-1", "ws-1", {
+      ...editData,
       opportunityId: currentOpportunity.id,
     });
-
-    const result = await editRoadmapItem(
-      "item-1",
-      { ...editData, opportunityId: currentOpportunity.id },
-      "/path",
-    );
 
     expect(mockOpportunity.findFirst).not.toHaveBeenCalled();
     expect(mockRoadmapItem.update.mock.calls[0][0].data).not.toHaveProperty("opportunityId");

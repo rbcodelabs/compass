@@ -32,12 +32,67 @@ describe("searchHelp", () => {
   });
 
   it("respects the limit parameter", () => {
-    const results = searchHelp("the", 2);
-    expect(results.length).toBeLessThanOrEqual(2);
+    expect(searchHelp("roadmap", 10).length).toBeGreaterThan(2);
+    expect(searchHelp("roadmap", 2)).toHaveLength(2);
   });
 
   it("returns [] for a query that matches nothing", () => {
     expect(searchHelp("zzzznonexistentqueryterm9999")).toEqual([]);
+  });
+
+  it("ranks the OKR cycle section first for a natural-language creation question", () => {
+    const results = searchHelp("how do I create an OKR cycle");
+
+    expect(results[0]).toMatchObject({
+      slug: "01-okrs",
+      anchor: "okr-cycles",
+    });
+  });
+
+  it("ranks the roadmap promotion section first for a natural-language workflow question", () => {
+    const results = searchHelp("how do I promote a solution to the roadmap");
+
+    expect(results[0]).toMatchObject({
+      slug: "04-roadmap",
+      anchor: "not-yet-on-the-roadmap",
+    });
+  });
+
+  it("returns [] when a query contains only question and filler stopwords", () => {
+    expect(searchHelp("how do I the to")).toEqual([]);
+  });
+
+  it("ignores polite question filler when ranking a roadmap workflow query", () => {
+    const results = searchHelp("could you please tell me how I promote a solution to the roadmap", 3);
+
+    expect(results[0]).toMatchObject({
+      slug: "04-roadmap",
+      anchor: "not-yet-on-the-roadmap",
+    });
+  });
+
+  it("removes one-character query terms", () => {
+    expect(searchHelp("x")).toEqual([]);
+  });
+
+  it("suppresses duplicate query terms", () => {
+    expect(searchHelp("roadmap roadmap")).toEqual(searchHelp("roadmap"));
+  });
+
+  it("caps each query term to one contribution per field", () => {
+    const results = searchHelp("roadmap", 20);
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every((result) => result.score <= 8)).toBe(true);
+  });
+
+  it("keeps substring matching so singular terms match plural doc titles", () => {
+    expect(searchHelp("experiment")[0]).toMatchObject({
+      slug: "03-experiments",
+      title: "Experiments",
+      anchor: null,
+      score: 8,
+    });
   });
 });
 

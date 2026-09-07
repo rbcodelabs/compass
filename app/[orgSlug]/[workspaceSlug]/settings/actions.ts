@@ -12,6 +12,7 @@ import { encrypt } from "@/lib/crypto-secrets";
 import { generateSsoSecret } from "@/lib/portal-sso";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
+import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
 import type {
   CustomFieldType,
   CustomFieldObjectType,
@@ -72,7 +73,7 @@ export async function deleteSquad(
   await prisma.objective.updateMany({ where: { squadId }, data: { squadId: null } });
   await prisma.opportunity.updateMany({ where: { squadId }, data: { squadId: null } });
   await prisma.experiment.updateMany({ where: { squadId }, data: { squadId: null } });
-  await prisma.roadmapItem.updateMany({ where: { squadId }, data: { squadId: null } });
+  await prisma.roadmapItem.updateMany({ where: { squadId }, data: { squadId: null, updatedAt: new Date() } });
 
   await prisma.squad.delete({ where: { id: squadId } });
 
@@ -97,7 +98,7 @@ export async function assignSquad(
   } else if (objectType === "experiment") {
     await prisma.experiment.update({ where: { id: objectId }, data: { squadId } });
   } else if (objectType === "roadmapItem") {
-    await prisma.roadmapItem.update({ where: { id: objectId }, data: { squadId } });
+    await prisma.roadmapItem.update({ where: { id: objectId }, data: { squadId, updatedAt: new Date() } });
   } else if (objectType === "task") {
     await prisma.task.update({ where: { id: objectId }, data: { squadId, updatedAt: new Date() } });
   }
@@ -445,6 +446,10 @@ export async function deleteWorkspace(
 
   const workspaceId = workspace.id;
   const organizationId = workspace.organizationId;
+
+  // Decision/release/capacity aggregates reference Tasks and RoadmapItems.
+  // DSQL has no FK cascades, so clear the full child graph first.
+  await deleteWorkspaceDecisionData(prisma, workspaceId);
 
   // ── Step 1: Break the Objective <-> KeyResult circular reference ────────────
   // Objective.parentKeyResultId references KeyResult; null it before deleting KRs.

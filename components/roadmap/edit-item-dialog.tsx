@@ -32,6 +32,7 @@ function toDateInputValue(iso: string | null): string {
 
 type Props = {
   item: RoadmapCardData;
+  workspaceId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   revalidatePathStr: string;
@@ -41,9 +42,9 @@ type Props = {
 
 export function EditItemDialog({
   item,
+  workspaceId,
   open,
   onOpenChange,
-  revalidatePathStr,
   onSaved,
   availableOpportunities,
 }: Props) {
@@ -52,16 +53,11 @@ export function EditItemDialog({
   const [startDate, setStartDate] = useState(toDateInputValue(item.startDate));
   const [endDate, setEndDate] = useState(toDateInputValue(item.endDate));
   const [isPrivate, setIsPrivate] = useState(item.isPrivate);
-  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(
-    item.opportunityId,
-  );
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(item.opportunityId);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  // Archived opportunities are not in the workspace's normal picker list,
-  // but an item already linked to one must still show its current value and
-  // preserve it unless the user explicitly changes or clears the link.
   const opportunityOptions = item.opportunity && !availableOpportunities?.some(
-    (opportunity) => opportunity.id === item.opportunity!.id,
+    (opportunity) => opportunity.id === item.opportunity?.id,
   )
     ? [item.opportunity, ...(availableOpportunities ?? [])]
     : (availableOpportunities ?? []);
@@ -87,14 +83,14 @@ export function EditItemDialog({
     setSaveError(null);
     startTransition(async () => {
       try {
-        const updated = await editRoadmapItem(item.id, {
+        const updated = await editRoadmapItem(item.id, workspaceId, {
           title: trimmedTitle,
           description: description.trim() || undefined,
           startDate: startDate ? new Date(startDate) : null,
           endDate: endDate ? new Date(endDate) : null,
           isPrivate,
           opportunityId: selectedOpportunityId,
-        }, revalidatePathStr);
+        });
 
         onSaved({
           ...item,
@@ -132,6 +128,33 @@ export function EditItemDialog({
             />
           </div>
 
+          {availableOpportunities && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor={`edit-opportunity-${item.id}`}>Opportunity</Label>
+              <Combobox
+                items={[
+                  { value: "__none__", label: "— None —" },
+                  ...opportunityOptions.map((opportunity) => ({
+                    value: opportunity.id,
+                    label: opportunity.title,
+                  })),
+                ]}
+                value={selectedOpportunityId ?? "__none__"}
+                onValueChange={(value) => setSelectedOpportunityId(value === "__none__" ? null : value)}
+                disabled={isPending}
+              >
+                <ComboboxTrigger
+                  id={`edit-opportunity-${item.id}`}
+                  aria-label="Opportunity"
+                  className="w-full"
+                >
+                  <ComboboxValue placeholder="Link to an opportunity…" />
+                </ComboboxTrigger>
+                <ComboboxContent />
+              </Combobox>
+            </div>
+          )}
+
           <div className="flex flex-col gap-1.5">
             <Label htmlFor={`edit-description-${item.id}`}>Description</Label>
             <Textarea
@@ -165,35 +188,6 @@ export function EditItemDialog({
               />
             </div>
           </div>
-
-          {availableOpportunities && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor={`edit-opportunity-${item.id}`}>Opportunity</Label>
-              <Combobox
-                items={[
-                  { value: "__none__", label: "— None —" },
-                  ...opportunityOptions.map((opportunity) => ({
-                    value: opportunity.id,
-                    label: opportunity.title,
-                  })),
-                ]}
-                value={selectedOpportunityId ?? "__none__"}
-                onValueChange={(value) =>
-                  setSelectedOpportunityId(value === "__none__" ? null : value)
-                }
-                disabled={isPending}
-              >
-                <ComboboxTrigger
-                  id={`edit-opportunity-${item.id}`}
-                  aria-label="Opportunity"
-                  className="w-full"
-                >
-                  <ComboboxValue placeholder="Link to an opportunity…" />
-                </ComboboxTrigger>
-                <ComboboxContent />
-              </Combobox>
-            </div>
-          )}
 
           <div className="flex items-center gap-2">
             <Checkbox

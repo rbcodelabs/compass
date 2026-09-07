@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { POST as start } from "@/app/api/research/start/route"
 import { POST as respond } from "@/app/api/research/respond/route"
 import { POST as complete } from "@/app/api/research/complete/route"
@@ -19,9 +19,30 @@ function rawRequest(body: string, contentLength?: number) {
 }
 
 describe("research participant API validation", () => {
+  afterEach(() => vi.unstubAllEnvs())
+
   it("requires a study token to start", async () => {
     const response = await start(request({}))
     expect(response.status).toBe(400)
+  })
+
+  it("rejects an unsupported participant modality", async () => {
+    const response = await start(request({ token: "token", modality: "SCREEN_RECORDING" }))
+    expect(response.status).toBe(400)
+  })
+
+  it("rejects legacy browser-authoritative voice starts while the global gate is disabled", async () => {
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    const response = await start(request({ token: "token", modality: "VOICE" }))
+    expect(response.status).toBe(409)
+  })
+
+  it("rejects legacy voice starts in production even when the authoritative flag is enabled", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
+    const response = await start(request({ token: "token", modality: "VOICE" }))
+    expect(response.status).toBe(409)
   })
 
   it("requires token, session, and transcript context to respond", async () => {

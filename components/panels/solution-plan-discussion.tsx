@@ -7,13 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   addSolutionComment,
   approveSolutionPlan,
   rejectSolutionPlan,
@@ -81,10 +74,11 @@ export function SolutionPlanDiscussion({
   // state directly below) so a plain useState seeded from props drives the
   // thread. Mutations additionally call onChanged() so the panel refetches and
   // any data derived from its copy of the comments (the section count) follows.
-  const [comments, setComments] = useState(initialComments);
+  const [comments, setComments] = useState(
+    initialComments.filter((comment) => comment.commentType === "PLAN")
+  );
 
   const [addingComment, setAddingComment] = useState(false);
-  const [commentType, setCommentType] = useState<CommentType>("COMMENT");
   const [isCommentPending, startCommentTransition] = useTransition();
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
   const [isPlanStatusPending, startPlanStatusTransition] = useTransition();
@@ -101,7 +95,11 @@ export function SolutionPlanDiscussion({
     if (!body) return;
 
     startCommentTransition(async () => {
-      const created = await addSolutionComment(solutionId, { body, commentType }, revalidatePathStr);
+      const created = await addSolutionComment(
+        solutionId,
+        { body, commentType: "PLAN" },
+        revalidatePathStr
+      );
       setComments((prev) => [
         ...prev,
         {
@@ -115,7 +113,6 @@ export function SolutionPlanDiscussion({
         },
       ]);
       form.reset();
-      setCommentType("COMMENT");
       setAddingComment(false);
       onChanged?.();
     });
@@ -187,7 +184,7 @@ export function SolutionPlanDiscussion({
       )}
 
       {comments.length === 0 && !addingComment && (
-        <p className="text-sm text-muted-foreground py-1">No plan or comments yet.</p>
+        <p className="text-sm text-muted-foreground py-1">No plan yet.</p>
       )}
 
       {comments.length > 0 && (
@@ -228,30 +225,15 @@ export function SolutionPlanDiscussion({
           <Textarea
             ref={commentInputRef}
             name="commentBody"
-            placeholder="Write a comment or plan update…"
+            placeholder="Write a plan update…"
             autoFocus
             required
             disabled={isCommentPending}
             className="text-xs min-h-16"
           />
           <div className="flex items-center gap-2">
-            <Select
-              value={commentType}
-              onValueChange={(v: string | null) => {
-                if (v) setCommentType(v as CommentType);
-              }}
-              disabled={isCommentPending}
-            >
-              <SelectTrigger size="sm" className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="COMMENT">Comment</SelectItem>
-                <SelectItem value="PLAN">Plan update</SelectItem>
-              </SelectContent>
-            </Select>
             <Button type="submit" size="sm" disabled={isCommentPending}>
-              {isCommentPending ? "Posting..." : "Post"}
+              {isCommentPending ? "Posting..." : "Post plan update"}
             </Button>
             <Button
               type="button"
@@ -272,7 +254,7 @@ export function SolutionPlanDiscussion({
           onClick={() => setAddingComment(true)}
         >
           <PlusIcon />
-          Add Comment
+          Add Plan Update
         </Button>
       )}
     </div>

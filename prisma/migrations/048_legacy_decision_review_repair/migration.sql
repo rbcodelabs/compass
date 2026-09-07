@@ -1,0 +1,2 @@
+-- Presentation-only data repair. The registered migration runner invokes the
+-- allowlisted, workspace-scoped repair hook before recording a finished receipt.

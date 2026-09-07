@@ -15,6 +15,7 @@ import { ChevronLeftIcon } from "lucide-react"
 import { EmptyState } from "@/components/patterns/empty-state"
 import { PageHeader } from "@/components/patterns/page-header"
 import { StatusBadge } from "@/components/patterns/status-badge"
+import { MarkdownContent } from "@/components/markdown-content"
 import type { CustomFieldDefinitionData, CustomFieldType, CustomFieldValue, SquadData } from "@/lib/types"
 
 interface ExperimentDetailPageProps {
@@ -145,9 +146,7 @@ export default async function ExperimentDetailPage({
             <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-0.5">
               Kill Condition
             </p>
-            <p className="text-sm text-amber-900 dark:text-amber-200">
-              {experiment.killCondition}
-            </p>
+            <MarkdownContent className="text-amber-900 dark:text-amber-200">{experiment.killCondition}</MarkdownContent>
           </div>
         </div>
       )}
@@ -223,18 +222,14 @@ export default async function ExperimentDetailPage({
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
             Hypothesis
           </h2>
-          <blockquote className="border-l-4 border-muted pl-4 text-sm italic text-foreground/80">
-            {experiment.hypothesis}
-          </blockquote>
+          <MarkdownContent className="border-l-4 border-muted pl-4 italic text-foreground/80">{experiment.hypothesis}</MarkdownContent>
         </section>
 
         <section>
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
             Method
           </h2>
-          <p className="text-sm text-foreground/80 whitespace-pre-wrap">
-            {experiment.method}
-          </p>
+          <MarkdownContent className="text-foreground/80">{experiment.method}</MarkdownContent>
         </section>
 
         {/* Kill condition shown again in body when not active (collapsed after conclusion) */}
@@ -246,9 +241,7 @@ export default async function ExperimentDetailPage({
               </span>
               Kill Condition
             </h2>
-            <p className="text-sm text-foreground/80 whitespace-pre-wrap">
-              {experiment.killCondition}
-            </p>
+            <MarkdownContent className="text-foreground/80">{experiment.killCondition}</MarkdownContent>
           </section>
         )}
       </div>

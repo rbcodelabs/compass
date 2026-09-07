@@ -18,6 +18,13 @@ vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),
 }));
 
+vi.mock("@/lib/comment-compat", () => ({
+  mirrorLegacySolutionComment: vi.fn(),
+  updateMirroredComment: vi.fn(),
+  deleteMirroredComment: vi.fn(),
+  updateMirroredLegacyPlanStatus: vi.fn(),
+}));
+
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 vi.mock("@/auth", () => ({
