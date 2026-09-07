@@ -13,8 +13,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { updateRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxTrigger,
+  ComboboxValue,
+} from "@/components/ui/combobox";
+import { editRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { RoadmapCardData } from "./roadmap-card";
+
+type AvailableOpportunity = { id: string; title: string };
 
 // Convert an ISO date string (or null) to the yyyy-mm-dd shape <input type="date"> expects.
 function toDateInputValue(iso: string | null): string {
@@ -29,15 +37,30 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   revalidatePathStr: string;
   onSaved: (item: RoadmapCardData) => void;
+  availableOpportunities?: AvailableOpportunity[];
 };
 
-export function EditItemDialog({ item, workspaceId, open, onOpenChange, onSaved }: Props) {
+export function EditItemDialog({
+  item,
+  workspaceId,
+  open,
+  onOpenChange,
+  onSaved,
+  availableOpportunities,
+}: Props) {
   const [title, setTitle] = useState(item.title);
   const [description, setDescription] = useState(item.description ?? "");
   const [startDate, setStartDate] = useState(toDateInputValue(item.startDate));
   const [endDate, setEndDate] = useState(toDateInputValue(item.endDate));
   const [isPrivate, setIsPrivate] = useState(item.isPrivate);
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(item.opportunityId);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const opportunityOptions = item.opportunity && !availableOpportunities?.some(
+    (opportunity) => opportunity.id === item.opportunity?.id,
+  )
+    ? [item.opportunity, ...(availableOpportunities ?? [])]
+    : (availableOpportunities ?? []);
 
   // Reset local form state whenever the dialog is (re)opened for this item.
   useEffect(() => {
@@ -47,6 +70,8 @@ export function EditItemDialog({ item, workspaceId, open, onOpenChange, onSaved 
       setStartDate(toDateInputValue(item.startDate));
       setEndDate(toDateInputValue(item.endDate));
       setIsPrivate(item.isPrivate);
+      setSelectedOpportunityId(item.opportunityId);
+      setSaveError(null);
     }
   }, [open, item]);
 
@@ -55,28 +80,32 @@ export function EditItemDialog({ item, workspaceId, open, onOpenChange, onSaved 
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return;
 
+    setSaveError(null);
     startTransition(async () => {
-      const updated = await updateRoadmapItem(
-        item.id,
-        workspaceId,
-        {
+      try {
+        const updated = await editRoadmapItem(item.id, workspaceId, {
           title: trimmedTitle,
           description: description.trim() || undefined,
           startDate: startDate ? new Date(startDate) : null,
           endDate: endDate ? new Date(endDate) : null,
           isPrivate,
-        }
-      );
+          opportunityId: selectedOpportunityId,
+        });
 
-      onSaved({
-        ...item,
-        title: updated.title,
-        description: updated.description ?? null,
-        startDate: updated.startDate ? updated.startDate.toISOString() : null,
-        endDate: updated.endDate ? updated.endDate.toISOString() : null,
-        isPrivate: updated.isPrivate,
-      });
-      onOpenChange(false);
+        onSaved({
+          ...item,
+          title: updated.title,
+          description: updated.description ?? null,
+          startDate: updated.startDate ? updated.startDate.toISOString() : null,
+          endDate: updated.endDate ? updated.endDate.toISOString() : null,
+          isPrivate: updated.isPrivate,
+          opportunityId: updated.opportunityId,
+          opportunity: updated.opportunity,
+        });
+        onOpenChange(false);
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : "Could not save changes. Try again.");
+      }
     });
   }
 
@@ -98,6 +127,33 @@ export function EditItemDialog({ item, workspaceId, open, onOpenChange, onSaved 
               disabled={isPending}
             />
           </div>
+
+          {availableOpportunities && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor={`edit-opportunity-${item.id}`}>Opportunity</Label>
+              <Combobox
+                items={[
+                  { value: "__none__", label: "— None —" },
+                  ...opportunityOptions.map((opportunity) => ({
+                    value: opportunity.id,
+                    label: opportunity.title,
+                  })),
+                ]}
+                value={selectedOpportunityId ?? "__none__"}
+                onValueChange={(value) => setSelectedOpportunityId(value === "__none__" ? null : value)}
+                disabled={isPending}
+              >
+                <ComboboxTrigger
+                  id={`edit-opportunity-${item.id}`}
+                  aria-label="Opportunity"
+                  className="w-full"
+                >
+                  <ComboboxValue placeholder="Link to an opportunity…" />
+                </ComboboxTrigger>
+                <ComboboxContent />
+              </Combobox>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor={`edit-description-${item.id}`}>Description</Label>
@@ -144,6 +200,12 @@ export function EditItemDialog({ item, workspaceId, open, onOpenChange, onSaved 
               Private (hidden from public roadmap)
             </Label>
           </div>
+
+          {saveError && (
+            <p role="alert" className="text-sm text-destructive">
+              {saveError}
+            </p>
+          )}
 
           <DialogFooter>
             <Button type="submit" size="sm" disabled={isPending}>
