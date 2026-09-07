@@ -89,6 +89,10 @@ Although [Realtime supports image inputs](https://developers.openai.com/api/docs
 Compass does not assume GIF animation or HEIC support and preserves those files
 without sending their contents to voice.
 
+![Saved GIF and HEIC evidence with honest download fallbacks](/screenshots/docs/research-attachment-formats-desktop.png)
+
+![Private attachment downloads on mobile](/screenshots/docs/research-attachment-formats-mobile.png)
+
 Compass saves each finalized participant and interviewer turn as the session progresses. If a participant reloads or briefly closes the tab, the same browser can safely resume its own in-progress Chat or Voice session. Finishing removes that browser's resume credential. Completed and abandoned sessions, their canonical transcripts, modality, and authorized attachments remain attached to the study and its workspace for member review.
 
 Public sessions have bounded message size, duration, turn count, attachment size/count/rate, and request rate. A participant link grants no access to workspace feedback, documents, opportunities, or other internal tools. Both Chat and Voice use server-authored prompts and models with no Compass tools or workspace credentials.
