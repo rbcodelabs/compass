@@ -175,6 +175,177 @@ and [OpenAI's generated server-event types](https://github.com/openai/openai-nod
 
 ## Risks
 
+### Controlled feasibility probe checkpoint — 2026-09-07
+
+The approved probe is deliberately separate from application behavior: scripts
+under `scripts/research-voice`, no database, callback, schema, participant route,
+flag change, or production write. Live execution still requires independent
+review and explicit operator go-ahead; local verification is not live evidence.
+
+The architect accepted exact development pins `undici@7.28.0` and
+`esbuild@0.28.2`, already present transitively. Options considered were native
+WebSocket (no supported authorization-header option), a new `ws` dependency
+(additional transport), and bundled Undici (existing pinned implementation with
+headers). The latter is packaged locally as a Node22 CommonJS artifact with only
+Node built-ins external. No runtime package installation or additional Sandbox
+egress is allowed. The complete artifact is loaded under Node22 before allocation.
+
+One fixed exclusive journal claim is fsynced before any allocation at
+`~/.geode/probes/compass-research-voice-feasibility-v1.jsonl`. Do not remove or reset
+it to rerun: failure consumes the attempt, including ambiguous creation. The
+actual SDK fetch dispatch is guarded because SDK2.9.2 retries otherwise; create
+and detached-command POST each dispatch at most once, without redirects. Only
+the original Sandbox Session is used, never auto-resume. Existing explicit
+project/team CLI credentials are read in memory, without scope inference.
+
+The absolute 120-second budget starts before provider allocation, reserves
+30 seconds for cleanup, and permits one nonpersistent one-vCPU/two-GB Sandbox
+with only `api.openai.com` egress. The provider model is explicitly
+`gpt-realtime-2.1`, with automatic response creation disabled from allocation and
+only one explicit response capped at 128 tokens. A conservative estimate of
+$1.383 includes 120 seconds of audio input, 8192 text-input tokens, worst-case
+audio/text output, separate transcription and Sandbox reserves, and a $1
+contingency. It must remain below $5 before allocation. This is not an account
+spend limit or a guaranteed invoice cap. Sources checked: [pricing](https://developers.openai.com/api/docs/pricing),
+[Realtime token accounting](https://developers.openai.com/api/docs/guides/realtime-costs),
+and [Sandbox pricing](https://vercel.com/docs/sandbox/pricing).
+
+The browser holds its SDP answer until the authenticated sideband observes the
+full configured policy for the matching session/nonce AND the sole assistant
+greeting yields a genuine explicit-null provider root and a completed canonical
+interviewer event. An empty parser or missing predecessor never proves root.
+Only then does an audio-only headless peer play locally generated synthetic
+speech (maximum 15 seconds, no microphone). A linked final participant transcript
+must pass the existing parser; there is no second assistant response. Failure
+dominates readiness/completion; final proof waits for the complete worker log
+stream and its independent provider-stop receipt. A pre-media timeout means
+initialization was **not demonstrated**, not that the provider cannot support it.
+
+The worker has its own absolute deadline and bounded provider hangup in finally;
+the controller independently hangs up and stops the Sandbox. Numeric HTTP status
+and redacted hashes/order metadata are recorded, never SDP, tokens, raw audio,
+full provider errors, tracing, HAR, or video. Known identities are retained before
+body reads/journal failures, and cleanup passes are bounded and independent.
+Arbitrary 404 is not stop proof. Missing identity after ambiguous creation, late
+results beyond the cleanup reserve, or failed browser closure remain unresolved
+and require operator investigation using the journal; no automatic new allocation
+or inferred absence is permitted.
+
+Local-only entry point (macOS offline `say`/`afconvert`, Node22):
+`fnm exec --using=v22.23.2 node scripts/research-voice/run.mjs --check`.
+This packages/loads the worker and prepares real Chromium audio SDP without
+credentials, a journal claim, or live resources. The explicit browser regression
+gate is `RUN_RESEARCH_VOICE_PROBE_BROWSER=1 pnpm vitest run __tests__/research-voice-probe-browser.test.ts`;
+it additionally connects two local peers, plays the fixture through source-ended,
+and rejects repeat SDP release. Default unit CI does not claim that opt-in browser
+coverage. The separate `--live-approved` mode is reserved for the reviewed operator
+invocation. Temporary generated speech/bundles are removed by the wrapper.
+
+Even a successful probe does not demonstrate that the participant heard the
+pre-media greeting, Function-return survival, durable READY, 40-minute sessions,
+normal completion, attachment ordering, or production readiness. These remain
+separate rollout gates; authoritative participant voice stays disabled.
+
+#### Single approved live attempt — observed outcome
+
+On 2026-09-07 at 16:51:50 UTC, the reviewed probe consumed its one attempt
+(`c344d6b2-602c-4942-8ba2-fc0e0a46a8fc`). Provider allocation returned HTTP201;
+the nonpersistent Sandbox and detached worker started. The worker then failed
+closed with `POLICY_MISMATCH` during `PREMEDIA_INITIALIZATION`. Total elapsed
+time through cleanup was 8,540 ms. No successful policy/root acknowledgement,
+canonical exchange, browser SDP release, participant audio, or assistant response
+was observed. This is **not demonstrated**, not a successful feasibility result
+and not evidence that pre-media initialization is impossible.
+
+The redacted journal did not capture the mismatched field or source event kind.
+The current comparator checks both session policy and session identity; therefore
+the exact mismatch cannot be determined from retained evidence. No policy field
+was relaxed and no guessed fix was applied. Any future diagnostic improvement or
+new live attempt requires separate approval; the existing claim must never be
+deleted/reset to enable a retry.
+
+Cleanup evidence was positive for all three resources: the worker recorded a
+successful provider hangup, the controller recorded provider/Sandbox/browser
+stopped, and the operator independently inspected the original Sandbox with
+`resume:false`, confirming `status:stopped` and `persistent:false`. This verifies
+cleanup for this attempt, not every possible crash or ambiguous-creation path.
+
+Audit identifiers (not credentials): provider
+`rtc_u2_ELWrPal4wad2DQIaMMwQZ`; Sandbox
+`compass-voice-probe-c344d6b2-602c-4942-8ba2-fc0e0a46a8fc`; command
+`cmd_fe511d5e7bee4b618aa5c6b254df`; packaged worker SHA256
+`1c103f4432c6aca9126cf315841bf56ee6bbd15ecaf6abd7567d20eb8df6721b`.
+The durable local journal remains at the fixed claim path above. The $1.383
+preflight figure is an estimate, not measured billed cost. No application,
+database, production flag, or participant runtime was changed by the probe.
+
+#### Separately authorized v2 diagnostic attempt — observed outcome
+
+After reviewing that inconclusive failure, the user explicitly authorized safe
+field-level diagnostics and **one additional** controlled live attempt. The
+current `--live-approved` entry point therefore claims only
+`~/.geode/probes/compass-research-voice-feasibility-v2.jsonl` with exclusive creation.
+There is no attempt-number/path override or reset mechanism. The consumed v1
+journal, its worker hash, and the observed v1 outcome above remain unchanged.
+The v2 claim is now also consumed; neither claim may be reset or deleted, and no
+further live attempt is authorized.
+
+The policy comparator, configured policy, pre-media root requirements, deadlines,
+allocation limits, and conservative sub-$5 preflight ceiling are unchanged.
+Diagnostics run only on a rejected policy/session identity and cannot acknowledge
+readiness. They use a fixed schema-owned path allowlist and only `missing`,
+`type`, or `value` mismatch kinds. Known harmless enums, bounded numeric limits,
+and boolean flags can be compared directly; unknown strings become `REDACTED`.
+Tools emit counts only. Instructions and session identifiers emit equality/type
+information, never their text. Provider-owned extra keys are not traversed or
+logged. Diagnostic records are validated again when the controller persists the
+worker's bounded stdout stream; no raw provider payload/error, audio, SDP, or
+credentials enter the journal. The existing 64-KiB log and 128-record journal
+bounds remain in force.
+
+Local regression coverage includes strict failure on each diagnosed mismatch,
+nested voice/automatic-response fields, redaction and forged journal records,
+split worker stdout through the real controller collector into a temporary
+journal, and distinct non-reusable v1/v2 claims. This diagnostic change is not a
+policy fix or a successful live proof. Voice remains disabled and PR167 remains
+unmerged pending the separately controlled review workflow.
+
+The operator executed the sole v2 attempt on 2026-09-07 at 17:30:10 UTC using
+reviewed commit `ed18d69a6bde142fa42f0aea56db5c9687c1a3d3`, run
+`8b1df5ae-2868-47c2-a4e8-8fe1bd8ca87f`. Provider allocation returned HTTP201 and
+the Sandbox/worker started. The only field diagnostic was
+`session.updated` → `session.id`, mismatch `value`, `equal:false`; the probe
+failed closed with `POLICY_MISMATCH` during `PREMEDIA_INITIALIZATION`. Total
+elapsed time through cleanup was 8,949 ms. No policy/root acknowledgement,
+canonical exchange, browser SDP release, participant audio, or assistant response
+was observed. The worker reported provider stop success, the controller reported
+provider/Sandbox/browser stopped, and the operator independently inspected the
+exact Sandbox with `resume:false`, confirming stopped and nonpersistent.
+
+This evidence does **not** establish that the provider changed session IDs.
+The same diagnostic occurs if `session.updated` arrives before a matching
+`session.created` has established the parser's local identity (still `null`),
+or if a prior identity exists and differs. Its `expectedType:string` describes
+the required identity contract, not the observed type of that local baseline.
+The journal did not retain event history or baseline-presence evidence, so those
+cases cannot be distinguished. This is another inconclusive pre-media result,
+not provider infeasibility or a demonstrated voice exchange. No implementation
+or acceptance rule was changed in response.
+
+V2 audit identifiers: provider `rtc_u1_ELXSVVRcKvp3AEXYGGIZ6`; Sandbox
+`compass-voice-probe-8b1df5ae-2868-47c2-a4e8-8fe1bd8ca87f`; command
+`cmd_c7fe3a72eb3e435cae0cc5a01d35`; worker SHA256
+`79e526c35520f89ea32cb13d94a16b4918ee3b4a6161297dcf7a3d6cdcf40400`.
+The unchanged $1.383 preflight estimate is not measured billed cost.
+
+The next investigation should remain offline/read-only: compare fixtures for
+update-before-created versus a genuinely different known identity, and verify
+the documented sideband-attachment initialization contract before proposing any
+handshake change. If separately approved later, safe diagnostics could include
+`createdObserved`/`identityBaselinePresent` booleans and bounded event-kind
+sequence counters, never session identifiers. Do not infer or accept an identity
+merely to pass the current gate; any contract adjustment needs evidence and review.
+
 - Provider realtime event shapes and completion semantics may evolve; the sideband parser, event allowlist, response-status correlation, and provider-item ordering must remain versioned and tested.
 - Vercel Sandbox duration, detached-process, egress-policy, or outbound-WebSocket behavior may differ by plan or change over time. Production enablement is blocked on the live Compass-plan spike; failure of that prerequisite requires a small managed container service rather than weakening the provider-authoritative boundary.
 - A Sandbox or sideband connection can fail before all finalized events are persisted. Bounded retry, heartbeat reconciliation, explicit provider hangup, and a visible degraded-integrity state prevent such a gap from being mistaken for a complete canonical transcript.
