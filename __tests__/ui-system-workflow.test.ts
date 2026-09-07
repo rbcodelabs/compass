@@ -2,6 +2,12 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 describe("UI system workflow integration", () => {
+  it("runs private GIF and HEIC original roundtrips with the other Capture journeys", () => {
+    const workflow = readFileSync(new URL("../.github/workflows/ui-system.yml", import.meta.url), "utf8")
+    const capture = workflow.split("  authenticated-capture:")[1].split("\n  screenshots:")[0]
+    expect(capture).toContain("e2e/functional/specs/capture-attachment-formats.spec.ts")
+    expect(capture).toContain("e2e/functional/specs/capture-results.spec.ts")
+  })
   it("runs mocked browser voice alongside Capture in the existing authenticated job", () => {
     const workflow = readFileSync(new URL("../.github/workflows/ui-system.yml", import.meta.url), "utf8")
     const capture = workflow.split("  authenticated-capture:")[1].split("\n  screenshots:")[0]
