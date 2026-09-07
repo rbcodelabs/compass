@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { NextRequest } from "next/server"
+import { readFileSync } from "node:fs"
+import { voiceMigrationCatalog } from "@/lib/research-voice-migration"
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
@@ -7,6 +9,13 @@ const mocks = vi.hoisted(() => ({
   end: vi.fn(),
   connect: vi.fn(),
   pool: vi.fn(),
+  repairMigration: vi.fn(),
+}))
+
+vi.mock("@/lib/migrations/legacy-decision-review-repair", () => ({
+  getLegacyDecisionReviewRepairStatus: mocks.repairMigration,
+  applyLegacyDecisionReviewRepair: mocks.repairMigration,
+  LEGACY_DECISION_REVIEW_REPAIR_MIGRATION: "048_legacy_decision_review_repair",
 }))
 
 vi.mock("pg", () => ({
@@ -35,6 +44,7 @@ vi.mock("@/lib/schema", () => ({
 }))
 
 import { GET, POST, getDecisionGateExpectedCatalog, normalizeConstraintDefinition } from "@/app/api/admin/migrate/route"
+import { applyMigrations } from "@/lib/migrations/runner"
 
 const ORIGINAL_ENV = { ...process.env }
 const INDEX_NAMES = [
@@ -137,6 +147,7 @@ beforeEach(() => {
   mocks.connect.mockResolvedValue({ query: mocks.query, release: mocks.release })
   mocks.end.mockResolvedValue(undefined)
   installQueryResponses()
+  mocks.repairMigration.mockResolvedValue({ workspaceStatus: "NOT_PRESENT", requests: [] })
 })
 
 afterEach(() => {
@@ -144,6 +155,104 @@ afterEach(() => {
 })
 
 describe("/api/admin/migrate rollout observability", () => {
+  it("reports both 047 families and legacy repair through the canonical runner", async () => {
+    const response = await GET(request("GET"))
+    const body = await response.json()
+    expect(body.manifest).toEqual(expect.arrayContaining(["047_preview_automation", "047_research_voice_control_plane", "048_legacy_decision_review_repair"]))
+    expect(body.researchVoiceControlPlane.indexes).toHaveLength(13)
+    expect(body.legacyDecisionReviewRepair).toBeDefined()
+  })
+  function installPartialVoiceCatalog(jobStatus: string | null = "completed", drift = false) {
+    delete process.env.DATABASE_URL
+    const expected = voiceMigrationCatalog(readFileSync(new URL("../prisma/migrations/047_research_voice_control_plane/migration.sql", import.meta.url), "utf8"))
+    const fallback = mocks.query.getMockImplementation()!
+    let inspections = 0
+    mocks.query.mockImplementation(async (value: unknown, params?: unknown[]) => {
+      const sql = String(value)
+      if (sql.includes("c.relkind kind")) {
+        inspections++
+        return { rows: (inspections === 1 ? expected.tables.slice(0, 1) : expected.tables).map((name) => ({ name, kind: "r" })) }
+      }
+      if (sql.includes("format_type(a.atttypid")) return { rows: expected.columns.filter((column) => inspections > 1 || column.table === "research_voice_calls").map((column) => drift && column.name === "id" ? { ...column, type: "text" } : column) }
+      if (sql.includes("AND i.indisprimary")) return { rows: (inspections === 1 ? expected.tables.slice(0, 1) : expected.tables).map((table) => ({ table, columns: ["id"], valid: true })) }
+      if (sql.includes("pg_get_expr(i.indpred")) return { rows: (inspections === 1 ? expected.indexes.slice(0, 1) : expected.indexes).map((index) => ({ ...index, valid: true, nullsNotDistinct: false, predicate: null, expression: null })) }
+      if (sql.startsWith("CREATE") && sql.includes("INDEX ASYNC")) return { rows: [{ job_id: "job-new" }] }
+      if (sql === "SELECT status FROM sys.jobs WHERE job_id = $1") return { rows: jobStatus === null ? [] : [{ status: jobStatus }] }
+      if (sql.includes("pg_index") && sql.includes("indisvalid")) return { rows: expected.indexes.map((index) => ({ name: index.name, valid: true })) }
+      if (sql.includes("UPDATE") && sql.includes("WITH") || sql.includes("SET voice_")) return { rows: [], rowCount: 0 }
+      return fallback(value, params)
+    })
+  }
+
+  it("resumes exact partial 047, CALLs jobs, and finishes only the new attempt", async () => {
+    installPartialVoiceCatalog()
+    const response = await POST(request("POST", { script: "047_research_voice_control_plane" }))
+    expect(await response.json()).not.toHaveProperty("error")
+    expect(response.status).toBe(200)
+    const statements = mocks.query.mock.calls.map(([sql]) => String(sql))
+    expect(statements.some((sql) => sql.startsWith("CREATE TABLE research_voice_calls"))).toBe(false)
+    expect(statements.some((sql) => sql.startsWith("CREATE UNIQUE INDEX ASYNC idx_research_voice_calls_session_key"))).toBe(false)
+    expect(statements.filter((sql) => sql === "CALL sys.wait_for_job($1)")).toHaveLength(12)
+    const receipt = statements.find((sql) => sql.includes("SET finished_at"))!
+    expect(receipt).toContain("WHERE id = $1")
+  })
+
+  it.each(["failed", "processing", null])("does not finish 047 for %s async job status", async (status) => {
+    installPartialVoiceCatalog(status)
+    const response = await POST(request("POST", { script: "047_research_voice_control_plane" }))
+    expect(response.status).toBe(500)
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET finished_at"))).toBe(false)
+  })
+
+  it("rejects incompatible partial 047 before its DDL, backfills or attempt receipt", async () => {
+    installPartialVoiceCatalog("completed", true)
+    const response = await POST(request("POST", { script: "047_research_voice_control_plane" }))
+    expect(response.status).toBe(500)
+    const statements = mocks.query.mock.calls.map(([sql]) => String(sql))
+    expect(statements.some((sql) => sql.startsWith("ALTER TABLE research_"))).toBe(false)
+    expect(statements.some((sql) => sql.startsWith('INSERT INTO "compass_preview"._prisma_migrations'))).toBe(false)
+  })
+
+  it("finishes the legacy review repair receipt only after its data hook succeeds", async () => {
+    const response = await applyMigrations(
+      { connect: mocks.connect } as never,
+      "compass_preview",
+      "048_legacy_decision_review_repair",
+    )
+
+    expect(response.status).toBe(200)
+    expect(mocks.repairMigration).toHaveBeenCalledOnce()
+    const finishedReceipt = mocks.query.mock.calls.find(([sql]) => String(sql).includes("SET finished_at"))
+    expect(finishedReceipt).toBeDefined()
+    const receiptCall = mocks.query.mock.calls.findIndex(([sql]) => String(sql).includes("SET finished_at"))
+    expect(mocks.repairMigration.mock.invocationCallOrder[0]).toBeLessThan(mocks.query.mock.invocationCallOrder[receiptCall])
+  })
+
+  it("leaves an unfinished receipt when the legacy review repair hook fails", async () => {
+    mocks.repairMigration.mockRejectedValueOnce(new Error("allowlisted request changed"))
+
+    const response = await applyMigrations(
+      { connect: mocks.connect } as never,
+      "compass_preview",
+      "048_legacy_decision_review_repair",
+    )
+
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toMatchObject({ error: "allowlisted request changed" })
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET finished_at"))).toBe(false)
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("_prisma_migrations") && String(sql).includes("INSERT INTO"))).toBe(true)
+  })
+  it("does not create schemas in the pre-provisioned worker path", async () => {
+    await applyMigrations({ connect: mocks.connect } as never, "compass_preview", undefined, { preProvisionedSchema: true })
+    expect(mocks.query.mock.calls.some(([sql]) => /CREATE SCHEMA/i.test(sql))).toBe(false)
+  })
+  it("disables legacy admin migration access in automation previews", async () => {
+    process.env.PREVIEW_AUTOMATION_ENABLED = "1"
+    process.env.VERCEL_ENV = "preview"
+    expect((await GET(request("GET"))).status).toBe(404)
+    expect((await POST(request("POST"))).status).toBe(404)
+    expect(mocks.pool).not.toHaveBeenCalled()
+  })
   it("canonicalizes only the default UNIQUE NULLS DISTINCT rendering", () => {
     expect(normalizeConstraintDefinition('UNIQUE NULLS DISTINCT ("active_workspace_id")', "u")).toBe(normalizeConstraintDefinition('UNIQUE ("active_workspace_id")', "u"))
     expect(normalizeConstraintDefinition('UNIQUE NULLS NOT DISTINCT ("active_workspace_id")', "u")).not.toBe(normalizeConstraintDefinition('UNIQUE ("active_workspace_id")', "u"))

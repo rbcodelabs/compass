@@ -21,6 +21,7 @@ import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
 import { CapabilityPacksPanel, type CapabilityPackSettingsRow } from "@/components/settings/capability-packs-panel";
+import { ThemePreferenceControl } from "@/components/theme/theme-preference-control";
 
 export const metadata = { title: "Workspace Settings" };
 
@@ -144,8 +145,12 @@ export default async function SettingsPage({ params }: Props) {
   }));
 
   return (
-    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8 max-w-3xl">
+    <main className="flex w-full min-w-0 flex-1 flex-col gap-8 p-4 sm:p-6 md:max-w-3xl md:p-8">
       <PageHeader title="Settings" description={workspace.name} />
+
+      <SettingsSection title="Appearance" description="Choose how Compass looks on this device. System follows your operating system setting.">
+        <ThemePreferenceControl />
+      </SettingsSection>
 
       <SettingsSection title="Squads" description="Teams within this workspace. Squads can be assigned to objectives, opportunities, experiments, and roadmap items.">
         <ManageSquadsPanel

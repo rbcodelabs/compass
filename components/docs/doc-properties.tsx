@@ -96,7 +96,7 @@ function TagChips({
       ) : (
         <button
           onClick={() => setAdding(true)}
-          className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5 transition-colors"
+          className="text-xs text-text-subtle hover:text-text-secondary flex items-center gap-0.5 transition-colors"
         >
           <Plus className="w-3 h-3" /> tag
         </button>
@@ -135,12 +135,12 @@ function PropertyRow({
                 if (e.key === "Escape") { setKeyDraft(propKey); setEditingKey(false); }
               }}
               onBlur={() => { onChangeKey(keyDraft); setEditingKey(false); }}
-              className="text-xs font-medium text-slate-500 bg-transparent border-b border-slate-300 outline-none w-full"
+              className="text-xs font-medium text-text-subtle bg-transparent border-b border-border-strong outline-none w-full"
             />
           ) : (
             <button
               onClick={() => setEditingKey(true)}
-              className="text-xs font-medium text-slate-500 hover:text-slate-700 truncate text-left"
+              className="text-xs font-medium text-text-subtle hover:text-text-secondary truncate text-left"
             >
               {propKey}
             </button>
@@ -179,12 +179,12 @@ function PropertyRow({
               if (e.key === "Escape") { setKeyDraft(propKey); setEditingKey(false); }
             }}
             onBlur={() => { onChangeKey(keyDraft); setEditingKey(false); }}
-            className="text-xs font-medium text-slate-500 bg-transparent border-b border-slate-300 outline-none w-full"
+            className="text-xs font-medium text-text-subtle bg-transparent border-b border-border-strong outline-none w-full"
           />
         ) : (
           <button
             onClick={() => setEditingKey(true)}
-            className="text-xs font-medium text-slate-500 hover:text-slate-700 truncate text-left w-full"
+            className="text-xs font-medium text-text-subtle hover:text-text-secondary truncate text-left w-full"
           >
             {propKey}
           </button>
@@ -196,7 +196,7 @@ function PropertyRow({
             type="date"
             defaultValue={typeof value === "string" ? value.slice(0, 10) : ""}
             onChange={(e) => onChangeValue(e.target.value)}
-            className="text-xs text-slate-700 bg-transparent border-b border-transparent hover:border-slate-200 focus:border-indigo-300 outline-none"
+            className="text-xs text-text-secondary bg-transparent border-b border-transparent hover:border-border-default focus:border-indigo-300 outline-none"
           />
         ) : (
           <input
@@ -206,7 +206,7 @@ function PropertyRow({
             onKeyDown={(e) => {
               if (e.key === "Enter") (e.target as HTMLInputElement).blur();
             }}
-            className="text-xs text-slate-700 bg-transparent border-b border-transparent hover:border-slate-200 focus:border-indigo-300 outline-none w-full"
+            className="text-xs text-text-secondary bg-transparent border-b border-transparent hover:border-border-default focus:border-indigo-300 outline-none w-full"
           />
         )}
       </div>
@@ -280,8 +280,8 @@ export function DocProperties({
       <button
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors",
-          hasProperties && "text-slate-500"
+          "flex items-center gap-1.5 text-xs font-medium text-text-subtle hover:text-text-secondary transition-colors",
+          hasProperties && "text-text-subtle"
         )}
       >
         {open ? (
@@ -311,7 +311,7 @@ export function DocProperties({
           ))}
           <button
             onClick={handleAddProperty}
-            className="mt-1 flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+            className="mt-1 flex items-center gap-1 text-xs text-text-subtle hover:text-text-secondary transition-colors"
           >
             <Plus className="w-3 h-3" /> Add property
           </button>

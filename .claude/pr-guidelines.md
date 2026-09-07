@@ -134,11 +134,16 @@ After a PR merges to main and Vercel deploys to production:
 
 1. **Wait for the production deploy** — poll `gh run list --branch main --limit 3` or check the Vercel dashboard. Production URL: `https://compass.rbcodelabs.com`.
 
-2. **Run any one-time data migrations** listed in the PR description. Example:
+2. **Run any registered schema or data migration** listed in the PR description through the authenticated migration endpoint. Check status first, then target the exact migration so unrelated pending work is not applied:
    ```bash
-   node --experimental-strip-types scripts/<migration-name>.ts
+   curl -s https://compass.rbcodelabs.com/api/admin/migrate \
+     -H "x-migration-secret: $COMPASS_PRODUCTION_MIGRATION_SECRET"
+   curl -s -X POST https://compass.rbcodelabs.com/api/admin/migrate \
+     -H "x-migration-secret: $COMPASS_PRODUCTION_MIGRATION_SECRET" \
+     -H "content-type: application/json" \
+     -d '{"script":"<migration-name>"}'
    ```
-   Check the PR body for a "Migration required" section. If none is listed, skip this step.
+   Repeat the status GET and perform application-level readback. Check the PR body for a "Migration required" section; if none is listed, skip this step. Never run a local script directly against production DSQL.
 
    **If `prisma/schema.prisma` or `prisma/migrations/` changed in this PR**, first confirm `MIGRATION_SECRET` actually works in the target environment — do not assume it does just because it exists:
    ```bash
@@ -156,30 +161,27 @@ After a PR merges to main and Vercel deploys to production:
 
 ## Database Migrations
 
-If `prisma/schema.prisma` changed, run against the dev DSQL cluster:
+If `prisma/schema.prisma` changes, add the corresponding DSQL-compatible SQL under `prisma/migrations/<number>_<name>/migration.sql` and register it in `lib/migrations/runner.ts`. The schema file is not the deployment mechanism. Validate locally through the same runner used by `/api/admin/migrate`; production and preview apply the registered migration through that authenticated endpoint.
 
-```bash
-prisma db push
-```
-
-- Do **not** use `prisma migrate dev` or `prisma migrate deploy` — Aurora DSQL uses `db push`.
+- Do **not** use `prisma db push`, `prisma migrate dev`, or `prisma migrate deploy` as the production deployment path.
 - Never use `@default(autoincrement())` or `CREATE TYPE` in schema changes.
-- Confirm the push succeeded before opening the PR.
+- Confirm migration manifest parity, DSQL schema compatibility, runner execution, and postconditions before opening the PR.
 
 ### DSQL Gotchas (all of these have bitten before)
 
 - **No `@updatedAt` triggers.** DSQL cannot auto-update timestamps. Every `update` call must set `updatedAt: new Date()` explicitly.
 - **No cascade deletes.** `relationMode = "prisma"` means the DB enforces nothing. Deleting a parent requires explicitly nulling or deleting child references in application code (see squad deletion for the established pattern).
-- **Indexes are async.** New indexes on non-empty tables use `CREATE INDEX ASYNC` semantics — do not assume an index exists immediately after `db push`.
+- **Indexes are async.** New indexes on non-empty tables use `CREATE INDEX ASYNC` semantics — the runner must wait or expose resumable status, and verification must confirm the index exists before enabling the feature.
 
-### Data Migration Scripts
+### Data migrations
 
-Any schema change that reshapes **existing data** (renaming, splitting, or re-linking rows — not just adding a nullable column) requires a migration script:
+Any change that reshapes **existing data** (renaming, splitting, re-linking, or repairing rows) requires a registered data migration. Use SQL in the migration file when it is sufficient, or a runner hook for bounded logic that SQL cannot safely express:
 
-- Written in TypeScript under `scripts/`, runnable via `node --experimental-strip-types scripts/<name>.ts`.
+- Packaged with an exact migration name and invoked only by `lib/migrations/runner.ts` before its receipt is marked finished. Do not add a separate production database CLI.
 - **Idempotent** — safe to run twice without duplicating or corrupting data.
-- **Tested against the dev schema** with real data before the PR is opened; note the observed result in the PR body.
-- The PR description must include a **"Migration required"** section naming the script, when to run it (post-deploy), and a one-line rollback note (what to do if it goes wrong).
+- **Fail closed with postconditions** — a partial or invalid repair leaves an unfinished forensic attempt and must not receive a successful migration receipt.
+- **Tested through the migration runner** against an isolated local schema with real data before the PR is opened; note the observed result in the PR body.
+- The PR description must include a **"Migration required"** section naming the registered migration, the exact targeted POST, verification/readback, and a one-line rollback or recovery note.
 
 ## MCP Tools
 

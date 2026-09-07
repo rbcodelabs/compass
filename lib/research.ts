@@ -52,6 +52,17 @@ export function parseResearchGuide(value: string | string[]): ResearchGuideItem[
   return values.flatMap((entry) => entry.split("\n")).map((text) => text.trim()).filter(Boolean).map((text, index) => ({ id: String(index + 1), text }))
 }
 
+export function deserializeResearchGuide(value: string): ResearchGuideItem[] {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!Array.isArray(parsed)) return []
+    if (parsed.some((item) => !item || typeof item !== "object" || typeof (item as { id?: unknown }).id !== "string" || typeof (item as { text?: unknown }).text !== "string")) return []
+    return parsed.map((item) => ({ id: (item as ResearchGuideItem).id, text: (item as ResearchGuideItem).text }))
+  } catch {
+    return []
+  }
+}
+
 export function buildResearchPrompt(
   guide: ResearchGuideItem[],
   targetMinutes: number,

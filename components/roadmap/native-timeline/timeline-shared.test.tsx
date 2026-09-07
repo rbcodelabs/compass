@@ -60,6 +60,9 @@ describe("TimelineCard reduced motion", () => {
     expect(screen.getByRole("button", { name: "Edit dates for Native validation" })).toHaveClass(
       "motion-reduce:transition-none", "size-6",
     );
+    expect(screen.getByRole("button", { name: "Edit dates for Native validation" })).toHaveClass(
+      "[@media(pointer:coarse)]:opacity-100",
+    );
   });
 
   it("communicates inclusive dates and overlap without relying on color", () => {
@@ -72,10 +75,21 @@ describe("TimelineCard reduced motion", () => {
 
     expect(screen.getByRole("button", { name: /Open details for Concurrent work.*2026-09-01 through 2026-09-14.*overlaps 1 other item/i })).toBeInTheDocument();
     expect(screen.getByText("2 overlapping")).toBeInTheDocument();
+    expect(screen.getByText("2 overlapping")).toHaveClass("hidden", "@[240px]/timeline-card:inline-flex");
+    expect(screen.getByRole("button", { name: /Open details for Concurrent work/ })).toHaveClass("overflow-hidden");
+    expect(screen.getByRole("button", { name: /Open details for Concurrent work/ })).toHaveAccessibleName(/Delivery status: Not Started/);
+    expect(screen.getByTestId("timeline-item-item-1")).toHaveClass("@container/timeline-card");
+    expect(screen.getByLabelText("Delivery status: Not Started")).toHaveClass("min-[900px]:@[240px]/timeline-card:inline-flex");
   });
 });
 
 describe("EditDatesDialog save failures", () => {
+  it("tells users to reload the page when reconciliation has locked editing", () => {
+    const item = { id: "item-1", title: "Conflict", horizon: "NEXT" } as RoadmapCardData;
+    render(<EditDatesDialog item={item} open disabled start="2026-09-01" end="2026-09-14" onOpenChange={vi.fn()} onSave={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Reload this page before another edit");
+    expect(screen.getByRole("button", { name: "Save schedule" })).toBeDisabled();
+  });
   it("edits horizon and both inclusive dates through explicit controls", async () => {
     const item = { id: "item-1", title: "Keyboard schedule", horizon: "NEXT", isPrivate: false, deliveryStatus: "NOT_STARTED" } as RoadmapCardData;
     const onSave = vi.fn().mockResolvedValue(undefined);

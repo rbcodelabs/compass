@@ -1,6 +1,6 @@
 # Native timeline safety baseline
 
-This is the reproducible safety baseline for the native-timeline productionization sequence. It changes test infrastructure only. SVAR remains the sole production timeline renderer; this baseline does not add native routing, flags, schema migrations, or workspace exposure.
+This records the reproducible safety baseline for the native-timeline productionization sequence. The original baseline changed test infrastructure only. The current bounded gate also covers the identity-scoped Compass native timeline rollout; SVAR remains the fallback and the default for other workspaces.
 
 ## Pinned environment
 
@@ -54,17 +54,23 @@ Run:
 pnpm test:e2e:roadmap
 ```
 
-The gate is exactly three serialized tests:
+The gate runs these serialized journeys (including authentication setup):
 
 1. authenticate the seeded development user and save browser state;
 2. create/edit timeline dates and prove persistence on the current SVAR timeline;
 3. promote backlog items through Board and Timeline scheduling.
+4. edit native dates and prove persistence, switch to classic and back, and capture desktop/mobile screenshots;
+5. change squad filters without retaining stale native rows and preserve the filter across fallback;
+6. reject URL-based opt-in to native for another workspace.
+7. promote backlog feedback through the native quick-add menu and prove Board persistence.
+
+The native spec mirrors the rollout workspace ID only inside the guarded local database, under the run-owned test organization. It does not add a production override. Teardown removes it along with the other test workspaces.
 
 The common Node runner prepares the guarded database, sets `CI=1` so Playwright always starts a fresh server instead of attaching to a stale worktree server, runs the requested scope, and verifies cleanup. `test:e2e:functional` and `test:e2e:all` use the same lifecycle, so established entry points cannot bypass the sentinel. The suite uses one worker and `--retries=0`; retry means rerunning the whole command, including database preparation. Cleanup verification requires zero `e2e-test-org` rows and exactly one control sentinel.
 
 ## CI gates
 
-The `checks` job runs install, lint, TypeScript, all unit/integration tests, the optimized build, and UI-system checks. The `authenticated-roadmap` job then starts an ephemeral PostgreSQL 16 service, prepares the guarded database, installs Chromium, runs the three authenticated tests, verifies cleanup even when the test step fails, and uploads Playwright artifacts on failure. The existing deployed screenshot job is unchanged in purpose and remains conditional.
+The `checks` job runs install, lint, TypeScript, all unit/integration tests, the optimized build, and UI-system checks. The `authenticated-roadmap` job then starts an ephemeral PostgreSQL 16 service, prepares the guarded database, installs Chromium, runs the bounded authenticated gate, verifies cleanup even when the test step fails, and uploads Playwright artifacts on failure. The existing deployed screenshot job is unchanged in purpose and remains conditional.
 
 ## First branch evidence
 

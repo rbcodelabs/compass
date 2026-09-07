@@ -21,6 +21,7 @@ import { PositioningBriefRow } from "./positioning-brief-row";
 import { RoadmapDeliveryTasks, type RoadmapDeliveryTaskData } from "./roadmap-delivery-tasks";
 import type { MemberData } from "@/lib/types";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { Discussion } from "@/components/comments/discussion";
 import { usePanelContext } from "./panel-context";
 
 type RoadmapItemData = {
@@ -104,7 +105,7 @@ export function RoadmapItemPanel({
   if (data.keyResult)
     linked.push({ type: "keyResult", id: data.keyResult.id, title: data.keyResult.title, badge: { label: "Key Result", className: "bg-indigo-100 text-indigo-700" } });
   if (data.feedback)
-    linked.push({ type: "feedback", id: data.feedback.id, title: data.feedback.title, badge: { label: "Feedback", className: "bg-slate-100 text-slate-600" } });
+    linked.push({ type: "feedback", id: data.feedback.id, title: data.feedback.title, badge: { label: "Feedback", className: "bg-surface-inset text-text-secondary" } });
 
   return (
     <PanelContainer>
@@ -178,6 +179,7 @@ export function RoadmapItemPanel({
           onChanged={refresh}
         />
       </Section>
+      <Discussion targetType="ROADMAP_ITEM" targetId={id} />
     </PanelContainer>
   );
 }

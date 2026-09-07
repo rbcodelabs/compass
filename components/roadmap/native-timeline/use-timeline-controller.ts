@@ -62,7 +62,7 @@ export function useTimelineController({
   const requireReconciliation = useCallback((id: string) => {
     reconciliationRequiredIdsRef.current.add(id);
     setReconciliationRequiredIds(new Set(reconciliationRequiredIdsRef.current));
-    setAnnouncement(`Roadmap item changed concurrently. Refreshing before another edit.`);
+    setAnnouncement(`Roadmap item changed concurrently. Reload this page before another edit.`);
     router.refresh();
   }, [router]);
 
@@ -201,7 +201,10 @@ export function useTimelineController({
       const rolledBack = itemsRef.current.map((item) => item.id === itemId ? authoritative : item);
       itemsRef.current = rolledBack;
       setItems(rolledBack);
-      setAnnouncement(`Could not save ${previousItem.title} to ${HORIZON_META[horizon].label}, ${start} through ${end}. Changes rolled back; try again.`);
+      const recovery = reconciliationRequiredIdsRef.current.has(itemId)
+        ? "Reload this page before another edit."
+        : "Changes rolled back; try again.";
+      setAnnouncement(`Could not save ${previousItem.title} to ${HORIZON_META[horizon].label}, ${start} through ${end}. ${recovery}`);
       throw error;
     } finally {
       pendingItemIdsRef.current.delete(itemId);

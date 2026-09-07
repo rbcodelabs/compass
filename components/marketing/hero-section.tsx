@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import type { MarketingViewer } from "@/lib/marketing-viewer";
 
 const KANBAN_COLUMNS = [
   {
@@ -32,12 +33,19 @@ const KANBAN_COLUMNS = [
   },
 ];
 
-export function HeroSection() {
+export function HeroSection({ viewer }: { viewer: MarketingViewer }) {
+  const isSignedOut = viewer.kind === "signed-out";
+  const primaryLabel = isSignedOut
+    ? "Start for free →"
+    : viewer.kind === "no-workspaces"
+      ? "Set up workspace"
+      : "Open Compass";
+  const primaryHref = !isSignedOut && viewer.kind === "no-workspaces" ? "/onboarding" : "/dashboard";
   return (
     <section className="bg-slate-950 text-white py-20 lg:py-28">
       <div className="max-w-6xl mx-auto px-6 grid lg:grid-cols-2 gap-16 items-center">
         {/* Left: copy */}
-        <div className="flex flex-col gap-6">
+        <div className="flex min-w-0 flex-col gap-6">
           <p className="text-xs font-semibold uppercase tracking-widest text-indigo-400">
             Continuous Discovery
           </p>
@@ -52,22 +60,24 @@ export function HeroSection() {
           </p>
           <div className="flex items-center gap-5 pt-2">
             <Link
-              href="/dashboard"
+              href={primaryHref}
               className="inline-block bg-indigo-600 hover:bg-indigo-500 transition-colors text-white font-semibold rounded-lg px-6 py-3 text-base"
             >
-              Start for free →
+              {primaryLabel}
             </Link>
-            <Link
-              href="/login"
-              className="text-slate-400 hover:text-slate-200 transition-colors text-base"
-            >
-              Sign in
-            </Link>
+            {isSignedOut && (
+              <Link
+                href="/login"
+                className="text-slate-400 hover:text-slate-200 transition-colors text-base"
+              >
+                Sign in
+              </Link>
+            )}
           </div>
         </div>
 
         {/* Right: browser chrome mock */}
-        <div aria-hidden="true" className="w-full">
+        <div aria-hidden="true" className="min-w-0 w-full">
           <div className="rounded-xl border border-white/10 bg-slate-900 shadow-2xl overflow-hidden">
             {/* Browser top bar */}
             <div className="flex items-center gap-3 px-4 py-3 bg-slate-800/80 border-b border-white/10">
@@ -86,7 +96,7 @@ export function HeroSection() {
             {/* Kanban content */}
             <div className="p-4 grid grid-cols-3 gap-3 min-h-[280px]">
               {KANBAN_COLUMNS.map((col) => (
-                <div key={col.title} className="flex flex-col gap-2">
+                <div key={col.title} className="flex min-w-0 flex-col gap-2">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
                     {col.title}
                   </p>

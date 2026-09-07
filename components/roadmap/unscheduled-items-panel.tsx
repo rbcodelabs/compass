@@ -6,6 +6,7 @@ import { GripVertical, Layers, Bug, MoreHorizontal } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
+import { BoardColumn, EmptyState } from "@/components/patterns";
 import { HORIZON_META, QUICK_ADD_HORIZONS } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
 
@@ -74,8 +75,8 @@ export function UnscheduledItemsPanel({
   return (
     <div id="unscheduled-items-panel" className="rounded-xl ring-1 ring-border bg-muted/30 p-3 sm:p-4 shrink-0">
       <div className="flex items-center gap-2 mb-1">
-        <h2 className="text-sm font-semibold text-slate-700">Not yet on the roadmap</h2>
-        <span className="text-xs font-medium text-slate-400 bg-slate-200/60 rounded-full px-2 py-0.5 tabular-nums">
+        <h2 className="text-sm font-semibold text-text-secondary">Not yet on the roadmap</h2>
+        <span className="text-xs font-medium text-text-subtle bg-slate-200/60 rounded-full px-2 py-0.5 tabular-nums">
           {items.length}
         </span>
       </div>
@@ -98,12 +99,56 @@ export function UnscheduledItemsPanel({
   );
 }
 
-function UnscheduledItemCard({ item, onQuickAdd, allowedHorizons, pending, interactionMode }: {
+export function UnscheduledItemsColumn({
+  items,
+  onQuickAdd,
+  allowedHorizons = QUICK_ADD_HORIZONS,
+  pendingItemKeys = NO_PENDING_ITEMS,
+  interactionMode = "compact",
+}: Props) {
+  return (
+    <BoardColumn
+      title="Not scheduled"
+      count={items.length}
+      accent="neutral"
+      data-testid="roadmap-unscheduled-column"
+      className="min-w-[280px] flex-1 overflow-hidden md:h-full"
+      bodyId="unscheduled-items-column"
+      bodyClassName="min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"
+    >
+      {items.length === 0 ? (
+        <EmptyState compact title="No items waiting to be scheduled." />
+      ) : (
+        items.map((item) => (
+          <UnscheduledItemCard
+            key={unscheduledDragId(item)}
+            item={item}
+            onQuickAdd={onQuickAdd}
+            allowedHorizons={allowedHorizons}
+            pending={pendingItemKeys.has(unscheduledDragId(item))}
+            interactionMode={interactionMode}
+            fullWidth
+          />
+        ))
+      )}
+    </BoardColumn>
+  );
+}
+
+function UnscheduledItemCard({
+  item,
+  onQuickAdd,
+  allowedHorizons,
+  pending,
+  interactionMode,
+  fullWidth = false,
+}: {
   item: UnscheduledItem;
   onQuickAdd: Props["onQuickAdd"];
   allowedHorizons: readonly Horizon[];
   pending: boolean;
   interactionMode: NonNullable<Props["interactionMode"]>;
+  fullWidth?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
     id: unscheduledDragId(item),
@@ -121,11 +166,11 @@ function UnscheduledItemCard({ item, onQuickAdd, allowedHorizons, pending, inter
       style={style}
       data-testid={`unscheduled-item-${item.kind}:${item.id}`}
       aria-busy={pending || undefined}
-      className={`${interactionMode === "touch-safe" ? "touch-pan-y" : "touch-none"} w-56`}
+      className={`${interactionMode === "touch-safe" ? "touch-pan-y" : "touch-none"} ${fullWidth ? "w-full" : "w-56"}`}
     >
       <Card
         size="sm"
-        className="w-full bg-white shadow-sm transition-opacity duration-150 data-[dragging=true]:opacity-40"
+        className="w-full bg-surface-panel shadow-sm transition-opacity duration-150 data-[dragging=true]:opacity-40"
         data-dragging={isDragging ? true : undefined}
       >
         <CardHeader className="flex-row items-start gap-2 pr-2">
@@ -191,7 +236,7 @@ function UnscheduledItemBody({ item }: { item: UnscheduledItem }) {
 export function UnscheduledItemPreview({ item }: { item: UnscheduledItem }) {
   return (
     <div className="w-56 rotate-1 scale-105">
-      <Card size="sm" className="w-full bg-white shadow-xl ring-2 ring-indigo-200">
+      <Card size="sm" className="w-full bg-surface-panel shadow-xl ring-2 ring-indigo-200">
         <CardHeader className="flex-row items-start gap-2 pr-2">
           <GripVertical className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50" />
           <CardTitle className="flex-1 text-sm leading-snug">{item.title}</CardTitle>

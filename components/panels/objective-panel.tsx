@@ -1,4 +1,5 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
 
 import {
   useEntityDetail,
@@ -135,6 +136,7 @@ export function ObjectivePanel({
       <Section label="Supports">
         <RelationList items={parentItems} empty="No higher-level Key Result." />
       </Section>
+      <Discussion targetType="OBJECTIVE" targetId={id} />
     </PanelContainer>
   );
 }

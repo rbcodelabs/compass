@@ -54,7 +54,7 @@ export function AddSubtaskForm({ workspaceId, parentTaskId, revalidatePathStr, o
     return (
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-indigo-600 transition-colors"
+        className="flex items-center gap-1.5 text-xs font-medium text-text-subtle hover:text-indigo-600 transition-colors"
       >
         <PlusIcon className="w-3.5 h-3.5" />
         Add subtask

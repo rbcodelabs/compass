@@ -77,8 +77,10 @@ test.describe("Feedback Bug → Roadmap", () => {
       );
 
       // Filter to Bugs. This is a server round trip now, not local state.
-      await page.getByRole("button", { name: "Bugs" }).click();
+      await page.getByRole("button", { name: "Filters", exact: true }).click();
+      await page.getByRole("menuitemradio", { name: "Bugs", exact: true }).click();
       await expect(page).toHaveURL(/type=BUG/);
+      await page.keyboard.press("Escape");
 
       const row = page.getByTestId("grid-row").filter({ hasText: bugTitle });
       await expect(row).toHaveCount(1);
