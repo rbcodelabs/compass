@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { installWorkspaceCapabilityPack, updateWorkspaceCapabilityPack } from "@/app/[orgSlug]/[workspaceSlug]/settings/capability-pack-actions"
 
@@ -23,8 +24,8 @@ export function CapabilityPacksPanel({ orgSlug, workspaceSlug, initialPacks }: {
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {initialPacks.map((row) => { const selected = row.versions.find((v) => v.id === row.selectedVersionId) ?? row.versions[0]; return <div key={row.selectedVersionId} className="space-y-3 rounded-lg border border-border-default p-4">
       <div className="flex items-center justify-between"><div><p className="font-medium">{row.displayName}</p><p className="text-xs text-text-muted">{row.packId} · {selected?.digest.slice(0, 12)}</p></div><Button variant="outline" size="sm" disabled={pending} onClick={() => run(() => updateWorkspaceCapabilityPack(orgSlug, workspaceSlug, { packVersionId: row.selectedVersionId, enabledSkillIds: row.enabledSkillIds, enabled: !row.enabled }))}>{row.enabled ? "Disable" : "Enable"}</Button></div>
-      <label className="block text-sm">Version<select className="mt-1 w-full rounded-lg border border-border-default bg-background px-3 py-2" defaultValue={row.selectedVersionId} onChange={(e) => { const next = row.versions.find((v) => v.id === e.target.value); if (next) run(() => updateWorkspaceCapabilityPack(orgSlug, workspaceSlug, { packVersionId: next.id, enabledSkillIds: next.skills.filter((s) => s.enabledByDefault !== false).map((s) => s.id), enabled: row.enabled })) }}>{row.versions.map((v) => <option key={v.id} value={v.id}>{v.version} · {v.commit.slice(0, 8)}</option>)}</select></label>
-      <div className="space-y-2">{selected?.skills.map((skill) => <label key={skill.id} className="flex items-center gap-2 text-sm"><input type="checkbox" defaultChecked={row.enabledSkillIds.includes(skill.id)} onChange={(e) => run(() => updateWorkspaceCapabilityPack(orgSlug, workspaceSlug, { packVersionId: row.selectedVersionId, enabledSkillIds: e.target.checked ? [...row.enabledSkillIds, skill.id] : row.enabledSkillIds.filter((id) => id !== skill.id), enabled: row.enabled }))} />{skill.id}</label>)}</div>
+      <label className="block text-sm">Version<select className="mt-1 w-full rounded-lg border border-border-default bg-background px-3 py-2" disabled={pending} value={row.selectedVersionId} onChange={(e) => { const next = row.versions.find((v) => v.id === e.target.value); if (next) run(() => updateWorkspaceCapabilityPack(orgSlug, workspaceSlug, { packVersionId: next.id, enabledSkillIds: next.skills.filter((s) => s.enabledByDefault !== false).map((s) => s.id), enabled: row.enabled })) }}>{row.versions.map((v) => <option key={v.id} value={v.id}>{v.version} · {v.commit.slice(0, 8)}</option>)}</select></label>
+      <div className="space-y-2">{selected?.skills.map((skill) => <label key={skill.id} className="flex items-center gap-2 text-sm"><Checkbox disabled={pending} checked={row.enabledSkillIds.includes(skill.id)} onCheckedChange={(checked) => run(() => updateWorkspaceCapabilityPack(orgSlug, workspaceSlug, { packVersionId: row.selectedVersionId, enabledSkillIds: checked ? [...row.enabledSkillIds, skill.id] : row.enabledSkillIds.filter((id) => id !== skill.id), enabled: row.enabled }))} />{skill.id}</label>)}</div>
     </div> })}
     {initialPacks.length === 0 && <p className="text-sm text-text-muted">No capability packs installed.</p>}
   </div>

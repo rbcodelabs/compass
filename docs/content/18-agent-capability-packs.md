@@ -9,6 +9,12 @@ Workspace administrators can add reusable skills to the Compass in-app agent fro
 
 Enter a public GitHub repository URL, a full 40-character commit SHA, and the path containing the pack. Compass validates the content before attaching it. Installed versions are immutable: to upgrade, install another commit and select its version; to roll back, select an earlier version.
 
+Use each skill's checkbox to choose which instructions are active, or disable the whole pack without removing its installed versions. A version change restores that version's default skill selection. Changes appear after saving; if a save fails, the previous selection remains visible with an error message.
+
+![Capability pack settings on desktop](/screenshots/docs/capability-packs-desktop.png)
+
+![Capability pack settings on mobile](/screenshots/docs/capability-packs-mobile.png)
+
 Each pack must contain a `compass-pack.json` manifest and one or more declared `skills/<skill-id>/SKILL.md` files. Skills may reference bundled Markdown, text, JSON, YAML, CSV, SVG, PNG, JPEG, or WebP assets. Packs are limited to 1 MiB, 20 skills, and 256 KiB per file.
 
 Capability packs add instructions, not authority. They cannot add shell or filesystem access, external websites, secrets, hooks, commands, subagents, or MCP servers. Compass remains the only tool provider and applies the signed-in user's existing workspace permissions to every action.
