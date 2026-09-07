@@ -9,4 +9,5 @@ it("runs the results journey in the existing authenticated Capture invocation", 
   expect(commands).toHaveLength(1)
   expect(commands[0]).toContain("e2e/functional/specs/capture-research.spec.ts")
   expect(commands[0]).toContain("e2e/functional/specs/capture-results.spec.ts")
+  expect(commands[0]).toContain("e2e/functional/specs/research-mcp.spec.ts")
 })
