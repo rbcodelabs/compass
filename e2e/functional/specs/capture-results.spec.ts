@@ -57,6 +57,12 @@ test("research results: summaries, coverage, synthesis history and paginated evi
   for (const [label, width, height] of [["desktop", 1280, 800], ["mobile", 390, 844]] as const) {
     await page.setViewportSize({ width, height })
     await expect(page.getByRole("heading", { name: "Research results review" })).toBeVisible()
+    // The workspace scrolls inside its shell; fullPage alone captures settings,
+    // not the results being verified. Position the actual synthesis in view.
+    const synthesisHeading = page.getByRole("heading", { name: "Cross-session synthesis" })
+    await synthesisHeading.evaluate(element => element.scrollIntoView({ block: "start" }))
+    await expect(synthesisHeading).toBeInViewport()
+    await expect(page.getByRole("heading", { name: "Executive summary" })).toBeInViewport()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`research-results-${label}.png`), fullPage: true })
     if (process.env.UPDATE_RESEARCH_RESULTS_SCREENSHOTS === "1") await page.screenshot({ path: `public/screenshots/docs/capture-results-${label}.png`, fullPage: true })
