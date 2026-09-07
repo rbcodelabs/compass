@@ -8,7 +8,7 @@
 import { expect, test } from "../fixtures/index";
 
 test.describe("Roadmap — opportunity links", () => {
-  test("link, persist, and clear an opportunity from the edit dialog", async ({ page, base }) => {
+  test("link, persist, and clear an opportunity from the edit dialog", async ({ page, base }, testInfo) => {
     const title = `E2E Roadmap Opportunity Link ${Date.now()}`;
     const opportunityTitle = "E2E Baseline Opportunity";
 
@@ -31,6 +31,16 @@ test.describe("Roadmap — opportunity links", () => {
     await expect(dialog.getByRole("combobox", { name: "Opportunity" })).toContainText(
       "— None —",
     );
+    await page.screenshot({
+      path: testInfo.outputPath("roadmap-opportunity-picker-desktop.png"),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+      path: testInfo.outputPath("roadmap-opportunity-picker-mobile.png"),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 1280, height: 800 });
     await dialog.getByRole("combobox", { name: "Opportunity" }).click();
     await page.getByRole("option", { name: opportunityTitle }).click();
     await dialog.getByRole("button", { name: "Save changes" }).click();
