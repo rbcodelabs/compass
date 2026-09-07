@@ -17,6 +17,10 @@ Use each skill's checkbox to choose which instructions are active, or disable th
 
 Each pack must contain a `compass-pack.json` manifest and one or more declared `skills/<skill-id>/SKILL.md` files. Skills may reference bundled Markdown, text, JSON, YAML, CSV, SVG, PNG, JPEG, or WebP assets. Packs are limited to 1 MiB, 20 skills, and 256 KiB per file.
 
+The in-app runtime compiles enabled skill instructions directly into each turn's context. Directly linked UTF-8 Markdown, text, JSON, YAML, CSV, and SVG assets are included once per pack as text, with a combined 64 KiB limit across all enabled packs and their prompt appendices. SVG is supplied as text, not rendered as an image. Binary assets (PNG, JPEG, WebP) are accepted by the pack format but cannot be consumed by this runtime: installation or enabling a skill that references one fails with an explicit error. Links to disabled skills are also rejected; disabled skill bodies never enter the compiled context. Pack images require a future runtime capability.
+
+Compilation uses more context per turn than loading a skill on demand, but does not require granting filesystem or shell access. The runtime checks stored artifact digests and compilation limits again before each turn. To recover from an unavailable artifact, disable the pack.
+
 Capability packs add instructions, not authority. They cannot add shell or filesystem access, external websites, secrets, hooks, commands, subagents, or MCP servers. Compass remains the only tool provider and applies the signed-in user's existing workspace permissions to every action.
 
 ## Agentic PM Playbook pack interface

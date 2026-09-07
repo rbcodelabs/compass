@@ -1,5 +1,6 @@
 import type { ArtifactStorage } from "@/lib/artifact-storage"
 import { verifyCapabilityPackArtifact } from "@/lib/capability-pack"
+import { compileCapabilityPackInstructions, COMPILED_PACK_CONTEXT_LIMIT } from "@/lib/capability-pack-compilation"
 
 export type ActiveCapabilityPack = {
   packId: string
@@ -19,7 +20,6 @@ const ACTIVE_PACK_LIMIT = 5
 const ACTIVE_SKILL_LIMIT = 40
 const ACTIVE_FILE_LIMIT = 100
 const ACTIVE_BYTES_LIMIT = 5 * 1024 * 1024
-const SYSTEM_APPENDIX_LIMIT = 64 * 1024
 
 function compareVersion(left: string, right: string): number {
   const parse = (value: string) => { const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value); if (!match) throw new Error("Invalid SDK compatibility version"); return match.slice(1).map(Number) }
@@ -68,7 +68,7 @@ export async function prepareCapabilityPacksForTurn(
     if (artifact.manifest.id !== item.packId || artifact.manifest.version !== item.version) throw new Error(`Capability pack metadata mismatch: ${item.packId}`)
     assertPackHostCompatibility(artifact.manifest.sdkCompatibility, artifact.manifest.requiredHostCapabilities)
     const declared = new Set(artifact.manifest.skills.map((skill) => skill.id))
-    for (const skill of item.enabledSkills) {
+    for (const skill of [...item.enabledSkills].sort()) {
       if (!declared.has(skill)) throw new Error(`Enabled skill is not declared by ${item.packId}: ${skill}`)
       if (seenSkills.has(skill)) throw new Error(`Duplicate skill id across active packs: ${skill}`)
       seenSkills.add(skill)
@@ -83,11 +83,10 @@ export async function prepareCapabilityPacksForTurn(
       if (files.length >= ACTIVE_FILE_LIMIT || totalBytes > ACTIVE_BYTES_LIMIT) throw new Error("Active capability packs exceed materialization limits")
       files.push({ path: `${directory}/${file.path}`, content })
     }
-    if (artifact.manifest.systemPromptAppendix) {
-      appendixBytes += Buffer.byteLength(artifact.manifest.systemPromptAppendix)
-      if (appendixBytes > SYSTEM_APPENDIX_LIMIT) throw new Error("Capability pack system prompt appendices exceed 64 KiB")
-      systemPromptAppendices.push(artifact.manifest.systemPromptAppendix)
-    }
+    const compiled = compileCapabilityPackInstructions(artifact, item.enabledSkills)
+    appendixBytes += Buffer.byteLength(compiled) + (systemPromptAppendices.length > 0 ? 2 : 0)
+    if (appendixBytes > COMPILED_PACK_CONTEXT_LIMIT) throw new Error("Compiled capability pack context exceeds 64 KiB")
+    systemPromptAppendices.push(compiled)
     provenance.push({ id: item.packId, version: item.version, commit: item.commit, digest: item.digest, enabledSkills: [...item.enabledSkills].sort() })
   }
   return { files, pluginPaths, skillIds, provenanceJson: JSON.stringify(provenance), systemPromptAppendices }

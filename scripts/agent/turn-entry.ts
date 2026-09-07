@@ -81,8 +81,8 @@ async function main(): Promise<void> {
         skipMcpDiscovery: true,
       })),
       skills: packConfig.skillIds,
-      // Enabling skills provides the Skill mechanism automatically. No pack
-      // receives Read/Bash/Edit/Web or any other built-in capability.
+      // Skill bodies and supported text assets are compiled into systemPrompt
+      // by the host. SDK 0.3.224 does not provide Skill/Read with tools: [].
       tools: [],
       strictMcpConfig: true,
       settingSources: [],

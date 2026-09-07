@@ -83,7 +83,7 @@ function parseManifest(bytes: Uint8Array): CapabilityPackManifest {
   return { schemaVersion: 1, id: m.id, displayName: m.displayName, version: m.version, sdkCompatibility: m.sdkCompatibility, skills, requiredHostCapabilities: m.requiredHostCapabilities as string[], ...(m.systemPromptAppendix ? { systemPromptAppendix: m.systemPromptAppendix } : {}) }
 }
 
-function referencedAssets(markdown: string, sourcePath: string): string[] {
+export function referencedAssets(markdown: string, sourcePath: string): string[] {
   const refs: string[] = []
   const regex = /!?(?:\[[^\]]*\])\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g
   for (const match of markdown.matchAll(regex)) {

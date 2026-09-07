@@ -1,7 +1,9 @@
 import type { PrismaClient } from "@prisma/client"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
+import { getArtifactStorage } from "@/lib/artifact-storage"
 import { fetchGithubCapabilityPack } from "@/lib/capability-pack-github"
-import { normalizeCapabilityPack, parseGithubPackSource } from "@/lib/capability-pack"
+import { normalizeCapabilityPack, parseGithubPackSource, verifyCapabilityPackArtifact } from "@/lib/capability-pack"
+import { compileCapabilityPackInstructions } from "@/lib/capability-pack-compilation"
 import { assertPackHostCompatibility } from "@/lib/capability-pack-runtime"
 import { createHash } from "node:crypto"
 
@@ -16,6 +18,7 @@ export async function installCapabilityPack(input: {
   const files = await fetchGithubCapabilityPack(input, deps.fetcher)
   const artifact = normalizeCapabilityPack(files)
   assertPackHostCompatibility(artifact.manifest.sdkCompatibility, artifact.manifest.requiredHostCapabilities)
+  compileCapabilityPackInstructions(artifact, artifact.manifest.enabledSkills)
   const artifactPathname = `capability-packs/sha256/${artifact.digest}.json`
   const sourceKey = createHash("sha256").update(`${input.repositoryUrl.replace(/\/$/, "")}\n${source.packPath}`).digest("hex")
   const existingBytes = await deps.storage.get(artifactPathname)
@@ -57,14 +60,21 @@ export async function configureWorkspaceCapabilityPack(input: {
   packVersionId: string
   enabledSkillIds: string[]
   enabled: boolean
-}, prisma: PrismaClient) {
-  const version = await prisma.capabilityPackVersion.findFirst({ where: { id: input.packVersionId, capabilityPack: { workspaceId: input.workspaceId } }, include: { capabilityPack: { select: { workspaceId: true } } } })
+}, prisma: PrismaClient, storage?: Pick<ArtifactStorage, "get">) {
+  const version = await prisma.capabilityPackVersion.findFirst({ where: { id: input.packVersionId, capabilityPack: { workspaceId: input.workspaceId } }, include: { capabilityPack: { select: { workspaceId: true, packId: true } } } })
   if (!version || version.validationStatus !== "VALID") throw new Error("Validated capability pack version not found")
   const manifest = JSON.parse(version.manifestJson) as { sdkCompatibility: string; requiredHostCapabilities: string[]; skills: Array<{ id: string }> }
   assertPackHostCompatibility(manifest.sdkCompatibility, manifest.requiredHostCapabilities)
   const declared = new Set(manifest.skills.map((skill) => skill.id))
   const enabledSkillIds = [...new Set(input.enabledSkillIds)].sort()
   if (enabledSkillIds.some((id) => !declared.has(id))) throw new Error("Enabled skill is not declared by this pack")
+  if (input.enabled) {
+    const bytes = await (storage ?? getArtifactStorage()).get(version.artifactPathname)
+    if (!bytes) throw new Error("Capability pack artifact not found")
+    const artifact = verifyCapabilityPackArtifact(bytes, version.artifactSha256)
+    if (artifact.manifest.id !== version.capabilityPack.packId || artifact.manifest.version !== version.semanticVersion) throw new Error("Capability pack metadata mismatch")
+    compileCapabilityPackInstructions(artifact, enabledSkillIds)
+  }
   return prisma.workspaceCapabilityPack.upsert({
     where: { workspaceId_capabilityPackId: { workspaceId: input.workspaceId, capabilityPackId: version.capabilityPackId } },
     update: { capabilityPackVersionId: version.id, enabledSkillIds: JSON.stringify(enabledSkillIds), enabled: input.enabled, updatedAt: new Date() },
