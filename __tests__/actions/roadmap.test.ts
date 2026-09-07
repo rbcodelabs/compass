@@ -587,12 +587,34 @@ describe("editRoadmapItem", () => {
       ).rejects.toThrow("Opportunity not found");
 
       expect(mockOpportunity.findFirst).toHaveBeenCalledWith({
-        where: { id: opportunityId, workspaceId: "ws-1" },
+        where: {
+          id: opportunityId,
+          workspaceId: "ws-1",
+          status: { not: "ARCHIVED" },
+        },
         select: { id: true, title: true },
       });
       expect(mockRoadmapItem.update).not.toHaveBeenCalled();
     },
   );
+
+  it("rejects newly linking an archived opportunity without committing scalar edits", async () => {
+    mockOpportunity.findFirst.mockResolvedValue(null);
+
+    await expect(
+      editRoadmapItem("item-1", "ws-1", { ...editData, opportunityId: "opp-archived" }),
+    ).rejects.toThrow("Opportunity not found");
+
+    expect(mockOpportunity.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "opp-archived",
+        workspaceId: "ws-1",
+        status: { not: "ARCHIVED" },
+      },
+      select: { id: true, title: true },
+    });
+    expect(mockRoadmapItem.update).not.toHaveBeenCalled();
+  });
 
   it("atomically updates scalar fields and the opportunity relation", async () => {
     const result = await editRoadmapItem("item-1", "ws-1", editData);

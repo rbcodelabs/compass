@@ -160,7 +160,11 @@ export async function editRoadmapItem(
   const opportunityChanged = data.opportunityId !== current.opportunityId;
   const opportunity = opportunityChanged && data.opportunityId
     ? await prisma.opportunity.findFirst({
-        where: { id: data.opportunityId, workspaceId },
+        where: {
+          id: data.opportunityId,
+          workspaceId,
+          status: { not: "ARCHIVED" },
+        },
         select: { id: true, title: true },
       })
     : opportunityChanged

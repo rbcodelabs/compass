@@ -31,6 +31,7 @@ test.describe("Roadmap — opportunity links", () => {
     await expect(dialog.getByRole("combobox", { name: "Opportunity" })).toContainText(
       "— None —",
     );
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.screenshot({
       path: testInfo.outputPath("roadmap-opportunity-picker-desktop.png"),
       fullPage: true,
