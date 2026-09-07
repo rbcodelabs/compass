@@ -11,6 +11,7 @@ import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
+import { generateResearchGuideTool, createResearchStudyTool, listResearchStudiesTool, getResearchStudyTool, updateResearchStudyTool, activateResearchStudyTool, closeResearchStudyTool, archiveResearchStudyTool, issueResearchLinkTool, rotateResearchLinkTool, revokeResearchLinksTool } from "@/lib/research-tool-handlers"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import {
   createFeedback,
@@ -167,6 +168,24 @@ const _handler = createMcpHandler(
       await applyToolGate(name, getMcpActor(), args ?? {})
       return handler(args, extra)
     })
+
+    const researchScope = { workspaceId: z.string().uuid() }
+    const researchStudy = { ...researchScope, studyId: z.string().uuid() }
+    const researchType = z.enum(["CUSTOMER_INTERVIEW", "USABILITY_TEST"])
+    const researchDuration = z.union([z.literal(10), z.literal(15), z.literal(20), z.literal(30)])
+    const researchGuide = z.array(z.string().trim().min(1).max(1_000)).min(1).max(20).refine(items => items.reduce((n, item) => n + item.length, 0) <= 10_000, "Guide exceeds 10,000 characters")
+    const researchFields = { name: z.string().trim().min(1).max(255), goal: z.string().trim().min(1).max(5_000), guide: researchGuide, studyType: researchType.optional(), targetMinutes: researchDuration.optional(), appUrl: z.string().max(2_048).optional() }
+    register("generate_research_guide", { title: "Generate Research Guide", description: "Draft 5–8 editable neutral questions or usability tasks. Does not create a study. Uses a bounded tool-free model call; review the guide before use.", inputSchema: { ...researchScope, studyType: researchType, goal: researchFields.goal, appUrl: researchFields.appUrl, targetMinutes: researchDuration }, outputSchema: TOOL_OUTPUT_SCHEMA }, generateResearchGuideTool)
+    register("create_research_study", { title: "Create Research Study", description: "Create an active research study and return its new participant link once. Store the returned link securely; plaintext cannot be retrieved later.", inputSchema: { ...researchScope, ...researchFields }, outputSchema: TOOL_OUTPUT_SCHEMA }, createResearchStudyTool)
+    register("list_research_studies", { title: "List Research Studies", description: "Page through study metadata and counts, newest first. Archived studies are excluded unless status ARCHIVED is requested. Cursors are scoped to workspace and status; no transcripts or participant identities are returned.", inputSchema: { ...researchScope, status: z.enum(["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]).optional(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(1_024).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listResearchStudiesTool)
+    register("get_research_study", { title: "Get Research Study", description: "Get study settings, guide and session count only. Does not return participant credentials, transcripts, identities or private storage paths.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, getResearchStudyTool)
+    register("update_research_study", { title: "Update Research Study", description: "Update study settings. After any session starts, only the name changes; protocol fields remain locked. Archived studies cannot be edited.", inputSchema: { ...researchStudy, ...researchFields, goal: researchFields.goal.optional(), guide: researchGuide.optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, updateResearchStudyTool)
+    register("activate_research_study", { title: "Activate Research Study", description: "Activate a draft or closed study and return a fresh participant link once. Cannot reactivate an archived study.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, activateResearchStudyTool)
+    register("close_research_study", { title: "Close Research Study", description: "Close an active study and revoke PRIMARY participant links; retain existing research.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, closeResearchStudyTool)
+    register("archive_research_study", { title: "Archive Research Study", description: "Archive a study and revoke PRIMARY participant links without deleting research.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, archiveResearchStudyTool)
+    register("issue_research_link", { title: "Issue Research Link", description: "Issue an active study's link only if none is live. If a live link already exists, use explicit rotation; plaintext is never recovered.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, issueResearchLinkTool)
+    register("rotate_research_link", { title: "Rotate Research Link", description: "Explicitly revoke an active study's prior PRIMARY links and return a newly generated participant link once.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, rotateResearchLinkTool)
+    register("revoke_research_links", { title: "Revoke Research Links", description: "Revoke an active study's PRIMARY participant links without generating a replacement.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, revokeResearchLinksTool)
 
     const commentTargetSchema = z.enum(["OBJECTIVE", "KEY_RESULT", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "EXPERIMENT", "ROADMAP_ITEM", "FEEDBACK_ITEM", "TASK", "DOC", "ARTIFACT", "RESEARCH_STUDY", "REVIEW_REQUEST"])
     register("add_comment", { title: "Add Comment", description: "Adds discussion to a supported Compass object. Comments never constitute a decision or authorization.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), parentId: z.string().uuid().optional(), body: z.string().min(1), authorName: z.string().min(1) }, outputSchema: TOOL_OUTPUT_SCHEMA }, addComment)

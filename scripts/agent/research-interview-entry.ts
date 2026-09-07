@@ -18,6 +18,7 @@ async function main(): Promise<void> {
   requireEnv("ANTHROPIC_API_KEY")
   const input = JSON.parse(readFileSync("prompt.json", "utf8")) as {
     prompt: string
+    deadline?: number
     attachments: Array<{ mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf"; originalName: string; data: string }>
   }
   const content: Exclude<SDKUserMessage["message"]["content"], string> = [{ type: "text", text: input.prompt }]
@@ -46,35 +47,42 @@ async function main(): Promise<void> {
 
   let finalText: string | undefined
   let usage: unknown
-  for await (const message of query({
-    prompt: input.attachments.length > 0 ? promptStream() : input.prompt,
-    options: {
-      model: "claude-sonnet-5",
-      tools: [],
-      maxTurns: 1,
-      includePartialMessages: true,
-    },
-  })) {
-    if (message.type === "stream_event" && message.parent_tool_use_id === null &&
-        message.event.type === "content_block_delta" && message.event.delta.type === "text_delta") {
-      emit("AGENT_DELTA", { text: message.event.delta.text })
+  if (input.deadline !== undefined && (!Number.isFinite(input.deadline) || Date.now() >= input.deadline)) throw new Error("Research guide deadline exceeded")
+  const abortController = new AbortController()
+  const timer = input.deadline === undefined ? undefined : setTimeout(() => abortController.abort(), input.deadline - Date.now())
+  try {
+    for await (const message of query({
+      prompt: input.attachments.length > 0 ? promptStream() : input.prompt,
+      options: {
+        model: "claude-sonnet-5",
+        tools: [],
+        maxTurns: 1,
+        includePartialMessages: true,
+        ...(input.deadline === undefined ? {} : { abortController }),
+      },
+    })) {
+      if (message.type === "stream_event" && message.parent_tool_use_id === null &&
+          message.event.type === "content_block_delta" && message.event.delta.type === "text_delta") {
+        emit("AGENT_DELTA", { text: message.event.delta.text })
+      }
+      if (message.type !== "result") continue
+      if (message.subtype !== "success") {
+        throw new Error(`Research query ended with subtype: ${message.subtype}`)
+      }
+      finalText = message.result
+      usage = {
+        durationMs: message.duration_ms,
+        durationApiMs: message.duration_api_ms,
+        numTurns: message.num_turns,
+        totalCostUsd: message.total_cost_usd,
+        usage: message.usage,
+      }
     }
-    if (message.type !== "result") continue
-    if (message.subtype !== "success") {
-      throw new Error(`Research query ended with subtype: ${message.subtype}`)
-    }
-    finalText = message.result
-    usage = {
-      durationMs: message.duration_ms,
-      durationApiMs: message.duration_api_ms,
-      numTurns: message.num_turns,
-      totalCostUsd: message.total_cost_usd,
-      usage: message.usage,
-    }
-  }
 
-  if (!finalText?.trim()) throw new Error("Research query ended without a response")
-  emit("AGENT_RESULT", { text: finalText.trim(), usage })
+    if (input.deadline !== undefined && Date.now() >= input.deadline) throw new Error("Research guide deadline exceeded")
+    if (!finalText?.trim()) throw new Error("Research query ended without a response")
+    emit("AGENT_RESULT", { text: finalText.trim(), usage })
+  } finally { if (timer !== undefined) { clearTimeout(timer); abortController.abort() } }
 }
 
 main().catch((error: unknown) => {
