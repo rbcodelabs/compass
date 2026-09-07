@@ -16,6 +16,7 @@ import {
 
 export const E2E_ORG_SLUG = "e2e-test-org";
 export const E2E_WORKSPACE_SLUG = "e2e-workspace";
+export const E2E_SECOND_WORKSPACE_SLUG = "e2e-planning";
 export const E2E_USER_EMAIL = "dev@localhost.dev";
 export const E2E_NOW_CANDIDATE_TITLE = "E2E Native NOW Policy Candidate";
 
@@ -89,6 +90,22 @@ export async function seedE2E(
     VALUES (gen_random_uuid(), $1, $2, 'ADMIN', NOW())
     ON CONFLICT (workspace_id, user_id) DO NOTHING
   `, [ws.id, user.id]);
+
+  // A second membership makes the marketing homepage exercise its workspace
+  // selector instead of the single-workspace shortcut.
+  const { rows: [secondWorkspace] } = await pool.query<{ id: string }>(`
+    INSERT INTO "${S}".workspaces
+      (id, organization_id, slug, name, roadmap_public, feedback_enabled, created_at, updated_at)
+    VALUES (gen_random_uuid(), $1, $2, 'E2E Planning', false, false, NOW(), NOW())
+    ON CONFLICT (organization_id, slug) DO UPDATE SET name = EXCLUDED.name
+    RETURNING id
+  `, [org.id, E2E_SECOND_WORKSPACE_SLUG]);
+
+  await pool.query(`
+    INSERT INTO "${S}".workspace_members (id, workspace_id, user_id, role, created_at)
+    VALUES (gen_random_uuid(), $1, $2, 'ADMIN', NOW())
+    ON CONFLICT (workspace_id, user_id) DO NOTHING
+  `, [secondWorkspace.id, user.id]);
 
   // ── Deterministic guided UX screenshot fixture ──────────────────────────
   // This public token exists only in the disposable functional workspace.
