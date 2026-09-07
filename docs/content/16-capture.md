@@ -113,6 +113,8 @@ Analysis is bounded to 500 completed sessions, 2,000 turns per session and 500,0
 
 ## Inbox
 
+Workspace agents can create and manage the same research studies through the [MCP API](/help/09-mcp-api), including editable guide generation, bounded study listing, settings, lifecycle and explicit link controls. The tools preserve the UI’s protocol lock and hashed participant-link behavior; they do not expose participant transcripts or enable voice. Existing participant research credentials cannot call these tools.
+
 The Capture **Inbox** opens the existing feedback workflow for ideas and bugs. Customer portal submissions, votes, attachments, opportunity links, and roadmap actions continue to work as before. While research studies remain behind the rollout gate, navigation continues to show **Feedback** and the existing `/feedback` route remains unchanged.
 
 ## Privacy and review

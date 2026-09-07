@@ -23,6 +23,7 @@ const mockPrisma = {
   feedbackItem: { findUnique: vi.fn() },
   doc: { findUnique: vi.fn() },
   reviewRequest: { findUnique: vi.fn() },
+  researchStudy: { findUnique: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
@@ -68,6 +69,11 @@ describe("TOOL_GATES completeness", () => {
 })
 
 describe("applyToolGate", () => {
+  it.each(["get_research_study", "update_research_study", "activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"])("%s rejects a study outside the declared workspace", async tool => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "declared" })
+    mockPrisma.researchStudy.findUnique.mockResolvedValue({ workspaceId: "foreign" })
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "declared", studyId: "study" })).rejects.toThrow(/does not belong to workspace declared/)
+  })
   it("gives public research credentials no internal workspace tools", () => {
     expect([...RESEARCH_TOOL_ALLOWLIST]).toEqual([])
   })
