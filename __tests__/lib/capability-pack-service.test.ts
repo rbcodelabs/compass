@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { configureWorkspaceCapabilityPack } from "@/lib/capability-pack-service"
 import { normalizeCapabilityPack } from "@/lib/capability-pack"
 const { unavailableStorage } = vi.hoisted(() => ({ unavailableStorage: vi.fn(() => { throw new Error("Storage unavailable") }) }))
-vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: unavailableStorage }))
+vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: unavailableStorage }))
 
 function pack(body = "Instructions", assets: Array<[string, Uint8Array]> = []) {
   return normalizeCapabilityPack(new Map([

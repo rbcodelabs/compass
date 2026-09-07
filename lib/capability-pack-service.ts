@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
-import { getArtifactStorage } from "@/lib/artifact-storage"
+import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { fetchGithubCapabilityPack } from "@/lib/capability-pack-github"
 import { normalizeCapabilityPack, parseGithubPackSource, verifyCapabilityPackArtifact } from "@/lib/capability-pack"
 import { compileCapabilityPackInstructions } from "@/lib/capability-pack-compilation"
@@ -69,7 +69,7 @@ export async function configureWorkspaceCapabilityPack(input: {
   const enabledSkillIds = [...new Set(input.enabledSkillIds)].sort()
   if (enabledSkillIds.some((id) => !declared.has(id))) throw new Error("Enabled skill is not declared by this pack")
   if (input.enabled) {
-    const bytes = await (storage ?? getArtifactStorage()).get(version.artifactPathname)
+    const bytes = await (storage ?? getCapabilityPackArtifactStorage()).get(version.artifactPathname)
     if (!bytes) throw new Error("Capability pack artifact not found")
     const artifact = verifyCapabilityPackArtifact(bytes, version.artifactSha256)
     if (artifact.manifest.id !== version.capabilityPack.packId || artifact.manifest.version !== version.semanticVersion) throw new Error("Capability pack metadata mismatch")

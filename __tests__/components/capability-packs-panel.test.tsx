@@ -22,6 +22,14 @@ afterEach(cleanup)
 beforeEach(() => { vi.resetAllMocks(); install.mockResolvedValue({ id: "v2" }); update.mockResolvedValue(undefined) })
 
 describe("capability pack settings", () => {
+  it("renders serialized server validation failures in production", async () => {
+    install.mockResolvedValue({ error: "A full 40-character commit SHA is required" })
+    render(panel())
+    fireEvent.change(screen.getByRole("textbox", { name: "GitHub repository URL" }), { target: { value: "https://github.com/sample/product" } })
+    fireEvent.change(screen.getByRole("textbox", { name: "Full commit SHA" }), { target: { value: "main" } })
+    fireEvent.click(screen.getByRole("button", { name: "Install and enable" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("A full 40-character commit SHA is required")
+  })
   it("keeps the persisted skill selection when an update fails", async () => {
     update.mockRejectedValue(new Error("Update unavailable"))
     render(panel())

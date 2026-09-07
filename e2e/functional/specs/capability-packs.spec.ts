@@ -3,7 +3,7 @@ import pg from "pg"
 import { randomUUID } from "node:crypto"
 import path from "node:path"
 import { normalizeCapabilityPack } from "../../../lib/capability-pack"
-import { getArtifactStorage } from "../../../lib/artifact-storage"
+import { getCapabilityPackArtifactStorage } from "../../../lib/artifact-storage"
 
 // Only local, dedicated test data. External installation is opt-in because it
 // exercises GitHub availability/rate limits; configuration runs in every suite.
@@ -42,7 +42,7 @@ test.beforeEach(async () => {
       ...manifest.skills.map((skill): [string, Uint8Array] => [skill.path, Buffer.from(`---\nname: ${skill.id}\ndescription: Sample product workflow\n---\nUse Compass to help the active workspace.`)]),
     ]))
     const pathname = `capability-packs/sha256/${artifact.digest}.json`
-    await getArtifactStorage().put(pathname, artifact.bytes, "application/json")
+    await getCapabilityPackArtifactStorage().put(pathname, artifact.bytes, "application/json")
     await pool.query(`INSERT INTO compass_dev.capability_pack_versions (id,capability_pack_id,semantic_version,source_repository,source_commit,source_path,artifact_sha256,artifact_pathname,sdk_compatibility,manifest_json,validation_status,created_by_id,created_at) VALUES ($1,$2,$3,'https://github.com/example/product-skills',$4,'packs/product',$5,$6,$7,$8,'VALID',(SELECT id FROM compass_dev.users WHERE email='dev@localhost.dev'),NOW())`, [id, packId, version, sha.repeat(40), artifact.digest, pathname, manifest.sdkCompatibility, JSON.stringify(artifact.manifest)])
   }
   await pool.query(`INSERT INTO compass_dev.workspace_capability_packs (id,workspace_id,capability_pack_id,capability_pack_version_id,enabled_skill_ids,enabled,created_at,updated_at) VALUES ($1,$2,$3,$4,'["discovery"]',true,NOW(),NOW())`, [randomUUID(), workspaceId, packId, newVersion])

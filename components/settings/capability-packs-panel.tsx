@@ -12,7 +12,7 @@ export function CapabilityPacksPanel({ orgSlug, workspaceSlug, initialPacks }: {
   const [source, setSource] = useState({ repositoryUrl: "", commitSha: "", packPath: "packs/compass" })
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
-  const run = (work: () => Promise<unknown>) => startTransition(async () => { setError(null); try { await work() } catch (cause) { setError(cause instanceof Error ? cause.message : "Capability pack operation failed") } })
+  const run = (work: () => Promise<unknown>) => startTransition(async () => { setError(null); try { const result = await work(); if (result && typeof result === "object" && "error" in result && typeof result.error === "string") setError(result.error) } catch (cause) { setError(cause instanceof Error ? cause.message : "Capability pack operation failed") } })
   return <div className="space-y-6">
     <div className="space-y-3 rounded-lg border border-border-default p-4">
       <p className="text-sm text-text-secondary">Install a declarative skills-only pack from public GitHub at an immutable commit.</p>

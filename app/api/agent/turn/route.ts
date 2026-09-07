@@ -23,7 +23,7 @@ import { checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
 import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
-import { getArtifactStorage } from "@/lib/artifact-storage"
+import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/capability-pack-runtime"
 
 export const runtime = "nodejs"
@@ -195,7 +195,7 @@ export async function POST(request: NextRequest) {
       let usage: any
 
       try {
-        const preparedPacks = await prepareCapabilityPacksForTurn(activePacks, getArtifactStorage())
+        const preparedPacks = await prepareCapabilityPacksForTurn(activePacks, { get: (pathname) => getCapabilityPackArtifactStorage().get(pathname) })
         packProvenance = preparedPacks.provenanceJson
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
         sandbox = await bootSandboxFromSnapshot(snapshotId)

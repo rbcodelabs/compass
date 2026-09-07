@@ -7,6 +7,8 @@ description: Install validated instruction packs for the Compass in-app agent
 
 Workspace administrators can add reusable skills to the Compass in-app agent from **Settings → Agent capability packs**.
 
+Before enabling packs in a deployed environment, an administrator must configure `CAPABILITY_PACK_BLOB_READ_WRITE_TOKEN` for a **private** Vercel Blob store. Preview and production require their own configured private pack storage. Compass does not fall back to the general `BLOB_READ_WRITE_TOKEN`, which may serve public documents or images. Missing or incorrectly configured private storage blocks pack installation and enabled pack turns; an agent with no active packs does not require this setting.
+
 Enter a public GitHub repository URL, a full 40-character commit SHA, and the path containing the pack. Compass validates the content before attaching it. Installed versions are immutable: to upgrade, install another commit and select its version; to roll back, select an earlier version.
 
 Use each skill's checkbox to choose which instructions are active, or disable the whole pack without removing its installed versions. A version change restores that version's default skill selection. Changes appear after saving; if a save fails, the previous selection remains visible with an error message.

@@ -32,7 +32,8 @@ vi.mock("@/lib/agent-sandbox", () => ({ bootSandboxFromSnapshot: (...args: unkno
 vi.mock("@/lib/agent-mcp-key", () => ({ mintAgentMcpKey: (...args: unknown[]) => mockMintKey(...args), revokeAgentMcpKey: (...args: unknown[]) => mockRevokeKey(...args) }))
 const mockPreparePacks = vi.fn()
 vi.mock("@/lib/capability-pack-runtime", () => ({ prepareCapabilityPacksForTurn: (...args: unknown[]) => mockPreparePacks(...args) }))
-vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: () => ({}) }))
+const mockPackStorage = vi.fn()
+vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: () => mockPackStorage() }))
 
 const mockCheckLimit = vi.fn()
 vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => mockCheckLimit() }))
@@ -51,6 +52,7 @@ const SESSION = { user: { id: "user-1" } }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockPackStorage.mockReturnValue({})
   process.env.ANTHROPIC_API_KEY = "sk-ant-test"
   mockAuth.mockResolvedValue(SESSION)
   mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
@@ -62,6 +64,19 @@ beforeEach(() => {
 })
 
 describe("agent turn route — guards", () => {
+  it("runs without dedicated pack storage when no packs are active", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/capability-pack-runtime")>("@/lib/capability-pack-runtime")
+    mockPreparePacks.mockImplementation(actual.prepareCapabilityPacksForTurn)
+    mockPackStorage.mockImplementation(() => { throw new Error("Private pack storage is not configured") })
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", name: "Test", slug: "test", organization: { slug: "org" } })
+    mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+    mockPrisma.agentMessage.findMany.mockResolvedValue([{ role: "user", content: "hi" }])
+    const runCommand = vi.fn().mockResolvedValue({ async *logs() { yield { stream: "stdout", data: 'AGENT_ERROR {"message":"test stop"}\n' } }, wait: vi.fn() })
+    mockBootSandbox.mockResolvedValue({ writeFiles: vi.fn(), runCommand, stop: vi.fn() })
+    await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+    expect(runCommand).toHaveBeenCalled()
+    expect(mockPackStorage).not.toHaveBeenCalled()
+  })
   it("passes actual compiled enabled instructions to the sandbox system prompt", async () => {
     const actual = await vi.importActual<typeof import("@/lib/capability-pack-runtime")>("@/lib/capability-pack-runtime")
     const artifact = normalizeCapabilityPack(new Map([
