@@ -551,16 +551,13 @@ describe("authoritative research voice control plane", () => {
       where: expect.objectContaining({ status: "DISCONNECTING", nextProviderOrdinal: 3, lastProviderItemId: "item-2" }),
       data: expect.objectContaining({ status: "COMPLETED", transcriptIntegrity: "COMPLETE" }),
     }))
-    expect(tx.researchSession.updateMany).toHaveBeenCalledWith({
-      where: { id: "session-1", voiceLeaseId: "call-1" },
-      data: { voiceLeaseId: null, voiceLeaseExpiresAt: null, updatedAt: now },
-    })
+    expect(tx.researchSession.updateMany).not.toHaveBeenCalled()
 
-    tx.researchVoiceCall.findFirst.mockResolvedValue({ id: "call-1", sessionId: "session-1", status: "ACTIVE", transcriptIntegrity: "PENDING", nextProviderOrdinal: 3, lastProviderItemId: "item-2", leaseExpiresAt: new Date(now.getTime() - 1), lastHeartbeatAt: now, statusChangedAt: now })
+    tx.researchVoiceCall.findFirst.mockResolvedValue({ id: "call-1", sessionId: "session-1", status: "ACTIVE", transcriptIntegrity: "PENDING", nextProviderOrdinal: 3, lastProviderItemId: "item-2", leaseExpiresAt: new Date(now.getTime() - 1), lastHeartbeatAt: now, statusChangedAt: now, updatedAt: now } as never)
     await reconcilePersistedResearchVoiceCall({ prisma: prisma as never, voiceCallId: "call-1", sessionId: "session-1", now })
     expect(tx.researchVoiceCall.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
       where: expect.objectContaining({ status: "ACTIVE", nextProviderOrdinal: 3, lastProviderItemId: "item-2" }),
-      data: expect.objectContaining({ status: "EXPIRED", transcriptIntegrity: "DEGRADED" }),
+      data: expect.objectContaining({ status: "UNKNOWN", transcriptIntegrity: "DEGRADED" }),
     }))
   })
 
@@ -574,6 +571,7 @@ describe("authoritative research voice control plane", () => {
           nextProviderOrdinal: 3, lastProviderItemId: "item-2",
           leaseExpiresAt: new Date(now.getTime() + 60_000), lastHeartbeatAt: observedHeartbeat,
           statusChangedAt: new Date(now.getTime() - 60_000),
+          updatedAt: now,
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
@@ -596,11 +594,11 @@ describe("authoritative research voice control plane", () => {
   it("reconciles stale nonterminal calls without mutating terminal calls", () => {
     const now = new Date("2026-09-05T12:00:00.000Z")
     expect(reconcileResearchVoiceCall({ status: "ACTIVE", leaseExpiresAt: new Date(now.getTime() - 1), lastHeartbeatAt: now, statusChangedAt: now }, now))
-      .toMatchObject({ callPatch: { status: "EXPIRED", transcriptIntegrity: "DEGRADED" }, releaseVoiceLease: true })
+      .toMatchObject({ callPatch: { status: "EXPIRED", transcriptIntegrity: "DEGRADED" }, releaseVoiceLease: false })
     expect(reconcileResearchVoiceCall({ status: "ACTIVE", leaseExpiresAt: new Date(now.getTime() + 60_000), lastHeartbeatAt: new Date(now.getTime() - 31_000), statusChangedAt: now }, now, 30_000))
       .toMatchObject({ callPatch: { status: "UNKNOWN", transcriptIntegrity: "DEGRADED" } })
     expect(reconcileResearchVoiceCall({ status: "COMPLETED", leaseExpiresAt: now, lastHeartbeatAt: null, statusChangedAt: now }, now))
-      .toEqual({ callPatch: null, releaseVoiceLease: true })
+      .toEqual({ callPatch: null, releaseVoiceLease: false })
   })
 
   it("uses the approved 45-second heartbeat staleness boundary", () => {

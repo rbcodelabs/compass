@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client"
 import { ResearchVoiceControlPlaneError } from "@/lib/research-voice-control-plane"
 import { OpenAIRealtimeProviderError } from "@/lib/research-voice-provider"
 import { ResearchVoiceSandboxLaunchError, stopResearchVoiceSandbox } from "@/lib/research-voice-sandbox"
+import { terminateResearchVoiceCall } from "@/lib/research-voice-termination"
 
 type ProvisioningPrisma = Pick<PrismaClient, "$transaction" | "researchVoiceCall">
 type Provider = {
@@ -21,41 +22,11 @@ async function terminalizeProvisioning(input: {
   sessionId: string
   status: "FAILED" | "UNKNOWN"
   errorCode: string
-  expectedStatus: "PROVISIONING" | "DISCONNECTING"
-  statusChangedAt?: Date
-  providerCallId?: string
-  sandboxName?: string
-  providerStoppedAt?: Date | null
-  sandboxStoppedAt?: Date | null
 }) {
-  const transitionedAt = new Date()
-  await input.prisma.$transaction(async (tx) => {
-    const updated = await tx.researchVoiceCall.updateMany({
-      where: {
-        id: input.callId,
-        sessionId: input.sessionId,
-        status: input.expectedStatus,
-        ...(input.statusChangedAt ? { statusChangedAt: input.statusChangedAt } : {}),
-        ...(input.providerCallId ? { providerCallId: input.providerCallId, sandboxName: input.sandboxName } : {}),
-      },
-      data: {
-        status: input.status,
-        transcriptIntegrity: "DEGRADED",
-        errorCode: input.errorCode,
-        endedAt: transitionedAt,
-        statusChangedAt: transitionedAt,
-        updatedAt: transitionedAt,
-        answerSdp: null,
-        ...(input.providerStoppedAt !== undefined ? { providerStoppedAt: input.providerStoppedAt } : {}),
-        ...(input.sandboxStoppedAt !== undefined ? { sandboxStoppedAt: input.sandboxStoppedAt } : {}),
-      },
-    })
-    if (updated.count !== 1) throw new ResearchVoiceControlPlaneError("Voice provisioning changed concurrently", 409, "PROVISIONING_RACE")
-    const released = await tx.researchSession.updateMany({
-      where: { id: input.sessionId, voiceLeaseId: input.callId },
-      data: { voiceLeaseId: null, voiceLeaseExpiresAt: null, updatedAt: transitionedAt },
-    })
-    if (released.count !== 1) throw new ResearchVoiceControlPlaneError("Voice lease changed concurrently", 409, "PROVISIONING_RACE")
+  return terminateResearchVoiceCall({
+    prisma: input.prisma, callId: input.callId, sessionId: input.sessionId,
+    compensation: true, raceCode: "PROVISIONING_RACE", errorCode: input.errorCode,
+    creationOutcome: { providerNeverCreated: input.status === "FAILED", sandboxNeverCreated: true },
   })
 }
 
@@ -68,55 +39,20 @@ async function compensateCreatedProviderCall(input: {
   providerCallId: string
   sandboxName: string
   sandboxAlreadyStopped: boolean
+  sandboxNeverCreated?: boolean
+  sandboxCommandId?: string
   errorCode: string
 }) {
-  const current = await input.prisma.researchVoiceCall.findUnique({ where: { id: input.callId } })
-  if (!current || current.sessionId !== input.sessionId ||
-      !["PROVISIONING", "PROVIDER_CREATED"].includes(current.status) ||
-      (current.providerCallId && current.providerCallId !== input.providerCallId)) {
-    throw new ResearchVoiceControlPlaneError("Voice provisioning changed concurrently", 409, "PROVISIONING_RACE")
-  }
-  const cleanupStartedAt = new Date()
-  // Publish cleanup ownership and resource provenance before issuing destructive I/O.
-  // A worker that advanced concurrently wins the fence and remains untouched.
-  const fenced = await input.prisma.researchVoiceCall.updateMany({
-    where: {
-      id: input.callId, sessionId: input.sessionId, status: current.status,
-      statusChangedAt: current.statusChangedAt, providerCallId: current.providerCallId,
-      sandboxName: current.sandboxName, sandboxCommandId: current.sandboxCommandId,
-    },
-    data: {
-      status: "DISCONNECTING", statusChangedAt: cleanupStartedAt, updatedAt: cleanupStartedAt,
+  return terminateResearchVoiceCall({
+    prisma: input.prisma, callId: input.callId, sessionId: input.sessionId,
+    compensation: true, raceCode: "PROVISIONING_RACE", errorCode: input.errorCode,
+    cleanup: { provider: input.provider, stopSandbox: input.stopSandbox },
+    creationOutcome: {
       providerCallId: input.providerCallId, sandboxName: input.sandboxName,
-      transcriptIntegrity: "DEGRADED", errorCode: input.errorCode, answerSdp: null,
+      sandboxCommandId: input.sandboxCommandId,
+      sandboxStopped: input.sandboxAlreadyStopped,
+      sandboxNeverCreated: input.sandboxNeverCreated,
     },
-  })
-  if (fenced.count !== 1) throw new ResearchVoiceControlPlaneError("Voice provisioning changed concurrently", 409, "PROVISIONING_RACE")
-  let providerStoppedAt: Date | null = null
-  try {
-    await input.provider.hangup(input.providerCallId)
-    providerStoppedAt = new Date()
-  } catch {
-    // Retain the provider identity for the durable cleanup retry.
-  }
-  let sandboxStopped = input.sandboxAlreadyStopped
-  if (!sandboxStopped) {
-    try {
-      await input.stopSandbox(input.sandboxName)
-      sandboxStopped = true
-    } catch {
-      sandboxStopped = false
-    }
-  }
-  await terminalizeProvisioning({
-    prisma: input.prisma,
-    callId: input.callId,
-    sessionId: input.sessionId,
-    status: sandboxStopped && providerStoppedAt ? "FAILED" : "UNKNOWN",
-    errorCode: input.errorCode,
-    expectedStatus: "DISCONNECTING", statusChangedAt: cleanupStartedAt,
-    providerCallId: input.providerCallId, sandboxName: input.sandboxName,
-    providerStoppedAt, sandboxStoppedAt: sandboxStopped ? new Date() : null,
   })
 }
 
@@ -169,14 +105,13 @@ export async function provisionAllocatedResearchVoiceCall({
     if (providerError.providerCallId) {
       await compensateCreatedProviderCall({
         prisma, provider, stopSandbox, callId: allocation.call.id, sessionId: allocation.call.sessionId,
-        providerCallId: providerError.providerCallId, sandboxName, sandboxAlreadyStopped: false,
+        providerCallId: providerError.providerCallId, sandboxName, sandboxAlreadyStopped: false, sandboxNeverCreated: true,
         errorCode: providerError.code,
       })
     } else {
       await terminalizeProvisioning({
         prisma, callId: allocation.call.id, sessionId: allocation.call.sessionId,
         status: providerError.ambiguous ? "UNKNOWN" : "FAILED", errorCode: providerError.code,
-        expectedStatus: "PROVISIONING",
       })
     }
     throw providerError
@@ -195,7 +130,7 @@ export async function provisionAllocatedResearchVoiceCall({
   } catch (error) {
     await compensateCreatedProviderCall({
       prisma, provider, stopSandbox, callId: allocation.call.id, sessionId: allocation.call.sessionId,
-      providerCallId: providerCall.providerCallId, sandboxName, sandboxAlreadyStopped: false,
+      providerCallId: providerCall.providerCallId, sandboxName, sandboxAlreadyStopped: false, sandboxNeverCreated: true,
       errorCode: "PROVIDER_STATE_CAS_FAILED",
     })
     throw error
@@ -245,6 +180,7 @@ export async function provisionAllocatedResearchVoiceCall({
     await compensateCreatedProviderCall({
       prisma, provider, stopSandbox, callId: allocation.call.id, sessionId: allocation.call.sessionId,
       providerCallId: providerCall.providerCallId, sandboxName: runtime.sandboxName,
+      sandboxCommandId: runtime.sandboxCommandId,
       sandboxAlreadyStopped: false, errorCode: "WORKER_STATE_CAS_FAILED",
     })
     throw error

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import type { PrismaClient } from "@prisma/client"
 import { isResearchAuthoritativeVoiceEnabled } from "@/lib/research-feature"
+import { terminateResearchVoiceCall, type ResearchVoiceCleanup } from "@/lib/research-voice-termination"
 
 export const MAX_RESEARCH_VOICE_ATTEMPTS_PER_MINUTE = 5
 export const MAX_RESEARCH_VOICE_ATTEMPTS_PER_DAY = 20
@@ -603,13 +604,13 @@ export function reconcileResearchVoiceCall(
 ) {
   assertVoiceCallStatus(call.status)
   if (TERMINAL_CALL_STATUSES.has(call.status)) {
-    return { callPatch: null, releaseVoiceLease: true }
+    return { callPatch: null, releaseVoiceLease: false }
   }
   if (call.leaseExpiresAt <= now) {
     return { callPatch: {
       status: "EXPIRED" as const, transcriptIntegrity: "DEGRADED" as const,
       endReason: "LEASE_EXPIRED", endedAt: now, statusChangedAt: now, updatedAt: now,
-    }, releaseVoiceLease: true }
+    }, releaseVoiceLease: false }
   }
   const expectsHeartbeat = ["WORKER_STARTING", "READY", "ACTIVE", "DISCONNECTING"].includes(call.status)
   const heartbeatReference = call.lastHeartbeatAt ?? call.statusChangedAt
@@ -618,7 +619,7 @@ export function reconcileResearchVoiceCall(
       status: call.status === "DISCONNECTING" ? "FAILED" as const : "UNKNOWN" as const,
       transcriptIntegrity: "DEGRADED" as const, endReason: "HEARTBEAT_STALE",
       endedAt: now, statusChangedAt: now, updatedAt: now,
-    }, releaseVoiceLease: true }
+    }, releaseVoiceLease: false }
   }
   return null
 }
@@ -647,7 +648,7 @@ export async function transitionResearchVoiceCall({
   return prisma.$transaction(async (tx) => {
     const call = await tx.researchVoiceCall.findFirst({
       where: { id: voiceCallId, sessionId },
-      select: { status: true, transcriptIntegrity: true, nextProviderOrdinal: true, lastProviderItemId: true },
+      select: { status: true, transcriptIntegrity: true, nextProviderOrdinal: true, lastProviderItemId: true, providerStoppedAt: true, sandboxStoppedAt: true },
     })
     if (!call || call.status !== expectedStatus || call.nextProviderOrdinal !== expectedNextProviderOrdinal ||
         call.lastProviderItemId !== expectedLastProviderItemId) {
@@ -661,12 +662,13 @@ export async function transitionResearchVoiceCall({
       where: {
         id: voiceCallId, sessionId, status: expectedStatus,
         transcriptIntegrity: call.transcriptIntegrity,
+        providerStoppedAt: call.providerStoppedAt, sandboxStoppedAt: call.sandboxStoppedAt,
         nextProviderOrdinal: expectedNextProviderOrdinal, lastProviderItemId: expectedLastProviderItemId,
       },
       data: callPatch,
     })
     if (updated.count !== 1) throw new ResearchVoiceControlPlaneError("Voice call transition changed concurrently", 409, "TRANSITION_RACE")
-    const releaseVoiceLease = TERMINAL_CALL_STATUSES.has(nextStatus)
+    const releaseVoiceLease = TERMINAL_CALL_STATUSES.has(nextStatus) && Boolean(call.providerStoppedAt && call.sandboxStoppedAt)
     if (releaseVoiceLease) {
       const released = await tx.researchSession.updateMany({
         where: { id: sessionId, voiceLeaseId: voiceCallId },
@@ -683,42 +685,26 @@ export async function reconcilePersistedResearchVoiceCall({
   voiceCallId,
   sessionId,
   now = new Date(),
+  cleanup,
 }: {
-  prisma: VoiceControlPlanePrisma
+  prisma: VoiceControlPlanePrisma & Pick<PrismaClient, "researchVoiceCall">
   voiceCallId: string
   sessionId: string
   now?: Date
+  cleanup?: ResearchVoiceCleanup
 }) {
-  return prisma.$transaction(async (tx) => {
-    const call = await tx.researchVoiceCall.findFirst({
+  const call = await prisma.$transaction(async (tx) => {
+    return tx.researchVoiceCall.findFirst({
       where: { id: voiceCallId, sessionId },
-      select: {
-        status: true, transcriptIntegrity: true, nextProviderOrdinal: true, lastProviderItemId: true,
-        leaseExpiresAt: true, lastHeartbeatAt: true, statusChangedAt: true,
-      },
     })
-    if (!call) throw new ResearchVoiceControlPlaneError("Voice call not found", 404, "CALL_NOT_FOUND")
-    assertVoiceCallStatus(call.status)
-    const reconciliation = reconcileResearchVoiceCall({ ...call, status: call.status }, now)
-    if (!reconciliation) return { callPatch: null, releaseVoiceLease: false }
-    if (reconciliation.callPatch) {
-      const updated = await tx.researchVoiceCall.updateMany({
-        where: {
-          id: voiceCallId, sessionId, status: call.status, transcriptIntegrity: call.transcriptIntegrity,
-          nextProviderOrdinal: call.nextProviderOrdinal, lastProviderItemId: call.lastProviderItemId,
-          leaseExpiresAt: call.leaseExpiresAt, lastHeartbeatAt: call.lastHeartbeatAt,
-          statusChangedAt: call.statusChangedAt,
-        },
-        data: reconciliation.callPatch,
-      })
-      if (updated.count !== 1) throw new ResearchVoiceControlPlaneError("Voice reconciliation changed concurrently", 409, "RECONCILIATION_RACE")
-    }
-    if (reconciliation.releaseVoiceLease) {
-      await tx.researchSession.updateMany({
-        where: { id: sessionId, voiceLeaseId: voiceCallId },
-        data: { voiceLeaseId: null, voiceLeaseExpiresAt: null, updatedAt: now },
-      })
-    }
-    return reconciliation
+  })
+  if (!call) throw new ResearchVoiceControlPlaneError("Voice call not found", 404, "CALL_NOT_FOUND")
+  assertVoiceCallStatus(call.status)
+  const reconciliation = reconcileResearchVoiceCall({ ...call, status: call.status }, now)
+  if (!reconciliation) return { callPatch: null, releaseVoiceLease: false }
+  return terminateResearchVoiceCall({
+    prisma, callId: voiceCallId, sessionId, expected: call, cleanup, now,
+    endReason: reconciliation.callPatch?.endReason ?? call.endReason ?? undefined,
+    raceCode: "RECONCILIATION_RACE",
   })
 }

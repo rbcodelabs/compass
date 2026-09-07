@@ -7,7 +7,7 @@ export const RESEARCH_VOICE_SANDBOX_TIMEOUT_MS = 40 * 60_000
 type SandboxCommand = { cmdId: string }
 type CreatedSandbox = {
   name: string
-  stop(): Promise<unknown>
+  stop(options?: { signal?: AbortSignal }): Promise<{ status: string }>
   runCommand(input: {
     cmd: string
     args: string[]
@@ -139,10 +139,10 @@ export async function launchResearchVoiceSandbox({
   } catch {
     let cleanupDefinite = false
     try {
-      await sandbox.stop()
-      cleanupDefinite = true
+      const result = await sandbox.stop({ signal: AbortSignal.timeout(10_000) })
+      cleanupDefinite = result.status === "stopped"
     } catch {
-      // The control plane will retry deterministic cleanup by the persisted name.
+      // Without a settled command or stop receipt, cleanup retains UNKNOWN.
     }
     throw new ResearchVoiceSandboxLaunchError("Research voice worker startup failed", sandboxName, cleanupDefinite)
   }
@@ -177,12 +177,18 @@ export async function inspectResearchVoiceSandbox(
 }
 
 export async function stopResearchVoiceSandbox(name: string) {
+  const signal = AbortSignal.timeout(10_000)
+  let sandbox: Sandbox
   try {
-    const sandbox = await Sandbox.get({ name, resume: false })
-    return await sandbox.stop()
+    sandbox = await Sandbox.get({ name, resume: false, signal })
   } catch (error) {
     const status = (error as { response?: { status?: number } })?.response?.status
     if (status === 404) return { alreadyStopped: true as const }
     throw error
   }
+  if (sandbox.status === "stopped") return { alreadyStopped: true as const }
+  // A stop endpoint's 404 does not establish that the named Sandbox is absent.
+  const result = await sandbox.stop({ signal })
+  if (result.status !== "stopped") throw new Error("Sandbox stop outcome is not confirmed")
+  return result
 }
