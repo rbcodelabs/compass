@@ -27,6 +27,9 @@ test("GIF and HEIC originals remain private and downloadable after resume", asyn
     ]
     const saved: Array<{ id: string; name: string; bytes: Buffer }> = []
     for (const [index, format] of formats.entries()) {
+      // Provisional interviewer text can match the final text before the
+      // composer unlocks; native file input must be usable before selecting.
+      await expect(page.getByLabel("Share screenshot or PDF")).toBeEnabled()
       const bytes = readFileSync(`e2e/fixtures/${format.name}`)
       const uploaded = page.waitForResponse(response => response.url().endsWith("/api/research/attachments") && response.request().method() === "POST")
       // Select the actual file path: do not inject a MIME type that a native
@@ -40,6 +43,7 @@ test("GIF and HEIC originals remain private and downloadable after resume", asyn
       await page.getByRole("button", { name: "Send" }).click()
       await expect(page.getByText("What made that difficult for you?", { exact: true })).toHaveCount(index + 1)
     }
+    await expect(page.getByLabel("Share screenshot or PDF")).toBeEnabled()
     await page.reload()
     await expect(page.getByText(/HEIC is preserved for researchers/)).toBeVisible()
     await expect(page.getByRole("img", { name: "test-image.heic" })).toHaveCount(0)
