@@ -77,6 +77,7 @@ import {
 } from "@/lib/solution-comment-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
 import { updateOpportunity } from "@/lib/opportunity-tool-handlers"
+import { listAssumptions, listSolutions } from "@/lib/discovery-query-tool-handlers"
 import {
   listScoringModels,
   getScoringModel,
@@ -128,6 +129,7 @@ import {
   updateObjective,
 } from "@/lib/okr-tool-handlers"
 import { applyRecordedDecision, getDecision, getReviewRequest, listDecisions, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
 import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
@@ -990,6 +992,45 @@ const _handler = createMcpHandler(
     )
 
     register(
+      "list_solutions",
+      {
+        title: "List Solutions",
+        description:
+          "Lists solutions across a workspace using factual lifecycle and parent filters. " +
+          "Roadmap presence is returned for deduplication; it does not establish readiness or authorization.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          status: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).optional().describe("Filter by solution lifecycle status"),
+          opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by parent opportunity status"),
+          squadId: z.string().uuid().optional().describe("Filter by the parent opportunity's squad"),
+          hasRoadmapItem: z.boolean().optional().describe("Filter by whether the solution is linked to any roadmap item"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listSolutions,
+    )
+
+    register(
+      "list_assumptions",
+      {
+        title: "List Assumptions",
+        description:
+          "Lists assumptions across a workspace using factual risk, lifecycle, and parent filters. " +
+          "The response reports stable ancestry and experiment counts but makes no evidence-sufficiency judgment.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]).optional().describe("Filter by assumption status"),
+          riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).optional().describe("Filter by recorded risk level"),
+          solutionStatus: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).optional().describe("Filter by parent solution status"),
+          opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by ancestor opportunity status"),
+          squadId: z.string().uuid().optional().describe("Filter by the ancestor opportunity's squad"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listAssumptions,
+    )
+
+    register(
       "create_opportunity",
       {
         title: "Create Opportunity",
@@ -1390,18 +1431,52 @@ const _handler = createMcpHandler(
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           status: z.enum(["DESIGNING", "RUNNING", "COMPLETE", "KILLED"]).optional().describe("Filter by status"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
+          hasResults: z.boolean().optional().describe("Filter by whether at least one result has been logged"),
+          updatedSince: z.string().datetime().optional().describe("Filter to experiments updated at or after this ISO timestamp"),
+          endBefore: z.string().datetime().optional().describe("Filter to experiments whose recorded end date is before this ISO timestamp"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, status, squadId }) => {
+      async ({ workspaceId, status, squadId, hasResults, updatedSince, endBefore }) => {
         const prisma = getPrisma()
         const experiments = await prisma.experiment.findMany({
-          where: { workspaceId, ...(status ? { status } : {}), ...(squadId ? { squadId } : {}) },
+          where: {
+            workspaceId,
+            ...(status ? { status } : {}),
+            ...(squadId ? { squadId } : {}),
+            ...(hasResults === true ? { results: { some: {} } } : {}),
+            ...(hasResults === false ? { results: { none: {} } } : {}),
+            ...(updatedSince
+              ? {
+                  OR: [
+                    { updatedAt: { gte: new Date(updatedSince) } },
+                    { results: { some: { createdAt: { gte: new Date(updatedSince) } } } },
+                  ],
+                }
+              : {}),
+            ...(endBefore ? { endDate: { lt: new Date(endBefore) } } : {}),
+          },
           include: {
             squad: { select: { name: true } },
-            assumption: { select: { title: true } },
+            assumption: {
+              select: {
+                id: true,
+                title: true,
+                status: true,
+                solution: {
+                  select: {
+                    id: true,
+                    title: true,
+                    status: true,
+                    opportunity: { select: { id: true, title: true, status: true } },
+                  },
+                },
+              },
+            },
+            _count: { select: { results: true } },
+            results: { select: { createdAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 },
           },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
         })
         if (!experiments.length) {
           return fail("No experiments found.")
@@ -1419,6 +1494,15 @@ const _handler = createMcpHandler(
             conclusion: e.conclusion,
             squad: e.squad?.name ?? null,
             assumption: e.assumption?.title ?? null,
+            assumptionId: e.assumptionId,
+            solutionId: e.assumption?.solution.id ?? null,
+            opportunityId: e.assumption?.solution.opportunity.id ?? null,
+            resultCount: e._count.results,
+            latestResultAt: e.results[0]?.createdAt ?? null,
+            startDate: e.startDate,
+            endDate: e.endDate,
+            createdAt: e.createdAt,
+            updatedAt: e.updatedAt,
           })),
           count: experiments.length,
         })
@@ -1719,6 +1803,24 @@ const _handler = createMcpHandler(
     )
 
     register(
+      "list_release_runs",
+      {
+        title: "List Release Runs",
+        description:
+          "Lists Compass release-authorization ledger records with exact repository, PR, commit, Task scope, and dispatch state. " +
+          "Merge, deployment, and production-verification evidence must be checked with their external providers.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          state: z.enum(["PREPARING", "READY_FOR_APPROVAL", "DECISION_RECORDING", "DISPATCH_QUEUED", "BLOCKED", "SUPERSEDED", "CANCELLED"]).optional().describe("Filter by Compass release-run ledger state"),
+          taskId: z.string().uuid().optional().describe("Filter to release runs covering this Task"),
+          updatedSince: z.string().datetime().optional().describe("Filter to release runs updated at or after this ISO timestamp"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listReleaseRuns,
+    )
+
+    register(
       "get_review_request",
       {
         title: "Get Review Request",
@@ -1780,7 +1882,7 @@ const _handler = createMcpHandler(
             squad: { select: { name: true } },
             experiment: { select: { title: true } },
           },
-          orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }],
+          orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
         })
         if (!items.length) {
           return fail("No active roadmap items found.")
@@ -1809,14 +1911,27 @@ const _handler = createMcpHandler(
           items: items.map((i) => ({
             id: i.id,
             title: i.title,
+            description: i.description,
             horizon: i.horizon,
+            status: i.status,
+            sortOrder: i.sortOrder,
             isPrivate: i.isPrivate,
+            opportunityId: i.opportunityId,
             opportunity: i.opportunity?.title ?? null,
+            solutionId: i.solutionId,
             solution: i.solution?.title ?? null,
+            experimentId: i.experimentId,
             experiment: i.experiment?.title ?? null,
+            keyResultId: i.keyResultId,
+            feedbackId: i.feedbackId,
+            squadId: i.squadId,
             squad: i.squad?.name ?? null,
             startDate: i.startDate,
             endDate: i.endDate,
+            nowCommitmentProvenance: i.nowCommitmentProvenance,
+            nowDecisionRecordId: i.nowDecisionRecordId,
+            createdAt: i.createdAt,
+            updatedAt: i.updatedAt,
           })),
           count: items.length,
         })
@@ -2209,6 +2324,8 @@ const _handler = createMcpHandler(
           linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM"]).optional().describe("Filter to tasks linked to this object type (pair with linkedId)"),
           linkedId: z.string().uuid().optional().describe("UUID of the linked object (pair with linkedType)"),
           includeSubtasks: z.boolean().optional().describe("Nest subtasks under their parent in the response"),
+          updatedSince: z.string().datetime().optional().describe("Filter to tasks updated at or after this ISO timestamp"),
+          updatedBefore: z.string().datetime().optional().describe("Filter to tasks updated before this ISO timestamp (useful for stale-work scans)"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -2340,6 +2457,12 @@ const _handler = createMcpHandler(
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           status: feedbackStatusSchema.optional().describe("Filter by status. CLOSED is deprecated but temporarily accepted."),
           limit: z.number().int().min(1).max(100).optional().default(50).describe("Max items to return (default 50)"),
+          updatedSince: z.string().datetime().optional().describe(
+            "Start a stable incremental scan at this ISO timestamp. Use the returned cursor for later pages."
+          ),
+          cursor: z.string().min(1).optional().describe(
+            "Opaque continuation cursor from a prior incremental scan; reuse the same workspace and status filters."
+          ),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
