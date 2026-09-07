@@ -26,6 +26,8 @@ import { query } from "@anthropic-ai/claude-agent-sdk"
 const MCP_BASE_URL = process.env.MCP_BASE_URL
 const MCP_TOKEN = process.env.MCP_TOKEN
 const AGENT_PROMPT = process.env.AGENT_PROMPT
+const AGENT_SYSTEM_PROMPT = process.env.AGENT_SYSTEM_PROMPT
+const AGENT_PACK_CONFIG = process.env.AGENT_PACK_CONFIG
 const MCP_BYPASS_SECRET = process.env.MCP_BYPASS_SECRET
 
 function emit(kind: "AGENT_EVENT" | "AGENT_RESULT" | "AGENT_ERROR", payload: unknown): void {
@@ -45,10 +47,14 @@ async function main(): Promise<void> {
   const baseUrl = requireEnv("MCP_BASE_URL", MCP_BASE_URL)
   const token = requireEnv("MCP_TOKEN", MCP_TOKEN)
   const prompt = requireEnv("AGENT_PROMPT", AGENT_PROMPT)
+  const systemPrompt = requireEnv("AGENT_SYSTEM_PROMPT", AGENT_SYSTEM_PROMPT)
   requireEnv("ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY)
 
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
   if (MCP_BYPASS_SECRET) headers["x-vercel-protection-bypass"] = MCP_BYPASS_SECRET
+  const packConfig = AGENT_PACK_CONFIG
+    ? JSON.parse(AGENT_PACK_CONFIG) as { pluginPaths: string[]; skillIds: string[] }
+    : { pluginPaths: [], skillIds: [] }
 
   let finalText: string | undefined
   let usage: unknown
@@ -69,7 +75,19 @@ async function main(): Promise<void> {
           alwaysLoad: true,
         },
       },
-      // Compass tools only, auto-approved. Headless (no human approver): the
+      plugins: packConfig.pluginPaths.map((pluginPath) => ({
+        type: "local" as const,
+        path: new URL(pluginPath, `file://${process.cwd()}/`).pathname,
+        skipMcpDiscovery: true,
+      })),
+      skills: packConfig.skillIds,
+      // Skill bodies and supported text assets are compiled into systemPrompt
+      // by the host. SDK 0.3.224 does not provide Skill/Read with tools: [].
+      tools: [],
+      strictMcpConfig: true,
+      settingSources: [],
+      systemPrompt,
+      // Compass MCP only, auto-approved. Headless (no human approver): the
       // real security boundary is the disposable sandbox + per-user MCP auth.
       allowedTools: ["mcp__compass"],
       // Safety default (Phase 5): keep the two irreversible hard-delete tools
