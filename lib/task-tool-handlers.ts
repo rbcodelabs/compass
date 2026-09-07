@@ -210,6 +210,8 @@ export async function listTasks({
   linkedType,
   linkedId,
   includeSubtasks,
+  updatedSince,
+  updatedBefore,
 }: {
   workspaceId: string
   status?: TaskStatus
@@ -220,6 +222,8 @@ export async function listTasks({
   linkedType?: TaskLinkedType
   linkedId?: string
   includeSubtasks?: boolean
+  updatedSince?: string
+  updatedBefore?: string
 }) {
   const prisma = getPrisma()
 
@@ -237,6 +241,14 @@ export async function listTasks({
     ...(assigneeUserId ? { assigneeUserId } : {}),
     ...(parentTaskId !== undefined ? { parentTaskId } : {}),
     ...(linkedType && linkedId ? { links: { some: { linkedType, linkedId } } } : {}),
+    ...(updatedSince || updatedBefore
+      ? {
+          updatedAt: {
+            ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
+            ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
+          },
+        }
+      : {}),
   }
 
   const tasks = await prisma.task.findMany({
@@ -262,7 +274,9 @@ export async function listTasks({
       const children = childrenByParent.get(t.id) ?? []
       const childLines = children.map((c) => `    ↳ [${c.status}] ${c.title} — ID: ${c.id}`)
       return [
-        `• [${t.status}] **${t.title}** (${t.priority})\n  ID: ${t.id}`,
+        `• [${t.status}] **${t.title}** (${t.priority})` +
+          (t.updatedAt ? `\n  Updated: ${t.updatedAt.toISOString()}` : "") +
+          `\n  ID: ${t.id}`,
         ...childLines,
       ].join("\n")
     })
@@ -272,6 +286,8 @@ export async function listTasks({
         status: t.status,
         title: t.title,
         priority: t.priority,
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
         subtasks: (childrenByParent.get(t.id) ?? []).map((c) => ({ id: c.id, status: c.status, title: c.title })),
       })),
       count: topLevel.length,
@@ -281,6 +297,7 @@ export async function listTasks({
   const lines = tasks.map((t) =>
     `• [${t.status}] **${t.title}** (${t.priority})` +
     (t._count.subtasks ? ` — ${t._count.subtasks} subtask(s)` : "") +
+    (t.updatedAt ? `\n  Updated: ${t.updatedAt.toISOString()}` : "") +
     `\n  ID: ${t.id}`
   )
   return ok(lines.join("\n\n"), {
@@ -289,6 +306,8 @@ export async function listTasks({
       status: t.status,
       title: t.title,
       priority: t.priority,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
       subtaskCount: t._count.subtasks,
     })),
     count: tasks.length,

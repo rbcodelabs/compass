@@ -150,6 +150,8 @@ export const TOOL_GATES: Record<string, Gate> = {
 
   // Discovery ---------------------------------------------------------------
   list_opportunities: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_solutions: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_assumptions: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_opportunity: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   create_opportunity: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   update_opportunity: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
@@ -216,6 +218,7 @@ export const TOOL_GATES: Record<string, Gate> = {
     await assertEntityAccess(a, "decisionRecord", x.authorityDecisionId)
   },
   request_release_authorization: async (a, x) => void (await assertWorkspaceAdmin(a, x.workspaceId)),
+  list_release_runs: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_review_request: async (a, x) => void (await assertEntityAccess(a, "reviewRequest", x.requestId)),
   list_review_requests: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   apply_recorded_decision: async (a, x) => void (await assertEntityAccess(a, "decisionRecord", x.decisionId)),

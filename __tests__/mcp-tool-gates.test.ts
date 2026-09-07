@@ -90,6 +90,16 @@ describe("applyToolGate", () => {
     )
   })
 
+  it.each(["list_solutions", "list_assumptions", "list_release_runs"])(
+    "%s denies discovery outside the caller's workspace membership",
+    async (tool) => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(
+        /not found or access denied/,
+      )
+    },
+  )
+
   it("get_opportunity: denies a non-member", async () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null) // not a member

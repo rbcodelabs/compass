@@ -616,6 +616,108 @@ describe("listFeedback", () => {
     const data = result.structuredContent.data as { items: Array<{ url: string }> }
     expect(data.items[0].url).toContain(`feedback%3A${FEED_ID}`)
   })
+
+  it("scans incrementally with a stable snapshot cursor and clear completion metadata", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-07T12:00:00.000Z"))
+    mockWorkspace.findUnique.mockResolvedValue(workspaceContext)
+    const first = { ...sampleItem, id: "feedback-1", updatedAt: new Date("2026-09-01T00:00:00.000Z") }
+    const second = { ...sampleItem, id: "feedback-2", updatedAt: new Date("2026-09-02T00:00:00.000Z") }
+    const third = { ...sampleItem, id: "feedback-3", updatedAt: new Date("2026-09-03T00:00:00.000Z") }
+    mockFeedbackItem.findMany.mockResolvedValueOnce([first, second, third])
+
+    const pageOne = await feedbackHandlers.listFeedback({
+      workspaceId: WS_ID,
+      status: "OPEN",
+      updatedSince: "2026-09-01T00:00:00.000Z",
+      limit: 2,
+    })
+    const pageOneData = pageOne.structuredContent.data as {
+      items: Array<{ id: string; createdAt: Date; updatedAt: Date; opportunityId: string | null }>
+      hasMore: boolean
+      nextCursor: string | null
+      asOf: string
+    }
+
+    expect(mockFeedbackItem.findMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        workspaceId: WS_ID,
+        status: "OPEN",
+        AND: [{ updatedAt: { gte: new Date("2026-09-01T00:00:00.000Z"), lte: new Date("2026-09-07T12:00:00.000Z") } }],
+      },
+      include: { opportunity: { select: { id: true, title: true } } },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+      take: 3,
+    })
+    expect(pageOneData.items.map((item) => item.id)).toEqual(["feedback-1", "feedback-2"])
+    expect(pageOneData.items[0]).toMatchObject({
+      opportunityId: null,
+      createdAt: sampleItem.createdAt,
+      updatedAt: first.updatedAt,
+    })
+    expect(pageOneData.hasMore).toBe(true)
+    expect(pageOneData.nextCursor).toEqual(expect.any(String))
+    expect(pageOneData.asOf).toBe("2026-09-07T12:00:00.000Z")
+
+    mockFeedbackItem.findMany.mockResolvedValueOnce([third])
+    const pageTwo = await feedbackHandlers.listFeedback({
+      workspaceId: WS_ID,
+      status: "OPEN",
+      cursor: pageOneData.nextCursor!,
+      limit: 2,
+    })
+    const pageTwoData = pageTwo.structuredContent.data as { items: Array<{ id: string }>; hasMore: boolean; nextCursor: string | null; asOf: string }
+    expect(mockFeedbackItem.findMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        workspaceId: WS_ID,
+        status: "OPEN",
+        AND: [
+          { updatedAt: { gte: new Date("2026-09-01T00:00:00.000Z"), lte: new Date("2026-09-07T12:00:00.000Z") } },
+          {
+            OR: [
+              { updatedAt: { gt: second.updatedAt } },
+              { updatedAt: second.updatedAt, id: { gt: "feedback-2" } },
+            ],
+          },
+        ],
+      },
+      include: { opportunity: { select: { id: true, title: true } } },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+      take: 3,
+    })
+    expect(pageTwoData).toMatchObject({
+      items: [{ id: "feedback-3" }],
+      hasMore: false,
+      nextCursor: null,
+      asOf: "2026-09-07T12:00:00.000Z",
+    })
+    vi.useRealTimers()
+  })
+
+  it("returns an empty successful page for an exhausted incremental scan", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce(workspaceContext)
+    mockFeedbackItem.findMany.mockResolvedValueOnce([])
+    const result = await feedbackHandlers.listFeedback({
+      workspaceId: WS_ID,
+      updatedSince: "2026-09-01T00:00:00.000Z",
+    })
+    expect(result.structuredContent).toMatchObject({
+      ok: true,
+      data: { items: [], count: 0, hasMore: false, nextCursor: null },
+    })
+  })
+
+  it("preserves legacy vote-ranked ordering when no scan arguments are provided", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce(workspaceContext)
+    mockFeedbackItem.findMany.mockResolvedValueOnce([sampleItem])
+    await feedbackHandlers.listFeedback({ workspaceId: WS_ID, limit: 25 })
+    expect(mockFeedbackItem.findMany).toHaveBeenCalledWith({
+      where: { workspaceId: WS_ID },
+      include: { opportunity: { select: { id: true, title: true } } },
+      orderBy: [{ voteCount: "desc" }, { createdAt: "desc" }, { id: "asc" }],
+      take: 25,
+    })
+  })
 })
 
 describe("addFeedbackAttachment", () => {

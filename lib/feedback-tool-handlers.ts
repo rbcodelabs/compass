@@ -188,10 +188,14 @@ export async function listFeedback({
   workspaceId,
   status,
   limit,
+  updatedSince,
+  cursor,
 }: {
   workspaceId: string
   status?: FeedbackStatus | "CLOSED"
   limit?: number
+  updatedSince?: string
+  cursor?: string
 }) {
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findUnique({
@@ -199,14 +203,69 @@ export async function listFeedback({
     select: { id: true, slug: true, organization: { select: { slug: true } } },
   })
   if (!workspace) return fail(`No workspace found with id "${workspaceId}".`)
+  const scanMode = updatedSince !== undefined || cursor !== undefined
+  let scan: {
+    updatedSince: Date
+    asOf: Date
+    after?: { updatedAt: Date; id: string }
+  } | null = null
+  if (scanMode) {
+    try {
+      if (cursor) {
+        const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+          v: number
+          updatedSince: string
+          asOf: string
+          afterUpdatedAt: string
+          afterId: string
+        }
+        if (decoded.v !== 1 || !decoded.afterId) throw new Error("Unsupported feedback cursor")
+        scan = {
+          updatedSince: new Date(decoded.updatedSince),
+          asOf: new Date(decoded.asOf),
+          after: { updatedAt: new Date(decoded.afterUpdatedAt), id: decoded.afterId },
+        }
+      } else {
+        scan = { updatedSince: new Date(updatedSince!), asOf: new Date() }
+      }
+      if (Number.isNaN(scan.updatedSince.getTime()) || Number.isNaN(scan.asOf.getTime()) ||
+          (scan.after && Number.isNaN(scan.after.updatedAt.getTime()))) {
+        throw new Error("Invalid feedback cursor dates")
+      }
+    } catch {
+      return fail("Invalid feedback cursor.")
+    }
+  }
+  const resolvedLimit = limit ?? 50
+  const scanBounds = scan
+    ? [
+        { updatedAt: { gte: scan.updatedSince, lte: scan.asOf } },
+        ...(scan.after
+          ? [{
+              OR: [
+                { updatedAt: { gt: scan.after.updatedAt } },
+                { updatedAt: scan.after.updatedAt, id: { gt: scan.after.id } },
+              ],
+            }]
+          : []),
+      ]
+    : undefined
   const items = await prisma.feedbackItem.findMany({
-    where: { workspaceId, ...(status ? { status } : {}) },
-    include: { opportunity: { select: { title: true } } },
-    orderBy: [{ voteCount: "desc" }, { createdAt: "desc" }],
-    take: limit ?? 50,
+    where: {
+      workspaceId,
+      ...(status ? { status } : {}),
+      ...(scanBounds ? { AND: scanBounds } : {}),
+    },
+    include: { opportunity: { select: { id: true, title: true } } },
+    orderBy: scan
+      ? [{ updatedAt: "asc" as const }, { id: "asc" as const }]
+      : [{ voteCount: "desc" as const }, { createdAt: "desc" as const }, { id: "asc" as const }],
+    take: scan ? resolvedLimit + 1 : resolvedLimit,
   })
-  if (!items.length) return fail("No feedback found.")
-  const withUrls = items.map((item) => ({
+  if (!items.length && !scan) return fail("No feedback found.")
+  const hasMore = scan ? items.length > resolvedLimit : false
+  const pageItems = hasMore ? items.slice(0, resolvedLimit) : items
+  const withUrls = pageItems.map((item) => ({
     item,
     url: canonicalFeedbackUrl(workspace, item.id),
   }))
@@ -226,11 +285,29 @@ export async function listFeedback({
       status: item.status,
       voteCount: item.voteCount,
       description: item.description,
+      opportunityId: item.opportunityId,
       opportunity: item.opportunity?.title ?? null,
       submitterName: item.submitterName,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
       url,
     })),
-    count: items.length,
+    count: pageItems.length,
+    ...(scan
+      ? {
+          hasMore,
+          nextCursor: hasMore
+            ? Buffer.from(JSON.stringify({
+                v: 1,
+                updatedSince: scan.updatedSince.toISOString(),
+                asOf: scan.asOf.toISOString(),
+                afterUpdatedAt: pageItems.at(-1)!.updatedAt.toISOString(),
+                afterId: pageItems.at(-1)!.id,
+              })).toString("base64url")
+            : null,
+          asOf: scan.asOf.toISOString(),
+        }
+      : {}),
   })
 }
 

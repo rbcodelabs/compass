@@ -141,6 +141,8 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 |---|---|
 | `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result |
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
+| `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment |
+| `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts |
 | `create_opportunity` | Create a new opportunity with title, description, status |
 | `update_opportunity` | Update an existing opportunity's title and/or description; pass `null` to clear its description |
 | `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
@@ -166,7 +168,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `list_experiments` | Fetch all experiments |
+| `list_experiments` | Fetch experiments with optional status, squad, logged-result-presence, `updatedSince`, and recorded `endBefore` filters; summaries include dates, timestamps, result count/latest-result time, and stable Assumption/Solution/Opportunity IDs |
 | `get_experiment` | Return full details for a single experiment: hypothesis, method, kill condition, linked assumption, all logged results, and conclusion |
 | `create_experiment` | Create a new experiment with hypothesis and method (starts in DESIGNING status) |
 | `log_experiment_result` | Record an observation or data point for a running experiment |
@@ -176,13 +178,14 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `list_roadmap_items` | Fetch active roadmap items for a workspace, grouped by horizon (including LAUNCHING/LAUNCHED), including start/end dates and whether each item is private (`isPrivate`) |
+| `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs |
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
 | `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
 | `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
 | `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state, linked item type, outcome, reviewer, or search text |
 | `get_decision` | Read one tracking-only decision and its immutable revision history |
 | `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. This operation never takes the human decision or invokes release automation |
+| `list_release_runs` | List recorded release-authorization runs by ledger state, covered Task, or `updatedSince`, including exact repository/PR/head SHA, Task IDs, authorization Decision ID, dispatch state, and a stable GitHub PR URL |
 | `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
 | `list_review_requests` | List review requests for a workspace, optionally filtered by state |
 | `apply_recorded_decision` | Idempotently apply the authorized continuation from a recorded decision and return its application receipt |
@@ -214,6 +217,12 @@ by default and therefore fails closed (`PR_NOT_READY`); a dispatch worker must
 use a configured provider and repeat the same head/check/policy revalidation at
 the dispatch-claim boundary before any future external side effect.
 
+`list_release_runs` reports Compass ledger facts only. A release-run state does
+not prove that GitHub merged the PR, that a deployment reached production, or
+that feature smoke tests passed. Completion workflows must re-read those facts
+from the configured GitHub and deployment providers before changing lifecycle
+state.
+
 ### Squads
 
 | Tool | Description |
@@ -232,7 +241,7 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 |---|---|
 | `create_task` | Create a Task with a title (required); optionally description, status (default TODO), priority (default MEDIUM), squad, parent task (to create a Subtask), assignee, freeform owner name, story points, due date, or iteration label |
 | `get_task` | Return full detail for a Task: fields, parent Epic (if any), subtasks, and resolved links to other Compass objects |
-| `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), or a linked object; optionally nest subtasks under their parent |
+| `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), a linked object, `updatedSince`, or `updatedBefore`; summaries include created/updated timestamps and can optionally nest subtasks |
 | `update_task` | Update a Task's title, description, priority, assignee, owner, story points, due date, or iteration — does not accept status |
 | `move_task_status` | Dedicated status-transition tool for a Task, including moving it into or out of BLOCKED |
 | `link_task` | Link a Task to another Compass object; idempotent — re-linking the same pair is a no-op |
@@ -244,7 +253,7 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 | Tool | Description |
 |---|---|
 | `create_feedback` | Create a new feedback item directly via MCP. Accepts 1–5 optional inline attachments with a combined decoded limit of 3 MiB; defaults to type IDEA |
-| `list_feedback` | Fetch customer feedback items for a workspace, with vote counts, type, status, and canonical Compass URLs |
+| `list_feedback` | Fetch customer feedback items with vote counts, type, status, linked Opportunity ID, timestamps, and canonical Compass URLs. Pass `updatedSince` to start a stable incremental scan and the returned opaque `cursor` for each later page |
 | `get_feedback_item` | Fetch full details for a single feedback item, including attachments, its linked opportunity, and its canonical Compass URL |
 | `update_feedback` | Update a feedback item's title and/or description; pass `description: null` to clear it |
 | `update_feedback_status` | Update a feedback item's status (OPEN, UNDER_REVIEW, PLANNED, IN_PROGRESS, COMPLETED, DECLINED), with an optional note. Legacy CLOSED remains temporarily accepted but is deprecated |
@@ -255,6 +264,14 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 | `promote_feedback_to_roadmap` | Promote a feedback item (typically a BUG) directly to the roadmap, skipping discovery entirely. Accepts an optional `isPrivate` flag (e.g. for a security-flagged bug) |
 
 Feedback create, read, list, update, status, type, link, and attachment responses include absolute canonical URLs that agents can give directly to users. Preview MCP responses point to the active Vercel branch/deployment URL, while production uses the configured Compass custom domain. Every feedback mutation also includes its affected entity ID on a plain `ID: <uuid>` line.
+
+Without scan arguments, `list_feedback` keeps its legacy vote-count/recency
+ordering and default limit of 50. That ranked batch is not proof the queue is
+exhausted. For complete or incremental retrieval, pass an ISO `updatedSince`
+timestamp (use the Unix epoch for a full historical scan), then follow
+`nextCursor` until `hasMore` is false. The first page freezes an `asOf` upper
+watermark, so records changed later appear in the next scan instead of shifting
+between pages.
 
 For screenshots and other small files, pass a base64 data URL (or raw base64 plus `fileType`) directly to `create_feedback` or `add_feedback_attachment`. Compass validates the encoded length before decoding and rejects the entire create request if any attachment cannot be uploaded; it never silently creates text-only feedback.
 

@@ -43,4 +43,13 @@ describe("feedback MCP tool schemas", () => {
       expect(schema.safeParse("BOGUS").success).toBe(false)
     }
   })
+
+  it("exposes explicit incremental scan inputs without changing the legacy limit", () => {
+    const tool = registeredTools.list_feedback.inputSchema
+    expect(tool.updatedSince.safeParse("2026-09-01T00:00:00.000Z").success).toBe(true)
+    expect(tool.updatedSince.safeParse("yesterday").success).toBe(false)
+    expect(tool.cursor.safeParse("opaque-cursor").success).toBe(true)
+    expect(tool.limit.safeParse(100).success).toBe(true)
+    expect(tool.limit.safeParse(101).success).toBe(false)
+  })
 })
