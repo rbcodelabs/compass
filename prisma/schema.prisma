@@ -269,6 +269,7 @@ model ResearchSession {
   requests               ResearchRequest[]
   attachments            ResearchAttachment[]
   voiceEvents            ResearchVoiceEvent[]
+  participantVoiceEvents ResearchParticipantVoiceEvent[]
   voiceCalls             ResearchVoiceCall[]
   voiceCommands          ResearchVoiceCommand[]
   voiceLeaseId           String?                   @map("voice_lease_id") @db.Uuid
@@ -291,6 +292,8 @@ model ResearchTurn {
   createdAt   DateTime             @default(now()) @map("created_at")
   session     ResearchSession      @relation(fields: [sessionId], references: [id])
   attachments ResearchAttachment[]
+
+  participantVoiceEvent ResearchParticipantVoiceEvent?
 
   @@unique([sessionId, sequence], map: "idx_research_turns_session_sequence")
   @@map("research_turns")
@@ -358,6 +361,27 @@ model ResearchBlobCleanup {
 
   @@index([workspaceId, status, nextAttemptAt], map: "idx_research_blob_cleanups_workspace_retry")
   @@map("research_blob_cleanups")
+}
+
+// Browser-reported transcript evidence, never provider-authenticated provenance.
+model ResearchParticipantVoiceEvent {
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String @map("workspace_id") @db.Uuid
+  sessionId       String @map("session_id") @db.Uuid
+  leaseId         String @map("lease_id") @db.Uuid
+  clientEventId   String @map("client_event_id") @db.VarChar(255)
+  reportedOrdinal Int @map("reported_ordinal")
+  claimedSpeaker  String @map("claimed_speaker") @db.VarChar(20)
+  content         String @db.Text
+  turnId          String @unique(map: "idx_participant_voice_turn") @map("turn_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  session         ResearchSession @relation(fields: [sessionId], references: [id])
+  turn            ResearchTurn @relation(fields: [turnId], references: [id])
+
+  @@unique([sessionId, clientEventId], map: "idx_participant_voice_client_event")
+  @@unique([sessionId, leaseId, reportedOrdinal], map: "idx_participant_voice_ordinal")
+  @@index([workspaceId, sessionId], map: "idx_participant_voice_workspace_session")
+  @@map("research_participant_voice_events")
 }
 
 model ResearchVoiceEvent {

@@ -3,7 +3,7 @@ import type { PrismaClient, ResearchParticipantToken, ResearchStudy } from "@pri
 import { buildResearchAgentTurnPrompt, type ResearchGuideItem } from "@/lib/research"
 import {
   isResearchDiscoveryVoiceEnabled,
-  isResearchLegacyVoiceHarnessEnabled,
+  isResearchParticipantVoiceEnabled,
 } from "@/lib/research-feature"
 
 export const MAX_RESEARCH_MESSAGE_CHARS = 4_000
@@ -277,7 +277,7 @@ export async function startOrResumeResearchSession(
     const session = await loadParticipantSession(context, resume.sessionId, resume.resumeToken, {
       allowCompleted: true,
     })
-    if (session.modality === "VOICE" && !isResearchLegacyVoiceHarnessEnabled()) {
+    if (session.modality === "VOICE" && !isResearchParticipantVoiceEnabled()) {
       throw new ResearchSessionError("Voice is not available for this study", 409)
     }
     return {
@@ -314,7 +314,7 @@ export async function startOrResumeResearchSession(
     const study = await tx.researchStudy.findUnique({ where: { id: context.study.id } })
     if (!study || study.status !== "ACTIVE") throw new ResearchSessionError("Study not found", 404)
     if (modality === "VOICE" && (
-      !isResearchLegacyVoiceHarnessEnabled() ||
+      !isResearchParticipantVoiceEnabled() ||
       (study.studyType === "CUSTOMER_INTERVIEW" && !isResearchDiscoveryVoiceEnabled()) ||
       (study.studyType === "USABILITY_TEST" && !study.appUrl)
     )) {

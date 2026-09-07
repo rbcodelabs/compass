@@ -5,7 +5,7 @@ import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchVoice } from "@/components/research/research-voice"
 
-class FakeDataChannel extends EventTarget { send = vi.fn(); close = vi.fn() }
+class FakeDataChannel extends EventTarget { readyState = "open"; send = vi.fn(); close = vi.fn() }
 const channel = new FakeDataChannel()
 const stopTrack = vi.fn()
 const peer = {
@@ -125,7 +125,7 @@ describe("ResearchVoice", () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it("releases the voice lease when finalized transcript persistence fails", async () => {
+  it("retains the lease and failed save until explicit retry, never falsely completes", async () => {
     render(<ResearchVoice token="study-token" />)
     fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
     await screen.findByText("Connected — speak naturally")
@@ -138,10 +138,17 @@ describe("ResearchVoice", () => {
     }) }))
 
     expect(await screen.findByRole("alert")).toHaveTextContent("could not be saved")
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/research/voice-event", expect.objectContaining({
-      body: expect.stringContaining('"action":"DISCONNECT"'),
-      keepalive: true,
-    })))
+    expect(stopTrack).toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Retry finishing session" })).toBeDisabled()
+    expect(fetch).not.toHaveBeenCalledWith("/api/research/complete", expect.anything())
+    expect(fetch).not.toHaveBeenCalledWith("/api/research/voice-event", expect.objectContaining({ body: expect.stringContaining('"action":"DISCONNECT"') }))
+    fireEvent.click(screen.getByRole("button", { name: "Retry saving transcript" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry finishing session" })).toBeEnabled())
+    const saves = vi.mocked(fetch).mock.calls.filter(([url, init]) => url === "/api/research/voice-event" && String(init?.body).includes('"action":"FINAL"'))
+    expect(saves).toHaveLength(2)
+    expect(saves[0][1]?.body).toBe(saves[1][1]?.body)
+    fireEvent.click(screen.getByRole("button", { name: "Retry finishing session" }))
+    expect(await screen.findByRole("heading", { name: "Thank you" })).toBeVisible()
   })
 
   it("retries once without stale stored resume credentials", async () => {
@@ -163,6 +170,19 @@ describe("ResearchVoice", () => {
     expect(fetch).toHaveBeenNthCalledWith(2, "/api/research/start", expect.objectContaining({
       body: JSON.stringify({ token: "study-token", modality: "VOICE" }),
     }))
+  })
+
+  it("stops the microphone but refuses completion when a final caption never arrives", async () => {
+    render(<ResearchVoice token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    await screen.findByText("Connected — speak naturally")
+    channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({
+      type: "conversation.item.input_audio_transcription.delta", item_id: "unfinished", delta: "Still speaking",
+    }) }))
+    fireEvent.click(screen.getByRole("button", { name: "Finish session" }))
+    expect(stopTrack).toHaveBeenCalled()
+    expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent("not marked complete")
+    expect(fetch).not.toHaveBeenCalledWith("/api/research/complete", expect.anything())
   })
 
   it("uses think-aloud copy only for guided usability voice", () => {

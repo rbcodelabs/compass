@@ -2,7 +2,8 @@ import { NextResponse } from "next/server"
 import { resolveActiveResearchStudy } from "@/lib/research-access"
 import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
 import { appendFinalResearchVoiceEvent, releaseResearchVoiceLease, ResearchVoiceError } from "@/lib/research-voice"
-import { isResearchLegacyVoiceHarnessEnabled } from "@/lib/research-feature"
+import { isResearchBrowserVoiceEnabled, isResearchParticipantVoiceEnabled } from "@/lib/research-feature"
+import { appendParticipantVoiceEvent } from "@/lib/research-participant-voice"
 
 const BASE_KEYS = ["token", "sessionId", "resumeToken", "leaseId", "action"] as const
 
@@ -19,11 +20,11 @@ export async function POST(request: Request) {
     (body.action !== "FINAL" && body.action !== "DISCONNECT")
   ) return NextResponse.json({ error: "Invalid request" }, { status: 400 })
   const allowed = new Set<string>(BASE_KEYS)
-  if (body.action === "FINAL") ["providerEventId", "role", "content", "attachmentId"].forEach((key) => allowed.add(key))
+  if (body.action === "FINAL") [...(isResearchBrowserVoiceEnabled() ? ["clientEventId", "reportedOrdinal"] : ["providerEventId"]), "role", "content", "attachmentId"].forEach((key) => allowed.add(key))
   if (Object.keys(body).some((key) => !allowed.has(key))) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 })
   }
-  if (!isResearchLegacyVoiceHarnessEnabled()) {
+  if (!isResearchParticipantVoiceEnabled()) {
     return NextResponse.json({ error: "Voice is not available for this study" }, { status: 409 })
   }
   const resolved = await resolveActiveResearchStudy(body.token as string)
@@ -36,6 +37,11 @@ export async function POST(request: Request) {
         resumeToken: body.resumeToken as string,
         leaseId: body.leaseId as string,
       }))
+    }
+    if (isResearchBrowserVoiceEnabled()) {
+      if (typeof body.clientEventId !== "string" || typeof body.reportedOrdinal !== "number" || typeof body.content !== "string" ||
+        (body.role !== "PARTICIPANT" && body.role !== "INTERVIEWER") || (body.attachmentId !== undefined && typeof body.attachmentId !== "string")) return NextResponse.json({ error: "Invalid participant voice event" }, { status: 400 })
+      return NextResponse.json(await appendParticipantVoiceEvent({ context: resolved, sessionId: body.sessionId as string, resumeToken: body.resumeToken as string, leaseId: body.leaseId as string, clientEventId: body.clientEventId, reportedOrdinal: body.reportedOrdinal, role: body.role, content: body.content, ...(typeof body.attachmentId === "string" ? { attachmentId: body.attachmentId } : {}) }))
     }
     if (typeof body.providerEventId !== "string" || typeof body.content !== "string" ||
       (body.role !== "PARTICIPANT" && body.role !== "INTERVIEWER") ||
