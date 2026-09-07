@@ -3,14 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-const { updateRoadmapItemMock, updateRoadmapItemOpportunityMock } = vi.hoisted(() => ({
-  updateRoadmapItemMock: vi.fn(),
-  updateRoadmapItemOpportunityMock: vi.fn(),
+const { editRoadmapItemMock } = vi.hoisted(() => ({
+  editRoadmapItemMock: vi.fn(),
 }));
 
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({
-  updateRoadmapItem: updateRoadmapItemMock,
-  updateRoadmapItemOpportunity: updateRoadmapItemOpportunityMock,
+  editRoadmapItem: editRoadmapItemMock,
 }));
 
 import { EditItemDialog } from "@/components/roadmap/edit-item-dialog";
@@ -52,18 +50,22 @@ const opportunities = [
   { id: "opp-2", title: "Retention friction" },
 ];
 
-function renderDialog(onSaved = vi.fn()) {
+function renderDialog(
+  onSaved = vi.fn(),
+  onOpenChange = vi.fn(),
+  availableOpportunities = opportunities,
+) {
   render(
     <EditItemDialog
       item={item}
       open
-      onOpenChange={vi.fn()}
+      onOpenChange={onOpenChange}
       revalidatePathStr="/rbcodelabs/compass/roadmap"
       onSaved={onSaved}
-      availableOpportunities={opportunities}
+      availableOpportunities={availableOpportunities}
     />,
   );
-  return onSaved;
+  return { onSaved, onOpenChange };
 }
 
 async function chooseOpportunity(name: string) {
@@ -74,7 +76,7 @@ async function chooseOpportunity(name: string) {
 describe("EditItemDialog opportunity link", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    updateRoadmapItemMock.mockResolvedValue({
+    editRoadmapItemMock.mockResolvedValue({
       ...item,
       startDate: null,
       endDate: null,
@@ -91,9 +93,18 @@ describe("EditItemDialog opportunity link", () => {
     );
   });
 
+  it("keeps an archived current opportunity visible when it is absent from the picker list", () => {
+    renderDialog(vi.fn(), vi.fn(), [opportunities[1]]);
+
+    expect(screen.getByRole("combobox", { name: "Opportunity" })).toHaveTextContent(
+      "Setup is confusing",
+    );
+  });
+
   it("optimistically replaces the card opportunity after saving another workspace opportunity", async () => {
-    const onSaved = renderDialog();
-    updateRoadmapItemOpportunityMock.mockResolvedValue({
+    const { onSaved } = renderDialog();
+    editRoadmapItemMock.mockResolvedValue({
+      ...item,
       opportunityId: "opp-2",
       opportunity: opportunities[1],
     });
@@ -102,9 +113,9 @@ describe("EditItemDialog opportunity link", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
-      expect(updateRoadmapItemOpportunityMock).toHaveBeenCalledWith(
+      expect(editRoadmapItemMock).toHaveBeenCalledWith(
         "item-1",
-        "opp-2",
+        expect.objectContaining({ opportunityId: "opp-2", title: "Improve onboarding" }),
         "/rbcodelabs/compass/roadmap",
       );
       expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({
@@ -119,8 +130,9 @@ describe("EditItemDialog opportunity link", () => {
   });
 
   it("supports clearing the opportunity link with None", async () => {
-    const onSaved = renderDialog();
-    updateRoadmapItemOpportunityMock.mockResolvedValue({
+    const { onSaved } = renderDialog();
+    editRoadmapItemMock.mockResolvedValue({
+      ...item,
       opportunityId: null,
       opportunity: null,
     });
@@ -129,9 +141,9 @@ describe("EditItemDialog opportunity link", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
-      expect(updateRoadmapItemOpportunityMock).toHaveBeenCalledWith(
+      expect(editRoadmapItemMock).toHaveBeenCalledWith(
         "item-1",
-        null,
+        expect.objectContaining({ opportunityId: null }),
         "/rbcodelabs/compass/roadmap",
       );
       expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({
@@ -139,5 +151,22 @@ describe("EditItemDialog opportunity link", () => {
         opportunity: null,
       }));
     });
+  });
+
+  it("shows an inline error and keeps the dialog open when the atomic save fails", async () => {
+    const onSaved = vi.fn();
+    const onOpenChange = vi.fn();
+    renderDialog(onSaved, onOpenChange);
+    editRoadmapItemMock.mockRejectedValue(new Error("Opportunity not found or access denied"));
+
+    await chooseOpportunity("Retention friction");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Opportunity not found or access denied",
+    );
+    expect(screen.getByRole("dialog", { name: "Edit roadmap item" })).toBeVisible();
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
 });

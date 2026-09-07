@@ -96,16 +96,21 @@ export async function updateRoadmapItem(
 }
 
 /**
- * Link, change, or clear a roadmap item's opportunity from the edit dialog.
- *
- * This is intentionally separate from updateRoadmapItem: that legacy action is
- * also used by the timeline and only addresses item fields by id. Relation
- * changes need their own authenticated, workspace-scoped boundary so a caller
- * cannot attach an item to an opportunity from another workspace.
+ * Atomically save every field in the roadmap card's edit dialog, including
+ * its opportunity relation. The timeline keeps using updateRoadmapItem above;
+ * this UI boundary is authenticated and workspace-scoped so relation
+ * validation can complete before any scalar edit is committed.
  */
-export async function updateRoadmapItemOpportunity(
+export async function editRoadmapItem(
   itemId: string,
-  opportunityId: string | null,
+  data: {
+    title?: string;
+    description?: string;
+    startDate?: Date | null;
+    endDate?: Date | null;
+    isPrivate?: boolean;
+    opportunityId: string | null;
+  },
   revalidatePathStr: string
 ) {
   const session = await auth();
@@ -117,29 +122,53 @@ export async function updateRoadmapItemOpportunity(
       id: itemId,
       workspace: { members: { some: { userId: session.user.id } } },
     },
-    select: { id: true, workspaceId: true },
+    select: {
+      id: true,
+      workspaceId: true,
+      opportunityId: true,
+      opportunity: { select: { id: true, title: true } },
+    },
   });
   if (!item) throw new Error("Roadmap item not found or access denied");
 
-  const opportunity = opportunityId
+  const opportunityChanged = data.opportunityId !== item.opportunityId;
+  const opportunity = opportunityChanged && data.opportunityId
     ? await prisma.opportunity.findFirst({
-        where: { id: opportunityId, workspaceId: item.workspaceId },
+        where: { id: data.opportunityId, workspaceId: item.workspaceId },
         select: { id: true, title: true },
       })
-    : null;
+    : opportunityChanged
+      ? null
+      : item.opportunity;
   // The same response covers a nonexistent id and an id owned by a different
   // workspace, so callers cannot use this action to enumerate opportunities.
-  if (opportunityId && !opportunity) {
+  if (data.opportunityId && !opportunity) {
     throw new Error("Opportunity not found or access denied");
   }
 
-  await prisma.roadmapItem.update({
+  const updateData: {
+    title?: string;
+    description?: string;
+    startDate?: Date | null;
+    endDate?: Date | null;
+    isPrivate?: boolean;
+    opportunityId?: string | null;
+    updatedAt: Date;
+  } = { updatedAt: new Date() };
+  if (data.title !== undefined) updateData.title = data.title;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.startDate !== undefined) updateData.startDate = data.startDate;
+  if (data.endDate !== undefined) updateData.endDate = data.endDate;
+  if (data.isPrivate !== undefined) updateData.isPrivate = data.isPrivate;
+  if (opportunityChanged) updateData.opportunityId = data.opportunityId;
+
+  const updated = await prisma.roadmapItem.update({
     where: { id: item.id },
-    data: { opportunityId, updatedAt: new Date() },
+    data: updateData,
   });
 
   revalidatePath(revalidatePathStr);
-  return { opportunityId, opportunity };
+  return { ...updated, opportunity };
 }
 
 // ─── Move Item (change horizon) ───────────────────────────────────────────────

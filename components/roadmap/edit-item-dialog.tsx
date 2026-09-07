@@ -19,10 +19,7 @@ import {
   ComboboxTrigger,
   ComboboxValue,
 } from "@/components/ui/combobox";
-import {
-  updateRoadmapItem,
-  updateRoadmapItemOpportunity,
-} from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import { editRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { RoadmapCardData } from "./roadmap-card";
 
 type AvailableOpportunity = { id: string; title: string };
@@ -58,6 +55,7 @@ export function EditItemDialog({
   const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(
     item.opportunityId,
   );
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   // Archived opportunities are not in the workspace's normal picker list,
   // but an item already linked to one must still show its current value and
@@ -77,6 +75,7 @@ export function EditItemDialog({
       setEndDate(toDateInputValue(item.endDate));
       setIsPrivate(item.isPrivate);
       setSelectedOpportunityId(item.opportunityId);
+      setSaveError(null);
     }
   }, [open, item]);
 
@@ -85,35 +84,32 @@ export function EditItemDialog({
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return;
 
+    setSaveError(null);
     startTransition(async () => {
-      const updated = await updateRoadmapItem(
-        item.id,
-        {
+      try {
+        const updated = await editRoadmapItem(item.id, {
           title: trimmedTitle,
           description: description.trim() || undefined,
           startDate: startDate ? new Date(startDate) : null,
           endDate: endDate ? new Date(endDate) : null,
           isPrivate,
-        },
-        revalidatePathStr
-      );
-      const opportunityUpdate = await updateRoadmapItemOpportunity(
-        item.id,
-        selectedOpportunityId,
-        revalidatePathStr,
-      );
+          opportunityId: selectedOpportunityId,
+        }, revalidatePathStr);
 
-      onSaved({
-        ...item,
-        title: updated.title,
-        description: updated.description ?? null,
-        startDate: updated.startDate ? updated.startDate.toISOString() : null,
-        endDate: updated.endDate ? updated.endDate.toISOString() : null,
-        isPrivate: updated.isPrivate,
-        opportunityId: opportunityUpdate.opportunityId,
-        opportunity: opportunityUpdate.opportunity,
-      });
-      onOpenChange(false);
+        onSaved({
+          ...item,
+          title: updated.title,
+          description: updated.description ?? null,
+          startDate: updated.startDate ? updated.startDate.toISOString() : null,
+          endDate: updated.endDate ? updated.endDate.toISOString() : null,
+          isPrivate: updated.isPrivate,
+          opportunityId: updated.opportunityId,
+          opportunity: updated.opportunity,
+        });
+        onOpenChange(false);
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : "Could not save changes. Try again.");
+      }
     });
   }
 
@@ -210,6 +206,12 @@ export function EditItemDialog({
               Private (hidden from public roadmap)
             </Label>
           </div>
+
+          {saveError && (
+            <p role="alert" className="text-sm text-destructive">
+              {saveError}
+            </p>
+          )}
 
           <DialogFooter>
             <Button type="submit" size="sm" disabled={isPending}>
