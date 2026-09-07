@@ -17,12 +17,12 @@ import { SessionAnalysisResults, SynthesisResults } from "@/components/research/
 import { guideFingerprint, parseResearchPage } from "@/lib/research-analysis"
 import { deserializeResearchGuide } from "@/lib/research"
 
-export default async function StudyPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; studyId: string }>; searchParams: Promise<{ token?: string; page?: string; synthesisPage?: string }> }) {
+export default async function StudyPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; studyId: string }>; searchParams: Promise<{ token?: string; page?: string; synthesisPage?: string; turnId?: string }> }) {
   if (!isResearchCaptureEnabled()) notFound()
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
   const { orgSlug, workspaceSlug, studyId } = await params
-  const { token, page: requestedPage, synthesisPage: requestedSynthesisPage } = await searchParams
+  const { token, page: requestedPage, synthesisPage: requestedSynthesisPage, turnId } = await searchParams
   const page = parseResearchPage(requestedPage)
   const synthesisPage = parseResearchPage(requestedSynthesisPage)
   const prisma = getPrisma()
@@ -38,6 +38,11 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
     select: { id: true },
   })
   if (!access) notFound()
+  if (turnId) {
+    const evidence = await prisma.researchTurn.findFirst({ where: { id: turnId, session: { studyId: access.id } }, select: { sessionId: true } })
+    if (!evidence) notFound()
+    redirect(`/${orgSlug}/${workspaceSlug}/capture/studies/${access.id}/sessions/${evidence.sessionId}?turnId=${encodeURIComponent(turnId)}#turn-${encodeURIComponent(turnId)}`)
+  }
   await reconcileAbandonedResearchSessions(prisma, access.id)
   const study = await prisma.researchStudy.findUnique({
     where: { id: access.id },
@@ -61,7 +66,9 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
     },
   })
   if (!study) notFound()
-  const completedSessions = await prisma.researchSession.findMany({ where: { studyId: study.id, status: "COMPLETED" }, select: { id: true } })
+  // Completed transcripts are immutable. Guide + completed IDs detect staleness without
+  // rereading all turns; 501 is necessarily stale against any valid <=500-session snapshot.
+  const completedSessions = await prisma.researchSession.findMany({ where: { studyId: study.id, status: "COMPLETED" }, select: { id: true }, take: 501 })
   const studyUrl = `/${orgSlug}/${workspaceSlug}/capture/studies/${study.id}`
   const guide = deserializeResearchGuide(study.guide)
   const displayedToken = token ? await prisma.researchParticipantToken.findFirst({

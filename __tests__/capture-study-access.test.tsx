@@ -11,10 +11,11 @@ const reconcileAbandonedResearchSessions = vi.hoisted(() => vi.fn())
 const researchStudy = { findFirst: vi.fn(), findUnique: vi.fn() }
 const researchParticipantToken = { findFirst: vi.fn() }
 const researchSession = { findMany: vi.fn() }
+const researchTurn = { findFirst: vi.fn() }
 
 vi.mock("@/auth", () => ({ auth }))
 vi.mock("next/navigation", () => ({ notFound, redirect, useRouter: () => ({ refresh: vi.fn() }) }))
-vi.mock("@/lib/db", () => ({ default: () => ({ researchStudy, researchParticipantToken, researchSession }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ researchStudy, researchParticipantToken, researchSession, researchTurn }) }))
 vi.mock("@/lib/research-session", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/research-session")>(),
   reconcileAbandonedResearchSessions,
@@ -28,6 +29,19 @@ const props = {
 }
 
 describe("researcher study access", () => {
+  it("resolves finding evidence only inside the authorized study", async () => {
+    researchStudy.findFirst.mockResolvedValue({ id: "study-1" })
+    researchTurn.findFirst.mockResolvedValue({ sessionId: "session-1" })
+    await expect(StudyPage({ ...props, searchParams: Promise.resolve({ turnId: "turn-2" }) })).rejects.toThrow("NEXT_REDIRECT")
+    expect(researchTurn.findFirst).toHaveBeenCalledWith({ where: { id: "turn-2", session: { studyId: "study-1" } }, select: { sessionId: true } })
+    expect(redirect).toHaveBeenCalledWith("/acme/product/capture/studies/study-1/sessions/session-1?turnId=turn-2#turn-turn-2")
+  })
+  it("does not resolve evidence belonging to a different study", async () => {
+    researchStudy.findFirst.mockResolvedValue({ id: "study-1" })
+    researchTurn.findFirst.mockResolvedValue(null)
+    await expect(StudyPage({ ...props, searchParams: Promise.resolve({ turnId: "foreign" }) })).rejects.toThrow("NEXT_NOT_FOUND")
+    expect(researchStudy.findUnique).not.toHaveBeenCalled()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
@@ -98,6 +112,7 @@ describe("researcher study access", () => {
     researchParticipantToken.findFirst.mockResolvedValue(null)
 
     render(await StudyPage(props))
+    expect(researchSession.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 501 }))
 
     expect(screen.getAllByText("Canonical question").at(-1)).toBeVisible()
     expect(screen.getByText("Canonical answer")).toBeVisible()

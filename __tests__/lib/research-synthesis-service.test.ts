@@ -1,16 +1,32 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ access: vi.fn(), sessions: vi.fn(), pending: vi.fn(), claim: vi.fn(), create: vi.fn(), update: vi.fn(), agent: vi.fn() }))
 vi.mock("@/lib/research-analysis-agent", () => ({ runResearchAnalysisAgent: mocks.agent }))
-vi.mock("@/lib/db", () => ({ default: () => ({ researchStudy: { findFirst: mocks.access }, researchSession: { findMany: mocks.sessions }, researchSynthesis: { update: mocks.update }, $transaction: async (fn: (tx: unknown) => unknown) => fn({ researchStudy: { updateMany: mocks.claim }, researchSynthesis: { findFirst: mocks.pending, create: mocks.create } }) }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ researchStudy: { findFirst: mocks.access }, researchSession: { findMany: mocks.sessions }, researchSynthesis: { updateMany: mocks.update }, $transaction: async (fn: (tx: unknown) => unknown) => fn({ researchStudy: { updateMany: mocks.claim }, researchSynthesis: { findFirst: mocks.pending, create: mocks.create } }) }) }))
 import { generateStudySynthesis } from "@/lib/research-analysis-service"
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.access.mockResolvedValue({ id: "study", goal: "Planning", guide: "[]", updatedAt: new Date("2020-01-01") })
   mocks.sessions.mockResolvedValue([{ id: "s1", modality: "CHAT", turns: [{ id: "t1", role: "PARTICIPANT", content: "Planning takes hours", sequence: 0 }] }])
-  mocks.pending.mockResolvedValue(null); mocks.claim.mockResolvedValue({ count: 1 }); mocks.create.mockResolvedValue({ id: "snapshot" }); mocks.update.mockResolvedValue({})
+  mocks.pending.mockResolvedValue(null); mocks.claim.mockResolvedValue({ count: 1 }); mocks.create.mockResolvedValue({ id: "snapshot" }); mocks.update.mockResolvedValue({ count: 1 })
   mocks.agent.mockResolvedValue(JSON.stringify({ summary: "Planning friction", themes: [{ title: "Slow planning", description: "Time cost", surprising: true, quotes: [{ sessionId: "s1", turnId: "t1", text: "takes hours" }] }], patterns: [], jobs: [], recommendations: [] }))
 })
 describe("research synthesis snapshots", () => {
+  afterEach(() => vi.useRealTimers())
+  it("rejects a late result instead of marking an expired snapshot successful", async () => {
+    vi.useFakeTimers()
+    const response = await mocks.agent()
+    mocks.agent.mockImplementation(async () => { vi.setSystemTime(Date.now() + 180_001); return response })
+    await expect(generateStudySynthesis("study", "member")).rejects.toThrow(/unavailable/)
+    expect(mocks.update.mock.calls.some(call => call[0].data.kind === "CROSS_SESSION")).toBe(false)
+  })
+  it("fences success and failure writes against a replaced pending snapshot", async () => {
+    mocks.update.mockResolvedValue({ count: 0 })
+    await expect(generateStudySynthesis("study", "member")).rejects.toThrow(/changed/)
+    for (const [write] of mocks.update.mock.calls) {
+      expect(write.where).toMatchObject({ id: "snapshot", kind: "PENDING" })
+      expect(write.where.content).toEqual(expect.any(String))
+    }
+  })
   it("authorizes before reading any source data", async () => {
     mocks.access.mockResolvedValue(null)
     await expect(generateStudySynthesis("study", "outsider")).rejects.toThrow(/not found/)

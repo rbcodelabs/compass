@@ -3,6 +3,7 @@ import getPrisma from "@/lib/db"
 import { deserializeResearchGuide } from "@/lib/research"
 import { analysisFingerprint, buildAnalysisPrompt, parseAnalysisResult, readSessionAnalysis, type AnalysisSource, type SessionAnalysis } from "@/lib/research-analysis"
 import { runResearchAnalysisAgent } from "@/lib/research-analysis-agent"
+import { analysisOperationMs, assertAnalysisDeadline } from "@/lib/research-analysis-deadline"
 
 export class ResearchAnalysisError extends Error {
   constructor(message: string, public status = 422) { super(message) }
@@ -42,11 +43,14 @@ export async function generateSessionAnalysis({ studyId, sessionId, kind, userId
   let prior: StoredSessionAnalysis = existing
   try { prior = { ...existing, pending: session.summary ? JSON.parse(session.summary).pending : undefined } } catch { /* Legacy plaintext is preserved until successful regeneration. */ }
   if (prior.pending && Date.now() - Date.parse(prior.pending.startedAt) < leaseMs) throw new ResearchAnalysisError("Analysis already in progress", 409)
-  const claim = JSON.stringify({ ...existing, pending: { id: randomUUID(), startedAt: new Date().toISOString() } })
+  const startedAt = Date.now()
+  const deadline = startedAt + analysisOperationMs
+  const claim = JSON.stringify({ ...existing, pending: { id: randomUUID(), startedAt: new Date(startedAt).toISOString() } })
   const claimed = await prisma.researchSession.updateMany({ where: { id: sessionId, studyId, status: "COMPLETED", summary: session.summary }, data: { summary: claim, updatedAt: new Date() } })
   if (claimed.count !== 1) throw new ResearchAnalysisError("Analysis already in progress", 409)
   try {
-    const result = parseAnalysisResult(kind, await analysisResponse(kind, prompt, source), source)
+    const result = parseAnalysisResult(kind, await analysisResponse(kind, prompt, source, deadline), source)
+    assertAnalysisDeadline(deadline)
     const saved = await prisma.researchSession.updateMany({ where: { id: sessionId, studyId, status: "COMPLETED", summary: claim }, data: { summary: JSON.stringify({ ...existing, [kind]: result }), updatedAt: new Date() } })
     if (saved.count !== 1) throw new ResearchAnalysisError("Analysis changed; refresh before retrying", 409)
     return result
@@ -65,25 +69,33 @@ export async function generateStudySynthesis(studyId: string, userId: string) {
   const source: AnalysisSource = { goal: study.goal, guide: deserializeResearchGuide(study.guide), sessions: sessions.map(session => ({ id: session.id, modality: session.modality, turns: session.turns.map(({ id, role, content, sequence }) => ({ id, role, content, sequence })) })) }
   assertSourceSize(source)
   const prompt = buildAnalysisPrompt("synthesis", source)
+  const startedAt = Date.now()
+  const deadline = startedAt + analysisOperationMs
+  const claimContent = JSON.stringify({ version: 1, sourceFingerprint: analysisFingerprint(source), claimId: randomUUID(), deadline })
   const pending = await prisma.$transaction(async tx => {
     const running = await tx.researchSynthesis.findFirst({ where: { studyId, kind: "PENDING", createdAt: { gt: new Date(Date.now() - leaseMs) } } })
     if (running) throw new ResearchAnalysisError("Synthesis already in progress", 409)
     // Serialize claims through the existing study row; no unique index or schema change.
     const claim = await tx.researchStudy.updateMany({ where: { id: studyId, updatedAt: study.updatedAt }, data: { updatedAt: new Date(Math.max(Date.now(), study.updatedAt.getTime() + 1)) } })
     if (claim.count !== 1) throw new ResearchAnalysisError("Study changed; refresh before generating", 409)
-    return tx.researchSynthesis.create({ data: { studyId, kind: "PENDING", content: JSON.stringify({ version: 1, sourceFingerprint: analysisFingerprint(source) }), sessionCount: sessions.length, promptVersion: "research-analysis-v1" } })
+    return tx.researchSynthesis.create({ data: { studyId, kind: "PENDING", content: claimContent, sessionCount: sessions.length, promptVersion: "research-analysis-v1", createdAt: new Date(startedAt) } })
   })
+  const pendingWhere = { id: pending.id, studyId, kind: "PENDING", content: claimContent }
   try {
-    const result = parseAnalysisResult("synthesis", await analysisResponse("synthesis", prompt, source), source)
-    await prisma.researchSynthesis.update({ where: { id: pending.id }, data: { kind: "CROSS_SESSION", content: JSON.stringify(result), model: "claude-sonnet-5", updatedAt: new Date() } })
+    const result = parseAnalysisResult("synthesis", await analysisResponse("synthesis", prompt, source, deadline), source)
+    assertAnalysisDeadline(deadline)
+    const saved = await prisma.researchSynthesis.updateMany({ where: pendingWhere, data: { kind: "CROSS_SESSION", content: JSON.stringify(result), model: "claude-sonnet-5", updatedAt: new Date() } })
+    if (saved.count !== 1) throw new ResearchAnalysisError("Synthesis changed; refresh before retrying", 409)
     return result
-  } catch {
-    await prisma.researchSynthesis.update({ where: { id: pending.id }, data: { kind: "FAILED", updatedAt: new Date() } })
+  } catch (error) {
+    await prisma.researchSynthesis.updateMany({ where: pendingWhere, data: { kind: "FAILED", updatedAt: new Date() } })
+    if (error instanceof ResearchAnalysisError) throw error
     throw new ResearchAnalysisError("Synthesis unavailable; previous results are unchanged. Retry generation.", 502)
   }
 }
 
-async function analysisResponse(kind: "summary" | "coverage" | "synthesis", prompt: string, source: AnalysisSource) {
+async function analysisResponse(kind: "summary" | "coverage" | "synthesis", prompt: string, source: AnalysisSource, deadline: number) {
+  assertAnalysisDeadline(deadline)
   if (process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1" && process.env.E2E_ISOLATED_DATABASE === "1") {
     const evidence = source.sessions.flatMap(session => session.turns.filter(turn => turn.role === "PARTICIPANT" && turn.content.trim()).map(turn => ({ sessionId: session.id, ...turn })))
     const first = evidence[0]
@@ -91,5 +103,5 @@ async function analysisResponse(kind: "summary" | "coverage" | "synthesis", prom
     if (kind === "coverage") return JSON.stringify({ coverage: source.guide.map(item => ({ guideItemId: item.id, covered: false, evidenceTurnIds: [] })) })
     return JSON.stringify({ summary: "Test synthesis from saved sessions.", themes: [{ title: "Saved participant evidence", description: "A fixture finding.", surprising: false, quotes: [{ sessionId: first.sessionId, turnId: first.id, text: first.content }] }], patterns: [], jobs: [], recommendations: [] })
   }
-  return runResearchAnalysisAgent(prompt)
+  return runResearchAnalysisAgent(prompt, deadline)
 }

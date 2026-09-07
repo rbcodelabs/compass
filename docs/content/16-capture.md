@@ -44,9 +44,11 @@ After a session is durably completed, Compass attempts an interview summary in t
 
 **Generate synthesis** analyzes all saved completed sessions in the study and produces an executive summary, themes and verbatim supporting quotes, surprises, repeated patterns, jobs to be done, and recommendations. **Regenerate synthesis** creates a new snapshot; previous snapshots remain inspectable. A snapshot is marked when newly completed sessions or a changed guide make its source set stale. Matching session analysis can be reused until explicit regeneration is requested.
 
-Analysis uses a separate tool-free runtime with no Compass workspace credentials. Quotes and evidence IDs must match saved participant turns; interpretation still needs researcher review. Voice transcripts are browser-reported evidence, not independently authenticated provider records. Analysis does not inspect attachment bytes or infer their contents from filenames. No audio recording is created.
+Analysis uses a separate tool-free runtime with no Compass workspace credentials. Quotes and evidence IDs must match saved participant turns; interpretation still needs researcher review. Voice source is unverified in this view; browser voice is participant-reported evidence, not independently authenticated provider records. Analysis does not inspect attachment bytes or infer their contents from filenames. No audio recording is created.
 
-Analysis is bounded to 500 completed sessions, 2,000 turns per session and 500,000 serialized input characters per request. If a study exceeds a limit, Compass returns an explicit error instead of silently omitting interviews. Transcript browsing is independent of those analysis limits. Analysis failures leave prior successful results intact; an interrupted generation can be retried after three minutes.
+Snapshot freshness assumes completed transcripts remain immutable, as enforced by the participant completion flow. A future transcript-editing feature must invalidate analysis fingerprints and freshness metadata. Pattern, job and recommendation evidence links resolve only within the study the researcher is authorized to view.
+
+Analysis is bounded to 500 completed sessions, 2,000 turns per session and 500,000 serialized input characters per request. If a study exceeds a limit, Compass returns an explicit error instead of silently omitting interviews. Transcript browsing is independent of those analysis limits. Analysis has a 150-second operation deadline, leaving time for bounded sandbox cleanup before a claim can be reclaimed after three minutes. Expired results cannot replace the current claim; failures leave prior successful results intact.
 
 ![Research results on desktop](/screenshots/docs/capture-results-desktop.png)
 

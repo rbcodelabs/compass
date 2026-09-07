@@ -12,8 +12,17 @@ beforeEach(() => {
   mocks.update.mockResolvedValue({ count: 1 })
   mocks.agent.mockResolvedValue('{"summary":"Slow process","evidenceTurnIds":["turn"]}')
 })
-afterEach(() => vi.unstubAllEnvs())
+afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers() })
 describe("saved research analysis", () => {
+  it("does not save a result after the claim operation deadline", async () => {
+    vi.useFakeTimers()
+    mocks.agent.mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 180_001)
+      return '{"summary":"Late","evidenceTurnIds":["turn"]}'
+    })
+    await expect(generateSessionAnalysis({ studyId: "study", sessionId: "session", kind: "summary", userId: "member" })).rejects.toThrow(/unavailable/)
+    expect(mocks.update.mock.calls.some(call => call[0].data.summary.includes('"kind":"summary"'))).toBe(false)
+  })
   it("authorizes membership before reading transcripts or running a model", async () => {
     mocks.study.mockResolvedValue(null)
     await expect(generateSessionAnalysis({ studyId: "study", sessionId: "session", kind: "summary", userId: "outsider" })).rejects.toThrow(/not found/)
