@@ -40,7 +40,7 @@ Click **+ Add Item** in any horizon column. A roadmap item has:
 - **Start date / End date** — Optional. Leave these blank for items whose timing isn't settled yet — the item still appears on the Timeline as a dashed placeholder bar you can drag to schedule; fill them in (here, via Edit, or by dragging the bar) once you know when the work will happen.
 - **Private** — Optional checkbox. Hides the item from the public portal roadmap and blocks voting on it, while still showing it (with a 🔒 Private badge) on the internal Board and Timeline. Use it for items you don't want visible to customers — security fixes, sensitive internal work, anything you'd rather not telegraph externally.
 
-The linked metadata appears as small icon badges on each card, giving stakeholders a quick way to trace the evidence behind each item. Use a card's **Edit** menu action at any time to add or change its title, description, dates, or private status.
+The linked metadata appears as small icon badges on each card, giving stakeholders a quick way to trace the evidence behind each item. Use a card's **Edit** menu action at any time to add or change its title, description, dates, linked opportunity, or private status. Choose **None** in the Opportunity picker to remove an existing opportunity link.
 
 ## Timeline View
 

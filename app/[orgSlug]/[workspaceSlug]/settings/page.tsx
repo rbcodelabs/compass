@@ -17,9 +17,10 @@ import type {
   SquadData,
   MemberData,
 } from "@/lib/types";
-import { normalizeWorkspaceRole } from "@/lib/roles";
+import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
+import { CapabilityPacksPanel, type CapabilityPackSettingsRow } from "@/components/settings/capability-packs-panel";
 import { ThemePreferenceControl } from "@/components/theme/theme-preference-control";
 
 export const metadata = { title: "Workspace Settings" };
@@ -40,6 +41,7 @@ export default async function SettingsPage({ params }: Props) {
     select: {
       id: true,
       organizationId: true,
+      organization: { select: { members: { where: { userId: session.user?.id }, select: { role: true } } } },
       name: true,
       feedbackEnabled: true,
       roadmapPublic: true,
@@ -57,7 +59,7 @@ export default async function SettingsPage({ params }: Props) {
 
   if (!workspace) redirect("/dashboard");
 
-  const [rawFields, rawSquads, rawApiKeys, rawMembers, rawScoringModels, scoringConfig] = await Promise.all([
+  const [rawFields, rawSquads, rawApiKeys, rawMembers, rawScoringModels, scoringConfig, rawCapabilityPacks] = await Promise.all([
     prisma.customFieldDefinition.findMany({
       where: { workspaceId: workspace.id },
       orderBy: [{ objectType: "asc" }, { order: "asc" }],
@@ -85,6 +87,11 @@ export default async function SettingsPage({ params }: Props) {
     prisma.workspaceScoringConfig.findUnique({
       where: { workspaceId: workspace.id },
       select: { scoringModelId: true },
+    }),
+    prisma.workspaceCapabilityPack.findMany({
+      where: { workspaceId: workspace.id },
+      include: { capabilityPackVersion: { include: { capabilityPack: { include: { versions: { orderBy: { createdAt: "desc" } } } } } } },
+      orderBy: { createdAt: "asc" },
     }),
   ]);
 
@@ -123,6 +130,19 @@ export default async function SettingsPage({ params }: Props) {
 
   const currentUserMembershipId =
     rawMembers.find((m) => m.userId === session.user?.id)?.id ?? null;
+  const currentWorkspaceRole = rawMembers.find((m) => m.userId === session.user?.id)?.role;
+  const canManageCapabilityPacks = normalizeWorkspaceRole(currentWorkspaceRole) === "ADMIN" || isOrgAdminRole(workspace.organization.members[0]?.role);
+  const capabilityPacks: CapabilityPackSettingsRow[] = rawCapabilityPacks.map((attachment) => ({
+    packId: attachment.capabilityPackVersion.capabilityPack.packId,
+    displayName: attachment.capabilityPackVersion.capabilityPack.displayName,
+    enabled: attachment.enabled,
+    selectedVersionId: attachment.capabilityPackVersionId,
+    enabledSkillIds: JSON.parse(attachment.enabledSkillIds) as string[],
+    versions: attachment.capabilityPackVersion.capabilityPack.versions.map((version) => ({
+      id: version.id, version: version.semanticVersion, commit: version.sourceCommit, digest: version.artifactSha256,
+      skills: (JSON.parse(version.manifestJson) as { skills: Array<{ id: string; enabledByDefault?: boolean }> }).skills,
+    })),
+  }));
 
   return (
     <main className="flex w-full min-w-0 flex-1 flex-col gap-8 p-4 sm:p-6 md:max-w-3xl md:p-8">
@@ -173,6 +193,10 @@ export default async function SettingsPage({ params }: Props) {
           initialKeys={apiKeys}
         />
       </SettingsSection>
+
+      {canManageCapabilityPacks && <SettingsSection title="Agent capability packs" description="Install validated skills-only packs for the in-app agent. Packs add instructions, never tools or credentials.">
+        <CapabilityPacksPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} initialPacks={capabilityPacks} />
+      </SettingsSection>}
 
       <SettingsSection title="Portal" description="Control which parts of this workspace are publicly accessible without login.">
         <PortalSettingsPanel

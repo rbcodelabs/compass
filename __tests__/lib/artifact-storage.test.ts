@@ -14,6 +14,41 @@ afterEach(() => {
 })
 
 describe("artifact storage credential boundaries", () => {
+  it("uses only the dedicated private capability pack token for every operation", async () => {
+    vi.stubEnv("DATABASE_URL", "")
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "public-token")
+    vi.stubEnv("BLOB_STORE_ID", "unrelated-store")
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "unrelated-oidc")
+    vi.stubEnv("CAPABILITY_PACK_BLOB_READ_WRITE_TOKEN", " pack-private-token ")
+    blob.put.mockResolvedValue({ pathname: "capability-packs/sha256/example.json" })
+    blob.get.mockResolvedValue(null)
+    const { getCapabilityPackArtifactStorage } = await import("@/lib/artifact-storage")
+    const storage = getCapabilityPackArtifactStorage()
+    await storage.put("capability-packs/sha256/example.json", new Uint8Array([1]), "application/json")
+    expect(await storage.get("capability-packs/sha256/example.json")).toBeNull()
+    await storage.del("capability-packs/sha256/example.json")
+    expect(blob.put.mock.calls[0]?.[2]).toMatchObject({ token: "pack-private-token", access: "private" })
+    expect(blob.get.mock.calls[0]?.[1]).toMatchObject({ token: "pack-private-token", access: "private" })
+    expect(blob.del).toHaveBeenCalledWith("capability-packs/sha256/example.json", { token: "pack-private-token" })
+  })
+
+  it("never falls back to the public store when the pack token is absent", async () => {
+    vi.stubEnv("DATABASE_URL", "")
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "public-token")
+    vi.stubEnv("CAPABILITY_PACK_BLOB_READ_WRITE_TOKEN", "")
+    const { getCapabilityPackArtifactStorage } = await import("@/lib/artifact-storage")
+    expect(() => getCapabilityPackArtifactStorage()).toThrow("Private capability pack storage is not configured")
+    expect(blob.get).not.toHaveBeenCalled()
+  })
+
+  it("propagates a private store400 failure rather than treating it as a missing artifact", async () => {
+    vi.stubEnv("DATABASE_URL", "")
+    vi.stubEnv("CAPABILITY_PACK_BLOB_READ_WRITE_TOKEN", "pack-private-token")
+    blob.get.mockRejectedValueOnce(new Error("Failed to fetch blob: 400 Bad Request"))
+    const { getCapabilityPackArtifactStorage } = await import("@/lib/artifact-storage")
+    await expect(getCapabilityPackArtifactStorage().get("capability-packs/sha256/example.json")).rejects.toThrow("400 Bad Request")
+    expect(blob.put).not.toHaveBeenCalled()
+  })
   it("provides a separate storage accessor for private research blobs", async () => {
     const storageModule = await import("@/lib/artifact-storage")
 

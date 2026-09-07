@@ -33,6 +33,9 @@ const mockOKRCycle = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockKeyResult = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockCheckIn = { deleteMany: vi.fn() };
 const mockWorkspaceScoringConfig = { deleteMany: vi.fn() };
+const mockWorkspaceCapabilityPack = { deleteMany: vi.fn() };
+const mockCapabilityPack = { findMany: vi.fn(), deleteMany: vi.fn() };
+const mockCapabilityPackVersion = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockCanvasNodePosition = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
@@ -85,6 +88,9 @@ const mockPrisma = {
   keyResult: mockKeyResult,
   checkIn: mockCheckIn,
   workspaceScoringConfig: mockWorkspaceScoringConfig,
+  workspaceCapabilityPack: mockWorkspaceCapabilityPack,
+  capabilityPack: mockCapabilityPack,
+  capabilityPackVersion: mockCapabilityPackVersion,
   canvasNodePosition: mockCanvasNodePosition,
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,
@@ -174,6 +180,8 @@ beforeEach(() => {
     mockArtifact,
     mockArtifactRevision,
     mockArtifactBlobCleanup,
+    mockCapabilityPack,
+    mockCapabilityPackVersion,
   ]) {
     m.findMany.mockResolvedValue([]);
   }
@@ -211,6 +219,9 @@ beforeEach(() => {
     mockKeyResult.deleteMany,
     mockCheckIn.deleteMany,
     mockWorkspaceScoringConfig.deleteMany,
+    mockWorkspaceCapabilityPack.deleteMany,
+    mockCapabilityPack.deleteMany,
+    mockCapabilityPackVersion.deleteMany,
     mockCanvasNodePosition.deleteMany,
     mockWorkspaceMember.deleteMany,
     mockSquad.deleteMany,
@@ -278,6 +289,10 @@ describe("deleteOrganization", () => {
 
   it("cascades every table and returns { redirectTo: '/dashboard' } on the happy path", async () => {
     seedNonEmptyFindMany();
+    mockCapabilityPack.findMany.mockResolvedValue([{ id: "pack-1" }]);
+    mockCapabilityPackVersion.findMany.mockResolvedValue([
+      { artifactPathname: "capability-packs/shared.json" },
+    ]);
 
     const result = await deleteOrganization("acme", ORG_NAME);
 
@@ -318,6 +333,11 @@ describe("deleteOrganization", () => {
       where: { artifactId: { in: ["art-1"] } },
     });
     expect(mockArtifact.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockWorkspaceCapabilityPack.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockCapabilityPackVersion.deleteMany).toHaveBeenCalledWith({
+      where: { capabilityPackId: { in: ["pack-1"] } },
+    });
+    expect(mockCapabilityPack.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["pack-1"] } } });
 
     // ── Tasks / TaskLinks ──
     expect(mockTaskLink.deleteMany).toHaveBeenCalledWith({ where: { taskId: { in: ["task-1"] } } });

@@ -71,6 +71,15 @@ export function getArtifactStorage(): ArtifactStorage {
   return process.env.DATABASE_URL ? localStorage : vercelBlobStorage
 }
 
+/** Packs must never inherit the project's general (potentially public) store. */
+export function getCapabilityPackArtifactStorage(): ArtifactStorage {
+  if (process.env.DATABASE_URL) return localStorage
+  const token = process.env.CAPABILITY_PACK_BLOB_READ_WRITE_TOKEN?.trim()
+  if (!token) throw new Error("Private capability pack storage is not configured")
+  // @vercel/blob 2.4.1 prioritizes explicit token over ambient OIDC/store IDs.
+  return createVercelBlobStorage(token)
+}
+
 export function getResearchArtifactStorage(): ArtifactStorage {
   if (process.env.DATABASE_URL) return localStorage
   const token = process.env.RESEARCH_BLOB_READ_WRITE_TOKEN?.trim()
