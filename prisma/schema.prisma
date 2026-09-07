@@ -216,23 +216,28 @@ model ResearchStudy {
 }
 
 model ResearchParticipantToken {
-  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  studyId          String            @map("study_id") @db.Uuid
-  tokenHash        String            @unique(map: "idx_research_participant_tokens_hash") @map("token_hash") @db.VarChar(64)
-  kind             String            @default("PRIMARY") @db.VarChar(30)
-  expiresAt        DateTime          @map("expires_at")
-  revokedAt        DateTime?         @map("revoked_at")
-  lastUsedAt       DateTime?         @map("last_used_at")
-  createdAt        DateTime          @default(now()) @map("created_at")
-  createdById      String?           @map("created_by_id") @db.Uuid
-  startWindowAt    DateTime?         @map("start_window_at")
-  startCount       Int?              @map("start_count")
-  responseWindowAt DateTime?         @map("response_window_at")
-  responseCount    Int?              @map("response_count")
-  agentWindowAt    DateTime?         @map("agent_window_at")
-  agentCallCount   Int?              @map("agent_call_count")
-  study            ResearchStudy     @relation(fields: [studyId], references: [id])
+  id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studyId          String              @map("study_id") @db.Uuid
+  tokenHash        String              @unique(map: "idx_research_participant_tokens_hash") @map("token_hash") @db.VarChar(64)
+  kind             String              @default("PRIMARY") @db.VarChar(30)
+  expiresAt        DateTime            @map("expires_at")
+  revokedAt        DateTime?           @map("revoked_at")
+  lastUsedAt       DateTime?           @map("last_used_at")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  createdById      String?             @map("created_by_id") @db.Uuid
+  startWindowAt    DateTime?           @map("start_window_at")
+  startCount       Int?                @map("start_count")
+  responseWindowAt DateTime?           @map("response_window_at")
+  responseCount    Int?                @map("response_count")
+  agentWindowAt    DateTime?           @map("agent_window_at")
+  agentCallCount   Int?                @map("agent_call_count")
+  voiceWindowAt    DateTime?           @map("voice_window_at")
+  voiceCount       Int?                @default(0) @map("voice_count")
+  voiceDayAt       DateTime?           @map("voice_day_at")
+  voiceDayCount    Int?                @default(0) @map("voice_day_count")
+  study            ResearchStudy       @relation(fields: [studyId], references: [id])
   sessions         ResearchSession[]
+  voiceCalls       ResearchVoiceCall[]
 
   @@index([studyId, kind, revokedAt], map: "idx_research_participant_tokens_study_kind")
   @@map("research_participant_tokens")
@@ -264,8 +269,13 @@ model ResearchSession {
   requests               ResearchRequest[]
   attachments            ResearchAttachment[]
   voiceEvents            ResearchVoiceEvent[]
+  voiceCalls             ResearchVoiceCall[]
+  voiceCommands          ResearchVoiceCommand[]
   voiceLeaseId           String?                   @map("voice_lease_id") @db.Uuid
   voiceLeaseExpiresAt    DateTime?                 @map("voice_lease_expires_at")
+  voiceAttemptCount      Int?                      @default(0) @map("voice_attempt_count")
+  voiceTurnCount         Int?                      @default(0) @map("voice_turn_count")
+  voiceTranscriptChars   Int?                      @default(0) @map("voice_transcript_chars")
 
   @@index([studyId, status])
   @@index([participantTokenId, status], map: "idx_research_sessions_participant_token")
@@ -351,19 +361,98 @@ model ResearchBlobCleanup {
 }
 
 model ResearchVoiceEvent {
-  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  sessionId       String          @map("session_id") @db.Uuid
-  providerEventId String          @map("provider_event_id") @db.VarChar(255)
-  turnId          String?         @map("turn_id") @db.Uuid
-  role            String          @db.VarChar(20)
-  content         String          @db.Text
-  status          String          @default("FINAL") @db.VarChar(20)
-  createdAt       DateTime        @default(now()) @map("created_at")
-  session         ResearchSession @relation(fields: [sessionId], references: [id])
+  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId              String             @map("session_id") @db.Uuid
+  providerEventId        String             @map("provider_event_id") @db.VarChar(255)
+  voiceCallId            String?            @map("voice_call_id") @db.Uuid
+  providerItemId         String?            @map("provider_item_id") @db.VarChar(255)
+  providerResponseId     String?            @map("provider_response_id") @db.VarChar(255)
+  providerPreviousItemId String?            @map("provider_previous_item_id") @db.VarChar(255)
+  providerOrdinal        Int?               @map("provider_ordinal")
+  providerStatus         String?            @map("provider_status") @db.VarChar(30)
+  turnId                 String?            @map("turn_id") @db.Uuid
+  role                   String             @db.VarChar(20)
+  content                String             @db.Text
+  status                 String             @default("FINAL") @db.VarChar(20)
+  createdAt              DateTime           @default(now()) @map("created_at")
+  session                ResearchSession    @relation(fields: [sessionId], references: [id])
+  voiceCall              ResearchVoiceCall? @relation(fields: [voiceCallId], references: [id])
 
   @@unique([sessionId, providerEventId], map: "idx_research_voice_events_session_provider")
+  @@unique([voiceCallId, providerEventId], map: "idx_research_voice_events_call_provider")
+  @@unique([voiceCallId, providerOrdinal], map: "idx_research_voice_events_call_ordinal")
+  @@unique([voiceCallId, providerItemId], map: "idx_research_voice_events_call_item")
   @@index([sessionId, createdAt], map: "idx_research_voice_events_session_created")
   @@map("research_voice_events")
+}
+
+model ResearchVoiceCall {
+  id                  String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId           String                   @map("session_id") @db.Uuid
+  participantTokenId  String                   @map("participant_token_id") @db.Uuid
+  idempotencyKey      String                   @map("idempotency_key") @db.VarChar(128)
+  offerSha256         String                   @map("offer_sha256") @db.VarChar(64)
+  answerSdp           String?                  @map("answer_sdp") @db.Text
+  providerCallId      String?                  @unique(map: "idx_research_voice_calls_provider_call") @map("provider_call_id") @db.VarChar(255)
+  sandboxName         String?                  @map("sandbox_name") @db.VarChar(255)
+  sandboxCommandId    String?                  @map("sandbox_command_id") @db.VarChar(255)
+  providerStoppedAt   DateTime?                @map("provider_stopped_at")
+  sandboxStoppedAt    DateTime?                @map("sandbox_stopped_at")
+  workerTokenHash     String                   @unique(map: "idx_research_voice_calls_worker_token") @map("worker_token_hash") @db.VarChar(64)
+  status              String                   @default("PROVISIONING") @db.VarChar(30)
+  attemptNumber       Int                      @map("attempt_number")
+  leaseExpiresAt      DateTime                 @map("lease_expires_at")
+  lastHeartbeatAt     DateTime?                @map("last_heartbeat_at")
+  statusChangedAt     DateTime                 @default(now()) @map("status_changed_at")
+  connectedAt         DateTime?                @map("connected_at")
+  endedAt             DateTime?                @map("ended_at")
+  lastProviderEventId String?                  @map("last_provider_event_id") @db.VarChar(255)
+  nextProviderOrdinal Int                      @default(0) @map("next_provider_ordinal")
+  lastProviderItemId  String?                  @map("last_provider_item_id") @db.VarChar(255)
+  endReason           String?                  @map("end_reason") @db.VarChar(50)
+  errorCode           String?                  @map("error_code") @db.VarChar(50)
+  transcriptIntegrity String                   @default("PENDING") @map("transcript_integrity") @db.VarChar(20)
+  commandPendingCount Int                      @default(0) @map("command_pending_count")
+  commandTotalCount   Int                      @default(0) @map("command_total_count")
+  commandWindowAt     DateTime?                @map("command_window_at")
+  commandWindowCount  Int                      @default(0) @map("command_window_count")
+  hangupCommandId     String?                  @map("hangup_command_id") @db.Uuid
+  createdAt           DateTime                 @default(now()) @map("created_at")
+  updatedAt           DateTime                 @default(now()) @map("updated_at")
+  session             ResearchSession          @relation(fields: [sessionId], references: [id])
+  participantToken    ResearchParticipantToken @relation(fields: [participantTokenId], references: [id])
+  commands            ResearchVoiceCommand[]
+  events              ResearchVoiceEvent[]
+
+  @@unique([sessionId, idempotencyKey], map: "idx_research_voice_calls_session_key")
+  @@index([sessionId, status], map: "idx_research_voice_calls_session_status")
+  @@index([status, leaseExpiresAt], map: "idx_research_voice_calls_status_lease")
+  @@index([status, lastHeartbeatAt], map: "idx_research_voice_calls_status_heartbeat")
+  @@index([participantTokenId], map: "idx_research_voice_calls_participant_token")
+  @@map("research_voice_calls")
+}
+
+model ResearchVoiceCommand {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  voiceCallId    String            @map("voice_call_id") @db.Uuid
+  sessionId      String            @map("session_id") @db.Uuid
+  idempotencyKey String            @map("idempotency_key") @db.VarChar(128)
+  kind           String            @db.VarChar(30)
+  attachmentId   String?           @map("attachment_id") @db.Uuid
+  status         String            @default("PENDING") @db.VarChar(20)
+  attemptCount   Int               @default(0) @map("attempt_count")
+  claimExpiresAt DateTime?         @map("claim_expires_at")
+  errorCode      String?           @map("error_code") @db.VarChar(50)
+  canonicalCommandId String?       @map("canonical_command_id") @db.Uuid
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @default(now()) @map("updated_at")
+  voiceCall      ResearchVoiceCall @relation(fields: [voiceCallId], references: [id])
+  session        ResearchSession   @relation(fields: [sessionId], references: [id])
+
+  @@unique([voiceCallId, idempotencyKey], map: "idx_research_voice_commands_call_key")
+  @@index([voiceCallId, status, createdAt], map: "idx_research_voice_commands_call_status_created")
+  @@index([sessionId], map: "idx_research_voice_commands_session")
+  @@map("research_voice_commands")
 }
 
 model ResearchSynthesis {

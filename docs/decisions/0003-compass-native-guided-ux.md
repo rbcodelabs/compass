@@ -51,6 +51,89 @@ The audio-only browser boundary removes the provider data channel and ephemeral 
 
 Cross-origin embed success remains unknowable, so the external link is first-class rather than an error-only escape hatch. Browser control, click telemetry, screen recording, and raw-audio retention are deliberately excluded.
 
+## Authoritative voice implementation gates
+
+The persistence and runtime-service foundation is an intermediate, non-routable
+slice. It does not enable participant voice: participant endpoints, authenticated
+internal callbacks, the actual provider sideband loop, and the termination saga
+must ship together before the authoritative flag can expose a call. The current
+heartbeat bootstrap alone cannot establish `READY`. Only an authenticated,
+configured sideband with event capture may do that; the SDP answer must remain
+withheld until that acknowledgement is durable.
+
+Provider creation is a one-shot operation. A retry during `PROVIDER_CREATED`
+reports provisioning in progress without stopping the original request. A known
+provider call ID must survive response-body or SDP validation failures so cleanup
+can still hang up that call. Cleanup records the provider and Sandbox identities
+and each confirmed stop before releasing the matching session lease. An ambiguous
+cleanup remains `UNKNOWN` with retryable provenance, not a successful completion.
+Controller-side provider requests use bounded abort deadlines (15 seconds for
+creation, 10 seconds for hangup). The termination saga must test a provider creation result that
+arrives after reconciliation has terminalized the attempt: preserve the newly
+discovered provider ID for cleanup without disturbing a concurrently advanced
+owner or a subsequent call.
+
+OpenAI does not provide a stateless call-status retrieval operation. Reconciliation
+uses durable sideband observations and Sandbox/command evidence, then explicitly
+attempts provider hangup and Sandbox termination. A stale heartbeat alone cannot
+prove that a call ended or justify releasing its lease. The production reconciler
+must implement that termination saga before the foundation's timing helpers are
+wired to any endpoint.
+
+Sandbox inspection must not start another execution session. With the pinned
+`@vercel/sandbox` 2.9.2 SDK, `get({ resume: false })` suppresses resumption only
+during lookup; subsequent Sandbox command methods can still auto-resume. Inspect
+the original `currentSession()` directly and preserve the distinction between a
+missing Sandbox, a missing command, and an uncertain inspection result. Network
+egress allows only OpenAI and the exact Compass callback hostname derived from
+trusted deployment configuration.
+
+### Sideband parser and callback checkpoint
+
+Protocol v1 consumes authenticated provider server events and orders transcript
+items using `previous_item_id`, never transcription completion time. Ordering
+treats an omitted predecessor as unknown, distinct from an explicit
+`null` root. The runtime must establish a trustworthy root and predecessor chain
+before readiness; it must not infer missing order from event arrival.
+Participant
+text waits for `conversation.item.input_audio_transcription.completed`; interviewer
+text waits for correlated `response.done`. Cancelled, failed, and incomplete
+interviewer items retain provenance without canonical text. Failed participant
+transcription, conflicting replay, unresolved ordering gaps, unsupported tools,
+or overflow poison the parser and require the later termination saga.
+
+The pure parser holds at most 128 items, 1,024 relevant event fingerprints, and
+256 KiB of item state. Raw audio deltas are discarded before buffering. Callback
+batches contain at most 10 events / 64 KiB and remain immutable until an explicit
+acknowledgement confirms the whole batch. Restart recovery is not implemented:
+the future worker must fail closed rather than reconstruct unobserved history.
+
+Only four worker-bearer callbacks exist: heartbeat, events, command claim, and
+command result. They use fixed UUID paths, bounded streaming JSON, `no-store`
+responses, and transactional credential/lease fences for writes. Heartbeat accepts
+only `RUNNING` and cannot establish `READY`. No participant call allocation route,
+WebSocket loop, readiness callback, or terminal-control callback is exposed by
+this checkpoint.
+
+Image/PDF context items can occupy positions in the provider item chain without
+being spoken transcript turns. Parser v1 rejects them explicitly; the attachment
+integration must represent those ordering positions before voice attachments can
+be enabled. Existing instructions may be supplied through session configuration.
+
+Checkpoint verification (2026-09-05): 2,184 tests passed across 185 files;
+production build, TypeScript, changed-file lint, and both UI policy guards passed.
+Independent review found no remaining blockers for this internal-only slice.
+Against the built local app, all four callback paths returned `401`, `no-store`,
+and no login redirect without a bearer credential. The temporary server was
+stopped after the check. No live provider call, Sandbox allocation, database
+migration, or participant E2E journey was exercised by this checkpoint; those
+remain required at their corresponding rollout gates.
+
+Reference contracts checked on 2026-09-05: [server controls](https://developers.openai.com/api/docs/guides/realtime-server-controls),
+[conversation lifecycle](https://developers.openai.com/api/docs/guides/realtime-conversations),
+[transcription](https://developers.openai.com/api/docs/guides/realtime-transcription),
+and [OpenAI's generated server-event types](https://github.com/openai/openai-node/blob/master/src/resources/realtime/realtime.ts).
+
 ## Risks
 
 - Provider realtime event shapes and completion semantics may evolve; the sideband parser, event allowlist, response-status correlation, and provider-item ordering must remain versioned and tested.

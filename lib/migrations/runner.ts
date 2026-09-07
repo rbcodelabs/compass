@@ -4,6 +4,7 @@ import { readFileSync } from "fs";
 import path from "path";
 import { createHash, randomUUID } from "node:crypto";
 import { backfillRoadmapCommitmentProvenance } from "@/lib/dsql-backfill";
+import { inspectVoiceMigrationCatalog, voiceMigrationCatalog } from "@/lib/research-voice-migration";
 import {
   applyLegacyDecisionReviewRepair,
   getLegacyDecisionReviewRepairStatus,
@@ -226,6 +227,10 @@ const MIGRATIONS = [
     name: "048_legacy_decision_review_repair",
     filePath: path.join(process.cwd(), "prisma/migrations/048_legacy_decision_review_repair/migration.sql"),
   },
+  {
+    name: "047_research_voice_control_plane",
+    filePath: path.join(process.cwd(), "prisma/migrations/047_research_voice_control_plane/migration.sql"),
+  },
 ];
 
 const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "decision_evidence_refs", "now_policy_application_evidence", "now_gate_evaluations", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"] as const;
@@ -233,6 +238,22 @@ const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record
 const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_decision_evidence_refs_subject", "idx_now_policy_evidence_workspace_created", "idx_now_gate_evaluations_workspace_created", "idx_now_gate_evaluations_workspace_outcome_created", "idx_now_gate_evaluations_item_created", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
 const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "decision_evidence_refs_pkey", "idx_decision_evidence_refs_revision_authority", "now_policy_application_evidence_pkey", "idx_now_policy_evidence_receipt", "now_gate_evaluations_pkey", "chk_now_gate_evaluations_mode", "chk_now_gate_evaluations_outcome", "chk_now_gate_evaluations_actor", "chk_roadmap_items_commitment_provenance_not_null", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
 const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger", "042_native_decision_gates_repair", "043_decision_evidence_refs", "044_now_policy_application_evidence", "045_now_gate_shadow_evaluations"] as const;
+const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane"] as const;
+const RESEARCH_VOICE_CONTROL_PLANE_INDEXES = [
+  "idx_research_voice_calls_session_key",
+  "idx_research_voice_calls_provider_call",
+  "idx_research_voice_calls_worker_token",
+  "idx_research_voice_calls_session_status",
+  "idx_research_voice_calls_status_lease",
+  "idx_research_voice_calls_status_heartbeat",
+  "idx_research_voice_calls_participant_token",
+  "idx_research_voice_commands_call_key",
+  "idx_research_voice_commands_call_status_created",
+  "idx_research_voice_commands_session",
+  "idx_research_voice_events_call_provider",
+  "idx_research_voice_events_call_ordinal",
+  "idx_research_voice_events_call_item",
+] as const;
 type DecisionMigrationName = typeof DECISION_GATE_MIGRATIONS[number]
 type DecisionMigrationStep = { id: string; sql?: string; kind: "sql" | "backfill"; async: boolean }
 const isDecisionMigration = (name: string): name is DecisionMigrationName => DECISION_GATE_MIGRATIONS.includes(name as DecisionMigrationName)
@@ -794,6 +815,50 @@ const DSQL_WRITE_LIMITS = {
   maxBytes: 10 * 1024 * 1024,
 } as const;
 
+const RESEARCH_VOICE_BACKFILL_BATCH_SIZE = 2_500;
+const RESEARCH_VOICE_COUNTER_BACKFILLS = [
+  { table: "research_sessions", column: "voice_attempt_count" },
+  { table: "research_sessions", column: "voice_turn_count" },
+  { table: "research_sessions", column: "voice_transcript_chars" },
+  { table: "research_participant_tokens", column: "voice_count" },
+  { table: "research_participant_tokens", column: "voice_day_count" },
+] as const;
+
+async function backfillNullableResearchVoiceColumn(
+  client: PoolClient,
+  schema: string,
+  target: typeof RESEARCH_VOICE_COUNTER_BACKFILLS[number],
+  log: string[],
+) {
+  const voiceSessionsOnly = target.column === "voice_turn_count" || target.column === "voice_transcript_chars"
+    ? " AND modality = 'VOICE'"
+    : "";
+  const valueExpression = target.column === "voice_turn_count"
+    ? `COALESCE((SELECT COUNT(*)::INTEGER FROM "${schema}".research_turns AS turns WHERE turns.session_id = target.id), 0)`
+    : target.column === "voice_transcript_chars"
+      ? `COALESCE((SELECT SUM(char_length(content))::INTEGER FROM "${schema}".research_turns AS turns WHERE turns.session_id = target.id), 0)`
+      : "0";
+  let total = 0;
+  while (true) {
+    const result = await client.query(
+      `WITH batch AS (
+         SELECT id FROM "${schema}".${target.table}
+         WHERE ${target.column} IS NULL${voiceSessionsOnly}
+         LIMIT $1
+       )
+       UPDATE "${schema}".${target.table} AS target
+       SET ${target.column} = ${valueExpression}
+       FROM batch
+       WHERE target.id = batch.id`,
+      [RESEARCH_VOICE_BACKFILL_BATCH_SIZE],
+    );
+    const updated = result.rowCount ?? 0;
+    total += updated;
+    if (result.rowCount === null || result.rowCount < RESEARCH_VOICE_BACKFILL_BATCH_SIZE) break;
+  }
+  log.push(`  ✓ backfilled ${total} ${target.table}.${target.column} rows`);
+}
+
 const RESEARCH_CAPTURE_INDEXES = [
   "idx_research_participant_tokens_hash",
   "idx_research_participant_tokens_study_kind",
@@ -966,6 +1031,18 @@ async function getNamedIndexStatus(
   return { indexes, indexesValid: indexes.every((index) => index.valid) }
 }
 
+async function getResearchVoiceControlPlaneReport(client: PoolClient, schema: string) {
+  return getNamedIndexStatus(client, schema, RESEARCH_VOICE_CONTROL_PLANE_INDEXES)
+}
+
+async function assertResearchVoiceControlPlanePostconditions(client: PoolClient, schema: string) {
+  const report = await getResearchVoiceControlPlaneReport(client, schema)
+  if (!report.indexesValid) {
+    const invalid = report.indexes.filter((index) => !index.valid).map((index) => index.name).join(", ")
+    throw new Error(`Migration 047 postcondition failed: indexes are not ACTIVE: ${invalid}`)
+  }
+}
+
 async function getResearchGuidedUxReport(client: PoolClient, schema: string, asyncIndexJobIds: string[] = []) {
   const indexStatus = await getNamedIndexStatus(client, schema, RESEARCH_GUIDED_UX_INDEXES)
   const asyncIndexJobs = await getAsyncIndexJobStatus(client, asyncIndexJobIds)
@@ -1067,10 +1144,11 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
     `).catch(() => ({ rows: [] as { name: string; applied?: boolean }[] }));
     const appliedNames = rows.filter((row) => row.applied !== false).map((row) => row.name)
     const incompleteNames = rows.filter((row) => row.applied === false).map((row) => row.name)
-    const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup, decisionGateInfrastructure, decisionMigrationProgress, legacyDecisionReviewRepair] = await Promise.all([
+    const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup, researchVoiceControlPlane, decisionGateInfrastructure, decisionMigrationProgress, legacyDecisionReviewRepair] = await Promise.all([
       getResearchCaptureHardeningReport(client, schema),
       getResearchGuidedUxReport(client, schema),
       getResearchBlobCleanupReport(client, schema),
+      getResearchVoiceControlPlaneReport(client, schema),
       getDecisionGateInfrastructureHealth(client, schema, appliedNames, incompleteNames),
       client.query(`SELECT migration_name, attempt_id, plan_version, plan_fingerprint, next_step, executing_step, executing_started_at, pending_step, pending_job_id, claim_epoch, claimed_by IS NOT NULL AND claim_expires_at >= CURRENT_TIMESTAMP AS claimed, last_error, updated_at FROM "${schema}"._migration_execution_state ORDER BY updated_at DESC`).then(({ rows }) => rows).catch(() => []),
       getLegacyDecisionReviewRepairStatus(pool, schema),
@@ -1084,6 +1162,7 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       researchCaptureHardening,
       researchGuidedUx,
       researchBlobCleanup,
+      researchVoiceControlPlane,
       decisionGateInfrastructure,
       decisionMigrationProgress,
       legacyDecisionReviewRepair,
@@ -1135,10 +1214,11 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
     );
 
     if (toRun.length === 0) {
-      const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup] = await Promise.all([
+      const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup, researchVoiceControlPlane] = await Promise.all([
         getResearchCaptureHardeningReport(client, schema),
         getResearchGuidedUxReport(client, schema),
         getResearchBlobCleanupReport(client, schema),
+        getResearchVoiceControlPlaneReport(client, schema),
       ]);
       return NextResponse.json({
         message: "Nothing to apply. All migrations up to date.",
@@ -1146,6 +1226,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         researchCaptureHardening,
         researchGuidedUx,
         researchBlobCleanup,
+        researchVoiceControlPlane,
       });
     }
 
@@ -1199,13 +1280,16 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         }
       }
 
+      const rawSql = readFileSync(migration.filePath, "utf-8");
+      const voiceCatalog = migration.name === "047_research_voice_control_plane" ? voiceMigrationCatalog(rawSql) : undefined;
+      // Admit partial 047 only when every existing object has the intended
+      // definition. A previous unfinished receipt remains forensic evidence.
+      const voiceExisting = voiceCatalog ? await inspectVoiceMigrationCatalog(client, schema, voiceCatalog) : undefined;
       const attemptId = randomUUID()
       await client.query(
         `INSERT INTO "${schema}"._prisma_migrations (id, migration_name) VALUES ($1, $2)`,
         [attemptId, migration.name],
       )
-
-      const rawSql = readFileSync(migration.filePath, "utf-8");
 
       // Strip all SQL line comments (-- ...) before splitting, so a leading
       // comment on a CREATE statement can't cause the whole statement to be
@@ -1228,11 +1312,24 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       let pendingRoadmapCommitmentProvenanceBackfill = false;
       for (const stmt of statements) {
         try {
+          const existingTable = stmt.match(/^CREATE TABLE (\w+) /)?.[1];
+          const existingIndex = stmt.match(/^CREATE (?:UNIQUE )?INDEX ASYNC (\w+) /)?.[1];
+          if (voiceExisting && ((existingTable && voiceExisting.tables.includes(existingTable)) || (existingIndex && voiceExisting.indexes.some((index) => index.name === existingIndex)))) {
+            log.push("  ~ verified matching 047 object already exists (skipped)");
+            continue;
+          }
           // ASYNC is mandatory on DSQL and unsupported by local PostgreSQL.
           // DATABASE_URL is the worktree-bootstrap local-mode signal.
           const executableStmt = process.env.DATABASE_URL
             ? stmt.replace(/\bINDEX ASYNC\b/gi, "INDEX").replace(/ALTER\s+TABLE\s+ASYNC/gi, "ALTER TABLE")
             : stmt;
+          const voiceCounterBackfill = migration.name === "047_research_voice_control_plane"
+            ? RESEARCH_VOICE_COUNTER_BACKFILLS.find(({ table, column }) =>
+                new RegExp(`^ALTER\\s+TABLE\\s+${table}\\s+ALTER\\s+COLUMN\\s+${column}\\s+SET\\s+DEFAULT\\s+0`, "i").test(executableStmt))
+            : undefined;
+          if (voiceCounterBackfill) {
+            await backfillNullableResearchVoiceColumn(client, schema, voiceCounterBackfill, log);
+          }
           if (repair039State?.checkPresent && /ADD\s+CONSTRAINT\s+"chk_roadmap_items_commitment_provenance_not_null"/i.test(executableStmt)) {
             log.push("  ~ matching provenance CHECK already exists (skipped)")
             continue
@@ -1242,12 +1339,12 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
             continue
           }
           const result = await client.query<{ job_id?: string }>(executableStmt);
-          if (!process.env.DATABASE_URL && DECISION_GATE_MIGRATIONS.includes(migration.name as typeof DECISION_GATE_MIGRATIONS[number]) && /(?:CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC|ALTER\s+TABLE\s+ASYNC)/i.test(stmt)) {
+          if (!process.env.DATABASE_URL && ASYNC_WAIT_MIGRATIONS.includes(migration.name as typeof ASYNC_WAIT_MIGRATIONS[number]) && /(?:CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC|ALTER\s+TABLE\s+ASYNC)/i.test(stmt)) {
             const jobId = result.rows[0]?.job_id
-            if (jobId) {
-              const waited = await client.query<{ succeeded: boolean }>("SELECT sys.wait_for_job($1) AS succeeded", [jobId])
-              if (waited.rows[0]?.succeeded !== true) throw new Error(`Aurora DSQL async DDL job ${jobId} did not complete successfully.`)
-            }
+            if (!jobId) throw new Error(`Migration ${migration.name} async DDL returned no job_id.`)
+            await client.query("CALL sys.wait_for_job($1)", [jobId])
+            const waited = await client.query<{ status: string }>("SELECT status FROM sys.jobs WHERE job_id = $1", [jobId])
+            if (waited.rows[0]?.status !== "completed") throw new Error(`Aurora DSQL async DDL job ${jobId} did not complete successfully.`)
           }
           if ((migration.name === "039_native_decision_gates" || migration.name === "042_native_decision_gates_repair") && /ALTER\s+COLUMN\s+"?now_commitment_provenance"?\s+SET\s+DEFAULT/i.test(executableStmt)) {
             pendingRoadmapCommitmentProvenanceBackfill = true;
@@ -1269,7 +1366,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
           log.push(`  ✓ ${label}…`);
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e);
-          if (msg.includes("already exists")) {
+          if (!voiceCatalog && msg.includes("already exists")) {
             log.push(`  ~ already exists (skipped)`);
           } else {
             log.push(`  ✗ Error: ${msg}`);
@@ -1284,6 +1381,10 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       }
 
       await assertDecisionMigrationPostconditions(client, schema, migration.name)
+      if (migration.name === "047_research_voice_control_plane") {
+        await inspectVoiceMigrationCatalog(client, schema, voiceCatalog!, true)
+        await assertResearchVoiceControlPlanePostconditions(client, schema)
+      }
 
       // Only this distinct attempt becomes a successful receipt. A failed
       // attempt remains unfinished as forensic evidence and is never relabeled.
@@ -1302,7 +1403,8 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
     );
     const researchGuidedUx = await getResearchGuidedUxReport(client, schema, researchGuidedUxAsyncIndexJobIds);
     const researchBlobCleanup = await getResearchBlobCleanupReport(client, schema, researchBlobCleanupAsyncIndexJobIds);
-    return NextResponse.json({ message: log.join("\n"), schema, researchCaptureHardening, researchGuidedUx, researchBlobCleanup });
+    const researchVoiceControlPlane = await getResearchVoiceControlPlaneReport(client, schema);
+    return NextResponse.json({ message: log.join("\n"), schema, researchCaptureHardening, researchGuidedUx, researchBlobCleanup, researchVoiceControlPlane });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: msg, log: log.join("\n"), schema }, { status: 500 });

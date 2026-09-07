@@ -54,4 +54,10 @@ describe("isPublicPath", () => {
   it("does not allow non-portal, non-admin API routes", () => {
     expect(isPublicPath("/api/branding/logo")).toBe(false);
   });
+
+  it("allows only the exact bearer-authenticated voice callback family", () => {
+    const base = "/api/internal/research/voice/00000000-0000-4000-8000-000000000001"
+    for (const suffix of ["heartbeat", "events", "commands/claim", "commands/result"]) expect(isPublicPath(`${base}/${suffix}`)).toBe(true)
+    for (const path of ["/api/internal/other", `${base}/ready`, `${base}/events/extra`, "/api/internal/research/voice/not-a-uuid/events"]) expect(isPublicPath(path)).toBe(false)
+  });
 });
