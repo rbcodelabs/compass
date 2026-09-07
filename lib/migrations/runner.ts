@@ -224,6 +224,11 @@ const MIGRATIONS = [
     filePath: path.join(process.cwd(), "prisma/migrations/047_preview_automation/migration.sql"),
   },
   {
+    // Migration receipts use full names, so independently chosen 047 prefixes coexist.
+    name: "047_capability_packs",
+    filePath: path.join(process.cwd(), "prisma/migrations/047_capability_packs/migration.sql"),
+  },
+  {
     name: "048_legacy_decision_review_repair",
     filePath: path.join(process.cwd(), "prisma/migrations/048_legacy_decision_review_repair/migration.sql"),
   },
