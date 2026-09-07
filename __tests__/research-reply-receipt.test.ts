@@ -8,6 +8,21 @@ function response(body = finalBody, status = 200, contentType = "application/x-n
 }
 afterEach(() => vi.useRealTimers())
 
+it.each([
+  ["Protocol error (Network.getResponseBody): No resource with given identifier found secret", "body-resource-unavailable"],
+  ["Protocol error (Network.getResponseBody): No data found for resource with given identifier secret", "body-resource-unavailable"],
+  ["net::ERR_ABORTED secret", "body-aborted"],
+  ["Target closed secret", "body-target-closed"],
+  ["Test ended secret", "body-test-ended"],
+  ["unknown private participant content", "body-unavailable"],
+])("classifies body retrieval failure without retaining its raw details %#", async (message, failureCategory) => {
+  const report = vi.fn()
+  await expect(awaitResearchReplyReceipt(Promise.resolve({ ...response(), body: async () => { throw new Error(message) } }), report)).rejects.toThrow("Research reply receipt failed")
+  expect(report).toHaveBeenLastCalledWith(expect.objectContaining({ stage: "failed", failureCategory, bytes: null, status: 200 }))
+  expect(JSON.stringify(report.mock.calls)).not.toContain("secret")
+  expect(JSON.stringify(report.mock.calls)).not.toContain("private participant")
+})
+
 it("waits beyond five seconds for terminal body before allowing the render assertion", async () => {
   vi.useFakeTimers()
   const renderAssertion = vi.fn()
