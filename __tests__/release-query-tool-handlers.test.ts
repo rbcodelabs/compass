@@ -47,8 +47,8 @@ describe("listReleaseRuns", () => {
         updatedAt: { gte: new Date("2026-09-01T00:00:00.000Z") },
       },
       include: {
-        tasks: { select: { taskId: true } },
-        dispatches: { select: { id: true, status: true, updatedAt: true }, orderBy: { createdAt: "desc" } },
+        tasks: { select: { taskId: true }, orderBy: { taskId: "asc" } },
+        dispatches: { select: { id: true, status: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] },
       },
       orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
     })

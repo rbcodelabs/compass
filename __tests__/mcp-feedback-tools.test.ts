@@ -621,9 +621,9 @@ describe("listFeedback", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-09-07T12:00:00.000Z"))
     mockWorkspace.findUnique.mockResolvedValue(workspaceContext)
-    const first = { ...sampleItem, id: "feedback-1", updatedAt: new Date("2026-09-01T00:00:00.000Z") }
-    const second = { ...sampleItem, id: "feedback-2", updatedAt: new Date("2026-09-02T00:00:00.000Z") }
-    const third = { ...sampleItem, id: "feedback-3", updatedAt: new Date("2026-09-03T00:00:00.000Z") }
+    const first = { ...sampleItem, id: "11111111-1111-4111-8111-111111111111", updatedAt: new Date("2026-09-02T00:00:00.000Z") }
+    const second = { ...sampleItem, id: "22222222-2222-4222-8222-222222222222", updatedAt: new Date("2026-09-02T00:00:00.000Z") }
+    const third = { ...sampleItem, id: "33333333-3333-4333-8333-333333333333", updatedAt: new Date("2026-09-07T12:00:00.000Z") }
     mockFeedbackItem.findMany.mockResolvedValueOnce([first, second, third])
 
     const pageOne = await feedbackHandlers.listFeedback({
@@ -649,7 +649,7 @@ describe("listFeedback", () => {
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: 3,
     })
-    expect(pageOneData.items.map((item) => item.id)).toEqual(["feedback-1", "feedback-2"])
+    expect(pageOneData.items.map((item) => item.id)).toEqual([first.id, second.id])
     expect(pageOneData.items[0]).toMatchObject({
       opportunityId: null,
       createdAt: sampleItem.createdAt,
@@ -676,7 +676,7 @@ describe("listFeedback", () => {
           {
             OR: [
               { updatedAt: { gt: second.updatedAt } },
-              { updatedAt: second.updatedAt, id: { gt: "feedback-2" } },
+              { updatedAt: second.updatedAt, id: { gt: second.id } },
             ],
           },
         ],
@@ -686,10 +686,96 @@ describe("listFeedback", () => {
       take: 3,
     })
     expect(pageTwoData).toMatchObject({
-      items: [{ id: "feedback-3" }],
+      items: [{ id: third.id }],
       hasMore: false,
       nextCursor: null,
       asOf: "2026-09-07T12:00:00.000Z",
+    })
+    vi.useRealTimers()
+  })
+
+  it("binds cursors to the original workspace and normalized status filters", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-07T12:00:00.000Z"))
+    mockWorkspace.findUnique.mockResolvedValue(workspaceContext)
+    const first = { ...sampleItem, id: "11111111-1111-4111-8111-111111111111", updatedAt: new Date("2026-09-01T00:00:00.000Z") }
+    const second = { ...sampleItem, id: "22222222-2222-4222-8222-222222222222", updatedAt: new Date("2026-09-02T00:00:00.000Z") }
+    mockFeedbackItem.findMany.mockResolvedValueOnce([first, second])
+    const firstPage = await feedbackHandlers.listFeedback({
+      workspaceId: WS_ID,
+      status: "OPEN",
+      updatedSince: "2026-09-01T00:00:00.000Z",
+      limit: 1,
+    })
+    const cursor = (firstPage.structuredContent.data as { nextCursor: string }).nextCursor
+    vi.clearAllMocks()
+
+    const wrongWorkspace = await feedbackHandlers.listFeedback({
+      workspaceId: "44444444-4444-4444-8444-444444444444",
+      status: "OPEN",
+      cursor,
+    })
+    const wrongStatus = await feedbackHandlers.listFeedback({ workspaceId: WS_ID, status: "UNDER_REVIEW", cursor })
+
+    expect(wrongWorkspace.structuredContent).toMatchObject({ ok: false, message: "Feedback cursor does not match the requested workspace or status." })
+    expect(wrongStatus.structuredContent).toMatchObject({ ok: false, message: "Feedback cursor does not match the requested workspace or status." })
+    expect(mockFeedbackItem.findMany).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it("rejects ambiguous and malformed cursor inputs before querying feedback", async () => {
+    mockWorkspace.findUnique.mockResolvedValue(workspaceContext)
+    const both = await feedbackHandlers.listFeedback({
+      workspaceId: WS_ID,
+      updatedSince: "2026-09-01T00:00:00.000Z",
+      cursor: "opaque",
+    })
+    const malformed = Buffer.from(JSON.stringify({
+      v: 1,
+      workspaceId: WS_ID,
+      status: null,
+      updatedSince: 123,
+      asOf: "not-a-date",
+      afterUpdatedAt: [],
+      afterId: false,
+    })).toString("base64url")
+    const malformedResult = await feedbackHandlers.listFeedback({ workspaceId: WS_ID, cursor: malformed })
+
+    expect(both.structuredContent).toMatchObject({ ok: false, message: "Provide either updatedSince or cursor, not both." })
+    expect(malformedResult.structuredContent).toMatchObject({ ok: false, message: "Invalid feedback cursor." })
+    expect(mockFeedbackItem.findMany).not.toHaveBeenCalled()
+  })
+
+  it("keeps the asOf boundary across pages and picks later changes up in the next scan", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-07T12:00:00.000Z"))
+    mockWorkspace.findUnique.mockResolvedValue(workspaceContext)
+    const first = { ...sampleItem, id: "11111111-1111-4111-8111-111111111111", updatedAt: new Date("2026-09-01T00:00:00.000Z") }
+    const atBoundary = { ...sampleItem, id: "22222222-2222-4222-8222-222222222222", updatedAt: new Date("2026-09-07T12:00:00.000Z") }
+    mockFeedbackItem.findMany.mockResolvedValueOnce([first, atBoundary])
+    const pageOne = await feedbackHandlers.listFeedback({
+      workspaceId: WS_ID,
+      updatedSince: "2026-09-01T00:00:00.000Z",
+      limit: 1,
+    })
+    const cursor = (pageOne.structuredContent.data as { nextCursor: string }).nextCursor
+    mockFeedbackItem.findMany.mockResolvedValueOnce([atBoundary])
+    await feedbackHandlers.listFeedback({ workspaceId: WS_ID, cursor, limit: 1 })
+    expect(mockFeedbackItem.findMany.mock.calls[1][0].where.AND[0]).toEqual({
+      updatedAt: {
+        gte: new Date("2026-09-01T00:00:00.000Z"),
+        lte: new Date("2026-09-07T12:00:00.000Z"),
+      },
+    })
+
+    vi.setSystemTime(new Date("2026-09-08T12:00:00.000Z"))
+    mockFeedbackItem.findMany.mockResolvedValueOnce([])
+    await feedbackHandlers.listFeedback({ workspaceId: WS_ID, updatedSince: "2026-09-07T12:00:00.000Z" })
+    expect(mockFeedbackItem.findMany.mock.calls[2][0].where.AND[0]).toEqual({
+      updatedAt: {
+        gte: new Date("2026-09-07T12:00:00.000Z"),
+        lte: new Date("2026-09-08T12:00:00.000Z"),
+      },
     })
     vi.useRealTimers()
   })

@@ -1016,7 +1016,7 @@ const _handler = createMcpHandler(
         title: "List Assumptions",
         description:
           "Lists assumptions across a workspace using factual risk, lifecycle, and parent filters. " +
-          "The response reports evidence locations but makes no evidence-sufficiency judgment.",
+          "The response reports stable ancestry and experiment counts but makes no evidence-sufficiency judgment.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]).optional().describe("Filter by assumption status"),
@@ -1446,7 +1446,14 @@ const _handler = createMcpHandler(
             ...(squadId ? { squadId } : {}),
             ...(hasResults === true ? { results: { some: {} } } : {}),
             ...(hasResults === false ? { results: { none: {} } } : {}),
-            ...(updatedSince ? { updatedAt: { gte: new Date(updatedSince) } } : {}),
+            ...(updatedSince
+              ? {
+                  OR: [
+                    { updatedAt: { gte: new Date(updatedSince) } },
+                    { results: { some: { createdAt: { gte: new Date(updatedSince) } } } },
+                  ],
+                }
+              : {}),
             ...(endBefore ? { endDate: { lt: new Date(endBefore) } } : {}),
           },
           include: {
@@ -1467,7 +1474,7 @@ const _handler = createMcpHandler(
               },
             },
             _count: { select: { results: true } },
-            results: { select: { createdAt: true }, orderBy: { createdAt: "desc" }, take: 1 },
+            results: { select: { createdAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 },
           },
           orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
         })
@@ -1804,7 +1811,7 @@ const _handler = createMcpHandler(
           "Merge, deployment, and production-verification evidence must be checked with their external providers.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          state: z.enum(["PREPARING", "READY_FOR_APPROVAL", "DISPATCH_QUEUED", "BLOCKED", "SUPERSEDED", "CANCELLED"]).optional().describe("Filter by Compass release-run ledger state"),
+          state: z.enum(["PREPARING", "READY_FOR_APPROVAL", "DECISION_RECORDING", "DISPATCH_QUEUED", "BLOCKED", "SUPERSEDED", "CANCELLED"]).optional().describe("Filter by Compass release-run ledger state"),
           taskId: z.string().uuid().optional().describe("Filter to release runs covering this Task"),
           updatedSince: z.string().datetime().optional().describe("Filter to release runs updated at or after this ISO timestamp"),
         },
@@ -1875,7 +1882,7 @@ const _handler = createMcpHandler(
             squad: { select: { name: true } },
             experiment: { select: { title: true } },
           },
-          orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }],
+          orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
         })
         if (!items.length) {
           return fail("No active roadmap items found.")

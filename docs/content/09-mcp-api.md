@@ -271,7 +271,8 @@ exhausted. For complete or incremental retrieval, pass an ISO `updatedSince`
 timestamp (use the Unix epoch for a full historical scan), then follow
 `nextCursor` until `hasMore` is false. The first page freezes an `asOf` upper
 watermark, so records changed later appear in the next scan instead of shifting
-between pages.
+between pages. A cursor is bound to its original workspace and normalized status
+filter; pass a cursor by itself rather than combining it with `updatedSince`.
 
 For screenshots and other small files, pass a base64 data URL (or raw base64 plus `fileType`) directly to `create_feedback` or `add_feedback_attachment`. Compass validates the encoded length before decoding and rejects the entire create request if any attachment cannot be uploaded; it never silently creates text-only feedback.
 

@@ -71,7 +71,10 @@ describe("list_experiments discovery summary", () => {
         status: "RUNNING",
         squadId: "squad-1",
         results: { some: {} },
-        updatedAt: { gte: updatedSince },
+        OR: [
+          { updatedAt: { gte: updatedSince } },
+          { results: { some: { createdAt: { gte: updatedSince } } } },
+        ],
         endDate: { lt: new Date("2026-09-07T00:00:00.000Z") },
       },
       include: {
@@ -92,7 +95,7 @@ describe("list_experiments discovery summary", () => {
           },
         },
         _count: { select: { results: true } },
-        results: { select: { createdAt: true }, orderBy: { createdAt: "desc" }, take: 1 },
+        results: { select: { createdAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 },
       },
       orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
     })
@@ -111,6 +114,24 @@ describe("list_experiments discovery summary", () => {
         }),
       ],
       count: 1,
+    })
+  })
+
+  it("discovers an unchanged experiment when a result was logged after the watermark", async () => {
+    const updatedSince = new Date("2026-09-01T00:00:00.000Z")
+    mockExperiment.findMany.mockResolvedValueOnce([])
+
+    await runWithMcpActor({ userId: null }, () => registeredTools.list_experiments.callback({
+      workspaceId: "workspace-1",
+      updatedSince: updatedSince.toISOString(),
+    }))
+
+    expect(mockExperiment.findMany.mock.calls[0][0].where).toEqual({
+      workspaceId: "workspace-1",
+      OR: [
+        { updatedAt: { gte: updatedSince } },
+        { results: { some: { createdAt: { gte: updatedSince } } } },
+      ],
     })
   })
 

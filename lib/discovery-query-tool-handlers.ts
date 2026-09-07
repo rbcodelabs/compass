@@ -32,7 +32,10 @@ export async function listSolutions({
     },
     include: {
       opportunity: { select: { id: true, title: true, status: true, squadId: true } },
-      roadmapItems: { select: { id: true, horizon: true, status: true } },
+      roadmapItems: {
+        select: { id: true, horizon: true, status: true },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      },
     },
     orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
   })

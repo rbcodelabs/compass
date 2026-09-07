@@ -4,6 +4,7 @@ import { ok } from "@/lib/mcp-output"
 type ReleaseRunState =
   | "PREPARING"
   | "READY_FOR_APPROVAL"
+  | "DECISION_RECORDING"
   | "DISPATCH_QUEUED"
   | "BLOCKED"
   | "SUPERSEDED"
@@ -28,10 +29,10 @@ export async function listReleaseRuns({
       ...(updatedSince ? { updatedAt: { gte: new Date(updatedSince) } } : {}),
     },
     include: {
-      tasks: { select: { taskId: true } },
+      tasks: { select: { taskId: true }, orderBy: { taskId: "asc" } },
       dispatches: {
         select: { id: true, status: true, updatedAt: true },
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       },
     },
     orderBy: [{ updatedAt: "desc" }, { id: "asc" }],

@@ -321,6 +321,42 @@ describe("listTasks", () => {
     expect(text).toContain("Epic A")
     expect(text).toContain("↳ [IN_PROGRESS] Child A")
   })
+
+  it("keeps a changed child visible under its unchanged parent in a timestamp-filtered nested result", async () => {
+    const parentCreatedAt = new Date("2026-08-01T00:00:00.000Z")
+    const parentUpdatedAt = new Date("2026-08-15T00:00:00.000Z")
+    const childCreatedAt = new Date("2026-08-20T00:00:00.000Z")
+    const childUpdatedAt = new Date("2026-09-03T00:00:00.000Z")
+    mockTask.findMany
+      .mockResolvedValueOnce([
+        { id: "sub-1", title: "Review fix", status: "IN_REVIEW", priority: "HIGH", parentTaskId: "epic-1", createdAt: childCreatedAt, updatedAt: childUpdatedAt, _count: { subtasks: 0 } },
+      ])
+      .mockResolvedValueOnce([
+        { id: "epic-1", title: "Ship fix", status: "IN_PROGRESS", priority: "HIGH", parentTaskId: null, createdAt: parentCreatedAt, updatedAt: parentUpdatedAt, _count: { subtasks: 1 } },
+      ])
+
+    const result = await listTasks({
+      workspaceId: WORKSPACE_ID,
+      status: "IN_REVIEW",
+      includeSubtasks: true,
+      updatedSince: "2026-09-01T00:00:00.000Z",
+    })
+
+    expect(mockTask.findMany).toHaveBeenNthCalledWith(2, {
+      where: { workspaceId: WORKSPACE_ID, id: { in: ["epic-1"] } },
+      include: { _count: { select: { subtasks: true } } },
+      orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
+    })
+    expect(result.structuredContent.data).toMatchObject({
+      items: [{
+        id: "epic-1",
+        createdAt: parentCreatedAt,
+        updatedAt: parentUpdatedAt,
+        subtasks: [{ id: "sub-1", createdAt: childCreatedAt, updatedAt: childUpdatedAt }],
+      }],
+      count: 1,
+    })
+  })
 })
 
 // ─── updateTask ───────────────────────────────────────────────────────────────

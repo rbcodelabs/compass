@@ -19,6 +19,7 @@ describe("list_release_runs route registration", () => {
     const schema = registeredTools.list_release_runs.inputSchema
     expect(Object.keys(schema)).toEqual(["workspaceId", "state", "taskId", "updatedSince"])
     expect(schema.state.safeParse("DISPATCH_QUEUED").success).toBe(true)
+    expect(schema.state.safeParse("DECISION_RECORDING").success).toBe(true)
     expect(schema.state.safeParse("MERGED").success).toBe(false)
     expect(schema.updatedSince.safeParse("2026-09-01T00:00:00.000Z").success).toBe(true)
     expect("productionVerified" in schema).toBe(false)

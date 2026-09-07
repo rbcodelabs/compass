@@ -5,6 +5,7 @@
 
 import getPrisma from "@/lib/db"
 import { randomUUID } from "node:crypto"
+import { z } from "zod"
 import { validateFeedbackInput } from "@/lib/feedback"
 import { ok, fail } from "@/lib/mcp-output"
 import {
@@ -16,7 +17,17 @@ import {
   verifyCompletedFeedbackUpload,
 } from "@/lib/feedback-attachments"
 import { feedbackItemUrl } from "@/lib/compass-url"
-import type { FeedbackStatus } from "@/lib/feedback-meta"
+import { FEEDBACK_STATUSES, type FeedbackStatus } from "@/lib/feedback-meta"
+
+const feedbackCursorSchema = z.object({
+  v: z.literal(1),
+  workspaceId: z.string().min(1),
+  status: z.enum([...FEEDBACK_STATUSES, "CLOSED"]).nullable(),
+  updatedSince: z.string().datetime(),
+  asOf: z.string().datetime(),
+  afterUpdatedAt: z.string().datetime(),
+  afterId: z.string().min(1),
+}).strict()
 
 type FeedbackWorkspace = {
   slug: string
@@ -197,6 +208,23 @@ export async function listFeedback({
   updatedSince?: string
   cursor?: string
 }) {
+  if (updatedSince !== undefined && cursor !== undefined) {
+    return fail("Provide either updatedSince or cursor, not both.")
+  }
+
+  const normalizedStatus = status ?? null
+  let decodedCursor: z.infer<typeof feedbackCursorSchema> | null = null
+  if (cursor !== undefined) {
+    try {
+      decodedCursor = feedbackCursorSchema.parse(JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")))
+    } catch {
+      return fail("Invalid feedback cursor.")
+    }
+    if (decodedCursor.workspaceId !== workspaceId || decodedCursor.status !== normalizedStatus) {
+      return fail("Feedback cursor does not match the requested workspace or status.")
+    }
+  }
+
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
@@ -211,19 +239,11 @@ export async function listFeedback({
   } | null = null
   if (scanMode) {
     try {
-      if (cursor) {
-        const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
-          v: number
-          updatedSince: string
-          asOf: string
-          afterUpdatedAt: string
-          afterId: string
-        }
-        if (decoded.v !== 1 || !decoded.afterId) throw new Error("Unsupported feedback cursor")
+      if (decodedCursor) {
         scan = {
-          updatedSince: new Date(decoded.updatedSince),
-          asOf: new Date(decoded.asOf),
-          after: { updatedAt: new Date(decoded.afterUpdatedAt), id: decoded.afterId },
+          updatedSince: new Date(decodedCursor.updatedSince),
+          asOf: new Date(decodedCursor.asOf),
+          after: { updatedAt: new Date(decodedCursor.afterUpdatedAt), id: decodedCursor.afterId },
         }
       } else {
         scan = { updatedSince: new Date(updatedSince!), asOf: new Date() }
@@ -231,6 +251,10 @@ export async function listFeedback({
       if (Number.isNaN(scan.updatedSince.getTime()) || Number.isNaN(scan.asOf.getTime()) ||
           (scan.after && Number.isNaN(scan.after.updatedAt.getTime()))) {
         throw new Error("Invalid feedback cursor dates")
+      }
+      if (scan.updatedSince > scan.asOf ||
+          (scan.after && (scan.after.updatedAt < scan.updatedSince || scan.after.updatedAt > scan.asOf))) {
+        throw new Error("Invalid feedback cursor bounds")
       }
     } catch {
       return fail("Invalid feedback cursor.")
@@ -299,6 +323,8 @@ export async function listFeedback({
           nextCursor: hasMore
             ? Buffer.from(JSON.stringify({
                 v: 1,
+                workspaceId,
+                status: normalizedStatus,
                 updatedSince: scan.updatedSince.toISOString(),
                 asOf: scan.asOf.toISOString(),
                 afterUpdatedAt: pageItems.at(-1)!.updatedAt.toISOString(),
