@@ -36,6 +36,22 @@ Compass saves each finalized participant and interviewer turn as the session pro
 
 Public sessions have bounded message size, duration, turn count, attachment size/count/rate, and request rate. A participant link grants no access to workspace feedback, documents, opportunities, or other internal tools. Both Chat and Voice use server-authored prompts and models with no Compass tools or workspace credentials.
 
+## Research results
+
+Open a study to review session status, dates, saved-turn counts, summaries and transcripts. **View full interview and attachments** opens a paginated transcript; evidence links jump to the page containing the referenced turn. Study lists, sessions, transcript turns, attachments and synthesis history are paginated, so older research remains accessible. **View archived studies** opens retained archived records.
+
+After a session is durably completed, Compass attempts an interview summary in the background. An analysis failure does not undo completion or lose the transcript. Members can choose **Generate summary** to retry, or **Regenerate summary** to replace it. **Check guide coverage** reports whether each discussion question or task was meaningfully addressed, with links to saved participant evidence.
+
+**Generate synthesis** analyzes all saved completed sessions in the study and produces an executive summary, themes and verbatim supporting quotes, surprises, repeated patterns, jobs to be done, and recommendations. **Regenerate synthesis** creates a new snapshot; previous snapshots remain inspectable. A snapshot is marked when newly completed sessions or a changed guide make its source set stale. Matching session analysis can be reused until explicit regeneration is requested.
+
+Analysis uses a separate tool-free runtime with no Compass workspace credentials. Quotes and evidence IDs must match saved participant turns; interpretation still needs researcher review. Voice transcripts are browser-reported evidence, not independently authenticated provider records. Analysis does not inspect attachment bytes or infer their contents from filenames. No audio recording is created.
+
+Analysis is bounded to 500 completed sessions, 2,000 turns per session and 500,000 serialized input characters per request. If a study exceeds a limit, Compass returns an explicit error instead of silently omitting interviews. Transcript browsing is independent of those analysis limits. Analysis failures leave prior successful results intact; an interrupted generation can be retried after three minutes.
+
+![Research results on desktop](/screenshots/docs/capture-results-desktop.png)
+
+![Research results on mobile](/screenshots/docs/capture-results-mobile.png)
+
 ## Inbox
 
 The Capture **Inbox** opens the existing feedback workflow for ideas and bugs. Customer portal submissions, votes, attachments, opportunity links, and roadmap actions continue to work as before. While research studies remain behind the rollout gate, navigation continues to show **Feedback** and the existing `/feedback` route remains unchanged.

@@ -10,10 +10,11 @@ const redirect = vi.hoisted(() => vi.fn(() => { throw new Error("NEXT_REDIRECT")
 const reconcileAbandonedResearchSessions = vi.hoisted(() => vi.fn())
 const researchStudy = { findFirst: vi.fn(), findUnique: vi.fn() }
 const researchParticipantToken = { findFirst: vi.fn() }
+const researchSession = { findMany: vi.fn() }
 
 vi.mock("@/auth", () => ({ auth }))
-vi.mock("next/navigation", () => ({ notFound, redirect }))
-vi.mock("@/lib/db", () => ({ default: () => ({ researchStudy, researchParticipantToken }) }))
+vi.mock("next/navigation", () => ({ notFound, redirect, useRouter: () => ({ refresh: vi.fn() }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ researchStudy, researchParticipantToken, researchSession }) }))
 vi.mock("@/lib/research-session", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/research-session")>(),
   reconcileAbandonedResearchSessions,
@@ -31,6 +32,7 @@ describe("researcher study access", () => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
     reconcileAbandonedResearchSessions.mockResolvedValue({ count: 0 })
+    researchSession.findMany.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -77,10 +79,15 @@ describe("researcher study access", () => {
       appUrl: "https://example.com/pricing",
       targetMinutes: 15,
       participantTokens: [],
+      _count: { sessions: 1 },
+      syntheses: [],
       sessions: [{
         id: "session-1",
         modality: "VOICE",
         status: "COMPLETED",
+        createdAt: new Date("2026-01-01"),
+        summary: null,
+        _count: { turns: 2 },
         attachments: [{ id: "attachment-1", originalName: "pricing.png", mimeType: "image/png", sizeBytes: 2048, turnId: "turn-2" }],
         turns: [
           { id: "turn-1", role: "INTERVIEWER", content: "Canonical question" },
@@ -108,9 +115,11 @@ describe("researcher study access", () => {
     expect(researchStudy.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({
         sessions: expect.objectContaining({
-          take: 50,
+          take: 21,
+          skip: 0,
           include: {
-            turns: { orderBy: { sequence: "asc" }, take: 200 },
+            _count: { select: { turns: true } },
+            turns: { orderBy: { sequence: "asc" }, take: 20 },
             attachments: { where: { status: "READY" }, orderBy: { createdAt: "asc" }, take: 100 },
           },
         }),

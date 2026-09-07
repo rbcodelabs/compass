@@ -28,13 +28,19 @@ describe("Capture study list access", () => {
   it("scopes membership and bounds the researcher study query", async () => {
     render(await CapturePage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product" }) }))
 
-    expect(screen.getByText(/No studies yet/)).toBeVisible()
+    expect(screen.getByText(/No studies on this page/)).toBeVisible()
     expect(workspace.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ members: { some: { userId: "user-1" } } }),
     }))
     expect(researchStudy.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { workspaceId: "workspace-1", status: { not: "ARCHIVED" } },
-      take: 100,
+      skip: 0,
+      take: 21,
     }))
+  })
+  it("paginates retained archived records without losing membership scoping", async () => {
+    render(await CapturePage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product" }), searchParams: Promise.resolve({ page: "2", archived: "1" }) }))
+    expect(researchStudy.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "workspace-1", status: "ARCHIVED" }, skip: 20, take: 21 }))
+    expect(screen.getByRole("link", { name: "Previous studies" })).toHaveAttribute("href", "/acme/product/capture?page=1&archived=1")
   })
 })
