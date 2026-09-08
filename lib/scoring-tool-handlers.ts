@@ -11,7 +11,8 @@
 
 import getPrisma from "@/lib/db"
 import { ok, fail } from "@/lib/mcp-output"
-import { getMcpActor, isServiceActor } from "@/lib/mcp-authz"
+import { getMcpActor } from "@/lib/mcp-authz"
+import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { Prisma } from "@prisma/client"
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring"
 import type { ScoringFormulaType, MetricDirection, FormulaSnapshotMetric } from "@/lib/types"
@@ -41,13 +42,16 @@ function formatMetricSummary(m: {
 
 export async function listScoringModels({ orgSlug }: { orgSlug: string }) {
   const prisma = getPrisma()
+  const actor = getMcpActor()
+  const agentConfigs = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"
+    ? await prisma.workspaceScoringConfig.findMany({ where: { workspace: await agentWorkspaceWhere(actor) }, select: { scoringModelId: true } }) : null
   const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
   if (!org) {
     return fail(`Organization "${orgSlug}" not found.`)
   }
 
   const models = await prisma.scoringModel.findMany({
-    where: { organizationId: org.id },
+    where: { organizationId: org.id, ...(agentConfigs ? { id: { in: agentConfigs.flatMap(c => c.scoringModelId ? [c.scoringModelId] : []) } } : {}) },
     include: { metrics: { orderBy: { order: "asc" } } },
     orderBy: { createdAt: "asc" },
   })
@@ -498,8 +502,7 @@ export async function listTopOpportunities({
   // workspaces the user isn't in. The service key sees all. (The workspaceId
   // view is already gated to a member of that single workspace.)
   const actor = getMcpActor()
-  const memberScope =
-    isServiceActor(actor) ? {} : { members: { some: { userId: actor.userId! } } }
+  const memberScope = await agentWorkspaceWhere(actor)
   const where: Prisma.OpportunityScoreWhereInput = workspaceId
     ? { opportunity: { workspaceId } }
     : { opportunity: { workspace: { organization: { slug: orgSlug }, ...memberScope } } }

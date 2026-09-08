@@ -82,6 +82,7 @@ const mockSolution = {
 const mockAssumption = { deleteMany: vi.fn() };
 const mockSolutionComment = { deleteMany: vi.fn() };
 const mockWorkspaceMember = {
+  updateMany: vi.fn(),
   deleteMany: vi.fn(),
   findFirst: vi.fn(),
   findMany: vi.fn(),
@@ -112,6 +113,10 @@ const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 
 const mockPrisma = {
+  $transaction: vi.fn(),
+  agent: { findMany: vi.fn().mockResolvedValue([]) },
+  agentWorkspaceGrant: { deleteMany: vi.fn(), updateMany: vi.fn() },
+  agentToolCall: { deleteMany: vi.fn() },
   squad: mockSquad,
   workspace: mockWorkspace,
   objective: mockObjective,
@@ -193,6 +198,8 @@ const mockAuth = vi.mocked(auth);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockPrisma.$transaction.mockImplementation((operation) => operation(mockPrisma));
+  mockWorkspaceMember.updateMany.mockResolvedValue({ count: 1 });
   // Default: authenticated
   mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T> ? T : never);
   // resolveWorkspace always finds the workspace
@@ -535,6 +542,7 @@ describe("createApiKey", () => {
   it("returns a rawKey starting with cmp_", async () => {
     const result = await createApiKey("org", "ws", "My Key");
     expect(result.rawKey).toMatch(/^cmp_[0-9a-f]{32}$/);
+    expect(result.id).toBe("key-1");
   });
 
   it("creates the API key with name and hash in DB", async () => {
@@ -1132,6 +1140,17 @@ describe("removeWorkspaceMember", () => {
     await removeWorkspaceMember("org", "ws", "ws-member-1");
 
     expect(mockWorkspaceMember.delete).toHaveBeenCalledWith({ where: { id: "ws-member-1" } });
+    expect(mockWorkspaceMember.updateMany).toHaveBeenCalledWith({ where: { id: "ws-member-1", role: "MEMBER" }, data: { role: "MEMBER" } });
+    expect(mockWorkspaceMember.updateMany.mock.invocationCallOrder[0]).toBeLessThan(mockPrisma.agent.findMany.mock.invocationCallOrder[0]);
+    expect(mockPrisma.agent.findMany.mock.invocationCallOrder[0]).toBeLessThan(mockWorkspaceMember.delete.mock.invocationCallOrder[0]);
+  });
+
+  it("does not overwrite a concurrent role change when locking a departing member", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", role: "MEMBER" });
+    mockCounts(2, ["ADMIN", "MEMBER"]);
+    mockWorkspaceMember.updateMany.mockResolvedValue({ count: 0 });
+    await expect(removeWorkspaceMember("org", "ws", "ws-member-1")).rejects.toThrow("Membership changed");
+    expect(mockWorkspaceMember.delete).not.toHaveBeenCalled();
   });
 
   it("throws Member not found when the member does not belong to this workspace", async () => {

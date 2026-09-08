@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const apiKey = { findFirst: vi.fn(), update: vi.fn() }
-vi.mock("@/lib/db", () => ({ default: () => ({ apiKey }) }))
+const agent = { findFirst: vi.fn() }
+vi.mock("@/lib/db", () => ({ default: () => ({ apiKey, agent }) }))
 
 import { validateMcpAuth } from "@/lib/mcp-auth"
 
@@ -13,6 +14,35 @@ function request() {
 
 describe("MCP credential expiry", () => {
   beforeEach(() => vi.clearAllMocks())
+  it("derives agent identity from the stored credential and checks its human owner", async () => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
+    apiKey.update.mockResolvedValue({})
+    agent.findFirst.mockResolvedValueOnce({ id: "agent" })
+    await expect(validateMcpAuth(request())).resolves.toMatchObject({ valid: true, purpose: "AGENT", userId: "user", agentId: "agent", credentialId: "key" })
+    expect(agent.findFirst).toHaveBeenCalledWith({ where: { id: "agent", ownerUserId: "user", status: "ACTIVE" }, select: { id: true } })
+    agent.findFirst.mockResolvedValueOnce(null)
+    await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
+    vi.unstubAllEnvs()
+  })
+  it("rejects personal credentials carrying an agent identity", async () => {
+    apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: null, agentId: "agent", expiresAt: null })
+    await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
+  })
+
+  it("rejects a registered-agent key while rollout is disabled", async () => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+    apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
+    apiKey.update.mockResolvedValue({})
+    await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
+    vi.unstubAllEnvs()
+  })
+
+  it("rejects an assistant-turn credential without workspace and expiry", async () => {
+    apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT_TURN", expiresAt: null })
+    apiKey.update.mockResolvedValue({})
+    await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
+  })
 
   it("accepts an unexpired research credential", async () => {
     apiKey.findFirst.mockResolvedValue({

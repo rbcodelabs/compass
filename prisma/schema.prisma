@@ -1413,6 +1413,7 @@ model ApiKey {
   keyHash          String    @unique @map("key_hash") @db.VarChar(64)
   keyPrefix        String    @map("key_prefix") @db.VarChar(8)
   purpose          String?   @db.VarChar(30)
+  agentId          String?   @map("agent_id") @db.Uuid
   scopeWorkspaceId String?   @map("scope_workspace_id") @db.Uuid
   expiresAt        DateTime? @map("expires_at")
   lastUsedAt       DateTime? @map("last_used_at")
@@ -1421,6 +1422,7 @@ model ApiKey {
   user             User      @relation(fields: [userId], references: [id])
 
   @@index([keyPrefix])
+  @@index([agentId])
   @@index([purpose, scopeWorkspaceId])
   @@map("api_keys")
 }
@@ -1822,6 +1824,7 @@ model Task {
   /// reasoning as createdById/updatedById elsewhere in this schema: it's
   /// resolved against WorkspaceMember at the app layer, not joined by Prisma.
   assigneeUserId String?   @map("assignee_user_id") @db.Uuid
+  assigneeAgentId String?  @map("assignee_agent_id") @db.Uuid
   /// Freeform owner name for PM-initiative tracking where the responsible party
   /// isn't a Compass WorkspaceMember (external stakeholder, exec, etc.). Either
   /// or both of assigneeUserId / ownerName may be set.
@@ -1850,7 +1853,49 @@ model Task {
   @@index([squadId])
   @@index([parentTaskId])
   @@index([assigneeUserId])
+  @@index([assigneeAgentId])
   @@map("tasks")
+}
+
+model Agent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerUserId String @map("owner_user_id") @db.Uuid
+  name String @db.VarChar(255)
+  description String? @db.Text
+  status String @default("ACTIVE") @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@index([ownerUserId])
+  @@map("agents")
+}
+
+model AgentWorkspaceGrant {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentId String @map("agent_id") @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  access String @db.VarChar(10)
+  grantedByUserId String @map("granted_by_user_id") @db.Uuid
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@unique([agentId, workspaceId])
+  @@index([workspaceId])
+  @@map("agent_workspace_grants")
+}
+
+model AgentToolCall {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentId String @map("agent_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  credentialId String @map("credential_id") @db.Uuid
+  toolName String @map("tool_name") @db.VarChar(100)
+  workspaceId String? @map("workspace_id") @db.Uuid
+  status String @default("STARTED") @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at")
+  finishedAt DateTime? @map("finished_at")
+  @@index([agentId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("agent_tool_calls")
 }
 
 // ─── Task Links (polymorphic many-to-many) ─────────────────────────────────

@@ -38,11 +38,11 @@ vi.mock("mcp-handler", () => ({
 vi.mock("@/lib/mcp-auth", () => ({ validateMcpAuth: vi.fn().mockResolvedValue({ valid: true, userId: "u1" }) }))
 
 await import("@/app/api/mcp/route")
-import { RESEARCH_TOOL_ALLOWLIST, TOOL_GATES, applyToolGate } from "@/lib/mcp-tool-gates"
+import { AGENT_TOOL_POLICY, RESEARCH_TOOL_ALLOWLIST, TOOL_GATES, applyToolGate } from "@/lib/mcp-tool-gates"
 import { runWithMcpActor } from "@/lib/mcp-authz"
 
 const MEMBER = { userId: "user-1" }
-const SERVICE = { userId: null }
+const SERVICE = { userId: null, purpose: "SERVICE" as const }
 const RESEARCH = { userId: "user-1", purpose: "RESEARCH" as const, scopeWorkspaceId: "ws-1" }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,6 +52,9 @@ const callTool = (name: string, actor: { userId: string | null }, args: any) =>
 beforeEach(() => vi.clearAllMocks())
 
 describe("TOOL_GATES completeness", () => {
+  it("classifies every registered tool for agent access", () => {
+    expect(Object.keys(registeredTools).filter(name => !AGENT_TOOL_POLICY[name])).toEqual([])
+  })
   it("registers at least the full known catalog", () => {
     // Guards against a silent drop in registration/capture.
     expect(Object.keys(registeredTools).length).toBeGreaterThanOrEqual(78)

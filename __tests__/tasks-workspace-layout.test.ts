@@ -6,6 +6,18 @@ const root = process.cwd();
 const source = (path: string) => readFileSync(join(root, path), "utf8");
 
 describe("Tasks dashboard workspace layout", () => {
+  it("keeps long assignee labels inside the edit dialog and wraps menu choices", () => {
+    const dialog = source("components/tasks/edit-task-dialog.tsx");
+    const picker = source("components/tasks/task-assignee-picker.tsx");
+
+    expect(dialog).toContain('className="flex min-w-0 flex-col gap-4"');
+    expect(picker).toContain('className="flex min-w-0 flex-col gap-1"');
+    expect(picker).toContain('className="w-full min-w-0 [&>[data-slot=combobox-value]]:block"');
+    expect(picker).toContain('className="min-w-0 truncate"');
+    expect(picker).toContain("[&_[data-slot=combobox-item]>span:first-child]:whitespace-normal");
+    expect(picker).toContain("[&_[data-slot=combobox-item]>span:first-child]:[overflow-wrap:anywhere]");
+  });
+
   it("uses the compact workspace shell and puts filters beside the view toggle", () => {
     const page = source("app/[orgSlug]/[workspaceSlug]/tasks/page.tsx");
 
@@ -42,7 +54,7 @@ describe("Tasks dashboard workspace layout", () => {
 
     expect(page).toContain("workspaceId: workspace.id");
     expect(page).toContain("...(squadFilter ? { squadId: squadFilter } : {})");
-    expect(page).toContain("...(assigneeFilter ? { assigneeUserId: assigneeFilter } : {})");
+    expect(page).toContain("...parseAssigneeFilter(assigneeFilter)");
     expect(page).toContain("...(priorityFilter ? { priority: priorityFilter } : {})");
     expect(page).toContain("prisma.taskLink.findMany({ where: { taskId: { in: taskIds } }");
     expect(page).toContain("prisma.task.groupBy({");

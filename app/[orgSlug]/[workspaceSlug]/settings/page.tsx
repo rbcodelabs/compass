@@ -22,6 +22,9 @@ import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
 import { CapabilityPacksPanel, type CapabilityPackSettingsRow } from "@/components/settings/capability-packs-panel";
 import { ThemePreferenceControl } from "@/components/theme/theme-preference-control";
+import { WorkspaceAgentsPanel } from "@/components/settings/workspace-agents-panel";
+import { AgentActivity } from "@/components/settings/agent-activity";
+import { agentsEnabled } from "@/lib/agent-access";
 
 export const metadata = { title: "Workspace Settings" };
 
@@ -31,13 +34,13 @@ type Props = {
 
 export default async function SettingsPage({ params }: Props) {
   const session = await auth();
-  if (!session) redirect("/login");
+  if (!session?.user?.id) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
-    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+    where: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } },
     select: {
       id: true,
       organizationId: true,
@@ -70,7 +73,7 @@ export default async function SettingsPage({ params }: Props) {
     }),
     session.user?.id
       ? prisma.apiKey.findMany({
-          where: { userId: session.user.id },
+          where: { userId: session.user.id, agentId: null },
           orderBy: { createdAt: "desc" },
         })
       : Promise.resolve([]),
@@ -132,6 +135,9 @@ export default async function SettingsPage({ params }: Props) {
     rawMembers.find((m) => m.userId === session.user?.id)?.id ?? null;
   const currentWorkspaceRole = rawMembers.find((m) => m.userId === session.user?.id)?.role;
   const canManageCapabilityPacks = normalizeWorkspaceRole(currentWorkspaceRole) === "ADMIN" || isOrgAdminRole(workspace.organization.members[0]?.role);
+  const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: workspace.id, revokedAt: null } });
+  const workspaceAgents = await prisma.agent.findMany({ where: canManageCapabilityPacks ? { OR: [{ ownerUserId: { in: rawMembers.map((m) => m.userId) } }, { id: { in: grants.map((g) => g.agentId) } }] } : { id: { in: grants.map((g) => g.agentId) } }, orderBy: { name: "asc" } });
+  const agentActivity = canManageCapabilityPacks ? await prisma.agentToolCall.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "desc" }, take: 25 }) : [];
   const capabilityPacks: CapabilityPackSettingsRow[] = rawCapabilityPacks.map((attachment) => ({
     packId: attachment.capabilityPackVersion.capabilityPack.packId,
     displayName: attachment.capabilityPackVersion.capabilityPack.displayName,
@@ -193,6 +199,11 @@ export default async function SettingsPage({ params }: Props) {
           initialKeys={apiKeys}
         />
       </SettingsSection>
+
+      <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace. Assignment does not grant access or start execution.">
+        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} enabled={agentsEnabled()} canManage={canManageCapabilityPacks} agents={workspaceAgents.map((a) => ({ id: a.id, name: a.name, status: a.status, ownerName: rawMembers.find((m) => m.userId === a.ownerUserId)?.user.name ?? rawMembers.find((m) => m.userId === a.ownerUserId)?.user.email ?? "Former member", eligible: rawMembers.some((m) => m.userId === a.ownerUserId), access: grants.find((g) => g.agentId === a.id)?.access ?? null }))} />
+      </SettingsSection>
+      {canManageCapabilityPacks && <SettingsSection title="Workspace agent activity"><AgentActivity rows={agentActivity.map((r) => ({ ...r, agentName: workspaceAgents.find((a) => a.id === r.agentId)?.name ?? "Former workspace agent", workspaceName: workspace.name }))} /></SettingsSection>}
 
       {canManageCapabilityPacks && <SettingsSection title="Agent capability packs" description="Install validated skills-only packs for the in-app agent. Packs add instructions, never tools or credentials.">
         <CapabilityPacksPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} initialPacks={capabilityPacks} />

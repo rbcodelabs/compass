@@ -26,7 +26,7 @@ Generate an API key from **Settings → API Keys**. Pass it as a Bearer token in
 Authorization: Bearer compass_your_api_key_here
 ```
 
-API keys are workspace-scoped. A key can read and write all data in the workspace it was created for. Treat API keys like passwords — rotate them in Settings if one is compromised.
+Personal keys act with their owner's access and any credential restrictions. Registered-agent keys work across explicitly granted workspaces and are limited by the owner's current membership, grant level, and permitted tools. Treat API keys like passwords — revoke and replace a key if it is compromised.
 
 ## Required Request Headers
 
@@ -384,6 +384,36 @@ Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-te
 | `score_opportunity` | Compute and save an opportunity's score using its workspace's active scoring model |
 | `get_opportunity_score` | Get an opportunity's saved score, including a `stale` flag if the live model has since been updated |
 | `list_top_opportunities` | List scored opportunities ranked by normalized score (0-100); pass `orgSlug` for a cross-workspace comparability view or `workspaceId` for a single workspace |
+
+## Registered agent identities and task assignment
+
+An agent-bound key identifies one personal agent across its explicitly granted
+workspaces, including different organizations. The key owner must remain a
+member of each workspace. See [Agents](/help/19-agents) for registration and grants.
+
+| Tool | Purpose |
+|---|---|
+| `get_current_identity` | Inspect caller kind, registered agent identity, and effective accessible workspaces |
+| `list_task_assignees` | Search and paginate eligible human and agent assignees in an authorized workspace |
+
+`create_task` and `update_task` accept `assignee: { type: "USER" | "AGENT", id }`;
+null clears an assignment and omission preserves it on update. Legacy
+`assigneeUserId` remains supported, but supplying both forms is rejected.
+`list_tasks` supports typed assignee filters and `assignedToMe: true`; conflicting
+assignee filters are rejected. Service and unregistered runtime credentials
+cannot use the “me” filter. Existing human assignee filter URLs remain supported.
+
+Agent credentials cannot expand their own access or perform human approval
+operations. Workspace lists and organization-wide rankings return only granted
+workspaces. Registration, grants, and key management use authenticated settings.
+
+Solution comments and plans created with agent credentials use the authenticated
+agent's name and `AGENT` author type, overriding caller-supplied attribution.
+Built-in assistant turns use “Compass assistant.” Agent credentials cannot call
+`update_comment`, `update_doc_comment`, or `update_solution_comment`: existing
+comment records do not have durable agent ownership, so agents must append a new
+comment instead of rewriting one under someone else's name or approval badge.
+Personal and service credential behavior is unchanged.
 
 ## Example: Connecting Claude Desktop
 

@@ -64,6 +64,7 @@ function AccountMenu({ viewer }: { viewer: Exclude<MarketingViewer, { kind: "sig
           <LayoutDashboard aria-hidden="true" />
           {primaryLabel}
         </MenuLink>
+        <MenuLink href="/settings/agents">My agents</MenuLink>
         <MenuLink href="/help">
           <HelpCircle aria-hidden="true" />
           Help

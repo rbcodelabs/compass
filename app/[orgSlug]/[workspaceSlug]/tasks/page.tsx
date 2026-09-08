@@ -12,6 +12,8 @@ import type { SquadData, MemberData } from "@/lib/types";
 import { normalizeWorkspaceRole } from "@/lib/roles";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { buildTaskCards } from "@/lib/task-read-model";
+import { getWorkspace } from "@/lib/workspace";
+import { parseAssigneeFilter, resolveTaskAssignees, taskLinkScope } from "@/lib/task-assignment";
 
 export const metadata = {
   title: "Tasks",
@@ -24,16 +26,14 @@ interface TasksPageProps {
 
 export default async function TasksPage({ params, searchParams }: TasksPageProps) {
   const session = await auth();
-  if (!session) redirect("/login");
+  if (!session?.user?.id) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
   const { squad: squadFilter, assignee: assigneeFilter, priority: priorityFilter, view: viewParam } = await searchParams;
   const view = viewParam === "list" ? "list" : "board";
   const prisma = getPrisma();
 
-  const workspace = await prisma.workspace.findFirst({
-    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-  });
+  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) notFound();
 
   const [rawSquads, rawTasks, rawMembers] = await Promise.all([
@@ -42,13 +42,13 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       where: {
         workspaceId: workspace.id,
         ...(squadFilter ? { squadId: squadFilter } : {}),
-        ...(assigneeFilter ? { assigneeUserId: assigneeFilter } : {}),
+        ...parseAssigneeFilter(assigneeFilter),
         ...(priorityFilter ? { priority: priorityFilter } : {}),
       },
       orderBy: [{ status: "asc" }, { sortOrder: "asc" }],
       select: {
         id: true, title: true, description: true, status: true, priority: true,
-        sortOrder: true, squadId: true, assigneeUserId: true, ownerName: true,
+        sortOrder: true, squadId: true, assigneeUserId: true, assigneeAgentId: true, ownerName: true,
         storyPoints: true, dueDate: true, iteration: true, parentTaskId: true,
       },
     }),
@@ -107,7 +107,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       if (!delegate) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rows: { id: string; title: string }[] = await (delegate as any).findMany({
-        where: { id: { in: ids } },
+        where: { id: { in: ids }, ...taskLinkScope(workspace.id, linkedType) },
         select: { id: true, title: true },
       });
       for (const row of rows) titleById.set(`${linkedType}:${row.id}`, row.title);
@@ -115,7 +115,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   );
 
   const tasks: TaskCardData[] = buildTaskCards({
-    tasks: rawTasks, squads, links: taskLinks, subtaskCounts, linkedTitles: titleById,
+    tasks: await resolveTaskAssignees(workspace.id, rawTasks), squads, links: taskLinks, subtaskCounts, linkedTitles: titleById,
   });
 
   return (

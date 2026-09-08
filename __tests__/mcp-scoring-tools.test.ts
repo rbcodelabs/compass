@@ -79,7 +79,7 @@ describe("listScoringModels", () => {
       { id: MODEL_ID, name: "RICE", description: "Classic RICE", status: "ACTIVE", formulaType: "WEIGHTED_SUM", version: 1, metrics: weightedSumMetrics },
     ])
 
-    const result = await listScoringModels({ orgSlug: "acme" })
+    const result = await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => listScoringModels({ orgSlug: "acme" }))
     const text = result.content[0].text
 
     expect(text).toContain("RICE")
@@ -92,7 +92,7 @@ describe("listScoringModels", () => {
 
   it("returns a not-found message when the org doesn't exist", async () => {
     mockOrganization.findUnique.mockResolvedValueOnce(null)
-    const result = await listScoringModels({ orgSlug: "missing" })
+    const result = await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => listScoringModels({ orgSlug: "missing" }))
     expect(result.content[0].text).toContain('"missing" not found')
     expect(mockScoringModel.findMany).not.toHaveBeenCalled()
   })
@@ -100,7 +100,7 @@ describe("listScoringModels", () => {
   it("returns an empty message when the org has no models", async () => {
     mockOrganization.findUnique.mockResolvedValueOnce({ id: ORG_ID })
     mockScoringModel.findMany.mockResolvedValueOnce([])
-    const result = await listScoringModels({ orgSlug: "acme" })
+    const result = await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => listScoringModels({ orgSlug: "acme" }))
     expect(result.content[0].text).toContain("No scoring models")
   })
 })
@@ -416,7 +416,7 @@ describe("listTopOpportunities", () => {
       { normalizedScore: 50, opportunity: { id: "opp-b", title: "B", status: "EXPLORING", workspace: { name: "WS" } } },
     ])
 
-    const result = await runWithMcpActor({ userId: null }, () => listTopOpportunities({ workspaceId: WS_ID }))
+    const result = await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => listTopOpportunities({ workspaceId: WS_ID }))
     const text = result.content[0].text
 
     expect(mockOpportunityScore.findMany).toHaveBeenCalledWith(
@@ -434,7 +434,7 @@ describe("listTopOpportunities", () => {
       { normalizedScore: 90, opportunity: { id: "opp-a", title: "A", status: "PRIORITIZED", workspace: { name: "Team Alpha" } } },
     ])
 
-    const result = await runWithMcpActor({ userId: null }, () => listTopOpportunities({ orgSlug: "acme" }))
+    const result = await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => listTopOpportunities({ orgSlug: "acme" }))
 
     expect(mockOpportunityScore.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -445,14 +445,14 @@ describe("listTopOpportunities", () => {
   })
 
   it("returns an error message when neither workspaceId nor orgSlug is provided", async () => {
-    const result = await runWithMcpActor({ userId: null }, () => listTopOpportunities({}))
+    const result = await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => listTopOpportunities({}))
     expect(result.content[0].text).toContain("Provide either workspaceId or orgSlug")
     expect(mockOpportunityScore.findMany).not.toHaveBeenCalled()
   })
 
   it("returns an empty message when there are no scored opportunities", async () => {
     mockOpportunityScore.findMany.mockResolvedValueOnce([])
-    const result = await runWithMcpActor({ userId: null }, () => listTopOpportunities({ workspaceId: WS_ID }))
+    const result = await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => listTopOpportunities({ workspaceId: WS_ID }))
     expect(result.content[0].text).toContain("No scored opportunities found")
   })
 })

@@ -57,6 +57,14 @@ async function ensureFunctionalSchema(pool: pg.Pool) {
         .map((statement) => (statement.endsWith(";") ? statement : `${statement};`));
       let pendingProvenanceBackfill = false;
       for (const statement of statements) {
+        const constraint = statement.match(/ALTER\s+TABLE\s+"([^"]+)"\s+ADD\s+CONSTRAINT\s+"([^"]+)"/i);
+        if (constraint) {
+          const existing = await client.query<{ exists: boolean }>(
+            "SELECT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=$1 AND t.relname=$2 AND c.conname=$3) AS exists",
+            [schema, constraint[1], constraint[2]],
+          );
+          if (existing.rows[0]?.exists) continue;
+        }
         await client.query(statement);
         if (/ALTER\s+COLUMN\s+"?now_commitment_provenance"?\s+SET\s+DEFAULT/i.test(statement)) {
           pendingProvenanceBackfill = true;

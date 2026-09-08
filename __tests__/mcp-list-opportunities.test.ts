@@ -52,7 +52,7 @@ await import("@/app/api/mcp/route")
 function getHandler(name: string): ToolCallback {
   const handler = registeredTools[name]
   if (!handler) throw new Error(`Tool "${name}" was not registered`)
-  return (args) => runWithMcpActor({ userId: null }, () => handler(args))
+  return (args) => runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => handler(args))
 }
 
 describe("list_opportunities MCP tool", () => {

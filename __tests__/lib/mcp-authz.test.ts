@@ -34,7 +34,7 @@ import {
   assertScoringModelAccess,
 } from "@/lib/mcp-authz"
 
-const SERVICE = { userId: null }
+const SERVICE = { userId: null, purpose: "SERVICE" as const }
 const USER = { userId: "user-1" }
 const RESEARCH = { userId: "user-1", purpose: "RESEARCH" as const, scopeWorkspaceId: "ws-1" }
 
@@ -64,7 +64,7 @@ describe("assertWorkspaceMember", () => {
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     await expect(assertWorkspaceMember(USER, "ws-1")).resolves.toBeUndefined()
     expect(mockPrisma.workspace.findFirst).toHaveBeenCalledWith({
-      where: { id: "ws-1", members: { some: { userId: "user-1" } } },
+      where: { AND: [{ id: "ws-1" }, { members: { some: { userId: "user-1" } } }] },
       select: { id: true },
     })
   })

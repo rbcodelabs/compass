@@ -56,7 +56,7 @@ describe("list_experiments discovery summary", () => {
       },
     ])
 
-    const result = await runWithMcpActor({ userId: null }, () => registeredTools.list_experiments.callback({
+    const result = await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => registeredTools.list_experiments.callback({
       workspaceId: "workspace-1",
       status: "RUNNING",
       squadId: "squad-1",
@@ -121,7 +121,7 @@ describe("list_experiments discovery summary", () => {
     const updatedSince = new Date("2026-09-01T00:00:00.000Z")
     mockExperiment.findMany.mockResolvedValueOnce([])
 
-    await runWithMcpActor({ userId: null }, () => registeredTools.list_experiments.callback({
+    await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => registeredTools.list_experiments.callback({
       workspaceId: "workspace-1",
       updatedSince: updatedSince.toISOString(),
     }))

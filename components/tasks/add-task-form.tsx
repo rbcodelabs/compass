@@ -5,12 +5,8 @@ import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Combobox,
-  ComboboxContent,
-  ComboboxTrigger,
-  ComboboxValue,
-} from "@/components/ui/combobox";
+import { TaskAssigneePicker } from "./task-assignee-picker";
+import type { TaskAssignee } from "@/lib/task-assignment";
 import { addTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import type { TaskCardData } from "./task-card";
 import type { TaskStatus, MemberData } from "@/lib/types";
@@ -26,11 +22,12 @@ type Props = {
 export function AddTaskForm({ workspaceId, status, revalidatePathStr, members, onAdd }: Props) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [assigneeUserId, setAssigneeUserId] = useState<string | null>(null);
+  const [assignee, setAssignee] = useState<TaskAssignee>(null);
+  const [error, setError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   function reset() {
-    setAssigneeUserId(null);
+    setAssignee(null);
     formRef.current?.reset();
   }
 
@@ -40,11 +37,12 @@ export function AddTaskForm({ workspaceId, status, revalidatePathStr, members, o
     const data = new FormData(form);
     const title = (data.get("title") as string).trim();
     if (!title) return;
-
+    setError(null);
     startTransition(async () => {
+      try {
       const task = await addTask(
         workspaceId,
-        { title, status, assigneeUserId: assigneeUserId ?? undefined },
+        { title, status, assignee },
         revalidatePathStr
       );
 
@@ -58,6 +56,8 @@ export function AddTaskForm({ workspaceId, status, revalidatePathStr, members, o
         squadId: null,
         squad: null,
         assigneeUserId: task.assigneeUserId ?? null,
+        assigneeAgentId: task.assigneeAgentId ?? null,
+        assignee: task.assignee,
         ownerName: task.ownerName ?? null,
         storyPoints: task.storyPoints ?? null,
         dueDate: task.dueDate ? task.dueDate.toISOString() : null,
@@ -68,6 +68,7 @@ export function AddTaskForm({ workspaceId, status, revalidatePathStr, members, o
       });
       setOpen(false);
       reset();
+      } catch (error) { setError(error instanceof Error ? error.message : "Could not add the task. Please retry."); }
     });
   }
 
@@ -104,20 +105,7 @@ export function AddTaskForm({ workspaceId, status, revalidatePathStr, members, o
       {members.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`task-assignee-${status}`}>Assignee (optional)</Label>
-          <Combobox
-            items={[
-              { value: "__none__", label: "— None —" },
-              ...members.map((m) => ({ value: m.userId, label: m.name || m.email })),
-            ]}
-            value={assigneeUserId ?? "__none__"}
-            onValueChange={(v) => setAssigneeUserId(v === "__none__" ? null : v)}
-            disabled={isPending}
-          >
-            <ComboboxTrigger id={`task-assignee-${status}`} size="sm">
-              <ComboboxValue placeholder="Unassigned" />
-            </ComboboxTrigger>
-            <ComboboxContent />
-          </Combobox>
+          <TaskAssigneePicker id={`task-assignee-${status}`} members={members} value={assignee} onChange={setAssignee} disabled={isPending} />
         </div>
       )}
 
@@ -138,6 +126,7 @@ export function AddTaskForm({ workspaceId, status, revalidatePathStr, members, o
           Cancel
         </Button>
       </div>
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </form>
   );
 }

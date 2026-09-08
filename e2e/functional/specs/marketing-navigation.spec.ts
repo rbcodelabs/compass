@@ -3,7 +3,8 @@ import { E2E_SECOND_WORKSPACE_SLUG } from "../fixtures/seed-e2e"
 
 test.describe("Marketing navigation", () => {
   test("anonymous visitors see sign-in navigation without account controls", async ({ browser, baseURL }) => {
-    const context = await browser.newContext()
+    // Explicitly override the functional project's authenticated storage state.
+    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } })
     const page = await context.newPage()
     await page.goto(baseURL || "/")
 

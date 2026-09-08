@@ -1,17 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockTask = {
+  findUnique: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   findFirst: vi.fn(),
 };
 const mockTaskLink = {
+  findUnique: vi.fn(),
   findFirst: vi.fn(),
   create: vi.fn(),
   delete: vi.fn(),
 };
 
 const mockPrisma = {
+  workspaceMember: { findFirst: vi.fn() },
+  opportunity: { findFirst: vi.fn() },
   task: mockTask,
   taskLink: mockTaskLink,
 };
@@ -21,6 +25,8 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+const { mockAuth } = vi.hoisted(() => ({ mockAuth: vi.fn() }));
+vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 import {
   addTask,
@@ -34,6 +40,11 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAuth.mockResolvedValue({ user: { id: "user-1" } });
+  mockPrisma.workspaceMember.findFirst.mockResolvedValue({ id: "membership" });
+  mockPrisma.opportunity.findFirst.mockResolvedValue({ id: "opp-1" });
+  mockTask.findUnique.mockResolvedValue({ id: "task-1", workspaceId: "ws-1" });
+  mockTaskLink.findUnique.mockResolvedValue({ taskId: "task-1" });
   mockTask.create.mockResolvedValue({ id: "task-1", title: "Test Task", status: "TODO" });
   mockTask.update.mockResolvedValue({ id: "task-1" });
   mockTask.findFirst.mockResolvedValue(null);
@@ -67,6 +78,7 @@ describe("addTask", () => {
   });
 
   it("passes through parentTaskId to create a subtask", async () => {
+    mockTask.findFirst.mockResolvedValueOnce({ id: "epic-1" });
     await addTask("ws-1", { title: "Subtask", parentTaskId: "epic-1" }, "/path");
     const data = mockTask.create.mock.calls[0][0].data;
     expect(data.parentTaskId).toBe("epic-1");
@@ -89,6 +101,33 @@ describe("addTask", () => {
   it("propagates DB errors", async () => {
     mockTask.create.mockRejectedValue(new Error("DB error"));
     await expect(addTask("ws-1", { title: "Fail" }, "/path")).rejects.toThrow("DB error");
+  });
+});
+
+describe("task action authorization", () => {
+  it("rejects unauthenticated writes before looking up tasks", async () => {
+    mockAuth.mockResolvedValue(null);
+    await expect(updateTask("task-1", { title: "no" }, "/path")).rejects.toThrow("Unauthorized");
+    expect(mockTask.findUnique).not.toHaveBeenCalled();
+    expect(mockTask.update).not.toHaveBeenCalled();
+  });
+  it("rejects direct action calls by nonmembers", async () => {
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue(null);
+    await expect(cancelTask("task-1", "/path")).rejects.toThrow("Not found");
+    expect(mockTask.update).not.toHaveBeenCalled();
+  });
+  it("cannot move a task through a different workspace", async () => {
+    await expect(moveTaskStatus("task-1", "DONE", "foreign", "/path")).rejects.toThrow("Not found");
+    expect(mockTask.update).not.toHaveBeenCalled();
+  });
+  it("denies cross-workspace links", async () => {
+    mockPrisma.opportunity.findFirst.mockResolvedValue(null);
+    await expect(linkTask("task-1", "OPPORTUNITY", "foreign", "/path")).rejects.toThrow("different workspace");
+    expect(mockTaskLink.create).not.toHaveBeenCalled();
+  });
+  it("legacy clear removes an agent assignment too", async () => {
+    await updateTask("task-1", { assigneeUserId: null }, "/path");
+    expect(mockTask.update.mock.calls[0][0].data).toMatchObject({ assigneeUserId: null, assigneeAgentId: null });
   });
 });
 

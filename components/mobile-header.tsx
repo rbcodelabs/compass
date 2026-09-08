@@ -166,6 +166,9 @@ export function MobileHeader({
             </DropdownMenuItem>
             <DropdownMenuSeparator className="bg-slate-700" />
             <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+              <Link href="/settings/agents" className="flex w-full items-center px-1.5 py-1">My agents</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem className="cursor-pointer p-0">
               <form action={signOutAction} className="w-full">
                 <button
                   type="submit"

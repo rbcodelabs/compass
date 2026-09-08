@@ -28,6 +28,7 @@
  * it.
  */
 import getPrisma from "@/lib/db";
+import { resolveTaskAssignees } from "@/lib/task-assignment";
 
 export const ENTITY_TYPES = [
   "objective",
@@ -265,6 +266,7 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
         status: true,
         priority: true,
         assigneeUserId: true,
+        assigneeAgentId: true,
         ownerName: true,
         sortOrder: true,
         createdAt: true,
@@ -310,7 +312,7 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
 
   return {
     ...item,
-    deliveryTasks,
+    deliveryTasks: await resolveTaskAssignees(workspaceId, deliveryTasks),
     linkableTasks,
     members: members.map((member) => ({
       id: member.id,

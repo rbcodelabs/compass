@@ -60,7 +60,17 @@ test.describe("Tasks", () => {
       const dragHandle = taskCard.getByLabel("Drag to reorder");
       const inProgressColumnBox = await page.locator("#task-column-IN_PROGRESS").boundingBox();
       if (!inProgressColumnBox) throw new Error("IN_PROGRESS column not found");
+      // The board moves optimistically during drag-over. Wait for the server
+      // action before reloading, otherwise navigation can interrupt persistence.
+      const moveResponse = page.waitForResponse((response) =>
+        response.request().method() === "POST" &&
+        Boolean(response.request().headers()["next-action"]) &&
+        new URL(response.url()).pathname === `${base}/tasks`
+      );
       await dragTo(page, dragHandle, inProgressColumnBox);
+      const persistedMove = await moveResponse;
+      expect(persistedMove.ok()).toBe(true);
+      await persistedMove.finished();
 
       await expect(todoColumn.locator('[data-slot="card"]').filter({ hasText: taskTitle })).not.toBeVisible({ timeout: 10_000 });
       const inProgressColumn = page.locator('[data-task-column="IN_PROGRESS"]');
@@ -97,6 +107,7 @@ test.describe("Tasks", () => {
       await page.getByRole("option", { name: "E2E Baseline Opportunity" }).click();
       await page.getByRole("button", { name: "Link" }).click();
 
+      await expect(page.getByRole("dialog", { name: "Link to another item" })).toBeHidden();
       await expect(page.getByText("E2E Baseline Opportunity")).toBeVisible({ timeout: 10_000 });
 
       // Reload and confirm the link persisted.

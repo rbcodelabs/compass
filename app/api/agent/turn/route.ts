@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
         controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
       }
 
-      const { token, apiKeyId } = await mintAgentMcpKey(userId)
+      const { token, apiKeyId } = await mintAgentMcpKey(userId, workspaceId)
       let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>> | undefined
       let assistantText: string | undefined
       let packProvenance = "[]"

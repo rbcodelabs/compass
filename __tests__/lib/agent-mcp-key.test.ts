@@ -11,7 +11,7 @@ beforeEach(() => vi.clearAllMocks())
 describe("mintAgentMcpKey", () => {
   it("mints a validateMcpAuth-compatible token and stores its hash (not the raw token)", async () => {
     mockApiKey.create.mockResolvedValue({ id: "key-1" })
-    const { token, apiKeyId } = await mintAgentMcpKey("user-1")
+    const { token, apiKeyId } = await mintAgentMcpKey("user-1", "workspace-1")
 
     // Format matches lib/mcp-auth.ts: cmp_ + 32 hex, length 36.
     expect(token).toMatch(/^cmp_[0-9a-f]{32}$/)
@@ -20,6 +20,9 @@ describe("mintAgentMcpKey", () => {
 
     const data = mockApiKey.create.mock.calls[0][0].data
     expect(data.userId).toBe("user-1")
+    expect(data.purpose).toBe("AGENT_TURN")
+    expect(data.scopeWorkspaceId).toBe("workspace-1")
+    expect(data.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(300_000)
     expect(data.keyHash).toBe(createHash("sha256").update(token).digest("hex"))
     expect(data.keyPrefix).toBe(token.slice(4, 12))
     // The raw token must never be persisted.
@@ -28,8 +31,8 @@ describe("mintAgentMcpKey", () => {
 
   it("mints unique tokens across calls", async () => {
     mockApiKey.create.mockResolvedValue({ id: "k" })
-    const a = await mintAgentMcpKey("u")
-    const b = await mintAgentMcpKey("u")
+    const a = await mintAgentMcpKey("u", "w")
+    const b = await mintAgentMcpKey("u", "w")
     expect(a.token).not.toBe(b.token)
   })
 
@@ -65,7 +68,7 @@ describe("withAgentMcpKey", () => {
     mockApiKey.create.mockResolvedValue({ id: "key-9" })
     mockApiKey.update.mockResolvedValue({})
 
-    const seen = await withAgentMcpKey("user-1", async (token) => {
+    const seen = await withAgentMcpKey("user-1", "workspace-1", async (token) => {
       expect(token).toMatch(/^cmp_[0-9a-f]{32}$/)
       return "done"
     })
@@ -75,7 +78,7 @@ describe("withAgentMcpKey", () => {
     // Revokes even when the body throws.
     mockApiKey.create.mockResolvedValue({ id: "key-10" })
     await expect(
-      withAgentMcpKey("user-1", async () => {
+      withAgentMcpKey("user-1", "workspace-1", async () => {
         throw new Error("turn failed")
       })
     ).rejects.toThrow("turn failed")

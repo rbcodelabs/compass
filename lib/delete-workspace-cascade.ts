@@ -3,6 +3,7 @@ import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
+import { deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
 
 /**
  * Deletes a single workspace and every row that hangs off it, children before
@@ -187,6 +188,7 @@ export async function deleteWorkspaceCascade(prisma: PrismaClient, workspaceId: 
 
   // 13. Workspace-scoped singletons (both Restrict toward Workspace).
   await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
+  await deleteWorkspaceAgentData(prisma, workspaceId);
   await prisma.workspaceScoringConfig.deleteMany({ where: { workspaceId } });
   await prisma.canvasNodePosition.deleteMany({ where: { workspaceId } });
 

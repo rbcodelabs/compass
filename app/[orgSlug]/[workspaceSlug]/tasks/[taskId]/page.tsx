@@ -21,15 +21,21 @@ import type {
   CustomFieldValue,
 } from "@/lib/types";
 import { normalizeWorkspaceRole } from "@/lib/roles";
+import { getWorkspace } from "@/lib/workspace";
+import { resolveTaskAssignees, taskLinkScope } from "@/lib/task-assignment";
 
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ orgSlug: string; workspaceSlug: string; taskId: string }>;
 }) {
-  const { taskId } = await params;
+  const { taskId, orgSlug, workspaceSlug } = await params;
+  const session = await auth();
+  if (!session?.user?.id) return { title: "Task" };
+  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
+  if (!workspace) return { title: "Task" };
   const prisma = getPrisma();
-  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { title: true } });
+  const task = await prisma.task.findFirst({ where: { id: taskId, workspaceId: workspace.id }, select: { title: true } });
   return { title: task?.title ?? "Task" };
 }
 
@@ -39,15 +45,12 @@ type Props = {
 
 export default async function TaskDetailPage({ params }: Props) {
   const session = await auth();
-  if (!session) redirect("/login");
+  if (!session?.user?.id) redirect("/login");
 
   const { orgSlug, workspaceSlug, taskId } = await params;
   const prisma = getPrisma();
 
-  const workspace = await prisma.workspace.findFirst({
-    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-    select: { id: true },
-  });
+  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) notFound();
 
   const task = await prisma.task.findFirst({
@@ -62,6 +65,7 @@ export default async function TaskDetailPage({ params }: Props) {
     },
   });
   if (!task) notFound();
+  const [resolvedTask, ...resolvedSubtasks] = await resolveTaskAssignees(workspace.id, [task, ...task.subtasks]);
 
   const [rawSquads, rawMembers, fieldDefs] = await Promise.all([
     prisma.squad.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "asc" } }),
@@ -106,7 +110,7 @@ export default async function TaskDetailPage({ params }: Props) {
       if (!delegate) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rows: { id: string; title: string }[] = await (delegate as any).findMany({
-        where: { id: { in: ids } },
+        where: { id: { in: ids }, ...taskLinkScope(workspace.id, linkedType) },
         select: { id: true, title: true },
       });
       for (const row of rows) titleById.set(`${linkedType}:${row.id}`, row.title);
@@ -147,6 +151,8 @@ export default async function TaskDetailPage({ params }: Props) {
     squadId: task.squadId,
     squad: task.squad,
     assigneeUserId: task.assigneeUserId,
+    assigneeAgentId: task.assigneeAgentId,
+    assignee: resolvedTask.assignee,
     ownerName: task.ownerName,
     storyPoints: task.storyPoints,
     dueDate: task.dueDate ? task.dueDate.toISOString() : null,
@@ -161,7 +167,7 @@ export default async function TaskDetailPage({ params }: Props) {
     })),
   };
 
-  const subtaskCards: TaskCardData[] = task.subtasks.map((s) => ({
+  const subtaskCards: TaskCardData[] = task.subtasks.map((s, index) => ({
     id: s.id,
     title: s.title,
     description: s.description,
@@ -171,6 +177,8 @@ export default async function TaskDetailPage({ params }: Props) {
     squadId: s.squadId,
     squad: s.squad,
     assigneeUserId: s.assigneeUserId,
+    assigneeAgentId: s.assigneeAgentId,
+    assignee: resolvedSubtasks[index].assignee,
     ownerName: s.ownerName,
     storyPoints: s.storyPoints,
     dueDate: s.dueDate ? s.dueDate.toISOString() : null,
