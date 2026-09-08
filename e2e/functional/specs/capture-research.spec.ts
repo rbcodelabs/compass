@@ -1,4 +1,6 @@
 import { test, expect } from "../fixtures/index"
+import { awaitResearchReplyReceipt } from "../fixtures/research-reply-receipt"
+import { observeResearchReply } from "../fixtures/research-reply-observer"
 
 function voiceEventIdentity(evidenceMode: string | undefined, id: string, ordinal: number) {
   return evidenceMode === "PARTICIPANT_SUBMITTED" ? { clientEventId: id, reportedOrdinal: ordinal } : { providerEventId: id }
@@ -53,7 +55,7 @@ test.describe("Capture — research study", () => {
     await anonymous.close()
   })
 
-  test("persists and resumes a secure anonymous interview for member review", async ({ page, base, browser, baseURL }) => {
+  test("persists and resumes a secure anonymous interview for member review", async ({ page, base, browser, baseURL }, testInfo) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto(`${base}/capture/new`)
     await page.getByLabel("Study name").fill(`E2E interview ${Date.now()}`)
@@ -80,7 +82,15 @@ test.describe("Capture — research study", () => {
     await participant.getByLabel("Share screenshot or PDF").setInputFiles("e2e/fixtures/test-image.png")
     await expect(participant.getByText("test-image.png")).toBeVisible()
     await participant.getByRole("textbox", { name: "Your response" }).fill("I use a spreadsheet every Monday.")
+    const observeReply = await observeResearchReply(participant)
     await participant.getByRole("button", { name: "Send" }).click()
+    // Server work (including cold route compilation) and UI rendering have
+    // separate gates. Neither a provisional delta nor HTTP 200 proves a save.
+    const receipt = await awaitResearchReplyReceipt(observeReply(), diagnostic => {
+      testInfo.annotations.push({ type: "research-reply-receipt", description: JSON.stringify(diagnostic) })
+      console.info("[research reply receipt]", JSON.stringify(diagnostic))
+    })
+    expect(receipt.message).toBe("What made that difficult for you?")
     await expect(participant.getByText("What made that difficult for you?")).toBeVisible()
 
     await participant.reload()
