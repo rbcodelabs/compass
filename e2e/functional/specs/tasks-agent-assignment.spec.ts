@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 test("task agent assignment persists, filters, replaces a human and survives suspension", async ({ page, base }, testInfo) => {
   test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1280, height: 800 });
   const url = new URL(process.env.DATABASE_URL!);
   if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/compass_e2e") throw new Error("Task agent tests require the dedicated local compass_e2e database");
   const pool = new pg.Pool({ connectionString: url.toString() });
@@ -31,19 +32,25 @@ test("task agent assignment persists, filters, replaces a human and survives sus
     await page.reload();
     await expect(page.getByText(`Assignee: Agent: ${name}`)).toBeVisible();
     await page.getByRole("button", { name: "Edit", exact: true }).click();
+    const editBounds = await page.getByRole("dialog", { name: "Edit task" }).boundingBox();
+    for (const field of [page.getByLabel("Title", { exact: true }), page.getByLabel("Assignee", { exact: true })]) {
+      const bounds = await field.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(editBounds!.x + editBounds!.width);
+    }
     await page.getByLabel("Assignee", { exact: true }).click();
     await expect(page.getByRole("option", { name: new RegExp(name) })).toBeVisible();
     if (process.env.COMPASS_CAPTURE_AGENT_DOCS === "1") await page.screenshot({ path: "public/screenshots/docs/tasks-agents-desktop.png", fullPage: true });
     await page.getByRole("option", { name: `People · ${user.name || user.email}`, exact: true }).click();
     await page.getByRole("button", { name: "Save changes" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Edit task" })).not.toBeVisible();
     expect((await pool.query("SELECT assignee_user_id,assignee_agent_id FROM compass_dev.tasks WHERE id=$1", [taskId])).rows[0]).toEqual({ assignee_user_id: user.id, assignee_agent_id: null });
 
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByLabel("Assignee", { exact: true }).click();
     await page.getByRole("option", { name: new RegExp(name) }).click();
     await page.getByRole("button", { name: "Save changes" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Edit task" })).not.toBeVisible();
     await page.goto(`${base}/tasks?view=list&assignee=agent:${agentId}`);
     await expect(page.getByRole("link", { name: title })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("agent-assignment-desktop.png"), fullPage: true });
@@ -53,11 +60,19 @@ test("task agent assignment persists, filters, replaces a human and survives sus
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByLabel("Title", { exact: true }).fill(`${title} retained`);
     await page.getByRole("button", { name: "Save changes" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Edit task" })).not.toBeVisible();
     expect((await pool.query("SELECT assignee_agent_id FROM compass_dev.tasks WHERE id=$1", [taskId])).rows[0].assignee_agent_id).toBe(agentId);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: testInfo.outputPath("agent-unavailable-mobile.png"), fullPage: true });
     if (process.env.COMPASS_CAPTURE_AGENT_DOCS === "1") await page.screenshot({ path: "public/screenshots/docs/tasks-agents-mobile.png", fullPage: true });
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    const mobileDialog = page.getByRole("dialog", { name: "Edit task" });
+    const mobileBounds = await mobileDialog.boundingBox();
+    expect(mobileBounds!.x).toBeGreaterThanOrEqual(0);
+    expect(mobileBounds!.x + mobileBounds!.width).toBeLessThanOrEqual(390);
+    await page.getByLabel("Assignee", { exact: true }).click();
+    await expect(page.getByRole("option", { name: new RegExp(name) })).toBeVisible();
+    if (process.env.COMPASS_CAPTURE_AGENT_DOCS === "1") await page.screenshot({ path: "public/screenshots/docs/tasks-agents-picker-mobile.png", fullPage: true });
   } finally {
     if (taskId) await pool.query("DELETE FROM compass_dev.tasks WHERE id=$1", [taskId]);
     await pool.query("DELETE FROM compass_dev.agent_workspace_grants WHERE agent_id=$1", [agentId]);

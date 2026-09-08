@@ -33,10 +33,10 @@ export function TaskAssigneePicker({ id, members, value, onChange, current, disa
   const { options, error } = useTaskAssignees(members);
   const choices = options.slice();
   if (current && !choices.some(option => option.id === current.id && option.type === current.type)) choices.push(current);
-  return <div className="flex flex-col gap-1">
+  return <div className="flex min-w-0 flex-col gap-1">
     <Combobox items={[{ value: "__none__", label: "Unassigned" }, ...choices.map(option => ({ value: assigneeValue(option), label: `${option.type === "AGENT" ? "Agents" : "People"} · ${option.displayName}${option.ownerName ? ` (${option.ownerName})` : ""}${option.type === "AGENT" ? ` · ${option.id.slice(0, 8)}` : ""}${option.available ? "" : " (unavailable)"}` }))]} value={assigneeValue(value)} onValueChange={next => onChange(assigneeFromValue(next))} disabled={disabled}>
-      <ComboboxTrigger id={id} aria-label={id ? undefined : "Assignee"}><ComboboxValue placeholder="Unassigned" /></ComboboxTrigger>
-      <ComboboxContent inputPlaceholder="Search people and agents…" />
+      <ComboboxTrigger id={id} aria-label={id ? undefined : "Assignee"} className="w-full min-w-0 [&>[data-slot=combobox-value]]:block"><ComboboxValue placeholder="Unassigned" className="min-w-0 truncate" /></ComboboxTrigger>
+      <ComboboxContent inputPlaceholder="Search people and agents…" className="min-w-0 max-w-[calc(100vw-2rem)] [&_[data-slot=combobox-item]>span:first-child]:min-w-0 [&_[data-slot=combobox-item]>span:first-child]:shrink [&_[data-slot=combobox-item]>span:first-child]:whitespace-normal [&_[data-slot=combobox-item]>span:first-child]:[overflow-wrap:anywhere]" />
     </Combobox>
     {error && <p role="status" className="text-xs text-muted-foreground">{error}</p>}
   </div>;

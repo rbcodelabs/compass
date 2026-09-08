@@ -109,7 +109,7 @@ export function EditTaskDialog({ task, open, onOpenChange, revalidatePathStr, me
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={handleSubmit} className="flex min-w-0 flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Edit task</DialogTitle>
           </DialogHeader>
