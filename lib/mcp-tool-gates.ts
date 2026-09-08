@@ -116,6 +116,17 @@ async function assertChildInDeclaredWorkspace(
 // ── The policy: every MCP tool → its gate ───────────────────────────────────
 
 export const TOOL_GATES: Record<string, Gate> = {
+  generate_research_guide: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  create_research_study: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_research_studies: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_research_study: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  update_research_study: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  activate_research_study: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  close_research_study: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  archive_research_study: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  issue_research_link: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  rotate_research_link: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  revoke_research_links: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
   add_comment: assertCommentTarget,
   list_comments: assertCommentTarget,
   get_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
