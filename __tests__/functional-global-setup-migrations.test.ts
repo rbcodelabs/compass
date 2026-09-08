@@ -101,4 +101,16 @@ describe("functional E2E migration setup", () => {
     expect(backfillIndex).toBeGreaterThan(setDefaultCommitIndex);
     expect(validateConstraintIndex).toBeGreaterThan(backfillIndex);
   });
+
+  it("preserves an existing provenance constraint when replaying migration 039", async () => {
+    const original = mocks.query.getMockImplementation()!;
+    mocks.query.mockImplementation(async (sqlValue: unknown, ...args: unknown[]) => {
+      const sql = String(sqlValue);
+      if (sql.includes("pg_constraint")) return { rows: [{ exists: true }] };
+      if (/ADD\s+CONSTRAINT\s+"chk_roadmap_items_commitment_provenance_not_null"/i.test(sql)) throw new Error("constraint already exists");
+      return original(sqlValue, ...args);
+    });
+    await expect(globalSetup()).resolves.toBeUndefined();
+    expect(mocks.query.mock.calls.some(([sql]) => /VALIDATE\s+CONSTRAINT/.test(String(sql)))).toBe(true);
+  });
 });
