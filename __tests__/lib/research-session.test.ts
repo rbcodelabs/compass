@@ -253,6 +253,26 @@ describe("canonical research persistence", () => {
     expect(fixture.prisma.researchTurn.create).not.toHaveBeenCalled()
   })
 
+  it("creates a production browser voice session without the legacy authoritative flag", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    vi.stubEnv("E2E_FUNCTIONAL", "")
+    try {
+      const fixture = context()
+
+      const result = await startOrResumeResearchSession(fixture.value, undefined, "VOICE")
+
+      expect(fixture.prisma.researchSession.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ id: result.sessionId, modality: "VOICE" }),
+      })
+      expect(fixture.prisma.researchTurn.create).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it("rejects a new customer-discovery voice session when its production rollout gate is disabled", async () => {
     vi.stubEnv("NODE_ENV", "production")
     vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
@@ -378,6 +398,7 @@ describe("canonical research persistence", () => {
 
   it("rejects a persisted voice resume in production when the request omits modality", async () => {
     vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "")
     vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
     vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "1")
     vi.stubEnv("E2E_FUNCTIONAL", "1")
@@ -396,6 +417,31 @@ describe("canonical research persistence", () => {
         resumeToken: "resume-secret",
       })).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchSessionError>)
       expect(fixture.prisma.researchSession.updateMany).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("resumes a production browser voice session without the legacy authoritative flag", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    vi.stubEnv("E2E_FUNCTIONAL", "")
+    try {
+      const fixture = context()
+      fixture.prisma.researchSession.findFirst.mockResolvedValue({
+        id: "voice-session-1",
+        modality: "VOICE",
+        status: "IN_PROGRESS",
+        startedAt: new Date(),
+        turns: [],
+      })
+
+      await expect(startOrResumeResearchSession(fixture.value, {
+        sessionId: "voice-session-1",
+        resumeToken: "resume-secret",
+      })).resolves.toMatchObject({ sessionId: "voice-session-1", status: "IN_PROGRESS", turns: [] })
     } finally {
       vi.unstubAllEnvs()
     }
