@@ -25,8 +25,9 @@ const WORKSPACE_BASE = FUNCTIONAL ? "/e2e-test-org/e2e-workspace" : "/rbcodelabs
 type StandardScreenshotCase = {
   file: string;
   url: string;
+  viewport?: { width: number; height: number };
   scrollToHeading?: string;
-  prepare?: "expand-first-opportunity";
+  prepare?: "expand-first-opportunity" | "workspace-search";
 };
 
 const STANDARD_PAGES: StandardScreenshotCase[] = [
@@ -44,12 +45,14 @@ const STANDARD_PAGES: StandardScreenshotCase[] = [
     prepare: "expand-first-opportunity",
   },
   { file: "roadmap.png",         url: `${WORKSPACE_BASE}/roadmap` },
+  ...(FUNCTIONAL ? [{ file: "workspace-search-mobile-closed.png", url: `${WORKSPACE_BASE}/roadmap`, viewport: { width: 390, height: 844 } }] : []),
   { file: "roadmap-timeline.png", url: `${WORKSPACE_BASE}/roadmap?view=timeline` },
   { file: "tasks.png",           url: `${WORKSPACE_BASE}/tasks` },
   { file: "tasks-list.png",      url: `${WORKSPACE_BASE}/tasks?view=list` },
   { file: "experiments.png",     url: `${WORKSPACE_BASE}/experiments` },
   { file: "feedback.png",        url: `${WORKSPACE_BASE}/feedback` },
   { file: "docs-editor.png",     url: `${WORKSPACE_BASE}/docs` },
+  ...(FUNCTIONAL ? [{ file: "workspace-search.png", url: `${WORKSPACE_BASE}/roadmap`, prepare: "workspace-search" as const }] : []),
   { file: "settings.png",        url: `${WORKSPACE_BASE}/settings` },
   // Settings is one long scrolling page — Branding sits below Portal, past
   // the initial viewport a plain (fullPage: false) capture would show, so
@@ -96,6 +99,15 @@ async function prepareScreenshot(
     await expect(disclosure).toHaveAttribute("aria-expanded", "false");
     await disclosure.click();
     await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    return;
+  }
+  if (entry.prepare === "workspace-search") {
+    await page.keyboard.press("Control+k");
+    await page.getByRole("combobox", { name: "Search workspace" }).fill("E2E Baseline");
+    await page
+      .getByRole("group", { name: "Opportunities" })
+      .getByRole("option", { name: /E2E Baseline Opportunity/ })
+      .waitFor();
     return;
   }
 
