@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchAttachmentPreview } from "@/components/research/research-attachment-preview"
@@ -9,6 +9,19 @@ const props = { attachment, token: "opaque-study", sessionId: "session-1", resum
 describe("private participant previews", () => {
   beforeEach(() => { URL.createObjectURL = vi.fn().mockReturnValue("blob:authorized"); URL.revokeObjectURL = vi.fn() })
   afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+  it("retains a named download when a GIF cannot decode", async () => {
+    render(<ResearchAttachmentPreview {...props} attachment={{ ...attachment, mimeType: "image/gif", originalName: "animation.gif" }} file={new File(["gif"], "animation.gif", { type: "image/gif" })} />)
+    fireEvent.error(await screen.findByRole("img"))
+    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    expect(screen.getByText(/Preview unavailable/)).toBeVisible()
+    expect(screen.getByRole("link", { name: "animation.gif" })).toHaveAttribute("download", "animation.gif")
+  })
+  it("preserves HEIC as a download without promising browser or moderator decoding", async () => {
+    render(<ResearchAttachmentPreview {...props} attachment={{ ...attachment, mimeType: "image/heic", originalName: "photo.heic" }} file={new File(["heic"], "photo.heic", { type: "image/heic" })} />)
+    expect(await screen.findByRole("link", { name: "photo.heic" })).toHaveAttribute("download", "photo.heic")
+    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    expect(screen.getByText(/not sent to the moderator/)).toBeVisible()
+  })
   it("uses an authorized POST and an ephemeral PDF link, not a public blob URL", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("pdf", { headers: { "Content-Type": "application/pdf" } })))
     render(<ResearchAttachmentPreview {...props} />)

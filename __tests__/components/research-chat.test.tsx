@@ -11,6 +11,42 @@ function savedReply(message: string) {
 }
 
 describe("ResearchChat", () => {
+  it.each(["", "application/octet-stream", "application/x-heic", "text/plain"])("uploads a native HEIC file when the browser supplies MIME %j", async (mimeType) => {
+    URL.createObjectURL = vi.fn(() => "blob:pending")
+    URL.revokeObjectURL = vi.fn()
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ sessionId: "session-1", resumeToken: "secret", status: "IN_PROGRESS", turns: [] }))
+      .mockResolvedValueOnce(Response.json({ id: "attachment-1", originalName: "photo.heic", mimeType: "image/heic", sizeBytes: 3 })))
+    render(<ResearchChat token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
+    await screen.findByRole("textbox", { name: "Your response" })
+    fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), { target: { files: [new File(["abc"], "photo.heic", { type: mimeType })] } })
+    expect(await screen.findByRole("link", { name: "photo.heic" })).toBeVisible()
+    expect(fetch).toHaveBeenCalledWith("/api/research/attachments", expect.objectContaining({ method: "POST" }))
+  })
+
+  it.each(["", "application/octet-stream"])("rejects non-HEIC files when the browser supplies MIME %j", async (mimeType) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ sessionId: "session-1", resumeToken: "secret", status: "IN_PROGRESS", turns: [] })))
+    render(<ResearchChat token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
+    await screen.findByRole("textbox", { name: "Your response" })
+    fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), { target: { files: [new File(["abc"], "photo.png", { type: mimeType })] } })
+    expect(await screen.findByRole("alert")).toHaveTextContent(/another browser/)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+  it.each(["image/gif", "image/heic"])("allows uploading preserved %s evidence", async (mimeType) => {
+    URL.createObjectURL = vi.fn(() => "blob:pending")
+    URL.revokeObjectURL = vi.fn()
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ sessionId: "session-1", resumeToken: "secret", status: "IN_PROGRESS", turns: [] }))
+      .mockResolvedValueOnce(Response.json({ id: "attachment-1", originalName: "original", mimeType, sizeBytes: 3 })))
+    render(<ResearchChat token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
+    await screen.findByRole("textbox", { name: "Your response" })
+    fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), { target: { files: [new File(["abc"], "original", { type: mimeType })] } })
+    expect(await screen.findByRole("link", { name: "original" })).toHaveAttribute("download", "original")
+    expect(fetch).toHaveBeenCalledWith("/api/research/attachments", expect.objectContaining({ method: "POST" }))
+  })
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn()
     const values = new Map<string, string>()
@@ -210,6 +246,35 @@ describe("ResearchChat", () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }))
     await screen.findByText("Saved retry")
     expect(fetchMock.mock.calls[1][1].body).toEqual(fetchMock.mock.calls[2][1].body)
+  })
+
+  it("does not accept a second file while matching reply text is still provisional", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const stream = new ReadableStream<Uint8Array>({ start(value) { controller = value } })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ sessionId: "session-1", resumeToken: "secret", status: "IN_PROGRESS", turns: [] }))
+      .mockResolvedValueOnce(new Response(stream, { headers: { "Content-Type": "application/x-ndjson" } }))
+      .mockResolvedValueOnce(Response.json({ id: "file-1", originalName: "photo.heic", mimeType: "image/heic", sizeBytes: 3 }))
+    vi.stubGlobal("fetch", fetchMock)
+    URL.createObjectURL = vi.fn(() => "blob:original")
+    URL.revokeObjectURL = vi.fn()
+    render(<ResearchChat token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
+    fireEvent.change(await screen.findByRole("textbox", { name: "Your response" }), { target: { value: "An answer" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    const text = "What made that difficult for you?"
+    await act(async () => { controller.enqueue(new TextEncoder().encode(JSON.stringify({ type: "delta", text }) + "\n")) })
+    expect(await screen.findByText(text)).toBeVisible()
+    const upload = screen.getByLabelText("Share screenshot or PDF")
+    expect(upload).toBeDisabled()
+    const selection = { target: { files: [new File(["abc"], "photo.heic", { type: "image/heic" })] } }
+    fireEvent.change(upload, selection)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await act(async () => { controller.enqueue(new TextEncoder().encode(JSON.stringify({ type: "final", result: savedReply(text) }) + "\n")); controller.close() })
+    await waitFor(() => expect(upload).toBeEnabled())
+    fireEvent.change(upload, selection)
+    expect(await screen.findByRole("link", { name: "photo.heic" })).toBeVisible()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it.each([

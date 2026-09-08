@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import type { ResearchChatAttachment } from "@/lib/research-chat-stream"
+import { ResearchAttachmentLink } from "@/components/research/research-attachment-link"
 
 export function ResearchAttachmentPreview({ attachment, token, sessionId, resumeToken, file }: {
   attachment: ResearchChatAttachment
@@ -49,11 +50,7 @@ export function ResearchAttachmentPreview({ attachment, token, sessionId, resume
   }, [attachment.id, attachment.mimeType, attachment.sizeBytes, token, sessionId, resumeToken, file])
 
   return <div className="min-w-0 space-y-1">
-    {url && attachment.mimeType.startsWith("image/") &&
-      // Authenticated object URLs cannot be fetched by the Next image optimizer.
-      // eslint-disable-next-line @next/next/no-img-element
-      <img alt={attachment.originalName} className="max-h-40 max-w-full rounded-lg border object-contain" src={url} />}
-    {url ? <a className="block break-all text-xs underline" href={url} rel="noopener noreferrer" target="_blank">{attachment.originalName}</a>
+    {url ? <ResearchAttachmentLink key={`${attachment.id}:${url}`} url={url} originalName={attachment.originalName} mimeType={attachment.mimeType} />
       : <span className="block break-all text-xs">{attachment.originalName}</span>}
     {failed && <span className="block text-xs">Preview unavailable</span>}
   </div>

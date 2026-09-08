@@ -54,6 +54,7 @@ describe("ResearchVoice", () => {
       originalName: "pricing.png",
       mimeType: "image/png",
       sizeBytes: 8,
+      status: "READY", kind: "SCREENSHOT",
     }), { status: 200 }))
 
     fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), {
@@ -65,6 +66,31 @@ describe("ResearchVoice", () => {
       body: expect.stringContaining('"attachmentId":"00000000-0000-4000-8000-000000000009"'),
     }))
     await waitFor(() => expect(channel.send).toHaveBeenCalledWith(expect.stringContaining('"type":"input_image"')))
+  })
+
+  it.each(["image/gif", "image/heic"])("preserves %s without sending its bytes to realtime", async (mimeType) => {
+    render(<ResearchVoice token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    await screen.findByText("Connected — speak naturally")
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ id: "00000000-0000-4000-8000-000000000009", originalName: "original", mimeType, sizeBytes: 4 }))
+    fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), { target: { files: [new File(["data"], "original", { type: mimeType })] } })
+    await waitFor(() => expect(channel.send).toHaveBeenCalledWith(expect.stringContaining("not sent")))
+    expect(channel.send).not.toHaveBeenCalledWith(expect.stringContaining('"input_image"'))
+    expect(fetch).toHaveBeenCalledWith("/api/research/voice-event", expect.objectContaining({ body: expect.stringContaining('"attachmentId"') }))
+  })
+
+  it("restores a private HEIC download from saved voice attachment metadata", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:voice-evidence")
+    URL.revokeObjectURL = vi.fn()
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [{ id: "saved", role: "PARTICIPANT", content: "Shared photo", attachments: [{ id: "attachment-1", originalName: "photo.heic", mimeType: "image/heic", sizeBytes: 4 }] }] }))
+      .mockResolvedValueOnce(Response.json({ ephemeralToken: "short-secret", leaseId: "lease-1" }))
+      .mockResolvedValueOnce(new Response("answer-sdp"))
+      .mockResolvedValue(new Response("heic", { headers: { "Content-Type": "image/heic" } })))
+    render(<ResearchVoice token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    expect(await screen.findByRole("link", { name: "photo.heic" })).toHaveAttribute("download", "photo.heic")
+    expect(fetch).toHaveBeenCalledWith("/api/research/attachments/attachment-1", expect.objectContaining({ method: "POST", body: expect.stringContaining("resume-secret") }))
   })
 
   it("offers chat fallback after microphone permission fails without starting a session", async () => {

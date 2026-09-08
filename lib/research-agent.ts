@@ -33,7 +33,7 @@ export async function runResearchInterviewAgent({
 }: {
   prompt: string
   baseUrl: string
-  attachments?: Array<{ mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf"; originalName: string; bytes: Uint8Array }>
+  attachments?: Array<{ mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "application/pdf"; originalName: string; bytes: Uint8Array }>
   onDelta?: (text: string) => void
   /** Optional absolute deadline for bounded callers such as MCP guide generation. */
   deadline?: number

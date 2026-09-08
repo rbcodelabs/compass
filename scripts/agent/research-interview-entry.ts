@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   const input = JSON.parse(readFileSync("prompt.json", "utf8")) as {
     prompt: string
     deadline?: number
-    attachments: Array<{ mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf"; originalName: string; data: string }>
+    attachments: Array<{ mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "application/pdf"; originalName: string; data: string }>
   }
   const content: Exclude<SDKUserMessage["message"]["content"], string> = [{ type: "text", text: input.prompt }]
   for (const attachment of input.attachments) {
@@ -31,6 +31,7 @@ async function main(): Promise<void> {
         source: { type: "base64", media_type: "application/pdf", data: attachment.data },
       })
     } else {
+      if (attachment.mimeType === "image/gif") content.push({ type: "text", text: "This GIF supplies only its first frame. Do not infer or claim to observe its animation." })
       content.push({
         type: "image",
         source: { type: "base64", media_type: attachment.mimeType, data: attachment.data },

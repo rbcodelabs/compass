@@ -99,7 +99,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e:functional -- e2e/functional/specs/capture-research.spec.ts e2e/functional/specs/research-browser-voice.spec.ts e2e/functional/specs/capture-results.spec.ts e2e/functional/specs/research-mcp.spec.ts
+      - run: pnpm test:e2e:functional -- e2e/functional/specs/capture-research.spec.ts e2e/functional/specs/research-browser-voice.spec.ts e2e/functional/specs/capture-results.spec.ts e2e/functional/specs/research-mcp.spec.ts e2e/functional/specs/capture-attachment-formats.spec.ts
         env:
           COMPASS_RESEARCH_BROWSER_VOICE_ENABLED: "1"
       - run: pnpm e2e:db:verify-clean

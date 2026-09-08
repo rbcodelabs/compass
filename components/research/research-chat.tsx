@@ -1,5 +1,7 @@
 "use client"
 
+import { RESEARCH_ATTACHMENT_ACCEPT } from "@/lib/research-attachment-formats"
+
 import { useEffect, useRef, useState } from "react"
 import { AlertCircleIcon, LoaderCircleIcon, PaperclipIcon, SendIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -230,8 +232,14 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
 
   async function upload(file: File) {
     if (!sessionId || !resumeToken || uploadLock.current || busy || pending || attachments.length >= 3) return
-    if (!file.size || file.size > 10 * 1024 * 1024 || !["image/png", "image/jpeg", "image/webp", "application/pdf"].includes(file.type)) {
-      setError("Use a PNG, JPEG, WebP or PDF no larger than 10 MiB.")
+    const heicCandidate = /\.heic$/i.test(file.name)
+    const unspecifiedMimeType = !file.type || file.type === "application/octet-stream"
+    if (unspecifiedMimeType && !heicCandidate) {
+      setError("This browser did not identify the file type. Try another browser or share a PNG, JPEG or PDF instead.")
+      return
+    }
+    if (!file.size || file.size > 10 * 1024 * 1024 || (!heicCandidate && !["image/png", "image/jpeg", "image/webp", "image/gif", "image/heic", "application/pdf"].includes(file.type))) {
+      setError("Use a PNG, JPEG, WebP, GIF, HEIC or PDF no larger than 10 MiB.")
       return
     }
     uploadLock.current = true
@@ -358,7 +366,7 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
         <label className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border hover:bg-muted" title="Share screenshot or PDF">
           {uploading ? <LoaderCircleIcon className="size-4 animate-spin" /> : <PaperclipIcon className="size-4" />}
           <input
-            accept="image/png,image/jpeg,image/webp,application/pdf"
+            accept={RESEARCH_ATTACHMENT_ACCEPT}
             aria-label="Share screenshot or PDF"
             className="sr-only"
             disabled={uploading || busy || Boolean(pending) || attachments.length >= 3}

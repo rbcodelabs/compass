@@ -2,7 +2,7 @@ import { z } from "zod"
 
 export const researchAttachmentMetadata = z.object({
   id: z.string().min(1).max(128), originalName: z.string().min(1).max(255),
-  mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "application/pdf"]),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif", "image/heic", "application/pdf"]),
   sizeBytes: z.number().int().min(1).max(10 * 1024 * 1024),
 }).strict()
 export type ResearchChatAttachment = z.infer<typeof researchAttachmentMetadata>
