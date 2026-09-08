@@ -2,6 +2,17 @@ import getPrisma from "@/lib/db"
 import { hashResearchToken } from "@/lib/research"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 
+// Cleanup only: the original token establishes study/tenant context even after
+// revocation. The caller must still verify session, resume secret and exact lease.
+export async function resolveResearchVoiceCleanupStudy(token: string) {
+  if (!isResearchCaptureEnabled()) return null
+  const prisma = getPrisma()
+  const participantToken = await prisma.researchParticipantToken.findUnique({
+    where: { tokenHash: hashResearchToken(token) }, include: { study: true },
+  })
+  return participantToken ? { prisma, study: participantToken.study, participantToken } : null
+}
+
 export async function resolveActiveResearchStudy(token: string) {
   if (!isResearchCaptureEnabled()) return null
   const prisma = getPrisma()

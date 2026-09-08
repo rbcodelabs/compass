@@ -8,6 +8,28 @@ section: "Workspace"
 
 # Capture
 
+## Browser voice availability
+
+Browser-managed voice supports discovery interviews and guided usability tests
+when separately enabled by the operator after release verification. It remains
+off by default. Microphone audio connects directly to the realtime provider;
+Compass does not record raw audio. Saved voice transcripts are labeled
+participant-submitted evidence, not independently authenticated provider records.
+
+Keep the page open until saving finishes. A failed save stops the microphone and
+offers **Retry saving transcript**; do not close the page with unsaved speech.
+**Finish session** stops capture and waits for final captions and acknowledged
+saves before marking the interview complete. Reconnecting uses saved transcript
+context. There are five connection attempts per session, including ambiguous
+connection failures. Local microphone closure does not guarantee provider-side
+termination or a hard spending limit.
+
+![Discovery voice with a live caption](/screenshots/docs/browser-voice-customer_interview-desktop.png)
+
+![Guided voice beside the product](/screenshots/docs/browser-voice-usability_test-desktop.png)
+
+Mobile examples: [discovery voice](/screenshots/docs/browser-voice-customer_interview-mobile.png) and [guided voice](/screenshots/docs/browser-voice-usability_test-mobile.png).
+
 Capture is the starting point for customer feedback, ideas, and research. It keeps raw input connected to the opportunities and decisions it informs.
 
 ## Studies
@@ -22,7 +44,7 @@ Study settings remain editable until the first participant session starts. After
 
 ![Guided usability study creation](/screenshots/docs/guided-study-create.png)
 
-Participants use Chat by default. The legacy browser-authoritative Voice path is unavailable in production, even when `COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED=1`; that flag is reserved for the replacement authoritative transport. The legacy path can run only in the non-production functional E2E harness when the flag and `E2E_FUNCTIONAL=1` are both set. Customer-interview voice additionally requires `COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED=1` in production. Chat remains available regardless of voice configuration.
+Participants use Chat by default. The separate `COMPASS_RESEARCH_BROWSER_VOICE_ENABLED=1` gate enables browser voice for both study types after its migration and release checks. The authoritative voice flag does not enable this path. A non-production functional harness can exercise synthetic voice without contacting a provider. Chat remains available regardless of voice configuration.
 
 For guided usability tests, the live product appears beside the neutral moderator on desktop and uses a constrained stacked layout on smaller screens. An **Open product** action is always available when a site blocks embedding. The moderator presents one task at a time, asks the participant to think aloud, and probes expectations without identifying controls or rescuing them.
 

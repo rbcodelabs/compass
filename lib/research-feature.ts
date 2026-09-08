@@ -13,7 +13,17 @@ export function isResearchLegacyVoiceHarnessEnabled(): boolean {
     isResearchAuthoritativeVoiceEnabled()
 }
 
+// Browser transcripts are participant-submitted evidence, not authoritative voice events.
+export function isResearchBrowserVoiceEnabled(): boolean {
+  return process.env.COMPASS_RESEARCH_BROWSER_VOICE_ENABLED === "1"
+}
+
+export function isResearchParticipantVoiceEnabled(): boolean {
+  return isResearchBrowserVoiceEnabled() || isResearchLegacyVoiceHarnessEnabled()
+}
+
 export function isResearchDiscoveryVoiceEnabled(): boolean {
+  if (isResearchBrowserVoiceEnabled()) return true
   if (!isResearchAuthoritativeVoiceEnabled()) return false
   if (process.env.NODE_ENV !== "production") return true
   return process.env.COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED === "1"
