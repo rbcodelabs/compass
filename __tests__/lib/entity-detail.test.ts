@@ -140,7 +140,7 @@ describe("getEntityDetail — return shape", () => {
     expect(result).toEqual({
       type: "roadmapItem",
       data: expect.objectContaining({
-        deliveryTasks: [{ id: "blocked", status: "BLOCKED" }],
+        deliveryTasks: [{ id: "blocked", status: "BLOCKED", assignee: null }],
         linkableTasks: [{ id: "candidate", title: "Candidate" }],
         members: [],
       }),

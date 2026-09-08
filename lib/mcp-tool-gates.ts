@@ -11,7 +11,7 @@
  * registered tool name has an entry, catching this at build time too.
  *
  * Gate semantics (see lib/mcp-authz.ts):
- *   - service key (userId === null) → every assert is a no-op (global/trusted).
+ *   - service key (purpose === SERVICE) → every assert is a no-op (global/trusted).
  *   - per-user key → membership/role-scoped to the acting user.
  *
  * `args` are already validated against the tool's zod inputSchema by the SDK
@@ -116,6 +116,8 @@ async function assertChildInDeclaredWorkspace(
 // ── The policy: every MCP tool → its gate ───────────────────────────────────
 
 export const TOOL_GATES: Record<string, Gate> = {
+  get_current_identity: async () => {},
+  list_task_assignees: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   add_comment: assertCommentTarget,
   list_comments: assertCommentTarget,
   get_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
@@ -246,16 +248,17 @@ export const TOOL_GATES: Record<string, Gate> = {
   create_task: async (a, x) => {
     await assertWorkspaceMember(a, x.workspaceId)
     if (x.parentTaskId) await assertChildInDeclaredWorkspace(a, "task", x.parentTaskId, x.workspaceId)
+    if (x.squadId) await assertChildInDeclaredWorkspace(a, "squad", x.squadId, x.workspaceId)
   },
   get_task: async (a, x) => void (await assertEntityAccess(a, "task", x.taskId)),
   list_tasks: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   update_task: async (a, x) => void (await assertEntityAccess(a, "task", x.taskId)),
   move_task_status: async (a, x) => void (await assertEntityAccess(a, "task", x.taskId)),
   link_task: async (a, x) => {
-    await assertEntityAccess(a, "task", x.taskId)
+    const { workspaceId } = await assertEntityAccess(a, "task", x.taskId)
     const entity = TASK_LINK_ENTITY[x.linkedType]
     if (!entity) throw new McpAuthzError(`Unknown linkedType: ${x.linkedType}`)
-    await assertEntityAccess(a, entity, x.linkedId)
+    await assertChildInDeclaredWorkspace(a, entity, x.linkedId, workspaceId)
   },
   unlink_task: async (a, x) => void (await assertEntityAccess(a, "task", x.taskId)),
   list_task_links: async (a, x) => void (await assertEntityAccess(a, "task", x.taskId)),
@@ -364,6 +367,17 @@ export const TOOL_GATES: Record<string, Gate> = {
   },
 }
 
+// Every operation is explicitly classified. Unlisted tools fail closed for agents.
+export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Object.fromEntries([
+  ...[
+    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_docs", "get_doc", "list_doc_versions", "get_doc_version", "list_doc_comments", "get_doc_comment", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "list_top_opportunities",
+  ].map(name => [name, "READ"]),
+  ...[
+    "add_comment", "update_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "update_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "request_building_investment", "reconsider_building_investment", "request_building_investment_revocation", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "update_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity",
+  ].map(name => [name, "WRITE"]),
+  ...["create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization", "apply_recorded_decision", "create_scoring_model", "update_scoring_model", "archive_scoring_model", "set_workspace_scoring_model"].map(name => [name, "DENY"]),
+])
+
 /**
  * Run the authorization gate for `toolName`. Fail-closed: a tool with no
  * policy entry is denied.
@@ -373,6 +387,11 @@ export async function applyToolGate(toolName: string, actor: McpActor, args: Arg
   // (and fail-closed denial of unmapped tools) apply only to per-user keys,
   // which is exactly the untrusted surface we're protecting.
   if (isServiceActor(actor)) return
+  if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") {
+    const policy = AGENT_TOOL_POLICY[toolName]
+    if (!policy || policy === "DENY") throw new McpAuthzError(`Tool requires a human identity: ${toolName}`)
+    actor.requiredAgentAccess = policy
+  }
   if (isResearchActor(actor) && !RESEARCH_TOOL_ALLOWLIST.has(toolName)) {
     throw new McpAuthzError(`Tool is not available to research interviews: ${toolName}`)
   }

@@ -14,6 +14,7 @@ import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
+import { revokeMemberAgentGrants, deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
 import type {
   CustomFieldType,
   CustomFieldObjectType,
@@ -241,7 +242,14 @@ export async function removeWorkspaceMember(
     }
   }
 
-  await prisma.workspaceMember.delete({ where: { id: memberId } });
+  await prisma.$transaction(async (tx) => {
+    // Lock before reading grants: PostgreSQL READ COMMITTED must see grants
+    // committed by an earlier holder of this row lock before revoking them.
+    // DSQL also detects the shared write as a grant/removal conflict.
+    await tx.workspaceMember.update({ where: { id: memberId }, data: { role: member.role } });
+    await revokeMemberAgentGrants(tx, workspaceId, member.userId);
+    await tx.workspaceMember.delete({ where: { id: memberId } });
+  });
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }
@@ -380,7 +388,7 @@ export async function createApiKey(
   const keyPrefix = randomHex.slice(0, 8);
   const keyHash = createHash("sha256").update(rawKey).digest("hex");
 
-  await prisma.apiKey.create({
+  const createdKey = await prisma.apiKey.create({
     data: {
       userId: session.user.id,
       name,
@@ -391,7 +399,7 @@ export async function createApiKey(
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
   // Return the raw key — shown ONCE to the user, never stored
-  return { rawKey };
+  return { id: createdKey.id, rawKey };
 }
 
 export async function revokeApiKey(
@@ -594,6 +602,7 @@ export async function deleteWorkspace(
   // ── Step 15: Delete Artifacts and private blobs ─────────────────────────────
   await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
   await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
+  await deleteWorkspaceAgentData(prisma, workspaceId);
 
   // ── Step 16: Delete WorkspaceMembers ────────────────────────────────────────
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });

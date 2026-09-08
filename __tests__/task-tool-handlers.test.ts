@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { runWithMcpActor } from "@/lib/mcp-authz"
 
 // --- Prisma mock setup -------------------------------------------------------
 
@@ -22,12 +23,16 @@ const mockTaskLink = {
   create: vi.fn(),
   delete: vi.fn(),
 }
-const mockOpportunity = { findUnique: vi.fn(), findMany: vi.fn() }
+const mockOpportunity = { findFirst: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() }
 const mockSolution = { findUnique: vi.fn(), findMany: vi.fn() }
 const mockRoadmapItem = { findUnique: vi.fn(), findMany: vi.fn() }
 const mockDoc = { findUnique: vi.fn(), findMany: vi.fn() }
 
 const mockPrisma = {
+  agent: { findUnique: vi.fn(), findMany: vi.fn() },
+  agentWorkspaceGrant: { findFirst: vi.fn(), findMany: vi.fn() },
+  workspaceMember: { findFirst: vi.fn() },
+  squad: { findFirst: vi.fn() },
   workspace: mockWorkspace,
   task: mockTask,
   taskLink: mockTaskLink,
@@ -67,7 +72,12 @@ function textOf(result: { content: { text: string }[] }) {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
+  mockPrisma.workspaceMember.findFirst.mockResolvedValue({ id: "member" })
+  mockPrisma.squad.findFirst.mockResolvedValue({ id: "squad" })
+  vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+  mockPrisma.agent.findUnique.mockResolvedValue({ id: "agent-1", status: "ACTIVE", ownerUserId: "owner" })
+  mockPrisma.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" })
   mockWorkspace.findUnique.mockResolvedValue({ id: WORKSPACE_ID })
   mockTask.findFirst.mockResolvedValue(null)
   mockTask.findUnique.mockResolvedValue({
@@ -95,7 +105,45 @@ beforeEach(() => {
     Promise.resolve({ id: TASK_ID, title: "Ship payments", status: data.status ?? "TODO", priority: data.priority ?? "MEDIUM" })
   )
   mockOpportunity.findUnique.mockResolvedValue({ id: OPP_ID, title: "Reduce churn" })
+  mockOpportunity.findFirst.mockResolvedValue({ id: OPP_ID, title: "Reduce churn" })
   mockOpportunity.findMany.mockResolvedValue([{ id: OPP_ID, title: "Reduce churn" }])
+})
+
+describe("typed task assignees", () => {
+  it("writes one agent assignee and clears the previous human atomically", async () => {
+    const result = await updateTask({ taskId: TASK_ID, assignee: { type: "AGENT", id: "agent-1" } })
+    expect(result.structuredContent.ok).toBe(true)
+    expect(mockTask.update.mock.calls[0][0].data).toMatchObject({ assigneeAgentId: "agent-1", assigneeUserId: null })
+  })
+  it("rejects both input styles before any write", async () => {
+    const result = await updateTask({ taskId: TASK_ID, assignee: null, assigneeUserId: null })
+    expect(textOf(result)).toContain("both")
+    expect(mockTask.update).not.toHaveBeenCalled()
+  })
+  it("uses the authenticated agent for assignedToMe, not its human owner", async () => {
+    mockTask.findMany.mockResolvedValue([])
+    await runWithMcpActor({ userId: "owner", purpose: "AGENT", agentId: "agent-1" }, () => listTasks({ workspaceId: WORKSPACE_ID, assignedToMe: true }))
+    expect(mockTask.findMany.mock.calls[0][0].where).toMatchObject({ assigneeAgentId: "agent-1" })
+    expect(mockTask.findMany.mock.calls[0][0].where.assigneeUserId).toBeUndefined()
+  })
+  it("uses a personal caller for assignedToMe", async () => {
+    mockTask.findMany.mockResolvedValue([])
+    await runWithMcpActor({ userId: "human", purpose: "USER" }, () => listTasks({ workspaceId: WORKSPACE_ID, assignedToMe: true }))
+    expect(mockTask.findMany.mock.calls[0][0].where).toMatchObject({ assigneeUserId: "human" })
+  })
+  it("rejects runtime and service identities for assignedToMe", async () => {
+    for (const actor of [{ userId: "owner", purpose: "AGENT_TURN" as const }, { userId: null, purpose: "SERVICE" as const }]) {
+      const result = await runWithMcpActor(actor, () => listTasks({ workspaceId: WORKSPACE_ID, assignedToMe: true }))
+      expect(textOf(result)).toContain("requires")
+    }
+    expect(mockTask.findMany).not.toHaveBeenCalled()
+  })
+  it("denies a link outside the task workspace", async () => {
+    mockOpportunity.findFirst.mockResolvedValue(null)
+    const result = await linkTask({ taskId: TASK_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID })
+    expect(textOf(result)).toContain("different workspace")
+    expect(mockTaskLink.create).not.toHaveBeenCalled()
+  })
 })
 
 // ─── createTask ───────────────────────────────────────────────────────────────

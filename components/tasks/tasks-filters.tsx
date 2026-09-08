@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FacetedFilterMenu } from "@/components/patterns/faceted-filter-menu";
 import type { MemberData, SquadData, TaskPriority } from "@/lib/types";
+import { assigneeValue, useTaskAssignees } from "./task-assignee-picker";
 
 const PRIORITIES: TaskPriority[] = ["URGENT", "HIGH", "MEDIUM", "LOW"];
 
@@ -15,6 +16,8 @@ export function TasksFilters({ squads, members }: TasksFiltersProps) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { options } = useTaskAssignees(members);
+  const selected = searchParams.get("assignee");
 
   function setFilter(key: "squad" | "assignee" | "priority", value: string | null) {
     const params = new URLSearchParams(searchParams.toString());
@@ -54,11 +57,11 @@ export function TasksFilters({ squads, members }: TasksFiltersProps) {
         {
           id: "assignee",
           label: "Assignee",
-          value: searchParams.get("assignee"),
+          value: selected && !selected.includes(":") ? `user:${selected}` : selected,
           onValueChange: (value) => setFilter("assignee", value),
-          options: members.map((member) => ({
-            value: member.userId,
-            label: member.name || member.email,
+          options: options.map((option) => ({
+            value: assigneeValue(option),
+            label: `${option.type === "AGENT" ? "Agent: " : ""}${option.displayName}`,
           })),
         },
         {

@@ -9,8 +9,10 @@ import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
-import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
-import { applyToolGate } from "@/lib/mcp-tool-gates"
+import { runWithMcpActor, getMcpActor } from "@/lib/mcp-authz"
+import { applyToolGate, AGENT_TOOL_POLICY } from "@/lib/mcp-tool-gates"
+import { agentWorkspaceWhere } from "@/lib/agent-access"
+import { withAgentActivity } from "@/lib/agent-activity"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import {
   createFeedback,
@@ -106,6 +108,7 @@ import {
   linkTask,
   unlinkTask,
   listTaskLinks,
+  listTaskAssignees,
 } from "@/lib/task-tool-handlers"
 import {
   createSquad,
@@ -164,10 +167,20 @@ const _handler = createMcpHandler(
       handler: (args: any, extra?: any) => any
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ) => (server.registerTool as (...a: any[]) => any)(name, meta, async (args: any, extra: any) => {
-      await applyToolGate(name, getMcpActor(), args ?? {})
-      return handler(args, extra)
+      const actor = { ...getMcpActor(), authorizedWorkspaceId: undefined }
+      return runWithMcpActor(actor, () => withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", () => applyToolGate(name, actor, args ?? {}), () => handler(args, extra)))
     })
 
+    register("get_current_identity", { title: "Current Identity", description: "Returns the authenticated caller and currently accessible workspaces.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, async () => {
+      const actor = getMcpActor()
+      const prisma = getPrisma()
+      const workspaces = await prisma.workspace.findMany({ where: await agentWorkspaceWhere(actor), select: { id: true, name: true, slug: true, organization: { select: { slug: true } } }, orderBy: { name: "asc" } })
+      const agent = actor.agentId ? await prisma.agent.findUnique({ where: { id: actor.agentId }, select: { id: true, name: true } }) : null
+      return ok("Current authenticated identity", { purpose: actor.purpose ?? "USER", userId: actor.userId, agent, workspaces })
+    })
+
+    const taskAssigneeSchema = z.object({ type: z.enum(["USER", "AGENT"]), id: z.string().uuid() })
+    register("list_task_assignees", { title: "List Task Assignees", description: "Lists eligible human and agent assignees in a workspace.", inputSchema: { workspaceId: z.string().uuid(), search: z.string().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listTaskAssignees)
     const commentTargetSchema = z.enum(["OBJECTIVE", "KEY_RESULT", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "EXPERIMENT", "ROADMAP_ITEM", "FEEDBACK_ITEM", "TASK", "DOC", "ARTIFACT", "RESEARCH_STUDY", "REVIEW_REQUEST"])
     register("add_comment", { title: "Add Comment", description: "Adds discussion to a supported Compass object. Comments never constitute a decision or authorization.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), parentId: z.string().uuid().optional(), body: z.string().min(1), authorName: z.string().min(1) }, outputSchema: TOOL_OUTPUT_SCHEMA }, addComment)
     register("list_comments", { title: "List Comments", description: "Lists shared comments for one supported object.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), status: z.enum(["OPEN", "RESOLVED"]).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listCommentsTool)
@@ -262,9 +275,7 @@ const _handler = createMcpHandler(
         const prisma = getPrisma()
         // Scope returned workspaces to the caller's memberships (service key
         // sees all). The gate already asserted org membership.
-        const workspaceFilter = isServiceActor(actor)
-          ? {}
-          : { members: { some: { userId: actor.userId! } } }
+        const workspaceFilter = await agentWorkspaceWhere(actor)
         const org = await prisma.organization.findUnique({
           where: { slug: orgSlug },
           select: {
@@ -2282,7 +2293,8 @@ const _handler = createMcpHandler(
           priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional().describe("Priority (default MEDIUM)"),
           squadId: z.string().uuid().optional().describe("Owning squad UUID"),
           parentTaskId: z.string().uuid().optional().describe("Parent task UUID, to create this as a Subtask"),
-          assigneeUserId: z.string().uuid().optional().describe("UUID of the assignee's WorkspaceMember userId"),
+          assigneeUserId: z.string().uuid().nullable().optional().describe("Legacy human assignee; do not combine with assignee"),
+          assignee: taskAssigneeSchema.nullable().optional(),
           ownerName: z.string().optional().describe("Freeform owner name for non-Compass stakeholders"),
           storyPoints: z.number().optional().describe("Story points estimate"),
           dueDate: z.string().optional().describe("Due date, ISO 8601"),
@@ -2319,7 +2331,9 @@ const _handler = createMcpHandler(
           status: z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE", "CANCELLED"]).optional().describe("Filter by status"),
           priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional().describe("Filter by priority"),
           squadId: z.string().uuid().optional().describe("Filter by owning squad"),
-          assigneeUserId: z.string().uuid().optional().describe("Filter by assignee"),
+          assigneeUserId: z.string().uuid().optional().describe("Legacy human assignee filter"),
+          assignee: taskAssigneeSchema.optional(),
+          assignedToMe: z.boolean().optional(),
           parentTaskId: z.string().uuid().nullable().optional().describe("Filter by parent task; pass null for top-level tasks/Epics only"),
           linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM"]).optional().describe("Filter to tasks linked to this object type (pair with linkedId)"),
           linkedId: z.string().uuid().optional().describe("UUID of the linked object (pair with linkedType)"),
@@ -2346,6 +2360,7 @@ const _handler = createMcpHandler(
           priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional().describe("New priority"),
           squadId: z.string().uuid().nullable().optional().describe("New owning squad, or null to clear"),
           assigneeUserId: z.string().uuid().nullable().optional().describe("New assignee userId, or null to clear"),
+          assignee: taskAssigneeSchema.nullable().optional(),
           ownerName: z.string().nullable().optional().describe("New freeform owner name, or null to clear"),
           storyPoints: z.number().nullable().optional().describe("New story points, or null to clear"),
           dueDate: z.string().nullable().optional().describe("New due date (ISO 8601), or null to clear"),
@@ -3212,6 +3227,8 @@ async function withMcpAuth(req: Request): Promise<Response> {
   return runWithMcpActor({
     userId: auth.userId,
     purpose: auth.purpose,
+    agentId: auth.agentId,
+    credentialId: auth.credentialId,
     scopeWorkspaceId: auth.scopeWorkspaceId,
   }, () => _handler(req))
 }

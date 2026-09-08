@@ -10,12 +10,13 @@
  *
  * MODEL.
  *   - The acting identity is an `McpActor = { userId: string | null }`.
- *   - `userId === null`  → the shared service key (MCP_API_KEY). Trusted,
+ *   - `purpose === SERVICE` → the shared service key (MCP_API_KEY). Trusted,
  *     GLOBAL access — every assert here is a no-op for it. Existing
  *     server-to-server automations depend on this and must keep working.
- *   - `userId !== null`  → a per-user `cmp_…` ApiKey. Scoped to the
+ *   - Other actors → a per-user `cmp_…` ApiKey. Scoped to the
  *     workspaces/orgs that user is a member of, mirroring the session-based
  *     gates in lib/permissions.ts (`resolveWorkspace*`/`resolveOrg*`).
+ *     Registered agents additionally require active workspace grants.
  *
  * PLUMBING. The actor is carried per-request via AsyncLocalStorage: the route
  * wraps `_handler(req)` in `runWithMcpActor(actor, …)` and handlers read it
@@ -34,10 +35,15 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import getPrisma from "@/lib/db"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
+import { agentWorkspaceWhere } from "@/lib/agent-access"
 
 export type McpActor = {
   userId: string | null
-  purpose?: "SERVICE" | "USER" | "RESEARCH"
+  purpose?: "SERVICE" | "USER" | "RESEARCH" | "AGENT" | "AGENT_TURN"
+  agentId?: string | null
+  credentialId?: string
+  requiredAgentAccess?: "READ" | "WRITE"
+  authorizedWorkspaceId?: string
   scopeWorkspaceId?: string | null
 }
 
@@ -68,7 +74,7 @@ export function getMcpActor(): McpActor {
   return actor
 }
 
-const isService = (actor: McpActor): boolean => actor.userId === null
+const isService = (actor: McpActor): boolean => actor.purpose === "SERVICE"
 
 /**
  * True for the shared service key (global/trusted). List tools that scope
@@ -84,7 +90,7 @@ export function isResearchActor(actor: McpActor): boolean {
 }
 
 function assertActorWorkspaceScope(actor: McpActor, workspaceId: string): void {
-  if (isResearchActor(actor) && actor.scopeWorkspaceId !== workspaceId) {
+  if ((isResearchActor(actor) || actor.purpose === "AGENT_TURN") && actor.scopeWorkspaceId !== workspaceId) {
     throw new McpAuthzError(`Workspace not found or access denied: ${workspaceId}`)
   }
 }
@@ -99,17 +105,19 @@ export async function assertWorkspaceMember(actor: McpActor, workspaceId: string
   assertActorWorkspaceScope(actor, workspaceId)
   const prisma = getPrisma()
   const ws = await prisma.workspace.findFirst({
-    where: { id: workspaceId, members: { some: { userId: actor.userId! } } },
+    where: { AND: [{ id: workspaceId }, await agentWorkspaceWhere(actor)] },
     select: { id: true },
   })
   if (!ws) {
     throw new McpAuthzError(`Workspace not found or access denied: ${workspaceId}`)
   }
+  actor.authorizedWorkspaceId = workspaceId
 }
 
 /** Assert the actor is a workspace ADMIN of `workspaceId`. */
 export async function assertWorkspaceAdmin(actor: McpActor, workspaceId: string): Promise<void> {
   if (isService(actor)) return
+  if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") throw new McpAuthzError("Human administrator required.")
   assertActorWorkspaceScope(actor, workspaceId)
   const prisma = getPrisma()
   const [member, orgMember] = await Promise.all([
@@ -148,6 +156,7 @@ export async function assertWorkspaceBySlug(
   if (!ws) {
     throw new McpAuthzError(`Workspace not found or access denied: ${orgSlug}/${workspaceSlug}`)
   }
+  await assertWorkspaceMember(actor, ws.id)
   return { workspaceId: ws.id }
 }
 
@@ -181,6 +190,7 @@ export async function assertOrgAdminBySlug(
   actor: McpActor,
   orgSlug: string
 ): Promise<{ organizationId: string }> {
+  if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") throw new McpAuthzError("Human administrator required.")
   const prisma = getPrisma()
   if (isService(actor)) {
     const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
@@ -331,13 +341,7 @@ export async function assertEntityAccess(
   }
   if (!isService(actor)) {
     assertActorWorkspaceScope(actor, workspaceId)
-    const ws = await prisma.workspace.findFirst({
-      where: { id: workspaceId, members: { some: { userId: actor.userId! } } },
-      select: { id: true },
-    })
-    if (!ws) {
-      throw new McpAuthzError(`${entityType} not found or access denied: ${entityId}`)
-    }
+    await assertWorkspaceMember(actor, workspaceId)
   }
   return { workspaceId }
 }
@@ -358,6 +362,12 @@ export async function assertScoringModelAccess(
   opts: { admin?: boolean } = {}
 ): Promise<{ organizationId: string }> {
   const prisma = getPrisma()
+  if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") {
+    if (opts.admin) throw new McpAuthzError("Human administrator required.")
+    const config = await prisma.workspaceScoringConfig.findFirst({ where: { scoringModelId, workspace: await agentWorkspaceWhere(actor) }, select: { workspaceId: true } })
+    if (!config) throw new McpAuthzError("Scoring model not found or access denied.")
+    await assertWorkspaceMember(actor, config.workspaceId)
+  }
   const model = await prisma.scoringModel.findUnique({
     where: { id: scoringModelId },
     select: { organizationId: true },

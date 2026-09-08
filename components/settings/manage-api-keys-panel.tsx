@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useTransition } from "react"
+import Link from "next/link"
 import { createApiKey, revokeApiKey } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions"
 import { ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -38,14 +39,10 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
         const result = await createApiKey(orgSlug, workspaceSlug, newName.trim())
         setNewKey(result.rawKey)
         setNewName("")
-        // Refresh key list — server action revalidated the path, but since this
-        // is a client component we just refetch by reloading the server-rendered data
-        // The page will re-render with fresh data from the server on next navigation.
-        // For now, add an optimistic stub so the list updates immediately.
         setKeys((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: result.id,
             name: newName.trim(),
             keyPrefix: result.rawKey.slice(4, 12),
             createdAt: new Date(),
@@ -78,6 +75,7 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
 
   return (
     <div className="flex flex-col gap-4">
+      <Link href="/settings/agents" className="text-sm underline">Manage agent identities and keys</Link>
       {/* New key form */}
       <div className="flex gap-2">
         <Input

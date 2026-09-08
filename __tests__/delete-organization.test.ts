@@ -59,6 +59,8 @@ const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 
 const mockPrisma = {
+  agentWorkspaceGrant: { deleteMany: vi.fn() },
+  agentToolCall: { deleteMany: vi.fn() },
   organization: mockOrganization,
   organizationMember: mockOrganizationMember,
   workspace: mockWorkspace,

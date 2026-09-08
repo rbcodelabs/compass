@@ -42,7 +42,7 @@ describe("Tasks dashboard workspace layout", () => {
 
     expect(page).toContain("workspaceId: workspace.id");
     expect(page).toContain("...(squadFilter ? { squadId: squadFilter } : {})");
-    expect(page).toContain("...(assigneeFilter ? { assigneeUserId: assigneeFilter } : {})");
+    expect(page).toContain("...parseAssigneeFilter(assigneeFilter)");
     expect(page).toContain("...(priorityFilter ? { priority: priorityFilter } : {})");
     expect(page).toContain("prisma.taskLink.findMany({ where: { taskId: { in: taskIds } }");
     expect(page).toContain("prisma.task.groupBy({");

@@ -56,7 +56,7 @@ export function TaskHeader({ task: initialTask, workspaceId, squads, members, re
   }
 
   const assigneeMember = task.assigneeUserId ? members.find((m) => m.userId === task.assigneeUserId) : null;
-  const assigneeLabel = assigneeMember?.name || assigneeMember?.email || task.ownerName || null;
+  const assigneeLabel = task.assignee ? `${task.assignee.type === "AGENT" ? "Agent: " : ""}${task.assignee.displayName}${task.assignee.available ? "" : " (unavailable)"}` : assigneeMember?.name || assigneeMember?.email || (task.assigneeUserId || task.assigneeAgentId ? "Unavailable assignee" : task.ownerName) || null;
   const dueLabel = formatDueDate(task.dueDate);
 
   return (
