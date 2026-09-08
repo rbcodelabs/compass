@@ -258,7 +258,7 @@ export function NativeTimeline(props: TimelineEngineProps) {
         stopDragPointerTracking();
       }}
     >
-      <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col gap-3 p-1 motion-reduce:[&_#unscheduled-items-panel_[data-slot=card]]:transition-none [&_#unscheduled-items-panel_.text-muted-foreground]:text-foreground [&_#unscheduled-items-panel_[data-slot=badge]]:border-border-interactive [&_#unscheduled-items-panel_[data-slot=badge]]:bg-white [&_#unscheduled-items-panel_[data-slot=badge]]:text-foreground">
+      <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col gap-3 p-1 motion-reduce:[&_#unscheduled-items-panel_[data-slot=card]]:transition-none [&_#unscheduled-items-panel_.text-muted-foreground]:text-foreground [&_#unscheduled-items-panel_[data-slot=badge]]:border-border-interactive [&_#unscheduled-items-panel_[data-slot=badge]]:bg-card [&_#unscheduled-items-panel_[data-slot=badge]]:text-foreground">
         <TimelineToolbar
           engineLabel="Compass native timeline"
           zoom={controller.zoom}
@@ -266,9 +266,9 @@ export function NativeTimeline(props: TimelineEngineProps) {
           onShift={controller.shiftViewport}
           onToday={controller.jumpToday}
         />
-        <div className="overflow-hidden rounded-xl border bg-white shadow-sm">
+        <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
           <div className="grid" style={{ gridTemplateColumns: `clamp(112px, 30vw, ${LABEL_WIDTH}px) minmax(0, 1fr)` }}>
-            <div className="border-r bg-white">
+            <div className="border-r bg-card">
               <div className="flex items-end border-b bg-muted/30 px-3 pb-2 text-xs font-semibold text-muted-foreground" style={{ height: HEADER_HEIGHT }}>
                 Horizon → Squad
               </div>
@@ -311,7 +311,7 @@ export function NativeTimeline(props: TimelineEngineProps) {
                   data-total-card-count={itemLayouts.length}
                   style={{
                     height: bodyHeight,
-                    backgroundImage: `repeating-linear-gradient(to right, transparent 0, transparent ${dayWidth - 1}px, rgb(226 232 240 / .6) ${dayWidth}px)`,
+                    backgroundImage: `repeating-linear-gradient(to right, transparent 0, transparent ${dayWidth - 1}px, color-mix(in oklab, var(--border) 60%, transparent) ${dayWidth}px)`,
                   }}
                 >
                   {rows.map((row) => (
@@ -415,7 +415,7 @@ function NativeHeaders({ start, end, width }: { start: CalendarDate; end: Calend
     return groups;
   }, new Map<string, { start: CalendarDate; end: CalendarDate; label: string }>()).values());
   return (
-    <div className="relative border-b bg-white" style={{ height: HEADER_HEIGHT }}>
+    <div className="relative border-b bg-card" style={{ height: HEADER_HEIGHT }}>
       {quarters.map((quarter) => (
         <div key={`q-${quarter.start}`} className="absolute top-0 flex h-8 items-center border-r bg-muted/30 px-2 text-xs font-semibold text-text-subtle" style={{ left: dateToPosition(quarter.start, start, end, width), width: Math.max(1, dateToPosition(quarter.end, start, end, width) - dateToPosition(quarter.start, start, end, width)) }}>
           {quarter.label}

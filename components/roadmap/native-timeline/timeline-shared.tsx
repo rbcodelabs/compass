@@ -42,7 +42,7 @@ export function TimelineToolbar({
   engineLabel: string;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white px-3 py-2 shadow-sm">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-3 py-2 shadow-sm">
       <div>
         <p className="text-sm font-semibold text-foreground">{engineLabel}</p>
         <p className="text-xs text-muted-foreground">Dates are inclusive</p>
@@ -188,17 +188,17 @@ function EditDatesForm({ item, open, disabled, start, end, onOpenChange, onSave 
         {disabled ? <p role="status" className="rounded-md bg-status-warning-surface p-2 text-sm text-status-warning">Reconciliation required. Reload this page before another edit.</p> : null}
         <label className="grid gap-1 text-xs font-medium">
           Horizon
-          <select disabled={disabled} className="h-11 rounded-lg border px-2 text-sm" value={draftHorizon} onChange={(event) => setDraftHorizon(event.target.value as Horizon)}>
+          <select disabled={disabled} className="h-11 rounded-lg border bg-card px-2 text-sm text-foreground" value={draftHorizon} onChange={(event) => setDraftHorizon(event.target.value as Horizon)}>
             {EDITABLE_HORIZONS.filter((horizon) => isInternalTimelineDestination(item.horizon, horizon)).map((horizon) => <option key={horizon} value={horizon}>{HORIZON_META[horizon].label}</option>)}
           </select>
         </label>
         <label className="grid gap-1 text-xs font-medium">
           Start
-          <input disabled={disabled} className="h-9 rounded-lg border px-2 text-sm" type="date" value={draftStart} onChange={(event) => setDraftStart(event.target.value)} />
+          <input disabled={disabled} className="h-9 rounded-lg border bg-card px-2 text-sm text-foreground" type="date" value={draftStart} onChange={(event) => setDraftStart(event.target.value)} />
         </label>
         <label className="grid gap-1 text-xs font-medium">
           End
-          <input disabled={disabled} className="h-9 rounded-lg border px-2 text-sm" type="date" min={draftStart} value={draftEnd} onChange={(event) => setDraftEnd(event.target.value)} />
+          <input disabled={disabled} className="h-9 rounded-lg border bg-card px-2 text-sm text-foreground" type="date" min={draftStart} value={draftEnd} onChange={(event) => setDraftEnd(event.target.value)} />
         </label>
         <DialogFooter showCloseButton>
           <Button
