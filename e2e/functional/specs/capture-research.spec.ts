@@ -1,5 +1,6 @@
 import { test, expect } from "../fixtures/index"
 import { awaitResearchReplyReceipt } from "../fixtures/research-reply-receipt"
+import { observeResearchReply } from "../fixtures/research-reply-observer"
 
 function voiceEventIdentity(evidenceMode: string | undefined, id: string, ordinal: number) {
   return evidenceMode === "PARTICIPANT_SUBMITTED" ? { clientEventId: id, reportedOrdinal: ordinal } : { providerEventId: id }
@@ -81,11 +82,11 @@ test.describe("Capture — research study", () => {
     await participant.getByLabel("Share screenshot or PDF").setInputFiles("e2e/fixtures/test-image.png")
     await expect(participant.getByText("test-image.png")).toBeVisible()
     await participant.getByRole("textbox", { name: "Your response" }).fill("I use a spreadsheet every Monday.")
-    const reply = participant.waitForResponse(response => new URL(response.url()).pathname === "/api/research/respond" && response.request().method() === "POST")
+    const observeReply = await observeResearchReply(participant)
     await participant.getByRole("button", { name: "Send" }).click()
     // Server work (including cold route compilation) and UI rendering have
     // separate gates. Neither a provisional delta nor HTTP 200 proves a save.
-    const receipt = await awaitResearchReplyReceipt(reply, diagnostic => {
+    const receipt = await awaitResearchReplyReceipt(observeReply(), diagnostic => {
       testInfo.annotations.push({ type: "research-reply-receipt", description: JSON.stringify(diagnostic) })
       console.info("[research reply receipt]", JSON.stringify(diagnostic))
     })
