@@ -8,19 +8,30 @@ import {
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])
 const pdf = new TextEncoder().encode("%PDF-1.7\ncontent")
 
+function heicBytes() {
+  const bytes = new Uint8Array(24)
+  new DataView(bytes.buffer).setUint32(0, 24)
+  bytes.set(new TextEncoder().encode("ftypheic"), 4)
+  bytes.set(new TextEncoder().encode("mif1heic"), 16)
+  return bytes
+}
+
 describe("research attachment validation", () => {
-  it("rejects missing MIME with an actionable browser message instead of trusting the extension", () => {
-    expect(() => validateResearchAttachmentUpload({ bytes: png, mimeType: "", originalName: "photo.heic" })).toThrow(/another browser/)
+  it("accepts a native HEIC file when the browser omits its MIME type", () => {
+    expect(validateResearchAttachmentUpload({ bytes: heicBytes(), mimeType: "", originalName: "photo.HEIC" }))
+      .toMatchObject({ extension: "heic", mimeType: "image/heic" })
+  })
+
+  it("rejects missing MIME unless both the filename and bounded signature identify HEIC", () => {
+    expect(() => validateResearchAttachmentUpload({ bytes: heicBytes(), mimeType: "", originalName: "photo.jpg" })).toThrow(/file type/)
+    expect(() => validateResearchAttachmentUpload({ bytes: png, mimeType: "", originalName: "photo.heic" })).toThrow(/file type/)
   })
   it.each(["GIF87a", "GIF89a"])("accepts the %s signature as a private GIF original", (signature) => {
     const bytes = new TextEncoder().encode(signature + "\u0001\u0000\u0001\u0000\u0000\u0000\u0000;")
     expect(validateResearchAttachmentUpload({ bytes, mimeType: "image/gif", originalName: "screen.gif" })).toMatchObject({ extension: "gif", mimeType: "image/gif" })
   })
   it("recognizes a bounded HEIC-specific ftyp brand, not generic HEIF or AVIF", () => {
-    const bytes = new Uint8Array(24)
-    new DataView(bytes.buffer).setUint32(0, 24)
-    bytes.set(new TextEncoder().encode("ftypheic"), 4)
-    bytes.set(new TextEncoder().encode("mif1heic"), 16)
+    const bytes = heicBytes()
     expect(validateResearchAttachmentUpload({ bytes, mimeType: "image/heic", originalName: "photo.heic" })).toMatchObject({ extension: "heic", mimeType: "image/heic" })
     for (const major of ["mif1", "avif", "isom"]) {
       const wrong = bytes.slice(); wrong.set(new TextEncoder().encode(major), 8); wrong.set(new TextEncoder().encode("mif1avif"), 16)

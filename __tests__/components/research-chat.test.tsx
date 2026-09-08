@@ -11,12 +11,26 @@ function savedReply(message: string) {
 }
 
 describe("ResearchChat", () => {
-  it("explains how to recover when a browser supplies no HEIC MIME type", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ sessionId: "session-1", resumeToken: "secret", status: "IN_PROGRESS", turns: [] })))
+  it("uploads a native HEIC file when the browser supplies no MIME type", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:pending")
+    URL.revokeObjectURL = vi.fn()
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ sessionId: "session-1", resumeToken: "secret", status: "IN_PROGRESS", turns: [] }))
+      .mockResolvedValueOnce(Response.json({ id: "attachment-1", originalName: "photo.heic", mimeType: "image/heic", sizeBytes: 3 })))
     render(<ResearchChat token="study-token" />)
     fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
     await screen.findByRole("textbox", { name: "Your response" })
     fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), { target: { files: [new File(["abc"], "photo.heic")] } })
+    expect(await screen.findByRole("link", { name: "photo.heic" })).toBeVisible()
+    expect(fetch).toHaveBeenCalledWith("/api/research/attachments", expect.objectContaining({ method: "POST" }))
+  })
+
+  it("rejects other files when the browser supplies no MIME type", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ sessionId: "session-1", resumeToken: "secret", status: "IN_PROGRESS", turns: [] })))
+    render(<ResearchChat token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start interview" }))
+    await screen.findByRole("textbox", { name: "Your response" })
+    fireEvent.change(screen.getByLabelText("Share screenshot or PDF"), { target: { files: [new File(["abc"], "photo.png")] } })
     expect(await screen.findByRole("alert")).toHaveTextContent(/another browser/)
     expect(fetch).toHaveBeenCalledTimes(1)
   })
