@@ -17,14 +17,15 @@ function heicBytes() {
 }
 
 describe("research attachment validation", () => {
-  it.each(["", "application/octet-stream"])("accepts a native HEIC file when transport supplies MIME %j", (mimeType) => {
+  it.each(["", "application/octet-stream", "application/x-heic", "text/plain"])("accepts and normalizes HEIC when transport supplies MIME %j", (mimeType) => {
     expect(validateResearchAttachmentUpload({ bytes: heicBytes(), mimeType, originalName: "photo.HEIC" }))
       .toMatchObject({ extension: "heic", mimeType: "image/heic" })
   })
 
-  it.each(["", "application/octet-stream"])("rejects MIME %j unless both the filename and bounded signature identify HEIC", (mimeType) => {
-    expect(() => validateResearchAttachmentUpload({ bytes: heicBytes(), mimeType, originalName: "photo.jpg" })).toThrow(/file type|signature/)
-    expect(() => validateResearchAttachmentUpload({ bytes: png, mimeType, originalName: "photo.heic" })).toThrow(/file type|signature/)
+  it("requires HEIC filename and bounded signature to agree regardless of supplied MIME", () => {
+    expect(() => validateResearchAttachmentUpload({ bytes: heicBytes(), mimeType: "image/heic", originalName: "photo.jpg" })).toThrow(/type|signature/)
+    expect(() => validateResearchAttachmentUpload({ bytes: png, mimeType: "image/png", originalName: "photo.heic" })).toThrow(/type|signature/)
+    expect(() => validateResearchAttachmentUpload({ bytes: new TextEncoder().encode("plain text"), mimeType: "text/plain", originalName: "photo.heic" })).toThrow(/type|signature/)
   })
   it.each(["GIF87a", "GIF89a"])("accepts the %s signature as a private GIF original", (signature) => {
     const bytes = new TextEncoder().encode(signature + "\u0001\u0000\u0001\u0000\u0000\u0000\u0000;")

@@ -11,7 +11,7 @@ function savedReply(message: string) {
 }
 
 describe("ResearchChat", () => {
-  it.each(["", "application/octet-stream"])("uploads a native HEIC file when the browser supplies MIME %j", async (mimeType) => {
+  it.each(["", "application/octet-stream", "application/x-heic", "text/plain"])("uploads a native HEIC file when the browser supplies MIME %j", async (mimeType) => {
     URL.createObjectURL = vi.fn(() => "blob:pending")
     URL.revokeObjectURL = vi.fn()
     vi.stubGlobal("fetch", vi.fn()

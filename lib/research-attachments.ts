@@ -68,13 +68,14 @@ export function validateResearchAttachmentUpload({
   }
   const detected = detectedType(bytes)
   const providedMimeType = mimeType.toLowerCase()
-  const unspecifiedMimeType = !providedMimeType || providedMimeType === "application/octet-stream"
-  const nativeHeicWithoutSpecificMime = unspecifiedMimeType && /\.heic$/i.test(name) && detected?.extension === "heic"
-  if (unspecifiedMimeType && !nativeHeicWithoutSpecificMime) {
+  const heicFilename = /\.heic$/i.test(name)
+  if ((heicFilename || detected?.extension === "heic") && (!heicFilename || detected?.extension !== "heic")) {
+    throw new Error("Attachment type or signature is not supported")
+  }
+  if (!providedMimeType && !heicFilename) {
     throw new Error("This browser did not identify the file type. Try another browser or share a PNG, JPEG or PDF instead.")
   }
-  const normalizedMimeType = nativeHeicWithoutSpecificMime ? "image/heic" : providedMimeType
-  if (!detected || !MIME_BY_EXTENSION[detected.extension].includes(normalizedMimeType)) {
+  if (!detected || (!heicFilename && !MIME_BY_EXTENSION[detected.extension].includes(providedMimeType))) {
     throw new Error("Attachment type or signature is not supported")
   }
   return {
