@@ -80,6 +80,9 @@ describe("research study actions", () => {
     expect(runResearchInterviewAgent).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringContaining("Return only a JSON array of 5 to 8"),
     }))
+    const prompt = runResearchInterviewAgent.mock.calls[0][0].prompt
+    expect(prompt).toContain("edge cases")
+    expect(prompt).toContain("Do not invent product capabilities")
   })
 
   it("generates neutral editable customer-interview questions without requiring a product URL", async () => {
@@ -100,6 +103,9 @@ describe("research study actions", () => {
     expect(runResearchInterviewAgent).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringContaining("customer discovery interview"),
     }))
+    const prompt = runResearchInterviewAgent.mock.calls[0][0].prompt
+    expect(prompt).toContain("workarounds")
+    expect(prompt).toContain("ideal experience")
   })
 
   it("rejects duplicate generated guide items", async () => {
@@ -246,6 +252,15 @@ describe("research study actions", () => {
         guide: JSON.stringify([{ id: "1", text: "Updated question" }]),
       }),
     })
+  })
+
+  it("preserves an existing guided type when an update form omits that field", async () => {
+    researchStudy.findFirst.mockResolvedValue({ id: "study-1", status: "ACTIVE", studyType: "USABILITY_TEST", goal: "Old goal", guide: '[{"id":"1","text":"Old task"}]', targetMinutes: 15, appUrl: "https://example.com/product", _count: { sessions: 0 } })
+    const data = form()
+    data.set("appUrl", "https://example.com/product")
+    await updateResearchStudy("acme", "product", "study-1", data)
+    expect(researchStudy.update.mock.calls[0][0].data).not.toMatchObject({ studyType: "CUSTOMER_INTERVIEW" })
+    expect(researchStudy.update.mock.calls[0][0].data.appUrl).toBe("https://example.com/product")
   })
 
   it("locks protocol fields after the first session while allowing the name to change", async () => {

@@ -284,6 +284,32 @@ For files larger than the 3 MiB inline aggregate limit, use the two-step direct 
 
 The receipt expires after ten minutes and is scoped to the workspace, prepared attachment ID, pathname, MIME type, and byte size. Compass verifies the receipt, configured Blob store, and Blob metadata before creating the attachment row. The prepared ID makes concurrent completion idempotent; an ID already committed to another feedback item is rejected. Each feedback item accepts at most five attachments, enforced transactionally.
 
+### Research studies
+
+Research tools use the same validation, protocol-locking and link transactions as Capture. Per-user API keys require workspace membership; the existing trusted service key retains its service-account semantics. Participant research credentials cannot invoke any MCP tool. Research Capture must be enabled in the target environment; these tools do not enable it or voice.
+
+| Tool | Description |
+|---|---|
+| `generate_research_guide` | Draft 5–8 editable questions or usability tasks from a goal, study type and duration; does not create a study |
+| `create_research_study` | Create an active study with a reviewed guide and return its new participant link once |
+| `list_research_studies` | Page through study settings and session counts in one workspace; no transcripts or participant identities |
+| `get_research_study` | Read one study’s settings, guide and session count in its declared workspace |
+| `update_research_study` | Update the name and supplied settings; omitted protocol fields are preserved, and protocol changes are locked after the first session |
+| `activate_research_study` | Activate a draft or closed study and return a fresh participant link once |
+| `close_research_study` | Close an active study and revoke PRIMARY participant links |
+| `archive_research_study` | Archive a study and revoke PRIMARY links without deleting its research |
+| `issue_research_link` | Issue a link only when the active study has no live PRIMARY link |
+| `rotate_research_link` | Explicitly revoke prior PRIMARY links and return one new link for an active study |
+| `revoke_research_links` | Revoke PRIMARY links without generating a replacement |
+
+All tools require `workspaceId`; single-study operations also require `studyId`. Create requires `name`, `goal` and `guide`; update requires `name`, with optional protocol fields. Study types are `CUSTOMER_INTERVIEW` and `USABILITY_TEST`; supported durations are 10, 15, 20 and 30 minutes. Guided studies require a valid public HTTPS product URL. Guides allow 1–20 items, at most 1,000 characters each and 10,000 total; generated guides must be reviewed before creation.
+
+List results use `{items, count, nextCursor}` with a default page size of 20 and maximum of 100, ordered newest first by creation time and ID. Pass `nextCursor` unchanged with the same workspace and status filter. Archived studies are excluded by default; request `status: "ARCHIVED"` to inspect them. Cursors do not authorize access and are rejected when malformed or reused with different scope. Concurrent edits may change metadata between pages; this is not a point-in-time export.
+
+Successful mutation text includes `ID: <uuid>` on its own line and structured output contains the same ID. Newly issued links appear as `participantUrl` only in that operation’s response: store them securely. Only hashes are persisted. Neither get nor list can recover a link, expose its hash, return private attachment paths, or read participant transcripts. A lost response to a link mutation is ambiguous: inspect study state and use explicit rotation if a replacement is needed, rather than assuming the mutation failed.
+
+Guide generation uses a tool-free runtime with a 45-second work deadline and bounded cleanup inside the existing MCP request budget. A timeout does not create a study. These tools do not expose research-session analysis or change model/voice rollout flags.
+
 ### Evidence
 
 | Tool | Description |

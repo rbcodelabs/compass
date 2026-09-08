@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient, PreviewAutomationRun } from "@prisma/client";
 import type { PreviewGrant } from "./grants";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
+import { deleteParticipantVoiceEvidenceIfPresent } from "@/lib/research-participant-voice-cleanup";
 
 export { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "./cookies";
 /** Revoke first. Retain the registry tombstone so failures can safely retry exact ownership. */
@@ -34,6 +35,7 @@ export async function cleanupPreviewRun(prisma: PrismaClient, runId: string, dep
     await prisma.agentConversation.deleteMany({ where: { workspaceId } });
     await prisma.agentAuditLog.deleteMany({ where: { workspaceId } });
     await prisma.researchVoiceEvent.deleteMany({ where: { session: { study: { workspaceId } } } });
+    await deleteParticipantVoiceEvidenceIfPresent(prisma, workspaceId);
     await prisma.researchRequest.deleteMany({ where: { session: { study: { workspaceId } } } });
     await prisma.researchTurn.deleteMany({ where: { session: { study: { workspaceId } } } });
     await prisma.researchSession.deleteMany({ where: { study: { workspaceId } } });

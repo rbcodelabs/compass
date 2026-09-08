@@ -2,7 +2,7 @@ import type { PoolClient } from "pg"
 
 type Column = { table: string; name: string; type: string; nullable: boolean; default: string | null; added: boolean }
 type Index = { name: string; table: string; columns: string[]; unique: boolean }
-type Expected = { tables: string[]; columns: Column[]; indexes: Index[] }
+type Expected = { tables: string[]; columns: Column[]; indexes: Index[]; migrationName?: string }
 type Actual = {
   tables: string[]
   columns: Column[]
@@ -12,12 +12,12 @@ type Actual = {
 const normalizeDefault = (value: string | null) => value?.replace(/::(?:character varying|text|integer)\b/g, "").replace(/^\((.*)\)$/, "$1").trim() ?? null
 const normalizeType = (value: string) => value.toLowerCase().replace(/^varchar/, "character varying").replace(/^timestamptz$/, "timestamp with time zone")
 
-// Deliberately accepts only the checked-in 047 grammar, not arbitrary SQL.
-export function voiceMigrationCatalog(sql: string): Expected {
-  const expected: Expected = { tables: [], columns: [], indexes: [] }
+// Deliberately accepts only the checked-in voice migration grammar, not arbitrary SQL.
+export function voiceMigrationCatalog(sql: string, migrationName = "047"): Expected {
+  const expected: Expected = { tables: [], columns: [], indexes: [], migrationName }
   const parseColumn = (table: string, declaration: string, added: boolean) => {
     const match = declaration.trim().match(/^(\w+)\s+(UUID|INTEGER|TEXT|TIMESTAMPTZ|VARCHAR\(\d+\))(.*)$/i)
-    if (!match) throw new Error("Migration 047 unsupported column declaration")
+    if (!match) throw new Error(`Migration ${migrationName} unsupported column declaration`)
     expected.columns.push({ table, name: match[1], type: normalizeType(match[2]), nullable: !/NOT NULL|PRIMARY KEY/i.test(match[3]), default: normalizeDefault(match[3].match(/DEFAULT\s+(.+)$/i)?.[1] ?? null), added })
   }
   for (const statement of sql.replace(/--[^\n]*/g, "").split(";").map((part) => part.trim()).filter(Boolean)) {
@@ -29,16 +29,16 @@ export function voiceMigrationCatalog(sql: string): Expected {
     else if (column) parseColumn(column[1], column[2], true)
     else if (defaultValue) {
       const target = expected.columns.find((item) => item.table === defaultValue[1] && item.name === defaultValue[2])
-      if (!target) throw new Error("Migration 047 unsupported default declaration")
+      if (!target) throw new Error(`Migration ${migrationName} unsupported default declaration`)
       target.default = "0"
     } else if (index) expected.indexes.push({ name: index[2], table: index[3], columns: index[4].split(/,\s*/), unique: Boolean(index[1]) })
-    else throw new Error("Migration 047 unsupported DDL")
+    else throw new Error(`Migration ${migrationName} unsupported DDL`)
   }
   return expected
 }
 
 export function validateVoiceMigrationCatalog(expected: Expected, actual: Actual, complete: boolean) {
-  const fail = (object: string): never => { throw new Error(`Migration 047 catalog mismatch: ${object}`) }
+  const fail = (object: string): never => { throw new Error(`Migration ${expected.migrationName ?? "047"} catalog mismatch: ${object}`) }
   for (const table of expected.tables) {
     if (!actual.tables.includes(table)) { if (complete) fail(table); continue }
     const key = actual.primaryKeys.filter((item) => item.table === table)
@@ -77,7 +77,7 @@ export async function inspectVoiceMigrationCatalog(client: PoolClient, schema: s
       ARRAY(SELECT a.attname::text FROM unnest(i.indkey) WITH ORDINALITY k(attnum, ordinal) JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum WHERE k.ordinal<=i.indnkeyatts ORDER BY k.ordinal) AS columns
       FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=$1 AND t.relname=ANY($2::text[]) AND i.indisprimary`, [schema, expected.tables]),
   ])
-  if (relations.rows.some((row) => row.kind !== "r")) throw new Error("Migration 047 expected ordinary tables")
+  if (relations.rows.some((row) => row.kind !== "r")) throw new Error(`Migration ${expected.migrationName ?? "047"} expected ordinary tables`)
   const actual = { tables: relations.rows.map((row) => row.name), columns: columns.rows, indexes: indexes.rows, primaryKeys: primaryKeys.rows }
   validateVoiceMigrationCatalog(expected, actual, complete)
   return actual

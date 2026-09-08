@@ -6,7 +6,7 @@ export const MAX_RESEARCH_ATTACHMENT_BYTES_PER_SESSION = 50 * 1024 * 1024
 
 type ApprovedAttachment = {
   kind: "SCREENSHOT" | "DOCUMENT"
-  extension: "png" | "jpg" | "webp" | "pdf"
+  extension: "png" | "jpg" | "webp" | "gif" | "heic" | "pdf"
 }
 
 function startsWith(bytes: Uint8Array, signature: number[]) {
@@ -14,6 +14,20 @@ function startsWith(bytes: Uint8Array, signature: number[]) {
 }
 
 function detectedType(bytes: Uint8Array): ApprovedAttachment | null {
+  const header = String.fromCharCode(...bytes.slice(0, 6))
+  if ((header === "GIF87a" || header === "GIF89a") && bytes.length >= 14 &&
+    (bytes[6] || bytes[7]) && (bytes[8] || bytes[9]) && bytes.at(-1) === 0x3b) return { kind: "SCREENSHOT", extension: "gif" }
+  if (bytes.length >= 16 && String.fromCharCode(...bytes.slice(4, 8)) === "ftyp") {
+    const boxSize = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0)
+    // Recognize bounded still-image HEIC brands, never generic HEIF/AVIF/video.
+    // This is a container signature check, not a decoder or validity guarantee.
+    if (boxSize >= 16 && boxSize <= Math.min(bytes.length, 4096) && boxSize % 4 === 0) {
+      const brands = [String.fromCharCode(...bytes.slice(8, 12))]
+      for (let offset = 16; offset < boxSize; offset += 4) brands.push(String.fromCharCode(...bytes.slice(offset, offset + 4)))
+      if (["heic", "heix", "mif1"].includes(brands[0]) && brands.some((brand) => brand === "heic" || brand === "heix")) return { kind: "SCREENSHOT", extension: "heic" }
+    }
+    return null
+  }
   if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
     return { kind: "SCREENSHOT", extension: "png" }
   }
@@ -32,6 +46,8 @@ const MIME_BY_EXTENSION: Record<ApprovedAttachment["extension"], string[]> = {
   png: ["image/png"],
   jpg: ["image/jpeg"],
   webp: ["image/webp"],
+  gif: ["image/gif"],
+  heic: ["image/heic"],
   pdf: ["application/pdf"],
 }
 
@@ -51,7 +67,15 @@ export function validateResearchAttachmentUpload({
     throw new Error("Attachment filename is invalid")
   }
   const detected = detectedType(bytes)
-  if (!detected || !MIME_BY_EXTENSION[detected.extension].includes(mimeType.toLowerCase())) {
+  const providedMimeType = mimeType.toLowerCase()
+  const heicFilename = /\.heic$/i.test(name)
+  if ((heicFilename || detected?.extension === "heic") && (!heicFilename || detected?.extension !== "heic")) {
+    throw new Error("Attachment type or signature is not supported")
+  }
+  if (!providedMimeType && !heicFilename) {
+    throw new Error("This browser did not identify the file type. Try another browser or share a PNG, JPEG or PDF instead.")
+  }
+  if (!detected || (!heicFilename && !MIME_BY_EXTENSION[detected.extension].includes(providedMimeType))) {
     throw new Error("Attachment type or signature is not supported")
   }
   return {

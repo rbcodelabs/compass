@@ -484,7 +484,12 @@ describe("canonical research persistence", () => {
       .toBeGreaterThanOrEqual(RESEARCH_REQUEST_LEASE_MS)
   })
 
-  it("atomically links authorized READY attachments to the answer and sends private bytes to the tool-free model", async () => {
+  it.each([
+    { answer: "This screen confused me.", mimeType: "image/png" },
+    { answer: "", mimeType: "image/png" },
+    { answer: "", mimeType: "image/gif" },
+    { answer: "", mimeType: "image/heic" },
+  ])("atomically links authorized evidence and sends only supported model bytes %j", async ({ answer, mimeType }) => {
     const fixture = context()
     const now = new Date()
     fixture.prisma.researchSession.findFirst.mockResolvedValue({
@@ -499,14 +504,14 @@ describe("canonical research persistence", () => {
       .mockResolvedValueOnce({ nextSequence: 1 })
     fixture.prisma.researchTurn.findMany.mockResolvedValue([{ id: "participant-turn", role: "PARTICIPANT", content: "This screen confused me.", sequence: 0 }])
     const attachmentId = "00000000-0000-4000-8000-000000000001"
-    const attachment = { id: attachmentId, status: "READY", turnId: null, workspaceId: "workspace-1", studyId: "study-1", sessionId: "session-1", blobPathname: "private/path", originalName: "screen.png", mimeType: "image/png", sizeBytes: 3 }
+    const attachment = { id: attachmentId, status: "READY", turnId: null, workspaceId: "workspace-1", studyId: "study-1", sessionId: "session-1", blobPathname: "private/path", originalName: "evidence", mimeType, sizeBytes: 3 }
     fixture.prisma.researchAttachment.findMany.mockResolvedValue([attachment])
     const loadAttachmentBytes = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]))
     const runAgent = vi.fn().mockResolvedValue("What did you expect to happen?")
 
     await respondToResearchSession({
       context: fixture.value, sessionId: "session-1", resumeToken: "resume-secret",
-      idempotencyKey: "clientturnid0001", answer: "This screen confused me.", baseUrl: "https://compass.test",
+      idempotencyKey: "clientturnid0001", answer, baseUrl: "https://compass.test",
       attachmentIds: [attachmentId], loadAttachmentBytes, runAgent,
     })
 
@@ -514,8 +519,31 @@ describe("canonical research persistence", () => {
       where: { id: { in: [attachmentId] }, sessionId: "session-1", status: "READY", turnId: null },
       data: { turnId: expect.any(String) },
     })
-    expect(runAgent).toHaveBeenCalledWith(expect.objectContaining({ attachments: [{ mimeType: "image/png", originalName: "screen.png", bytes: expect.any(Uint8Array) }] }))
+    if (mimeType === "image/heic") {
+      expect(loadAttachmentBytes).not.toHaveBeenCalled()
+      expect(runAgent).toHaveBeenCalledWith(expect.objectContaining({ attachments: [], prompt: expect.stringContaining("not sent") }))
+    } else expect(runAgent).toHaveBeenCalledWith(expect.objectContaining({ attachments: [{ mimeType, originalName: "evidence", bytes: expect.any(Uint8Array) }] }))
     expect(runAgent.mock.calls[0][0]).not.toHaveProperty("blobPathname")
+  })
+
+  it("resumes saved evidence metadata without exposing private storage paths", async () => {
+    const fixture = context()
+    const now = new Date()
+    fixture.prisma.researchSession.findFirst.mockResolvedValue({
+      id: "session-1", modality: "CHAT", status: "IN_PROGRESS", startedAt: now,
+      turns: [{ id: "turn-1", role: "PARTICIPANT", content: "", sequence: 0 }],
+    })
+    fixture.prisma.researchAttachment.findMany.mockResolvedValue([{
+      id: "attachment-1", turnId: "turn-1", originalName: "screen.png", mimeType: "image/png", sizeBytes: 3,
+      blobPathname: "private/never-public", sha256: "internal-hash",
+    }])
+    const result = await startOrResumeResearchSession(fixture.value, { sessionId: "session-1", resumeToken: "resume-secret" })
+    expect(result.turns[0]).toMatchObject({ attachments: [{ id: "attachment-1", originalName: "screen.png", mimeType: "image/png", sizeBytes: 3 }] })
+    expect(JSON.stringify(result)).not.toContain("private/never-public")
+    expect(JSON.stringify(result)).not.toContain("internal-hash")
+    expect(fixture.prisma.researchAttachment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ workspaceId: "workspace-1", studyId: "study-1", sessionId: "session-1", status: "READY", deletedAt: null }),
+    }))
   })
 
   it("replays a completed idempotent request without invoking the agent", async () => {

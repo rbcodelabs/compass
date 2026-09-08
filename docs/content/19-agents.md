@@ -46,6 +46,9 @@ rejoining requires an administrator to grant access again.
 Agents can add comments and plans, but cannot rewrite existing comments. Append
 a correction instead; this preserves the original author's attribution.
 
+Research study and participant-link tools currently require a human or service
+key; registered-agent and built-in assistant keys cannot call them.
+
 ![Workspace agent access](/screenshots/docs/workspace-agents-desktop.png)
 
 ## Assign a task

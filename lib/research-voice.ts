@@ -8,8 +8,10 @@ import {
 import { deserializeResearchGuide } from "@/lib/research"
 import {
   isResearchDiscoveryVoiceEnabled,
-  isResearchLegacyVoiceHarnessEnabled,
+  isResearchBrowserVoiceEnabled,
+  isResearchParticipantVoiceEnabled,
 } from "@/lib/research-feature"
+import { claimParticipantVoiceLease, releaseParticipantVoiceLease } from "@/lib/research-participant-voice"
 
 const VOICE_LEASE_BUFFER_MS = 5 * 60 * 1000
 const MAX_VOICE_EVENT_CHARS = 4_000
@@ -99,7 +101,7 @@ ${persisted || "No finalized prior turns."}`
 }
 
 function assertVoiceStudy(study: ResearchStudy) {
-  if (!isResearchLegacyVoiceHarnessEnabled()) {
+  if (!isResearchParticipantVoiceEnabled()) {
     throw new ResearchVoiceError("Voice is not available for this study", 409)
   }
   if (study.studyType === "CUSTOMER_INTERVIEW") return
@@ -125,6 +127,16 @@ export async function createResearchVoiceLease({
   resumeToken: string
 }) {
   assertVoiceLeaseAllowed(context.study)
+  if (isResearchBrowserVoiceEnabled()) {
+    const guide = deserializeResearchGuide(context.study.guide)
+    if (!guide.length) throw new ResearchVoiceError("Study guide is unavailable", 409)
+    const lease = await claimParticipantVoiceLease({ context, sessionId, resumeToken })
+    return { leaseId: lease.leaseId, expiresAt: lease.expiresAt,
+      instructions: context.study.studyType === "CUSTOMER_INTERVIEW"
+        ? buildCustomerInterviewVoiceInstructions({ studyName: context.study.name, goal: context.study.goal, questions: guide.map((item) => item.text), targetMinutes: context.study.targetMinutes, transcript: lease.turns })
+        : buildGuidedUxVoiceInstructions({ studyName: context.study.name, goal: context.study.goal, tasks: guide.map((item) => item.text), targetMinutes: context.study.targetMinutes, appUrl: context.study.appUrl as string, transcript: lease.turns }),
+    }
+  }
   const session = await context.prisma.researchSession.findFirst({
     where: {
       id: sessionId,
@@ -328,6 +340,7 @@ export async function releaseResearchVoiceLease({
   leaseId: string
 }) {
   assertVoiceLeaseAllowed(context.study)
+  if (isResearchBrowserVoiceEnabled()) return releaseParticipantVoiceLease({ context, sessionId, resumeToken, leaseId })
   const now = new Date()
   const result = await context.prisma.researchSession.updateMany({
     where: {
