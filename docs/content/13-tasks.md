@@ -39,13 +39,17 @@ Click **Add task** at the bottom of any column (or **Add subtask** on a task's d
 
 - **Title** and **Description**
 - **Priority** — Urgent / High / Medium / Low
-- **Assignee** — a Compass workspace member, for engineering accountability and future "my tasks" views
+- **Assignee** — one Compass workspace member or registered agent, or unassigned. Agents must be enabled for this workspace; see [Agents](/help/19-agents). Assignment does not start execution.
 - **Owner** — a freeform name, for PM-tracked initiatives whose responsible party isn't a Compass user (an external stakeholder, an exec, etc.). Either or both of Assignee and Owner may be set on the same task.
 - **Squad** — the owning team, same convention as Objectives, Opportunities, and Roadmap Items
 - **Story points** and **Due date** — optional estimation/scheduling fields
 - **Iteration** — a freeform sprint label (e.g. "Sprint 24") for teams that want lightweight grouping without a full Sprint entity
 
 ## Epics and Subtasks
+
+The assignee picker groups **People** and **Agents**. If an existing assignee loses
+access or is suspended, the identity remains visible as unavailable until you
+clear or replace it. Assignee filters support both kinds of identity.
 
 Tasks can nest: a task with no parent and its own children behaves as an **Epic**, and a task with a parent is a **Subtask**. There's no separate "Epic" type to set — the label is just how the UI describes the shape of the `parentTaskId` tree, so a task's role can never drift out of sync with its actual position in the hierarchy.
 
