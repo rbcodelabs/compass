@@ -52,6 +52,8 @@ The `rbcodelabs/compass` workspace uses the **Compass native timeline** by defau
 
 The native chart groups items by horizon and squad, with separate tracks for overlapping bars. Use **Month** or **Quarter** to change the visible planning range, **Previous / Next** to navigate, and **Today** to return to the current period. Scroll horizontally to reach dates outside the visible area.
 
+The native timeline follows your workspace's Light, Dark, or System appearance preference, including its calendar, squad labels, backlog, and date editor. Horizon colors remain consistent across themes.
+
 Drag the **dotted move handle** just inside a bar's left edge to move its dates. Slim grips on the **left and right borders** resize the start and end dates; their invisible hit areas are wider than the visible grips and stay separate from the move handle. The compact controls leave more room for the title, which opens the item's details when clicked. Narrow bars hide status and overlap badges to prioritize the title; both remain available to screen readers, and delivery status is also shown in the item's details.
 
 Keyboard controls and an **Edit dates** dialog offer alternatives to dragging: focus the move handle and use **Alt + Left/Right** to shift dates, or **D** to open the date dialog; use **Left/Right** on either resize grip to adjust that edge. Narrow bars keep the dialog when there is not enough space for separate controls. Dates are inclusive, and changes save immediately. Items without dates use placeholder dates until scheduled. Launching and Launched items are display-only in this chart; use the existing launch workflow to manage them.

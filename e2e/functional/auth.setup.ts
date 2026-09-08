@@ -27,7 +27,10 @@ setup("authenticate as dev user", async ({ page }) => {
 
   // Wait for the browser to navigate away from /login
   await page.waitForURL((url) => !url.pathname.startsWith("/login"), {
-    timeout: 30_000,
+    // The first authenticated navigation cold-compiles /dashboard in Next dev.
+    // Keep this below the functional project's 90s test budget without imposing
+    // the shorter Playwright navigation default on a valid local cold start.
+    timeout: 60_000,
   });
 
   // Explicitly navigate to the e2e workspace to verify the session is valid

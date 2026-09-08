@@ -46,6 +46,7 @@ import {
 import { SendCompassFeedbackDialog } from "@/components/feedback/send-compass-feedback-dialog"
 import { signOutAction } from "@/lib/actions/auth-actions"
 import { getWorkspaceSwitchPath } from "@/lib/workspace-nav"
+import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
 
 interface SidebarProps {
   orgSlug: string
@@ -215,6 +216,11 @@ export function Sidebar({
       <SidebarContent>
         <SidebarGroup className="py-3">
           <SidebarGroupContent>
+            <SidebarMenu className="mb-2">
+              <SidebarMenuItem>
+                <WorkspaceSearchPalette orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
+              </SidebarMenuItem>
+            </SidebarMenu>
             <nav aria-label="Main navigation">
               <SidebarMenu className="gap-0.5">
               {navItems.map(({ label, path, Icon }) => {

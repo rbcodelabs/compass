@@ -69,6 +69,67 @@ test.describe("Native timeline limited rollout", () => {
     } finally { await pool.end(); }
   });
 
+  for (const theme of ["dark", "light"] as const) {
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+      test(`native timeline ${theme} appearance at ${viewport.width}px`, async ({ page }) => {
+        await page.setViewportSize(viewport);
+        await page.addInitScript((value) => localStorage.setItem("compass-theme", value), theme);
+        await page.goto(`${nativeBase}/roadmap?view=timeline`);
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+        const title = page.getByText("Compass native timeline", { exact: true });
+        await expect(title).toBeVisible();
+        // Resolve the actual painted surface, including transparent ancestors,
+        // and convert CSS colors (including oklch) through the browser canvas.
+        const contrast = await title.evaluate((element) => {
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 1;
+          const context = canvas.getContext("2d")!;
+          function luminance(color: string) {
+            context.clearRect(0, 0, 1, 1);
+            context.fillStyle = color;
+            context.fillRect(0, 0, 1, 1);
+            const rgb = Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3).map((value) => {
+              const channel = value / 255;
+              return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+            });
+            return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+          }
+          let surface: Element | null = element;
+          while (surface && getComputedStyle(surface).backgroundColor === "rgba(0, 0, 0, 0)") surface = surface.parentElement;
+          const foreground = luminance(getComputedStyle(element).color);
+          const background = luminance(getComputedStyle(surface!).backgroundColor);
+          return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+        });
+        expect(contrast, "timeline title contrast against its painted toolbar").toBeGreaterThanOrEqual(4.5);
+        const cardColor = await page.evaluate(() => {
+          const probe = document.createElement("div");
+          probe.style.backgroundColor = "var(--card)";
+          document.body.append(probe);
+          const value = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return value;
+        });
+        await expect(title.locator("../..")).toHaveCSS("background-color", cardColor);
+        const scroll = page.getByTestId("native-timeline-scroll");
+        await expect(scroll.locator("../..")).toHaveCSS("background-color", cardColor);
+        await expect(scroll.locator("../div").first()).toHaveCSS("background-color", cardColor);
+        await expect(scroll.locator(":scope > div > div").first()).toHaveCSS("background-color", cardColor);
+        await expect(page.locator("#unscheduled-items-panel [data-slot=badge]").first()).toHaveCSS("background-color", cardColor);
+        const grid = page.getByTestId("timeline-grid");
+        expect(await grid.evaluate((element) => getComputedStyle(element).backgroundImage)).not.toContain("226, 232, 240");
+        await scrollToFixtureMonth(page);
+        await page.screenshot({ path: `public/screenshots/docs/native-timeline-${theme}-${viewport.width}.png`, fullPage: true, style: "nextjs-portal { display: none }" });
+        await page.getByRole("button", { name: "Edit dates for Beta delivery", exact: true }).click();
+        await expect(page.getByRole("dialog").getByLabel("Start", { exact: true })).toHaveValue(start);
+        await expect(page.getByRole("dialog").getByRole("combobox")).toHaveCSS("background-color", cardColor);
+        await expect(page.getByRole("dialog").getByLabel("Start", { exact: true })).toHaveCSS("background-color", cardColor);
+        await expect(page.getByRole("dialog").getByLabel("End", { exact: true })).toHaveCSS("background-color", cardColor);
+        await page.screenshot({ path: `public/screenshots/docs/native-timeline-editor-${theme}-${viewport.width}.png`, style: "nextjs-portal { display: none }" });
+        await page.keyboard.press("Escape");
+      });
+    }
+  }
+
   test("native scheduling persists, classic fallback and board remain available", async ({ page }) => {
     await page.goto(`${nativeBase}/roadmap`);
     await page.getByRole("button", { name: "Add item", exact: true }).nth(1).click();

@@ -36,6 +36,7 @@ The **OST Tree view** in Discovery lets you see the full tree at a glance: outco
 
 Beyond the core OST workflow, Compass includes:
 
+- **Workspace Search** — Press **⌘K** on macOS or **Ctrl+K** on Windows and Linux, or choose Search in the desktop sidebar, to find Opportunities, Solutions, Experiments, Roadmap items, Tasks, Feedback, and Docs by title. Results stay within your current workspace; use the workspace switcher before searching another workspace.
 - **Capture** — Collect direct feedback and run shareable customer-interview studies without moving research into a separate product.
 - **Feedback Portal** — A public-facing page where customers can submit feedback and vote on requests. Internal teams triage incoming feedback by linking it to opportunities.
 - **Docs** — A rich-text editor for internal documentation. Pages live in a hierarchical tree and support inline screenshots.
