@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs"
 import { Pool } from "pg"
 import { test, expect } from "../fixtures/index"
 import { assertIsolatedE2EDatabase } from "../fixtures/isolated-database"
+import { observeResearchReply } from "../fixtures/research-reply-observer"
+import { awaitResearchReplyReceipt } from "../fixtures/research-reply-receipt"
 
 // Real private storage, routes, database and Chromium. The functional runner's
 // synthetic interviewer is used; no paid model or voice resource is created.
@@ -40,7 +42,10 @@ test("GIF and HEIC originals remain private and downloadable after resume", asyn
       const attachment = await response.json()
       saved.push({ id: attachment.id, name: format.name, bytes })
       await expect(page.getByRole("link", { name: format.name })).toBeVisible()
+      const observeReply = await observeResearchReply(page)
       await page.getByRole("button", { name: "Send" }).click()
+      const receipt = await awaitResearchReplyReceipt(observeReply(), diagnostic => console.info("[attachment reply receipt]", JSON.stringify(diagnostic)))
+      expect(receipt.message).toBe("What made that difficult for you?")
       await expect(page.getByText("What made that difficult for you?", { exact: true })).toHaveCount(index + 1)
     }
     await expect(page.getByLabel("Share screenshot or PDF")).toBeEnabled()
