@@ -344,6 +344,58 @@ export async function seedE2E(
     )
   `, [ws.id]);
 
+  // ── Workspace search fixtures ────────────────────────────────────────────
+  const { rows: [baselineOpportunity] } = await pool.query<{ id: string }>(`
+    SELECT id FROM "${S}".opportunities
+    WHERE workspace_id = $1 AND title = 'E2E Baseline Opportunity'
+    ORDER BY created_at LIMIT 1
+  `, [ws.id]);
+  await pool.query(`
+    INSERT INTO "${S}".solutions
+      (id, opportunity_id, title, status, sort_order, created_at, updated_at)
+    SELECT gen_random_uuid(), $1, 'E2E Baseline Solution', 'IDEA', 0, NOW(), NOW()
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "${S}".solutions
+      WHERE opportunity_id = $1 AND title = 'E2E Baseline Solution'
+    )
+  `, [baselineOpportunity.id]);
+  await pool.query(`
+    INSERT INTO "${S}".roadmap_items
+      (id, workspace_id, title, horizon, status, sort_order, now_commitment_provenance, created_at, updated_at)
+    SELECT gen_random_uuid(), $1, 'E2E Baseline Roadmap', 'LATER', 'ACTIVE', 0, 'LEGACY_UNGATED', NOW(), NOW()
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "${S}".roadmap_items
+      WHERE workspace_id = $1 AND title = 'E2E Baseline Roadmap'
+    )
+  `, [ws.id]);
+  await pool.query(`
+    INSERT INTO "${S}".feedback
+      (id, workspace_id, title, type, status, created_at, updated_at)
+    SELECT gen_random_uuid(), $1, 'E2E Baseline Feedback', 'IDEA', 'OPEN', NOW(), NOW()
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "${S}".feedback
+      WHERE workspace_id = $1 AND title = 'E2E Baseline Feedback'
+    )
+  `, [ws.id]);
+  await pool.query(`
+    INSERT INTO "${S}".docs
+      (id, workspace_id, title, content, sort_order, doc_type, created_at, updated_at)
+    SELECT gen_random_uuid(), $1, 'E2E Baseline Doc', 'Search fixture', 0, 'STANDARD', NOW(), NOW()
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "${S}".docs
+      WHERE workspace_id = $1 AND title = 'E2E Baseline Doc'
+    )
+  `, [ws.id]);
+  await pool.query(`
+    INSERT INTO "${S}".docs
+      (id, workspace_id, title, content, sort_order, doc_type, created_at, updated_at)
+    SELECT gen_random_uuid(), $1, 'E2E Foreign Search Sentinel', 'Must never cross workspace boundaries', 0, 'STANDARD', NOW(), NOW()
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "${S}".docs
+      WHERE workspace_id = $1 AND title = 'E2E Foreign Search Sentinel'
+    )
+  `, [secondWorkspace.id]);
+
   // ── Baseline experiment ────────────────────────────────────────────────────
   await pool.query(`
     INSERT INTO "${S}".experiments
