@@ -67,11 +67,13 @@ export function validateResearchAttachmentUpload({
     throw new Error("Attachment filename is invalid")
   }
   const detected = detectedType(bytes)
-  const nativeHeicWithoutMime = !mimeType && /\.heic$/i.test(name) && detected?.extension === "heic"
-  if (!mimeType && !nativeHeicWithoutMime) {
+  const providedMimeType = mimeType.toLowerCase()
+  const unspecifiedMimeType = !providedMimeType || providedMimeType === "application/octet-stream"
+  const nativeHeicWithoutSpecificMime = unspecifiedMimeType && /\.heic$/i.test(name) && detected?.extension === "heic"
+  if (unspecifiedMimeType && !nativeHeicWithoutSpecificMime) {
     throw new Error("This browser did not identify the file type. Try another browser or share a PNG, JPEG or PDF instead.")
   }
-  const normalizedMimeType = nativeHeicWithoutMime ? "image/heic" : mimeType.toLowerCase()
+  const normalizedMimeType = nativeHeicWithoutSpecificMime ? "image/heic" : providedMimeType
   if (!detected || !MIME_BY_EXTENSION[detected.extension].includes(normalizedMimeType)) {
     throw new Error("Attachment type or signature is not supported")
   }

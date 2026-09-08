@@ -17,14 +17,14 @@ function heicBytes() {
 }
 
 describe("research attachment validation", () => {
-  it("accepts a native HEIC file when the browser omits its MIME type", () => {
-    expect(validateResearchAttachmentUpload({ bytes: heicBytes(), mimeType: "", originalName: "photo.HEIC" }))
+  it.each(["", "application/octet-stream"])("accepts a native HEIC file when transport supplies MIME %j", (mimeType) => {
+    expect(validateResearchAttachmentUpload({ bytes: heicBytes(), mimeType, originalName: "photo.HEIC" }))
       .toMatchObject({ extension: "heic", mimeType: "image/heic" })
   })
 
-  it("rejects missing MIME unless both the filename and bounded signature identify HEIC", () => {
-    expect(() => validateResearchAttachmentUpload({ bytes: heicBytes(), mimeType: "", originalName: "photo.jpg" })).toThrow(/file type/)
-    expect(() => validateResearchAttachmentUpload({ bytes: png, mimeType: "", originalName: "photo.heic" })).toThrow(/file type/)
+  it.each(["", "application/octet-stream"])("rejects MIME %j unless both the filename and bounded signature identify HEIC", (mimeType) => {
+    expect(() => validateResearchAttachmentUpload({ bytes: heicBytes(), mimeType, originalName: "photo.jpg" })).toThrow(/file type|signature/)
+    expect(() => validateResearchAttachmentUpload({ bytes: png, mimeType, originalName: "photo.heic" })).toThrow(/file type|signature/)
   })
   it.each(["GIF87a", "GIF89a"])("accepts the %s signature as a private GIF original", (signature) => {
     const bytes = new TextEncoder().encode(signature + "\u0001\u0000\u0001\u0000\u0000\u0000\u0000;")
