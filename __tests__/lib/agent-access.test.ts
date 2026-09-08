@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest"
-const prisma = { agent: { findFirst: vi.fn() }, agentWorkspaceGrant: { findMany: vi.fn() }, workspace: { findFirst: vi.fn() } }
+const prisma = { agent: { findFirst: vi.fn() }, agentWorkspaceGrant: { findMany: vi.fn() }, workspace: { findFirst: vi.fn() }, solutionComment: { findUnique: vi.fn() }, comment: { findUnique: vi.fn() }, docComment: { findUnique: vi.fn() } }
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
@@ -27,4 +27,13 @@ it.each(["approve_solution_plan", "reject_solution_plan", "create_workspace", "a
 })
 it("scopes built-in assistant reads to the initiating workspace", async () => {
   expect(await agentWorkspaceWhere({ purpose: "AGENT_TURN", userId: "owner", scopeWorkspaceId: "one" })).toEqual({ members: { some: { userId: "owner" } }, id: "one" })
+})
+it.each(["AGENT", "AGENT_TURN"] as const)("prevents %s from editing existing human-attributed comments or approved plans", async purpose => {
+  prisma.workspace.findFirst.mockResolvedValue({ id: "one" })
+  prisma.solutionComment.findUnique.mockResolvedValue({ solution: { opportunity: { workspaceId: "one" } } })
+  prisma.comment.findUnique.mockResolvedValue({ workspaceId: "one" })
+  prisma.docComment.findUnique.mockResolvedValue({ doc: { workspaceId: "one" } })
+  for (const tool of ["update_solution_comment", "update_comment", "update_doc_comment"]) {
+    await expect(applyToolGate(tool, { ...actor, purpose, scopeWorkspaceId: "one" }, { commentId: "comment", body: "Forged replacement" })).rejects.toThrow(/human identity/)
+  }
 })

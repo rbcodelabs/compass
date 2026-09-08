@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(), admin: vi.fn(), enabled: vi.fn(),
   agent: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   apiKey: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
-  workspaceMember: { findFirst: vi.fn(), update: vi.fn() },
+  workspaceMember: { findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   $transaction: vi.fn(),
   agentWorkspaceGrant: { upsert: vi.fn(), updateMany: vi.fn() },
 }));
@@ -23,6 +23,7 @@ beforeEach(() => {
   mocks.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "owner", status: "ACTIVE" });
   mocks.admin.mockResolvedValue({ prisma: mocks, workspaceId: "workspace" });
   mocks.workspaceMember.findFirst.mockResolvedValue({ id: "member", role: "MEMBER" });
+  mocks.workspaceMember.updateMany.mockResolvedValue({ count: 1 });
   mocks.$transaction.mockImplementation((operation) => operation(mocks));
   mocks.apiKey.create.mockResolvedValue({ id: "persisted-key" });
 });
@@ -85,7 +86,7 @@ describe("agent account and workspace management", () => {
     await grantWorkspaceAgent("org", "ws", "agent", "READ");
     expect(mocks.agentWorkspaceGrant.upsert).toHaveBeenCalledWith(expect.objectContaining({ where: { agentId_workspaceId: { agentId: "agent", workspaceId: "workspace" } }, update: expect.objectContaining({ revokedAt: null, access: "READ" }) }));
     expect(mocks.apiKey.create).not.toHaveBeenCalled();
-    expect(mocks.workspaceMember.update).toHaveBeenCalledWith({ where: { id: "member" }, data: { role: "MEMBER" } });
+    expect(mocks.workspaceMember.updateMany).toHaveBeenCalledWith({ where: { id: "member", role: "MEMBER" }, data: { role: "MEMBER" } });
     expect(mocks.$transaction).toHaveBeenCalled();
   });
   it("allows revocation while rollout is disabled", async () => {
@@ -95,5 +96,10 @@ describe("agent account and workspace management", () => {
     await revokeWorkspaceAgent("org", "ws", "agent");
     expect(mocks.apiKey.update).toHaveBeenCalled();
     expect(mocks.agentWorkspaceGrant.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { agentId: "agent", workspaceId: "workspace", revokedAt: null } }));
+  });
+  it("does not overwrite a concurrent membership role change when granting access", async () => {
+    mocks.workspaceMember.updateMany.mockResolvedValue({ count: 0 });
+    await expect(grantWorkspaceAgent("org", "ws", "agent", "READ")).rejects.toThrow("Membership changed");
+    expect(mocks.agentWorkspaceGrant.upsert).not.toHaveBeenCalled();
   });
 });

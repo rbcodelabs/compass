@@ -6,7 +6,7 @@ export async function revokeMemberAgentGrants(prisma: Prisma.TransactionClient, 
   if (agents.length) await prisma.agentWorkspaceGrant.updateMany({ where: { workspaceId, agentId: { in: agents.map((a) => a.id) }, revokedAt: null }, data: { revokedAt: new Date(), updatedAt: new Date() } });
 }
 
-/** DSQL has no FK cascades. Personal agents and keys outlive any workspace. */
+/** This schema uses application-managed relations. Personal identities outlive workspaces. */
 export async function deleteWorkspaceAgentData(prisma: PrismaClient, workspaceId: string) {
   await prisma.agentToolCall.deleteMany({ where: { workspaceId } });
   await prisma.agentWorkspaceGrant.deleteMany({ where: { workspaceId } });

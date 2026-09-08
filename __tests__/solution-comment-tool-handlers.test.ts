@@ -6,6 +6,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+const actor = vi.hoisted(() => ({ get: vi.fn() }))
+vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: actor.get }))
 
 vi.mock("@/lib/comment-compat", () => ({
   mirrorLegacySolutionComment: vi.fn(),
@@ -29,6 +31,7 @@ const mockSolutionComment = {
 }
 
 const mockPrisma = {
+  agent: { findFirst: vi.fn() },
   solution: mockSolution,
   solutionComment: mockSolutionComment,
 }
@@ -60,8 +63,22 @@ function textOf(result: { content: { text: string }[] }) {
 
 const NOW = new Date("2026-07-27T12:00:00.000Z")
 
+it.each(["AGENT", "AGENT_TURN"])("derives %s comment attribution despite caller-supplied human identity", async purpose => {
+  actor.get.mockReturnValue({ purpose, userId: "user", agentId: purpose === "AGENT" ? "agent" : null })
+  await addSolutionComment({ solutionId: SOLUTION_ID, body: "Agent comment", authorName: "Impersonated person", authorType: "HUMAN" })
+  expect(mockSolutionComment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ authorType: "AGENT", authorName: purpose === "AGENT" ? "Registered worker" : "Compass assistant" }) })
+})
+
+it("derives registered-agent plan attribution", async () => {
+  actor.get.mockReturnValue({ purpose: "AGENT", userId: "user", agentId: "agent" })
+  await addSolutionPlan({ solutionId: SOLUTION_ID, body: "Plan", authorName: "Impersonated person" })
+  expect(mockSolutionComment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ authorType: "AGENT", authorName: "Registered worker" }) })
+})
+
 beforeEach(() => {
   vi.clearAllMocks()
+  actor.get.mockReturnValue({ purpose: "USER", userId: "user" })
+  mockPrisma.agent.findFirst.mockResolvedValue({ name: "Registered worker" })
   mockSolution.findUnique.mockResolvedValue({ id: SOLUTION_ID, title: "Ship the diff-view rail" })
   mockSolutionComment.create.mockImplementation(({ data }) =>
     Promise.resolve({

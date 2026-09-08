@@ -71,7 +71,10 @@ export async function grantWorkspaceAgent(orgSlug: string, workspaceSlug: string
     if (!member) throw new Error("Agent owner must be a current workspace member");
     // Touch the membership row so DSQL rejects a concurrent membership delete.
     // Without this write, a grant could commit after removal and revive on rejoin.
-    await tx.workspaceMember.update({ where: { id: member.id }, data: { role: member.role } });
+    // Compare the role as well: a concurrent demotion must never be overwritten
+    // by the role read before waiting for PostgreSQL's row lock.
+    const locked = await tx.workspaceMember.updateMany({ where: { id: member.id, role: member.role }, data: { role: member.role } });
+    if (locked.count !== 1) throw new Error("Membership changed; retry the operation");
     const data = { access, grantedByUserId: userId, revokedAt: null, updatedAt: new Date() };
     await tx.agentWorkspaceGrant.upsert({ where: { agentId_workspaceId: { agentId, workspaceId } }, create: { agentId, workspaceId, ...data }, update: data });
   });

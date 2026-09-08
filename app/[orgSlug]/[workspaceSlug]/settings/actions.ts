@@ -246,7 +246,9 @@ export async function removeWorkspaceMember(
     // Lock before reading grants: PostgreSQL READ COMMITTED must see grants
     // committed by an earlier holder of this row lock before revoking them.
     // DSQL also detects the shared write as a grant/removal conflict.
-    await tx.workspaceMember.update({ where: { id: memberId }, data: { role: member.role } });
+    // A stale role must not overwrite a concurrent promotion or demotion.
+    const locked = await tx.workspaceMember.updateMany({ where: { id: memberId, role: member.role }, data: { role: member.role } });
+    if (locked.count !== 1) throw new Error("Membership changed; retry the operation");
     await revokeMemberAgentGrants(tx, workspaceId, member.userId);
     await tx.workspaceMember.delete({ where: { id: memberId } });
   });
