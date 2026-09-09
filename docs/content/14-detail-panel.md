@@ -24,7 +24,7 @@ Each panel shows the essentials for that item — its status, key fields, and th
 |---|---|
 | **Objective** | Status, cycle, and its Key Results |
 | **Key Result** | Progress, its Objective, and any linked Opportunities and Roadmap items |
-| **Opportunity** | Status, the Key Result it drives, its Solutions, and evidence |
+| **Opportunity** | Status, the Key Result it drives, linked feedback, its Solutions, and evidence |
 | **Solution** | Status, its Opportunity, assumptions, and roadmap links |
 | **Assumption** | Status, risk level, its Solution, and experiments |
 | **Experiment** | Status, kill condition, the assumption it tests, and results |
@@ -60,6 +60,12 @@ This first shared-Discussion release covers the eight detail panels above. A fol
 ## Jump between related items
 
 The linked items in a panel are **clickable**. Open an Objective, click one of its Key Results, and the panel switches to that Key Result — from there click an Opportunity it drives, and so on. This lets you walk your whole opportunity-solution tree without leaving the panel or losing the thread. The browser **back** button steps back through the items you visited.
+
+An Opportunity's **Driving Key Result** title and **Linked feedback** rows open the corresponding panels. Linked feedback includes a count and status labels; it is distinct from Evidence. These same navigation controls are also available on the opportunity's full page.
+
+![Opportunity relationships in the desktop panel](/screenshots/docs/opportunity-links-panel-desktop.png)
+
+![Opportunity relationships in the mobile panel](/screenshots/docs/opportunity-links-panel-mobile.png)
 
 ## Edit in place
 

@@ -1,5 +1,7 @@
 "use client";
 import { Discussion } from "@/components/comments/discussion";
+import { usePanelContext } from "./panel-context";
+import { LinkedFeedback, type LinkedFeedbackItem } from "@/components/discovery/linked-feedback";
 
 import {
   useEntityDetail,
@@ -38,6 +40,7 @@ type OpportunityData = {
   } | null;
   solutions: Array<{ id: string; title: string; status: string }>;
   evidence: EvidenceListItem[];
+  feedback: LinkedFeedbackItem[];
 };
 
 // Matches the actual Opportunity status enum (see lib/entity-mutations.ts /
@@ -61,6 +64,7 @@ export function OpportunityPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
+  const { openPanel } = usePanelContext();
   const { data, error, mutate, refresh } = useEntityDetail<OpportunityData>(
     "opportunity",
     opportunityId,
@@ -130,9 +134,13 @@ export function OpportunityPanel({
                 {data.linkedKeyResult.objective.title}
               </p>
             )}
-            <p className="text-sm font-medium leading-snug">
+            <button
+              type="button"
+              onClick={() => openPanel("keyResult", data.linkedKeyResult!.id)}
+              className="text-left text-sm font-medium leading-snug underline underline-offset-2 rounded-sm focus-visible:outline-2 focus-visible:outline-ring break-words"
+            >
               {data.linkedKeyResult.title}
-            </p>
+            </button>
             {krProgress !== null && (
               <div className="flex items-center gap-2 mt-1">
                 <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -152,6 +160,8 @@ export function OpportunityPanel({
           <p className="text-sm text-muted-foreground">No key result linked.</p>
         )}
       </Section>
+
+      <LinkedFeedback feedback={data.feedback} />
 
       <Section label="Solutions" count={data.solutions.length}>
         <div className="flex flex-col gap-2">

@@ -153,7 +153,11 @@ function fetchOpportunity(id: string, workspaceId: string) {
       score: {
         select: { normalizedScore: true, rawScore: true, modelVersion: true, scoredAt: true },
       },
-      feedback: { select: { id: true, title: true, type: true, status: true } },
+      feedback: {
+        where: { workspaceId },
+        select: { id: true, title: true, type: true, status: true },
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      },
       roadmapItems: { select: { id: true, title: true, horizon: true } },
     },
   });

@@ -48,6 +48,18 @@ Click **+ Add Opportunity** in any column. An opportunity needs:
 
 Write opportunity titles from the customer's perspective, not from a solution or feature angle. "Users can't find their billing history" is better than "Add billing history page."
 
+## Linked feedback and Key Results
+
+Both the opportunity page and its detail panel show **Linked feedback**, with a count and each item's status. Select a feedback title to open its detail panel and read the original signal. The list is newest first; opportunities without linked feedback show **No feedback linked.**
+
+Select the driving Key Result title to open its detail panel. On the full page, **change KR** remains a separate control for changing the relationship. Panel navigation preserves your underlying page, and browser Back returns to the previous item.
+
+Linked Feedback and Evidence are separate records. Linking a feedback item does not create an Evidence record, so their counts can differ.
+
+![Linked feedback and driving Key Result on an opportunity](/screenshots/docs/opportunity-links-page-desktop.png)
+
+![Opportunity relationships on mobile](/screenshots/docs/opportunity-links-page-mobile.png)
+
 ## Solutions
 
 Open an opportunity by clicking its card, then click **+ Add Solution** in the detail panel. A solution is a concrete idea for addressing the opportunity. Each opportunity can have multiple competing solutions — this is intentional. The OST methodology encourages exploring multiple solution directions before committing.
