@@ -24,6 +24,8 @@ const mockPrisma = {
   doc: { findUnique: vi.fn() },
   reviewRequest: { findUnique: vi.fn() },
   researchStudy: { findUnique: vi.fn() },
+  agent: { findFirst: vi.fn() },
+  agentWorkspaceGrant: { findMany: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
@@ -50,6 +52,36 @@ const callTool = (name: string, actor: { userId: string | null }, args: any) =>
   runWithMcpActor(actor, () => (registeredTools[name] as (a: unknown) => Promise<unknown>)(args))
 
 beforeEach(() => vi.clearAllMocks())
+
+describe("Decision Artifact mutation boundaries", () => {
+  for (const tool of ["link_artifact_to_decision", "unlink_artifact_from_decision"]) {
+    it(`${tool} is classified as an agent write`, () => {
+      expect(AGENT_TOOL_POLICY[tool]).toBe("WRITE")
+    })
+    for (const foreign of ["artifact", "reviewRequest"] as const) {
+      it(`${tool} rejects a foreign ${foreign}`, async () => {
+        mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+        mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: foreign === "artifact" ? "ws-2" : "ws-1" })
+        mockPrisma.reviewRequest.findUnique.mockResolvedValue({ workspaceId: foreign === "reviewRequest" ? "ws-2" : "ws-1" })
+        await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1", artifactId: "art-1", requestId: "req-1" })).rejects.toThrow(/does not belong to workspace/)
+      })
+    }
+    it(`${tool} denies a non-member`, async () => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1", artifactId: "art-1", requestId: "req-1" })).rejects.toThrow(/not found or access denied/)
+    })
+    it(`${tool} excludes read-only agent grants`, async () => {
+      vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+      try {
+        mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent" })
+        mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
+        mockPrisma.workspace.findFirst.mockResolvedValue(null)
+        await expect(applyToolGate(tool, { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1", artifactId: "art-1", requestId: "req-1" })).rejects.toThrow(/not found or access denied/)
+        expect(mockPrisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith({ where: { agentId: "agent", revokedAt: null, access: "WRITE" }, select: { workspaceId: true } })
+      } finally { vi.unstubAllEnvs() }
+    })
+  }
+})
 
 describe("TOOL_GATES completeness", () => {
   it("classifies every registered tool for agent access", () => {

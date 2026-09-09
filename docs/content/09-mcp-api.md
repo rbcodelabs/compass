@@ -340,12 +340,16 @@ Artifacts are first-class solution deliverables, separate from Markdown Docs. HT
 | Tool | Description |
 |---|---|
 | `list_artifacts` | List active Artifacts in a workspace; pass `includeArchived: true` to include archived records |
-| `get_artifact` | Return Artifact metadata, revision history, and linked Solutions without exposing private blob paths or uploaded HTML |
+| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML |
 | `create_artifact` | Create `HTML_UPLOAD` from `html` plus an optional `.html` filename, or `EXTERNAL_LINK` from an `http`/`https` `url` |
 | `update_artifact` | Update title/description and optionally create a new immutable HTML or URL revision |
 | `link_artifact_to_solution` | Idempotently link an Artifact and Solution in the same workspace |
 | `unlink_artifact_from_solution` | Remove an Artifact-to-Solution link |
+| `link_artifact_to_decision` | Idempotently link an active Artifact to an ordinary tracked Decision in the same workspace; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs, `linkId`, and `created` |
+| `unlink_artifact_from_decision` | Idempotently remove a Decision link; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs and `removed` |
 | `archive_artifact` | Archive an Artifact while preserving its revision history and links |
+
+Decision–Artifact links are live supporting material, not frozen review evidence. `get_decision` and `get_review_request` include an `artifacts` array with title, type, status, and current revision number; legacy review requests return an empty array. `get_artifact.decisions` includes the same-workspace tracked request ID, current title, and state. The new link tools require write access and validate both objects in the declared workspace. They preserve packets, fingerprints, revisions, cycles, and recorded outcomes. New links to archived Artifacts are rejected, but retrying an existing link and removing it remain supported. Links follow the stable Decision request and the current Artifact revision.
 
 ### Doc inline comments
 

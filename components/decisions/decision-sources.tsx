@@ -1,4 +1,5 @@
 import Link from "next/link"
+import type { ReactNode } from "react"
 import type { TrackedDecisionSourceSnapshot, TrackedSourceType } from "@/lib/tracked-decisions"
 
 type TrackedDecisionPacket = {
@@ -84,11 +85,12 @@ function SourceRow({ source, orgSlug, workspaceSlug, primary = false }: { source
   </li>
 }
 
-export function DecisionSources({ orgSlug, workspaceSlug, entity, sources }: { orgSlug: string; workspaceSlug: string; entity: TrackedDecisionPacket["entity"]; sources: TrackedDecisionSourceSnapshot[] }) {
+export function DecisionSources({ orgSlug, workspaceSlug, entity, sources, supportingArtifacts }: { orgSlug: string; workspaceSlug: string; entity: TrackedDecisionPacket["entity"]; sources: TrackedDecisionSourceSnapshot[]; supportingArtifacts?: ReactNode }) {
   return <div className="space-y-4">
     <div className="space-y-2">
       <h2 className="text-sm font-medium">Linked to</h2>
       <ul><SourceRow source={entity} orgSlug={orgSlug} workspaceSlug={workspaceSlug} primary /></ul>
+      {supportingArtifacts}
     </div>
     {sources.length > 0 && <div className="space-y-2">
       <h2 className="text-sm font-medium">Sources</h2>

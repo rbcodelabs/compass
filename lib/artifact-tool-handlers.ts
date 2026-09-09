@@ -1,11 +1,15 @@
 import getPrisma from "@/lib/db"
 import { fail, ok } from "@/lib/mcp-output"
 import { getArtifactStorage } from "@/lib/artifact-storage"
+import { getMcpActor } from "@/lib/mcp-authz"
 import {
   archiveArtifact as archiveArtifactCore,
   createExternalArtifact,
   createHtmlArtifact,
   linkArtifactToSolution,
+  linkArtifactToDecision,
+  unlinkArtifactFromDecision,
+  getArtifactDecisions,
   replaceExternalArtifactRevision,
   replaceHtmlArtifactRevision,
   unlinkArtifactFromSolution,
@@ -29,9 +33,10 @@ export async function getArtifact({ artifactId }: { artifactId: string }) {
   const artifact = await prisma.artifact.findUnique({ where: { id: artifactId }, include: { currentRevision: true, revisions: { orderBy: { revisionNumber: "desc" } }, links: { where: { linkedType: "SOLUTION" } } } })
   if (!artifact) return fail(`Artifact "${artifactId}" not found.`)
   const solutions = artifact.links.length ? await prisma.solution.findMany({ where: { id: { in: artifact.links.map((link) => link.linkedId) }, opportunity: { workspaceId: artifact.workspaceId } }, select: { id: true, title: true } }) : []
+  const decisions = await getArtifactDecisions(artifact.workspaceId, artifact.id)
   const safeRevisions = artifact.revisions.map(({ blobPathname: _privatePath, ...revision }) => revision)
   const text = [`# ${artifact.title}`, `ID: ${artifact.id}`, `Type: ${artifact.sourceType}`, `Status: ${artifact.status}`, `Current revision: ${artifact.currentRevision?.revisionNumber ?? "None"}`, `Linked solutions: ${solutions.map((solution) => `${solution.title} (${solution.id})`).join(", ") || "None"}`].join("\n")
-  return ok(text, { ...artifact, currentRevision: artifact.currentRevision ? { ...artifact.currentRevision, blobPathname: undefined } : null, revisions: safeRevisions, solutions, links: undefined })
+  return ok(`${text}\nLinked decisions: ${decisions.map((decision) => `${decision.title} (${decision.id})`).join(", ") || "None"}`, { ...artifact, currentRevision: artifact.currentRevision ? { ...artifact.currentRevision, blobPathname: undefined } : null, revisions: safeRevisions, solutions, decisions, links: undefined })
 }
 
 export async function createArtifact(input: { workspaceId: string; title: string; description?: string; sourceType: "HTML_UPLOAD" | "EXTERNAL_LINK"; html?: string; filename?: string; url?: string }) {
@@ -86,4 +91,18 @@ export async function unlinkArtifact({ artifactId, solutionId, workspaceId }: { 
 export async function archiveArtifact({ artifactId, workspaceId }: { artifactId: string; workspaceId: string }) {
   try { await archiveArtifactCore({ artifactId, workspaceId }); return ok(`Artifact archived.\nID: ${artifactId}`, { id: artifactId, status: "ARCHIVED" }) }
   catch (error) { return fail(error instanceof Error ? error.message : "Could not archive artifact") }
+}
+
+export async function linkArtifactDecision(input: { workspaceId: string; artifactId: string; requestId: string }) {
+  try {
+    const link = await linkArtifactToDecision({ ...input, createdById: getMcpActor().userId, source: "MCP" })
+    return ok(`Artifact linked to Decision as live supporting material.\nID: ${input.artifactId}`, { ...input, linkId: link.id, created: link.created })
+  } catch (error) { return fail(error instanceof Error ? error.message : "Could not link artifact") }
+}
+
+export async function unlinkArtifactDecision(input: { workspaceId: string; artifactId: string; requestId: string }) {
+  try {
+    const result = await unlinkArtifactFromDecision(input)
+    return ok(`Artifact unlinked from Decision.\nID: ${input.artifactId}`, { ...input, ...result })
+  } catch (error) { return fail(error instanceof Error ? error.message : "Could not unlink artifact") }
 }
