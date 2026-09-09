@@ -8,6 +8,7 @@ import { TaskHeader } from "@/components/tasks/task-header";
 import { SubtasksPanel } from "@/components/tasks/subtasks-panel";
 import { TaskLinksPanel } from "@/components/tasks/task-links-panel";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
+import { Discussion } from "@/components/comments/discussion";
 import type { LinkableTargets } from "@/components/tasks/link-task-dialog";
 import type { TaskCardData } from "@/components/tasks/task-card";
 import type {
@@ -210,7 +211,7 @@ export default async function TaskDetailPage({ params }: Props) {
   const detailPath = `/${orgSlug}/${workspaceSlug}/tasks/${taskId}`;
 
   return (
-    <div className="min-h-full p-4 sm:p-6 md:p-8">
+    <div className="min-h-full shrink-0 p-4 sm:p-6 md:p-8">
       <div className="max-w-4xl mx-auto flex flex-col gap-6">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Link href={boardPath} className="flex items-center gap-1 hover:text-foreground transition-colors">
@@ -289,6 +290,7 @@ export default async function TaskDetailPage({ params }: Props) {
             </TabsContent>
           )}
         </Tabs>
+        <Discussion targetType="TASK" targetId={task.id} />
       </div>
     </div>
   );

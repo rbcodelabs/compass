@@ -33,7 +33,7 @@ Each panel shows the essentials for that item — its status, key fields, and th
 
 ## Discuss work in context
 
-Every one of these eight panels includes a shared **Discussion**. Use it for working notes, questions, and follow-up that should stay attached to the Objective, Key Result, Opportunity, Solution, Assumption, Experiment, Roadmap item, or Feedback item.
+Every one of these eight panels includes a shared **Discussion**, as does the [Task detail page](/help/13-tasks). Use it for working notes, questions, and follow-up that should stay attached to the item.
 
 ![Shared Discussion in a Roadmap item panel](/screenshots/docs/shared-discussion-desktop.png)
 
@@ -55,7 +55,7 @@ A comment records conversation; it does not approve work, authorize a release, o
 
 Solutions have one additional, specialized surface: **Current Plan**. Plan updates remain separate from ordinary Discussion comments so the current proposal can stay pinned and retain its Approve/Reject workflow without duplicating conversation.
 
-This first shared-Discussion release covers the eight detail panels above. A follow-up release will bring the same model to Tasks, Docs, Artifacts, Research Studies, and tracked Decision reviews; their existing specialized experiences remain unchanged for now.
+Shared Discussion covers the eight detail panels above and Task detail pages. A follow-up release will bring the same model to Docs, Artifacts, Research Studies, and tracked Decision reviews; their existing specialized experiences remain unchanged for now.
 
 ## Jump between related items
 

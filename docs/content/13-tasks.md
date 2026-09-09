@@ -45,6 +45,20 @@ Click **Add task** at the bottom of any column (or **Add subtask** on a task's d
 - **Story points** and **Due date** — optional estimation/scheduling fields
 - **Iteration** — a freeform sprint label (e.g. "Sprint 24") for teams that want lightweight grouping without a full Sprint entity
 
+## Discussion
+
+Open a task from the board or list to find **Discussion** below its detail tabs. Existing comments, including comments added through the API, appear here. Discussion remains available while you switch between Overview, Subtasks, Links, and Details.
+
+Add comments and replies, edit or delete your own comments, and resolve or reopen threads using the same [shared Discussion](/help/14-detail-panel) available on other Compass items. Workspace and organization administrators can moderate discussions. Subtasks have their own discussions on their detail pages.
+
+Comment text preserves line breaks and Markdown source; Markdown syntax is shown as text rather than rendered formatting. Comments record conversation and do not authorize work or change task status.
+
+![Discussion on a Task detail page](/screenshots/docs/task-discussion-desktop.png)
+
+On mobile, scroll down to the comment composer below the thread:
+
+![Task discussion composer on mobile](/screenshots/docs/task-discussion-composer-mobile.png)
+
 ## Epics and Subtasks
 
 The assignee picker groups **People** and **Agents**. If an existing assignee loses
