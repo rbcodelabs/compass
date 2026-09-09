@@ -9,6 +9,11 @@ const panels = [
 ] as const
 
 describe("entity panel discussion wiring", () => {
+  it("connects Task detail to its own TASK discussion", () => {
+    const source = readFileSync(new URL("../../app/[orgSlug]/[workspaceSlug]/tasks/[taskId]/page.tsx", import.meta.url), "utf8")
+    expect(source).toContain('<Discussion targetType="TASK" targetId={task.id} />')
+  })
+
   it.each(panels)("wires %s to %s", (filename, targetType) => {
     const source = readFileSync(new URL(`../../components/panels/${filename}`, import.meta.url), "utf8")
     expect(source).toContain('import { Discussion } from "@/components/comments/discussion"')
