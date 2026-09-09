@@ -22,6 +22,10 @@ Pages can be dragged to reorder them within their level of the hierarchy.
 
 ## Artifacts
 
+Deployed HTML Artifacts require `ARTIFACT_BLOB_READ_WRITE_TOKEN` for a **private** Vercel Blob store. Configure separate stores and credentials for production and preview. Uploads, reads, and cleanup use this credential explicitly; Compass never falls back to the general `BLOB_READ_WRITE_TOKEN`, which can serve public images. Missing configuration blocks HTML storage operations with “Private artifact storage is not configured.” An incorrectly configured public store is rejected by Vercel. Local database-backed development uses filesystem storage.
+
+When upgrading an existing installation, point this credential at the private store that already contains its Artifact revisions, or migrate those files before switching stores. Revisions retain storage paths, so changing the credential alone does not move existing files.
+
 Artifacts have stable identities and a separate section in the Docs navigator. They are not nested into the Page hierarchy. An Artifact can be linked to multiple Solutions, and a Solution can link to multiple Artifacts.
 
 Choose one source when creating an Artifact:
