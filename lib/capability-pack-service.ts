@@ -13,10 +13,12 @@ export async function installCapabilityPack(input: {
   packPath: string
   createdById: string
   workspaceId: string
+  expectedPackId?: string
 }, deps: { prisma: PrismaClient; storage: ArtifactStorage; fetcher?: typeof fetch }) {
   const source = parseGithubPackSource(input.repositoryUrl, input.commitSha, input.packPath)
   const files = await fetchGithubCapabilityPack(input, deps.fetcher)
   const artifact = normalizeCapabilityPack(files)
+  if (input.expectedPackId && artifact.manifest.id !== input.expectedPackId) throw new Error("Curated capability pack identity mismatch")
   assertPackHostCompatibility(artifact.manifest.sdkCompatibility, artifact.manifest.requiredHostCapabilities)
   compileCapabilityPackInstructions(artifact, artifact.manifest.enabledSkills)
   const artifactPathname = `capability-packs/sha256/${artifact.digest}.json`
@@ -60,6 +62,7 @@ export async function configureWorkspaceCapabilityPack(input: {
   packVersionId: string
   enabledSkillIds: string[]
   enabled: boolean
+  preserveExisting?: boolean
 }, prisma: PrismaClient, storage?: Pick<ArtifactStorage, "get">) {
   const version = await prisma.capabilityPackVersion.findFirst({ where: { id: input.packVersionId, capabilityPack: { workspaceId: input.workspaceId } }, include: { capabilityPack: { select: { workspaceId: true, packId: true } } } })
   if (!version || version.validationStatus !== "VALID") throw new Error("Validated capability pack version not found")
@@ -77,7 +80,7 @@ export async function configureWorkspaceCapabilityPack(input: {
   }
   return prisma.workspaceCapabilityPack.upsert({
     where: { workspaceId_capabilityPackId: { workspaceId: input.workspaceId, capabilityPackId: version.capabilityPackId } },
-    update: { capabilityPackVersionId: version.id, enabledSkillIds: JSON.stringify(enabledSkillIds), enabled: input.enabled, updatedAt: new Date() },
+    update: input.preserveExisting ? {} : { capabilityPackVersionId: version.id, enabledSkillIds: JSON.stringify(enabledSkillIds), enabled: input.enabled, updatedAt: new Date() },
     create: { workspaceId: input.workspaceId, capabilityPackId: version.capabilityPackId, capabilityPackVersionId: version.id, enabledSkillIds: JSON.stringify(enabledSkillIds), enabled: input.enabled },
   })
 }

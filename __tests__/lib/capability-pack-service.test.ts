@@ -14,6 +14,19 @@ function pack(body = "Instructions", assets: Array<[string, Uint8Array]> = []) {
 }
 
 describe("workspace capability-pack configuration", () => {
+  it("preserves the winner when concurrent initial attachments select different versions", async () => {
+    const artifact = pack()
+    let winner: Record<string, unknown> | undefined
+    const upsert = vi.fn(async (args) => {
+      if (!winner) winner = { ...args.create }
+      else Object.assign(winner, args.update)
+      return winner
+    })
+    const prisma = { capabilityPackVersion: { findFirst: vi.fn(async ({ where }) => ({ id: where.id, capabilityPackId: "p1", semanticVersion: "1.0.0", capabilityPack: { workspaceId: "ws-1", packId: "sample" }, artifactSha256: artifact.digest, artifactPathname: "sample.json", validationStatus: "VALID", manifestJson: JSON.stringify(artifact.manifest) })) }, workspaceCapabilityPack: { upsert } }
+    await Promise.all(["v-first", "v-later"].map((packVersionId, index) => configureWorkspaceCapabilityPack({ workspaceId: "ws-1", packVersionId, enabledSkillIds: index ? ["b"] : ["a"], enabled: true, preserveExisting: true }, prisma as never, { get: async () => artifact.bytes })))
+    expect(winner).toMatchObject({ capabilityPackVersionId: "v-first", enabledSkillIds: '["a"]' })
+    expect(upsert.mock.calls.every(([args]) => Object.keys(args.update).length === 0)).toBe(true)
+  })
   it("scopes the attachment to the supplied workspace and persists sorted unique skills", async () => {
     const upsert = vi.fn().mockResolvedValue({ id: "attachment" })
     const artifact = pack()
@@ -23,6 +36,8 @@ describe("workspace capability-pack configuration", () => {
       where: { workspaceId_capabilityPackId: { workspaceId: "ws-1", capabilityPackId: "p1" } },
       update: expect.objectContaining({ enabledSkillIds: '["a","b"]' }),
     }))
+    await configureWorkspaceCapabilityPack({ workspaceId: "ws-1", packVersionId: "v1", enabledSkillIds: ["a"], enabled: true, preserveExisting: true }, prisma as never, { get: async () => artifact.bytes })
+    expect(upsert).toHaveBeenLastCalledWith(expect.objectContaining({ update: {}, create: expect.objectContaining({ enabledSkillIds: '["a"]', enabled: true }) }))
   })
 
   it("does not enable a pack whose selected skill requires an unsupported binary asset", async () => {
