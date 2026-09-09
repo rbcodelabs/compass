@@ -110,6 +110,20 @@ describe("getEntityDetail — workspace scoping", () => {
 });
 
 describe("getEntityDetail — return shape", () => {
+  it("only loads linked feedback in the opportunity workspace, newest first with a stable tie break", async () => {
+    models.opportunity.findFirst.mockResolvedValue({ id: ID });
+    await getEntityDetail("opportunity", ID, WS);
+    expect(models.opportunity.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        feedback: {
+          where: { workspaceId: WS },
+          select: { id: true, title: true, type: true, status: true },
+          orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        },
+      }),
+    }));
+  });
+
   it("returns active roadmap delivery tasks and linkable workspace tasks in deterministic delivery order", async () => {
     models.roadmapItem.findFirst.mockResolvedValue({ id: ID, workspaceId: WS });
     models.task.findMany
