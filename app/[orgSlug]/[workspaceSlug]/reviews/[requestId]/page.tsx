@@ -7,6 +7,8 @@ import { ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocati
 import { DecisionActions } from "@/components/decisions/decision-actions"
 import { DecisionDetailsGrid, DecisionLongForm, DecisionSummary } from "@/components/decisions/decision-long-form"
 import { DecisionSources, parseTrackedDecisionPacket } from "@/components/decisions/decision-sources"
+import { DecisionArtifacts } from "@/components/decisions/decision-artifacts"
+import { getDecisionArtifacts } from "@/lib/artifacts"
 
 function parsePacket(raw: string): Record<string, unknown> {
   try { return JSON.parse(raw) as Record<string, unknown> } catch { return {} }
@@ -67,6 +69,13 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
   const trackedPacket = isTracked ? parseTrackedDecisionPacket(revision.packetJson) : null
   const isRetired = request.gateType === "NOW_COMMITMENT" || isPolicyActivation
   const canDecide = canDecideReview(request.workspace.members[0]?.role, request.workspace.organization.members[0]?.role)
+  const canEditArtifacts = request.workspace.members.length > 0
+  const artifacts = isTracked ? await getDecisionArtifacts(request.workspaceId, requestId) : []
+  const availableArtifacts = isTracked && canEditArtifacts ? await prisma.artifact.findMany({
+    where: { workspaceId: request.workspaceId, status: "ACTIVE", id: { notIn: artifacts.map((artifact) => artifact.id) } },
+    select: { id: true, title: true }, orderBy: [{ title: "asc" }, { id: "asc" }],
+  }) : []
+  const supportingArtifacts = isTracked ? <DecisionArtifacts workspaceId={request.workspaceId} requestId={requestId} basePath={`/${orgSlug}/${workspaceSlug}/docs`} canEdit={canEditArtifacts} artifacts={artifacts} availableArtifacts={availableArtifacts} /> : null
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-3xl space-y-6 overflow-x-hidden p-4 sm:p-6">
@@ -78,8 +87,8 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
       <section className="min-w-0 max-w-full rounded-lg border p-4 text-sm">
         {isTracked ? <div className="space-y-5">
           {trackedPacket
-            ? <DecisionSources orgSlug={orgSlug} workspaceSlug={workspaceSlug} entity={trackedPacket.entity} sources={trackedPacket.sources} />
-            : <div><h2 className="text-sm font-medium">Linked to</h2><p className="mt-2 text-muted-foreground">{request.subjectType.replaceAll("_", " ").toLowerCase()}</p></div>}
+            ? <DecisionSources orgSlug={orgSlug} workspaceSlug={workspaceSlug} entity={trackedPacket.entity} sources={trackedPacket.sources} supportingArtifacts={supportingArtifacts} />
+            : <div className="space-y-2"><h2 className="text-sm font-medium">Linked to</h2><p className="mt-2 text-muted-foreground">{request.subjectType.replaceAll("_", " ").toLowerCase()}</p>{supportingArtifacts}</div>}
           <div className="border-t pt-4">
             <h2 className="mb-2 text-sm font-medium">Context</h2>
             <DecisionLongForm content={trackedPacket?.context ?? revision.summary} />

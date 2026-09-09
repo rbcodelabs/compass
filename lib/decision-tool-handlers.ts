@@ -1,4 +1,5 @@
 import getPrisma from "@/lib/db"
+import { getDecisionArtifacts } from "@/lib/artifacts"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
@@ -47,7 +48,8 @@ export async function getDecision({ workspaceId, requestId }: { workspaceId: str
   try {
     const request = await getTrackedDecision(workspaceId, requestId)
     if (!request) return fail(`Decision "${requestId}" not found.`)
-    return ok(`${request.currentRevision?.title ?? "Decision"} [${request.state}]\nID: ${request.id}`, request)
+    const artifacts = await getDecisionArtifacts(workspaceId, requestId)
+    return ok(`${request.currentRevision?.title ?? "Decision"} [${request.state}]\nID: ${request.id}`, { ...request, artifacts })
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Could not get decision.")
   }
@@ -103,7 +105,8 @@ export async function getReviewRequest({ requestId }: { requestId: string }) {
     include: { currentRevision: { include: { options: { orderBy: { sortOrder: "asc" } }, decisions: true } } },
   })
   if (!request) return fail(`Review request "${requestId}" not found.`)
-  return ok(`Review request ${request.id} [${request.state}]\nGate: ${request.gateType}\nSubject: ${request.subjectType} ${request.subjectId}`, request)
+  const artifacts = request.gateType === "TRACKED_DECISION" ? await getDecisionArtifacts(request.workspaceId, requestId) : []
+  return ok(`Review request ${request.id} [${request.state}]\nGate: ${request.gateType}\nSubject: ${request.subjectType} ${request.subjectId}`, { ...request, artifacts })
 }
 
 export async function listReviewRequests({ workspaceId, state }: { workspaceId: string; state?: string }) {

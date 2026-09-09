@@ -44,6 +44,8 @@ import {
   archiveArtifact,
   createArtifact,
   getArtifact,
+  linkArtifactDecision,
+  unlinkArtifactDecision,
   linkArtifact,
   listArtifacts,
   unlinkArtifact,
@@ -1803,7 +1805,7 @@ const _handler = createMcpHandler(
       "get_decision",
       {
         title: "Get Decision",
-        description: "Reads one tracking-only decision request and its immutable revision history.",
+        description: "Reads one tracking-only decision request, its immutable revision history, and live supporting artifacts (separate from frozen evidence).",
         inputSchema: { workspaceId: z.string().uuid(), requestId: z.string().uuid() },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -1854,7 +1856,7 @@ const _handler = createMcpHandler(
       "get_review_request",
       {
         title: "Get Review Request",
-        description: "Reads a Compass-native review request, its current immutable revision, options, and decision state.",
+        description: "Reads a Compass-native review request, its current immutable revision, options, decision state, and live supporting artifacts for ordinary tracked Decisions.",
         inputSchema: { requestId: z.string().uuid().describe("UUID of the Review Request") },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -2795,7 +2797,7 @@ const _handler = createMcpHandler(
       inputSchema: { workspaceId: z.string().uuid(), includeArchived: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, listArtifacts)
     register("get_artifact", {
-      title: "Get Artifact", description: "Returns artifact metadata, immutable revision history, and linked Solutions without exposing private storage keys or HTML content.",
+      title: "Get Artifact", description: "Returns artifact metadata, immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content.",
       inputSchema: { artifactId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, getArtifact)
     register("create_artifact", {
@@ -2814,6 +2816,14 @@ const _handler = createMcpHandler(
       title: "Unlink Artifact from Solution", description: "Removes an Artifact-to-Solution link.",
       inputSchema: { artifactId: z.string().uuid(), solutionId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, unlinkArtifact)
+    register("link_artifact_to_decision", {
+      title: "Link Artifact to Decision", description: "Idempotently links an active Artifact to an ordinary tracked Decision in the same workspace as live supporting material, without changing frozen evidence or recorded decisions.",
+      inputSchema: { workspaceId: z.string().uuid(), artifactId: z.string().uuid(), requestId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, linkArtifactDecision)
+    register("unlink_artifact_from_decision", {
+      title: "Unlink Artifact from Decision", description: "Idempotently removes a live Artifact link from an ordinary tracked Decision without modifying its recorded outcome or frozen evidence.",
+      inputSchema: { workspaceId: z.string().uuid(), artifactId: z.string().uuid(), requestId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, unlinkArtifactDecision)
     register("archive_artifact", {
       title: "Archive Artifact", description: "Archives an Artifact while preserving its links and immutable revision history.",
       inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,

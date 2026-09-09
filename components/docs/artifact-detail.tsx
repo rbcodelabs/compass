@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { archiveArtifact, linkArtifact, replaceArtifactRevision, unlinkArtifact, updateArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
+import { archiveArtifact, linkArtifact, replaceArtifactRevision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
 import { ArtifactPreview } from "./artifact-preview"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,9 +16,10 @@ type ArtifactDetailProps = {
   workspaceId: string
   basePath: string
   solutions: Array<{ id: string; title: string; linked: boolean }>
+  decisions: Array<{ id: string; title: string; state: string }>
 }
 
-export function ArtifactDetail({ artifact, html, workspaceId, basePath, solutions }: ArtifactDetailProps) {
+export function ArtifactDetail({ artifact, html, workspaceId, basePath, solutions, decisions }: ArtifactDetailProps) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -43,6 +44,15 @@ export function ArtifactDetail({ artifact, html, workspaceId, basePath, solution
     </div>
     <section className="rounded-lg border p-4 space-y-3"><h2 className="font-semibold">Linked solutions</h2>{linked.length === 0 ? <p className="text-sm text-text-subtle">Not linked to a solution.</p> : <ul className="space-y-2">{linked.map((solution) => <li key={solution.id} className="flex items-center justify-between gap-2"><span>{solution.title}</span><Button size="sm" variant="ghost" onClick={() => run(() => unlinkArtifact(workspaceId, artifact.id, solution.id, basePath))}>Unlink</Button></li>)}</ul>}
       {available.length > 0 && <div className="flex gap-2"><select aria-label="Solution to link" className="flex-1 rounded-md border px-3 text-sm" value={selectedSolution} onChange={(event) => setSelectedSolution(event.target.value)}><option value="">Select a solution…</option>{available.map((solution) => <option key={solution.id} value={solution.id}>{solution.title}</option>)}</select><Button disabled={!selectedSolution || pending} onClick={() => run(() => linkArtifact(workspaceId, artifact.id, selectedSolution, basePath))}>Link</Button></div>}
+    </section>
+    <section className="min-w-0 rounded-lg border p-4 space-y-3">
+      <h2 className="font-semibold">Linked decisions</h2>
+      <p className="text-xs text-muted-foreground">Live supporting material, not frozen approval evidence.</p>
+      {decisions.length === 0 ? <p className="text-sm text-text-subtle">Not linked to a Decision. Add this Artifact from a Decision’s “Linked to” section.</p> : <ul className="space-y-2">{decisions.map((decision) => <li key={decision.id} className="flex min-w-0 flex-col items-start gap-2 sm:flex-row sm:items-center">
+        <Link className="min-w-0 flex-1 whitespace-normal break-words [overflow-wrap:anywhere] text-primary hover:underline" href={`${basePath.replace(/\/docs$/, "")}/reviews/${decision.id}`}>{decision.title}</Link>
+        <span className="text-xs text-muted-foreground">{decision.state === "DECIDED" ? "Decided" : "Pending"}</span>
+        <Button size="sm" variant="ghost" disabled={pending} aria-label={`Unlink ${decision.title}`} onClick={() => run(() => unlinkArtifactDecision(workspaceId, artifact.id, decision.id, basePath))}>Unlink</Button>
+      </li>)}</ul>}
     </section>
     <section className="rounded-lg border p-4"><h2 className="font-semibold mb-2">Revision history</h2><ol className="space-y-2 text-sm">{artifact.revisions.map((revision) => <li key={revision.id} className="flex justify-between"><span>Revision {revision.revisionNumber}{revision.filename ? ` · ${revision.filename}` : " · External URL"}</span><time>{new Date(revision.createdAt).toLocaleString()}</time></li>)}</ol></section>
     {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}

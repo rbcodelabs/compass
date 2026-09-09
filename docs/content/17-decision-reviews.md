@@ -31,6 +31,14 @@ validates that every source belongs to the same workspace and snapshots its
 title and version date into the immutable review packet. Renaming or removing a
 source later does not erase what the reviewer originally saw.
 
+## Supporting Artifacts
+
+Wireframes and prototypes can be linked directly in **Linked to**, beneath the original subject. Workspace members select an active same-workspace Artifact with **Artifact to link** and choose **Link**. Open its title to view the current preview; **Unlink** removes only the relationship. Artifact detail shows reciprocal **Linked decisions** and also supports unlinking. A URL pasted into a discussion does not create this structured relationship.
+
+Artifact rows show their current revision and archived status. They are **live supporting material, not frozen approval evidence**: they are separate from the captured **Sources** and never modify the immutable packet, fingerprint, Decision history, or outcome. Link changes work on both pending and decided requests and remain across request revisions. Existing archived links remain visible and removable, while newly linking archived Artifacts is disabled. Organization administrators who can read a Decision without workspace membership can see supporting rows but cannot edit Artifact relationships.
+
+Agents use `link_artifact_to_decision` and `unlink_artifact_from_decision`. Both Decision MCP getters include live `artifacts`, and `get_artifact` includes `decisions`. Legacy system review requests do not support these links.
+
 ## Roadmap behavior
 
 Authorized roadmap actions work directly in every ordinary horizon, including

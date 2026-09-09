@@ -2,14 +2,17 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const { auth, findFirst, ensureBuildingInvestmentRevisionFresh } = vi.hoisted(() => ({
+const { auth, findFirst, findArtifacts, linkedArtifacts, ensureBuildingInvestmentRevisionFresh } = vi.hoisted(() => ({
   auth: vi.fn(),
   findFirst: vi.fn(),
+  findArtifacts: vi.fn(), linkedArtifacts: vi.fn(),
   ensureBuildingInvestmentRevisionFresh: vi.fn(),
 }))
 
 vi.mock("@/auth", () => ({ auth }))
-vi.mock("@/lib/db", () => ({ default: () => ({ reviewRequest: { findFirst } }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ reviewRequest: { findFirst }, artifact: { findMany: findArtifacts } }) }))
+vi.mock("@/lib/artifacts", () => ({ getDecisionArtifacts: linkedArtifacts }))
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({ linkArtifactDecision: vi.fn(), unlinkArtifactDecision: vi.fn() }))
 vi.mock("@/lib/building-investment", () => ({
   ensureBuildingInvestmentRevisionFresh,
   ensureBuildingInvestmentRevocationRevisionFresh: vi.fn(),
@@ -39,7 +42,7 @@ function reviewRequest(gateType: "BUILDING_INVESTMENT" | "TRACKED_DECISION") {
         schemaVersion: "tracked-decision/v2",
         question: "Should we build this?",
         context: "Review the evidence.",
-        entity: { type: "SOLUTION", id: "solution-1", title: "A solution" },
+        entity: { type: "SOLUTION", id: "solution-1", title: "A solution", updatedAt: "2026-09-01T00:00:00Z" },
         sources: [],
         solution: { title: "A solution", status: "VALIDATING", opportunityTitle: "An opportunity" },
       }),
@@ -61,6 +64,8 @@ describe("review request page eyebrow", () => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
     ensureBuildingInvestmentRevisionFresh.mockResolvedValue({ stale: false })
+    findArtifacts.mockResolvedValue([{ id: "new", title: "New prototype" }])
+    linkedArtifacts.mockResolvedValue([{ id: "linked", title: "Existing prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }])
   })
 
   it("preserves the Building investment review label", async () => {
@@ -78,5 +83,25 @@ describe("review request page eyebrow", () => {
 
     expect(screen.getByText("Decision")).toBeDefined()
     expect(screen.queryByText(/Legacy system decision/)).toBeNull()
+  })
+
+  it("places supporting Artifacts alongside the subject and offers only unlinked active choices", async () => {
+    findFirst.mockResolvedValue(reviewRequest("TRACKED_DECISION"))
+    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    expect(screen.getByRole("link", { name: "Existing prototype" })).toBeDefined()
+    expect(screen.getByRole("combobox", { name: "Artifact to link" })).toBeDefined()
+    expect(findArtifacts.mock.calls[0][0].where).toEqual({ workspaceId: "workspace-1", status: "ACTIVE", id: { notIn: ["linked"] } })
+  })
+
+  it("does not grant Artifact editing to org-admin-only Decision readers", async () => {
+    const request = reviewRequest("TRACKED_DECISION")
+    request.workspace.members = []
+    request.workspace.organization.members = [{ role: "ADMIN" }] as never[]
+    findFirst.mockResolvedValue(request)
+    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    expect(screen.getByRole("link", { name: "Existing prototype" })).toBeDefined()
+    expect(screen.queryByRole("combobox", { name: "Artifact to link" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Unlink Existing prototype" })).toBeNull()
+    expect(findArtifacts).not.toHaveBeenCalled()
   })
 })

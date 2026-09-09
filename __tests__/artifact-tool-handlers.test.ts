@@ -5,7 +5,7 @@ const prisma = {
   workspace: { findUnique: vi.fn() },
   artifact: { findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
   artifactRevision: { findFirst: vi.fn(), create: vi.fn() },
-  artifactLink: { findFirst: vi.fn() },
+  artifactLink: { findFirst: vi.fn(), findMany: vi.fn() },
   solution: { findMany: vi.fn() },
   artifactBlobCleanup: { upsert: vi.fn() },
   $transaction: vi.fn(),
@@ -20,6 +20,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   prisma.$transaction.mockImplementation(async (callback) => callback(prisma))
   prisma.artifactRevision.findFirst.mockResolvedValue(null)
+  prisma.artifactLink.findMany.mockResolvedValue([])
   storage.put.mockResolvedValue({ pathname: "artifacts/ws-1/art-1/rev-2.html" })
   storage.del.mockResolvedValue(undefined)
 })
