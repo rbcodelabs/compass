@@ -15,6 +15,7 @@ import { usePanelContext } from "@/components/panels/panel-context";
 import {
   addCalendarDays,
   addCalendarMonths,
+  inclusiveDayCount,
   monthStart,
   utcDate,
   type CalendarDate,
@@ -30,6 +31,22 @@ export function localCalendarToday(now = new Date()): CalendarDate {
 }
 
 export type TimelineItemView = RoadmapCardData & { viewStart: CalendarDate; viewEnd: CalendarDate; hasDates: boolean };
+
+function projectTimelineItem(item: RoadmapCardData, placeholderStart: CalendarDate): TimelineItemView {
+  const start = item.startDate?.slice(0, 10);
+  const end = item.endDate?.slice(0, 10);
+  if (start && end) {
+    try {
+      inclusiveDayCount(start, end);
+      return { ...item, hasDates: true, viewStart: start, viewEnd: end };
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error;
+    }
+  }
+  // Legacy/API records can contain incomplete or reversed dates. Project a
+  // complete placeholder pair without rewriting their persisted schedule.
+  return { ...item, hasDates: false, viewStart: placeholderStart, viewEnd: addCalendarDays(placeholderStart, 13) };
+}
 
 export function useTimelineController({
   initialItems,
@@ -68,13 +85,10 @@ export function useTimelineController({
 
   const viewportEnd = addCalendarMonths(viewportStart, zoom === "month" ? 6 : 18);
   const viewItems = useMemo<TimelineItemView[]>(
-    () =>
-      items.map((item) => ({
-        ...item,
-        hasDates: Boolean(item.startDate && item.endDate),
-        viewStart: item.startDate?.slice(0, 10) ?? localCalendarToday(),
-        viewEnd: item.endDate?.slice(0, 10) ?? addCalendarDays(localCalendarToday(), 13),
-      })),
+    () => {
+      const placeholderStart = localCalendarToday();
+      return items.map((item) => projectTimelineItem(item, placeholderStart));
+    },
     [items],
   );
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const actions = vi.hoisted(() => ({
   promoteFeedbackToRoadmap: vi.fn(),
@@ -25,6 +25,56 @@ vi.mock("@/components/panels/panel-context", () => ({
 }));
 
 import { localCalendarToday, useTimelineController } from "./use-timeline-controller";
+import { NativeTimeline } from "./native-timeline";
+import { addCalendarDays } from "./timeline-model";
+
+vi.mock("./timeline-shared", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./timeline-shared")>(),
+  useTimelinePanelNavigation: () => ({ openItem: vi.fn(), triggerItemId: null }),
+}));
+
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+const unsafeDatePairs = [
+  { label: "past end-only", startDate: null, endDate: "2000-01-01" },
+  { label: "future start-only", startDate: "2099-01-01", endDate: null },
+  { label: "reversed", startDate: "2026-10-10", endDate: "2026-10-01" },
+  { label: "invalid calendar day", startDate: "2026-02-30", endDate: "2026-03-10" },
+  { label: "malformed", startDate: "not-a-date", endDate: "2026-03-10" },
+];
+
+describe("legacy schedule projection", () => {
+  it.each([
+    { startDate: "2026-09-01T00:00:00.000Z", endDate: "2026-09-14T00:00:00.000Z" },
+    { startDate: "2026-09-01", endDate: "2026-09-01" },
+  ])("preserves a complete valid schedule $startDate through $endDate", ({ startDate, endDate }) => {
+    const item = { id: "valid", title: "Valid", horizon: "NEXT", squad: null, startDate, endDate };
+    const { result } = renderHook(() => useTimelineController({ initialItems: [item] as never[], initialUnscheduled: [], workspaceId: "workspace-1" }));
+    expect(result.current.items[0]).toMatchObject({ startDate, endDate, hasDates: true, viewStart: startDate.slice(0, 10), viewEnd: endDate.slice(0, 10) });
+    expect(actions.rescheduleRoadmapItem).not.toHaveBeenCalled();
+  });
+
+  it.each(unsafeDatePairs)("projects $label without changing stored fields or saving", ({ startDate, endDate }) => {
+    const item = { id: "legacy", title: "Legacy", horizon: "NEXT", squad: null, startDate, endDate };
+    const { result } = renderHook(() => useTimelineController({ initialItems: [item] as never[], initialUnscheduled: [], workspaceId: "workspace-1" }));
+    expect(result.current.items[0]).toMatchObject({ startDate, endDate, hasDates: false, viewStart: localCalendarToday(), viewEnd: addCalendarDays(localCalendarToday(), 13) });
+    expect(item).toMatchObject({ startDate, endDate });
+    expect(actions.rescheduleRoadmapItem).not.toHaveBeenCalled();
+    expect(router.refresh).not.toHaveBeenCalled();
+  });
+
+  it.each(unsafeDatePairs)("renders $label through the real timeline and opens date repair", ({ startDate, endDate }) => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(2000);
+    const item = { id: "legacy", title: "Legacy", horizon: "NEXT", squad: null, startDate, endDate, deliveryStatus: "NOT_STARTED" };
+    render(<NativeTimeline items={[item] as never[]} squads={[]} unscheduledItems={[]} workspaceId="workspace-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit dates for Legacy" }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect((screen.getByLabelText("Start", { exact: true }) as HTMLInputElement).value).toBe(localCalendarToday());
+    expect((screen.getByLabelText("End", { exact: true }) as HTMLInputElement).value).toBe(addCalendarDays(localCalendarToday(), 13));
+    expect(actions.rescheduleRoadmapItem).not.toHaveBeenCalled();
+  });
+});
 
 const ack = (horizon = "LATER", startDate = "2026-10-01", endDate = "2026-10-14", updatedAt = "2026-09-05T12:00:00.000Z") => ({
   id: "item-1", horizon, startDate: new Date(`${startDate}T00:00:00.000Z`), endDate: new Date(`${endDate}T00:00:00.000Z`), updatedAt: new Date(updatedAt),
