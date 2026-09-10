@@ -1,9 +1,25 @@
 import { describe, expect, it, vi } from "vitest"
-import { fetchGithubCapabilityPack } from "@/lib/capability-pack-github"
+import { fetchGithubCapabilityPack, resolveAgenticPmPackSource } from "@/lib/capability-pack-github"
 
 const SHA = "0123456789abcdef0123456789abcdef01234567"
 
 describe("GitHub capability pack fetch", () => {
+  it("resolves the server-owned main ref once to a full immutable source", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ sha: SHA }), { headers: { "content-type": "application/json" } }))
+    expect(await resolveAgenticPmPackSource(fetcher)).toEqual({ repositoryUrl: "https://github.com/rbcodelabs/agent-pm-playbook", packPath: "packs/compass", commitSha: SHA })
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(fetcher).toHaveBeenCalledWith("https://api.github.com/repos/rbcodelabs/agent-pm-playbook/commits/heads%2Fmain", expect.objectContaining({ redirect: "error", signal: expect.any(AbortSignal) }))
+  })
+  it("rejects mutable/invalid SHAs, redirects, oversized bodies and unavailable refs", async () => {
+    for (const body of ["null", "[]", "true", "{invalid"]) {
+      await expect(resolveAgenticPmPackSource(vi.fn().mockResolvedValue(new Response(body, { headers: { "content-type": "application/json" } })))).rejects.toThrow()
+    }
+    await expect(resolveAgenticPmPackSource(vi.fn().mockResolvedValue(new Response("<html>unavailable</html>", { headers: { "content-type": "text/html" } })))).rejects.toThrow(/content type/i)
+    for (const response of [new Response(JSON.stringify({ sha: "main" }), { headers: { "content-type": "application/json" } }), new Response(null, { status: 302 }), new Response(null, { status: 404 }), new Response("{}", { headers: { "content-type": "application/json", "content-length": "3000000" } })]) {
+      await expect(resolveAgenticPmPackSource(vi.fn().mockResolvedValue(response))).rejects.toThrow()
+    }
+    await expect(resolveAgenticPmPackSource(vi.fn().mockRejectedValue(new DOMException("timeout", "TimeoutError")))).rejects.toThrow("timeout")
+  })
   const commitResponse = () => new Response(JSON.stringify({ sha: SHA, tree: { sha: "tree-sha" } }), { headers: { "content-type": "application/json" } })
   it("loads only the requested tree with bounded GitHub API responses", async () => {
     const fetcher = vi.fn()

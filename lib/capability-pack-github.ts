@@ -1,10 +1,20 @@
 import { CAPABILITY_PACK_LIMITS, parseGithubPackSource } from "@/lib/capability-pack"
+import { AGENTIC_PM_PACK } from "@/lib/capability-pack-curated"
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 type GithubTreeItem = { path?: unknown; type?: unknown; mode?: unknown; sha?: unknown; size?: unknown }
 
 const API_RESPONSE_LIMIT = 2 * 1024 * 1024
 const FETCH_TIMEOUT_MS = 15_000
+
+export async function resolveAgenticPmPackSource(fetcher: FetchLike = fetch) {
+  const value = await boundedJson(await fetcher("https://api.github.com/repos/rbcodelabs/agent-pm-playbook/commits/heads%2Fmain", {
+    headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+    redirect: "error", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), cache: "no-store",
+  }))
+  if (!value || typeof value !== "object" || !("sha" in value) || typeof value.sha !== "string" || !/^[a-f0-9]{40}$/.test(value.sha)) throw new Error("GitHub did not resolve a full immutable commit SHA")
+  return { repositoryUrl: AGENTIC_PM_PACK.repositoryUrl, packPath: AGENTIC_PM_PACK.packPath, commitSha: value.sha }
+}
 
 async function boundedJson(response: Response, maxBytes = API_RESPONSE_LIMIT): Promise<unknown> {
   if (!response.ok || response.redirected || (response.status >= 300 && response.status < 400)) throw new Error(`GitHub request failed (${response.status})`)

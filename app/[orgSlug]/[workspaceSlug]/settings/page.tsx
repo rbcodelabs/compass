@@ -140,6 +140,8 @@ export default async function SettingsPage({ params }: Props) {
   const agentActivity = canManageCapabilityPacks ? await prisma.agentToolCall.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "desc" }, take: 25 }) : [];
   const capabilityPacks: CapabilityPackSettingsRow[] = rawCapabilityPacks.map((attachment) => ({
     packId: attachment.capabilityPackVersion.capabilityPack.packId,
+    sourceRepository: attachment.capabilityPackVersion.sourceRepository,
+    sourcePath: attachment.capabilityPackVersion.sourcePath,
     displayName: attachment.capabilityPackVersion.capabilityPack.displayName,
     enabled: attachment.enabled,
     selectedVersionId: attachment.capabilityPackVersionId,

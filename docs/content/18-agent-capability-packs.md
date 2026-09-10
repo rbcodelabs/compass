@@ -9,7 +9,11 @@ Workspace administrators can add reusable skills to the Compass in-app agent fro
 
 Before enabling packs in a deployed environment, an administrator must configure `CAPABILITY_PACK_BLOB_READ_WRITE_TOKEN` for a **private** Vercel Blob store. Preview and production require their own configured private pack storage. Compass does not fall back to the general `BLOB_READ_WRITE_TOKEN`, which may serve public documents or images. Missing or incorrectly configured private storage blocks pack installation and enabled pack turns; an agent with no active packs does not require this setting.
 
-Enter a public GitHub repository URL, a full 40-character commit SHA, and the path containing the pack. Compass validates the content before attaching it. Installed versions are immutable: to upgrade, install another commit and select its version; to roll back, select an earlier version.
+Choose **Install Agentic PM pack** for one-click setup. Compass resolves the curated Agentic PM Playbook repository's `main` branch once, validates its pack, and pins the resulting full commit SHA. You do not need to enter a URL, SHA, or path. An existing installation shows **Agentic PM pack installed** and keeps its selected version, enabled/disabled state, and skill choices unchanged.
+
+For another pack or an explicit update, expand **Advanced** and enter a public GitHub repository URL, a full 40-character commit SHA, and the path containing the pack. Compass validates the content before attaching it. Installed versions are immutable and never update automatically: to upgrade, install another commit and select its version; to roll back, select an earlier version.
+
+![One-click pack installation on desktop](/screenshots/docs/capability-packs-install-desktop.png)
 
 Use each skill's checkbox to choose which instructions are active, or disable the whole pack without removing its installed versions. A version change restores that version's default skill selection. Changes appear after saving; if a save fails, the previous selection remains visible with an error message.
 
