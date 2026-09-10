@@ -45,7 +45,6 @@
     "@modelcontextprotocol/sdk": "1.26.0",
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
-    "@svar-ui/react-gantt": "^2.7.1",
     "@tanstack/react-table": "^9.1.2",
     "@tiptap/extension-character-count": "^3.27.1",
     "@tiptap/extension-image": "^3.27.1",
