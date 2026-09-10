@@ -58,6 +58,8 @@ Drag the **dotted move handle** just inside a bar's left edge to move its dates.
 
 Keyboard controls and an **Edit dates** dialog offer alternatives to dragging: focus the move handle and use **Alt + Left/Right** to shift dates, or **D** to open the date dialog; use **Left/Right** on either resize grip to adjust that edge. Narrow bars keep the dialog when there is not enough space for separate controls. Dates are inclusive, and changes save immediately. Items without dates use placeholder dates until scheduled. Launching and Launched items are display-only in this chart; use the existing launch workflow to manage them.
 
+Older items with incomplete or invalid dates also appear as placeholders starting today. Their stored dates are not changed by viewing or reloading the timeline. Use **Edit dates** to explicitly save a corrected schedule.
+
 Use **Reload timeline** to fetch a fresh snapshot after changes made elsewhere. Reload is disabled while a date save or backlog placement is pending, so it cannot interrupt an active save. The Board tab remains available.
 
 ![Native timeline on desktop](/screenshots/docs/native-timeline-1280.png)

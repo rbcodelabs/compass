@@ -68,6 +68,60 @@ test.describe("Native timeline default", () => {
     } finally { await pool.end(); }
   });
 
+  test("legacy partial and reversed schedules render without silent persistence and allow explicit repair", async ({ page }, testInfo) => {
+    await assertIsolatedE2EDatabase();
+    const pool = new pg.Client({ connectionString: isolatedE2EConnectionString() });
+    await pool.connect();
+    const ids: string[] = [];
+    try {
+      const cases = [
+        { title: "Legacy past end only", start: null, end: "2000-01-01" },
+        { title: "Legacy future start only", start: "2099-01-01", end: null },
+        { title: "Legacy reversed dates", start: "2026-10-10", end: "2026-10-01" },
+      ];
+      for (const item of cases) {
+        const { rows: [created] } = await pool.query(`INSERT INTO compass_dev.roadmap_items
+          (id, workspace_id, title, horizon, status, sort_order, start_date, end_date, created_at, updated_at)
+          VALUES (gen_random_uuid(), $1, $2, 'NEXT', 'ACTIVE', 0, $3, $4, NOW(), NOW()) RETURNING id`, [nativeId, item.title, item.start, item.end]);
+        ids.push(created.id);
+      }
+      const readSchedules = () => pool.query(`SELECT id, start_date::text, end_date::text, updated_at::text
+        FROM compass_dev.roadmap_items WHERE workspace_id = $1 AND id = ANY($2::uuid[]) ORDER BY id`, [nativeId, ids]);
+      const before = (await readSchedules()).rows;
+      await page.goto(`${nativeBase}/roadmap?view=timeline`);
+      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      await scrollToFixtureMonth(page);
+      for (const item of cases) {
+        await page.getByRole("button", { name: `Edit dates for ${item.title}`, exact: true }).click();
+        const dialog = page.getByRole("dialog");
+        const shownStart = await dialog.getByLabel("Start", { exact: true }).inputValue();
+        const shownEnd = await dialog.getByLabel("End", { exact: true }).inputValue();
+        expect(shownEnd).toBe(shiftDate(shownStart, 13));
+        await page.keyboard.press("Escape");
+      }
+      await page.reload();
+      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      expect((await readSchedules()).rows).toEqual(before);
+      await scrollToFixtureMonth(page);
+      await page.screenshot({ path: testInfo.outputPath("legacy-schedule-recovery.png"), fullPage: true, style: "nextjs-portal { display: none }" });
+      await page.getByRole("button", { name: "Edit dates for Legacy past end only", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("Start", { exact: true }).fill(start);
+      await dialog.getByLabel("End", { exact: true }).fill(end);
+      await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
+      await expect(dialog).not.toBeVisible();
+      await page.reload();
+      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      const { rows: [repaired] } = await pool.query(`SELECT start_date::date::text AS start, end_date::date::text AS end
+        FROM compass_dev.roadmap_items WHERE workspace_id = $1 AND id = $2`, [nativeId, ids[0]]);
+      expect(repaired).toEqual({ start, end });
+    } finally {
+      // Only this test's inserted rows; the normal suite retains its own fixtures.
+      await pool.query("DELETE FROM compass_dev.roadmap_items WHERE workspace_id = $1 AND id = ANY($2::uuid[])", [nativeId, ids]);
+      await pool.end();
+    }
+  });
+
   for (const theme of ["dark", "light"] as const) {
     for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
       test(`native timeline ${theme} appearance at ${viewport.width}px`, async ({ page }) => {
