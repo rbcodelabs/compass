@@ -66,6 +66,13 @@ export async function POST(request: Request) {
           tools: [],
           audio: {
             input: {
+              // Research answers often include thinking pauses; retain participant barge-in.
+              turn_detection: {
+                type: "semantic_vad",
+                eagerness: "low",
+                create_response: true,
+                interrupt_response: true,
+              },
               transcription: {
                 model: process.env.OPENAI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe",
               },

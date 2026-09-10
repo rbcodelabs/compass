@@ -46,6 +46,8 @@ Study settings remain editable until the first participant session starts. After
 
 Participants use Chat by default. The separate `COMPASS_RESEARCH_BROWSER_VOICE_ENABLED=1` gate enables browser voice for both study types after its migration and release checks. The authoritative voice flag does not enable this path. A non-production functional harness can exercise synthetic voice without contacting a provider. Chat remains available regardless of voice configuration.
 
+Voice conversations in both study types give participants time to think. Compass uses the meaning of an answer to estimate when a thought is finished, with a less eager response setting to reduce interruptions during pauses. Replies still start automatically, and participants can interrupt the moderator by speaking. The wait varies with the answer; it is not a fixed delay or a guarantee against every interruption.
+
 For guided usability tests, the live product appears beside the neutral moderator on desktop and uses a constrained stacked layout on smaller screens. An **Open product** action is always available when a site blocks embedding. The moderator presents one task at a time, asks the participant to think aloud, and probes expectations without identifying controls or rescuing them.
 
 The product pane and external fallback remain available when voice is disabled.
