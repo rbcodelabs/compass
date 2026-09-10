@@ -14,6 +14,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
+import { Button } from "@/components/ui/button";
 import { GripVertical } from "lucide-react";
 import { createTimelineLaneKey, packTimelineIntervals } from "@/lib/roadmap-timeline/lane-packing";
 import { HORIZON_META, HORIZON_ORDER } from "@/lib/roadmap";
@@ -266,6 +267,18 @@ export function NativeTimeline(props: TimelineEngineProps) {
           onShift={controller.shiftViewport}
           onToday={controller.jumpToday}
         />
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+          <p>{controller.reconciliationRequiredIds.size > 0
+            ? "An item changed elsewhere. Reload the timeline before editing it again."
+            : "Reload to pick up deletions or conflicting changes made elsewhere."}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0}
+            onClick={() => window.location.reload()}
+          >Reload timeline</Button>
+        </div>
         <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
           <div className="grid" style={{ gridTemplateColumns: `clamp(112px, 30vw, ${LABEL_WIDTH}px) minmax(0, 1fr)` }}>
             <div className="border-r bg-card">

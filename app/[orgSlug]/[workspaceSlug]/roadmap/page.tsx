@@ -1,11 +1,9 @@
 import { Suspense } from "react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
-import { RoadmapGantt } from "@/components/roadmap/roadmap-gantt";
 import { NativeTimeline } from "@/components/roadmap/native-timeline/native-timeline";
 import { RoadmapViewToggle } from "@/components/roadmap/roadmap-view-toggle";
 import { RoadmapFilters } from "@/components/roadmap/roadmap-filters";
@@ -21,7 +19,7 @@ export const metadata = {
 
 interface RoadmapPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string; view?: string; timelineEngine?: string }>;
+  searchParams: Promise<{ squad?: string; view?: string }>;
 }
 
 export default async function RoadmapPage({ params, searchParams }: RoadmapPageProps) {
@@ -29,7 +27,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const { squad: squadFilter, view: viewParam, timelineEngine } = await searchParams;
+  const { squad: squadFilter, view: viewParam } = await searchParams;
   const view = viewParam === "timeline" ? "timeline" : "board";
   const prisma = getPrisma();
 
@@ -41,15 +39,6 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   });
 
   if (!workspace) notFound();
-
-  // Server-owned, identity-based dogfood cohort: URL parameters cannot opt
-  // another workspace in. Keep the old renderer available as an escape hatch.
-  const nativeEligible = workspace.id === "3eaf938a-782c-4073-a452-070d54156896";
-  const useNative = nativeEligible && timelineEngine !== "classic";
-  const engineQuery = new URLSearchParams({ view: "timeline" });
-  if (squadFilter) engineQuery.set("squad", squadFilter);
-  if (useNative) engineQuery.set("timelineEngine", "classic");
-  const engineHref = `/${orgSlug}/${workspaceSlug}/roadmap?${engineQuery}`;
 
   const [rawSquads, items, rawKRs, rawSolutions, rawOpportunities, rawExperiments, unscheduledSolutions, unscheduledBugs] = await Promise.all([
     prisma.squad.findMany({
@@ -263,33 +252,15 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     >
       {view === "timeline" ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {nativeEligible && (
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
-              <p>{useNative ? "Native timeline preview. After external deletions or conflicting edits, reload this page before continuing." : "Classic timeline is active."}</p>
-              <Link href={engineHref} className="font-medium text-primary underline underline-offset-4">
-                {useNative ? "Use classic timeline" : "Use native timeline"}
-              </Link>
-            </div>
-          )}
-          {useNative ? (
-            <NativeTimeline
-              // The controller retains mounted-session snapshots. A filter
-              // change is a new dataset, but ordinary refreshes must not drop
-              // in-flight mutation fences or optimistic edits.
-              key={JSON.stringify([workspace.id, squadFilter || null])}
-              items={cardItems}
-              squads={squadFilter ? squads.filter((squad) => squad.id === squadFilter) : squads}
-              workspaceId={workspace.id}
-              unscheduledItems={unscheduledItems}
-            />
-          ) : (
-          <RoadmapGantt
+          <NativeTimeline
+            // A filter change is a new dataset; ordinary refreshes must
+            // preserve in-flight mutation fences and optimistic edits.
+            key={JSON.stringify([workspace.id, squadFilter || null])}
             items={cardItems}
+            squads={squadFilter ? squads.filter((squad) => squad.id === squadFilter) : squads}
             workspaceId={workspace.id}
             unscheduledItems={unscheduledItems}
-            revalidatePathStr={`/${orgSlug}/${workspaceSlug}/roadmap`}
           />
-          )}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">

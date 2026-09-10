@@ -3,7 +3,7 @@ import { test, expect } from "../fixtures/index";
 import { assertIsolatedE2EDatabase, isolatedE2EConnectionString } from "../fixtures/isolated-database";
 import type { Locator, Page } from "@playwright/test";
 
-const nativeId = "3eaf938a-782c-4073-a452-070d54156896";
+const nativeId = "daf2cdb6-0c38-4c29-bc2b-090bfa391532";
 const nativeBase = "/e2e-test-org/native-dogfood";
 const start = new Date().toISOString().slice(0, 8) + "01";
 const end = new Date().toISOString().slice(0, 8) + "28";
@@ -30,11 +30,10 @@ async function scrollToFixtureMonth(page: Page) {
   await page.getByTestId("native-timeline-scroll").evaluate((element, left) => { element.scrollLeft = left; }, offset);
 }
 
-test.describe("Native timeline limited rollout", () => {
+test.describe("Native timeline default", () => {
   test.beforeAll(async () => {
-    // Mirror only the cohort identity in disposable, sentinel-protected local
-    // Postgres. Never relax the production gate for tests. Global teardown
-    // owns every workspace beneath this run's e2e-test-org.
+    // A separate fixture workspace proves native does not depend on a dogfood
+    // identity. Global teardown owns this sentinel-protected local fixture.
     await assertIsolatedE2EDatabase();
     const pool = new pg.Client({ connectionString: isolatedE2EConnectionString() });
     await pool.connect();
@@ -130,14 +129,14 @@ test.describe("Native timeline limited rollout", () => {
     }
   }
 
-  test("native scheduling persists, classic fallback and board remain available", async ({ page }) => {
+  test("native scheduling persists across reload, old bookmarks and Board", async ({ page }) => {
     await page.goto(`${nativeBase}/roadmap`);
     await page.getByRole("button", { name: "Add item", exact: true }).nth(1).click();
     await page.getByLabel("Title", { exact: true }).fill("Native rollout scheduling");
     await page.getByRole("button", { name: "Add Item", exact: true }).click();
     await expect(page.getByText("Native rollout scheduling", { exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();
-    await expect(page.getByRole("link", { name: "Use classic timeline" })).toBeVisible();
+    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
     await page.getByRole("button", { name: "Edit dates for Native rollout scheduling", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Start", { exact: true }).fill(start);
@@ -155,19 +154,16 @@ test.describe("Native timeline limited rollout", () => {
       await page.screenshot({ path: `public/screenshots/docs/native-timeline-${viewport.width}.png`, fullPage: true, style: "nextjs-portal { display: none }" });
     }
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.getByRole("link", { name: "Use classic timeline" }).click();
-    await expect(page).toHaveURL(/timelineEngine=classic/);
-    await expect(page.getByRole("tab", { name: "Year", exact: true })).toBeVisible();
+    await page.goto(`${nativeBase}/roadmap?view=timeline&timelineEngine=classic`);
+    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
     await page.getByRole("tab", { name: "Board", exact: true }).click();
     await expect(page.getByRole("button", { name: "Add item", exact: true }).first()).toBeVisible();
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();
-    await expect(page.getByRole("tab", { name: "Year", exact: true })).toBeVisible();
-    await expect(page).toHaveURL(/timelineEngine=classic/);
-    await page.getByRole("link", { name: "Use native timeline" }).click();
-    await expect(page.getByRole("link", { name: "Use classic timeline" })).toBeVisible();
+    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Use classic timeline" })).toHaveCount(0);
   });
 
-  test("squad filter drops old native rows and survives renderer fallback", async ({ page }) => {
+  test("squad filter drops old rows and survives a full reload", async ({ page }) => {
     await page.goto(`${nativeBase}/roadmap?view=timeline`);
     await expect(page.getByRole("button", { name: /Open details for Alpha delivery/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Open details for Beta delivery/ })).toBeVisible();
@@ -177,9 +173,7 @@ test.describe("Native timeline limited rollout", () => {
     await expect(page.getByRole("button", { name: /Open details for Alpha delivery/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Open details for Beta delivery/ })).toHaveCount(0);
     const squad = new URL(page.url()).searchParams.get("squad");
-    await page.getByRole("link", { name: "Use classic timeline" }).click();
-    expect(new URL(page.url()).searchParams.get("squad")).toBe(squad);
-    await page.getByRole("link", { name: "Use native timeline" }).click();
+    await page.getByRole("button", { name: "Reload timeline" }).click();
     expect(new URL(page.url()).searchParams.get("squad")).toBe(squad);
     await expect(page.getByRole("button", { name: /Open details for Beta delivery/ })).toHaveCount(0);
   });
@@ -279,9 +273,9 @@ test.describe("Native timeline limited rollout", () => {
     await expect(move).toHaveCount(0);
   });
 
-  test("query cannot opt another workspace into native", async ({ page, base }) => {
-    await page.goto(`${base}/roadmap?view=timeline&timelineEngine=native`);
-    await expect(page.getByRole("tab", { name: "Year", exact: true })).toBeVisible();
+  test("another workspace gets native without an opt-in", async ({ page, base }) => {
+    await page.goto(`${base}/roadmap?view=timeline`);
+    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
     await expect(page.getByRole("link", { name: "Use classic timeline" })).toHaveCount(0);
   });
 
@@ -315,6 +309,36 @@ test.describe("Native timeline limited rollout", () => {
       await page.getByRole("button", { name: "Close", exact: true }).first().tap();
       await expect(page.getByRole("dialog")).not.toBeVisible();
     });
+  });
+
+  test("failed save rolls back and preserves persisted dates after reload", async ({ page }) => {
+    await page.goto(`${nativeBase}/roadmap?view=timeline`);
+    await scrollToFixtureMonth(page);
+    const card = page.locator('[data-testid^="timeline-item-"][data-start]').filter({ hasText: "Beta delivery" });
+    const previousStart = await card.getAttribute("data-start");
+    const previousEnd = await card.getAttribute("data-end");
+    let blocked = 0;
+    await page.route("**/roadmap*", async (route) => {
+      if (route.request().method() === "POST" && route.request().headers()["next-action"]) {
+        blocked++;
+        await route.abort("failed");
+      } else await route.continue();
+    });
+    await page.getByRole("button", { name: "Edit dates for Beta delivery", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Start", { exact: true }).fill(shiftDate(previousStart!, 1));
+    await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
+    await expect(page.getByTestId("timeline-engine-native").getByRole("status")).toContainText("Changes rolled back; try again.");
+    expect(blocked).toBe(1);
+    await expect(dialog).toBeVisible();
+    await expect(card).toHaveAttribute("data-start", previousStart!);
+    await expect(card).toHaveAttribute("data-end", previousEnd!);
+    await page.keyboard.press("Escape");
+    await page.unroute("**/roadmap*");
+    await page.getByRole("button", { name: "Reload timeline" }).click();
+    await scrollToFixtureMonth(page);
+    await expect(card).toHaveAttribute("data-start", previousStart!);
+    await expect(card).toHaveAttribute("data-end", previousEnd!);
   });
 
   test("native backlog quick-add persists on the roadmap", async ({ page }) => {

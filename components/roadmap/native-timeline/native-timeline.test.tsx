@@ -133,6 +133,17 @@ afterEach(() => {
 });
 
 describe("NativeTimeline", () => {
+  it("offers visible reload recovery and prevents interrupting a pending save", () => {
+    const { rerender } = renderTimeline();
+    expect(screen.getByRole("button", { name: "Reload timeline" })).toBeEnabled();
+    harness.controller.pendingItemIds = new Set(["saving"]);
+    rerender(<NativeTimeline items={[]} squads={[]} workspaceId="workspace-1" unscheduledItems={[]} />);
+    expect(screen.getByRole("button", { name: "Reload timeline" })).toBeDisabled();
+    harness.controller.pendingItemIds = new Set();
+    harness.controller.pendingBacklogIds = new Set(["scheduling"]);
+    rerender(<NativeTimeline items={[]} squads={[]} workspaceId="workspace-1" unscheduledItems={[]} />);
+    expect(screen.getByRole("button", { name: "Reload timeline" })).toBeDisabled();
+  });
   it("shows a dotted move affordance and slim grips on both date borders", () => {
     harness.controller.items = [{ id: "item-1", title: "Compact controls", horizon: "NEXT", squad: null, viewStart: "2026-07-10", viewEnd: "2026-07-28", hasDates: true }];
     renderTimeline();
