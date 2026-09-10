@@ -86,7 +86,7 @@ Write neutral, open-ended questions about concrete past behavior and real experi
   const response = await runResearchInterviewAgent({ prompt, baseUrl: "https://compass.local", ...(deadline === undefined ? {} : { deadline }) })
   let parsed: unknown
   try {
-    parsed = JSON.parse(response)
+    parsed = JSON.parse(response.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, ""))
   } catch {
     throw new ResearchStudyError("Compass could not generate an editable study guide")
   }

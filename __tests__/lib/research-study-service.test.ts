@@ -101,6 +101,13 @@ describe("shared research study service", () => {
     expect(m.agent.mock.calls[0][0].deadline).toBe(deadline)
     expect(m.agent.mock.calls[0][0].prompt).toContain("workarounds")
   })
+  it("accepts an otherwise valid generated guide wrapped in a JSON code fence", async () => {
+    m.agent.mockResolvedValue('```json\n["One", "Two", "Three", "Four", "Five"]\n```')
+
+    await expect(generateResearchGuide(scope, actor, {
+      studyType: "CUSTOMER_INTERVIEW", goal: "Goal", appUrl: "", targetMinutes: 15,
+    })).resolves.toEqual(["One", "Two", "Three", "Four", "Five"])
+  })
   it("creates an active study and never returns or persists a token hash in its result", async () => {
     const result = await createResearchStudy(scope, actor, { name: "Study", goal: "Goal", guide: ["Question"] })
     expect(result.id).toBeTruthy()
