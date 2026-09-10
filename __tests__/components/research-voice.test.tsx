@@ -28,7 +28,7 @@ describe("ResearchVoice", () => {
       .mockResolvedValueOnce(new Response("answer-sdp", { status: 200 }))
       .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })))
   })
-  afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+  afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
   it("connects with an ephemeral credential and persists finalized events incrementally", async () => {
     render(<ResearchVoice token="study-token" />)
@@ -199,16 +199,42 @@ describe("ResearchVoice", () => {
     }))
   })
 
-  it("stops the microphone but refuses completion when a final caption never arrives", async () => {
+  it("mutes capture while waiting for a late semantic final caption before completing", async () => {
+    const track = { enabled: true, stop: stopTrack }
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({ getTracks: () => [track] } as unknown as MediaStream)
     render(<ResearchVoice token="study-token" />)
     fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
     await screen.findByText("Connected — speak naturally")
+    vi.useFakeTimers()
+    fireEvent.click(screen.getByRole("button", { name: "Finish session" }))
+    expect(track.enabled).toBe(false)
+    expect(stopTrack).not.toHaveBeenCalled()
+    await act(() => vi.advanceTimersByTimeAsync(1_000))
+    act(() => channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "input_audio_buffer.speech_started" }) })))
+    await act(() => vi.advanceTimersByTimeAsync(2_000))
+    expect(fetch).not.toHaveBeenCalledWith("/api/research/complete", expect.anything())
+    act(() => channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({
+      type: "conversation.item.input_audio_transcription.completed", item_id: "final-answer", transcript: "I needed time to finish this thought.",
+    }) })))
+    await act(() => vi.advanceTimersByTimeAsync(200))
+    expect(fetch).toHaveBeenCalledWith("/api/research/voice-event", expect.objectContaining({ body: expect.stringContaining("I needed time to finish this thought.") }))
+    expect(fetch).toHaveBeenCalledWith("/api/research/complete", expect.anything())
+    expect(stopTrack).toHaveBeenCalled()
+    expect(screen.getByRole("heading", { name: "Thank you" })).toBeVisible()
+  })
+
+  it("stops the microphone after a bounded drain and refuses completion when a final caption never arrives", async () => {
+    render(<ResearchVoice token="study-token" />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    await screen.findByText("Connected — speak naturally")
+    vi.useFakeTimers()
     channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({
       type: "conversation.item.input_audio_transcription.delta", item_id: "unfinished", delta: "Still speaking",
     }) }))
     fireEvent.click(screen.getByRole("button", { name: "Finish session" }))
+    await act(() => vi.advanceTimersByTimeAsync(10_000))
     expect(stopTrack).toHaveBeenCalled()
-    expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent("not marked complete")
+    expect(screen.getByRole("alert")).toHaveTextContent("not marked complete")
     expect(fetch).not.toHaveBeenCalledWith("/api/research/complete", expect.anything())
   })
 
