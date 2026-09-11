@@ -1066,7 +1066,7 @@ async function assertPmInterviewPostconditions(client: PoolClient, schema: strin
   const [{ rows }, indexes] = await Promise.all([
     client.query<{ pm_table: boolean; description_column: boolean }>(
       `SELECT
-        to_regclass(format('%I.pm_interviews', $1)) IS NOT NULL AS pm_table,
+        to_regclass(format('%I.pm_interviews', $1::text)) IS NOT NULL AS pm_table,
         EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='assumptions' AND column_name='description') AS description_column`,
       [schema],
     ),
