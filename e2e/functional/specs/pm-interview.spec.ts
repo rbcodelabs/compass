@@ -15,6 +15,14 @@ test.describe("Capture — PM interview", () => {
     ] as const
     const interviewIds: string[] = []
     try {
+      await page.setViewportSize({ width: 1280, height: 960 })
+      await page.goto(`${base}/capture/pm/new`)
+      await expect(page.getByRole("heading", { name: "Flesh this out" })).toBeVisible()
+      await page.screenshot({ path: "public/screenshots/docs/pm-interview-picker-desktop.png", fullPage: true })
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.goto(`${base}/capture/pm/new`)
+      await page.screenshot({ path: "public/screenshots/docs/pm-interview-picker-mobile.png", fullPage: true })
+
       for (const [targetType, targetId] of targets) {
         const created = await page.request.post(`/api/pm-interviews?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { targetType, targetId } })
         expect(created.status(), await created.text()).toBe(201)
@@ -33,10 +41,15 @@ test.describe("Capture — PM interview", () => {
       }
       await page.goto(`${base}/capture`)
       await expect(page.getByRole("link", { name: "PM interview" }).first()).toBeVisible()
+      await page.setViewportSize({ width: 1280, height: 960 })
+      await page.goto(`${base}/capture/pm/${interviewIds[0]}`)
+      await expect(page.getByText("PM interview brief")).toBeVisible()
+      await page.screenshot({ path: "public/screenshots/docs/pm-interview-review-desktop.png", fullPage: true })
       await page.setViewportSize({ width: 390, height: 844 })
       await page.goto(`${base}/capture/pm/${interviewIds[0]}`)
       await expect(page.getByText("PM interview brief")).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.screenshot({ path: "public/screenshots/docs/pm-interview-review-mobile.png", fullPage: true })
     } finally {
       const records = await prisma.pMInterview.findMany({ where: { id: { in: interviewIds } }, select: { studyId: true, sessionId: true } })
       const sessionIds = records.map(record => record.sessionId), studyIds = records.map(record => record.studyId)
