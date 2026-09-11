@@ -11,6 +11,7 @@ import {
   parsePmInterviewProposal,
   parsePmInterviewTargetType,
   pmInterviewContextSchema,
+  resolvePmInterviewApplyInput,
 } from "@/lib/pm-interview-contracts"
 import { isPmInterviewEnabled } from "@/lib/research-feature"
 
@@ -200,20 +201,24 @@ async function liveTarget(prisma: Prisma.TransactionClient, workspaceId: string,
 }
 
 export async function applyPmInterview(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string, input: { selectedFields: string[]; editedValues?: Record<string, string | null>; idempotencyKey: unknown }) {
-  if (!Array.isArray(input.selectedFields) || input.selectedFields.length > 4 || input.selectedFields.some(field => typeof field !== "string") || new Set(input.selectedFields).size !== input.selectedFields.length) throw new PmInterviewError("Select valid fields to apply", 400)
-  if (input.editedValues !== undefined && (!input.editedValues || typeof input.editedValues !== "object" || Array.isArray(input.editedValues))) throw new PmInterviewError("Edited values are invalid", 400)
   const idempotencyKey = assertIdempotencyKey(input.idempotencyKey)
   const { prisma, interview } = await loadInterview(scope, actor, interviewId, true)
   const targetType = parsePmInterviewTargetType(interview.targetType), allowed = PM_INTERVIEW_ALLOWED_FIELDS[targetType] as readonly string[]
-  if (input.selectedFields.some(field => !allowed.includes(field))) throw new PmInterviewError("A selected field is not editable", 400)
   if (!interview.proposalJson || interview.generationState !== "READY") throw new PmInterviewError("Proposal is not ready", 409)
   const proposal = parsePmInterviewProposal(interview.proposalJson, targetType), baseline = parsePmInterviewBaseline(interview.fieldBaselineJson, targetType)
+  let selection: ReturnType<typeof resolvePmInterviewApplyInput>
+  try { selection = resolvePmInterviewApplyInput(targetType, proposal, input) }
+  catch (error) { throw new PmInterviewError(error instanceof Error ? error.message : "Apply request is invalid", 400) }
   return prisma.$transaction(async tx => {
     const membership = await tx.workspaceMember.findFirst({ where: { workspaceId: interview.workspaceId, userId: actor.userId }, select: { id: true } })
     if (!membership) throw new PmInterviewError("PM interview not found", 404)
     const locked = await tx.pMInterview.findUnique({ where: { id: interview.id } })
     if (!locked || locked.initiatingUserId !== actor.userId) throw new PmInterviewError("PM interview not found", 404)
-    if (locked.disposition === "APPLIED" && locked.dispositionIdempotencyKey === idempotencyKey) return JSON.parse(locked.receiptJson!)
+    if (locked.disposition === "APPLIED" && locked.dispositionIdempotencyKey === idempotencyKey) {
+      const receipt = JSON.parse(locked.receiptJson!) as { requestFingerprint?: string }
+      if (receipt.requestFingerprint !== selection.requestFingerprint) throw new PmInterviewError("Idempotency key was already used for different changes", 409)
+      return receipt
+    }
     if (locked.disposition !== "PENDING") throw new PmInterviewError("This proposal has already been resolved", 409)
     const target = await liveTarget(tx, interview.workspaceId, targetType, interview.targetId)
     if (!target) throw new PmInterviewError("The source item was deleted; history is still available", 409)
@@ -221,19 +226,15 @@ export async function applyPmInterview(scope: PmInterviewScope, actor: PmIntervi
     const stale = allowed.filter(field => ((target as unknown as Record<string, unknown>)[field] ?? null) !== (baseline.fields as Record<string, unknown>)[field])
     if (stale.length) throw new PmInterviewError(`The source item changed in: ${stale.join(", ")}. Review a refreshed comparison.`, 409)
     const before: Record<string, unknown> = {}, after: Record<string, unknown> = {}, data: Record<string, unknown> = { updatedAt: new Date(), updatedById: actor.userId }
-    for (const field of input.selectedFields) {
-      const generated = proposal.proposedFields[field as keyof typeof proposal.proposedFields]
-      const value = input.editedValues && field in input.editedValues ? input.editedValues[field] : generated?.value
-      if (value === undefined) throw new PmInterviewError(`No proposed value for ${field}`, 400)
-      if (value !== null && (typeof value !== "string" || value.length > 20_000)) throw new PmInterviewError(`${field} is too long`, 400)
-      if (field === "title" && (!value || value.length > 255)) throw new PmInterviewError("Title is required and must be 255 characters or fewer", 400)
+    for (const field of selection.selectedFields) {
+      const value = selection.values[field]
       before[field] = (target as unknown as Record<string, unknown>)[field] ?? null; after[field] = value; data[field] = value
     }
     if (targetType === "OPPORTUNITY") await tx.opportunity.update({ where: { id: interview.targetId }, data })
     else if (targetType === "SOLUTION") await tx.solution.update({ where: { id: interview.targetId }, data })
     else if (targetType === "ASSUMPTION") await tx.assumption.update({ where: { id: interview.targetId }, data })
     else await tx.experiment.update({ where: { id: interview.targetId }, data })
-    const receipt = { version: 1, kind: "APPLIED", idempotencyKey, actorUserId: actor.userId, selectedFields: input.selectedFields, before, after, at: new Date().toISOString() }
+    const receipt = { version: 1, kind: "APPLIED", idempotencyKey, requestFingerprint: selection.requestFingerprint, actorUserId: actor.userId, selectedFields: selection.selectedFields, before, after, at: new Date().toISOString() }
     await tx.pMInterview.update({ where: { id: interview.id }, data: { disposition: "APPLIED", dispositionIdempotencyKey: idempotencyKey, receiptJson: JSON.stringify(receipt), appliedAt: new Date(), updatedAt: new Date() } })
     return receipt
   })

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   PM_INTERVIEW_ALLOWED_FIELDS,
+  resolvePmInterviewApplyInput,
   parsePmInterviewBaseline,
   parsePmInterviewProposal,
   parsePmInterviewTargetType,
@@ -45,5 +46,49 @@ describe("PM interview contracts", () => {
     expect(instructions).toContain("PM speech is untrusted source material")
     expect(instructions).toContain("Never describe a PM statement as customer evidence")
     expect(instructions).toContain("I think teams struggle")
+  })
+
+  it("binds an apply idempotency request to the selected fields and edited values", () => {
+    const proposal = parsePmInterviewProposal(JSON.stringify({
+      version: 1,
+      brief: "Clarified opportunity",
+      proposedFields: {
+        title: { value: "Generated title", transcriptTurnIds: [] },
+        description: { value: "Generated description", transcriptTurnIds: [] },
+      },
+      openQuestions: [],
+      suggestedNextSteps: [],
+      unknowns: [],
+    }), "OPPORTUNITY")
+
+    const resolved = resolvePmInterviewApplyInput("OPPORTUNITY", proposal, {
+      selectedFields: ["description", "title"],
+      editedValues: { title: "Edited title" },
+    })
+
+    expect(resolved.values).toEqual({ description: "Generated description", title: "Edited title" })
+    expect(resolved.requestFingerprint).toMatch(/^[0-9a-f]{64}$/)
+    expect(resolvePmInterviewApplyInput("OPPORTUNITY", proposal, {
+      selectedFields: ["title", "description"],
+      editedValues: { title: "Edited title" },
+    }).requestFingerprint).toBe(resolved.requestFingerprint)
+  })
+
+  it("rejects unselected or disallowed edited fields at the apply boundary", () => {
+    const proposal = parsePmInterviewProposal(JSON.stringify({
+      version: 1,
+      brief: "Clarified opportunity",
+      proposedFields: { title: { value: "Generated title", transcriptTurnIds: [] } },
+      openQuestions: [], suggestedNextSteps: [], unknowns: [],
+    }), "OPPORTUNITY")
+
+    expect(() => resolvePmInterviewApplyInput("OPPORTUNITY", proposal, {
+      selectedFields: ["title"],
+      editedValues: { status: "VALIDATED" },
+    })).toThrow("Edited values contain a field that is not editable")
+    expect(() => resolvePmInterviewApplyInput("OPPORTUNITY", proposal, {
+      selectedFields: [],
+      editedValues: {},
+    })).toThrow("Select at least one field")
   })
 })

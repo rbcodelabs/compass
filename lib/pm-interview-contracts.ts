@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { createHash } from "node:crypto"
 
 export const PM_INTERVIEW_TARGET_TYPES = ["OPPORTUNITY", "SOLUTION", "ASSUMPTION", "EXPERIMENT"] as const
 export type PmInterviewTargetType = (typeof PM_INTERVIEW_TARGET_TYPES)[number]
@@ -38,6 +39,33 @@ export function parsePmInterviewProposal(value: string, targetType: PmInterviewT
     suggestedNextSteps: z.array(z.string().min(1).max(2_000)).max(20),
     unknowns: z.array(z.string().min(1).max(2_000)).max(20),
   }).strict().parse(JSON.parse(value))
+}
+
+export function resolvePmInterviewApplyInput(
+  targetType: PmInterviewTargetType,
+  proposal: ReturnType<typeof parsePmInterviewProposal>,
+  input: { selectedFields: unknown; editedValues?: unknown },
+) {
+  const allowed = PM_INTERVIEW_ALLOWED_FIELDS[targetType] as readonly string[]
+  if (!Array.isArray(input.selectedFields) || input.selectedFields.length === 0) throw new Error("Select at least one field")
+  if (input.selectedFields.length > allowed.length || input.selectedFields.some(field => typeof field !== "string") || new Set(input.selectedFields).size !== input.selectedFields.length) throw new Error("Select valid fields to apply")
+  const selectedFields = input.selectedFields as string[]
+  if (selectedFields.some(field => !allowed.includes(field))) throw new Error("A selected field is not editable")
+  if (input.editedValues !== undefined && (!input.editedValues || typeof input.editedValues !== "object" || Array.isArray(input.editedValues))) throw new Error("Edited values are invalid")
+  const editedValues = (input.editedValues ?? {}) as Record<string, unknown>
+  if (Object.keys(editedValues).some(field => !allowed.includes(field))) throw new Error("Edited values contain a field that is not editable")
+
+  const values: Record<string, string | null> = {}
+  for (const field of [...selectedFields].sort()) {
+    const generated = proposal.proposedFields[field as keyof typeof proposal.proposedFields]
+    const value = field in editedValues ? editedValues[field] : generated?.value
+    if (value === undefined) throw new Error(`No proposed value for ${field}`)
+    if (value !== null && (typeof value !== "string" || value.length > 20_000)) throw new Error(`${field} is too long`)
+    if (field === "title" && (!value || value.length > 255)) throw new Error("Title is required and must be 255 characters or fewer")
+    values[field] = value
+  }
+  const requestFingerprint = createHash("sha256").update(JSON.stringify({ selectedFields: Object.keys(values), values })).digest("hex")
+  return { selectedFields: Object.keys(values), values, requestFingerprint }
 }
 
 export const pmInterviewContextSchema = z.object({
