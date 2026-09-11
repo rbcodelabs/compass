@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { PrismaClient } from "@prisma/client"
+import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
 import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { reconcilePersistedResearchVoiceCall } from "@/lib/research-voice-control-plane"
@@ -20,7 +21,7 @@ function deferred<T>() {
 run("voice termination on isolated real PostgreSQL", () => {
   const schema = `voice_cleanup_${randomUUID().replaceAll("-", "")}`
   const pool = new Pool({ connectionString: databaseUrl, max: 6 })
-  const prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) })
+  const prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) }).$extends(injectUpdatedAtExtension)
   let ownedSchemaCreated = false
 
   beforeAll(async () => {

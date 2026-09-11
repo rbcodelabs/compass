@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { PrismaClient, ResearchStudy } from "@prisma/client"
+import type { ResearchStudy } from "@prisma/client"
+import type { AppPrismaClient } from "@/lib/db"
 import { appendParticipantVoiceEvent, claimParticipantVoiceLease } from "@/lib/research-participant-voice"
 
 function fixture() {
@@ -12,7 +13,7 @@ function fixture() {
     researchAttachment: { findMany: vi.fn().mockResolvedValue([]), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     researchTurn: { create: vi.fn().mockImplementation(({ data }) => data), findUnique: vi.fn().mockResolvedValue({ id: "turn" }) },
   }
-  const context = { prisma: { $transaction: (fn: (value: typeof tx) => unknown) => fn(tx) } as unknown as PrismaClient,
+  const context = { prisma: { $transaction: (fn: (value: typeof tx) => unknown) => fn(tx) } as unknown as AppPrismaClient,
     study: { id: "study", workspaceId: "workspace", studyType: "CUSTOMER_INTERVIEW", targetMinutes: 15 } as ResearchStudy, participantToken: { id: "token" } }
   return { tx, context, session }
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
-import type { PrismaClient, ResearchStudy } from "@prisma/client"
+import type { ResearchStudy } from "@prisma/client"
+import type { AppPrismaClient } from "@/lib/db"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
 import {
   buildResearchAttachmentPathname,
@@ -14,7 +15,7 @@ const RESEARCH_CLEANUP_RETRY_LIMIT = 5
 const RESEARCH_CLEANUP_RETRY_DELAY_MS = 60_000
 
 type AttachmentContext = {
-  prisma: PrismaClient
+  prisma: AppPrismaClient
   study: ResearchStudy
   participantToken: { id: string }
 }

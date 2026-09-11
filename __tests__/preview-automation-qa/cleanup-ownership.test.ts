@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const cascade = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/delete-workspace-cascade", () => ({ deleteWorkspaceCascade: cascade }));
@@ -24,7 +24,7 @@ function fixture() {
       }
       return models.get(property);
     },
-  }) as PrismaClient;
+  }) as AppPrismaClient;
   return { db, calls };
 }
 beforeEach(() => cascade.mockReset().mockResolvedValue(undefined));

@@ -14,6 +14,7 @@ import getPrisma from "@/lib/db"
 import matter from "gray-matter"
 import { Prisma } from "@prisma/client"
 import { ok, fail } from "@/lib/mcp-output"
+import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates"
 import { maybeSnapshotDocVersion } from "@/lib/doc-versions"
 
@@ -59,7 +60,17 @@ function serializeWithFrontmatter(body: string | null, metadata: DocMetadata | n
 
 // ── list_docs ────────────────────────────────────────────────────────────────
 
-export async function listDocs({ workspaceId }: { workspaceId: string }) {
+export async function listDocs({
+  workspaceId,
+  updatedSince,
+  updatedBefore,
+  sort,
+}: {
+  workspaceId: string
+  updatedSince?: string
+  updatedBefore?: string
+  sort?: RecencySort
+}) {
   const prisma = getPrisma()
 
   const workspace = await prisma.workspace.findUnique({
@@ -71,8 +82,18 @@ export async function listDocs({ workspaceId }: { workspaceId: string }) {
   }
 
   const allDocs = await prisma.doc.findMany({
-    where: { workspaceId },
-    orderBy: [{ parentId: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
+    where: {
+      workspaceId,
+      ...(updatedSince || updatedBefore
+        ? {
+            updatedAt: {
+              ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
+              ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
+            },
+          }
+        : {}),
+    },
+    orderBy: recencyOrderBy(sort) ?? [{ parentId: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
     select: {
       id: true,
       title: true,
@@ -88,9 +109,22 @@ export async function listDocs({ workspaceId }: { workspaceId: string }) {
     return fail(`No docs found in workspace "${workspace.name}".`)
   }
 
+  // A doc whose parent is absent from the result set is rendered at the top
+  // level. Without this, a recency filter that matches a child but not its
+  // parent would leave the child in `items` but unreachable from any root, so
+  // it would silently disappear from the rendered tree while still being
+  // counted. Promotion is preferred over fetching the missing parents
+  // (list_tasks/includeSubtasks does that) because it keeps `count` equal to the
+  // number of docs that actually matched the filter.
+  //
+  // On an unfiltered call every parent is present, so nothing is promoted — the
+  // one exception being a doc whose parentId dangles, which relationMode="prisma"
+  // does not prevent. Such a doc was previously counted but never rendered; it
+  // is now rendered as a root.
+  const presentIds = new Set(allDocs.map((doc) => doc.id))
   const childrenMap = new Map<string | null, typeof allDocs>()
   for (const doc of allDocs) {
-    const key = doc.parentId ?? null
+    const key = doc.parentId && presentIds.has(doc.parentId) ? doc.parentId : null
     if (!childrenMap.has(key)) childrenMap.set(key, [])
     childrenMap.get(key)!.push(doc)
   }

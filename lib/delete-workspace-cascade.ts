@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
@@ -17,7 +17,7 @@ import { deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
  * OpportunityScore, WorkspaceScoringConfig, LaunchChecklist/ChecklistTemplate,
  * FeedbackAttachment, CanvasNodePosition).
  */
-export async function deleteWorkspaceCascade(prisma: PrismaClient, workspaceId: string, options: { skipBlobCleanup?: boolean } = {}) {
+export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceId: string, options: { skipBlobCleanup?: boolean } = {}) {
   const ids = async (
     rows: Promise<{ id: string }[]>
   ): Promise<string[]> => (await rows).map((r) => r.id);

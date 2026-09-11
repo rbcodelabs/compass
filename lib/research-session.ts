@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
-import type { PrismaClient, ResearchParticipantToken, ResearchStudy } from "@prisma/client"
+import type { ResearchParticipantToken, ResearchStudy } from "@prisma/client"
+import type { AppPrismaClient } from "@/lib/db"
 import { buildResearchAgentTurnPrompt, type ResearchGuideItem } from "@/lib/research"
 import { isResearchModelAttachmentMime, type ResearchModelAttachmentMime } from "@/lib/research-attachment-formats"
 import {
@@ -21,7 +22,7 @@ export const MAX_RESEARCH_AGENT_CALLS_PER_DAY = 200
 export const RESEARCH_REQUEST_LEASE_MS = 6 * 60 * 1000
 
 type ResearchContext = {
-  prisma: PrismaClient
+  prisma: AppPrismaClient
   study: ResearchStudy
   participantToken: ResearchParticipantToken
 }
@@ -102,7 +103,7 @@ async function retryDsql<T>(
 }
 
 async function consumeParticipantRateOnClient(
-  prisma: Pick<PrismaClient, "researchParticipantToken">,
+  prisma: Pick<AppPrismaClient, "researchParticipantToken">,
   tokenId: string,
   kind: "START" | "RESPONSE",
 ) {
@@ -166,7 +167,7 @@ async function consumeParticipantRateOnClient(
 }
 
 async function consumeParticipantRate(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   tokenId: string,
   kind: "START" | "RESPONSE",
 ) {
@@ -209,7 +210,7 @@ function assertCanonicalCapacity(turns: CanonicalTurn[], missingTurns: number, m
   }
 }
 
-async function markAbandoned(prisma: PrismaClient, sessionId: string, now: Date) {
+async function markAbandoned(prisma: AppPrismaClient, sessionId: string, now: Date) {
   await prisma.researchSession.updateMany({
     where: { id: sessionId, status: "IN_PROGRESS" },
     data: {
@@ -225,7 +226,7 @@ async function markAbandoned(prisma: PrismaClient, sessionId: string, now: Date)
 }
 
 export async function reconcileAbandonedResearchSessions(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   studyId: string,
   now = new Date(),
 ) {
@@ -363,7 +364,7 @@ export async function startOrResumeResearchSession(
 }
 
 async function appendParticipantTurnAndLinkRequest(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   sessionId: string,
   requestId: string,
   turn: { id: string; role: "PARTICIPANT" | "INTERVIEWER"; content: string },
@@ -459,7 +460,7 @@ async function appendParticipantTurnAndLinkRequest(
 }
 
 async function appendInterviewerTurnAndCompleteRequest(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   sessionId: string,
   requestId: string,
   content: string,
@@ -495,7 +496,7 @@ async function appendInterviewerTurnAndCompleteRequest(
 }
 
 async function loadCompletedReply(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   request: { participantTurnId: string | null; interviewerTurnId: string | null },
   answer: string,
   attachmentIds: string[],
@@ -509,7 +510,7 @@ async function loadCompletedReply(
 }
 
 async function assertParticipantTurnPayload(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   turnId: string,
   answer: string,
   attachmentIds: string[],
@@ -528,7 +529,7 @@ async function assertParticipantTurnPayload(
   return participantTurn
 }
 
-async function acquireRequestLease(prisma: PrismaClient, sessionId: string, requestId: string, now: Date) {
+async function acquireRequestLease(prisma: AppPrismaClient, sessionId: string, requestId: string, now: Date) {
   await retryDsql(() => prisma.$transaction(async (tx) => {
     const session = await tx.researchSession.findUnique({
       where: { id: sessionId },
@@ -565,7 +566,7 @@ async function acquireRequestLease(prisma: PrismaClient, sessionId: string, requ
   }))
 }
 
-async function releaseRequestLease(prisma: PrismaClient, sessionId: string, requestId: string) {
+async function releaseRequestLease(prisma: AppPrismaClient, sessionId: string, requestId: string) {
   await prisma.researchSession.updateMany({
     where: { id: sessionId, activeRequestId: requestId },
     data: { activeRequestId: null, activeRequestExpiresAt: null, updatedAt: new Date() },

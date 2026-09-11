@@ -13,6 +13,7 @@
 
 import getPrisma from "@/lib/db"
 import { ok, fail } from "@/lib/mcp-output"
+import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types"
 import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLinkScope, validateTaskLink, validateTaskReferences, type ResolvedTaskAssignee, type TaskAssignee } from "@/lib/task-assignment"
 import { getMcpActor } from "@/lib/mcp-authz"
@@ -236,6 +237,7 @@ export async function listTasks({
   updatedSince,
   updatedBefore,
   assignedToMe,
+  sort,
 }: {
   workspaceId: string
   status?: TaskStatus
@@ -250,6 +252,7 @@ export async function listTasks({
   updatedSince?: string
   updatedBefore?: string
   assignedToMe?: boolean
+  sort?: RecencySort
 }) {
   const prisma = getPrisma()
 
@@ -286,10 +289,14 @@ export async function listTasks({
       : {}),
   }
 
+  // Applied to the subtask-backfill query below as well, so a sorted call does
+  // not leave the two result sets ordered by different rules.
+  const taskOrderBy = recencyOrderBy(sort) ?? [{ status: "asc" as const }, { sortOrder: "asc" as const }, { id: "asc" as const }]
+
   const matchingTasks = await resolveTaskAssignees(workspaceId, await prisma.task.findMany({
     where,
     include: { _count: { select: { subtasks: true } } },
-    orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
+    orderBy: taskOrderBy,
   }))
 
   if (!matchingTasks.length) {
@@ -307,7 +314,7 @@ export async function listTasks({
       ? await resolveTaskAssignees(workspaceId, await prisma.task.findMany({
           where: { workspaceId, id: { in: missingParentIds } },
           include: { _count: { select: { subtasks: true } } },
-          orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
+          orderBy: taskOrderBy,
         }))
       : []
     const tasks = [...missingParents, ...matchingTasks]

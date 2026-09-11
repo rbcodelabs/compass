@@ -1,7 +1,8 @@
-import type { PrismaClient, ResearchVoiceCall } from "@prisma/client"
+import type { ResearchVoiceCall } from "@prisma/client"
+import type { AppPrismaClient } from "@/lib/db"
 import { ResearchVoiceControlPlaneError } from "@/lib/research-voice-control-plane"
 
-type TerminationPrisma = Pick<PrismaClient, "$transaction" | "researchVoiceCall">
+type TerminationPrisma = Pick<AppPrismaClient, "$transaction" | "researchVoiceCall">
 export type ResearchVoiceCleanup = {
   provider: { hangup(providerCallId: string): Promise<{ definite: true }> }
   stopSandbox(name: string): Promise<unknown>

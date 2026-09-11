@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
-import type { PrismaClient } from "@prisma/client"
+import type { AppPrismaClient } from "@/lib/db"
 import { isResearchAuthoritativeVoiceEnabled } from "@/lib/research-feature"
 import { terminateResearchVoiceCall, type ResearchVoiceCleanup } from "@/lib/research-voice-termination"
 
@@ -133,7 +133,7 @@ export function voiceAnswerRetentionPatch(
   return null
 }
 
-type VoiceControlPlanePrisma = Pick<PrismaClient, "$transaction">
+type VoiceControlPlanePrisma = Pick<AppPrismaClient, "$transaction">
 
 function validIdempotencyKey(value: string) {
   return value.length > 0 && value.length <= 128 && /^[A-Za-z0-9_.:-]+$/.test(value)
@@ -687,7 +687,7 @@ export async function reconcilePersistedResearchVoiceCall({
   now = new Date(),
   cleanup,
 }: {
-  prisma: VoiceControlPlanePrisma & Pick<PrismaClient, "researchVoiceCall">
+  prisma: VoiceControlPlanePrisma & Pick<AppPrismaClient, "researchVoiceCall">
   voiceCallId: string
   sessionId: string
   now?: Date

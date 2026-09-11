@@ -31,6 +31,7 @@ import { PrismaClient } from "@prisma/client"
 import { Pool } from "pg"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { getActiveSchema } from "../lib/schema.ts"
+import { injectUpdatedAtExtension } from "../lib/prisma-updated-at.ts"
 import { normalizeMemberRoles } from "../lib/normalize-member-roles.ts"
 
 const DRY_RUN = process.argv.includes("--dry-run")
@@ -38,7 +39,9 @@ const mark = (label: string) => (DRY_RUN ? "would " + label : "✓")
 
 // A local-only client. lib/db.ts cannot be imported here: it resolves "./schema"
 // without a file extension, which the Next bundler accepts but Node ESM does not.
-function createClient(): PrismaClient {
+// The updatedAt interceptor is imported from its own relative, extension-bearing
+// module so this client matches the one lib/db.ts builds for the app.
+function createClient() {
   const url = process.env.DATABASE_URL
   if (!url) {
     throw new Error(
@@ -48,7 +51,7 @@ function createClient(): PrismaClient {
     )
   }
   const pool = new Pool({ connectionString: url })
-  return new PrismaClient({ adapter: new PrismaPg(pool, { schema: getActiveSchema() }) })
+  return new PrismaClient({ adapter: new PrismaPg(pool, { schema: getActiveSchema() }) }).$extends(injectUpdatedAtExtension)
 }
 
 const prisma = createClient()

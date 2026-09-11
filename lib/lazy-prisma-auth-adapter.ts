@@ -1,9 +1,9 @@
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { PrismaClient } from "@prisma/client";
 
-import getPrisma from "@/lib/db";
+import getPrisma, { type AppPrismaClient } from "@/lib/db";
 
-type GetPrisma = () => PrismaClient;
+type GetPrisma = () => AppPrismaClient;
 
 /**
  * Builds Auth.js's complete Prisma adapter without opening a database connection.
@@ -13,8 +13,16 @@ type GetPrisma = () => PrismaClient;
 export function createLazyPrismaAuthAdapter(
   initializePrisma: GetPrisma = getPrisma
 ): ReturnType<typeof PrismaAdapter> {
-  let prisma: PrismaClient | undefined;
+  let prisma: AppPrismaClient | undefined;
 
+  // The Proxy target is declared as a base `PrismaClient` because that is what
+  // `PrismaAdapter` accepts; every get is forwarded to the extended singleton
+  // returned by `initializePrisma`. The two types differ only in the
+  // client-level methods an extended client drops (`$on`/`$use`/`$extends`),
+  // none of which Auth.js's adapter calls — it only touches the User, Account,
+  // Session and VerificationToken delegates, and this file's own
+  // previewAutomation* reads. Those models have no `updatedAt` column, so the
+  // injection extension is a no-op for them either way.
   const lazyPrisma = new Proxy({} as PrismaClient, {
     get(_target, property) {
       prisma ??= initializePrisma();

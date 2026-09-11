@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
 import { describe, expect, it, vi } from "vitest";
 import { bootstrapPreviewRun, issuePreviewSession, teardownPreviewRun } from "@/lib/preview-automation/service";
 import type { PreviewGrant } from "@/lib/preview-automation/grants";
@@ -12,7 +12,7 @@ function fixture() {
     session: { create: vi.fn().mockImplementation(({ data }) => data) },
     previewAutomationSession: { create: vi.fn() },
   };
-  return { tx, client: { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient };
+  return { tx, client: { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as AppPrismaClient };
 }
 describe("preview run lifecycle", () => {
   it("creates only synthetic registered identities with a hard one-hour deadline", async () => {

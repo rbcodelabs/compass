@@ -1,6 +1,5 @@
 import { z } from "zod"
-import type { PrismaClient } from "@prisma/client"
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppPrismaClient } from "@/lib/db"
 import { isResearchAuthoritativeVoiceEnabled } from "@/lib/research-feature"
 import { appendCanonicalVoiceBatch, ResearchVoiceControlPlaneError } from "@/lib/research-voice-control-plane"
 import { authorizeResearchVoiceWorker, claimResearchVoiceCommand, completeResearchVoiceCommand, recordResearchVoiceHeartbeat } from "@/lib/research-voice-operations"
@@ -39,7 +38,7 @@ async function readCallbackBody(request: Request) {
   } finally { reader.releaseLock() }
 }
 
-export async function handleResearchVoiceCallback(request: Request, callId: string, action: "heartbeat" | "events" | "claim" | "result", database?: PrismaClient) {
+export async function handleResearchVoiceCallback(request: Request, callId: string, action: "heartbeat" | "events" | "claim" | "result", database?: AppPrismaClient) {
   try {
     if (!uuid.test(callId) || new URL(request.url).search) return respond({ error: "Invalid callback URL" }, 400)
     const bearer = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.get("authorization") ?? "")

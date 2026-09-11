@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { PrismaClient } from "@prisma/client"
+import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -11,7 +12,7 @@ const run = url ? describe : describe.skip
 run("participant voice persistence on owned real PostgreSQL", () => {
   const schema = `participant_events_${randomUUID().replaceAll("-", "")}`
   const pool = new Pool({ connectionString: url, max: 6 })
-  const prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) })
+  const prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) }).$extends(injectUpdatedAtExtension)
   let created = false
   beforeAll(async () => {
     const target = new URL(url!)

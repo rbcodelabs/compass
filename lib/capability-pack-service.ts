@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client"
+import type { AppPrismaClient } from "@/lib/db"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { fetchGithubCapabilityPack } from "@/lib/capability-pack-github"
@@ -14,7 +14,7 @@ export async function installCapabilityPack(input: {
   createdById: string
   workspaceId: string
   expectedPackId?: string
-}, deps: { prisma: PrismaClient; storage: ArtifactStorage; fetcher?: typeof fetch }) {
+}, deps: { prisma: AppPrismaClient; storage: ArtifactStorage; fetcher?: typeof fetch }) {
   const source = parseGithubPackSource(input.repositoryUrl, input.commitSha, input.packPath)
   const files = await fetchGithubCapabilityPack(input, deps.fetcher)
   const artifact = normalizeCapabilityPack(files)
@@ -63,7 +63,7 @@ export async function configureWorkspaceCapabilityPack(input: {
   enabledSkillIds: string[]
   enabled: boolean
   preserveExisting?: boolean
-}, prisma: PrismaClient, storage?: Pick<ArtifactStorage, "get">) {
+}, prisma: AppPrismaClient, storage?: Pick<ArtifactStorage, "get">) {
   const version = await prisma.capabilityPackVersion.findFirst({ where: { id: input.packVersionId, capabilityPack: { workspaceId: input.workspaceId } }, include: { capabilityPack: { select: { workspaceId: true, packId: true } } } })
   if (!version || version.validationStatus !== "VALID") throw new Error("Validated capability pack version not found")
   const manifest = JSON.parse(version.manifestJson) as { sdkCompatibility: string; requiredHostCapabilities: string[]; skills: Array<{ id: string }> }

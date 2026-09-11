@@ -16,7 +16,7 @@
  * drag-to-pin (CanvasNodePosition stays queried-but-unwritten, same as
  * before).
  */
-import type { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
 import type {
   ObjectiveStatus,
   OpportunityStatus,
@@ -124,7 +124,7 @@ export interface CanvasOverview {
  * `include`.
  */
 export async function getCanvasOverview(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   workspaceId: string
 ): Promise<CanvasOverview> {
   // ── Batch 1: workspace-scoped, no FK dependency on anything fetched below ──

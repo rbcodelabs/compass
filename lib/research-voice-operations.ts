@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
-import type { Prisma, PrismaClient } from "@prisma/client"
+import type { Prisma } from "@prisma/client"
+import type { AppPrismaClient } from "@/lib/db"
 import { isResearchAuthoritativeVoiceEnabled } from "@/lib/research-feature"
 import { hashResearchResumeToken } from "@/lib/research-session"
 import {
@@ -13,8 +14,8 @@ const MAX_COMMAND_ATTEMPTS = 3
 const MAX_PENDING_COMMANDS = 20
 const MAX_TOTAL_COMMANDS = 100
 const MAX_COMMANDS_PER_MINUTE = 10
-type VoiceOperationsPrisma = Pick<PrismaClient, "$transaction" | "researchVoiceCall" | "researchVoiceCommand">
-type ParticipantVoicePrisma = Pick<PrismaClient,
+type VoiceOperationsPrisma = Pick<AppPrismaClient, "$transaction" | "researchVoiceCall" | "researchVoiceCommand">
+type ParticipantVoicePrisma = Pick<AppPrismaClient,
   "$transaction" | "researchSession" | "researchVoiceCall" | "researchVoiceCommand" |
   "researchAttachment" | "researchParticipantToken">
 
@@ -30,7 +31,7 @@ export async function authorizeResearchVoiceWorker({
   rawToken,
   now = new Date(),
 }: {
-  prisma: Pick<PrismaClient, "researchVoiceCall">
+  prisma: Pick<AppPrismaClient, "researchVoiceCall">
   callId: string
   rawToken: string
   now?: Date
@@ -215,7 +216,7 @@ export async function authorizeResearchVoiceParticipant({
   resumeToken,
   allowTerminal = false,
 }: {
-  prisma: Pick<PrismaClient, "researchSession">
+  prisma: Pick<AppPrismaClient, "researchSession">
   sessionId: string
   participantTokenId: string
   resumeToken: string

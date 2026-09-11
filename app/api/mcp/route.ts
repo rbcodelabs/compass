@@ -9,6 +9,7 @@ import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
+import { recencyOrderBy, recencySortSchema } from "@/lib/mcp-recency"
 import { runWithMcpActor, getMcpActor } from "@/lib/mcp-authz"
 import { applyToolGate, AGENT_TOOL_POLICY } from "@/lib/mcp-tool-gates"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
@@ -902,24 +903,39 @@ const _handler = createMcpHandler(
       "list_opportunities",
       {
         title: "List Opportunities",
-        description: "Lists opportunities in a workspace, with optional filters by status and squad.",
+        description: "Lists opportunities in a workspace, with optional filters by status, squad and last-updated window.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by status"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
+          updatedSince: z.string().datetime().optional().describe("Filter to opportunities updated at or after this ISO timestamp"),
+          updatedBefore: z.string().datetime().optional().describe("Filter to opportunities updated before this ISO timestamp (useful for stale-work scans)"),
+          sort: recencySortSchema,
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, status, squadId }) => {
+      async ({ workspaceId, status, squadId, updatedSince, updatedBefore, sort }) => {
         const prisma = getPrisma()
         const opportunities = await prisma.opportunity.findMany({
-          where: { workspaceId, ...(status ? { status } : {}), ...(squadId ? { squadId } : {}) },
+          where: {
+            workspaceId,
+            ...(status ? { status } : {}),
+            ...(squadId ? { squadId } : {}),
+            ...(updatedSince || updatedBefore
+              ? {
+                  updatedAt: {
+                    ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
+                    ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
+                  },
+                }
+              : {}),
+          },
           include: {
             linkedKeyResult: { select: { title: true, objective: { select: { title: true } } } },
             squad: { select: { name: true } },
             _count: { select: { solutions: true } },
           },
-          orderBy: { createdAt: "desc" },
+          orderBy: recencyOrderBy(sort) ?? { createdAt: "desc" },
         })
         if (!opportunities.length) {
           return fail("No opportunities found.")
@@ -1036,6 +1052,9 @@ const _handler = createMcpHandler(
           opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by parent opportunity status"),
           squadId: z.string().uuid().optional().describe("Filter by the parent opportunity's squad"),
           hasRoadmapItem: z.boolean().optional().describe("Filter by whether the solution is linked to any roadmap item"),
+          updatedSince: z.string().datetime().optional().describe("Filter to solutions updated at or after this ISO timestamp"),
+          updatedBefore: z.string().datetime().optional().describe("Filter to solutions updated before this ISO timestamp (useful for stale-work scans)"),
+          sort: recencySortSchema,
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -1056,6 +1075,9 @@ const _handler = createMcpHandler(
           solutionStatus: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).optional().describe("Filter by parent solution status"),
           opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by ancestor opportunity status"),
           squadId: z.string().uuid().optional().describe("Filter by the ancestor opportunity's squad"),
+          updatedSince: z.string().datetime().optional().describe("Filter to assumptions updated at or after this ISO timestamp"),
+          updatedBefore: z.string().datetime().optional().describe("Filter to assumptions updated before this ISO timestamp (useful for stale-work scans)"),
+          sort: recencySortSchema,
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -1896,10 +1918,15 @@ const _handler = createMcpHandler(
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           horizon: z.enum(["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional().describe("Filter to a specific horizon (omit for all)"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
+          updatedSince: z.string().datetime().optional().describe("Filter to roadmap items updated at or after this ISO timestamp"),
+          updatedBefore: z.string().datetime().optional().describe("Filter to roadmap items updated before this ISO timestamp (useful for stale-work scans)"),
+          // Results stay grouped into horizon sections either way; sort reorders
+          // items within each section.
+          sort: recencySortSchema,
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, horizon, squadId }) => {
+      async ({ workspaceId, horizon, squadId, updatedSince, updatedBefore, sort }) => {
         const prisma = getPrisma()
         const items = await prisma.roadmapItem.findMany({
           where: {
@@ -1907,6 +1934,14 @@ const _handler = createMcpHandler(
             status: "ACTIVE",
             ...(horizon ? { horizon } : {}),
             ...(squadId ? { squadId } : {}),
+            ...(updatedSince || updatedBefore
+              ? {
+                  updatedAt: {
+                    ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
+                    ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
+                  },
+                }
+              : {}),
           },
           include: {
             opportunity: { select: { title: true } },
@@ -1914,7 +1949,7 @@ const _handler = createMcpHandler(
             squad: { select: { name: true } },
             experiment: { select: { title: true } },
           },
-          orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
+          orderBy: recencyOrderBy(sort) ?? [{ horizon: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
         })
         if (!items.length) {
           return fail("No active roadmap items found.")
@@ -2361,6 +2396,7 @@ const _handler = createMcpHandler(
           includeSubtasks: z.boolean().optional().describe("Nest subtasks under their parent in the response"),
           updatedSince: z.string().datetime().optional().describe("Filter to tasks updated at or after this ISO timestamp"),
           updatedBefore: z.string().datetime().optional().describe("Filter to tasks updated before this ISO timestamp (useful for stale-work scans)"),
+          sort: recencySortSchema,
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -2714,9 +2750,13 @@ const _handler = createMcpHandler(
         description:
           "Lists all docs in a workspace as an indented tree. " +
           "Returns each doc's ID, title, icon, and child count. " +
-          "Use this to discover doc IDs before calling get_doc or update_doc.",
+          "Use this to discover doc IDs before calling get_doc or update_doc. " +
+          "When a recency filter excludes a doc whose child still matches, the child is listed at the top level.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          updatedSince: z.string().datetime().optional().describe("Filter to docs updated at or after this ISO timestamp"),
+          updatedBefore: z.string().datetime().optional().describe("Filter to docs updated before this ISO timestamp (useful for stale-work scans)"),
+          sort: recencySortSchema,
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },

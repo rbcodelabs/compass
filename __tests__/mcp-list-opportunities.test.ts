@@ -166,3 +166,86 @@ describe("list_opportunities MCP tool", () => {
     expect(result.content[0].text).not.toContain("null")
   })
 })
+
+describe("list_opportunities recency filtering and sorting", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockPrisma.opportunity.findMany.mockResolvedValue([
+      { id: "opportunity-1", title: "Any", description: null, status: "EXPLORING", squad: null, linkedKeyResult: null, _count: { solutions: 0 } },
+    ])
+  })
+
+  function queryFor(call: number = 0) {
+    return mockPrisma.opportunity.findMany.mock.calls[call][0] as {
+      where: Record<string, unknown>
+      orderBy: unknown
+    }
+  }
+
+  it("keeps createdAt desc as the default ordering when sort is absent", async () => {
+    await getHandler("list_opportunities")({ workspaceId: "workspace-1" })
+
+    // Changing this default would silently reorder results for every existing caller.
+    expect(queryFor().orderBy).toEqual({ createdAt: "desc" })
+    expect(queryFor().where).not.toHaveProperty("updatedAt")
+  })
+
+  it("filters on a closed updatedSince/updatedBefore window", async () => {
+    await getHandler("list_opportunities")({
+      workspaceId: "workspace-1",
+      updatedSince: "2026-09-01T00:00:00.000Z",
+      updatedBefore: "2026-09-10T00:00:00.000Z",
+    })
+
+    expect(queryFor().where.updatedAt).toEqual({
+      gte: new Date("2026-09-01T00:00:00.000Z"),
+      lt: new Date("2026-09-10T00:00:00.000Z"),
+    })
+  })
+
+  it("filters on updatedSince alone with an inclusive lower bound", async () => {
+    await getHandler("list_opportunities")({ workspaceId: "workspace-1", updatedSince: "2026-09-01T00:00:00.000Z" })
+
+    expect(queryFor().where.updatedAt).toEqual({ gte: new Date("2026-09-01T00:00:00.000Z") })
+  })
+
+  it("filters on updatedBefore alone with an exclusive upper bound", async () => {
+    await getHandler("list_opportunities")({ workspaceId: "workspace-1", updatedBefore: "2026-09-10T00:00:00.000Z" })
+
+    expect(queryFor().where.updatedAt).toEqual({ lt: new Date("2026-09-10T00:00:00.000Z") })
+  })
+
+  it("sorts most recently updated first with a stable id tiebreaker", async () => {
+    await getHandler("list_opportunities")({ workspaceId: "workspace-1", sort: "recentlyUpdated" })
+
+    expect(queryFor().orderBy).toEqual([{ updatedAt: "desc" }, { id: "asc" }])
+  })
+
+  it("sorts least recently updated first for stale-work scans", async () => {
+    await getHandler("list_opportunities")({ workspaceId: "workspace-1", sort: "leastRecentlyUpdated" })
+
+    expect(queryFor().orderBy).toEqual([{ updatedAt: "asc" }, { id: "asc" }])
+  })
+
+  it("combines a recency window with a recency sort and the pre-existing filters", async () => {
+    await getHandler("list_opportunities")({
+      workspaceId: "workspace-1",
+      status: "ACTIVE",
+      squadId: "11111111-1111-4111-8111-111111111111",
+      updatedSince: "2026-09-01T00:00:00.000Z",
+      sort: "recentlyUpdated",
+    })
+
+    expect(queryFor().where).toEqual({
+      workspaceId: "workspace-1",
+      status: "ACTIVE",
+      squadId: "11111111-1111-4111-8111-111111111111",
+      updatedAt: { gte: new Date("2026-09-01T00:00:00.000Z") },
+    })
+    expect(queryFor().orderBy).toEqual([{ updatedAt: "desc" }, { id: "asc" }])
+  })
+
+  // Input rejection is not asserted here: this harness invokes the tool callback
+  // directly, so the registered inputSchema never runs. Schema-level validation
+  // is covered in __tests__/mcp-recency-tool-schema.test.ts.
+})

@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLazyPrismaAuthAdapter } from "@/lib/lazy-prisma-auth-adapter";
 
@@ -12,7 +12,7 @@ function client() {
     previewAutomationSession: { findUnique: vi.fn().mockResolvedValue({ sessionToken: row.sessionToken, runId: "run" }) },
     previewAutomationRun: { findUnique: vi.fn().mockResolvedValue(run) },
   };
-  return { db, row, adapter: createLazyPrismaAuthAdapter(() => db as unknown as PrismaClient) };
+  return { db, row, adapter: createLazyPrismaAuthAdapter(() => db as unknown as AppPrismaClient) };
 }
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(now);
@@ -68,7 +68,7 @@ describe("independent QA: automation sessions remain distinguishable after parti
     // Intentionally no automation tables: simulates an existing deployment
     // before the opt-in preview migrations have ever run.
     const db = { session: { findUnique: vi.fn().mockResolvedValue(session), update: vi.fn().mockResolvedValue(session) } };
-    const adapter = createLazyPrismaAuthAdapter(() => db as unknown as PrismaClient);
+    const adapter = createLazyPrismaAuthAdapter(() => db as unknown as AppPrismaClient);
     expect((await adapter.getSessionAndUser!("ordinary-token"))?.user).toEqual(user);
     await adapter.updateSession!({ sessionToken: "ordinary-token", expires: deadline });
     expect(db.session.findUnique).toHaveBeenCalledWith({ where: { sessionToken: "ordinary-token" }, include: { user: true } });
