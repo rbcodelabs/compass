@@ -1,6 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient, PreviewAutomationRun } from "@prisma/client";
 import type { PreviewGrant } from "./grants";
+import { applyPreviewScenario, DEFAULT_PREVIEW_SCENARIO } from "./scenarios";
+import { getActiveSchema } from "@/lib/schema";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { deleteParticipantVoiceEvidenceIfPresent } from "@/lib/research-participant-voice-cleanup";
 
@@ -116,6 +118,15 @@ export async function bootstrapPreviewRun(prisma: PrismaClient, grant: PreviewGr
       { workspaceId: run.workspaceId, userId: run.ownerUserId, role: "ADMIN" },
       { workspaceId: run.workspaceId, userId: run.viewerUserId, role: "MEMBER" },
     ] });
+    // Same transaction as the registry row, so fixtures are never orphaned
+    // from the run that owns their teardown. Only the primary workspace is
+    // seeded: the isolated one must stay empty for cross-workspace denial
+    // checks. The default scenario writes nothing, keeping previously
+    // signed grants on exactly the fixture they bootstrap today.
+    const scenario = grant.scenario ?? DEFAULT_PREVIEW_SCENARIO;
+    if (scenario !== DEFAULT_PREVIEW_SCENARIO) {
+      await applyPreviewScenario(tx, { schema: getActiveSchema(), workspaceId: run.workspaceId, scenario });
+    }
     return describeRun(run);
   });
 }
