@@ -53,6 +53,12 @@ Docs uses a Tiptap-powered rich-text editor. Supported formatting includes:
 - **Horizontal rules** — Type `---` on a blank line
 - **Blockquotes** — Start a line with `>`
 
+## Decisions in the toolbar
+
+Use **Request decision** on the right of the editor toolbar to start a decision with this page already selected. While a decision about the page is pending, the same control shows **Decision pending** and a request count. Click it to open the existing decision. If several requests are pending, **Decisions pending** opens a menu of their questions, newest first.
+
+The count includes only pending decisions whose primary subject is this page, not decisions that merely cite it as supporting material. Recorded decisions leave the count; a revised pending request appears again. To start an additional decision, use **New decision** in Decisions. If status cannot be loaded, **Decision status unavailable** links to Decisions while the editor remains usable.
+
 ## Inserting Screenshots
 
 Click the **image icon** in the toolbar to upload a screenshot. You can also paste an image from the clipboard directly into the editor — Compass will upload it automatically and embed it inline.
