@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useUrlState } from "@/hooks/use-url-state";
 import {
   promoteFeedbackToRoadmap,
   promoteToRoadmap,
@@ -73,7 +74,10 @@ export function useTimelineController({
   const authoritativeUnscheduledRef = useRef(initialUnscheduled);
   const lastInitialItemsRef = useRef(initialItems);
   const lastInitialUnscheduledRef = useRef(initialUnscheduled);
-  const [zoom, setZoom] = useState<TimelineZoom>("month");
+  // Keep presentation state across squad-key remounts without resetting save fences.
+  const { params: viewParams, set: setViewParams } = useUrlState();
+  const zoom: TimelineZoom = viewParams.get("timelineScale") === "quarter" ? "quarter" : "month";
+  const setZoom = (value: TimelineZoom) => setViewParams({ timelineScale: value === "quarter" ? "quarter" : null });
   const [viewportStart, setViewportStart] = useState<CalendarDate>(() => monthStart(addCalendarMonths(localCalendarToday(), -2)));
   const [announcement, setAnnouncement] = useState("Timeline ready");
   const requireReconciliation = useCallback((id: string) => {

@@ -14,7 +14,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { Button } from "@/components/ui/button";
+import { RoadmapHeader } from "../roadmap-header";
 import { GripVertical } from "lucide-react";
 import { createTimelineLaneKey, packTimelineIntervals } from "@/lib/roadmap-timeline/lane-packing";
 import { HORIZON_META, HORIZON_ORDER } from "@/lib/roadmap";
@@ -37,7 +37,7 @@ import {
   type CalendarDate,
   type TimelineRow,
 } from "./timeline-model";
-import { EditDatesDialog, TimelineCard, TimelineToolbar, useTimelinePanelNavigation, type TimelineEngineProps } from "./timeline-shared";
+import { EditDatesDialog, TimelineCard, useTimelinePanelNavigation, type TimelineEngineProps } from "./timeline-shared";
 import { localCalendarToday, useTimelineController, type TimelineItemView } from "./use-timeline-controller";
 
 const LABEL_WIDTH = 176;
@@ -61,7 +61,7 @@ type NativeItemLayout = {
   overlapCount: number;
 };
 
-export function NativeTimeline(props: TimelineEngineProps) {
+export function NativeTimeline(props: TimelineEngineProps & { headerSquads?: TimelineEngineProps["squads"] }) {
   const controller = useTimelineController({
     initialItems: props.items,
     initialUnscheduled: props.unscheduledItems,
@@ -242,160 +242,147 @@ export function NativeTimeline(props: TimelineEngineProps) {
   }
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={pointerWithin}
-      onDragStart={handleDragStart}
-      onDragMove={handleDragMove}
-      onDragCancel={() => {
-        stopDragPointerTracking();
-        setActiveItemId(null);
-        setActiveDragId(null);
-      }}
-      onDragEnd={(event) => {
-        setActiveItemId(null);
-        setActiveDragId(null);
-        handleDragEnd(event);
-        stopDragPointerTracking();
-      }}
-    >
-      <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col gap-3 p-1 motion-reduce:[&_#unscheduled-items-panel_[data-slot=card]]:transition-none [&_#unscheduled-items-panel_.text-muted-foreground]:text-foreground [&_#unscheduled-items-panel_[data-slot=badge]]:border-border-interactive [&_#unscheduled-items-panel_[data-slot=badge]]:bg-card [&_#unscheduled-items-panel_[data-slot=badge]]:text-foreground">
-        <TimelineToolbar
-          engineLabel="Compass native timeline"
-          zoom={controller.zoom}
-          onZoom={controller.setZoom}
-          onShift={controller.shiftViewport}
-          onToday={controller.jumpToday}
-        />
-        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
-          <p>{controller.reconciliationRequiredIds.size > 0
-            ? "An item changed elsewhere. Reload the timeline before editing it again."
-            : "Reload to pick up deletions or conflicting changes made elsewhere."}</p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0}
-            onClick={() => window.location.reload()}
-          >Reload timeline</Button>
-        </div>
-        <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
-          <div className="grid" style={{ gridTemplateColumns: `clamp(112px, 30vw, ${LABEL_WIDTH}px) minmax(0, 1fr)` }}>
-            <div className="border-r bg-card">
-              <div className="flex items-end border-b bg-muted/30 px-3 pb-2 text-xs font-semibold text-muted-foreground" style={{ height: HEADER_HEIGHT }}>
-                Horizon → Squad
-              </div>
-              {rows.map((row) => (
-                <div
-                  key={row.id}
-                  className={row.kind === "horizon" ? "flex items-center gap-2 border-b bg-muted px-3 text-xs font-bold uppercase tracking-wide text-text-subtle" : "flex items-center gap-2 border-b px-5 text-sm text-text-subtle"}
-                  style={{ height: rowHeights.get(row.id) ?? LANE_HEIGHT }}
-                >
-                  <span className="size-2 shrink-0 rounded-full" style={{ background: row.color ?? "#cbd5e1" }} />
-                  <span className="truncate">{row.label}</span>
-                </div>
-              ))}
-            </div>
-            <div
-              ref={scrollRef}
-              className="overflow-x-auto"
-              data-testid="native-timeline-scroll"
-              data-scroll-left-px={Math.round(scrollViewport.scrollLeft)}
-              data-viewport-width-px={Math.round(scrollViewport.width)}
-              data-measurement-timing="pre-paint"
-              role="region"
-              aria-label="Timeline dates"
-              tabIndex={0}
-              onScroll={(event) => setScrollViewport({ scrollLeft: event.currentTarget.scrollLeft, width: event.currentTarget.clientWidth })}
-            >
-              <div
-                ref={canvasRef}
-                className="relative"
-                data-logical-width-px={Math.round(timelineWidth)}
-                style={{ width: timelineWidth, minWidth: "100%" }}
-              >
-                <NativeHeaders start={controller.viewportStart} end={controller.viewportEnd} width={timelineWidth} />
-                <div
-                  className="relative overflow-hidden"
-                  data-testid="timeline-grid"
-                  data-virtual-window-start-px={Math.round(renderWindow.start)}
-                  data-virtual-window-end-px={Math.round(renderWindow.end)}
-                  data-rendered-card-count={renderedItemLayouts.length}
-                  data-total-card-count={itemLayouts.length}
-                  style={{
-                    height: bodyHeight,
-                    backgroundImage: `repeating-linear-gradient(to right, transparent 0, transparent ${dayWidth - 1}px, color-mix(in oklab, var(--border) 60%, transparent) ${dayWidth}px)`,
-                  }}
-                >
+    <div className="flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0">
+      <RoadmapHeader squads={props.headerSquads ?? props.squads} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: controller.jumpToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0 }} />
+      <div data-slot="workspace-content" className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:px-4 md:py-3">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={pointerWithin}
+          onDragStart={handleDragStart}
+          onDragMove={handleDragMove}
+          onDragCancel={() => {
+            stopDragPointerTracking();
+            setActiveItemId(null);
+            setActiveDragId(null);
+          }}
+          onDragEnd={(event) => {
+            setActiveItemId(null);
+            setActiveDragId(null);
+            handleDragEnd(event);
+            stopDragPointerTracking();
+          }}
+        >
+          <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col gap-3 p-1 motion-reduce:[&_#unscheduled-items-panel_[data-slot=card]]:transition-none [&_#unscheduled-items-panel_.text-muted-foreground]:text-foreground [&_#unscheduled-items-panel_[data-slot=badge]]:border-border-interactive [&_#unscheduled-items-panel_[data-slot=badge]]:bg-card [&_#unscheduled-items-panel_[data-slot=badge]]:text-foreground">
+            {controller.reconciliationRequiredIds.size > 0 && <p role="alert" className="text-sm text-muted-foreground">An item changed elsewhere. Reload the timeline before editing it again.</p>}
+            <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+              <div className="grid" style={{ gridTemplateColumns: `clamp(112px, 30vw, ${LABEL_WIDTH}px) minmax(0, 1fr)` }}>
+                <div className="border-r bg-card">
+                  <div className="flex items-end border-b bg-muted/30 px-3 pb-2 text-xs font-semibold text-muted-foreground" style={{ height: HEADER_HEIGHT }}>
+                    Horizon → Squad
+                  </div>
                   {rows.map((row) => (
-                    <NativeLane
+                    <div
                       key={row.id}
-                      row={row}
-                      top={rowTops.get(row.id) ?? 0}
-                      height={rowHeights.get(row.id) ?? LANE_HEIGHT}
-                      disabled={!isRowValidForActiveDrag(row, activeDragId, controller.items, controller.unscheduled)}
-                    />
+                      className={row.kind === "horizon" ? "flex items-center gap-2 border-b bg-muted px-3 text-xs font-bold uppercase tracking-wide text-text-subtle" : "flex items-center gap-2 border-b px-5 text-sm text-text-subtle"}
+                      style={{ height: rowHeights.get(row.id) ?? LANE_HEIGHT }}
+                    >
+                      <span className="size-2 shrink-0 rounded-full" style={{ background: row.color ?? "#cbd5e1" }} />
+                      <span className="truncate">{row.label}</span>
+                    </div>
                   ))}
-                  <TodayLine start={controller.viewportStart} end={controller.viewportEnd} width={timelineWidth} />
-                  {renderedItemLayouts.map(({ item, left, width, interactionWidth, top, track, trackCount, overlapCount }) => {
-                    return (
-                      <NativeItem
-                        key={item.id}
-                        item={item}
-                        left={left}
-                        width={width}
-                        interactionWidth={interactionWidth}
-                        top={top}
-                        dayWidth={dayWidth}
-                        track={track}
-                        trackCount={trackCount}
-                        overlapCount={overlapCount}
-                        disabled={controller.pendingItemIds.has(item.id) || controller.reconciliationRequiredIds.has(item.id) || item.horizon === "LAUNCHING" || item.horizon === "LAUNCHED"}
-                        onFocusChange={(focused) => setFocusedItemId(focused ? item.id : null)}
-                        onOpen={() => openItem(item.id)}
-                        onEdit={() => setEditing(item)}
-                        onKeyboardMove={(days, horizon) => {
-                          if (!isInternalTimelineDestination(item.horizon, horizon)) {
-                            controller.setAnnouncement(`${item.title} cannot move to ${HORIZON_META[horizon].label} from the timeline`);
-                            return;
-                          }
-                          const start = addCalendarDays(item.viewStart, days);
-                          const end = addCalendarDays(item.viewEnd, days);
-                          controller.setAnnouncement(`Moving ${item.title} to ${HORIZON_META[horizon].label}, ${start} through ${end}`);
-                          void controller.reschedule(item.id, horizon, start, end).catch(() => undefined);
-                        }}
-                        onResize={(edge, delta) => {
-                          const changed = addCalendarDays(edge === "left" ? item.viewStart : item.viewEnd, timelinePixelDeltaToDays(delta, dayWidth));
-                          const resized = resizeRange(item.viewStart, item.viewEnd, edge, changed);
-                          void controller.reschedule(item.id, item.horizon, resized.start, resized.end).catch(() => undefined);
-                        }}
-                      />
-                    );
-                  })}
+                </div>
+                <div
+                  ref={scrollRef}
+                  className="overflow-x-auto"
+                  data-testid="native-timeline-scroll"
+                  data-scroll-left-px={Math.round(scrollViewport.scrollLeft)}
+                  data-viewport-width-px={Math.round(scrollViewport.width)}
+                  data-measurement-timing="pre-paint"
+                  role="region"
+                  aria-label="Timeline dates"
+                  tabIndex={0}
+                  onScroll={(event) => setScrollViewport({ scrollLeft: event.currentTarget.scrollLeft, width: event.currentTarget.clientWidth })}
+                >
+                  <div
+                    ref={canvasRef}
+                    className="relative"
+                    data-logical-width-px={Math.round(timelineWidth)}
+                    style={{ width: timelineWidth, minWidth: "100%" }}
+                  >
+                    <NativeHeaders start={controller.viewportStart} end={controller.viewportEnd} width={timelineWidth} />
+                    <div
+                      className="relative overflow-hidden"
+                      data-testid="timeline-grid"
+                      data-virtual-window-start-px={Math.round(renderWindow.start)}
+                      data-virtual-window-end-px={Math.round(renderWindow.end)}
+                      data-rendered-card-count={renderedItemLayouts.length}
+                      data-total-card-count={itemLayouts.length}
+                      style={{
+                        height: bodyHeight,
+                        backgroundImage: `repeating-linear-gradient(to right, transparent 0, transparent ${dayWidth - 1}px, color-mix(in oklab, var(--border) 60%, transparent) ${dayWidth}px)`,
+                      }}
+                    >
+                      {rows.map((row) => (
+                        <NativeLane
+                          key={row.id}
+                          row={row}
+                          top={rowTops.get(row.id) ?? 0}
+                          height={rowHeights.get(row.id) ?? LANE_HEIGHT}
+                          disabled={!isRowValidForActiveDrag(row, activeDragId, controller.items, controller.unscheduled)}
+                        />
+                      ))}
+                      <TodayLine start={controller.viewportStart} end={controller.viewportEnd} width={timelineWidth} />
+                      {renderedItemLayouts.map(({ item, left, width, interactionWidth, top, track, trackCount, overlapCount }) => {
+                        return (
+                          <NativeItem
+                            key={item.id}
+                            item={item}
+                            left={left}
+                            width={width}
+                            interactionWidth={interactionWidth}
+                            top={top}
+                            dayWidth={dayWidth}
+                            track={track}
+                            trackCount={trackCount}
+                            overlapCount={overlapCount}
+                            disabled={controller.pendingItemIds.has(item.id) || controller.reconciliationRequiredIds.has(item.id) || item.horizon === "LAUNCHING" || item.horizon === "LAUNCHED"}
+                            onFocusChange={(focused) => setFocusedItemId(focused ? item.id : null)}
+                            onOpen={() => openItem(item.id)}
+                            onEdit={() => setEditing(item)}
+                            onKeyboardMove={(days, horizon) => {
+                              if (!isInternalTimelineDestination(item.horizon, horizon)) {
+                                controller.setAnnouncement(`${item.title} cannot move to ${HORIZON_META[horizon].label} from the timeline`);
+                                return;
+                              }
+                              const start = addCalendarDays(item.viewStart, days);
+                              const end = addCalendarDays(item.viewEnd, days);
+                              controller.setAnnouncement(`Moving ${item.title} to ${HORIZON_META[horizon].label}, ${start} through ${end}`);
+                              void controller.reschedule(item.id, horizon, start, end).catch(() => undefined);
+                            }}
+                            onResize={(edge, delta) => {
+                              const changed = addCalendarDays(edge === "left" ? item.viewStart : item.viewEnd, timelinePixelDeltaToDays(delta, dayWidth));
+                              const resized = resizeRange(item.viewStart, item.viewEnd, edge, changed);
+                              void controller.reschedule(item.id, item.horizon, resized.start, resized.end).catch(() => undefined);
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-        <UnscheduledItemsPanel
-          items={controller.unscheduled}
-          onQuickAdd={controller.quickAdd}
-          allowedHorizons={NATIVE_BACKLOG_HORIZONS}
-          pendingItemKeys={controller.pendingBacklogIds}
-          interactionMode="touch-safe"
-        />
-        <p className="sr-only" role="status" aria-live="polite">{controller.announcement}</p>
-        <EditDatesDialog
-          item={editing}
-          open={Boolean(editing)}
-          disabled={Boolean(editing && controller.reconciliationRequiredIds.has(editing.id))}
-          start={editing?.viewStart ?? controller.viewportStart}
-          end={editing?.viewEnd ?? controller.viewportStart}
-          onOpenChange={(open) => { if (!open) setEditing(null); }}
-          onSave={(horizon, start, end) => controller.reschedule(editing!.id, horizon, start, end)}
-        />
-      </section>
-    </DndContext>
+            <UnscheduledItemsPanel
+              items={controller.unscheduled}
+              onQuickAdd={controller.quickAdd}
+              allowedHorizons={NATIVE_BACKLOG_HORIZONS}
+              pendingItemKeys={controller.pendingBacklogIds}
+              interactionMode="touch-safe"
+            />
+            <p className="sr-only" role="status" aria-live="polite">{controller.announcement}</p>
+            <EditDatesDialog
+              item={editing}
+              open={Boolean(editing)}
+              disabled={Boolean(editing && controller.reconciliationRequiredIds.has(editing.id))}
+              start={editing?.viewStart ?? controller.viewportStart}
+              end={editing?.viewEnd ?? controller.viewportStart}
+              onOpenChange={(open) => { if (!open) setEditing(null); }}
+              onSave={(horizon, start, end) => controller.reschedule(editing!.id, horizon, start, end)}
+            />
+          </section>
+        </DndContext>
+      </div>
+    </div>
   );
 }
 

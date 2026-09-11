@@ -6,19 +6,27 @@ const root = process.cwd();
 const source = (path: string) => readFileSync(join(root, path), "utf8");
 
 describe("Roadmap dashboard workspace layout", () => {
-  it("uses the reusable compact workspace shell with distinct header and content regions", () => {
+  it("uses a roadmap-scoped responsive header and distinct content regions", () => {
     const page = source("app/[orgSlug]/[workspaceSlug]/roadmap/page.tsx");
-    const shell = source("components/patterns/workspace-page.tsx");
+    const header = source("components/roadmap/roadmap-header.tsx");
+    const timeline = source("components/roadmap/native-timeline/native-timeline.tsx");
 
-    expect(page).toContain("<WorkspacePage");
+    expect(page).toContain("<RoadmapHeader squads={squads} />");
+    expect(timeline).toContain("<RoadmapHeader");
+    expect(page).not.toContain("<WorkspacePage");
     expect(page).not.toContain("toolbar={");
     expect(page).not.toContain("Drag items between horizons");
     expect(page).not.toContain("See when items are planned");
     expect(page).not.toContain("md:p-8");
-    expect(shell).toContain('data-slot="workspace-header"');
-    expect(shell).toContain('data-slot="workspace-toolbar"');
-    expect(shell).toContain('data-slot="workspace-content"');
-    expect(shell).toContain("min-h-0 flex-1");
+    expect(header).toContain('data-slot="workspace-header"');
+    expect(header).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(header).toContain("md:grid-cols-[minmax(0,1fr)_auto_auto]");
+    expect(header).toContain("row-start-2");
+    expect(header).toContain("md:row-start-1");
+    expect(page).toContain('data-slot="workspace-content"');
+    expect(timeline).toContain('data-slot="workspace-content"');
+    expect(timeline).toContain("min-h-0 min-w-0 flex-1 overflow-y-auto");
+    expect(timeline).not.toContain("<TimelineToolbar");
   });
 
   it("lets the Roadmap board and columns consume the remaining desktop height without clipping mobile", () => {
@@ -26,7 +34,8 @@ describe("Roadmap dashboard workspace layout", () => {
     const board = source("components/roadmap/roadmap-board.tsx");
     const column = source("components/roadmap/roadmap-column.tsx");
 
-    expect(page).toContain('contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}');
+    expect(page).toContain("flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0");
+    expect(page).toContain('data-slot="workspace-content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden"');
     expect(page).not.toContain('className="flex min-h-0 flex-1 flex-col overflow-x-auto"');
     expect(board).toContain("flex min-h-0 flex-1 flex-col");
     expect(board).toContain("md:overflow-hidden");
