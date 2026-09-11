@@ -319,7 +319,7 @@ function isDsqlWriteConflict(error: unknown) {
   return value?.code === "P2034" || value?.code === "40001" || value?.meta?.code === "40001" || /OC00\d|serialization/i.test(value?.message ?? "")
 }
 
-export async function applyPmInterview(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string, input: { selectedFields: string[]; editedValues?: Record<string, string | null>; idempotencyKey: unknown }) {
+export async function applyPmInterview(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string, input: { selectedFields: string[]; editedValues?: Record<string, string | null>; idempotencyKey: unknown }, testHooks?: { failReceiptFinalization?: boolean }) {
   const idempotencyKey = assertIdempotencyKey(input.idempotencyKey)
   const { prisma, interview } = await loadInterview(scope, actor, interviewId, true)
   const targetType = parsePmInterviewTargetType(interview.targetType), allowed = PM_INTERVIEW_ALLOWED_FIELDS[targetType] as readonly string[]
@@ -362,6 +362,7 @@ export async function applyPmInterview(scope: PmInterviewScope, actor: PmIntervi
     else if (targetType === "SOLUTION") await tx.solution.update({ where: { id: interview.targetId }, data })
     else if (targetType === "ASSUMPTION") await tx.assumption.update({ where: { id: interview.targetId }, data })
     else await tx.experiment.update({ where: { id: interview.targetId }, data })
+    if (testHooks?.failReceiptFinalization) throw new Error("Injected PM receipt finalization failure")
     const receipt = { version: 1, kind: "APPLIED", idempotencyKey, requestFingerprint: selection.requestFingerprint, actorUserId: actor.userId, selectedFields: selection.selectedFields, before, after, at: new Date().toISOString() }
     const finalized = await tx.pMInterview.updateMany({ where: { id: interview.id, disposition: "PENDING", updatedAt: reservationAt }, data: { disposition: "APPLIED", dispositionIdempotencyKey: idempotencyKey, receiptJson: JSON.stringify(receipt), appliedAt: new Date(), updatedAt: new Date() } })
     if (finalized.count !== 1) throw Object.assign(new Error("Concurrent PM interview apply"), { code: "P2034" })
@@ -412,10 +413,11 @@ function parseVoiceTransitionInput(input: { leaseId: unknown; settlement: unknow
   return { leaseId, settlement: input.settlement }
 }
 
-export async function settlePmInterviewVoice(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string, input: { leaseId: unknown; settlement: unknown }) {
-  const { leaseId, settlement } = parseVoiceTransitionInput(input)
+export async function markPmInterviewSpeechPending(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string, input: { leaseId: unknown; speechId: unknown }) {
+  const leaseId = typeof input.leaseId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.leaseId) ? input.leaseId : undefined
+  const speechId = typeof input.speechId === "string" && /^input:[A-Za-z0-9_.:-]{1,255}$/.test(input.speechId) ? input.speechId : undefined
+  if (!leaseId || !speechId) throw new PmInterviewError("A valid pending speech event is required", 400)
   const { prisma, interview } = await loadInterview(scope, actor, interviewId, true)
-  if (interview.session.modality !== "VOICE") throw new PmInterviewError("The active voice connection changed. Refresh before continuing in text.", 409)
   const now = new Date()
   try { return await prisma.$transaction(async tx => {
     const member = await tx.workspaceMember.findFirst({ where: { workspaceId: interview.workspaceId, userId: actor.userId }, select: { id: true } })
@@ -423,53 +425,65 @@ export async function settlePmInterviewVoice(scope: PmInterviewScope, actor: PmI
     const locked = await tx.pMInterview.findFirst({ where: { id: interview.id, workspaceId: interview.workspaceId, initiatingUserId: actor.userId }, select: { id: true, sessionId: true, transitionReceiptJson: true } })
     if (!locked) throw new PmInterviewError("PM interview not found", 404)
     const existing = parsePmInterviewVoiceTransitionReceipt(locked.transitionReceiptJson)
-    if (existing?.phase === "SETTLED" && existing.leaseId === leaseId && existing.settlement === settlement) return existing
-    if (existing) throw new PmInterviewError("The active voice settlement changed. Refresh before continuing in text.", 409)
+    if (existing?.phase === "SPEECH_PENDING" && existing.leaseId === leaseId && existing.speechId === speechId) return existing
+    if (existing) throw new PmInterviewError("Another voice utterance or transition is already pending", 409)
     const session = await tx.researchSession.findFirst({ where: { id: locked.sessionId, status: "IN_PROGRESS", modality: "VOICE", voiceLeaseId: leaseId, voiceLeaseExpiresAt: { gt: now } }, select: { id: true, updatedAt: true } })
-    if (!session) throw new PmInterviewError("The active voice connection changed. Refresh before continuing in text.", 409)
-    const activeCall = await tx.researchVoiceCall.findFirst({ where: { sessionId: session.id, status: { in: ["PROVISIONING", "CONNECTED", "DISCONNECTING"] } }, orderBy: { createdAt: "desc" } })
-    if (activeCall?.transcriptIntegrity === "PENDING" && settlement !== "DISCARD_PENDING") throw new PmInterviewError("Pending speech could not be confirmed. Save it or explicitly discard it before continuing in text.", 409)
+    if (!session) throw new PmInterviewError("The active voice connection changed. Refresh before continuing.", 409)
     const sessionFenceAt = new Date(Math.max(now.getTime(), session.updatedAt.getTime() + 1))
     const fenced = await tx.researchSession.updateMany({ where: { id: session.id, status: "IN_PROGRESS", modality: "VOICE", voiceLeaseId: leaseId, updatedAt: session.updatedAt }, data: { lastActiveAt: now, updatedAt: sessionFenceAt } })
-    if (fenced.count !== 1) throw new PmInterviewError("The voice transcript changed while settlement was being recorded. Retry continuing in text.", 409)
-    const events = await tx.researchParticipantVoiceEvent.findMany({ where: { sessionId: session.id, leaseId }, orderBy: { reportedOrdinal: "asc" }, select: { reportedOrdinal: true } })
-    const receipt = { version: 1 as const, phase: "SETTLED" as const, leaseId, settlement, finalizedEventCount: events.length, lastFinalizedOrdinal: events.at(-1)?.reportedOrdinal ?? null, at: now.toISOString() }
+    if (fenced.count !== 1) throw new PmInterviewError("Voice activity changed concurrently. Retry.", 409)
+    const receipt = { version: 1 as const, phase: "SPEECH_PENDING" as const, leaseId, speechId, at: now.toISOString() }
     const saved = await tx.pMInterview.updateMany({ where: { id: locked.id, transitionReceiptJson: null, retiredVoiceLeaseId: null }, data: { transitionReceiptJson: JSON.stringify(receipt), updatedAt: now } })
-    if (saved.count !== 1) throw new PmInterviewError("The active voice settlement changed. Refresh before continuing in text.", 409)
+    if (saved.count !== 1) throw new PmInterviewError("Voice activity changed concurrently. Retry.", 409)
     return receipt
   }) } catch (error) {
     if (error instanceof PmInterviewError) throw error
-    if (isDsqlWriteConflict(error)) throw new PmInterviewError("The voice transcript changed while settlement was being recorded. Retry continuing in text.", 409)
+    if (isDsqlWriteConflict(error)) throw new PmInterviewError("Voice activity changed concurrently. Retry.", 409)
     throw error
   }
 }
 
 export async function switchPmInterviewToText(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string, input: { leaseId: unknown; settlement: unknown }) {
   const { prisma, interview } = await loadInterview(scope, actor, interviewId, true)
-  if (interview.session.modality === "CHAT") return { modality: "CHAT", replayed: true }
   const { leaseId, settlement } = parseVoiceTransitionInput(input)
+  if (interview.session.modality === "CHAT") {
+    const receipt = parsePmInterviewVoiceTransitionReceipt(interview.transitionReceiptJson)
+    if (receipt?.phase !== "TRANSITIONED" || receipt.leaseId !== leaseId || receipt.settlement !== settlement) throw new PmInterviewError("The voice transition does not match the saved result", 409)
+    return { modality: "CHAT", replayed: true }
+  }
   const now = new Date()
-  try { await prisma.$transaction(async tx => {
+  let replayed = false
+  try { replayed = await prisma.$transaction(async tx => {
     const member = await tx.workspaceMember.findFirst({ where: { workspaceId: interview.workspaceId, userId: actor.userId }, select: { id: true } })
     if (!member) throw new PmInterviewError("PM interview not found", 404)
     const locked = await tx.pMInterview.findFirst({ where: { id: interview.id, workspaceId: interview.workspaceId, initiatingUserId: actor.userId }, select: { id: true, sessionId: true, transitionReceiptJson: true } })
     if (!locked) throw new PmInterviewError("PM interview not found", 404)
-    const settlementReceipt = parsePmInterviewVoiceTransitionReceipt(locked.transitionReceiptJson)
-    if (!settlementReceipt || settlementReceipt.phase !== "SETTLED" || settlementReceipt.leaseId !== leaseId || settlementReceipt.settlement !== settlement) throw new PmInterviewError("Voice transcript settlement must be recorded before continuing in text.", 409)
-    const session = await tx.researchSession.findFirst({ where: { id: locked.sessionId, status: "IN_PROGRESS", modality: "VOICE", voiceLeaseId: leaseId }, select: { id: true, voiceLeaseId: true } })
+    const existing = parsePmInterviewVoiceTransitionReceipt(locked.transitionReceiptJson)
+    if (existing?.leaseId !== undefined && existing.leaseId !== leaseId) throw new PmInterviewError("The active voice connection changed. Refresh before continuing in text.", 409)
+    if (existing?.phase === "TRANSITIONED") {
+      if (existing.settlement !== settlement) throw new PmInterviewError("The voice transition was already recorded with a different settlement", 409)
+      return true
+    }
+    if (existing?.phase === "SPEECH_PENDING" && settlement !== "DISCARD_PENDING") throw new PmInterviewError("Pending speech could not be confirmed. Save it or explicitly discard it before continuing in text.", 409)
+    if (existing?.phase === "SETTLED" && existing.settlement !== settlement) throw new PmInterviewError("The voice settlement was already recorded with a different result", 409)
+    const session = await tx.researchSession.findFirst({ where: { id: locked.sessionId, status: "IN_PROGRESS", modality: "VOICE", voiceLeaseId: leaseId }, select: { id: true, voiceLeaseId: true, updatedAt: true } })
     if (!session) throw new PmInterviewError("The active voice connection changed. Refresh before continuing in text.", 409)
     const events = leaseId ? await tx.researchParticipantVoiceEvent.findMany({ where: { sessionId: session.id, leaseId }, orderBy: { reportedOrdinal: "asc" }, select: { reportedOrdinal: true } }) : []
     const activeCall = await tx.researchVoiceCall.findFirst({ where: { sessionId: session.id, status: { in: ["PROVISIONING", "CONNECTED", "DISCONNECTING"] } }, orderBy: { createdAt: "desc" } })
-    if (events.length !== settlementReceipt.finalizedEventCount || (events.at(-1)?.reportedOrdinal ?? null) !== settlementReceipt.lastFinalizedOrdinal) throw new PmInterviewError("Voice transcript changed after settlement. Refresh before continuing in text.", 409)
+    if (existing?.phase === "SETTLED" && (events.length !== existing.finalizedEventCount || (events.at(-1)?.reportedOrdinal ?? null) !== existing.lastFinalizedOrdinal)) throw new PmInterviewError("Voice transcript changed after settlement. Refresh before continuing in text.", 409)
     if (activeCall?.transcriptIntegrity === "PENDING" && settlement !== "DISCARD_PENDING") throw new PmInterviewError("Pending speech could not be confirmed. Save it or explicitly discard it before continuing in text.", 409)
     if (activeCall) await tx.researchVoiceCall.update({ where: { id: activeCall.id }, data: { status: "ENDED", endReason: settlement === "DISCARD_PENDING" ? "SWITCH_TO_TEXT_DISCARD" : "SWITCH_TO_TEXT", endedAt: now, leaseExpiresAt: now, updatedAt: now } })
-    const transitioned = await tx.researchSession.updateMany({ where: { id: session.id, status: "IN_PROGRESS", modality: "VOICE", voiceLeaseId: leaseId }, data: { modality: "CHAT", voiceLeaseId: null, voiceLeaseExpiresAt: null, lastActiveAt: now, updatedAt: now } })
+    const sessionFenceAt = new Date(Math.max(now.getTime(), session.updatedAt.getTime() + 1))
+    const transitioned = await tx.researchSession.updateMany({ where: { id: session.id, status: "IN_PROGRESS", modality: "VOICE", voiceLeaseId: leaseId, updatedAt: session.updatedAt }, data: { modality: "CHAT", voiceLeaseId: null, voiceLeaseExpiresAt: null, lastActiveAt: now, updatedAt: sessionFenceAt } })
     if (transitioned.count !== 1) throw new PmInterviewError("The active voice connection changed. Refresh before continuing in text.", 409)
-    await tx.pMInterview.update({ where: { id: locked.id }, data: { retiredVoiceLeaseId: leaseId, transitionReceiptJson: JSON.stringify({ ...settlementReceipt, phase: "TRANSITIONED", at: now.toISOString() }), updatedAt: now } })
+    const transition = { version: 1 as const, phase: "TRANSITIONED" as const, leaseId, settlement, finalizedEventCount: events.length, lastFinalizedOrdinal: events.at(-1)?.reportedOrdinal ?? null, at: now.toISOString() }
+    const saved = await tx.pMInterview.updateMany({ where: { id: locked.id, transitionReceiptJson: locked.transitionReceiptJson, retiredVoiceLeaseId: null }, data: { retiredVoiceLeaseId: leaseId, transitionReceiptJson: JSON.stringify(transition), updatedAt: now } })
+    if (saved.count !== 1) throw new PmInterviewError("The active voice connection changed. Refresh before continuing in text.", 409)
+    return false
   }) } catch (error) {
     if (error instanceof PmInterviewError) throw error
     if (isDsqlWriteConflict(error)) throw new PmInterviewError("The active voice connection changed. Refresh before continuing in text.", 409)
     throw error
   }
-  return { modality: "CHAT", replayed: false }
+  return { modality: "CHAT", replayed }
 }

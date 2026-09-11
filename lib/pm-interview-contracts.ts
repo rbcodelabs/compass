@@ -115,12 +115,19 @@ const pmVoiceSettlementSchema = z.object({
 }).strict()
 
 const pmVoiceTransitionSchema = pmVoiceSettlementSchema.extend({ phase: z.literal("TRANSITIONED") }).strict()
+const pmVoiceSpeechPendingSchema = z.object({
+  version: z.literal(1),
+  phase: z.literal("SPEECH_PENDING"),
+  leaseId: z.string().uuid(),
+  speechId: z.string().regex(/^(?:input|output):[A-Za-z0-9_.:-]{1,255}$/),
+  at: z.string().datetime(),
+}).strict()
 
-export type PmInterviewVoiceTransitionReceipt = z.infer<typeof pmVoiceSettlementSchema> | z.infer<typeof pmVoiceTransitionSchema>
+export type PmInterviewVoiceTransitionReceipt = z.infer<typeof pmVoiceSettlementSchema> | z.infer<typeof pmVoiceTransitionSchema> | z.infer<typeof pmVoiceSpeechPendingSchema>
 
 export function parsePmInterviewVoiceTransitionReceipt(value: string | null): PmInterviewVoiceTransitionReceipt | null {
   if (!value) return null
-  return z.discriminatedUnion("phase", [pmVoiceSettlementSchema, pmVoiceTransitionSchema]).parse(JSON.parse(value))
+  return z.discriminatedUnion("phase", [pmVoiceSettlementSchema, pmVoiceTransitionSchema, pmVoiceSpeechPendingSchema]).parse(JSON.parse(value))
 }
 
 type PmInterviewReadSource = {

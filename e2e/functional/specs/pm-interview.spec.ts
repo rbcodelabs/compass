@@ -243,8 +243,9 @@ test.describe("Capture — PM interview", () => {
       const publicRecord = await prisma.pMInterview.findUniqueOrThrow({ where: { id: publicId }, select: { studyId: true } })
       const copiedToken = `copied-${publicId}`
       await prisma.researchParticipantToken.updateMany({ where: { studyId: publicRecord.studyId }, data: { tokenHash: createHash("sha256").update(copiedToken).digest("hex") } })
-      const anonymous = await browser.newContext({ storageState: undefined })
+      const anonymous = await browser.newContext({ storageState: { cookies: [], origins: [] } })
       try {
+        expect(await anonymous.cookies()).toEqual([])
         expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: copiedToken, modality: "CHAT" } })).status()).toBe(404)
         const anonymousPmRoutes = [
           anonymous.request.post(`${baseURL}/api/pm-interviews?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { targetType: "OPPORTUNITY", targetId: opportunity.id } }),
@@ -294,15 +295,43 @@ test.describe("Capture — PM interview", () => {
       const provision = await page.request.post(`/api/pm-interviews/${voiceId}/voice-session?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: voiceSession })
       expect(provision.status()).toBe(200)
       const { leaseId } = await provision.json() as { leaseId: string }
-      const voiceEvent = { ...voiceSession, leaseId, action: "FINAL", clientEventId: `voice-${voiceId}`, reportedOrdinal: 0, role: "PARTICIPANT", content: "A synthetic finalized PM voice answer" }
-      expect((await page.request.post(`/api/pm-interviews/${voiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: voiceEvent })).status()).toBe(200)
+      const speechId = `input:voice-${voiceId}`
+      expect((await page.request.post(`/api/pm-interviews/${voiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { ...voiceSession, leaseId, action: "SPEECH_START", speechId } })).status()).toBe(200)
       expect((await page.request.post(`/api/pm-interviews/${voiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId, settlement: "FINALIZED" } })).status()).toBe(409)
-      expect((await page.request.post(`/api/pm-interviews/${voiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { ...voiceSession, leaseId, action: "SETTLE", settlement: "FINALIZED" } })).status()).toBe(200)
+      const voiceEvent = { ...voiceSession, leaseId, action: "FINAL", clientEventId: `voice-${voiceId}`, reportedOrdinal: 0, role: "PARTICIPANT", content: "A synthetic finalized PM voice answer", speechId }
+      expect((await page.request.post(`/api/pm-interviews/${voiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: voiceEvent })).status()).toBe(200)
+      expect((await page.request.post(`/api/pm-interviews/${voiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId, settlement: "FINALIZED" } })).status()).toBe(200)
       expect((await page.request.post(`/api/pm-interviews/${voiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId, settlement: "FINALIZED" } })).status()).toBe(200)
       expect((await page.request.post(`/api/pm-interviews/${voiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { ...voiceEvent, clientEventId: `late-${voiceId}`, reportedOrdinal: 1 } })).status()).toBe(404)
       const voiceRecord = await prisma.pMInterview.findUniqueOrThrow({ where: { id: voiceId }, include: { session: true } })
       expect(voiceRecord.session).toMatchObject({ modality: "CHAT", voiceLeaseId: null })
       expect(JSON.parse(voiceRecord.transitionReceiptJson!)).toMatchObject({ version: 1, phase: "TRANSITIONED", leaseId, settlement: "FINALIZED", finalizedEventCount: 1, lastFinalizedOrdinal: 0 })
+
+      const discardVoiceId = await createInterview()
+      const discardStart = await page.request.post(`/api/pm-interviews/${discardVoiceId}/start?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { modality: "VOICE" } })
+      const discardSession = await discardStart.json() as { sessionId: string; resumeToken: string }
+      const discardProvision = await page.request.post(`/api/pm-interviews/${discardVoiceId}/voice-session?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: discardSession })
+      const discardLease = ((await discardProvision.json()) as { leaseId: string }).leaseId
+      expect((await page.request.post(`/api/pm-interviews/${discardVoiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { ...discardSession, leaseId: discardLease, action: "SPEECH_START", speechId: `input:discard-${discardVoiceId}` } })).status()).toBe(200)
+      expect((await page.request.post(`/api/pm-interviews/${discardVoiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId: discardLease, settlement: "DISCARD_PENDING" } })).status()).toBe(200)
+      expect(JSON.parse((await prisma.pMInterview.findUniqueOrThrow({ where: { id: discardVoiceId } })).transitionReceiptJson!)).toMatchObject({ phase: "TRANSITIONED", leaseId: discardLease, settlement: "DISCARD_PENDING" })
+
+      const racingVoiceId = await createInterview()
+      const racingStart = await page.request.post(`/api/pm-interviews/${racingVoiceId}/start?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { modality: "VOICE" } })
+      const racingSession = await racingStart.json() as { sessionId: string; resumeToken: string }
+      const racingProvision = await page.request.post(`/api/pm-interviews/${racingVoiceId}/voice-session?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: racingSession })
+      const racingLease = ((await racingProvision.json()) as { leaseId: string }).leaseId
+      const racingFinal = { ...racingSession, leaseId: racingLease, action: "FINAL", clientEventId: `race-${racingVoiceId}`, reportedOrdinal: 0, role: "PARTICIPANT", content: "A final event racing the text transition" }
+      const [finalRace, transitionRace] = await Promise.all([
+        page.request.post(`/api/pm-interviews/${racingVoiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: racingFinal }),
+        page.request.post(`/api/pm-interviews/${racingVoiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId: racingLease, settlement: "FINALIZED" } }),
+      ])
+      const voiceRaceStatuses = [finalRace.status(), transitionRace.status()]
+      expect(voiceRaceStatuses.filter(status => status === 200)).toHaveLength(1)
+      expect([404, 409]).toContain(voiceRaceStatuses.find(status => status !== 200))
+      const transitionRetry = await page.request.post(`/api/pm-interviews/${racingVoiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId: racingLease, settlement: "FINALIZED" } })
+      expect(transitionRetry.status(), await transitionRetry.text()).toBe(200)
+      expect((await prisma.pMInterview.findUniqueOrThrow({ where: { id: racingVoiceId }, include: { session: true } })).session).toMatchObject({ modality: "CHAT", voiceLeaseId: null })
 
       const nonOwnerId = await createInterview()
       await prepareProposal(nonOwnerId)
@@ -331,12 +360,14 @@ test.describe("Capture — PM interview", () => {
       expect(rollbackIdResponse.status()).toBe(201)
       const rollbackId = ((await rollbackIdResponse.json()) as { id: string }).id
       interviewIds.push(rollbackId)
-      await expect(prisma.$transaction(async tx => {
-        await tx.opportunity.update({ where: { id: rollbackOpportunity.id }, data: { title: "Must roll back", updatedAt: new Date() } })
-        const finalized = await tx.pMInterview.updateMany({ where: { id: rollbackId, disposition: "APPLIED" }, data: { receiptJson: JSON.stringify({ version: 1, kind: "APPLIED" }), updatedAt: new Date() } })
-        if (finalized.count !== 1) throw new Error("Synthetic receipt finalization failure")
-      })).rejects.toThrow("Synthetic receipt finalization failure")
+      await prepareProposal(rollbackId)
+      const failedApply = await page.request.post(`/api/pm-interviews/${rollbackId}/apply?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, {
+        headers: { "x-e2e-pm-fail-receipt-finalization": "1" },
+        data: { selectedFields: ["title"], editedValues: { title: "Must roll back" }, idempotencyKey: `rollback-${rollbackId}` },
+      })
+      expect(failedApply.status(), await failedApply.text()).toBe(500)
       expect((await prisma.opportunity.findUniqueOrThrow({ where: { id: rollbackOpportunity.id } })).title).toBe(rollbackOpportunity.title)
+      expect(await prisma.pMInterview.findUniqueOrThrow({ where: { id: rollbackId }, select: { disposition: true, receiptJson: true, dispositionIdempotencyKey: true } })).toEqual({ disposition: "PENDING", receiptJson: null, dispositionIdempotencyKey: null })
 
       const removedMemberId = await createInterview()
       const { initiatingUserId } = await prisma.pMInterview.findUniqueOrThrow({ where: { id: removedMemberId }, select: { initiatingUserId: true } })

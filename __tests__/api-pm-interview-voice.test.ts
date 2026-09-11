@@ -6,12 +6,12 @@ const createResearchVoiceLease = vi.hoisted(() => vi.fn())
 const releaseResearchVoiceLease = vi.hoisted(() => vi.fn())
 const verifyParticipantVoiceLease = vi.hoisted(() => vi.fn())
 const appendParticipantVoiceEvent = vi.hoisted(() => vi.fn())
-const settlePmInterviewVoice = vi.hoisted(() => vi.fn())
+const markPmInterviewSpeechPending = vi.hoisted(() => vi.fn())
 vi.mock("@/auth", () => ({ auth }))
 vi.mock("@/lib/pm-interview-service", () => ({
   PmInterviewError: class PmInterviewError extends Error { constructor(message: string, readonly status = 422) { super(message) } },
   pmInterviewVoiceContext,
-  settlePmInterviewVoice,
+  markPmInterviewSpeechPending,
 }))
 vi.mock("@/lib/research-voice", () => ({
   ResearchVoiceError: class ResearchVoiceError extends Error { constructor(message: string, readonly status: number) { super(message) } },
@@ -33,7 +33,7 @@ describe("authenticated PM interview voice", () => {
     pmInterviewVoiceContext.mockResolvedValue({ prisma: {}, study: { id: "study-1", targetMinutes: 15 }, participantToken: { id: "internal-token-row" }, interview: { id: "interview-1" } })
     createResearchVoiceLease.mockResolvedValue({ leaseId: "lease-1", expiresAt: new Date("2026-09-11T13:00:00Z"), instructions: "PM ONLY" })
     appendParticipantVoiceEvent.mockResolvedValue({ replayed: false, turn: { id: "turn-1" } })
-    settlePmInterviewVoice.mockResolvedValue({ version: 1, phase: "SETTLED", leaseId: "lease-1", settlement: "FINALIZED", finalizedEventCount: 1, lastFinalizedOrdinal: 0, at: "2026-09-11T12:00:00.000Z" })
+    markPmInterviewSpeechPending.mockResolvedValue({ version: 1, phase: "SPEECH_PENDING", leaseId: "lease-1", speechId: "input:item-1", at: "2026-09-11T12:00:00.000Z" })
     vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
     vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
     vi.stubEnv("E2E_FUNCTIONAL", "1")
@@ -62,16 +62,17 @@ describe("authenticated PM interview voice", () => {
     expect(appendParticipantVoiceEvent).toHaveBeenCalledWith(expect.objectContaining({ leaseId: "lease-1", reportedOrdinal: 0, role: "PARTICIPANT" }))
   })
 
-  it("records a server-owned exact-lease settlement before transition", async () => {
-    const response = await event(request("/api/pm-interviews/interview-1/voice-event", { sessionId: "session-1", resumeToken: "resume-secret", leaseId: "lease-1", action: "SETTLE", settlement: "FINALIZED" }), params)
+  it("records browser speech start durably against the exact lease", async () => {
+    const response = await event(request("/api/pm-interviews/interview-1/voice-event", { sessionId: "session-1", resumeToken: "resume-secret", leaseId: "lease-1", action: "SPEECH_START", speechId: "input:item-1" }), params)
     expect(response.status).toBe(200)
-    expect(settlePmInterviewVoice).toHaveBeenCalledWith({ orgSlug: "acme", workspaceSlug: "product" }, { userId: "owner-1" }, "interview-1", { leaseId: "lease-1", settlement: "FINALIZED" })
+    expect(markPmInterviewSpeechPending).toHaveBeenCalledWith({ orgSlug: "acme", workspaceSlug: "product" }, { userId: "owner-1" }, "interview-1", { leaseId: "lease-1", speechId: "input:item-1" })
+    expect(pmInterviewVoiceContext).not.toHaveBeenCalled()
   })
 
   it("rejects client-supplied settlement counters and receipts", async () => {
     const response = await event(request("/api/pm-interviews/interview-1/voice-event", { sessionId: "session-1", resumeToken: "resume-secret", leaseId: "lease-1", action: "SETTLE", settlement: "FINALIZED", finalizedEventCount: 999 }), params)
     expect(response.status).toBe(400)
-    expect(settlePmInterviewVoice).not.toHaveBeenCalled()
+    expect(markPmInterviewSpeechPending).not.toHaveBeenCalled()
   })
 
   it("requires a signed-in user before resolving internal voice context", async () => {

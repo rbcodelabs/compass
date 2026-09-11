@@ -116,17 +116,28 @@ describe("ResearchVoice", () => {
     expect(onUseChat).toHaveBeenCalledOnce()
   })
 
-  it("durably settles an atomic PM voice lease before requesting the text transition", async () => {
+  it("durably orders PM speech lifecycle and final transcript before the atomic text transition", async () => {
+    vi.mocked(fetch).mockReset()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ephemeralToken: "short-secret", leaseId: "lease-1", evidenceMode: "PARTICIPANT_SUBMITTED" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("answer-sdp", { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }))
     const onUseChat = vi.fn().mockResolvedValue(undefined)
     render(<ResearchVoice transport={{ basePath: "/api/pm-interviews/interview-1", query: "?orgSlug=acme&workspaceSlug=product", identity: "pm-interview-1", atomicTextTransition: true }} onUseChat={onUseChat} />)
     fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
     await screen.findByText("Connected — speak naturally")
+    channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "input_audio_buffer.speech_started", item_id: "user-1" }) }))
+    channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "conversation.item.input_audio_transcription.completed", item_id: "user-1", transcript: "A saved answer" }) }))
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url).includes("/voice-event?") && String(init?.body).includes('"action":"FINAL"'))).toBe(true))
     fireEvent.click(screen.getByRole("button", { name: "Continue in text" }))
 
     await waitFor(() => expect(onUseChat).toHaveBeenCalledWith({ leaseId: "lease-1", settlement: "FINALIZED" }))
-    const settlementCall = vi.mocked(fetch).mock.calls.findIndex(([url, init]) => String(url).includes("/voice-event?") && String(init?.body).includes('"action":"SETTLE"'))
-    expect(settlementCall).toBeGreaterThan(-1)
-    expect(vi.mocked(fetch).mock.invocationCallOrder[settlementCall]).toBeLessThan(onUseChat.mock.invocationCallOrder[0])
+    const speechCall = vi.mocked(fetch).mock.calls.findIndex(([url, init]) => String(url).includes("/voice-event?") && String(init?.body).includes('"action":"SPEECH_START"'))
+    const finalCall = vi.mocked(fetch).mock.calls.findIndex(([url, init]) => String(url).includes("/voice-event?") && String(init?.body).includes('"action":"FINAL"'))
+    expect(speechCall).toBeGreaterThan(-1)
+    expect(finalCall).toBeGreaterThan(speechCall)
+    expect(String(vi.mocked(fetch).mock.calls[finalCall][1]?.body)).toContain('"speechId":"input:user-1"')
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => String(init?.body).includes('"action":"SETTLE"'))).toBe(false)
   })
 
   it("stops the acquired microphone when a stored session has already completed", async () => {

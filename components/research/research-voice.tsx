@@ -108,6 +108,26 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  function appendVoicePayload(payload: Record<string, unknown>) {
+    if (!queueRef.current) queueRef.current = new VoiceSaveQueue(async (value) => {
+      const response = await fetch(endpoint("voice-event"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(value),
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!response.ok) throw new Error("Voice activity could not be saved")
+    })
+    return queueRef.current.append(payload)
+  }
+
+  function noteVoiceSaveFailure() {
+    setError("Some transcript could not be saved. Your microphone is stopped. Retry saving before finishing or reconnecting; keep this page open.")
+    setSaveFailed(true)
+    setStatus("error")
+    closeMedia()
+  }
+
   function persistFinal(event: FinalResearchVoiceEvent & { attachmentId?: string }) {
     const session = sessionRef.current
     const leaseId = leaseRef.current
@@ -117,24 +137,10 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
     setMessages((current) => current.some((message) => message.providerEventId === event.providerEventId)
       ? current
       : [...current, { ...event, id: event.providerEventId }])
-    if (!queueRef.current) queueRef.current = new VoiceSaveQueue(async (payload) => {
-      const response = await fetch(endpoint("voice-event"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(10_000),
-      })
-      if (!response.ok) throw new Error("Finalized transcript could not be saved")
-    })
     const { providerEventId, ...evidence } = event
     const identity = browserEvidenceRef.current ? { clientEventId: crypto.randomUUID(), reportedOrdinal: ordinalRef.current++ } : { providerEventId }
-    return queueRef.current.append({ ...auth, ...session, leaseId, action: "FINAL", ...evidence, ...identity }).catch((caught) => {
-      setError("Some transcript could not be saved. Your microphone is stopped. Retry saving before finishing or reconnecting; keep this page open.")
-      setSaveFailed(true)
-      setStatus("error")
-      closeMedia()
-      throw caught
-    })
+    const speech = browserEvidenceRef.current && event.role === "PARTICIPANT" ? { speechId: providerEventId } : {}
+    return appendVoicePayload({ ...auth, ...session, leaseId, action: "FINAL", ...evidence, ...identity, ...speech }).catch((caught) => { noteVoiceSaveFailure(); throw caught })
   }
 
   function handleProviderEvent(event: Record<string, unknown>) {
@@ -147,7 +153,13 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
       const input = event.type === "conversation.item.input_audio_transcription.completed"
       void orderRef.current?.finalize({ providerEventId: `${input ? "input" : "output"}:${event.item_id}`, role: input ? "PARTICIPANT" : "INTERVIEWER", content: "" }).catch(() => undefined)
     }
-    if (event.type === "input_audio_buffer.speech_started") pendingSpeechRef.current = true
+    if (event.type === "input_audio_buffer.speech_started") {
+      pendingSpeechRef.current = true
+      const session = sessionRef.current, leaseId = leaseRef.current
+      if (transport?.atomicTextTransition && session && leaseId && typeof event.item_id === "string") {
+        void appendVoicePayload({ ...auth, ...session, leaseId, action: "SPEECH_START", speechId: `input:${event.item_id}` }).catch(() => noteVoiceSaveFailure())
+      }
+    }
     if (event.type === "conversation.item.input_audio_transcription.completed") pendingSpeechRef.current = false
     if (final) void (orderRef.current?.finalize(final) ?? persistFinal(final)).catch(() => undefined)
     if (finishingRef.current) return
@@ -424,13 +436,6 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
       const settlement = discardPending ? "DISCARD_PENDING" : "FINALIZED"
       if (transport?.atomicTextTransition) {
         if (!session || !leaseId) throw new Error("The active voice connection changed. Refresh before continuing in text.")
-        const settled = await fetch(endpoint("voice-event"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...auth, ...session, leaseId, action: "SETTLE", settlement }),
-          signal: AbortSignal.timeout(10_000),
-        })
-        if (!settled.ok) throw new Error("Voice transcript settlement could not be recorded. Retry continuing in text.")
         await onUseChat?.({ leaseId, settlement })
       }
       else { await releaseLease(); await onUseChat?.() }

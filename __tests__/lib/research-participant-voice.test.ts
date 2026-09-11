@@ -12,7 +12,7 @@ function fixture() {
     researchParticipantVoiceEvent: { findUnique: vi.fn().mockResolvedValue(null), findFirst: vi.fn().mockResolvedValue(null), count: vi.fn().mockResolvedValue(0), create: vi.fn().mockResolvedValue({}) },
     researchAttachment: { findMany: vi.fn().mockResolvedValue([]), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     researchTurn: { create: vi.fn().mockImplementation(({ data }) => data), findUnique: vi.fn().mockResolvedValue({ id: "turn" }) },
-    pMInterview: { findUnique: vi.fn().mockResolvedValue(null) },
+    pMInterview: { findUnique: vi.fn().mockResolvedValue(null), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
   }
   const context = { prisma: { $transaction: (fn: (value: typeof tx) => unknown) => fn(tx) } as unknown as AppPrismaClient,
     study: { id: "study", workspaceId: "workspace", studyType: "CUSTOMER_INTERVIEW", targetMinutes: 15 } as ResearchStudy, participantToken: { id: "token" } }
@@ -46,14 +46,31 @@ describe("participant-submitted voice persistence", () => {
     const { context } = fixture()
     await expect(appendParticipantVoiceEvent({ context, ...input, reportedOrdinal: 2 })).rejects.toThrow("order")
   })
-  it("rejects a late PM voice event after the exact lease is durably settled", async () => {
+  it("rejects a late PM voice event after the exact lease is durably transitioned", async () => {
     const { context, tx } = fixture()
     const settledLeaseId = "00000000-0000-4000-8000-000000000050"
     context.study.studyType = "PM_INTERVIEW"
-    tx.pMInterview.findUnique.mockResolvedValue({ transitionReceiptJson: JSON.stringify({ version: 1, phase: "SETTLED", leaseId: settledLeaseId, settlement: "FINALIZED", finalizedEventCount: 0, lastFinalizedOrdinal: null, at: "2026-09-11T12:00:00.000Z" }) })
+    tx.pMInterview.findUnique.mockResolvedValue({ transitionReceiptJson: JSON.stringify({ version: 1, phase: "TRANSITIONED", leaseId: settledLeaseId, settlement: "FINALIZED", finalizedEventCount: 0, lastFinalizedOrdinal: null, at: "2026-09-11T12:00:00.000Z" }) })
     await expect(appendParticipantVoiceEvent({ context, ...input, leaseId: settledLeaseId })).rejects.toThrow("already settled")
     expect(tx.researchTurn.create).not.toHaveBeenCalled()
     expect(tx.researchParticipantVoiceEvent.create).not.toHaveBeenCalled()
+  })
+  it("clears pending speech only when the finalized event matches its exact lease and speech ID", async () => {
+    const { context, tx } = fixture()
+    context.study.studyType = "PM_INTERVIEW"
+    const exactLease = "00000000-0000-4000-8000-000000000050"
+    const pending = JSON.stringify({ version: 1, phase: "SPEECH_PENDING", leaseId: exactLease, speechId: "input:item-1", at: "2026-09-11T12:00:00.000Z" })
+    tx.pMInterview.findUnique.mockResolvedValue({ transitionReceiptJson: pending })
+    await appendParticipantVoiceEvent({ context, ...input, leaseId: exactLease, speechId: "input:item-1" })
+    expect(tx.pMInterview.updateMany).toHaveBeenCalledWith({ where: { sessionId: "session", transitionReceiptJson: pending }, data: { transitionReceiptJson: null, updatedAt: expect.any(Date) } })
+  })
+  it("rejects a finalized event that does not match the pending speech lifecycle", async () => {
+    const { context, tx } = fixture()
+    context.study.studyType = "PM_INTERVIEW"
+    const exactLease = "00000000-0000-4000-8000-000000000050"
+    tx.pMInterview.findUnique.mockResolvedValue({ transitionReceiptJson: JSON.stringify({ version: 1, phase: "SPEECH_PENDING", leaseId: exactLease, speechId: "input:item-1", at: "2026-09-11T12:00:00.000Z" }) })
+    await expect(appendParticipantVoiceEvent({ context, ...input, leaseId: exactLease, speechId: "input:item-2" })).rejects.toThrow("does not match")
+    expect(tx.researchTurn.create).not.toHaveBeenCalled()
   })
   it("rejects retries that omit the attachment from the original event", async () => {
     const { tx, context } = fixture()
