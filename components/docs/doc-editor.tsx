@@ -387,7 +387,11 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       </div>
 
       {/* Toolbar */}
-      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-0.5 px-4 sm:px-8 py-1.5 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
+      <div className="sticky top-0 z-10 flex items-center gap-1 px-4 sm:px-8 py-1.5 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
+        {/* Buttons scroll horizontally on narrow screens instead of wrapping to a
+            second row (which used to eat viewport height) or shrinking to the
+            point of being unreadable/untappable. */}
+        <div className="flex flex-1 min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
           isActive={editor.isActive("bold")}
@@ -402,7 +406,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         >
           <Italic className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-border-default mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
           isActive={editor.isActive("heading", { level: 1 })}
@@ -424,7 +428,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         >
           <Heading3 className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-border-default mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBulletList().run()}
           isActive={editor.isActive("bulletList")}
@@ -446,13 +450,17 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         >
           <Code2 className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-border-default mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
         <ToolbarButton onClick={handleImageButtonClick} title="Add image">
           <ImageIcon className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-border-default mx-1" />
+        </div>
+        {/* Comment/history/version controls stay outside the scroll strip above —
+            their popovers are absolutely positioned and would get clipped by an
+            overflow-x-auto ancestor, so they're pinned here instead of scrolling. */}
+        <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
         {/* Comment on the current selection */}
-        <div className="relative">
+        <div className="relative shrink-0">
           <ToolbarButton
             onClick={handleStartComment}
             disabled={selectionEmpty}
@@ -517,11 +525,11 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             )}
           </span>
         </ToolbarButton>
-        <div className="w-px h-5 bg-border-default mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
         <ToolbarButton onClick={() => setHistoryOpen(true)} title="Version history">
           <History className="w-4 h-4" />
         </ToolbarButton>
-        <div className="relative">
+        <div className="relative shrink-0">
           <ToolbarButton onClick={() => setShowSaveVersionInput((v) => !v)} title="Save named version">
             <BookmarkPlus className="w-4 h-4" />
           </ToolbarButton>
@@ -541,7 +549,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             </div>
           )}
         </div>
-        {decisionAction && <div className="ml-auto flex w-full justify-end pt-1 sm:w-auto sm:pt-0">{decisionAction}</div>}
+        {decisionAction && <div className="shrink-0 pl-1">{decisionAction}</div>}
       </div>
 
       {/* Hidden file input */}
@@ -641,7 +649,7 @@ function ToolbarButton({
       title={title}
       disabled={disabled}
       className={cn(
-        "w-7 h-7 flex items-center justify-center rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
+        "w-7 h-7 shrink-0 flex items-center justify-center rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
         isActive
           ? "bg-indigo-100 text-indigo-700"
           : "text-text-secondary hover:bg-surface-inset hover:text-text-primary"

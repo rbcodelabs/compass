@@ -11,14 +11,24 @@ import type { DecidedDocDecision, DocDecisions } from "@/lib/tracked-decisions"
 type Props = { orgSlug: string; workspaceSlug: string; docId: string; docTitle: string; decisions: DocDecisions | null }
 const actionClass = "inline-flex max-w-full items-center gap-2 rounded-md border border-status-warning/30 bg-status-warning-surface px-3 py-2 text-sm font-medium text-status-warning hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
-/** Same tones the Decisions list uses, so an outcome reads identically everywhere. */
+/**
+ * Same tones the Decisions list uses, so an outcome reads identically
+ * everywhere. The label text collapses below `sm` — this badge sits in the
+ * doc toolbar, which is a horizontally-scrollable strip on mobile; a
+ * full-text badge here would eat most of the available scroll width and
+ * crowd out the formatting buttons. The icon alone still conveys the
+ * outcome, and the trigger's `aria-label` (see `decidedSummary`) keeps it
+ * accessible regardless of what's visually shown.
+ */
 function outcomeBadge(decided: DecidedDocDecision) {
+  const collapsed = (text: string) => <span className="hidden sm:inline">{text}</span>
   switch (decided.outcome) {
-    case "APPROVE": return <StatusBadge status="success" icon={<CircleCheck />}>Approved</StatusBadge>
-    case "REQUEST_CHANGES": return <StatusBadge status="warning" icon={<PencilLine />}>Changes requested</StatusBadge>
-    case "REJECT": return <StatusBadge status="danger" icon={<CircleSlash />}>Rejected</StatusBadge>
+    case "APPROVE": return <StatusBadge status="success" icon={<CircleCheck />}>{collapsed("Approved")}</StatusBadge>
+    case "REQUEST_CHANGES": return <StatusBadge status="warning" icon={<PencilLine />}>{collapsed("Changes requested")}</StatusBadge>
+    case "REJECT": return <StatusBadge status="danger" icon={<CircleSlash />}>{collapsed("Rejected")}</StatusBadge>
     // An outcome class added later should still render, labelled by the option.
-    default: return <StatusBadge status="neutral">{decided.outcomeLabel}</StatusBadge>
+    // (icon included so the collapsed mobile badge isn't left empty)
+    default: return <StatusBadge status="neutral" icon={<CircleAlert />}>{collapsed(decided.outcomeLabel)}</StatusBadge>
   }
 }
 
@@ -30,7 +40,7 @@ function decidedSummary(decided: DecidedDocDecision) {
 
 export function DocDecisionAction({ orgSlug, workspaceSlug, docId, docTitle, decisions }: Props) {
   const base = `/${orgSlug}/${workspaceSlug}`
-  if (decisions === null) return <Link href={`${base}/decisions`} className={actionClass}><CircleAlert className="size-4 shrink-0" aria-hidden="true" />Decision status unavailable</Link>
+  if (decisions === null) return <Link href={`${base}/decisions`} className={actionClass} aria-label="Decision status unavailable"><CircleAlert className="size-4 shrink-0" aria-hidden="true" /><span className="hidden sm:inline">Decision status unavailable</span></Link>
 
   const { pending, latestDecided } = decisions
 
@@ -40,7 +50,13 @@ export function DocDecisionAction({ orgSlug, workspaceSlug, docId, docTitle, dec
     const accessibleLabel = `${label}, ${pending.length} ${pending.length === 1 ? "request" : "requests"}`
     // The count is only rendered for 2+. At one request it duplicated the
     // singular label and advertised a list that does not open at that count.
-    const content = <><Clock className="size-4 shrink-0" aria-hidden="true" /><span>{label}</span>{pending.length > 1 && <span className="rounded-sm bg-status-warning/10 px-1.5 text-xs tabular-nums" aria-hidden="true">{pending.length}</span>}</>
+    // The label text collapses below `sm` for the same reason the outcome
+    // badge does (see outcomeBadge) — this trigger lives in the horizontally-
+    // scrollable doc toolbar on mobile. The count badge stays visible on its
+    // own since "clock + N" is still legible without the words, and the
+    // multi-request case always renders one; accessibility is covered by
+    // `accessibleLabel` on the trigger itself.
+    const content = <><Clock className="size-4 shrink-0" aria-hidden="true" /><span className="hidden sm:inline">{label}</span>{pending.length > 1 && <span className="rounded-sm bg-status-warning/10 px-1.5 text-xs tabular-nums" aria-hidden="true">{pending.length}</span>}</>
     if (pending.length === 1) return <Link href={`${base}/reviews/${pending[0].id}`} className={actionClass} aria-label={accessibleLabel}>{content}</Link>
     return <DropdownMenu>
       <DropdownMenuTrigger className={actionClass} aria-label={accessibleLabel}>{content}<ChevronDown className="size-3 shrink-0" aria-hidden="true" /></DropdownMenuTrigger>
@@ -87,5 +103,14 @@ export function DocDecisionAction({ orgSlug, workspaceSlug, docId, docTitle, dec
     </DropdownMenu>
   }
 
-  return <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={docId} subjectTitle={docTitle} />
+  return <RequestDecisionLink
+    orgSlug={orgSlug}
+    workspaceSlug={workspaceSlug}
+    subjectType="DOC"
+    subjectId={docId}
+    subjectTitle={docTitle}
+    // Collapses below `sm` — see outcomeBadge's comment for why.
+    label={<span className="hidden sm:inline">Request decision</span>}
+    ariaLabel="Request decision"
+  />
 }
