@@ -83,8 +83,12 @@ test.describe("Capture — PM interview", () => {
           await expect(page.getByText("What concrete observation would most challenge that belief?")).toBeVisible()
         }
 
-        await page.getByRole("button", { name: "Finish and review" }).click()
-        await expect(page.getByText("PM interview brief")).toBeVisible()
+        const [completeResponse] = await Promise.all([
+          page.waitForResponse(response => response.url().includes(`/api/pm-interviews/${interviewId}/complete`) && response.request().method() === "POST", { timeout: 20_000 }),
+          page.getByRole("button", { name: "Finish and review" }).click(),
+        ])
+        expect(completeResponse.ok(), await completeResponse.text()).toBe(true)
+        await expect(page.getByText("PM interview brief")).toBeVisible({ timeout: 10_000 })
         await expect(page.getByRole("heading", { name: "Proposed changes" })).toBeVisible()
         if (index === 0) {
           await page.screenshot({ path: "public/screenshots/docs/pm-interview-review-desktop.png", fullPage: true })

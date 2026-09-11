@@ -35,6 +35,11 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/docs/some-doc-id")).toBe(true);
   });
 
+  it("allows PM interview API routes (session auth handled internally)", () => {
+    expect(isPublicPath("/api/pm-interviews")).toBe(true);
+    expect(isPublicPath("/api/pm-interviews/interview-id/complete")).toBe(true);
+  });
+
   it("allows the public product docs", () => {
     expect(isPublicPath("/help")).toBe(true);
     expect(isPublicPath("/help/02-discovery")).toBe(true);
