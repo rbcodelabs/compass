@@ -18,19 +18,33 @@ export function parsePmInterviewTargetType(value: unknown): PmInterviewTargetTyp
 }
 
 const nullableFieldValue = z.string().max(20_000).nullable()
+const titleFieldValue = z.string().trim().min(1).max(255)
+const customerSegmentFieldValue = z.string().trim().max(255).nullable().transform(value => value || null)
+const requiredTextFieldValue = z.string().max(20_000)
+const pmInterviewFieldSchemas = {
+  OPPORTUNITY: { title: titleFieldValue, description: nullableFieldValue, customerSegment: customerSegmentFieldValue },
+  SOLUTION: { title: titleFieldValue, description: nullableFieldValue },
+  ASSUMPTION: { title: titleFieldValue, description: nullableFieldValue },
+  EXPERIMENT: { title: titleFieldValue, hypothesis: requiredTextFieldValue, method: requiredTextFieldValue, killCondition: requiredTextFieldValue },
+} as const
+
+export function normalizePmInterviewFieldValue(targetType: PmInterviewTargetType, field: string, value: unknown): string | null {
+  if (!(field in pmInterviewFieldSchemas[targetType])) throw new Error("A selected field is not editable")
+  return (pmInterviewFieldSchemas[targetType] as Record<string, z.ZodType<string | null>>)[field].parse(value)
+}
 
 export function parsePmInterviewBaseline(value: string, targetType: PmInterviewTargetType) {
-  const fields = Object.fromEntries(PM_INTERVIEW_ALLOWED_FIELDS[targetType].map((field) => [field, nullableFieldValue]))
+  const fields = pmInterviewFieldSchemas[targetType]
   return z.object({ version: z.literal(1), fields: z.object(fields).strict() }).strict().parse(JSON.parse(value))
 }
 
-const proposalField = z.object({
-  value: nullableFieldValue,
+const proposalField = (value: z.ZodType<string | null>) => z.object({
+  value,
   transcriptTurnIds: z.array(z.string().uuid()).max(50),
 }).strict()
 
 export function parsePmInterviewProposal(value: string, targetType: PmInterviewTargetType) {
-  const proposedFields = Object.fromEntries(PM_INTERVIEW_ALLOWED_FIELDS[targetType].map((field) => [field, proposalField.optional()]))
+  const proposedFields = Object.fromEntries(PM_INTERVIEW_ALLOWED_FIELDS[targetType].map((field) => [field, proposalField((pmInterviewFieldSchemas[targetType] as Record<string, z.ZodType<string | null>>)[field]).optional()]))
   return z.object({
     version: z.literal(1),
     brief: z.string().min(1).max(20_000),
@@ -60,9 +74,7 @@ export function resolvePmInterviewApplyInput(
     const generated = proposal.proposedFields[field as keyof typeof proposal.proposedFields]
     const value = field in editedValues ? editedValues[field] : generated?.value
     if (value === undefined) throw new Error(`No proposed value for ${field}`)
-    if (value !== null && (typeof value !== "string" || value.length > 20_000)) throw new Error(`${field} is too long`)
-    if (field === "title" && (!value || value.length > 255)) throw new Error("Title is required and must be 255 characters or fewer")
-    values[field] = value
+    values[field] = normalizePmInterviewFieldValue(targetType, field, value)
   }
   const requestFingerprint = createHash("sha256").update(JSON.stringify({ selectedFields: Object.keys(values), values })).digest("hex")
   return { selectedFields: Object.keys(values), values, requestFingerprint }
@@ -80,3 +92,49 @@ export const pmInterviewContextSchema = z.object({
 }).strict()
 
 export type PmInterviewContextSnapshot = z.infer<typeof pmInterviewContextSchema>
+
+type PmInterviewReadSource = {
+  id: string
+  targetType: string
+  targetId: string
+  initiatingUserId: string
+  contextSnapshotJson: string
+  fieldBaselineJson: string
+  proposalJson: string | null
+  generationState: string
+  generationFailureCode: string | null
+  disposition: string
+  createdAt: Date
+  updatedAt: Date
+  session: {
+    id: string
+    status: string
+    modality: string
+    turns: Array<{ id: string; role: string; content: string; sequence: number; createdAt: Date }>
+  }
+}
+
+export function buildPmInterviewReadDto(source: PmInterviewReadSource, actorUserId: string) {
+  const targetType = parsePmInterviewTargetType(source.targetType)
+  return {
+    version: 1 as const,
+    id: source.id,
+    targetType,
+    targetId: source.targetId,
+    generationState: source.generationState,
+    generationFailureCode: source.generationFailureCode,
+    disposition: source.disposition,
+    createdAt: source.createdAt,
+    updatedAt: source.updatedAt,
+    owner: source.initiatingUserId === actorUserId,
+    context: pmInterviewContextSchema.parse(JSON.parse(source.contextSnapshotJson)),
+    reviewBaseline: parsePmInterviewBaseline(source.fieldBaselineJson, targetType),
+    proposal: source.proposalJson ? parsePmInterviewProposal(source.proposalJson, targetType) : null,
+    session: {
+      id: source.session.id,
+      status: source.session.status,
+      modality: source.session.modality,
+      turns: source.session.turns.map(({ id, role, content, sequence, createdAt }) => ({ id, role, content, sequence, createdAt })),
+    },
+  }
+}

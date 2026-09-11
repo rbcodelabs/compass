@@ -14,6 +14,7 @@ import { ScoringPanel } from "@/components/discovery/scoring-panel";
 import { EvidenceList } from "@/components/discovery/evidence-list";
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
+import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 import { isPmInterviewEnabled } from "@/lib/research-feature";
 import type {
   OpportunityStatus,
@@ -130,6 +131,12 @@ export default async function OpportunityDetailPage({ params }: Props) {
   ]);
 
   if (!opportunity) notFound();
+
+  const pmInterviews = isPmInterviewEnabled() ? await prisma.pMInterview.findMany({
+    where: { workspaceId: workspace.id, targetType: "OPPORTUNITY", targetId: opportunityId },
+    orderBy: { createdAt: "desc" }, take: 20,
+    select: { id: true, disposition: true, generationState: true, createdAt: true },
+  }) : [];
 
   const evidence = await prisma.evidence.findMany({
     where: { opportunityId },
@@ -400,6 +407,7 @@ export default async function OpportunityDetailPage({ params }: Props) {
             </TabsContent>
           )}
         </Tabs>
+        <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={pmInterviews} />
       </div>
     </div>
   );

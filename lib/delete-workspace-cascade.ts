@@ -4,6 +4,7 @@ import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
+import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 
 /**
  * Deletes a single workspace and every row that hangs off it, children before
@@ -27,6 +28,8 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     where: { cycle: { workspaceId } },
     data: { parentKeyResultId: null },
   });
+
+  await deleteWorkspaceResearchData(prisma, workspaceId);
 
   // 2. Null Experiment.assumptionId so assumptions can be deleted later.
   await prisma.experiment.updateMany({

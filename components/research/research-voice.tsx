@@ -34,14 +34,15 @@ function readFileDataUrl(file: File) {
   })
 }
 
-export type ResearchVoiceTransport = { basePath: string; query: string; identity: string; supportsAttachments?: boolean }
+export type ResearchVoiceTransport = { basePath: string; query: string; identity: string; supportsAttachments?: boolean; atomicTextTransition?: boolean }
 
-export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, guided = false }: { token?: string; transport?: ResearchVoiceTransport; onUseChat?: (retiredLeaseId?: string) => void | Promise<void>; onCompleted?: (result: unknown) => void; guided?: boolean }) {
+export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, guided = false }: { token?: string; transport?: ResearchVoiceTransport; onUseChat?: (transition?: { leaseId: string | null; settlement: "FINALIZED" | "DISCARD_PENDING" }) => void | Promise<void>; onCompleted?: (result: unknown) => void; guided?: boolean }) {
   const [status, setStatus] = useState<VoiceStatus>("idle")
   const [messages, setMessages] = useState<VoiceMessage[]>([])
   const [error, setError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
+  const [pendingDiscard, setPendingDiscard] = useState(false)
   const [captions, setCaptions] = useState<VoiceCaption[]>([])
   const [hasSession, setHasSession] = useState(false)
   const [viewSession, setViewSession] = useState<StoredVoiceSession | null>(null)
@@ -405,18 +406,24 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
     } finally { finishingRef.current = false }
   }
 
-  async function switchToChat() {
+  async function switchToChat(discardPending = false) {
     if (saveFailed) return
     setStatus("connecting")
     setError(null)
     try {
-      const retiredLeaseId = leaseRef.current ?? undefined
+      const leaseId = leaseRef.current
+      const hasPending = Boolean(pendingSpeechRef.current || orderRef.current?.unresolved || captionsRef.current.some(caption => caption.partial))
+      if (hasPending && !discardPending) {
+        setPendingDiscard(true)
+        throw new Error("Pending speech could not be saved. Let the caption finish, or explicitly discard that pending speech before continuing in text.")
+      }
+      await queueRef.current?.flush()
       acceptingEventsRef.current = false
       closeMedia()
-      if (pendingSpeechRef.current || orderRef.current?.unresolved || captionsRef.current.some(caption => caption.partial)) throw new Error("Pending speech could not be saved. Reconnect and let the caption finish before continuing in text.")
-      await queueRef.current?.flush()
-      await releaseLease()
-      await onUseChat?.(retiredLeaseId)
+      if (transport?.atomicTextTransition) await onUseChat?.({ leaseId, settlement: discardPending ? "DISCARD_PENDING" : "FINALIZED" })
+      else { await releaseLease(); await onUseChat?.() }
+      leaseRef.current = null
+      setPendingDiscard(false)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The interview could not continue in text")
       setStatus("error")
@@ -425,7 +432,7 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
 
   function requestChatFallback() {
     if (!leaseRef.current && !queueRef.current && !pendingSpeechRef.current) {
-      void onUseChat?.()
+      void onUseChat?.(transport?.atomicTextTransition ? { leaseId: null, settlement: "FINALIZED" } : undefined)
       return
     }
     void switchToChat()
@@ -526,7 +533,7 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
           type="file"
         />
       </label>}
-      <div className="flex gap-2">{onUseChat && <Button disabled={status === "connecting" || uploading || saveFailed} onClick={() => void switchToChat()} variant="outline">Continue in text</Button>}<Button disabled={status === "connecting" || uploading} onClick={() => void finish()} variant="ghost"><PhoneOffIcon data-icon="inline-start" />Finish session</Button></div>
+      <div className="flex flex-wrap gap-2">{onUseChat && <Button disabled={status === "connecting" || uploading || saveFailed} onClick={() => void switchToChat()} variant="outline">Continue in text</Button>}{onUseChat && pendingDiscard && <Button disabled={status === "connecting" || uploading || saveFailed} onClick={() => void switchToChat(true)} variant="destructive">Discard pending speech and use text</Button>}<Button disabled={status === "connecting" || uploading} onClick={() => void finish()} variant="ghost"><PhoneOffIcon data-icon="inline-start" />Finish session</Button></div>
     </div>
   </div>
 }
