@@ -228,9 +228,9 @@ export function DocProperties({
   initialMetadata,
   revalidatePathStr,
 }: DocPropertiesProps) {
-  const [open, setOpen] = useState(
-    initialMetadata !== null && Object.keys(initialMetadata).length > 0
-  );
+  // Always starts collapsed — properties are reference data, not the primary
+  // surface, so they should never consume editor space until asked for.
+  const [open, setOpen] = useState(false);
   const [metadata, setMetadata] = useState<DocMetadata>(initialMetadata ?? {});
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
