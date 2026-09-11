@@ -1378,7 +1378,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
             const jobId = result.rows[0]?.job_id
             // IF NOT EXISTS returns no job for an already-created agent index.
             // Its validity is checked before a completion receipt is written.
-            if (!jobId && migration.name === "049_agent_identity") continue
+            if (!jobId && (migration.name === "049_agent_identity" || migration.name === "050_pm_interviews")) continue
             if (!jobId) throw new Error(`Migration ${migration.name} async DDL returned no job_id.`)
             await client.query("CALL sys.wait_for_job($1)", [jobId])
             const waited = await client.query<{ status: string }>("SELECT status FROM sys.jobs WHERE job_id = $1", [jobId])

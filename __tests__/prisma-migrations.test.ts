@@ -94,6 +94,26 @@ describe("Aurora DSQL DDL constraints", () => {
   });
 });
 
+describe("PM interview migration (050)", () => {
+  const sql = sqlFor("050_pm_interviews");
+  const runner = readFileSync(ROUTE, "utf-8");
+
+  it("is registered with additive, retry-safe DDL", () => {
+    expect(registered).toContain("050_pm_interviews");
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS description TEXT");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS pm_interviews");
+    expect(sql.match(/CREATE (?:UNIQUE )?INDEX ASYNC IF NOT EXISTS/g)).toHaveLength(6);
+  });
+
+  it("can resume after a timed-out async index wait and verifies the full catalog before receipt", () => {
+    expect(runner).toContain('migration.name === "049_agent_identity" || migration.name === "050_pm_interviews"');
+    expect(runner).toContain('if (migration.name === "050_pm_interviews") await assertPmInterviewPostconditions(client, schema)');
+    expect(runner.indexOf('if (migration.name === "050_pm_interviews") await assertPmInterviewPostconditions')).toBeLessThan(
+      runner.indexOf('UPDATE "${schema}"._prisma_migrations SET finished_at = CURRENT_TIMESTAMP'),
+    );
+  });
+});
+
 describe("feedback grid indexes (033)", () => {
   const sql = sqlFor("033_feedback_grid_indexes");
 
