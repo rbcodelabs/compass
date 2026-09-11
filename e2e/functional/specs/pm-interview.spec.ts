@@ -99,8 +99,12 @@ test.describe("Capture — PM interview", () => {
         await titleProposal.locator("textarea").fill(editedTitle)
         const deselectedProposal = page.locator("label").filter({ has: page.getByText(target.deselectedField, { exact: true }) })
         await deselectedProposal.getByRole("checkbox").uncheck()
-        await page.getByRole("button", { name: "Apply selected changes" }).click()
-        await expect(page.getByText("Proposal applied.")).toBeVisible()
+        const [applyResponse] = await Promise.all([
+          page.waitForResponse(response => response.url().includes(`/api/pm-interviews/${interviewId}/apply`) && response.request().method() === "POST", { timeout: 20_000 }),
+          page.getByRole("button", { name: "Apply selected changes" }).click(),
+        ])
+        expect(applyResponse.ok(), await applyResponse.text()).toBe(true)
+        await expect(page.getByText("Proposal applied.")).toBeVisible({ timeout: 10_000 })
 
         const savedInterview = await prisma.pMInterview.findUniqueOrThrow({ where: { id: interviewId }, include: { session: { include: { turns: { orderBy: { sequence: "asc" } } } } } })
         expect(savedInterview.disposition).toBe("APPLIED")
@@ -217,7 +221,11 @@ test.describe("Capture — PM interview", () => {
       expect(raced.map(response => response.status()).sort()).toEqual([200, 409])
       const winner = raced.findIndex(response => response.status() === 200)
       const receipt = await raced[winner].json() as { after: { title: string } }
-      expect((await page.request.post(`/api/pm-interviews/${raceId}/apply?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: requests[winner] })).status()).toBe(200)
+      const storedWinner = await prisma.pMInterview.findUniqueOrThrow({ where: { id: raceId }, select: { disposition: true, dispositionIdempotencyKey: true } })
+      expect(storedWinner).toEqual({ disposition: "APPLIED", dispositionIdempotencyKey: requests[winner].idempotencyKey })
+      const replay = await page.request.post(`/api/pm-interviews/${raceId}/apply?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: requests[winner] })
+      const replayBody = await replay.text()
+      expect(replay.status(), replayBody).toBe(200)
       expect((await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunity.id } })).title).toBe(receipt.after.title)
 
       const staleId = await createInterview()
