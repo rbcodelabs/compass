@@ -65,6 +65,7 @@ import {
   updateAssumption,
   deleteAssumption,
 } from "@/lib/assumption-tool-handlers"
+import { updateSolution } from "@/lib/solution-tool-handlers"
 import {
   addSolutionPlan,
   addSolutionComment,
@@ -1121,6 +1122,21 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateSolutionStatus
+    )
+
+    register(
+      "update_solution",
+      {
+        title: "Update Solution",
+        description: "Updates an existing Solution's title or description. Use this to self-correct mistakes without going through status transitions. At least one of title or description must be provided.",
+        inputSchema: {
+          solutionId: z.string().uuid().describe("UUID of the solution"),
+          title: z.string().min(1).optional().describe("New title for the solution"),
+          description: z.string().optional().describe("New description for the solution (pass empty string to clear)"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      updateSolution
     )
 
     register(

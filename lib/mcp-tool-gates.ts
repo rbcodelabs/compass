@@ -128,6 +128,7 @@ export const TOOL_GATES: Record<string, Gate> = {
   },
   add_solution: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   update_solution_status: async (a, x) => void (await assertEntityAccess(a, "solution", x.solutionId)),
+  update_solution: async (a, x) => void (await assertEntityAccess(a, "solution", x.solutionId)),
   add_assumption: async (a, x) => void (await assertEntityAccess(a, "solution", x.solutionId)),
   update_assumption: async (a, x) => void (await assertEntityAccess(a, "assumption", x.assumptionId)),
   delete_assumption: async (a, x) => void (await assertEntityAccess(a, "assumption", x.assumptionId)),
