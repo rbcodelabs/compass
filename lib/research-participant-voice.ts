@@ -100,13 +100,20 @@ export async function appendParticipantVoiceEvent(input: SessionInput & {
       if (attachments.length !== (attachmentId ? 1 : 0) || (attachmentId && attachments[0]?.id !== attachmentId)) throw new ResearchVoiceError("Client event ID was reused with a different attachment", 409)
       return { replayed: true, source: "PARTICIPANT_SUBMITTED", turn: await tx.researchTurn.findUnique({ where: { id: prior.turnId } }) }
     }
-    let pendingReceiptJson: string | null = null
+    let pendingReceiptJsonToClear: string | null = null
     if (context.study.studyType === "PM_INTERVIEW") {
       const pmInterview = await tx.pMInterview.findUnique({ where: { sessionId }, select: { transitionReceiptJson: true } })
-      pendingReceiptJson = pmInterview?.transitionReceiptJson ?? null
+      const pendingReceiptJson = pmInterview?.transitionReceiptJson ?? null
       const lifecycle = parsePmInterviewVoiceTransitionReceipt(pendingReceiptJson)
       if (lifecycle?.phase === "SETTLED" || lifecycle?.phase === "TRANSITIONED") throw new ResearchVoiceError("Voice transcript intake is already settled", 409)
-      if (lifecycle?.phase === "SPEECH_PENDING" && (lifecycle.leaseId !== leaseId || lifecycle.speechId !== speechId)) throw new ResearchVoiceError("Finalized speech does not match the pending utterance", 409)
+      if (role === "INTERVIEWER") {
+        if (speechId !== undefined) throw new ResearchVoiceError("Interviewer voice events cannot claim participant speech", 400)
+      } else if (lifecycle?.phase === "SPEECH_PENDING") {
+        if (lifecycle.leaseId !== leaseId || lifecycle.speechId !== speechId) throw new ResearchVoiceError("Finalized speech does not match the pending utterance", 409)
+        pendingReceiptJsonToClear = pendingReceiptJson
+      } else if (speechId !== undefined) {
+        throw new ResearchVoiceError("Finalized speech has no matching pending utterance", 409)
+      }
     }
     const last = await tx.researchParticipantVoiceEvent.findFirst({ where: { sessionId, leaseId }, orderBy: { reportedOrdinal: "desc" } })
     if (reportedOrdinal !== (last ? last.reportedOrdinal + 1 : 0)) throw new ResearchVoiceError("Voice transcript order does not match the next expected event", 409)
@@ -126,8 +133,8 @@ export async function appendParticipantVoiceEvent(input: SessionInput & {
       if (linked.count !== 1) throw new ResearchVoiceError("Attachment is not available", 409)
     }
     await tx.researchParticipantVoiceEvent.create({ data: { workspaceId: context.study.workspaceId, sessionId, leaseId, clientEventId, reportedOrdinal, claimedSpeaker: role, content, turnId: turn.id } })
-    if (pendingReceiptJson) {
-      const cleared = await tx.pMInterview.updateMany({ where: { sessionId, transitionReceiptJson: pendingReceiptJson }, data: { transitionReceiptJson: null, updatedAt: now } })
+    if (pendingReceiptJsonToClear) {
+      const cleared = await tx.pMInterview.updateMany({ where: { sessionId, transitionReceiptJson: pendingReceiptJsonToClear }, data: { transitionReceiptJson: null, updatedAt: now } })
       if (cleared.count !== 1) throw new ResearchVoiceError("Voice activity changed concurrently", 409)
     }
     return { replayed: false, source: "PARTICIPANT_SUBMITTED", turn }

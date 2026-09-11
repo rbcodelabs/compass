@@ -310,6 +310,17 @@ describe("PM interview voice-to-text transaction", () => {
     expect(mocks.prisma.pMInterview.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ retiredVoiceLeaseId: leaseId }) }))
   })
 
+  it("advances the transition session fence within the same clock millisecond", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-11T12:00:00.000Z"))
+    try {
+      await switchPmInterviewToText(scope, actor, interviewId, { leaseId, settlement: "FINALIZED" })
+      expect(mocks.prisma.researchSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ updatedAt: new Date("2026-09-11T12:00:00.001Z") }),
+      }))
+    } finally { vi.useRealTimers() }
+  })
+
   it("replays the exact committed transition after reload without another transaction", async () => {
     mocks.prisma.pMInterview.findFirst.mockReset()
     mocks.prisma.pMInterview.findFirst.mockResolvedValue(interview({

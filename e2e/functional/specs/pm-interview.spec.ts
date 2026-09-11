@@ -321,17 +321,25 @@ test.describe("Capture — PM interview", () => {
       const racingSession = await racingStart.json() as { sessionId: string; resumeToken: string }
       const racingProvision = await page.request.post(`/api/pm-interviews/${racingVoiceId}/voice-session?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: racingSession })
       const racingLease = ((await racingProvision.json()) as { leaseId: string }).leaseId
-      const racingFinal = { ...racingSession, leaseId: racingLease, action: "FINAL", clientEventId: `race-${racingVoiceId}`, reportedOrdinal: 0, role: "PARTICIPANT", content: "A final event racing the text transition" }
+      const racingSpeechId = `input:race-${racingVoiceId}`
+      const speechStart = await page.request.post(`/api/pm-interviews/${racingVoiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { ...racingSession, leaseId: racingLease, action: "SPEECH_START", speechId: racingSpeechId } })
+      expect(speechStart.status(), await speechStart.text()).toBe(200)
+      const racingFinal = { ...racingSession, leaseId: racingLease, action: "FINAL", clientEventId: `race-${racingVoiceId}`, reportedOrdinal: 0, role: "PARTICIPANT", content: "A final event racing the text transition", speechId: racingSpeechId }
       const [finalRace, transitionRace] = await Promise.all([
         page.request.post(`/api/pm-interviews/${racingVoiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: racingFinal }),
-        page.request.post(`/api/pm-interviews/${racingVoiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId: racingLease, settlement: "FINALIZED" } }),
+        page.request.post(`/api/pm-interviews/${racingVoiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId: racingLease, settlement: "DISCARD_PENDING" } }),
       ])
-      const voiceRaceStatuses = [finalRace.status(), transitionRace.status()]
-      expect(voiceRaceStatuses.filter(status => status === 200)).toHaveLength(1)
-      expect([404, 409]).toContain(voiceRaceStatuses.find(status => status !== 200))
-      const transitionRetry = await page.request.post(`/api/pm-interviews/${racingVoiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId: racingLease, settlement: "FINALIZED" } })
+      expect([200, 404, 409], await finalRace.text()).toContain(finalRace.status())
+      expect([200, 409], await transitionRace.text()).toContain(transitionRace.status())
+      expect([finalRace.status(), transitionRace.status()]).toContain(200)
+      const transitionRetry = await page.request.post(`/api/pm-interviews/${racingVoiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId: racingLease, settlement: "DISCARD_PENDING" } })
       expect(transitionRetry.status(), await transitionRetry.text()).toBe(200)
-      expect((await prisma.pMInterview.findUniqueOrThrow({ where: { id: racingVoiceId }, include: { session: true } })).session).toMatchObject({ modality: "CHAT", voiceLeaseId: null })
+      const racingRecord = await prisma.pMInterview.findUniqueOrThrow({ where: { id: racingVoiceId }, include: { session: true } })
+      const racingTurns = await prisma.researchTurn.findMany({ where: { sessionId: racingSession.sessionId, content: racingFinal.content } })
+      const racingReceipt = JSON.parse(racingRecord.transitionReceiptJson!) as { phase: string; settlement: string; finalizedEventCount: number; lastFinalizedOrdinal: number | null }
+      expect(racingRecord.session).toMatchObject({ modality: "CHAT", voiceLeaseId: null })
+      expect(racingTurns).toHaveLength(finalRace.status() === 200 ? 1 : 0)
+      expect(racingReceipt).toMatchObject({ phase: "TRANSITIONED", settlement: "DISCARD_PENDING", finalizedEventCount: racingTurns.length, lastFinalizedOrdinal: racingTurns.length ? 0 : null })
 
       const nonOwnerId = await createInterview()
       await prepareProposal(nonOwnerId)

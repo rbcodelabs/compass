@@ -55,14 +55,37 @@ describe("participant-submitted voice persistence", () => {
     expect(tx.researchTurn.create).not.toHaveBeenCalled()
     expect(tx.researchParticipantVoiceEvent.create).not.toHaveBeenCalled()
   })
-  it("clears pending speech only when the finalized event matches its exact lease and speech ID", async () => {
-    const { context, tx } = fixture()
+  it("keeps participant speech pending across an interviewer final and clears it only with the matching participant final", async () => {
+    const { context, tx, session } = fixture()
     context.study.studyType = "PM_INTERVIEW"
     const exactLease = "00000000-0000-4000-8000-000000000050"
     const pending = JSON.stringify({ version: 1, phase: "SPEECH_PENDING", leaseId: exactLease, speechId: "input:item-1", at: "2026-09-11T12:00:00.000Z" })
     tx.pMInterview.findUnique.mockResolvedValue({ transitionReceiptJson: pending })
-    await appendParticipantVoiceEvent({ context, ...input, leaseId: exactLease, speechId: "input:item-1" })
+
+    await appendParticipantVoiceEvent({ context, ...input, leaseId: exactLease, clientEventId: "interviewer-1", role: "INTERVIEWER", content: "Let me rephrase that." })
+    expect(tx.pMInterview.updateMany).not.toHaveBeenCalled()
+
+    session.nextSequence = 1
+    session.voiceTurnCount = 1
+    session.voiceTranscriptChars = "Let me rephrase that.".length
+    session.updatedAt = new Date("2026-09-11T12:00:00.001Z")
+    tx.researchParticipantVoiceEvent.findFirst.mockResolvedValue({ reportedOrdinal: 0 } as never)
+    await appendParticipantVoiceEvent({ context, ...input, leaseId: exactLease, clientEventId: "participant-1", reportedOrdinal: 1, speechId: "input:item-1" })
     expect(tx.pMInterview.updateMany).toHaveBeenCalledWith({ where: { sessionId: "session", transitionReceiptJson: pending }, data: { transitionReceiptJson: null, updatedAt: expect.any(Date) } })
+  })
+  it("rejects an interviewer final that claims a participant speech ID", async () => {
+    const { context, tx } = fixture()
+    context.study.studyType = "PM_INTERVIEW"
+    tx.pMInterview.findUnique.mockResolvedValue({ transitionReceiptJson: null })
+    await expect(appendParticipantVoiceEvent({ context, ...input, role: "INTERVIEWER", speechId: "input:item-1" })).rejects.toThrow("cannot claim participant speech")
+    expect(tx.researchTurn.create).not.toHaveBeenCalled()
+  })
+  it("rejects a participant speech ID when no matching utterance is pending", async () => {
+    const { context, tx } = fixture()
+    context.study.studyType = "PM_INTERVIEW"
+    tx.pMInterview.findUnique.mockResolvedValue({ transitionReceiptJson: null })
+    await expect(appendParticipantVoiceEvent({ context, ...input, speechId: "input:item-1" })).rejects.toThrow("no matching pending utterance")
+    expect(tx.researchTurn.create).not.toHaveBeenCalled()
   })
   it("rejects a finalized event that does not match the pending speech lifecycle", async () => {
     const { context, tx } = fixture()
