@@ -297,7 +297,8 @@ test.describe("Capture — PM interview", () => {
       const voiceId = await createInterview()
       const start = await page.request.post(`/api/pm-interviews/${voiceId}/start?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { modality: "VOICE" } })
       expect(start.status()).toBe(200)
-      const voiceSession = await start.json() as { sessionId: string; resumeToken: string }
+      const { sessionId: voiceSessionId, resumeToken: voiceResumeToken } = await start.json() as { sessionId: string; resumeToken: string }
+      const voiceSession = { sessionId: voiceSessionId, resumeToken: voiceResumeToken }
       const provision = await page.request.post(`/api/pm-interviews/${voiceId}/voice-session?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: voiceSession })
       expect(provision.status()).toBe(200)
       const { leaseId } = await provision.json() as { leaseId: string }
@@ -315,7 +316,8 @@ test.describe("Capture — PM interview", () => {
 
       const discardVoiceId = await createInterview()
       const discardStart = await page.request.post(`/api/pm-interviews/${discardVoiceId}/start?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { modality: "VOICE" } })
-      const discardSession = await discardStart.json() as { sessionId: string; resumeToken: string }
+      const { sessionId: discardSessionId, resumeToken: discardResumeToken } = await discardStart.json() as { sessionId: string; resumeToken: string }
+      const discardSession = { sessionId: discardSessionId, resumeToken: discardResumeToken }
       const discardProvision = await page.request.post(`/api/pm-interviews/${discardVoiceId}/voice-session?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: discardSession })
       const discardLease = ((await discardProvision.json()) as { leaseId: string }).leaseId
       expect((await page.request.post(`/api/pm-interviews/${discardVoiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { ...discardSession, leaseId: discardLease, action: "SPEECH_START", speechId: `input:discard-${discardVoiceId}` } })).status()).toBe(200)
@@ -324,7 +326,8 @@ test.describe("Capture — PM interview", () => {
 
       const racingVoiceId = await createInterview()
       const racingStart = await page.request.post(`/api/pm-interviews/${racingVoiceId}/start?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { modality: "VOICE" } })
-      const racingSession = await racingStart.json() as { sessionId: string; resumeToken: string }
+      const { sessionId: racingSessionId, resumeToken: racingResumeToken } = await racingStart.json() as { sessionId: string; resumeToken: string }
+      const racingSession = { sessionId: racingSessionId, resumeToken: racingResumeToken }
       const racingProvision = await page.request.post(`/api/pm-interviews/${racingVoiceId}/voice-session?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: racingSession })
       const racingLease = ((await racingProvision.json()) as { leaseId: string }).leaseId
       const racingSpeechId = `input:race-${racingVoiceId}`
