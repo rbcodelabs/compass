@@ -122,6 +122,42 @@ export async function reviseTrackedDecisionRequest(input: { workspaceId: string;
 }
 
 export type TrackedDecisionListInput = { workspaceId: string; tab?: "PENDING" | "DECIDED"; subjectType?: TrackedSubjectType; outcome?: "APPROVE" | "REQUEST_CHANGES" | "REJECT"; reviewerId?: string; query?: string; from?: Date; to?: Date; page?: number; pageSize?: number; includeLegacy?: boolean }
+
+export type PendingDocDecision = { id: string; title: string }
+
+/** Call only after authorizing access to the workspace and document. */
+export async function listPendingDocDecisions(workspaceId: string, docId: string): Promise<PendingDocDecision[]> {
+  const prisma = getPrisma()
+  const decisions: PendingDocDecision[] = []
+  const batchSize = 100
+  let after: { id: string; updatedAt: Date } | undefined
+  while (true) {
+    const candidates = await prisma.reviewRequest.findMany({
+      where: {
+        workspaceId, gateType: TRACKED_GATE, state: "PENDING",
+        // subjectId is the idempotency key. Only the current packet identifies
+        // the document; missing revisions must not masquerade as an empty list.
+        OR: [{ currentRevision: { is: { packetJson: { contains: docId } } } }, { currentRevision: { is: null } }],
+        ...(after ? { AND: [{ OR: [{ updatedAt: { lt: after.updatedAt } }, { updatedAt: after.updatedAt, id: { lt: after.id } }] }] } : {}),
+      },
+      select: { id: true, updatedAt: true, currentRevision: { select: { title: true, packetJson: true } } },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: batchSize,
+    })
+    for (const request of candidates) {
+      if (!request.currentRevision) throw new TrackedDecisionError("INVALID_PACKET", "The current decision revision is unavailable.")
+      let packet: unknown
+      try { packet = JSON.parse(request.currentRevision.packetJson) } catch { throw new TrackedDecisionError("INVALID_PACKET", "The current decision packet is invalid.") }
+      if (!packet || typeof packet !== "object" || !("schemaVersion" in packet)) throw new TrackedDecisionError("INVALID_PACKET", "The current decision packet is invalid.")
+      if (packet.schemaVersion !== "tracked-decision/v1" && packet.schemaVersion !== "tracked-decision/v2") continue
+      if (!("entity" in packet) || !packet.entity || typeof packet.entity !== "object" || !("type" in packet.entity) || !("id" in packet.entity) || typeof packet.entity.type !== "string" || typeof packet.entity.id !== "string") throw new TrackedDecisionError("INVALID_PACKET", "The current decision subject is invalid.")
+      if (packet.entity.type === "DOC" && packet.entity.id === docId) decisions.push({ id: request.id, title: request.currentRevision.title })
+    }
+    if (candidates.length < batchSize) return decisions
+    after = candidates[candidates.length - 1]
+  }
+}
+
 export async function listTrackedDecisions(input: TrackedDecisionListInput) {
   const prisma = getPrisma(), pageSize = Math.min(50, Math.max(1, input.pageSize ?? 20)), page = Math.max(1, input.page ?? 1), query = input.query?.trim()
   if (input.reviewerId) uuid(input.reviewerId, "Reviewer")
