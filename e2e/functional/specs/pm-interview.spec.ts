@@ -45,8 +45,10 @@ test.describe("Capture — PM interview", () => {
           await page.setViewportSize({ width: 1280, height: 960 })
         }
         await page.getByLabel("Choose an item").selectOption(`${target.type}:${target.id}`)
-        await page.getByRole("button", { name: "Start PM interview" }).click()
-        await expect(page).toHaveURL(/\/capture\/pm\/[a-f0-9-]+$/)
+        await Promise.all([
+          page.waitForURL(/\/capture\/pm\/[a-f0-9-]+$/, { timeout: 20_000 }),
+          page.getByRole("button", { name: "Start PM interview" }).click(),
+        ])
         const interviewId = new URL(page.url()).pathname.split("/").at(-1)!
         interviewIds.push(interviewId)
 
@@ -153,8 +155,10 @@ test.describe("Capture — PM interview", () => {
     try {
       await page.goto(`${base}/capture/pm/new`)
       await page.getByLabel("Choose an item").selectOption(`OPPORTUNITY:${opportunity.id}`)
-      await page.getByRole("button", { name: "Start PM interview" }).click()
-      await expect(page).toHaveURL(/\/capture\/pm\/[a-f0-9-]+$/)
+      await Promise.all([
+        page.waitForURL(/\/capture\/pm\/[a-f0-9-]+$/, { timeout: 20_000 }),
+        page.getByRole("button", { name: "Start PM interview" }).click(),
+      ])
       interviewId = new URL(page.url()).pathname.split("/").at(-1)!
       await page.getByRole("button", { name: /Use text/ }).click()
       await page.getByLabel("Your answer").fill("This needs more evidence before any wording changes.")
