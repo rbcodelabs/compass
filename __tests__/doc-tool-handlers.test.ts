@@ -363,6 +363,7 @@ describe("listDocs recency filtering and sorting", () => {
     expect(queryFor().orderBy).toEqual([{ updatedAt: "asc" }, { id: "asc" }])
   })
 
+
   it("still nests children under their parent on an unfiltered call", async () => {
     mockDoc.findMany.mockResolvedValue([doc("parent", null, 1), doc("child", "parent")])
 
@@ -401,12 +402,29 @@ describe("listDocs recency filtering and sorting", () => {
     expect(mockDoc.findMany).toHaveBeenCalledTimes(1)
   })
 
-  it("reports no docs found when the recency window matches nothing", async () => {
+  it("reports an empty recency window as a success, not a failure", async () => {
+    // Revised after exercising this live over MCP. The earlier expectation here
+    // was ok:false, which mirrored the unfiltered empty-workspace branch — but
+    // for a recency window "nothing changed" is the normal answer a digest
+    // caller expects on a quiet day, and ok:false reads as an error and invites
+    // pointless retries. That defeats the purpose of the filter.
     mockDoc.findMany.mockResolvedValue([])
 
     const result = await listDocs({ workspaceId: WORKSPACE_ID, updatedSince: "2099-01-01T00:00:00.000Z" })
 
-    expect(result.content[0].text).toContain("No docs found")
+    expect(result.content[0].text).toContain("No docs updated in the requested window")
+    expect(result.structuredContent.ok).toBe(true)
+    expect(result.structuredContent.data).toEqual({ items: [], count: 0 })
+  })
+
+  it("still fails for an entirely empty workspace when no window was requested", async () => {
+    // The unfiltered empty case keeps its original behaviour so existing
+    // callers see no change.
+    mockDoc.findMany.mockResolvedValue([])
+
+    const result = await listDocs({ workspaceId: WORKSPACE_ID })
+
     expect(result.structuredContent.ok).toBe(false)
+    expect(result.content[0].text).toContain("No docs found")
   })
 })

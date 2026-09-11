@@ -106,6 +106,14 @@ export async function listDocs({
   })
 
   if (!allDocs.length) {
+    // An empty *recency window* is a successful answer, not a failure: "nothing
+    // changed since X" is exactly what a digest caller expects to hear on a quiet
+    // day, and returning ok:false there reads as an error and invites pointless
+    // retries. An empty *unfiltered* workspace keeps its original fail() so
+    // existing callers see no change.
+    if (updatedSince || updatedBefore) {
+      return ok(`No docs updated in the requested window in workspace "${workspace.name}".`, { items: [], count: 0 })
+    }
     return fail(`No docs found in workspace "${workspace.name}".`)
   }
 

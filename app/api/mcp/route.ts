@@ -1952,6 +1952,13 @@ const _handler = createMcpHandler(
           orderBy: recencyOrderBy(sort) ?? [{ horizon: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
         })
         if (!items.length) {
+          // An empty *recency window* is a successful answer, not a failure —
+          // see the same note in lib/doc-tool-handlers.ts listDocs. An empty
+          // *unfiltered* roadmap keeps its original fail() so existing callers
+          // see no change.
+          if (updatedSince || updatedBefore) {
+            return ok("No active roadmap items updated in the requested window.", { items: [], count: 0 })
+          }
           return fail("No active roadmap items found.")
         }
         const groups: Record<string, typeof items> = { NOW: [], NEXT: [], LATER: [], LAUNCHING: [], LAUNCHED: [] }
