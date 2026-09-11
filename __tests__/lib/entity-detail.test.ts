@@ -165,7 +165,7 @@ describe("getEntityDetail — return shape", () => {
     const row = { id: ID, title: "An opportunity" };
     models.opportunity.findFirst.mockResolvedValue(row);
     const result = await getEntityDetail("opportunity", ID, WS);
-    expect(result).toEqual({ type: "opportunity", data: row });
+    expect(result).toEqual({ type: "opportunity", data: { ...row, pmInterviewEnabled: true, pmInterviews: [] } });
   });
 
   it("returns null when the entity isn't in the workspace (findFirst miss)", async () => {

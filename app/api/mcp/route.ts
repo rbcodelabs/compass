@@ -1271,22 +1271,24 @@ const _handler = createMcpHandler(
         inputSchema: {
           solutionId: z.string().uuid().describe("UUID of the parent solution"),
           title: z.string().min(1).describe("The assumption to be tested"),
+          description: z.string().optional().describe("Why the belief matters and relevant context"),
           riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).default("MEDIUM").describe("How risky this assumption is if wrong"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ solutionId, title, riskLevel }) => {
+      async ({ solutionId, title, description, riskLevel }) => {
         const prisma = getPrisma()
         const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true } })
         if (!solution) {
           return fail(`Solution "${solutionId}" not found.`)
         }
-        const assumption = await prisma.assumption.create({ data: { solutionId, title: title.trim(), riskLevel, status: "UNTESTED" } })
+        const assumption = await prisma.assumption.create({ data: { solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED" } })
         return ok(
           `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
           {
             id: assumption.id,
             title: assumption.title,
+            description: assumption.description,
             riskLevel: assumption.riskLevel,
             status: assumption.status,
             solutionId,
@@ -1303,6 +1305,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           assumptionId: z.string().uuid().describe("UUID of the assumption"),
           title: z.string().min(1).optional().describe("New title for the assumption"),
+          description: z.string().nullable().optional().describe("Updated detail, or null to clear"),
           riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).optional().describe("New risk level"),
           status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]).optional().describe("New status"),
         },

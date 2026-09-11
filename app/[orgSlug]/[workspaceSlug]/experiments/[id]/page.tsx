@@ -16,6 +16,8 @@ import { EmptyState } from "@/components/patterns/empty-state"
 import { PageHeader } from "@/components/patterns/page-header"
 import { StatusBadge } from "@/components/patterns/status-badge"
 import { MarkdownContent } from "@/components/markdown-content"
+import { FleshThisOutLink } from "@/components/research/flesh-this-out-link"
+import { isPmInterviewEnabled } from "@/lib/research-feature"
 import type { CustomFieldDefinitionData, CustomFieldType, CustomFieldValue, SquadData } from "@/lib/types"
 
 interface ExperimentDetailPageProps {
@@ -166,6 +168,7 @@ export default async function ExperimentDetailPage({
             </>
           )}
         />
+        {isPmInterviewEnabled() && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="EXPERIMENT" targetId={id} />}
 
         {/* Dates */}
         {(experiment.startDate || experiment.endDate) && (

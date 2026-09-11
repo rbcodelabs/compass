@@ -12,11 +12,13 @@ import { ok, fail } from "@/lib/mcp-output"
 export async function updateAssumption({
   assumptionId,
   title,
+  description,
   riskLevel,
   status,
 }: {
   assumptionId: string
   title?: string
+  description?: string | null
   riskLevel?: "HIGH" | "MEDIUM" | "LOW"
   status?: "UNTESTED" | "TESTING" | "VALIDATED" | "INVALIDATED"
 }) {
@@ -34,6 +36,7 @@ export async function updateAssumption({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updateData: Record<string, any> = { updatedAt: new Date() }
   if (title !== undefined) updateData.title = title.trim()
+  if (description !== undefined) updateData.description = description?.trim() || null
   if (riskLevel !== undefined) updateData.riskLevel = riskLevel
   if (status !== undefined) updateData.status = status
 
@@ -46,11 +49,13 @@ export async function updateAssumption({
     `**Assumption updated**\n` +
       `ID: ${updated.id}\n` +
       `Title: ${updated.title}\n` +
+      `Description: ${updated.description ?? "(none)"}\n` +
       `Risk: ${updated.riskLevel}\n` +
       `Status: ${updated.status}`,
     {
       id: updated.id,
       title: updated.title,
+      description: updated.description,
       riskLevel: updated.riskLevel,
       status: updated.status,
     }

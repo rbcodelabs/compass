@@ -14,11 +14,11 @@ type VoiceMessage = FinalResearchVoiceEvent & { id: string; attachments?: Resear
 type UploadedAttachment = { id: string; originalName: string; mimeType: string; sizeBytes: number }
 type VoiceStatus = "idle" | "connecting" | "ready" | "listening" | "speaking" | "error" | "complete"
 
-function storageKey(token: string) { return `compass-research-voice-${token.slice(-16)}` }
+function storageKey(identity: string) { return `compass-research-voice-${identity.slice(-32)}` }
 
-function readStored(token: string): StoredVoiceSession | null {
+function readStored(identity: string): StoredVoiceSession | null {
   try {
-    const parsed = JSON.parse(localStorage.getItem(storageKey(token)) ?? "null") as Partial<StoredVoiceSession> | null
+    const parsed = JSON.parse(localStorage.getItem(storageKey(identity)) ?? "null") as Partial<StoredVoiceSession> | null
     return parsed && typeof parsed.sessionId === "string" && typeof parsed.resumeToken === "string"
       ? { sessionId: parsed.sessionId, resumeToken: parsed.resumeToken }
       : null
@@ -34,7 +34,9 @@ function readFileDataUrl(file: File) {
   })
 }
 
-export function ResearchVoice({ token, onUseChat, guided = false }: { token: string; onUseChat?: () => void; guided?: boolean }) {
+export type ResearchVoiceTransport = { basePath: string; query: string; identity: string; supportsAttachments?: boolean }
+
+export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, guided = false }: { token?: string; transport?: ResearchVoiceTransport; onUseChat?: (retiredLeaseId?: string) => void | Promise<void>; onCompleted?: (result: unknown) => void; guided?: boolean }) {
   const [status, setStatus] = useState<VoiceStatus>("idle")
   const [messages, setMessages] = useState<VoiceMessage[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +65,9 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
   const connectAttemptRef = useRef(0)
   const startupAbortRef = useRef<AbortController | null>(null)
   const startupCleanupRef = useRef<(() => void) | null>(null)
+  const identity = transport?.identity ?? token
+  const endpoint = (name: string) => transport ? `${transport.basePath}/${name}${transport.query}` : `/api/research/${name}`
+  const auth = transport ? {} : { token }
 
   function closeMedia() {
     startupCleanupRef.current?.()
@@ -82,10 +87,10 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
 
   async function releaseLease(session = sessionRef.current, leaseId = leaseRef.current) {
     if (!session || !leaseId) return
-    const response = await fetch("/api/research/voice-event", {
+    const response = await fetch(endpoint("voice-event"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, ...session, leaseId, action: "DISCONNECT" }),
+      body: JSON.stringify({ ...auth, ...session, leaseId, action: "DISCONNECT" }),
       keepalive: true,
       signal: AbortSignal.timeout(10_000),
     })
@@ -112,7 +117,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
       ? current
       : [...current, { ...event, id: event.providerEventId }])
     if (!queueRef.current) queueRef.current = new VoiceSaveQueue(async (payload) => {
-      const response = await fetch("/api/research/voice-event", {
+      const response = await fetch(endpoint("voice-event"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -122,7 +127,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
     })
     const { providerEventId, ...evidence } = event
     const identity = browserEvidenceRef.current ? { clientEventId: crypto.randomUUID(), reportedOrdinal: ordinalRef.current++ } : { providerEventId }
-    return queueRef.current.append({ token, ...session, leaseId, action: "FINAL", ...evidence, ...identity }).catch((caught) => {
+    return queueRef.current.append({ ...auth, ...session, leaseId, action: "FINAL", ...evidence, ...identity }).catch((caught) => {
       setError("Some transcript could not be saved. Your microphone is stopped. Retry saving before finishing or reconnecting; keep this page open.")
       setSaveFailed(true)
       setStatus("error")
@@ -209,11 +214,11 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
         return
       }
       streamRef.current = stream
-      let session = readStored(token)
-      let start = await fetch("/api/research/start", {
+      let session = readStored(identity)
+      let start = await fetch(endpoint("start"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, modality: "VOICE", ...(session ?? {}) }),
+        body: JSON.stringify({ ...auth, modality: "VOICE", ...(session ?? {}) }),
         signal: startupSignal,
       })
       if (!isCurrentAttempt()) {
@@ -221,12 +226,12 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
         return
       }
       if (!start.ok && session && (start.status === 404 || start.status === 409)) {
-        localStorage.removeItem(storageKey(token))
+        localStorage.removeItem(storageKey(identity))
         session = null
-        start = await fetch("/api/research/start", {
+        start = await fetch(endpoint("start"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token, modality: "VOICE" }),
+          body: JSON.stringify({ ...auth, modality: "VOICE" }),
           signal: startupSignal,
         })
         if (!isCurrentAttempt()) {
@@ -241,7 +246,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
         return
       }
       if (started.status === "COMPLETED") {
-        localStorage.removeItem(storageKey(token))
+        localStorage.removeItem(storageKey(identity))
         closeMedia()
         setStatus("complete")
         return
@@ -250,15 +255,15 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
       sessionRef.current = session
       setViewSession(session)
       setHasSession(true)
-      localStorage.setItem(storageKey(token), JSON.stringify(session))
+      localStorage.setItem(storageKey(identity), JSON.stringify(session))
       if (started.turns) setMessages(started.turns.map((turn) => ({ id: turn.id, providerEventId: turn.id, role: turn.role, content: turn.content,
         attachments: (turn.attachments ?? []).flatMap((value) => { const parsed = researchAttachmentMetadata.safeParse(value); return parsed.success ? [parsed.data] : [] }),
       })))
 
-      const credentialResponse = await fetch("/api/research/voice-session", {
+      const credentialResponse = await fetch(endpoint("voice-session"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, ...session }),
+        body: JSON.stringify({ ...auth, ...session }),
         signal: startupSignal,
       })
       if (!credentialResponse.ok) {
@@ -383,19 +388,47 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
       if (pendingSpeechRef.current || orderRef.current?.unresolved || captionsRef.current.some((caption) => caption.partial)) throw new Error("The final voice caption did not finish. The session is not marked complete; please contact the researcher.")
       await queueRef.current?.flush()
       await releaseLease()
-      const response = await fetch("/api/research/complete", {
+      const response = await fetch(endpoint("complete"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, ...session }),
+      body: JSON.stringify({ ...auth, ...session }),
       signal: AbortSignal.timeout(15_000),
     })
       if (!response.ok) throw new Error("The session could not be completed. Retry finishing; your saved transcript is retained.")
-      localStorage.removeItem(storageKey(token))
+      const result = await response.json().catch(() => null)
+      localStorage.removeItem(storageKey(identity))
       setStatus("complete")
+      onCompleted?.(result)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The session could not be completed")
       setStatus("error")
     } finally { finishingRef.current = false }
+  }
+
+  async function switchToChat() {
+    if (saveFailed) return
+    setStatus("connecting")
+    setError(null)
+    try {
+      const retiredLeaseId = leaseRef.current ?? undefined
+      acceptingEventsRef.current = false
+      closeMedia()
+      if (pendingSpeechRef.current || orderRef.current?.unresolved || captionsRef.current.some(caption => caption.partial)) throw new Error("Pending speech could not be saved. Reconnect and let the caption finish before continuing in text.")
+      await queueRef.current?.flush()
+      await releaseLease()
+      await onUseChat?.(retiredLeaseId)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The interview could not continue in text")
+      setStatus("error")
+    }
+  }
+
+  function requestChatFallback() {
+    if (!leaseRef.current && !queueRef.current && !pendingSpeechRef.current) {
+      void onUseChat?.()
+      return
+    }
+    void switchToChat()
   }
 
   async function retrySaving() {
@@ -417,7 +450,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
       form.set("resumeToken", session.resumeToken)
       form.set("idempotencyKey", crypto.randomUUID().replaceAll("-", ""))
       form.set("file", file)
-      const response = await fetch("/api/research/attachments", { method: "POST", body: form })
+      const response = await fetch(endpoint("attachments"), { method: "POST", body: form })
       if (!response.ok) throw new Error(response.status === 413 ? "That attachment is too large." : "The attachment couldn’t be uploaded.")
       const attachment = await response.json() as UploadedAttachment
       const attachmentEvent = {
@@ -461,7 +494,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
     <div className="flex flex-wrap justify-center gap-2">
       {saveFailed ? <Button onClick={() => void retrySaving()} type="button">Retry saving transcript</Button> : <Button onClick={() => void connect()} type="button">{status === "error" && <RotateCcwIcon data-icon="inline-start" />}{status === "error" ? "Reconnect voice session" : "Start voice session"}</Button>}
       {status === "error" && hasSession && <Button disabled={saveFailed} onClick={() => void finish()} variant="outline">Retry finishing session</Button>}
-      {status === "error" && onUseChat && <Button disabled={saveFailed} onClick={onUseChat} type="button" variant="outline">Use chat instead</Button>}
+      {status === "error" && onUseChat && <Button disabled={saveFailed} onClick={requestChatFallback} type="button" variant="outline">Use chat instead</Button>}
     </div>
   </div>
 
@@ -481,7 +514,7 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
     </div>
     {error && <p className="mt-3 text-sm text-destructive" role="alert">{error}</p>}
     <div className="mt-4 flex items-center justify-between gap-2">
-      <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg border px-2.5 text-sm hover:bg-muted">
+      {(transport?.supportsAttachments ?? !transport) && <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg border px-2.5 text-sm hover:bg-muted">
         {uploading ? <LoaderCircleIcon className="size-4 animate-spin" /> : <PaperclipIcon className="size-4" />}
         Share screenshot or PDF
         <input
@@ -492,8 +525,8 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
           onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAndShare(file); event.target.value = "" }}
           type="file"
         />
-      </label>
-      <Button disabled={status === "connecting" || uploading} onClick={() => void finish()} variant="ghost"><PhoneOffIcon data-icon="inline-start" />Finish session</Button>
+      </label>}
+      <div className="flex gap-2">{onUseChat && <Button disabled={status === "connecting" || uploading || saveFailed} onClick={() => void switchToChat()} variant="outline">Continue in text</Button>}<Button disabled={status === "connecting" || uploading} onClick={() => void finish()} variant="ghost"><PhoneOffIcon data-icon="inline-start" />Finish session</Button></div>
     </div>
   </div>
 }

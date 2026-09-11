@@ -21,9 +21,10 @@ describe("resolveActiveResearchStudy", () => {
   })
 
   it("resolves an active, unexpired, unrevoked participant token and records use", async () => {
-    const study = { id: "study-1", status: "ACTIVE" }
+    const study = { id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" }
     participantToken.findUnique.mockResolvedValue({
       id: "token-1",
+      kind: "PRIMARY",
       expiresAt: new Date(Date.now() + 60_000),
       revokedAt: null,
       study,
@@ -43,11 +44,11 @@ describe("resolveActiveResearchStudy", () => {
   })
 
   it.each([
-    ["expired", { expiresAt: new Date(Date.now() - 1), revokedAt: null, study: { status: "ACTIVE" } }],
-    ["revoked", { expiresAt: new Date(Date.now() + 60_000), revokedAt: new Date(), study: { status: "ACTIVE" } }],
-    ["closed study", { expiresAt: new Date(Date.now() + 60_000), revokedAt: null, study: { status: "CLOSED" } }],
+    ["expired", { expiresAt: new Date(Date.now() - 1), revokedAt: null, study: { status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" } }],
+    ["revoked", { expiresAt: new Date(Date.now() + 60_000), revokedAt: new Date(), study: { status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" } }],
+    ["closed study", { expiresAt: new Date(Date.now() + 60_000), revokedAt: null, study: { status: "CLOSED", studyType: "CUSTOMER_INTERVIEW" } }],
   ])("rejects a %s participant token", async (_label, row) => {
-    participantToken.findUnique.mockResolvedValue({ id: "token-1", ...row })
+    participantToken.findUnique.mockResolvedValue({ id: "token-1", kind: "PRIMARY", ...row })
 
     await expect(resolveActiveResearchStudy("raw-token")).resolves.toBeNull()
     expect(participantToken.update).not.toHaveBeenCalled()
@@ -62,7 +63,7 @@ describe("resolveActiveResearchStudy", () => {
       kind: "PRIMARY",
       expiresAt: now,
       revokedAt: null,
-      study: { id: "study-1", status: "ACTIVE" },
+      study: { id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" },
     })
 
     await expect(resolveActiveResearchStudy("raw-token")).resolves.toBeNull()
@@ -75,7 +76,7 @@ describe("resolveActiveResearchStudy", () => {
       kind: "LEGACY_HELIO",
       expiresAt: new Date(Date.now() + 60_000),
       revokedAt: null,
-      study: { id: "study-1", status: "ACTIVE" },
+      study: { id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" },
     })
     participantToken.update.mockResolvedValue({})
 
@@ -85,9 +86,10 @@ describe("resolveActiveResearchStudy", () => {
   })
 
   it("does not fail a valid request when last-used bookkeeping conflicts", async () => {
-    const study = { id: "study-1", status: "ACTIVE" }
+    const study = { id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" }
     participantToken.findUnique.mockResolvedValue({
       id: "token-1",
+      kind: "PRIMARY",
       expiresAt: new Date(Date.now() + 60_000),
       revokedAt: null,
       study,
@@ -95,5 +97,18 @@ describe("resolveActiveResearchStudy", () => {
     participantToken.update.mockRejectedValue(Object.assign(new Error("write conflict"), { code: "P2034" }))
 
     await expect(resolveActiveResearchStudy("raw-token")).resolves.toMatchObject({ study })
+  })
+
+  it("rejects an internal token for a PM interview", async () => {
+    participantToken.findUnique.mockResolvedValue({
+      id: "internal-token",
+      kind: "PM_INTERNAL",
+      expiresAt: new Date(Date.now() + 60_000),
+      revokedAt: null,
+      study: { id: "study-pm", status: "ACTIVE", studyType: "PM_INTERVIEW" },
+    })
+
+    await expect(resolveActiveResearchStudy("copied-token")).resolves.toBeNull()
+    expect(participantToken.update).not.toHaveBeenCalled()
   })
 })

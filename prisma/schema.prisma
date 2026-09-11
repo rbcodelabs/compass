@@ -212,6 +212,7 @@ model ResearchStudy {
   syntheses         ResearchSynthesis[]
   participantTokens ResearchParticipantToken[]
   attachments       ResearchAttachment[]
+  pmInterview       PMInterview?
 
   @@index([workspaceId, status])
   @@map("research_studies")
@@ -279,10 +280,46 @@ model ResearchSession {
   voiceAttemptCount      Int?                      @default(0) @map("voice_attempt_count")
   voiceTurnCount         Int?                      @default(0) @map("voice_turn_count")
   voiceTranscriptChars   Int?                      @default(0) @map("voice_transcript_chars")
+  pmInterview            PMInterview?
 
   @@index([studyId, status])
   @@index([participantTokenId, status], map: "idx_research_sessions_participant_token")
   @@map("research_sessions")
+}
+
+model PMInterview {
+  id                        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId               String          @map("workspace_id") @db.Uuid
+  studyId                   String          @unique(map: "idx_pm_interviews_study") @map("study_id") @db.Uuid
+  sessionId                 String          @unique(map: "idx_pm_interviews_session") @map("session_id") @db.Uuid
+  initiatingUserId          String          @map("initiating_user_id") @db.Uuid
+  targetType                String          @map("target_type") @db.VarChar(30)
+  targetId                  String          @map("target_id") @db.Uuid
+  contextSnapshotJson       String          @map("context_snapshot_json") @db.Text
+  fieldBaselineJson         String          @map("field_baseline_json") @db.Text
+  generationState           String          @default("NOT_STARTED") @map("generation_state") @db.VarChar(20)
+  generationClaimId         String?         @map("generation_claim_id") @db.Uuid
+  generationClaimedAt       DateTime?       @map("generation_claimed_at")
+  generationFailureCode     String?         @map("generation_failure_code") @db.VarChar(50)
+  sourceFingerprint         String?         @map("source_fingerprint") @db.VarChar(64)
+  proposalJson              String?         @map("proposal_json") @db.Text
+  disposition               String          @default("PENDING") @db.VarChar(20)
+  receiptJson               String?         @map("receipt_json") @db.Text
+  appliedAt                 DateTime?        @map("applied_at")
+  dismissedAt               DateTime?        @map("dismissed_at")
+  dispositionIdempotencyKey String?         @map("disposition_idempotency_key") @db.VarChar(128)
+  retiredVoiceLeaseId       String?         @map("retired_voice_lease_id") @db.Uuid
+  transitionReceiptJson     String?         @map("transition_receipt_json") @db.Text
+  createdAt                 DateTime        @default(now()) @map("created_at")
+  updatedAt                 DateTime        @default(now()) @map("updated_at")
+  study                     ResearchStudy   @relation(fields: [studyId], references: [id])
+  session                   ResearchSession @relation(fields: [sessionId], references: [id])
+
+  @@index([workspaceId, createdAt], map: "idx_pm_interviews_workspace_created")
+  @@index([workspaceId, targetType, targetId], map: "idx_pm_interviews_target")
+  @@index([generationState, generationClaimedAt], map: "idx_pm_interviews_generation_claim")
+  @@unique([id, dispositionIdempotencyKey], map: "idx_pm_interviews_disposition_key")
+  @@map("pm_interviews")
 }
 
 model ResearchTurn {
@@ -717,6 +754,7 @@ model Assumption {
   id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   solutionId  String       @map("solution_id") @db.Uuid
   title       String       @db.VarChar(255)
+  description String?      @db.Text
   riskLevel   String       @default("MEDIUM") @map("risk_level") @db.VarChar(50)
   status      String       @default("UNTESTED") @db.VarChar(50)
   sortOrder   Int          @default(0) @map("sort_order")

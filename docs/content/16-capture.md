@@ -32,6 +32,37 @@ Mobile examples: [discovery voice](/screenshots/docs/browser-voice-customer_inte
 
 Capture is the starting point for customer feedback, ideas, and research. It keeps raw input connected to the opportunities and decisions it informs.
 
+## Flesh out a product item with a PM interview
+
+Workspace members can start **Flesh this out** from an opportunity, solution,
+assumption, or experiment, or choose **PM interview** in Capture and select an
+existing item. Compass uses only that item, its parent chain, linked outcome, and
+directly linked feedback or evidence. It discloses when bounded context was omitted.
+
+The 15-minute interview is voice-first with text available. Voice uses the same
+Realtime connection, finalized-turn persistence, reconnect limits, and lease
+fencing as participant research, but PM interviews require workspace
+authentication and never expose a participant link. **Continue in text** first
+saves finalized captions and releases the voice lease; the interview cannot switch
+back to voice. Raw audio is not retained.
+
+Finishing creates an editable brief with proposed field changes, transcript
+references, open questions, explicit unknowns, and suggested next steps. The
+initiating PM selects and edits fields before applying them. Other workspace
+members can read the history, but cannot continue or apply it. If the source item
+changed after the interview began, Compass preserves the draft and requires a new
+comparison instead of overwriting those edits. Experiment protocols can only be
+updated while the experiment is **Designing**.
+
+PM statements are internal interpretations, not customer evidence. PM interviews
+do not create evidence, change confidence or lifecycle state, alter relationships,
+or write experiment results. Suggested assumptions and experiments remain written
+next steps in this version.
+
+![PM interview item picker on desktop](/screenshots/docs/pm-interview-picker-desktop.png)
+
+![PM interview item picker on mobile](/screenshots/docs/pm-interview-picker-mobile.png)
+
 ## Studies
 
 Open **Capture** and choose **New study** to create either a customer interview or a guided usability test. Customer interviews use open-ended discussion questions. Guided usability tests add an HTTPS product URL, a 10, 15, 20, or 30 minute target, and five to eight editable participant tasks. Compass can draft realistic tasks from the research goal and product URL; review, edit, add, or remove them before creating the study.

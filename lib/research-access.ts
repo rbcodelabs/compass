@@ -23,6 +23,8 @@ export async function resolveActiveResearchStudy(token: string) {
   const now = new Date()
   if (
     !participantToken ||
+    !["PRIMARY", "LEGACY_HELIO"].includes(participantToken.kind) ||
+    !["CUSTOMER_INTERVIEW", "USABILITY_TEST"].includes(participantToken.study.studyType) ||
     participantToken.revokedAt ||
     participantToken.expiresAt.getTime() <= now.getTime() ||
     participantToken.study.status !== "ACTIVE"

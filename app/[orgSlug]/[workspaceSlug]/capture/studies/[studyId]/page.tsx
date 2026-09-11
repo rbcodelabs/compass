@@ -38,6 +38,8 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
     select: { id: true },
   })
   if (!access) notFound()
+  const pmInterview = prisma.pMInterview?.findUnique ? await prisma.pMInterview.findUnique({ where: { studyId: access.id }, select: { id: true } }) : null
+  if (pmInterview) redirect(`/${orgSlug}/${workspaceSlug}/capture/pm/${pmInterview.id}`)
   if (turnId) {
     const evidence = await prisma.researchTurn.findFirst({ where: { id: turnId, session: { studyId: access.id } }, select: { sessionId: true } })
     if (!evidence) notFound()

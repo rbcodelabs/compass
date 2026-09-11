@@ -39,9 +39,13 @@ import {
   solutionStatusBadge,
 } from "@/lib/solution-status";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
+import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 
 type SolutionData = {
   id: string;
+  pmInterviews: Array<{ id: string; disposition: string; generationState: string; createdAt: string }>;
+  pmInterviewEnabled?: boolean;
   title: string;
   description: string | null;
   status: string;
@@ -120,6 +124,7 @@ export function SolutionPanel({
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
       />
       <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="SOLUTION" subjectId={data.id} subjectTitle={data.title} />
+      {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="SOLUTION" targetId={id} />}
 
       <EditableText
         value={data.description}
@@ -219,6 +224,7 @@ export function SolutionPanel({
           />
         </Section>
       )}
+      <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={data.pmInterviews} />
       <Discussion targetType="SOLUTION" targetId={id} />
     </PanelContainer>
   );

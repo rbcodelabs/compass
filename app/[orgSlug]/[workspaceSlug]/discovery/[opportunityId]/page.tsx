@@ -13,6 +13,8 @@ import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-pane
 import { ScoringPanel } from "@/components/discovery/scoring-panel";
 import { EvidenceList } from "@/components/discovery/evidence-list";
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
+import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
+import { isPmInterviewEnabled } from "@/lib/research-feature";
 import type {
   OpportunityStatus,
   SolutionStatus,
@@ -276,6 +278,7 @@ export default async function OpportunityDetailPage({ params }: Props) {
           squads={squads}
           revalidatePathStr={detailPath}
         />
+        {isPmInterviewEnabled() && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="OPPORTUNITY" targetId={opportunityId} />}
 
         <LinkedFeedback feedback={opportunity.feedback} />
 

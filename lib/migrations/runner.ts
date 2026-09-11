@@ -245,6 +245,10 @@ const MIGRATIONS = [
     name: "049_research_participant_voice",
     filePath: path.join(process.cwd(), "prisma/migrations/049_research_participant_voice/migration.sql"),
   },
+  {
+    name: "050_pm_interviews",
+    filePath: path.join(process.cwd(), "prisma/migrations/050_pm_interviews/migration.sql"),
+  },
 ];
 
 const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "decision_evidence_refs", "now_policy_application_evidence", "now_gate_evaluations", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"] as const;
@@ -252,7 +256,7 @@ const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record
 const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_decision_evidence_refs_subject", "idx_now_policy_evidence_workspace_created", "idx_now_gate_evaluations_workspace_created", "idx_now_gate_evaluations_workspace_outcome_created", "idx_now_gate_evaluations_item_created", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
 const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "decision_evidence_refs_pkey", "idx_decision_evidence_refs_revision_authority", "now_policy_application_evidence_pkey", "idx_now_policy_evidence_receipt", "now_gate_evaluations_pkey", "chk_now_gate_evaluations_mode", "chk_now_gate_evaluations_outcome", "chk_now_gate_evaluations_actor", "chk_roadmap_items_commitment_provenance_not_null", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
 const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger", "042_native_decision_gates_repair", "043_decision_evidence_refs", "044_now_policy_application_evidence", "045_now_gate_shadow_evaluations"] as const;
-const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice"] as const;
+const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice", "050_pm_interviews"] as const;
 const RESEARCH_VOICE_CONTROL_PLANE_INDEXES = [
   "idx_research_voice_calls_session_key",
   "idx_research_voice_calls_provider_call",
@@ -268,6 +272,7 @@ const RESEARCH_VOICE_CONTROL_PLANE_INDEXES = [
   "idx_research_voice_events_call_ordinal",
   "idx_research_voice_events_call_item",
 ] as const;
+const PM_INTERVIEW_INDEXES = ["idx_pm_interviews_study", "idx_pm_interviews_session", "idx_pm_interviews_workspace_created", "idx_pm_interviews_target", "idx_pm_interviews_generation_claim", "idx_pm_interviews_disposition_key"] as const;
 type DecisionMigrationName = typeof DECISION_GATE_MIGRATIONS[number]
 type DecisionMigrationStep = { id: string; sql?: string; kind: "sql" | "backfill"; async: boolean }
 const isDecisionMigration = (name: string): name is DecisionMigrationName => DECISION_GATE_MIGRATIONS.includes(name as DecisionMigrationName)
@@ -1057,6 +1062,22 @@ async function assertResearchVoiceControlPlanePostconditions(client: PoolClient,
   }
 }
 
+async function assertPmInterviewPostconditions(client: PoolClient, schema: string) {
+  const [{ rows }, indexes] = await Promise.all([
+    client.query<{ pm_table: boolean; description_column: boolean }>(
+      `SELECT
+        to_regclass(format('%I.pm_interviews', $1)) IS NOT NULL AS pm_table,
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='assumptions' AND column_name='description') AS description_column`,
+      [schema],
+    ),
+    getNamedIndexStatus(client, schema, PM_INTERVIEW_INDEXES),
+  ])
+  if (!rows[0]?.pm_table || !rows[0]?.description_column || !indexes.indexesValid) {
+    const invalid = indexes.indexes.filter(index => !index.valid).map(index => index.name).join(", ")
+    throw new Error(`Migration 050 postcondition failed: PM interview catalog is incomplete${invalid ? ` (${invalid})` : ""}.`)
+  }
+}
+
 async function getResearchGuidedUxReport(client: PoolClient, schema: string, asyncIndexJobIds: string[] = []) {
   const indexStatus = await getNamedIndexStatus(client, schema, RESEARCH_GUIDED_UX_INDEXES)
   const asyncIndexJobs = await getAsyncIndexJobStatus(client, asyncIndexJobIds)
@@ -1405,6 +1426,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await inspectVoiceMigrationCatalog(client, schema, voiceCatalog!, true)
         await assertResearchVoiceControlPlanePostconditions(client, schema)
       }
+      if (migration.name === "050_pm_interviews") await assertPmInterviewPostconditions(client, schema)
       if (migration.name === "049_agent_identity") await assertAgentIdentityMigration(client, schema)
 
       // Only this distinct attempt becomes a successful receipt. A failed
