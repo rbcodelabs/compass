@@ -166,8 +166,12 @@ test.describe("Capture — PM interview", () => {
       await expect(page.getByText("What concrete observation would most challenge that belief?")).toBeVisible()
       await page.getByRole("button", { name: "Finish and review" }).click()
       await expect(page.getByText("PM interview brief")).toBeVisible()
-      await page.getByRole("button", { name: "Dismiss proposal" }).click()
-      await expect(page.getByText("Proposal dismissed.")).toBeVisible()
+      const [dismissResponse] = await Promise.all([
+        page.waitForResponse(response => response.url().includes(`/api/pm-interviews/${interviewId}/dismiss`) && response.request().method() === "POST", { timeout: 20_000 }),
+        page.getByRole("button", { name: "Dismiss proposal" }).click(),
+      ])
+      expect(dismissResponse.ok(), await dismissResponse.text()).toBe(true)
+      await expect(page.getByText("Proposal dismissed.")).toBeVisible({ timeout: 10_000 })
       await expect(prisma.opportunity.findUniqueOrThrow({ where: { id: opportunity.id } })).resolves.toMatchObject({ title, description: "Keep this unchanged." })
     } finally {
       if (interviewId) {
