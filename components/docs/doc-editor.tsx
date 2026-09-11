@@ -393,7 +393,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       </div>
 
       {/* Toolbar */}
-      <div className="sticky top-0 z-10 flex items-center gap-0.5 px-8 py-1.5 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
+      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-0.5 px-4 sm:px-8 py-1.5 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
           isActive={editor.isActive("bold")}
@@ -547,7 +547,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             </div>
           )}
         </div>
-        {decisionAction && <div className="ml-auto">{decisionAction}</div>}
+        {decisionAction && <div className="ml-auto flex w-full justify-end pt-1 sm:w-auto sm:pt-0">{decisionAction}</div>}
       </div>
 
       {/* Hidden file input */}

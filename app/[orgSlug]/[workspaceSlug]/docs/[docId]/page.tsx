@@ -2,7 +2,8 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { DocEditor } from "@/components/docs/doc-editor";
-import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { DocDecisionAction } from "@/components/docs/doc-decision-action";
+import { listPendingDocDecisions } from "@/lib/tracked-decisions";
 
 type Props = {
   params: Promise<{
@@ -47,6 +48,9 @@ export default async function DocPage({ params }: Props) {
 
   if (!doc) notFound();
 
+  // An unavailable lookup is distinct from a document with no pending requests.
+  const decisions = await listPendingDocDecisions(workspace.id, doc.id).catch(() => null);
+
   // Lightweight fields only (no content) -- the full snapshot is fetched on
   // demand when a version is opened in the history panel, so opening a doc
   // doesn't pull every historical content blob along with it.
@@ -85,7 +89,7 @@ export default async function DocPage({ params }: Props) {
       versions={versions}
       comments={comments}
       revalidatePathStr={revalidatePathStr}
-      decisionAction={<RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={doc.id} subjectTitle={doc.title} />}
+      decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
     />
   );
 }
