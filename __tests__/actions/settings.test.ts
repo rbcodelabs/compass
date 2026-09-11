@@ -111,6 +111,7 @@ const mockReviewRevision = { deleteMany: vi.fn() };
 const mockReviewRequest = { updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
+const mockResearchDelete = { deleteMany: vi.fn() };
 
 const mockPrisma = {
   $transaction: vi.fn(),
@@ -160,6 +161,18 @@ const mockPrisma = {
   reviewRequest: mockReviewRequest,
   portfolioCapacityReservation: mockPortfolioCapacityReservation,
   portfolioCapacityPlan: mockPortfolioCapacityPlan,
+  researchVoiceCommand: mockResearchDelete,
+  researchVoiceEvent: mockResearchDelete,
+  researchVoiceCall: mockResearchDelete,
+  researchRequest: mockResearchDelete,
+  researchAttachment: mockResearchDelete,
+  researchParticipantVoiceEvent: mockResearchDelete,
+  researchTurn: mockResearchDelete,
+  pMInterview: mockResearchDelete,
+  researchSession: mockResearchDelete,
+  researchParticipantToken: mockResearchDelete,
+  researchSynthesis: mockResearchDelete,
+  researchStudy: mockResearchDelete,
 };
 
 vi.mock("@/lib/db", () => ({
