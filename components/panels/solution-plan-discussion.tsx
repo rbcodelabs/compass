@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { useRef, useState, useTransition } from "react";
-import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
+import Link from "next/link";
+import { CheckIcon, PlusIcon, SparklesIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -54,6 +55,9 @@ type Props = {
   solutionId: string;
   comments: SolutionComment[];
   revalidatePathStr: string;
+  /** Used to build the "Send to agent" hand-off link (`/${orgSlug}/${workspaceSlug}/agent?...`). */
+  orgSlug: string;
+  workspaceSlug: string;
   /**
    * Notify the panel that the comment set changed. The thread itself renders
    * from local state below, but the enclosing <Section label="Plan & Discussion"
@@ -68,6 +72,8 @@ export function SolutionPlanDiscussion({
   solutionId,
   comments: initialComments,
   revalidatePathStr,
+  orgSlug,
+  workspaceSlug,
   onChanged,
 }: Props) {
   // This component owns comment mutations (add/approve/reject all update local
@@ -179,6 +185,17 @@ export function SolutionPlanDiscussion({
               <XIcon />
               Reject
             </Button>
+            {currentPlan.planStatus === "APPROVED" && (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                render={<Link href={`/${orgSlug}/${workspaceSlug}/agent?entityType=solutionPlan&entityId=${currentPlan.id}`} />}
+              >
+                <SparklesIcon />
+                Send to agent
+              </Button>
+            )}
           </div>
         </div>
       )}
