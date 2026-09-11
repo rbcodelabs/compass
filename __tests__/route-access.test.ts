@@ -45,6 +45,13 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/screenshots/docs/roadmap.png")).toBe(true);
   });
 
+  it("allows the ADR-0009 preview-login page and its start route (both fail closed internally)", () => {
+    expect(isPublicPath("/preview-login")).toBe(true);
+    expect(isPublicPath("/api/preview-login/start")).toBe(true);
+    expect(isPublicPath("/preview-login/extra")).toBe(false);
+    expect(isPublicPath("/api/preview-login/other")).toBe(false);
+  });
+
   it("does not allow authenticated app routes", () => {
     expect(isPublicPath("/dashboard")).toBe(false);
     expect(isPublicPath("/rbcodelabs/compass/discovery")).toBe(false);

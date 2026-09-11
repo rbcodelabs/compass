@@ -8,6 +8,14 @@
 export function isPublicPath(pathname: string): boolean {
   return (
     ["/api/preview-automation/bootstrap", "/api/preview-automation/session", "/api/preview-automation/teardown"].includes(pathname) ||
+    // ADR-0009 preview-login page + its start route. Both fail closed
+    // internally (404 before any DB access) unless VERCEL_ENV=preview and
+    // PREVIEW_LOGIN_ENABLED=1, so making them reachable without a session
+    // here does not widen access on production or non-opted-in previews —
+    // it only lets an anonymous visitor reach the gate at all, which is the
+    // entire point of a login page.
+    pathname === "/preview-login" ||
+    pathname === "/api/preview-login/start" ||
     pathname === "/" ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/api/auth") ||
