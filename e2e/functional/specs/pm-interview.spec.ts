@@ -193,7 +193,7 @@ test.describe("Capture — PM interview", () => {
     }
   })
 
-  test("fences public access, stale baselines, and concurrent apply on the real service", async ({ page, browser, baseURL, workspaceSlug }) => {
+  test("fences public access, stale baselines, and concurrent apply on the real service", async ({ page, baseURL, workspaceSlug }) => {
     const prisma = getPrisma()
     const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug } })
     const opportunity = await prisma.opportunity.create({ data: { workspaceId: workspace.id, title: `PM adversarial ${Date.now()}`, description: "Original" } })
@@ -243,23 +243,25 @@ test.describe("Capture — PM interview", () => {
       const publicRecord = await prisma.pMInterview.findUniqueOrThrow({ where: { id: publicId }, select: { studyId: true } })
       const copiedToken = `copied-${publicId}`
       await prisma.researchParticipantToken.updateMany({ where: { studyId: publicRecord.studyId }, data: { tokenHash: createHash("sha256").update(copiedToken).digest("hex") } })
-      const anonymous = await browser.newContext({ storageState: { cookies: [], origins: [] } })
-      try {
-        expect(await anonymous.cookies()).toEqual([])
-        expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: copiedToken, modality: "CHAT" } })).status()).toBe(404)
-        const anonymousPmRoutes = [
-          anonymous.request.post(`${baseURL}/api/pm-interviews?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { targetType: "OPPORTUNITY", targetId: opportunity.id } }),
-          anonymous.request.get(`${baseURL}/api/pm-interviews/${publicId}?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
-          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/start?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { modality: "VOICE" } }),
-          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/respond?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { answer: "No", idempotencyKey: "anonymous-answer-0001" } }),
-          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/complete?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
-          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/review-baseline?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
-          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/apply?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { selectedFields: ["title"], idempotencyKey: "anonymous-apply-0001" } }),
-          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/dismiss?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { idempotencyKey: "anonymous-dismiss-0001" } }),
-          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId: null, settlement: "FINALIZED" } }),
-        ]
-        expect((await Promise.all(anonymousPmRoutes)).map(response => response.status())).toEqual(Array(9).fill(401))
-      } finally { await anonymous.close() }
+      const anonymousRequest = (method: "GET" | "POST", path: string, body?: unknown) => fetch(`${baseURL}${path}`, {
+        method,
+        headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        redirect: "manual",
+      })
+      expect((await anonymousRequest("POST", "/api/research/start", { token: copiedToken, modality: "CHAT" })).status).toBe(404)
+      const anonymousPmRoutes = [
+        anonymousRequest("POST", `/api/pm-interviews?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { targetType: "OPPORTUNITY", targetId: opportunity.id }),
+        anonymousRequest("GET", `/api/pm-interviews/${publicId}?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
+        anonymousRequest("POST", `/api/pm-interviews/${publicId}/start?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { modality: "VOICE" }),
+        anonymousRequest("POST", `/api/pm-interviews/${publicId}/respond?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { answer: "No", idempotencyKey: "anonymous-answer-0001" }),
+        anonymousRequest("POST", `/api/pm-interviews/${publicId}/complete?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
+        anonymousRequest("POST", `/api/pm-interviews/${publicId}/review-baseline?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
+        anonymousRequest("POST", `/api/pm-interviews/${publicId}/apply?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { selectedFields: ["title"], idempotencyKey: "anonymous-apply-0001" }),
+        anonymousRequest("POST", `/api/pm-interviews/${publicId}/dismiss?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { idempotencyKey: "anonymous-dismiss-0001" }),
+        anonymousRequest("POST", `/api/pm-interviews/${publicId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { leaseId: null, settlement: "FINALIZED" }),
+      ]
+      expect((await Promise.all(anonymousPmRoutes)).map(response => response.status)).toEqual(Array(9).fill(401))
 
       const deletedOpportunity = await prisma.opportunity.create({ data: { workspaceId: workspace.id, title: `PM deleted target ${Date.now()}`, description: "Delete after proposal" } })
       disposableOpportunityIds.push(deletedOpportunity.id)

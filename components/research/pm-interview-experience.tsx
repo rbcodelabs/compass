@@ -68,7 +68,7 @@ export function PmInterviewExperience({ interviewId, orgSlug, workspaceSlug, tar
   }
 
   async function continueText(transition?: { leaseId: string | null; settlement: "FINALIZED" | "DISCARD_PENDING" }) {
-    await api("/continue-in-text", transition ?? { leaseId: null, settlement: "FINALIZED" })
+    if (transition?.leaseId) await api("/continue-in-text", transition)
     setMode("CHAT")
   }
 

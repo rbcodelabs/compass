@@ -139,7 +139,7 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
       : [...current, { ...event, id: event.providerEventId }])
     const { providerEventId, ...evidence } = event
     const identity = browserEvidenceRef.current ? { clientEventId: crypto.randomUUID(), reportedOrdinal: ordinalRef.current++ } : { providerEventId }
-    const speech = browserEvidenceRef.current && event.role === "PARTICIPANT" ? { speechId: providerEventId } : {}
+    const speech = transport?.atomicTextTransition && browserEvidenceRef.current && event.role === "PARTICIPANT" ? { speechId: providerEventId } : {}
     return appendVoicePayload({ ...auth, ...session, leaseId, action: "FINAL", ...evidence, ...identity, ...speech }).catch((caught) => { noteVoiceSaveFailure(); throw caught })
   }
 

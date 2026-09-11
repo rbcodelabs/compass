@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
+
+vi.mock("@/components/research/research-voice", () => ({
+  ResearchVoice: ({ onUseChat }: { onUseChat?: () => void }) => <button onClick={() => onUseChat?.()}>Microphone unavailable fallback</button>,
+}))
+
 import { PmInterviewExperience } from "@/components/research/pm-interview-experience"
 
 const base = {
@@ -22,7 +27,17 @@ const base = {
 }
 
 describe("PM interview member history", () => {
-  afterEach(cleanup)
+  afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+  it("enters chat without settling a lease when microphone access failed before voice startup", async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal("fetch", fetch)
+    render(<PmInterviewExperience {...base} initialTurns={[]} initialProposal={null} initialDisposition="PENDING" initialReceipt={null} owner />)
+    fireEvent.click(screen.getByRole("button", { name: /Start voice/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Microphone unavailable fallback" }))
+    await waitFor(() => expect(screen.getByLabelText("Your answer")).toBeVisible())
+    expect(fetch).not.toHaveBeenCalled()
+  })
 
   it("shows the complete transcript and safe applied receipt after proposal generation", () => {
     render(<PmInterviewExperience {...base} initialReceipt={{ version: 1, kind: "APPLIED", selectedFields: ["title"], before: { title: "Clarify onboarding" }, after: { title: "Admins struggle to orient" }, at: "2026-09-11T12:05:00.000Z" }} />)

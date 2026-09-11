@@ -24,7 +24,7 @@ describe("ResearchVoice", () => {
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: stopTrack }] }) } })
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ephemeralToken: "short-secret", leaseId: "lease-1" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ephemeralToken: "short-secret", leaseId: "lease-1", evidenceMode: "PARTICIPANT_SUBMITTED" }), { status: 200 }))
       .mockResolvedValueOnce(new Response("answer-sdp", { status: 200 }))
       .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })))
   })
@@ -42,7 +42,9 @@ describe("ResearchVoice", () => {
 
     channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "conversation.item.input_audio_transcription.completed", item_id: "user-1", transcript: "I expected pricing here." }) }))
     expect(await screen.findByText("I expected pricing here.")).toBeVisible()
-    expect(fetch).toHaveBeenCalledWith("/api/research/voice-event", expect.objectContaining({ body: expect.stringContaining('"providerEventId":"input:user-1"') }))
+    const finalSave = vi.mocked(fetch).mock.calls.find(([url, init]) => url === "/api/research/voice-event" && String(init?.body).includes('"action":"FINAL"'))
+    expect(finalSave?.[1]?.body).toContain('"clientEventId"')
+    expect(finalSave?.[1]?.body).not.toContain('"speechId"')
   })
 
   it("uploads a screenshot, links it to the canonical transcript, and shares bytes with realtime", async () => {
