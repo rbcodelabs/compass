@@ -26,6 +26,8 @@ export type TaskCardData = {
   squadId: string | null;
   squad: { id: string; name: string; color: string } | null;
   assigneeUserId: string | null;
+  assigneeAgentId?: string | null;
+  assignee?: import("@/lib/task-assignment").ResolvedTaskAssignee | null;
   ownerName: string | null;
   storyPoints: number | null;
   dueDate: string | null;
@@ -85,7 +87,7 @@ export function TaskCard({ task, revalidatePathStr, orgSlug, workspaceSlug, memb
   }
 
   const assigneeMember = task.assigneeUserId ? members.find((m) => m.userId === task.assigneeUserId) : null;
-  const assigneeLabel = assigneeMember?.name || assigneeMember?.email || task.ownerName || null;
+  const assigneeLabel = task.assignee ? `${task.assignee.type === "AGENT" ? "Agent: " : ""}${task.assignee.displayName}${task.assignee.available ? "" : " (unavailable)"}` : assigneeMember?.name || assigneeMember?.email || (task.assigneeUserId || task.assigneeAgentId ? "Unavailable assignee" : task.ownerName) || null;
   const dueLabel = formatDueDate(task.dueDate);
   const detailHref = `/${orgSlug}/${workspaceSlug}/tasks/${task.id}`;
 

@@ -2,6 +2,7 @@
 
 import { useUrlState } from "@/hooks/use-url-state";
 import type { MemberData, TaskPriority } from "@/lib/types";
+import { assigneeValue, useTaskAssignees } from "./task-assignee-picker";
 
 interface AssigneeProps {
   members: MemberData[];
@@ -11,8 +12,10 @@ interface AssigneeProps {
 export function AssigneeFilterBar({ members }: AssigneeProps) {
   const { params, set } = useUrlState();
   const activeAssignee = params.get("assignee");
+  const selected = activeAssignee && !activeAssignee.includes(":") ? `user:${activeAssignee}` : activeAssignee;
+  const { options } = useTaskAssignees(members);
 
-  if (members.length === 0) return null;
+  if (options.length === 0) return null;
 
   function setFilter(userId: string | null) {
     set({ assignee: userId });
@@ -20,26 +23,26 @@ export function AssigneeFilterBar({ members }: AssigneeProps) {
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
-      <span className="text-xs text-slate-400 font-medium mr-1">Assignee:</span>
+      <span className="text-xs text-text-subtle font-medium mr-1">Assignee:</span>
       <button
         onClick={() => setFilter(null)}
         className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
-          !activeAssignee ? "bg-slate-800 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+          !activeAssignee ? "bg-slate-800 text-white shadow-sm" : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
         }`}
       >
         All
       </button>
-      {members.map((member) => (
+      {options.map((member) => (
         <button
-          key={member.userId}
-          onClick={() => setFilter(member.userId === activeAssignee ? null : member.userId)}
+          key={assigneeValue(member)}
+          onClick={() => setFilter(assigneeValue(member) === selected ? null : assigneeValue(member))}
           className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
-            activeAssignee === member.userId
+            selected === assigneeValue(member)
               ? "bg-slate-800 text-white shadow-sm"
-              : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+              : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
           }`}
         >
-          {member.name || member.email}
+          {member.type === "AGENT" ? "Agent: " : ""}{member.displayName}
         </button>
       ))}
     </div>
@@ -59,11 +62,11 @@ export function PriorityFilterBar() {
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
-      <span className="text-xs text-slate-400 font-medium mr-1">Priority:</span>
+      <span className="text-xs text-text-subtle font-medium mr-1">Priority:</span>
       <button
         onClick={() => setFilter(null)}
         className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
-          !activePriority ? "bg-slate-800 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+          !activePriority ? "bg-slate-800 text-white shadow-sm" : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
         }`}
       >
         All
@@ -75,7 +78,7 @@ export function PriorityFilterBar() {
           className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
             activePriority === priority
               ? "bg-slate-800 text-white shadow-sm"
-              : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+              : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
           }`}
         >
           {priority}

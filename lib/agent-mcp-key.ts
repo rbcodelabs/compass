@@ -28,7 +28,7 @@ async function mintScopedMcpKey({
 }: {
   userId: string
   name: string
-  purpose?: "RESEARCH"
+  purpose?: "RESEARCH" | "AGENT_TURN"
   scopeWorkspaceId?: string
   expiresAt?: Date
 }): Promise<MintedAgentKey> {
@@ -47,8 +47,8 @@ async function mintScopedMcpKey({
 
 /** Mint an ephemeral per-user MCP key. Returns the raw token (only chance to
  *  read it) and the row id for later revocation. */
-export async function mintAgentMcpKey(userId: string): Promise<MintedAgentKey> {
-  return mintScopedMcpKey({ userId, name: "agent-turn (ephemeral)" })
+export async function mintAgentMcpKey(userId: string, workspaceId: string): Promise<MintedAgentKey> {
+  return mintScopedMcpKey({ userId, name: "agent-turn (ephemeral)", purpose: "AGENT_TURN", scopeWorkspaceId: workspaceId, expiresAt: new Date(Date.now() + 5 * 60 * 1000) })
 }
 
 /** Mint a read-only research-agent key locked to exactly one workspace. */
@@ -71,8 +71,7 @@ export async function revokeAgentMcpKey(apiKeyId: string): Promise<void> {
     const prisma = getPrisma()
     await prisma.apiKey.update({ where: { id: apiKeyId }, data: { revokedAt: new Date() } })
   } catch {
-    // best-effort — a leaked ephemeral key still expires when revoked by a
-    // later sweep; do not fail the turn on revocation error.
+    // Best effort: every newly minted turn key also expires after five minutes.
   }
 }
 
@@ -83,9 +82,10 @@ export async function revokeAgentMcpKey(apiKeyId: string): Promise<void> {
  */
 export async function withAgentMcpKey<T>(
   userId: string,
+  workspaceId: string,
   fn: (token: string) => Promise<T>
 ): Promise<T> {
-  const { token, apiKeyId } = await mintAgentMcpKey(userId)
+  const { token, apiKeyId } = await mintAgentMcpKey(userId, workspaceId)
   try {
     return await fn(token)
   } finally {

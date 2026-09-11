@@ -9,10 +9,12 @@ let currentSearch = "";
 let currentPath = "/acme/web/tasks";
 
 vi.mock("next/navigation", () => ({
+  useParams: () => ({}),
   useRouter: () => ({ push, replace: vi.fn(), refresh: vi.fn() }),
   usePathname: () => currentPath,
   useSearchParams: () => new URLSearchParams(currentSearch),
 }));
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({ getTaskAssigneeOptions: vi.fn() }));
 
 import { useUrlState } from "@/hooks/use-url-state";
 import {
@@ -159,13 +161,13 @@ describe("AssigneeFilterBar on useUrlState", () => {
     currentSearch = "squad=s1";
     render(<AssigneeFilterBar members={MEMBERS} />);
     fireEvent.click(screen.getByRole("button", { name: "Ada" }));
-    expect(lastPush()).toBe("/acme/web/tasks?squad=s1&assignee=u1");
+    expect(lastPush()).toBe("/acme/web/tasks?squad=s1&assignee=user%3Au1");
   });
 
   it("falls back to the email when a member has no name", () => {
     render(<AssigneeFilterBar members={MEMBERS} />);
     fireEvent.click(screen.getByRole("button", { name: "bob@x.test" }));
-    expect(lastPush()).toBe("/acme/web/tasks?assignee=u2");
+    expect(lastPush()).toBe("/acme/web/tasks?assignee=user%3Au2");
   });
 
   it("clicking the active assignee toggles it off", () => {

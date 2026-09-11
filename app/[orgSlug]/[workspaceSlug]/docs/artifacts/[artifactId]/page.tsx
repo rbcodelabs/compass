@@ -3,7 +3,7 @@ import getPrisma from "@/lib/db"
 import { notFound, redirect } from "next/navigation"
 import { ArtifactDetail } from "@/components/docs/artifact-detail"
 import { getArtifactStorage } from "@/lib/artifact-storage"
-import { buildSandboxedHtml, toArtifactDetailDto } from "@/lib/artifacts"
+import { buildSandboxedHtml, getArtifactDecisions, toArtifactDetailDto } from "@/lib/artifacts"
 
 export default async function ArtifactPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string; artifactId: string }> }) {
   const session = await auth()
@@ -21,5 +21,6 @@ export default async function ArtifactPage({ params }: { params: Promise<{ orgSl
   }
   const rawSolutions = await prisma.solution.findMany({ where: { opportunity: { workspaceId: workspace.id } }, select: { id: true, title: true }, orderBy: { title: "asc" } })
   const linkedIds = new Set(artifact.links.map((link) => link.linkedId))
-  return <ArtifactDetail artifact={toArtifactDetailDto(artifact)} html={html} workspaceId={workspace.id} basePath={`/${orgSlug}/${workspaceSlug}/docs`} solutions={rawSolutions.map((solution) => ({ ...solution, linked: linkedIds.has(solution.id) }))} />
+  const decisions = await getArtifactDecisions(workspace.id, artifactId)
+  return <ArtifactDetail artifact={toArtifactDetailDto(artifact)} html={html} workspaceId={workspace.id} basePath={`/${orgSlug}/${workspaceSlug}/docs`} decisions={decisions} solutions={rawSolutions.map((solution) => ({ ...solution, linked: linkedIds.has(solution.id) }))} />
 }

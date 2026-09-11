@@ -7,7 +7,7 @@
  *
  * Runs once before all functional tests (depends: functional-setup project).
  */
-import { test as setup } from "@playwright/test";
+import { test as setup, expect } from "@playwright/test";
 import path from "path";
 import fs from "fs";
 
@@ -18,15 +18,19 @@ setup("authenticate as dev user", async ({ page }) => {
   fs.mkdirSync(path.dirname(AUTH_FILE), { recursive: true });
 
   // Navigate to login
-  await page.goto("/login");
-  await page.waitForLoadState("networkidle");
+  const loginResponse = await page.goto("/login");
+  expect(loginResponse?.status(), "[auth setup] /login must return HTTP 200 before authentication").toBe(200);
+  await expect(page.getByRole("heading", { name: "Sign in to Compass", exact: true })).toBeVisible();
 
   // Click the dev-only instant login button
   await page.getByRole("button", { name: /Dev Login/i }).click();
 
   // Wait for the browser to navigate away from /login
   await page.waitForURL((url) => !url.pathname.startsWith("/login"), {
-    timeout: 30_000,
+    // The first authenticated navigation cold-compiles /dashboard in Next dev.
+    // Keep this below the functional project's 90s test budget without imposing
+    // the shorter Playwright navigation default on a valid local cold start.
+    timeout: 60_000,
   });
 
   // Explicitly navigate to the e2e workspace to verify the session is valid

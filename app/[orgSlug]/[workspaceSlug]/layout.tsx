@@ -13,6 +13,8 @@ import { cookies } from "next/headers"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
+import { ThemeProvider } from "@/components/theme/theme-provider"
+import { workspaceThemeInitScript } from "@/lib/theme"
 
 interface WorkspaceLayoutProps {
   children: React.ReactNode
@@ -49,8 +51,11 @@ export default async function WorkspaceLayout({
 
   return (
     <>
+      <script dangerouslySetInnerHTML={{ __html: workspaceThemeInitScript }} />
       <WorkspaceThemeStyle branding={resolveWorkspaceBranding(workspace)} />
-      <PanelProvider orgSlug={orgSlug} workspaceSlug={workspaceSlug}>
+      <ThemeProvider>
+        <div className="workspace-theme-scope contents">
+        <PanelProvider orgSlug={orgSlug} workspaceSlug={workspaceSlug}>
         {/* Mobile header — shown on small screens only (hidden on md+) */}
         <MobileHeader
           orgSlug={orgSlug}
@@ -94,7 +99,9 @@ export default async function WorkspaceLayout({
         <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} researchCaptureEnabled={researchCaptureEnabled} />
 
         <PanelShell />
-      </PanelProvider>
+        </PanelProvider>
+        </div>
+      </ThemeProvider>
     </>
   )
 }

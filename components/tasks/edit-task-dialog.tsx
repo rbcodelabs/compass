@@ -19,12 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Combobox,
-  ComboboxContent,
-  ComboboxTrigger,
-  ComboboxValue,
-} from "@/components/ui/combobox";
+import { TaskAssigneePicker } from "./task-assignee-picker";
+import type { TaskAssignee } from "@/lib/task-assignment";
 import { updateTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import type { TaskCardData } from "./task-card";
 import type { TaskPriority, MemberData } from "@/lib/types";
@@ -49,7 +45,10 @@ export function EditTaskDialog({ task, open, onOpenChange, revalidatePathStr, me
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
-  const [assigneeUserId, setAssigneeUserId] = useState<string | null>(task.assigneeUserId);
+  const initialAssignee: TaskAssignee = task.assigneeAgentId ? { type: "AGENT", id: task.assigneeAgentId } : task.assigneeUserId ? { type: "USER", id: task.assigneeUserId } : null;
+  const [assignee, setAssignee] = useState<TaskAssignee>(initialAssignee);
+  const [assignmentChanged, setAssignmentChanged] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [ownerName, setOwnerName] = useState(task.ownerName ?? "");
   const [storyPoints, setStoryPoints] = useState(task.storyPoints != null ? String(task.storyPoints) : "");
   const [dueDate, setDueDate] = useState(toDateInputValue(task.dueDate));
@@ -60,7 +59,9 @@ export function EditTaskDialog({ task, open, onOpenChange, revalidatePathStr, me
       setTitle(task.title);
       setDescription(task.description ?? "");
       setPriority(task.priority);
-      setAssigneeUserId(task.assigneeUserId);
+      setAssignee(task.assigneeAgentId ? { type: "AGENT", id: task.assigneeAgentId } : task.assigneeUserId ? { type: "USER", id: task.assigneeUserId } : null);
+      setAssignmentChanged(false);
+      setError(null);
       setOwnerName(task.ownerName ?? "");
       setStoryPoints(task.storyPoints != null ? String(task.storyPoints) : "");
       setDueDate(toDateInputValue(task.dueDate));
@@ -71,15 +72,16 @@ export function EditTaskDialog({ task, open, onOpenChange, revalidatePathStr, me
     e.preventDefault();
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return;
-
+    setError(null);
     startTransition(async () => {
+      try {
       const updated = await updateTask(
         task.id,
         {
           title: trimmedTitle,
           description: description.trim() || null,
           priority,
-          assigneeUserId,
+          ...(assignmentChanged ? { assignee } : {}),
           ownerName: ownerName.trim() || null,
           storyPoints: storyPoints ? parseFloat(storyPoints) : null,
           dueDate: dueDate ? new Date(dueDate) : null,
@@ -93,18 +95,21 @@ export function EditTaskDialog({ task, open, onOpenChange, revalidatePathStr, me
         description: updated.description ?? null,
         priority: updated.priority as TaskPriority,
         assigneeUserId: updated.assigneeUserId ?? null,
+        assigneeAgentId: updated.assigneeAgentId ?? null,
+        assignee: updated.assignee,
         ownerName: updated.ownerName ?? null,
         storyPoints: updated.storyPoints ?? null,
         dueDate: updated.dueDate ? updated.dueDate.toISOString() : null,
       });
       onOpenChange(false);
+      } catch (error) { setError(error instanceof Error ? error.message : "Could not save the task. Please retry."); }
     });
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={handleSubmit} className="flex min-w-0 flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Edit task</DialogTitle>
           </DialogHeader>
@@ -163,20 +168,7 @@ export function EditTaskDialog({ task, open, onOpenChange, revalidatePathStr, me
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor={`edit-task-assignee-${task.id}`}>Assignee</Label>
-            <Combobox
-              items={[
-                { value: "__none__", label: "— None —" },
-                ...members.map((m) => ({ value: m.userId, label: m.name || m.email })),
-              ]}
-              value={assigneeUserId ?? "__none__"}
-              onValueChange={(v) => setAssigneeUserId(v === "__none__" ? null : v)}
-              disabled={isPending}
-            >
-              <ComboboxTrigger id={`edit-task-assignee-${task.id}`}>
-                <ComboboxValue placeholder="Unassigned" />
-              </ComboboxTrigger>
-              <ComboboxContent />
-            </Combobox>
+            <TaskAssigneePicker id={`edit-task-assignee-${task.id}`} members={members} value={assignee} onChange={value => { setAssignee(value); setAssignmentChanged(true); }} current={task.assignee} disabled={isPending} />
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -206,6 +198,7 @@ export function EditTaskDialog({ task, open, onOpenChange, revalidatePathStr, me
               {isPending ? "Saving..." : "Save changes"}
             </Button>
           </DialogFooter>
+          {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         </form>
       </DialogContent>
     </Dialog>

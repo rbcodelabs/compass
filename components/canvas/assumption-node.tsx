@@ -25,11 +25,11 @@ function AssumptionNodeComponent({ data }: NodeProps<AssumptionNodeType>) {
   const risk = RISK_LEVEL_BADGE[data.riskLevel];
 
   return (
-    <div className="flex w-64 flex-col gap-2 rounded-xl border border-amber-100 bg-amber-50/60 p-3 shadow-sm">
+    <div className="flex w-64 flex-col gap-2 rounded-xl border border-status-warning/20 bg-status-warning-surface p-3 shadow-sm">
       <Handle type="target" position={Position.Left} className="opacity-0" />
       <div className="flex items-start gap-2">
         <AlertTriangle className={`mt-0.5 size-3.5 shrink-0 ${risk.className}`} />
-        <p className="flex-1 text-xs font-medium text-slate-800 leading-snug truncate min-w-0" title={data.title}>
+        <p className="flex-1 text-xs font-medium text-text-primary leading-snug truncate min-w-0" title={data.title}>
           {data.title}
         </p>
       </div>

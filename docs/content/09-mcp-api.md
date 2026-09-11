@@ -26,7 +26,7 @@ Generate an API key from **Settings → API Keys**. Pass it as a Bearer token in
 Authorization: Bearer compass_your_api_key_here
 ```
 
-API keys are workspace-scoped. A key can read and write all data in the workspace it was created for. Treat API keys like passwords — rotate them in Settings if one is compromised.
+Personal keys act with their owner's access and any credential restrictions. Registered-agent keys work across explicitly granted workspaces and are limited by the owner's current membership, grant level, and permitted tools. Treat API keys like passwords — revoke and replace a key if it is compromised.
 
 ## Required Request Headers
 
@@ -53,6 +53,61 @@ curl https://your-compass-url.vercel.app/api/mcp \
 ## What Agents Can Do
 
 The MCP server exposes tools that agents can call, grouped below by area.
+
+### Shared comments
+
+Comments are mutable discussion only. They do not approve work, authorize a release, or change a tracked Decision. `REVIEW_REQUEST` targets are accepted only for informational `TRACKED_DECISION` requests; immutable review revisions, options, Decision records/applications, legacy review gates, and release authorization are not commentable.
+
+Phase 1 exposes the shared comment capability through the generic MCP tools and the existing Doc and Solution compatibility paths. It does not add a general Comments UI to every supported object. Until Phase 2, the existing Doc and Solution experiences remain the only comment UIs.
+
+#### Production migration and backfill
+
+After deploying application code containing migration `046_shared_comments`, run these commands from the Vercel-linked Compass main checkout (the directory containing `.vercel/project.json`). The authenticated admin routes use Vercel OIDC for Aurora DSQL, require `MIGRATION_SECRET`, and always select `getActiveSchema()` for that deployment. First apply the additive schema migration:
+
+```bash
+vercel curl /api/admin/migrate \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"script":"046_shared_comments"}'
+```
+
+Then invoke one bounded backfill batch at a time. Repeat the same request until the JSON response reports `"complete": true`; a retry after a timeout or ambiguous response is safe because rows retain their legacy IDs and inserts use conflict-safe idempotency. The response contains aggregate processed and invariant counts only.
+
+```bash
+vercel curl /api/admin/shared-comments-backfill \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"operation":"backfill","batchSize":500}'
+```
+
+Finish with a read-only validation request. It succeeds only when every legacy comment has a matching shared row, required extensions exist, reply topology is valid, and no legacy row is orphaned:
+
+```bash
+vercel curl /api/admin/shared-comments-backfill \
+  --deployment "$DEPLOYMENT_URL" \
+  -- --request POST \
+     --header "Content-Type: application/json" \
+     --header "x-migration-secret: $MIGRATION_SECRET" \
+     --data '{"operation":"validate"}'
+```
+
+HTTP `409` means validation failed or the backfill cannot make safe progress. Resolve orphaned legacy data explicitly; the endpoint never fabricates workspace ownership. Rollback remains application-code-only: revert the runtime code and leave the additive shared tables in place so the unchanged legacy tables and current UIs continue to operate.
+
+Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`, `EXPERIMENT`, `ROADMAP_ITEM`, `FEEDBACK_ITEM`, `TASK`, `DOC`, `ARTIFACT`, `RESEARCH_STUDY`, and `REVIEW_REQUEST`.
+
+| Tool | Description |
+|---|---|
+| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional |
+| `list_comments` | List comments for an exact workspace and target, optionally filtered by `OPEN` or `RESOLVED` |
+| `get_comment` | Get one comment and any specialized Doc-anchor or Solution-plan metadata |
+| `update_comment` | Edit a comment body |
+| `delete_comment` | Delete a reply, or a root and its replies |
+| `resolve_comment` | Mark a comment resolved |
+| `reopen_comment` | Mark a resolved comment open |
 
 ### Workspace
 
@@ -86,7 +141,10 @@ The MCP server exposes tools that agents can call, grouped below by area.
 |---|---|
 | `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result |
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
+| `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment |
+| `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts |
 | `create_opportunity` | Create a new opportunity with title, description, status |
+| `update_opportunity` | Update an existing opportunity's title and/or description; pass `null` to clear its description |
 | `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
 | `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (or clear the link) |
 | `add_solution` | Add a proposed Solution to an Opportunity |
@@ -104,11 +162,13 @@ The MCP server exposes tools that agents can call, grouped below by area.
 | `reject_solution_plan` | Mark a PLAN entry as REJECTED (only applies to PLAN entries, not COMMENT replies) |
 | `promote_to_roadmap` | Promote a validated Solution directly to the roadmap, creating a Roadmap Item linked back to the originating opportunity. Accepts an optional `isPrivate` flag |
 
+`approve_solution_plan` and `reject_solution_plan` preserve the legacy, reversible plan-status marker only. They do not create a tracked Decision, authorize delivery, or establish authoritative approval semantics for new plans.
+
 ### Experiments
 
 | Tool | Description |
 |---|---|
-| `list_experiments` | Fetch all experiments |
+| `list_experiments` | Fetch experiments with optional status, squad, logged-result-presence, `updatedSince`, and recorded `endBefore` filters; summaries include dates, timestamps, result count/latest-result time, and stable Assumption/Solution/Opportunity IDs |
 | `get_experiment` | Return full details for a single experiment: hypothesis, method, kill condition, linked assumption, all logged results, and conclusion |
 | `create_experiment` | Create a new experiment with hypothesis and method (starts in DESIGNING status) |
 | `log_experiment_result` | Record an observation or data point for a running experiment |
@@ -118,14 +178,50 @@ The MCP server exposes tools that agents can call, grouped below by area.
 
 | Tool | Description |
 |---|---|
-| `list_roadmap_items` | Fetch active roadmap items for a workspace, grouped by horizon (including LAUNCHING/LAUNCHED), including start/end dates and whether each item is private (`isPrivate`) |
-| `add_to_roadmap` | Create a roadmap item in NOW/NEXT/LATER/SHIPPED, optionally with a start date and end date for the Timeline view, and an `isPrivate` flag to hide it from the public portal roadmap and block voting on it |
-| `update_roadmap_item` | Update a roadmap item's horizon, status, title, description, start/end dates, or `isPrivate` flag. Rejects `horizon: LAUNCHING`/`LAUNCHED` — use `set_launch_tier` to move an item into LAUNCHING |
+| `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs |
+| `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
+| `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
+| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
+| `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state, linked item type, outcome, reviewer, or search text |
+| `get_decision` | Read one tracking-only decision and its immutable revision history |
+| `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. This operation never takes the human decision or invokes release automation |
+| `list_release_runs` | List recorded release-authorization runs by ledger state, covered Task, or `updatedSince`, including exact repository/PR/head SHA, Task IDs, authorization Decision ID, dispatch state, and a stable GitHub PR URL |
+| `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
+| `list_review_requests` | List review requests for a workspace, optionally filtered by state |
+| `apply_recorded_decision` | Idempotently apply the authorized continuation from a recorded decision and return its application receipt |
 | `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items |
 | `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier |
 | `set_launch_tier` | Move a roadmap item into the LAUNCHING horizon by picking a launch tier; attaches a checklist cloned from an explicit or auto-resolved (most recent ACTIVE) template for that tier. Rejects items already LAUNCHING/LAUNCHED |
 | `get_launch_checklist` | Get the launch checklist for a roadmap item, including each item's status and ID |
 | `update_launch_checklist_item` | Set a launch checklist item's status (PENDING/DONE/SKIPPED) |
+
+Decision-taking is deliberately absent from MCP. A signed-in human reviewer opens
+the stable Compass review URL and chooses one option. Agents may prepare and read
+packets, then apply a recorded decision; they cannot impersonate the reviewer.
+
+`request_decision.sources` is an optional array of `{ type, id }` references.
+Supported types are `WORKSPACE`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`,
+`ROADMAP_ITEM`, `DOC`, `EXPERIMENT`, `FEEDBACK`, and `EVIDENCE`. Compass removes
+duplicates and the primary linked item, validates every reference within the
+declared workspace, and snapshots the source title and `updatedAt` version into
+the immutable packet. If any source is missing or belongs to another workspace,
+the whole request fails and no review is created. Put readable reasoning in the
+Markdown `context`; do not embed source UUIDs there.
+
+`apply_recorded_decision` is queue-only for release authorization. It validates
+the authoritative provider snapshot outside the database transaction, then a
+short transaction binds the unchanged snapshot and human decision to a durable
+dispatch row. Compass does not merge, deploy, or otherwise invoke external
+release automation in this implementation. Provider validation is unconfigured
+by default and therefore fails closed (`PR_NOT_READY`); a dispatch worker must
+use a configured provider and repeat the same head/check/policy revalidation at
+the dispatch-claim boundary before any future external side effect.
+
+`list_release_runs` reports Compass ledger facts only. A release-run state does
+not prove that GitHub merged the PR, that a deployment reached production, or
+that feature smoke tests passed. Completion workflows must re-read those facts
+from the configured GitHub and deployment providers before changing lifecycle
+state.
 
 ### Squads
 
@@ -145,7 +241,7 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 |---|---|
 | `create_task` | Create a Task with a title (required); optionally description, status (default TODO), priority (default MEDIUM), squad, parent task (to create a Subtask), assignee, freeform owner name, story points, due date, or iteration label |
 | `get_task` | Return full detail for a Task: fields, parent Epic (if any), subtasks, and resolved links to other Compass objects |
-| `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), or a linked object; optionally nest subtasks under their parent |
+| `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), a linked object, `updatedSince`, or `updatedBefore`; summaries include created/updated timestamps and can optionally nest subtasks |
 | `update_task` | Update a Task's title, description, priority, assignee, owner, story points, due date, or iteration — does not accept status |
 | `move_task_status` | Dedicated status-transition tool for a Task, including moving it into or out of BLOCKED |
 | `link_task` | Link a Task to another Compass object; idempotent — re-linking the same pair is a no-op |
@@ -157,7 +253,7 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 | Tool | Description |
 |---|---|
 | `create_feedback` | Create a new feedback item directly via MCP. Accepts 1–5 optional inline attachments with a combined decoded limit of 3 MiB; defaults to type IDEA |
-| `list_feedback` | Fetch customer feedback items for a workspace, with vote counts, type, status, and canonical Compass URLs |
+| `list_feedback` | Fetch customer feedback items with vote counts, type, status, linked Opportunity ID, timestamps, and canonical Compass URLs. Pass `updatedSince` to start a stable incremental scan and the returned opaque `cursor` for each later page |
 | `get_feedback_item` | Fetch full details for a single feedback item, including attachments, its linked opportunity, and its canonical Compass URL |
 | `update_feedback` | Update a feedback item's title and/or description; pass `description: null` to clear it |
 | `update_feedback_status` | Update a feedback item's status (OPEN, UNDER_REVIEW, PLANNED, IN_PROGRESS, COMPLETED, DECLINED), with an optional note. Legacy CLOSED remains temporarily accepted but is deprecated |
@@ -169,6 +265,15 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 
 Feedback create, read, list, update, status, type, link, and attachment responses include absolute canonical URLs that agents can give directly to users. Preview MCP responses point to the active Vercel branch/deployment URL, while production uses the configured Compass custom domain. Every feedback mutation also includes its affected entity ID on a plain `ID: <uuid>` line.
 
+Without scan arguments, `list_feedback` keeps its legacy vote-count/recency
+ordering and default limit of 50. That ranked batch is not proof the queue is
+exhausted. For complete or incremental retrieval, pass an ISO `updatedSince`
+timestamp (use the Unix epoch for a full historical scan), then follow
+`nextCursor` until `hasMore` is false. The first page freezes an `asOf` upper
+watermark, so records changed later appear in the next scan instead of shifting
+between pages. A cursor is bound to its original workspace and normalized status
+filter; pass a cursor by itself rather than combining it with `updatedSince`.
+
 For screenshots and other small files, pass a base64 data URL (or raw base64 plus `fileType`) directly to `create_feedback` or `add_feedback_attachment`. Compass validates the encoded length before decoding and rejects the entire create request if any attachment cannot be uploaded; it never silently creates text-only feedback.
 
 For files larger than the 3 MiB inline aggregate limit, use the two-step direct upload flow:
@@ -178,6 +283,32 @@ For files larger than the 3 MiB inline aggregate limit, use the two-step direct 
 3. Call `add_feedback_attachment` with the target feedback ID, returned Blob URL, and signed receipt.
 
 The receipt expires after ten minutes and is scoped to the workspace, prepared attachment ID, pathname, MIME type, and byte size. Compass verifies the receipt, configured Blob store, and Blob metadata before creating the attachment row. The prepared ID makes concurrent completion idempotent; an ID already committed to another feedback item is rejected. Each feedback item accepts at most five attachments, enforced transactionally.
+
+### Research studies
+
+Research tools use the same validation, protocol-locking and link transactions as Capture. Per-user API keys require workspace membership; the existing trusted service key retains its service-account semantics. Participant research credentials cannot invoke any MCP tool. Research Capture must be enabled in the target environment; these tools do not enable it or voice.
+
+| Tool | Description |
+|---|---|
+| `generate_research_guide` | Draft 5–8 editable questions or usability tasks from a goal, study type and duration; does not create a study |
+| `create_research_study` | Create an active study with a reviewed guide and return its new participant link once |
+| `list_research_studies` | Page through study settings and session counts in one workspace; no transcripts or participant identities |
+| `get_research_study` | Read one study’s settings, guide and session count in its declared workspace |
+| `update_research_study` | Update the name and supplied settings; omitted protocol fields are preserved, and protocol changes are locked after the first session |
+| `activate_research_study` | Activate a draft or closed study and return a fresh participant link once |
+| `close_research_study` | Close an active study and revoke PRIMARY participant links |
+| `archive_research_study` | Archive a study and revoke PRIMARY links without deleting its research |
+| `issue_research_link` | Issue a link only when the active study has no live PRIMARY link |
+| `rotate_research_link` | Explicitly revoke prior PRIMARY links and return one new link for an active study |
+| `revoke_research_links` | Revoke PRIMARY links without generating a replacement |
+
+All tools require `workspaceId`; single-study operations also require `studyId`. Create requires `name`, `goal` and `guide`; update requires `name`, with optional protocol fields. Study types are `CUSTOMER_INTERVIEW` and `USABILITY_TEST`; supported durations are 10, 15, 20 and 30 minutes. Guided studies require a valid public HTTPS product URL. Guides allow 1–20 items, at most 1,000 characters each and 10,000 total; generated guides must be reviewed before creation.
+
+List results use `{items, count, nextCursor}` with a default page size of 20 and maximum of 100, ordered newest first by creation time and ID. Pass `nextCursor` unchanged with the same workspace and status filter. Archived studies are excluded by default; request `status: "ARCHIVED"` to inspect them. Cursors do not authorize access and are rejected when malformed or reused with different scope. Concurrent edits may change metadata between pages; this is not a point-in-time export.
+
+Successful mutation text includes `ID: <uuid>` on its own line and structured output contains the same ID. Newly issued links appear as `participantUrl` only in that operation’s response: store them securely. Only hashes are persisted. Neither get nor list can recover a link, expose its hash, return private attachment paths, or read participant transcripts. A lost response to a link mutation is ambiguous: inspect study state and use explicit rotation if a replacement is needed, rather than assuming the mutation failed.
+
+Guide generation uses a tool-free runtime with a 45-second work deadline and bounded cleanup inside the existing MCP request budget. A timeout does not create a study. These tools do not expose research-session analysis or change model/voice rollout flags.
 
 ### Evidence
 
@@ -209,12 +340,16 @@ Artifacts are first-class solution deliverables, separate from Markdown Docs. HT
 | Tool | Description |
 |---|---|
 | `list_artifacts` | List active Artifacts in a workspace; pass `includeArchived: true` to include archived records |
-| `get_artifact` | Return Artifact metadata, revision history, and linked Solutions without exposing private blob paths or uploaded HTML |
+| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML |
 | `create_artifact` | Create `HTML_UPLOAD` from `html` plus an optional `.html` filename, or `EXTERNAL_LINK` from an `http`/`https` `url` |
 | `update_artifact` | Update title/description and optionally create a new immutable HTML or URL revision |
 | `link_artifact_to_solution` | Idempotently link an Artifact and Solution in the same workspace |
 | `unlink_artifact_from_solution` | Remove an Artifact-to-Solution link |
+| `link_artifact_to_decision` | Idempotently link an active Artifact to an ordinary tracked Decision in the same workspace; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs, `linkId`, and `created` |
+| `unlink_artifact_from_decision` | Idempotently remove a Decision link; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs and `removed` |
 | `archive_artifact` | Archive an Artifact while preserving its revision history and links |
+
+Decision–Artifact links are live supporting material, not frozen review evidence. `get_decision` and `get_review_request` include an `artifacts` array with title, type, status, and current revision number; legacy review requests return an empty array. `get_artifact.decisions` includes the same-workspace tracked request ID, current title, and state. The new link tools require write access and validate both objects in the declared workspace. They preserve packets, fingerprints, revisions, cycles, and recorded outcomes. New links to archived Artifacts are rejected, but retrying an existing link and removing it remain supported. Links follow the stable Decision request and the current Artifact revision.
 
 ### Doc inline comments
 
@@ -253,6 +388,36 @@ Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-te
 | `score_opportunity` | Compute and save an opportunity's score using its workspace's active scoring model |
 | `get_opportunity_score` | Get an opportunity's saved score, including a `stale` flag if the live model has since been updated |
 | `list_top_opportunities` | List scored opportunities ranked by normalized score (0-100); pass `orgSlug` for a cross-workspace comparability view or `workspaceId` for a single workspace |
+
+## Registered agent identities and task assignment
+
+An agent-bound key identifies one personal agent across its explicitly granted
+workspaces, including different organizations. The key owner must remain a
+member of each workspace. See [Agents](/help/19-agents) for registration and grants.
+
+| Tool | Purpose |
+|---|---|
+| `get_current_identity` | Inspect caller kind, registered agent identity, and effective accessible workspaces |
+| `list_task_assignees` | Search and paginate eligible human and agent assignees in an authorized workspace |
+
+`create_task` and `update_task` accept `assignee: { type: "USER" | "AGENT", id }`;
+null clears an assignment and omission preserves it on update. Legacy
+`assigneeUserId` remains supported, but supplying both forms is rejected.
+`list_tasks` supports typed assignee filters and `assignedToMe: true`; conflicting
+assignee filters are rejected. Service and unregistered runtime credentials
+cannot use the “me” filter. Existing human assignee filter URLs remain supported.
+
+Agent credentials cannot expand their own access or perform human approval
+operations. Workspace lists and organization-wide rankings return only granted
+workspaces. Registration, grants, and key management use authenticated settings.
+
+Solution comments and plans created with agent credentials use the authenticated
+agent's name and `AGENT` author type, overriding caller-supplied attribution.
+Built-in assistant turns use “Compass assistant.” Agent credentials cannot call
+`update_comment`, `update_doc_comment`, or `update_solution_comment`: existing
+comment records do not have durable agent ownership, so agents must append a new
+comment instead of rewriting one under someone else's name or approval badge.
+Personal and service credential behavior is unchanged.
 
 ## Example: Connecting Claude Desktop
 

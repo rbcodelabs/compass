@@ -17,13 +17,13 @@ import type { TaskCardData } from "./task-card";
 import type { TaskStatus, SquadData, MemberData } from "@/lib/types";
 
 const STATUS_BADGE_CLASSES: Record<TaskStatus, string> = {
-  BACKLOG: "bg-slate-100 text-slate-600 border-slate-200",
+  BACKLOG: "bg-surface-inset text-text-secondary border-border-default",
   TODO: "bg-sky-100 text-sky-700 border-sky-200",
   IN_PROGRESS: "bg-blue-100 text-blue-700 border-blue-200",
   BLOCKED: "bg-red-100 text-red-700 border-red-200",
   IN_REVIEW: "bg-amber-100 text-amber-700 border-amber-200",
   DONE: "bg-emerald-100 text-emerald-700 border-emerald-200",
-  CANCELLED: "bg-slate-100 text-slate-500 border-slate-200",
+  CANCELLED: "bg-surface-inset text-text-subtle border-border-default",
 };
 
 const STATUSES = Object.keys(STATUS_CONFIG) as TaskStatus[];
@@ -56,7 +56,7 @@ export function TaskHeader({ task: initialTask, workspaceId, squads, members, re
   }
 
   const assigneeMember = task.assigneeUserId ? members.find((m) => m.userId === task.assigneeUserId) : null;
-  const assigneeLabel = assigneeMember?.name || assigneeMember?.email || task.ownerName || null;
+  const assigneeLabel = task.assignee ? `${task.assignee.type === "AGENT" ? "Agent: " : ""}${task.assignee.displayName}${task.assignee.available ? "" : " (unavailable)"}` : assigneeMember?.name || assigneeMember?.email || (task.assigneeUserId || task.assigneeAgentId ? "Unavailable assignee" : task.ownerName) || null;
   const dueLabel = formatDueDate(task.dueDate);
 
   return (
@@ -78,7 +78,7 @@ export function TaskHeader({ task: initialTask, workspaceId, squads, members, re
           </SelectContent>
         </Select>
 
-        <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-600 px-2.5 py-0.5 text-xs font-medium border border-slate-200">
+        <span className="inline-flex items-center rounded-full bg-surface-inset text-text-secondary px-2.5 py-0.5 text-xs font-medium border border-border-default">
           {task.priority}
         </span>
 
@@ -100,7 +100,7 @@ export function TaskHeader({ task: initialTask, workspaceId, squads, members, re
         </button>
       </div>
 
-      <h1 className="text-2xl font-bold tracking-tight text-slate-900 leading-tight">{task.title}</h1>
+      <h1 className="text-2xl font-bold tracking-tight text-text-primary leading-tight">{task.title}</h1>
 
       {task.description ? (
         <div className="text-muted-foreground max-w-2xl">

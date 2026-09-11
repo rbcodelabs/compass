@@ -16,6 +16,8 @@ import {
   createExternalArtifact,
   createHtmlArtifact,
   linkArtifactToSolution,
+  linkArtifactToDecision,
+  unlinkArtifactFromDecision,
   replaceExternalArtifactRevision,
   replaceHtmlArtifactRevision,
   unlinkArtifactFromSolution,
@@ -97,6 +99,25 @@ export async function unlinkArtifact(workspaceId: string, artifactId: string, so
   await requireWorkspaceMember(workspaceId);
   const result = await unlinkArtifactFromSolution({ workspaceId, artifactId, solutionId });
   revalidatePath(revalidatePathStr);
+  return result;
+}
+
+function revalidateDecisionArtifact(basePath: string, artifactId: string, requestId: string) {
+  revalidatePath(`${basePath}/artifacts/${artifactId}`);
+  revalidatePath(`${basePath.replace(/\/docs$/, "")}/reviews/${requestId}`);
+}
+
+export async function linkArtifactDecision(workspaceId: string, artifactId: string, requestId: string, basePath: string) {
+  const user = await requireWorkspaceMember(workspaceId);
+  const result = await linkArtifactToDecision({ workspaceId, artifactId, requestId, createdById: user.id, source: "UI" });
+  revalidateDecisionArtifact(basePath, artifactId, requestId);
+  return result;
+}
+
+export async function unlinkArtifactDecision(workspaceId: string, artifactId: string, requestId: string, basePath: string) {
+  await requireWorkspaceMember(workspaceId);
+  const result = await unlinkArtifactFromDecision({ workspaceId, artifactId, requestId });
+  revalidateDecisionArtifact(basePath, artifactId, requestId);
   return result;
 }
 

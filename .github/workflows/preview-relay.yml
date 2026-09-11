@@ -1,0 +1,21 @@
+name: Preview deployment relay
+on:
+  deployment_status:
+permissions:
+  contents: read
+jobs:
+  relay:
+    if: ${{ github.event.deployment_status.state == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      # This workflow executes the deployed revision's YAML. It must have NO privileged environment or secrets.
+      - name: Record untrusted deployment hint
+        env:
+          DEPLOYMENT_URL: ${{ github.event.deployment_status.environment_url }}
+        run: |
+          node -e 'require("node:fs").writeFileSync("preview-target.json", JSON.stringify({ deployment: process.env.DEPLOYMENT_URL }))'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-target
+          path: preview-target.json
+          retention-days: 1

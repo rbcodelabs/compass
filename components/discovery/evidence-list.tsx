@@ -27,7 +27,7 @@ const SOURCE_TYPE_LABELS: Record<EvidenceSourceType, string> = {
 const CONFIDENCE_CLASSES: Record<EvidenceConfidence, string> = {
   high: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
   medium: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-  low: "bg-slate-100 text-slate-600 dark:bg-slate-800/50 dark:text-slate-400",
+  low: "bg-surface-inset text-text-secondary dark:bg-slate-800/50 dark:text-text-subtle",
 };
 
 type Props = {

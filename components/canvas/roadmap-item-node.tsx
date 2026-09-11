@@ -38,7 +38,7 @@ function RoadmapItemNodeComponent({ data }: NodeProps<RoadmapItemNodeType>) {
               title={data.squad.name}
             />
           )}
-          <h3 className="text-xs font-medium text-slate-800 leading-snug truncate min-w-0 flex-1" title={data.title}>
+          <h3 className="text-xs font-medium text-text-primary leading-snug truncate min-w-0 flex-1" title={data.title}>
             {data.title}
           </h3>
         </div>

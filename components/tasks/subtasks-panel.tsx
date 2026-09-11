@@ -33,6 +33,7 @@ export function SubtasksPanel({
         <TaskListView tasks={subtasks} orgSlug={orgSlug} workspaceSlug={workspaceSlug} members={members} />
       )}
       <AddSubtaskForm
+        members={members}
         workspaceId={workspaceId}
         parentTaskId={parentTaskId}
         revalidatePathStr={revalidatePathStr}

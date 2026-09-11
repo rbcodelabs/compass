@@ -17,9 +17,14 @@ import type {
   SquadData,
   MemberData,
 } from "@/lib/types";
-import { normalizeWorkspaceRole } from "@/lib/roles";
+import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
+import { CapabilityPacksPanel, type CapabilityPackSettingsRow } from "@/components/settings/capability-packs-panel";
+import { ThemePreferenceControl } from "@/components/theme/theme-preference-control";
+import { WorkspaceAgentsPanel } from "@/components/settings/workspace-agents-panel";
+import { AgentActivity } from "@/components/settings/agent-activity";
+import { agentsEnabled } from "@/lib/agent-access";
 
 export const metadata = { title: "Workspace Settings" };
 
@@ -29,16 +34,17 @@ type Props = {
 
 export default async function SettingsPage({ params }: Props) {
   const session = await auth();
-  if (!session) redirect("/login");
+  if (!session?.user?.id) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
-    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+    where: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } },
     select: {
       id: true,
       organizationId: true,
+      organization: { select: { members: { where: { userId: session.user?.id }, select: { role: true } } } },
       name: true,
       feedbackEnabled: true,
       roadmapPublic: true,
@@ -56,7 +62,7 @@ export default async function SettingsPage({ params }: Props) {
 
   if (!workspace) redirect("/dashboard");
 
-  const [rawFields, rawSquads, rawApiKeys, rawMembers, rawScoringModels, scoringConfig] = await Promise.all([
+  const [rawFields, rawSquads, rawApiKeys, rawMembers, rawScoringModels, scoringConfig, rawCapabilityPacks] = await Promise.all([
     prisma.customFieldDefinition.findMany({
       where: { workspaceId: workspace.id },
       orderBy: [{ objectType: "asc" }, { order: "asc" }],
@@ -67,7 +73,7 @@ export default async function SettingsPage({ params }: Props) {
     }),
     session.user?.id
       ? prisma.apiKey.findMany({
-          where: { userId: session.user.id },
+          where: { userId: session.user.id, agentId: null },
           orderBy: { createdAt: "desc" },
         })
       : Promise.resolve([]),
@@ -84,6 +90,11 @@ export default async function SettingsPage({ params }: Props) {
     prisma.workspaceScoringConfig.findUnique({
       where: { workspaceId: workspace.id },
       select: { scoringModelId: true },
+    }),
+    prisma.workspaceCapabilityPack.findMany({
+      where: { workspaceId: workspace.id },
+      include: { capabilityPackVersion: { include: { capabilityPack: { include: { versions: { orderBy: { createdAt: "desc" } } } } } } },
+      orderBy: { createdAt: "asc" },
     }),
   ]);
 
@@ -122,10 +133,32 @@ export default async function SettingsPage({ params }: Props) {
 
   const currentUserMembershipId =
     rawMembers.find((m) => m.userId === session.user?.id)?.id ?? null;
+  const currentWorkspaceRole = rawMembers.find((m) => m.userId === session.user?.id)?.role;
+  const canManageCapabilityPacks = normalizeWorkspaceRole(currentWorkspaceRole) === "ADMIN" || isOrgAdminRole(workspace.organization.members[0]?.role);
+  const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: workspace.id, revokedAt: null } });
+  const workspaceAgents = await prisma.agent.findMany({ where: canManageCapabilityPacks ? { OR: [{ ownerUserId: { in: rawMembers.map((m) => m.userId) } }, { id: { in: grants.map((g) => g.agentId) } }] } : { id: { in: grants.map((g) => g.agentId) } }, orderBy: { name: "asc" } });
+  const agentActivity = canManageCapabilityPacks ? await prisma.agentToolCall.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "desc" }, take: 25 }) : [];
+  const capabilityPacks: CapabilityPackSettingsRow[] = rawCapabilityPacks.map((attachment) => ({
+    packId: attachment.capabilityPackVersion.capabilityPack.packId,
+    sourceRepository: attachment.capabilityPackVersion.sourceRepository,
+    sourcePath: attachment.capabilityPackVersion.sourcePath,
+    displayName: attachment.capabilityPackVersion.capabilityPack.displayName,
+    enabled: attachment.enabled,
+    selectedVersionId: attachment.capabilityPackVersionId,
+    enabledSkillIds: JSON.parse(attachment.enabledSkillIds) as string[],
+    versions: attachment.capabilityPackVersion.capabilityPack.versions.map((version) => ({
+      id: version.id, version: version.semanticVersion, commit: version.sourceCommit, digest: version.artifactSha256,
+      skills: (JSON.parse(version.manifestJson) as { skills: Array<{ id: string; enabledByDefault?: boolean }> }).skills,
+    })),
+  }));
 
   return (
-    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8 max-w-3xl">
+    <main className="flex w-full min-w-0 flex-1 flex-col gap-8 p-4 sm:p-6 md:max-w-3xl md:p-8">
       <PageHeader title="Settings" description={workspace.name} />
+
+      <SettingsSection title="Appearance" description="Choose how Compass looks on this device. System follows your operating system setting.">
+        <ThemePreferenceControl />
+      </SettingsSection>
 
       <SettingsSection title="Squads" description="Teams within this workspace. Squads can be assigned to objectives, opportunities, experiments, and roadmap items.">
         <ManageSquadsPanel
@@ -168,6 +201,15 @@ export default async function SettingsPage({ params }: Props) {
           initialKeys={apiKeys}
         />
       </SettingsSection>
+
+      <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace. Assignment does not grant access or start execution.">
+        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} enabled={agentsEnabled()} canManage={canManageCapabilityPacks} agents={workspaceAgents.map((a) => ({ id: a.id, name: a.name, status: a.status, ownerName: rawMembers.find((m) => m.userId === a.ownerUserId)?.user.name ?? rawMembers.find((m) => m.userId === a.ownerUserId)?.user.email ?? "Former member", eligible: rawMembers.some((m) => m.userId === a.ownerUserId), access: grants.find((g) => g.agentId === a.id)?.access ?? null }))} />
+      </SettingsSection>
+      {canManageCapabilityPacks && <SettingsSection title="Workspace agent activity"><AgentActivity rows={agentActivity.map((r) => ({ ...r, agentName: workspaceAgents.find((a) => a.id === r.agentId)?.name ?? "Former workspace agent", workspaceName: workspace.name }))} /></SettingsSection>}
+
+      {canManageCapabilityPacks && <SettingsSection title="Agent capability packs" description="Install validated skills-only packs for the in-app agent. Packs add instructions, never tools or credentials.">
+        <CapabilityPacksPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} initialPacks={capabilityPacks} />
+      </SettingsSection>}
 
       <SettingsSection title="Portal" description="Control which parts of this workspace are publicly accessible without login.">
         <PortalSettingsPanel

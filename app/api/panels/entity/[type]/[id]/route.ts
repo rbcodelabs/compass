@@ -108,7 +108,8 @@ export async function PATCH(
     id,
     workspace.id,
     body.field,
-    body.value
+    body.value,
+    { kind: "USER", id: session.user.id },
   );
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status });

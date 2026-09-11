@@ -37,6 +37,9 @@ async function createAndLinkTask(
   await page.getByRole("option", { name: roadmapTitle }).click();
   await page.getByRole("button", { name: "Link", exact: true }).click();
 
+  // The selected combobox label is already visible while the action is pending.
+  // This dialog closes only after linkTask has successfully persisted the link.
+  await expect(page.getByRole("dialog", { name: "Link to another item" })).toBeHidden();
   // The visible link confirms the task-to-roadmap relationship persisted in
   // the task detail experience before the roadmap consumes it.
   await expect(page.getByText(roadmapTitle)).toBeVisible({ timeout: 10_000 });
@@ -52,7 +55,7 @@ test.describe("Roadmap delivery status", () => {
 
     await page.goto(`${base}/roadmap`);
     await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: "Add item" }).first().click();
+    await page.getByRole("button", { name: "Add item" }).nth(1).click();
     await page.getByLabel("Title").fill(roadmapTitle);
     await page.getByRole("button", { name: "Add Item", exact: true }).click();
 

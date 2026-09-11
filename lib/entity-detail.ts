@@ -28,6 +28,7 @@
  * it.
  */
 import getPrisma from "@/lib/db";
+import { resolveTaskAssignees } from "@/lib/task-assignment";
 
 export const ENTITY_TYPES = [
   "objective",
@@ -152,7 +153,11 @@ function fetchOpportunity(id: string, workspaceId: string) {
       score: {
         select: { normalizedScore: true, rawScore: true, modelVersion: true, scoredAt: true },
       },
-      feedback: { select: { id: true, title: true, type: true, status: true } },
+      feedback: {
+        where: { workspaceId },
+        select: { id: true, title: true, type: true, status: true },
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      },
       roadmapItems: { select: { id: true, title: true, horizon: true } },
     },
   });
@@ -265,6 +270,7 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
         status: true,
         priority: true,
         assigneeUserId: true,
+        assigneeAgentId: true,
         ownerName: true,
         sortOrder: true,
         createdAt: true,
@@ -310,7 +316,7 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
 
   return {
     ...item,
-    deliveryTasks,
+    deliveryTasks: await resolveTaskAssignees(workspaceId, deliveryTasks),
     linkableTasks,
     members: members.map((member) => ({
       id: member.id,

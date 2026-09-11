@@ -101,7 +101,7 @@ describe("participant research attachment persistence", () => {
     expect(context.prisma).not.toHaveProperty("artifactBlobCleanup")
   })
 
-  it("retries only tenant-owned research paths and completes successful cleanup", async () => {
+  it.each(["png", "gif", "heic"])("retries only tenant-owned %s research paths and completes cleanup", async (extension) => {
     const { prisma, storage, context } = fixture()
     prisma.researchBlobCleanup.findMany.mockResolvedValue([{
       id: "cleanup-1",
@@ -109,7 +109,7 @@ describe("participant research attachment persistence", () => {
       studyId: "study-1",
       sessionId: "session-1",
       attachmentId: "attachment-1",
-      blobPathname: "research/workspace-1/study-1/session-1/attachment-1-0123456789abcdef0123456789abcdef.png",
+      blobPathname: `research/workspace-1/study-1/session-1/attachment-1-0123456789abcdef0123456789abcdef.${extension}`,
       attempts: 1,
     }])
 
@@ -120,7 +120,7 @@ describe("participant research attachment persistence", () => {
       take: 5,
     }))
     expect(storage.del).toHaveBeenCalledWith(
-      "research/workspace-1/study-1/session-1/attachment-1-0123456789abcdef0123456789abcdef.png",
+      `research/workspace-1/study-1/session-1/attachment-1-0123456789abcdef0123456789abcdef.${extension}`,
     )
     expect(prisma.researchBlobCleanup.update).toHaveBeenCalledWith({
       where: { id: "cleanup-1" },

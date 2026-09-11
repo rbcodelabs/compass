@@ -3,8 +3,7 @@
  *
  * Journey: Create opportunity (in EXPLORING column) → open detail panel →
  *          add solution → open the solution's sidebar panel → change status
- *          to IN_DELIVERY → promote to roadmap (NOW horizon) →
- *          verify card appears in roadmap NOW column.
+ *          to IN_DELIVERY → promote to roadmap (NEXT horizon).
  *
  * Note: The "SHIPPED" horizon promote option is added in the feat/roadmap-shipped-state
  * branch (PR #16). Update the horizon to "Shipped" once that branch merges.
@@ -75,8 +74,10 @@ test.describe("Discovery → Roadmap", () => {
       // The "→ Promote to Roadmap" button appears when status is VALIDATED or IN_DELIVERY
       await panel.getByRole("button", { name: /Promote to Roadmap/i }).click();
 
-      // Promote form shows horizon Select (NOW/NEXT/LATER) and "→ Roadmap" button.
-      // Default horizon is NOW — leave it and click "→ Roadmap"
+      // Direct creation in NOW is intentionally guarded. Create the delivery
+      // candidate in NEXT, then exercise the explicit human decision flow.
+      await panel.getByRole("combobox").filter({ hasText: "Now" }).click();
+      await page.getByRole("option", { name: "Next" }).click();
       await panel.getByRole("button", { name: "→ Roadmap" }).click();
 
       // ── 8. Verify on roadmap ──────────────────────────────────────────────
@@ -84,10 +85,10 @@ test.describe("Discovery → Roadmap", () => {
       await page.waitForLoadState("networkidle");
 
       // The solution should appear as a roadmap card.
-      // The NOW column is the first column (visible without scrolling at 1440px).
       // Use .first() because the roadmap card shows the solution title in both
       // the card heading AND in a tooltip trigger span (linked-solution badge).
       await expect(page.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
+
     }
   );
 });

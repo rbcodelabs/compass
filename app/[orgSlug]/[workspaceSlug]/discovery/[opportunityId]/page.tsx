@@ -7,6 +7,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { SolutionsList } from "@/components/discovery/solutions-list";
 import { AddSolutionForm } from "@/components/discovery/add-solution-form";
 import { OpportunityHeader } from "@/components/discovery/opportunity-header";
+import { LinkedFeedback } from "@/components/discovery/linked-feedback";
 import { OSTTreeView } from "@/components/discovery/ost-tree-view";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { ScoringPanel } from "@/components/discovery/scoring-panel";
@@ -79,6 +80,11 @@ export default async function OpportunityDetailPage({ params }: Props) {
         },
       },
       include: {
+        feedback: {
+          where: { workspaceId: workspace.id },
+          select: { id: true, title: true, type: true, status: true },
+          orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        },
         linkedKeyResult: {
           select: {
             id: true,
@@ -270,6 +276,8 @@ export default async function OpportunityDetailPage({ params }: Props) {
           squads={squads}
           revalidatePathStr={detailPath}
         />
+
+        <LinkedFeedback feedback={opportunity.feedback} />
 
         {/* Tabs */}
         <Tabs defaultValue="solutions">

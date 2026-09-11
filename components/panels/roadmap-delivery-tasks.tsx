@@ -12,6 +12,8 @@ import { Combobox, ComboboxContent, ComboboxTrigger, ComboboxValue } from "@/com
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePanelContext } from "./panel-context";
 import type { MemberData, TaskPriority, TaskStatus } from "@/lib/types";
+import { TaskAssigneePicker } from "@/components/tasks/task-assignee-picker";
+import type { ResolvedTaskAssignee, TaskAssignee } from "@/lib/task-assignment";
 
 export type RoadmapDeliveryTaskData = {
   id: string;
@@ -19,6 +21,8 @@ export type RoadmapDeliveryTaskData = {
   status: TaskStatus;
   priority: TaskPriority | null;
   assigneeUserId: string | null;
+  assigneeAgentId?: string | null;
+  assignee?: ResolvedTaskAssignee | null;
   ownerName: string | null;
 };
 
@@ -47,7 +51,7 @@ export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, ta
   const [addOpen, setAddOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkTaskId, setLinkTaskId] = useState<string | null>(null);
-  const [assigneeUserId, setAssigneeUserId] = useState<string | null>(null);
+  const [assignee, setAssignee] = useState<TaskAssignee>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -63,10 +67,10 @@ export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, ta
     setError(null);
     startTransition(async () => {
       try {
-        await addRoadmapDeliveryTask(orgSlug, workspaceSlug, roadmapItemId, { title, assigneeUserId });
+        await addRoadmapDeliveryTask(orgSlug, workspaceSlug, roadmapItemId, { title, assignee });
         await finishMutation();
         form.reset();
-        setAssigneeUserId(null);
+        setAssignee(null);
         setAddOpen(false);
       } catch {
         setError("Could not add the task. Please try again.");
@@ -92,7 +96,7 @@ export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, ta
 
   const memberName = (task: RoadmapDeliveryTaskData) => {
     const member = task.assigneeUserId ? members.find((candidate) => candidate.userId === task.assigneeUserId) : null;
-    return member?.name || member?.email || task.ownerName;
+    return task.assignee ? `${task.assignee.type === "AGENT" ? "Agent: " : ""}${task.assignee.displayName}${task.assignee.available ? "" : " (unavailable)"}` : member?.name || member?.email || (task.assigneeUserId || task.assigneeAgentId ? "Unavailable assignee" : task.ownerName);
   };
 
   return (
@@ -125,10 +129,7 @@ export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, ta
           <Label htmlFor={`roadmap-task-title-${roadmapItemId}`}>Task title</Label>
           <Input id={`roadmap-task-title-${roadmapItemId}`} name="title" placeholder="What needs doing?" autoFocus required disabled={isPending} />
           {members.length > 0 && (
-            <Combobox items={[{ value: "__none__", label: "Unassigned" }, ...members.map((m) => ({ value: m.userId, label: m.name || m.email }))]} value={assigneeUserId ?? "__none__"} onValueChange={(value) => setAssigneeUserId(value === "__none__" ? null : value)} disabled={isPending}>
-              <ComboboxTrigger aria-label="Assignee"><ComboboxValue placeholder="Unassigned" /></ComboboxTrigger>
-              <ComboboxContent />
-            </Combobox>
+            <TaskAssigneePicker members={members} value={assignee} onChange={setAssignee} disabled={isPending} />
           )}
           <div className="flex gap-2"><Button type="submit" size="sm" disabled={isPending}>{isPending ? "Adding…" : "Add task"}</Button><Button type="button" size="sm" variant="ghost" onClick={() => setAddOpen(false)} disabled={isPending}>Cancel</Button></div>
         </form>

@@ -10,7 +10,9 @@ export async function validateMcpAuth(
 ): Promise<{
   valid: true
   userId: string | null
-  purpose: "SERVICE" | "USER" | "RESEARCH"
+  purpose: "SERVICE" | "USER" | "RESEARCH" | "AGENT" | "AGENT_TURN"
+  agentId?: string | null
+  credentialId?: string
   scopeWorkspaceId: string | null
 } | { valid: false }> {
   const authHeader = request.headers.get("authorization")
@@ -36,10 +38,18 @@ export async function validateMcpAuth(
       revokedAt: null,
       OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
-    select: { id: true, userId: true, purpose: true, scopeWorkspaceId: true, expiresAt: true },
+    select: { id: true, userId: true, purpose: true, agentId: true, scopeWorkspaceId: true, expiresAt: true },
   })
 
   if (!apiKey) return { valid: false }
+  if (apiKey.agentId && apiKey.purpose !== "AGENT") return { valid: false }
+  if (apiKey.purpose === "AGENT") {
+    if (process.env.COMPASS_AGENTS_ENABLED !== "1" || !apiKey.agentId) return { valid: false }
+    const agent = await prisma.agent.findFirst({ where: { id: apiKey.agentId, ownerUserId: apiKey.userId, status: "ACTIVE" }, select: { id: true } })
+    if (!agent) return { valid: false }
+  }
+  if (apiKey.purpose === "AGENT_TURN" && (!apiKey.scopeWorkspaceId || !apiKey.expiresAt || apiKey.expiresAt.getTime() <= Date.now())) return { valid: false }
+  if (apiKey.purpose && !["USER", "RESEARCH", "AGENT", "AGENT_TURN"].includes(apiKey.purpose)) return { valid: false }
   if (
     apiKey.purpose === "RESEARCH" &&
     (!apiKey.expiresAt || apiKey.expiresAt.getTime() <= Date.now())
@@ -54,7 +64,9 @@ export async function validateMcpAuth(
   return {
     valid: true,
     userId: apiKey.userId,
-    purpose: apiKey.purpose === "RESEARCH" ? "RESEARCH" : "USER",
+    purpose: (apiKey.purpose || "USER") as "USER" | "RESEARCH" | "AGENT" | "AGENT_TURN",
+    agentId: apiKey.agentId,
+    credentialId: apiKey.id,
     scopeWorkspaceId: apiKey.scopeWorkspaceId,
   }
 }

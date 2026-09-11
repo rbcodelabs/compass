@@ -7,6 +7,15 @@
  */
 export function isPublicPath(pathname: string): boolean {
   return (
+    ["/api/preview-automation/bootstrap", "/api/preview-automation/session", "/api/preview-automation/teardown"].includes(pathname) ||
+    // ADR-0009 preview-login page + its start route. Both fail closed
+    // internally (404 before any DB access) unless VERCEL_ENV=preview and
+    // PREVIEW_LOGIN_ENABLED=1, so making them reachable without a session
+    // here does not widen access on production or non-opted-in previews —
+    // it only lets an anonymous visitor reach the gate at all, which is the
+    // entire point of a login page.
+    pathname === "/preview-login" ||
+    pathname === "/api/preview-login/start" ||
     pathname === "/" ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/api/auth") ||
@@ -22,6 +31,8 @@ export function isPublicPath(pathname: string): boolean {
     // API handlers validate the token and session-to-study scope themselves.
     pathname.startsWith("/research/") ||
     pathname.startsWith("/api/research/") ||
+    // Only these internal callbacks bypass browser login; each requires its bound worker bearer.
+    /^\/api\/internal\/research\/voice\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/(?:heartbeat|events|commands\/(?:claim|result))$/i.test(pathname) ||
     // Docs API routes use session auth internally — let them handle 401 themselves
     pathname.startsWith("/api/docs/") ||
     // Agent turn route uses session auth internally (returns 401, not a 302)

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { resolveActiveResearchStudy } from "@/lib/research-access"
 import { ResearchSessionError, startOrResumeResearchSession } from "@/lib/research-session"
 import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
+import { isResearchParticipantVoiceEnabled } from "@/lib/research-feature"
 
 export async function POST(request: Request) {
   let body: Record<string, unknown>
@@ -20,6 +21,9 @@ export async function POST(request: Request) {
   const modality = body.modality ?? "CHAT"
   if (modality !== "CHAT" && modality !== "VOICE") {
     return NextResponse.json({ error: "Invalid modality" }, { status: 400 })
+  }
+  if (modality === "VOICE" && !isResearchParticipantVoiceEnabled()) {
+    return NextResponse.json({ error: "Voice is not available for this study" }, { status: 409 })
   }
   const hasResume = body.sessionId !== undefined || body.resumeToken !== undefined
   if (hasResume && (typeof body.sessionId !== "string" || typeof body.resumeToken !== "string")) {

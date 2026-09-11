@@ -36,39 +36,49 @@ const localStorage: ArtifactStorage = {
   },
 }
 
-function createVercelBlobStorage(token?: string): ArtifactStorage {
-  const tokenOptions = token ? { token } : {}
+function createVercelBlobStorage(token: string | (() => string)): ArtifactStorage {
+  const tokenOptions = () => ({ token: typeof token === "function" ? token() : token })
   return {
     async put(pathname, bytes, contentType = "text/html; charset=utf-8") {
       const result = await put(pathname, Buffer.from(bytes), {
         access: "private",
         contentType,
         addRandomSuffix: false,
-        ...tokenOptions,
+        ...tokenOptions(),
       })
       return { pathname: result.pathname }
     },
     async get(pathname) {
-      const result = await get(pathname, { access: "private", useCache: false, ...tokenOptions })
+      const result = await get(pathname, { access: "private", useCache: false, ...tokenOptions() })
       if (!result || result.statusCode !== 200) return null
       return new Uint8Array(await new Response(result.stream).arrayBuffer())
     },
     async del(pathname) {
-      if (token) {
-        await del(pathname, tokenOptions)
-        return
-      }
-      await del(pathname)
+      await del(pathname, tokenOptions())
     },
   }
 }
 
-const vercelBlobStorage = createVercelBlobStorage()
-
 /** Local development uses private filesystem storage; deployed environments
  * use authenticated private Vercel Blob. The interface is injected in tests. */
 export function getArtifactStorage(): ArtifactStorage {
-  return process.env.DATABASE_URL ? localStorage : vercelBlobStorage
+  if (process.env.DATABASE_URL) return localStorage
+  // Resolve only for actual I/O, so deleting a workspace without HTML artifacts
+  // does not require Blob configuration. Never inherit the public image token.
+  return createVercelBlobStorage(() => {
+    const token = process.env.ARTIFACT_BLOB_READ_WRITE_TOKEN?.trim()
+    if (!token) throw new Error("Private artifact storage is not configured")
+    return token
+  })
+}
+
+/** Packs must never inherit the project's general (potentially public) store. */
+export function getCapabilityPackArtifactStorage(): ArtifactStorage {
+  if (process.env.DATABASE_URL) return localStorage
+  const token = process.env.CAPABILITY_PACK_BLOB_READ_WRITE_TOKEN?.trim()
+  if (!token) throw new Error("Private capability pack storage is not configured")
+  // @vercel/blob 2.4.1 prioritizes explicit token over ambient OIDC/store IDs.
+  return createVercelBlobStorage(token)
 }
 
 export function getResearchArtifactStorage(): ArtifactStorage {

@@ -13,6 +13,7 @@ import {
   ListChecks,
   Map,
   MessageSquare,
+  MessageSquareCheck,
   Settings,
   Sparkles,
   Target,
@@ -45,6 +46,7 @@ import {
 import { SendCompassFeedbackDialog } from "@/components/feedback/send-compass-feedback-dialog"
 import { signOutAction } from "@/lib/actions/auth-actions"
 import { getWorkspaceSwitchPath } from "@/lib/workspace-nav"
+import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
 
 interface SidebarProps {
   orgSlug: string
@@ -65,6 +67,7 @@ const baseNavItems = [
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
   { label: "Tasks", path: "tasks", Icon: ListChecks },
+  { label: "Decisions", path: "decisions", Icon: MessageSquareCheck },
   { label: "Docs", path: "docs", Icon: BookOpen },
   { label: "Canvas", path: "canvas", Icon: Waypoints },
   { label: "Agent", path: "agent", Icon: Sparkles },
@@ -213,6 +216,11 @@ export function Sidebar({
       <SidebarContent>
         <SidebarGroup className="py-3">
           <SidebarGroupContent>
+            <SidebarMenu className="mb-2">
+              <SidebarMenuItem>
+                <WorkspaceSearchPalette orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
+              </SidebarMenuItem>
+            </SidebarMenu>
             <nav aria-label="Main navigation">
               <SidebarMenu className="gap-0.5">
               {navItems.map(({ label, path, Icon }) => {
@@ -313,6 +321,9 @@ export function Sidebar({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="bg-slate-700" />
                 <DropdownMenuItem className="cursor-pointer p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100">
+                  <Link href="/settings/agents" className="flex w-full items-center px-1.5 py-1">My agents</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer p-0">
                   <form action={signOutAction} className="w-full">
                     <Button type="submit" variant="ghost" size="sm" className="w-full justify-start">
                       Sign out

@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const redirect = vi.hoisted(() => vi.fn())
 const auth = vi.hoisted(() => vi.fn())
 const workspace = { findFirst: vi.fn() }
-const researchStudy = { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() }
+const researchStudy = { create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() }
 const researchParticipantToken = { create: vi.fn(), updateMany: vi.fn() }
-const transaction = vi.fn(async (operations: Array<Promise<unknown>>) => Promise.all(operations))
+const researchSession = { count: vi.fn() }
+const transaction = vi.fn(async (operations: Array<Promise<unknown>> | ((tx: { researchStudy: typeof researchStudy; researchParticipantToken: typeof researchParticipantToken; researchSession: typeof researchSession }) => Promise<unknown>)) => typeof operations === "function"
+  ? operations({ researchStudy, researchParticipantToken, researchSession })
+  : Promise.all(operations))
 const runResearchInterviewAgent = vi.hoisted(() => vi.fn())
 
 vi.mock("next/navigation", () => ({ redirect }))
@@ -16,11 +19,21 @@ vi.mock("@/lib/db", () => ({
     workspace,
     researchStudy,
     researchParticipantToken,
+    researchSession,
     $transaction: transaction,
   }),
 }))
 
-import { createResearchStudy, generateUsabilityTasks, regenerateResearchLink, revokeResearchLinks } from "@/app/[orgSlug]/[workspaceSlug]/capture/actions"
+import {
+  activateResearchStudy,
+  archiveResearchStudy,
+  closeResearchStudy,
+  createResearchStudy,
+  generateResearchGuide,
+  regenerateResearchLink,
+  revokeResearchLinks,
+  updateResearchStudy,
+} from "@/app/[orgSlug]/[workspaceSlug]/capture/actions"
 
 function form() {
   const data = new FormData()
@@ -37,11 +50,13 @@ describe("research study actions", () => {
     workspace.findFirst.mockResolvedValue({ id: "workspace-1" })
     researchStudy.create.mockResolvedValue({ id: "study-1" })
     researchStudy.update.mockResolvedValue({ id: "study-1" })
+    researchStudy.updateMany.mockResolvedValue({ count: 1 })
     researchParticipantToken.create.mockResolvedValue({ id: "token-1" })
     researchParticipantToken.updateMany.mockResolvedValue({ count: 1 })
+    researchSession.count.mockResolvedValue(0)
   })
 
-  it("generates 5–8 realistic editable tasks through the tool-free Compass agent", async () => {
+  it("generates 5–8 realistic editable usability tasks through the tool-free Compass agent", async () => {
     runResearchInterviewAgent.mockResolvedValue(JSON.stringify([
       "Find the plan that fits a five-person team.",
       "Start creating an account for your team.",
@@ -50,7 +65,8 @@ describe("research study actions", () => {
       "Change the billing cadence to annual.",
     ]))
 
-    await expect(generateUsabilityTasks("acme", "product", {
+    await expect(generateResearchGuide("acme", "product", {
+      studyType: "USABILITY_TEST",
       goal: "Learn whether pricing makes sense",
       appUrl: "https://example.com/pricing",
       targetMinutes: 15,
@@ -64,6 +80,39 @@ describe("research study actions", () => {
     expect(runResearchInterviewAgent).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringContaining("Return only a JSON array of 5 to 8"),
     }))
+    const prompt = runResearchInterviewAgent.mock.calls[0][0].prompt
+    expect(prompt).toContain("edge cases")
+    expect(prompt).toContain("Do not invent product capabilities")
+  })
+
+  it("generates neutral editable customer-interview questions without requiring a product URL", async () => {
+    runResearchInterviewAgent.mockResolvedValue(JSON.stringify([
+      "Tell me about the last time you planned this work.",
+      "What prompted you to start?",
+      "What did you try first?",
+      "Where did the process become difficult?",
+      "What did you do next?",
+    ]))
+
+    await expect(generateResearchGuide("acme", "product", {
+      studyType: "CUSTOMER_INTERVIEW",
+      goal: "Understand existing planning behavior",
+      appUrl: "",
+      targetMinutes: 20,
+    })).resolves.toHaveLength(5)
+    expect(runResearchInterviewAgent).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining("customer discovery interview"),
+    }))
+    const prompt = runResearchInterviewAgent.mock.calls[0][0].prompt
+    expect(prompt).toContain("workarounds")
+    expect(prompt).toContain("ideal experience")
+  })
+
+  it("rejects duplicate generated guide items", async () => {
+    runResearchInterviewAgent.mockResolvedValue(JSON.stringify(["Same", "Other", "Third", "Fourth", " same "]))
+    await expect(generateResearchGuide("acme", "product", {
+      studyType: "CUSTOMER_INTERVIEW", goal: "Learn", appUrl: "", targetMinutes: 15,
+    })).rejects.toThrow("invalid")
   })
 
   it("creates a study and first-class hashed PRIMARY token without persisting plaintext", async () => {
@@ -100,6 +149,17 @@ describe("research study actions", () => {
         targetMinutes: 20,
         guide: JSON.stringify([{ id: "1", text: "Find the right plan for your team." }]),
       }),
+    })
+  })
+
+  it("persists the selected duration for a customer interview", async () => {
+    const data = form()
+    data.set("targetMinutes", "30")
+
+    await createResearchStudy("acme", "product", data)
+
+    expect(researchStudy.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ targetMinutes: 30 }),
     })
   })
 
@@ -145,10 +205,9 @@ describe("research study actions", () => {
       data: expect.objectContaining({ studyId: "study-1", kind: "PRIMARY" }),
     })
     expect(transaction).toHaveBeenCalledTimes(1)
-    expect(researchStudy.update).toHaveBeenCalledWith({
-      where: { id: "study-1" },
-      data: { updatedAt: expect.any(Date), updatedById: "user-1" },
-    })
+    expect(researchStudy.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "study-1", status: "ACTIVE" },
+    }))
   })
 
   it("does not reactivate or rotate a closed study", async () => {
@@ -168,9 +227,117 @@ describe("research study actions", () => {
       data: { revokedAt: expect.any(Date) },
     })
     expect(researchParticipantToken.create).not.toHaveBeenCalled()
+    expect(researchStudy.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "study-1", status: "ACTIVE" } }))
+  })
+
+  it("updates the full protocol before the first session", async () => {
+    researchStudy.findFirst.mockResolvedValue({
+      id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW", goal: "Old goal",
+      guide: JSON.stringify([{ id: "1", text: "Old question" }]), targetMinutes: 15, appUrl: null,
+      _count: { sessions: 0 },
+    })
+    const data = form()
+    data.set("name", "Updated interview")
+    data.set("goal", "Updated goal")
+    data.set("targetMinutes", "20")
+    data.delete("guide")
+    data.append("guide", "Updated question")
+
+    await updateResearchStudy("acme", "product", "study-1", data)
+
     expect(researchStudy.update).toHaveBeenCalledWith({
       where: { id: "study-1" },
-      data: { updatedAt: expect.any(Date), updatedById: "user-1" },
+      data: expect.objectContaining({
+        name: "Updated interview", goal: "Updated goal", targetMinutes: 20,
+        guide: JSON.stringify([{ id: "1", text: "Updated question" }]),
+      }),
     })
+  })
+
+  it("preserves an existing guided type when an update form omits that field", async () => {
+    researchStudy.findFirst.mockResolvedValue({ id: "study-1", status: "ACTIVE", studyType: "USABILITY_TEST", goal: "Old goal", guide: '[{"id":"1","text":"Old task"}]', targetMinutes: 15, appUrl: "https://example.com/product", _count: { sessions: 0 } })
+    const data = form()
+    data.set("appUrl", "https://example.com/product")
+    await updateResearchStudy("acme", "product", "study-1", data)
+    expect(researchStudy.update.mock.calls[0][0].data).not.toMatchObject({ studyType: "CUSTOMER_INTERVIEW" })
+    expect(researchStudy.update.mock.calls[0][0].data.appUrl).toBe("https://example.com/product")
+  })
+
+  it("locks protocol fields after the first session while allowing the name to change", async () => {
+    researchStudy.findFirst.mockResolvedValue({
+      id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW", goal: "Locked goal",
+      guide: JSON.stringify([{ id: "1", text: "Locked question" }]), targetMinutes: 15, appUrl: null,
+      _count: { sessions: 1 },
+    })
+    researchSession.count.mockResolvedValueOnce(1)
+    const data = form()
+    data.set("name", "New display name")
+    data.set("goal", "Tampered goal")
+    data.set("targetMinutes", "30")
+
+    await updateResearchStudy("acme", "product", "study-1", data)
+
+    expect(researchStudy.update).toHaveBeenCalledWith({
+      where: { id: "study-1" },
+      data: expect.objectContaining({ name: "New display name" }),
+    })
+    expect(researchStudy.update.mock.calls[0][0].data).not.toHaveProperty("goal")
+  })
+
+  it("closes and archives studies by revoking active participant links", async () => {
+    researchStudy.findFirst.mockResolvedValue({ id: "study-1", status: "ACTIVE" })
+
+    await closeResearchStudy("acme", "product", "study-1")
+    expect(researchStudy.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "CLOSED" }) }))
+    await archiveResearchStudy("acme", "product", "study-1")
+    expect(researchStudy.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "ARCHIVED" }) }))
+    expect(researchParticipantToken.updateMany).toHaveBeenCalledTimes(2)
+  })
+
+  it("reactivates a closed study with a fresh hashed participant link", async () => {
+    researchStudy.findFirst.mockResolvedValue({ id: "study-1", status: "CLOSED" })
+
+    await activateResearchStudy("acme", "product", "study-1")
+
+    expect(researchStudy.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "ACTIVE" }) }))
+    expect(researchParticipantToken.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ studyId: "study-1", tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/) }),
+    })
+    expect(redirect).toHaveBeenCalledWith(expect.stringContaining("?token="))
+  })
+
+  it("does not change a protocol when a session wins the race", async () => {
+    researchStudy.findFirst.mockResolvedValue({
+      id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW", goal: "Old goal",
+      guide: JSON.stringify([{ id: "1", text: "Old" }]), targetMinutes: 15, appUrl: null,
+      _count: { sessions: 0 },
+    })
+    researchSession.count.mockResolvedValueOnce(1)
+    const data = form(); data.set("goal", "Unsafe replacement")
+
+    await updateResearchStudy("acme", "product", "study-1", data)
+
+    expect(researchStudy.updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({ where: expect.objectContaining({ status: { not: "ARCHIVED" } }) }))
+    expect(researchSession.count).toHaveBeenCalledWith({ where: { studyId: "study-1" } })
+    expect(researchStudy.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.not.objectContaining({ goal: expect.anything() }) }))
+    expect(researchStudy.updateMany.mock.invocationCallOrder[0]).toBeLessThan(researchSession.count.mock.invocationCallOrder[0])
+    expect(researchSession.count.mock.invocationCallOrder[0]).toBeLessThan(researchStudy.update.mock.invocationCallOrder[0])
+  })
+
+  it("allows only one concurrent activation to create a participant token", async () => {
+    researchStudy.findFirst.mockResolvedValue({ id: "study-1", status: "CLOSED" })
+    researchStudy.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 })
+
+    await activateResearchStudy("acme", "product", "study-1")
+    await expect(activateResearchStudy("acme", "product", "study-1")).rejects.toThrow("changed")
+
+    expect(researchParticipantToken.create).toHaveBeenCalledTimes(1)
+  })
+
+  it("denies lifecycle mutations outside the workspace and rejects illegal states", async () => {
+    researchStudy.findFirst.mockResolvedValueOnce(null)
+    await expect(closeResearchStudy("acme", "other", "study-1")).rejects.toThrow("Study not found")
+    researchStudy.findFirst.mockResolvedValueOnce({ id: "study-1", status: "ARCHIVED" })
+    await expect(activateResearchStudy("acme", "product", "study-1")).rejects.toThrow("draft or closed")
   })
 })

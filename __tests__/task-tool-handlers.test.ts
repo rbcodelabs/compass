@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { runWithMcpActor } from "@/lib/mcp-authz"
 
 // --- Prisma mock setup -------------------------------------------------------
 
@@ -22,12 +23,16 @@ const mockTaskLink = {
   create: vi.fn(),
   delete: vi.fn(),
 }
-const mockOpportunity = { findUnique: vi.fn(), findMany: vi.fn() }
+const mockOpportunity = { findFirst: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() }
 const mockSolution = { findUnique: vi.fn(), findMany: vi.fn() }
 const mockRoadmapItem = { findUnique: vi.fn(), findMany: vi.fn() }
 const mockDoc = { findUnique: vi.fn(), findMany: vi.fn() }
 
 const mockPrisma = {
+  agent: { findUnique: vi.fn(), findMany: vi.fn() },
+  agentWorkspaceGrant: { findFirst: vi.fn(), findMany: vi.fn() },
+  workspaceMember: { findFirst: vi.fn() },
+  squad: { findFirst: vi.fn() },
   workspace: mockWorkspace,
   task: mockTask,
   taskLink: mockTaskLink,
@@ -67,7 +72,12 @@ function textOf(result: { content: { text: string }[] }) {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
+  mockPrisma.workspaceMember.findFirst.mockResolvedValue({ id: "member" })
+  mockPrisma.squad.findFirst.mockResolvedValue({ id: "squad" })
+  vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+  mockPrisma.agent.findUnique.mockResolvedValue({ id: "agent-1", status: "ACTIVE", ownerUserId: "owner" })
+  mockPrisma.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" })
   mockWorkspace.findUnique.mockResolvedValue({ id: WORKSPACE_ID })
   mockTask.findFirst.mockResolvedValue(null)
   mockTask.findUnique.mockResolvedValue({
@@ -95,7 +105,45 @@ beforeEach(() => {
     Promise.resolve({ id: TASK_ID, title: "Ship payments", status: data.status ?? "TODO", priority: data.priority ?? "MEDIUM" })
   )
   mockOpportunity.findUnique.mockResolvedValue({ id: OPP_ID, title: "Reduce churn" })
+  mockOpportunity.findFirst.mockResolvedValue({ id: OPP_ID, title: "Reduce churn" })
   mockOpportunity.findMany.mockResolvedValue([{ id: OPP_ID, title: "Reduce churn" }])
+})
+
+describe("typed task assignees", () => {
+  it("writes one agent assignee and clears the previous human atomically", async () => {
+    const result = await updateTask({ taskId: TASK_ID, assignee: { type: "AGENT", id: "agent-1" } })
+    expect(result.structuredContent.ok).toBe(true)
+    expect(mockTask.update.mock.calls[0][0].data).toMatchObject({ assigneeAgentId: "agent-1", assigneeUserId: null })
+  })
+  it("rejects both input styles before any write", async () => {
+    const result = await updateTask({ taskId: TASK_ID, assignee: null, assigneeUserId: null })
+    expect(textOf(result)).toContain("both")
+    expect(mockTask.update).not.toHaveBeenCalled()
+  })
+  it("uses the authenticated agent for assignedToMe, not its human owner", async () => {
+    mockTask.findMany.mockResolvedValue([])
+    await runWithMcpActor({ userId: "owner", purpose: "AGENT", agentId: "agent-1" }, () => listTasks({ workspaceId: WORKSPACE_ID, assignedToMe: true }))
+    expect(mockTask.findMany.mock.calls[0][0].where).toMatchObject({ assigneeAgentId: "agent-1" })
+    expect(mockTask.findMany.mock.calls[0][0].where.assigneeUserId).toBeUndefined()
+  })
+  it("uses a personal caller for assignedToMe", async () => {
+    mockTask.findMany.mockResolvedValue([])
+    await runWithMcpActor({ userId: "human", purpose: "USER" }, () => listTasks({ workspaceId: WORKSPACE_ID, assignedToMe: true }))
+    expect(mockTask.findMany.mock.calls[0][0].where).toMatchObject({ assigneeUserId: "human" })
+  })
+  it("rejects runtime and service identities for assignedToMe", async () => {
+    for (const actor of [{ userId: "owner", purpose: "AGENT_TURN" as const }, { userId: null, purpose: "SERVICE" as const }]) {
+      const result = await runWithMcpActor(actor, () => listTasks({ workspaceId: WORKSPACE_ID, assignedToMe: true }))
+      expect(textOf(result)).toContain("requires")
+    }
+    expect(mockTask.findMany).not.toHaveBeenCalled()
+  })
+  it("denies a link outside the task workspace", async () => {
+    mockOpportunity.findFirst.mockResolvedValue(null)
+    const result = await linkTask({ taskId: TASK_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID })
+    expect(textOf(result)).toContain("different workspace")
+    expect(mockTaskLink.create).not.toHaveBeenCalled()
+  })
 })
 
 // ─── createTask ───────────────────────────────────────────────────────────────
@@ -256,6 +304,24 @@ describe("listTasks", () => {
     expect(where).toMatchObject({ workspaceId: WORKSPACE_ID, status: "BLOCKED", priority: "URGENT", squadId: "sq-1", assigneeUserId: "u-1" })
   })
 
+  it("filters changed or stale tasks using factual update timestamps", async () => {
+    mockTask.findMany.mockResolvedValueOnce([])
+    await listTasks({
+      workspaceId: WORKSPACE_ID,
+      status: "IN_REVIEW",
+      updatedSince: "2026-09-01T00:00:00.000Z",
+      updatedBefore: "2026-09-07T00:00:00.000Z",
+    })
+    expect(mockTask.findMany.mock.calls[0][0].where).toMatchObject({
+      workspaceId: WORKSPACE_ID,
+      status: "IN_REVIEW",
+      updatedAt: {
+        gte: new Date("2026-09-01T00:00:00.000Z"),
+        lt: new Date("2026-09-07T00:00:00.000Z"),
+      },
+    })
+  })
+
   it("treats explicit null parentTaskId as top-level-only filter", async () => {
     mockTask.findMany.mockResolvedValueOnce([])
     await listTasks({ workspaceId: WORKSPACE_ID, parentTaskId: null })
@@ -278,14 +344,19 @@ describe("listTasks", () => {
   })
 
   it("lists tasks flat with subtask counts", async () => {
+    const createdAt = new Date("2026-08-01T00:00:00.000Z")
+    const updatedAt = new Date("2026-09-01T00:00:00.000Z")
     mockTask.findMany.mockResolvedValueOnce([
-      { id: "t-1", title: "Epic A", status: "TODO", priority: "HIGH", parentTaskId: null, _count: { subtasks: 2 } },
+      { id: "t-1", title: "Epic A", status: "TODO", priority: "HIGH", parentTaskId: null, createdAt, updatedAt, _count: { subtasks: 2 } },
     ])
     const result = await listTasks({ workspaceId: WORKSPACE_ID })
     const text = textOf(result)
     expect(text).toContain("Epic A")
     expect(text).toContain("2 subtask(s)")
     expect(text).toContain("ID: t-1")
+    expect(result.structuredContent.data).toMatchObject({
+      items: [{ id: "t-1", createdAt, updatedAt }],
+    })
   })
 
   it("nests subtasks under their parent when includeSubtasks is set", async () => {
@@ -297,6 +368,42 @@ describe("listTasks", () => {
     const text = textOf(result)
     expect(text).toContain("Epic A")
     expect(text).toContain("↳ [IN_PROGRESS] Child A")
+  })
+
+  it("keeps a changed child visible under its unchanged parent in a timestamp-filtered nested result", async () => {
+    const parentCreatedAt = new Date("2026-08-01T00:00:00.000Z")
+    const parentUpdatedAt = new Date("2026-08-15T00:00:00.000Z")
+    const childCreatedAt = new Date("2026-08-20T00:00:00.000Z")
+    const childUpdatedAt = new Date("2026-09-03T00:00:00.000Z")
+    mockTask.findMany
+      .mockResolvedValueOnce([
+        { id: "sub-1", title: "Review fix", status: "IN_REVIEW", priority: "HIGH", parentTaskId: "epic-1", createdAt: childCreatedAt, updatedAt: childUpdatedAt, _count: { subtasks: 0 } },
+      ])
+      .mockResolvedValueOnce([
+        { id: "epic-1", title: "Ship fix", status: "IN_PROGRESS", priority: "HIGH", parentTaskId: null, createdAt: parentCreatedAt, updatedAt: parentUpdatedAt, _count: { subtasks: 1 } },
+      ])
+
+    const result = await listTasks({
+      workspaceId: WORKSPACE_ID,
+      status: "IN_REVIEW",
+      includeSubtasks: true,
+      updatedSince: "2026-09-01T00:00:00.000Z",
+    })
+
+    expect(mockTask.findMany).toHaveBeenNthCalledWith(2, {
+      where: { workspaceId: WORKSPACE_ID, id: { in: ["epic-1"] } },
+      include: { _count: { select: { subtasks: true } } },
+      orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
+    })
+    expect(result.structuredContent.data).toMatchObject({
+      items: [{
+        id: "epic-1",
+        createdAt: parentCreatedAt,
+        updatedAt: parentUpdatedAt,
+        subtasks: [{ id: "sub-1", createdAt: childCreatedAt, updatedAt: childUpdatedAt }],
+      }],
+      count: 1,
+    })
   })
 })
 

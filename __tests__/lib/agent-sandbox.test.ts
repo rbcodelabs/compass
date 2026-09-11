@@ -8,6 +8,7 @@ describe("sandboxPackageJson", () => {
     expect(pkg.dependencies).toEqual(SANDBOX_DEPENDENCIES)
     expect(Object.keys(pkg.dependencies)).toContain("@anthropic-ai/claude-agent-sdk")
     expect(Object.keys(pkg.dependencies)).toContain("@modelcontextprotocol/sdk")
+    expect(pkg.dependencies["@anthropic-ai/claude-agent-sdk"]).toBe("0.3.224")
   })
 })
 

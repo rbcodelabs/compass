@@ -9,8 +9,11 @@ import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
-import { runWithMcpActor, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
-import { applyToolGate } from "@/lib/mcp-tool-gates"
+import { runWithMcpActor, getMcpActor } from "@/lib/mcp-authz"
+import { applyToolGate, AGENT_TOOL_POLICY } from "@/lib/mcp-tool-gates"
+import { agentWorkspaceWhere } from "@/lib/agent-access"
+import { withAgentActivity } from "@/lib/agent-activity"
+import { generateResearchGuideTool, createResearchStudyTool, listResearchStudiesTool, getResearchStudyTool, updateResearchStudyTool, activateResearchStudyTool, closeResearchStudyTool, archiveResearchStudyTool, issueResearchLinkTool, rotateResearchLinkTool, revokeResearchLinksTool } from "@/lib/research-tool-handlers"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import {
   createFeedback,
@@ -41,6 +44,8 @@ import {
   archiveArtifact,
   createArtifact,
   getArtifact,
+  linkArtifactDecision,
+  unlinkArtifactDecision,
   linkArtifact,
   listArtifacts,
   unlinkArtifact,
@@ -77,6 +82,8 @@ import {
   rejectSolutionPlan,
 } from "@/lib/solution-comment-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
+import { updateOpportunity } from "@/lib/opportunity-tool-handlers"
+import { listAssumptions, listSolutions } from "@/lib/discovery-query-tool-handlers"
 import {
   listScoringModels,
   getScoringModel,
@@ -105,6 +112,7 @@ import {
   linkTask,
   unlinkTask,
   listTaskLinks,
+  listTaskAssignees,
 } from "@/lib/task-tool-handlers"
 import {
   createSquad,
@@ -127,6 +135,9 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
+import { applyRecordedDecision, getDecision, getReviewRequest, listDecisions, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
+import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -139,7 +150,6 @@ function formatUtcDate(date: Date): string {
 
 const _handler = createMcpHandler(
   (server) => {
-
     const inlineFeedbackAttachmentSchema = z.object({
       filename: z.string().min(1).max(255).describe("Original filename shown in Compass"),
       data: z.string().min(1).describe("Raw base64 (requires fileType) or a base64 data URL"),
@@ -161,9 +171,46 @@ const _handler = createMcpHandler(
       handler: (args: any, extra?: any) => any
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ) => (server.registerTool as (...a: any[]) => any)(name, meta, async (args: any, extra: any) => {
-      await applyToolGate(name, getMcpActor(), args ?? {})
-      return handler(args, extra)
+      const actor = { ...getMcpActor(), authorizedWorkspaceId: undefined }
+      return runWithMcpActor(actor, () => withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", () => applyToolGate(name, actor, args ?? {}), () => handler(args, extra)))
     })
+
+    register("get_current_identity", { title: "Current Identity", description: "Returns the authenticated caller and currently accessible workspaces.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, async () => {
+      const actor = getMcpActor()
+      const prisma = getPrisma()
+      const workspaces = await prisma.workspace.findMany({ where: await agentWorkspaceWhere(actor), select: { id: true, name: true, slug: true, organization: { select: { slug: true } } }, orderBy: { name: "asc" } })
+      const agent = actor.agentId ? await prisma.agent.findUnique({ where: { id: actor.agentId }, select: { id: true, name: true } }) : null
+      return ok("Current authenticated identity", { purpose: actor.purpose ?? "USER", userId: actor.userId, agent, workspaces })
+    })
+
+    const taskAssigneeSchema = z.object({ type: z.enum(["USER", "AGENT"]), id: z.string().uuid() })
+    register("list_task_assignees", { title: "List Task Assignees", description: "Lists eligible human and agent assignees in a workspace.", inputSchema: { workspaceId: z.string().uuid(), search: z.string().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listTaskAssignees)
+    const researchScope = { workspaceId: z.string().uuid() }
+    const researchStudy = { ...researchScope, studyId: z.string().uuid() }
+    const researchType = z.enum(["CUSTOMER_INTERVIEW", "USABILITY_TEST"])
+    const researchDuration = z.union([z.literal(10), z.literal(15), z.literal(20), z.literal(30)])
+    const researchGuide = z.array(z.string().trim().min(1).max(1_000)).min(1).max(20).refine(items => items.reduce((n, item) => n + item.length, 0) <= 10_000, "Guide exceeds 10,000 characters")
+    const researchFields = { name: z.string().trim().min(1).max(255), goal: z.string().trim().min(1).max(5_000), guide: researchGuide, studyType: researchType.optional(), targetMinutes: researchDuration.optional(), appUrl: z.string().max(2_048).optional() }
+    register("generate_research_guide", { title: "Generate Research Guide", description: "Draft 5–8 editable neutral questions or usability tasks. Does not create a study. Uses a bounded tool-free model call; review the guide before use.", inputSchema: { ...researchScope, studyType: researchType, goal: researchFields.goal, appUrl: researchFields.appUrl, targetMinutes: researchDuration }, outputSchema: TOOL_OUTPUT_SCHEMA }, generateResearchGuideTool)
+    register("create_research_study", { title: "Create Research Study", description: "Create an active research study and return its new participant link once. Store the returned link securely; plaintext cannot be retrieved later.", inputSchema: { ...researchScope, ...researchFields }, outputSchema: TOOL_OUTPUT_SCHEMA }, createResearchStudyTool)
+    register("list_research_studies", { title: "List Research Studies", description: "Page through study metadata and counts, newest first. Archived studies are excluded unless status ARCHIVED is requested. Cursors are scoped to workspace and status; no transcripts or participant identities are returned.", inputSchema: { ...researchScope, status: z.enum(["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]).optional(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(1_024).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listResearchStudiesTool)
+    register("get_research_study", { title: "Get Research Study", description: "Get study settings, guide and session count only. Does not return participant credentials, transcripts, identities or private storage paths.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, getResearchStudyTool)
+    register("update_research_study", { title: "Update Research Study", description: "Update study settings. After any session starts, only the name changes; protocol fields remain locked. Archived studies cannot be edited.", inputSchema: { ...researchStudy, ...researchFields, goal: researchFields.goal.optional(), guide: researchGuide.optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, updateResearchStudyTool)
+    register("activate_research_study", { title: "Activate Research Study", description: "Activate a draft or closed study and return a fresh participant link once. Cannot reactivate an archived study.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, activateResearchStudyTool)
+    register("close_research_study", { title: "Close Research Study", description: "Close an active study and revoke PRIMARY participant links; retain existing research.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, closeResearchStudyTool)
+    register("archive_research_study", { title: "Archive Research Study", description: "Archive a study and revoke PRIMARY participant links without deleting research.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, archiveResearchStudyTool)
+    register("issue_research_link", { title: "Issue Research Link", description: "Issue an active study's link only if none is live. If a live link already exists, use explicit rotation; plaintext is never recovered.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, issueResearchLinkTool)
+    register("rotate_research_link", { title: "Rotate Research Link", description: "Explicitly revoke an active study's prior PRIMARY links and return a newly generated participant link once.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, rotateResearchLinkTool)
+    register("revoke_research_links", { title: "Revoke Research Links", description: "Revoke an active study's PRIMARY participant links without generating a replacement.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, revokeResearchLinksTool)
+
+    const commentTargetSchema = z.enum(["OBJECTIVE", "KEY_RESULT", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "EXPERIMENT", "ROADMAP_ITEM", "FEEDBACK_ITEM", "TASK", "DOC", "ARTIFACT", "RESEARCH_STUDY", "REVIEW_REQUEST"])
+    register("add_comment", { title: "Add Comment", description: "Adds discussion to a supported Compass object. Comments never constitute a decision or authorization.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), parentId: z.string().uuid().optional(), body: z.string().min(1), authorName: z.string().min(1) }, outputSchema: TOOL_OUTPUT_SCHEMA }, addComment)
+    register("list_comments", { title: "List Comments", description: "Lists shared comments for one supported object.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), status: z.enum(["OPEN", "RESOLVED"]).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listCommentsTool)
+    register("get_comment", { title: "Get Comment", description: "Gets one shared comment by ID.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, getCommentTool)
+    register("update_comment", { title: "Update Comment", description: "Updates discussion text without changing any decision record.", inputSchema: { commentId: z.string().uuid(), body: z.string().min(1) }, outputSchema: TOOL_OUTPUT_SCHEMA }, updateComment)
+    register("delete_comment", { title: "Delete Comment", description: "Deletes a comment and its one-level replies when it is a root.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, deleteCommentTool)
+    register("resolve_comment", { title: "Resolve Comment", description: "Marks a discussion comment resolved.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, resolveComment)
+    register("reopen_comment", { title: "Reopen Comment", description: "Reopens a resolved discussion comment.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, reopenComment)
 
     // ════════════════════════════════════════════════════════════════
     // WORKSPACE
@@ -250,9 +297,7 @@ const _handler = createMcpHandler(
         const prisma = getPrisma()
         // Scope returned workspaces to the caller's memberships (service key
         // sees all). The gate already asserted org membership.
-        const workspaceFilter = isServiceActor(actor)
-          ? {}
-          : { members: { some: { userId: actor.userId! } } }
+        const workspaceFilter = await agentWorkspaceWhere(actor)
         const org = await prisma.organization.findUnique({
           where: { slug: orgSlug },
           select: {
@@ -980,6 +1025,45 @@ const _handler = createMcpHandler(
     )
 
     register(
+      "list_solutions",
+      {
+        title: "List Solutions",
+        description:
+          "Lists solutions across a workspace using factual lifecycle and parent filters. " +
+          "Roadmap presence is returned for deduplication; it does not establish readiness or authorization.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          status: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).optional().describe("Filter by solution lifecycle status"),
+          opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by parent opportunity status"),
+          squadId: z.string().uuid().optional().describe("Filter by the parent opportunity's squad"),
+          hasRoadmapItem: z.boolean().optional().describe("Filter by whether the solution is linked to any roadmap item"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listSolutions,
+    )
+
+    register(
+      "list_assumptions",
+      {
+        title: "List Assumptions",
+        description:
+          "Lists assumptions across a workspace using factual risk, lifecycle, and parent filters. " +
+          "The response reports stable ancestry and experiment counts but makes no evidence-sufficiency judgment.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]).optional().describe("Filter by assumption status"),
+          riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).optional().describe("Filter by recorded risk level"),
+          solutionStatus: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).optional().describe("Filter by parent solution status"),
+          opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by ancestor opportunity status"),
+          squadId: z.string().uuid().optional().describe("Filter by the ancestor opportunity's squad"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listAssumptions,
+    )
+
+    register(
       "create_opportunity",
       {
         title: "Create Opportunity",
@@ -1025,6 +1109,24 @@ const _handler = createMcpHandler(
           },
         )
       }
+    )
+
+    register(
+      "update_opportunity",
+      {
+        title: "Update Opportunity",
+        description: "Partially updates an Opportunity's title and/or description. Use null to clear the description.",
+        inputSchema: z.object({
+          opportunityId: z.string().uuid().describe("UUID of the opportunity"),
+          title: z.string().trim().min(1).max(255).optional().describe("New title for the opportunity"),
+          description: z.string().trim().min(1).nullable().optional().describe("New description, or null to clear it"),
+        }).strict().refine(
+          ({ title, description }) => title !== undefined || description !== undefined,
+          { message: "Provide at least one editable field: title or description." },
+        ),
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      updateOpportunity,
     )
 
     register(
@@ -1337,8 +1439,7 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const item = await prisma.roadmapItem.create({
-          data: {
+        const item = await prisma.roadmapItem.create({ data: {
             workspaceId,
             title: solution.title,
             horizon,
@@ -1347,8 +1448,7 @@ const _handler = createMcpHandler(
             opportunityId: solution.opportunity.id,
             squadId: solution.opportunity.squadId ?? null,
             isPrivate: isPrivate ?? false,
-          },
-        })
+          } })
         return ok(
           `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
             (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
@@ -1379,18 +1479,52 @@ const _handler = createMcpHandler(
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           status: z.enum(["DESIGNING", "RUNNING", "COMPLETE", "KILLED"]).optional().describe("Filter by status"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
+          hasResults: z.boolean().optional().describe("Filter by whether at least one result has been logged"),
+          updatedSince: z.string().datetime().optional().describe("Filter to experiments updated at or after this ISO timestamp"),
+          endBefore: z.string().datetime().optional().describe("Filter to experiments whose recorded end date is before this ISO timestamp"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, status, squadId }) => {
+      async ({ workspaceId, status, squadId, hasResults, updatedSince, endBefore }) => {
         const prisma = getPrisma()
         const experiments = await prisma.experiment.findMany({
-          where: { workspaceId, ...(status ? { status } : {}), ...(squadId ? { squadId } : {}) },
+          where: {
+            workspaceId,
+            ...(status ? { status } : {}),
+            ...(squadId ? { squadId } : {}),
+            ...(hasResults === true ? { results: { some: {} } } : {}),
+            ...(hasResults === false ? { results: { none: {} } } : {}),
+            ...(updatedSince
+              ? {
+                  OR: [
+                    { updatedAt: { gte: new Date(updatedSince) } },
+                    { results: { some: { createdAt: { gte: new Date(updatedSince) } } } },
+                  ],
+                }
+              : {}),
+            ...(endBefore ? { endDate: { lt: new Date(endBefore) } } : {}),
+          },
           include: {
             squad: { select: { name: true } },
-            assumption: { select: { title: true } },
+            assumption: {
+              select: {
+                id: true,
+                title: true,
+                status: true,
+                solution: {
+                  select: {
+                    id: true,
+                    title: true,
+                    status: true,
+                    opportunity: { select: { id: true, title: true, status: true } },
+                  },
+                },
+              },
+            },
+            _count: { select: { results: true } },
+            results: { select: { createdAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 },
           },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
         })
         if (!experiments.length) {
           return fail("No experiments found.")
@@ -1408,6 +1542,15 @@ const _handler = createMcpHandler(
             conclusion: e.conclusion,
             squad: e.squad?.name ?? null,
             assumption: e.assumption?.title ?? null,
+            assumptionId: e.assumptionId,
+            solutionId: e.assumption?.solution.id ?? null,
+            opportunityId: e.assumption?.solution.opportunity.id ?? null,
+            resultCount: e._count.results,
+            latestResultAt: e.results[0]?.createdAt ?? null,
+            startDate: e.startDate,
+            endDate: e.endDate,
+            createdAt: e.createdAt,
+            updatedAt: e.updatedAt,
           })),
           count: experiments.length,
         })
@@ -1600,6 +1743,165 @@ const _handler = createMcpHandler(
     // ════════════════════════════════════════════════════════════════
 
     register(
+      "request_building_investment",
+      {
+        title: "Request Building Investment",
+        description: "Prepares an immutable human-admin review of Building investment in an exact Solution. This does not take the decision.",
+        inputSchema: { solutionId: z.string().uuid().describe("UUID of the Solution") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestBuildingInvestment,
+    )
+
+    register(
+      "reconsider_building_investment",
+      {
+        title: "Reconsider Building Investment",
+        description: "Starts an explicit new decision cycle after a rejected or changes-requested Building investment decision. Approved investments require a separate revocation.",
+        inputSchema: { solutionId: z.string().uuid(), expectedTerminalDecisionId: z.string().uuid(), reason: z.string().min(1) },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      reconsiderBuildingInvestment,
+    )
+
+    register(
+      "request_building_investment_revocation",
+      {
+        title: "Request Building Investment Revocation",
+        description: "Prepares an immutable human-admin correction review for an exact applied Building investment authority.",
+        inputSchema: { solutionId: z.string().uuid(), authorityDecisionId: z.string().uuid() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestBuildingInvestmentRevocation,
+    )
+
+    register(
+      "request_decision",
+      {
+        title: "Request Decision",
+        description: "Creates a tracking-only human decision request linked to a workspace or Compass item. This never changes the linked item.",
+        inputSchema: {
+          workspaceId: z.string().uuid(),
+          subjectType: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"]),
+          subjectId: z.string().uuid(),
+          question: z.string().min(1).max(255),
+          context: z.string().min(1).max(20000).describe("Decision context. Markdown supported."),
+          sources: z.array(z.object({
+            type: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK", "EVIDENCE"]),
+            id: z.string().uuid(),
+          })).max(12).optional().describe("Supporting Compass objects to snapshot and show alongside the primary linked item."),
+          idempotencyKey: z.string().uuid(),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestDecision,
+    )
+
+    register(
+      "list_decisions",
+      {
+        title: "List Decisions",
+        description: "Lists tracking-only decision requests in a workspace, newest first.",
+        inputSchema: {
+          workspaceId: z.string().uuid(),
+          state: z.enum(["PENDING", "DECIDED"]).optional(),
+          subjectType: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"]).optional(),
+          outcome: z.enum(["APPROVE", "REQUEST_CHANGES", "REJECT"]).optional(),
+          reviewerId: z.string().uuid().optional(),
+          query: z.string().max(255).optional(),
+          page: z.number().int().positive().optional(),
+          pageSize: z.number().int().min(1).max(50).optional(),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listDecisions,
+    )
+
+    register(
+      "get_decision",
+      {
+        title: "Get Decision",
+        description: "Reads one tracking-only decision request, its immutable revision history, and live supporting artifacts (separate from frozen evidence).",
+        inputSchema: { workspaceId: z.string().uuid(), requestId: z.string().uuid() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getDecision,
+    )
+
+    register(
+      "request_release_authorization",
+      {
+        title: "Request Release Authorization",
+        description: "Prepares an immutable human review packet for an exact GitHub PR commit and covered Task scope. Approval only writes a durable release dispatch outbox record; it does not invoke release automation.",
+        inputSchema: {
+          workspaceId: z.string().uuid(),
+          provider: z.literal("GITHUB"),
+          repositoryOwner: z.string().min(1),
+          repositoryName: z.string().min(1),
+          pullRequestNumber: z.number().int().positive(),
+          baseRef: z.string().min(1),
+          headSha: z.string().regex(/^[a-f0-9]{40}$/i),
+          targetEnvironment: z.literal("PRODUCTION"),
+          releasePolicyId: z.string().min(1),
+          taskIds: z.array(z.string().uuid()).min(1),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      requestReleaseAuthorization,
+    )
+
+    register(
+      "list_release_runs",
+      {
+        title: "List Release Runs",
+        description:
+          "Lists Compass release-authorization ledger records with exact repository, PR, commit, Task scope, and dispatch state. " +
+          "Merge, deployment, and production-verification evidence must be checked with their external providers.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          state: z.enum(["PREPARING", "READY_FOR_APPROVAL", "DECISION_RECORDING", "DISPATCH_QUEUED", "BLOCKED", "SUPERSEDED", "CANCELLED"]).optional().describe("Filter by Compass release-run ledger state"),
+          taskId: z.string().uuid().optional().describe("Filter to release runs covering this Task"),
+          updatedSince: z.string().datetime().optional().describe("Filter to release runs updated at or after this ISO timestamp"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listReleaseRuns,
+    )
+
+    register(
+      "get_review_request",
+      {
+        title: "Get Review Request",
+        description: "Reads a Compass-native review request, its current immutable revision, options, decision state, and live supporting artifacts for ordinary tracked Decisions.",
+        inputSchema: { requestId: z.string().uuid().describe("UUID of the Review Request") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getReviewRequest,
+    )
+
+    register(
+      "list_review_requests",
+      {
+        title: "List Review Requests",
+        description: "Lists Compass-native review requests in a workspace.",
+        inputSchema: { workspaceId: z.string().uuid(), state: z.enum(["DRAFT", "PENDING", "DECIDED", "SUPERSEDED", "EXPIRED", "CANCELLED"]).optional() },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listReviewRequests,
+    )
+
+    register(
+      "apply_recorded_decision",
+      {
+        title: "Apply Recorded Decision",
+        description: "Idempotently applies a previously recorded human decision and returns its durable receipt. Service actors may apply but cannot take decisions.",
+        inputSchema: { decisionId: z.string().uuid().describe("UUID of the immutable Decision Record") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      applyRecordedDecision,
+    )
+
+    register(
       "list_roadmap_items",
       {
         title: "List Roadmap Items",
@@ -1628,7 +1930,7 @@ const _handler = createMcpHandler(
             squad: { select: { name: true } },
             experiment: { select: { title: true } },
           },
-          orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }],
+          orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
         })
         if (!items.length) {
           return fail("No active roadmap items found.")
@@ -1657,14 +1959,27 @@ const _handler = createMcpHandler(
           items: items.map((i) => ({
             id: i.id,
             title: i.title,
+            description: i.description,
             horizon: i.horizon,
+            status: i.status,
+            sortOrder: i.sortOrder,
             isPrivate: i.isPrivate,
+            opportunityId: i.opportunityId,
             opportunity: i.opportunity?.title ?? null,
+            solutionId: i.solutionId,
             solution: i.solution?.title ?? null,
+            experimentId: i.experimentId,
             experiment: i.experiment?.title ?? null,
+            keyResultId: i.keyResultId,
+            feedbackId: i.feedbackId,
+            squadId: i.squadId,
             squad: i.squad?.name ?? null,
             startDate: i.startDate,
             endDate: i.endDate,
+            nowCommitmentProvenance: i.nowCommitmentProvenance,
+            nowDecisionRecordId: i.nowDecisionRecordId,
+            createdAt: i.createdAt,
+            updatedAt: i.updatedAt,
           })),
           count: items.length,
         })
@@ -1699,13 +2014,11 @@ const _handler = createMcpHandler(
           return fail(`Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`)
         }
         const prisma = getPrisma()
-        const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, title: true, horizon: true, status: true } })
+        const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, workspaceId: true, title: true, horizon: true, status: true } })
         if (!item) {
           return fail(`Roadmap item "${itemId}" not found.`)
         }
-        const updated = await prisma.roadmapItem.update({
-          where: { id: itemId },
-          data: {
+        const updateData = {
             ...(horizon ? { horizon } : {}),
             ...(status ? { status } : {}),
             ...(title ? { title: title.trim() } : {}),
@@ -1714,8 +2027,8 @@ const _handler = createMcpHandler(
             ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
             ...(isPrivate !== undefined ? { isPrivate } : {}),
             updatedAt: new Date(),
-          },
-        })
+        }
+        const updated = await prisma.roadmapItem.update({ where: { id: itemId }, data: updateData })
         return ok(
           `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
             `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
@@ -1740,7 +2053,7 @@ const _handler = createMcpHandler(
       "add_to_roadmap",
       {
         title: "Add to Roadmap",
-        description: "Creates a Roadmap Item in the NOW, NEXT, or LATER horizon. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
+        description: "Creates a Roadmap Item in any ordinary roadmap horizon, including NOW. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Title of the roadmap item"),
@@ -1767,8 +2080,7 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const item = await prisma.roadmapItem.create({
-          data: {
+        const item = await prisma.roadmapItem.create({ data: {
             workspaceId,
             title: title.trim(),
             horizon,
@@ -1781,8 +2093,7 @@ const _handler = createMcpHandler(
             startDate: startDate ? new Date(startDate) : undefined,
             endDate: endDate ? new Date(endDate) : undefined,
             isPrivate: isPrivate ?? false,
-          },
-        })
+          } })
         return ok(
           `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
             (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
@@ -1981,7 +2292,7 @@ const _handler = createMcpHandler(
             await prisma.experiment.update({ where: { id: objectId }, data })
             break
           case "roadmap_item":
-            await prisma.roadmapItem.update({ where: { id: objectId }, data })
+            await prisma.roadmapItem.update({ where: { id: objectId }, data: { ...data, updatedAt: new Date() } })
             break
           case "objective":
             await prisma.objective.update({ where: { id: objectId }, data })
@@ -2019,7 +2330,8 @@ const _handler = createMcpHandler(
           priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional().describe("Priority (default MEDIUM)"),
           squadId: z.string().uuid().optional().describe("Owning squad UUID"),
           parentTaskId: z.string().uuid().optional().describe("Parent task UUID, to create this as a Subtask"),
-          assigneeUserId: z.string().uuid().optional().describe("UUID of the assignee's WorkspaceMember userId"),
+          assigneeUserId: z.string().uuid().nullable().optional().describe("Legacy human assignee; do not combine with assignee"),
+          assignee: taskAssigneeSchema.nullable().optional(),
           ownerName: z.string().optional().describe("Freeform owner name for non-Compass stakeholders"),
           storyPoints: z.number().optional().describe("Story points estimate"),
           dueDate: z.string().optional().describe("Due date, ISO 8601"),
@@ -2056,11 +2368,15 @@ const _handler = createMcpHandler(
           status: z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE", "CANCELLED"]).optional().describe("Filter by status"),
           priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional().describe("Filter by priority"),
           squadId: z.string().uuid().optional().describe("Filter by owning squad"),
-          assigneeUserId: z.string().uuid().optional().describe("Filter by assignee"),
+          assigneeUserId: z.string().uuid().optional().describe("Legacy human assignee filter"),
+          assignee: taskAssigneeSchema.optional(),
+          assignedToMe: z.boolean().optional(),
           parentTaskId: z.string().uuid().nullable().optional().describe("Filter by parent task; pass null for top-level tasks/Epics only"),
           linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM"]).optional().describe("Filter to tasks linked to this object type (pair with linkedId)"),
           linkedId: z.string().uuid().optional().describe("UUID of the linked object (pair with linkedType)"),
           includeSubtasks: z.boolean().optional().describe("Nest subtasks under their parent in the response"),
+          updatedSince: z.string().datetime().optional().describe("Filter to tasks updated at or after this ISO timestamp"),
+          updatedBefore: z.string().datetime().optional().describe("Filter to tasks updated before this ISO timestamp (useful for stale-work scans)"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -2081,6 +2397,7 @@ const _handler = createMcpHandler(
           priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional().describe("New priority"),
           squadId: z.string().uuid().nullable().optional().describe("New owning squad, or null to clear"),
           assigneeUserId: z.string().uuid().nullable().optional().describe("New assignee userId, or null to clear"),
+          assignee: taskAssigneeSchema.nullable().optional(),
           ownerName: z.string().nullable().optional().describe("New freeform owner name, or null to clear"),
           storyPoints: z.number().nullable().optional().describe("New story points, or null to clear"),
           dueDate: z.string().nullable().optional().describe("New due date (ISO 8601), or null to clear"),
@@ -2192,6 +2509,12 @@ const _handler = createMcpHandler(
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           status: feedbackStatusSchema.optional().describe("Filter by status. CLOSED is deprecated but temporarily accepted."),
           limit: z.number().int().min(1).max(100).optional().default(50).describe("Max items to return (default 50)"),
+          updatedSince: z.string().datetime().optional().describe(
+            "Start a stable incremental scan at this ISO timestamp. Use the returned cursor for later pages."
+          ),
+          cursor: z.string().min(1).optional().describe(
+            "Opaque continuation cursor from a prior incremental scan; reuse the same workspace and status filters."
+          ),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -2490,7 +2813,7 @@ const _handler = createMcpHandler(
       inputSchema: { workspaceId: z.string().uuid(), includeArchived: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, listArtifacts)
     register("get_artifact", {
-      title: "Get Artifact", description: "Returns artifact metadata, immutable revision history, and linked Solutions without exposing private storage keys or HTML content.",
+      title: "Get Artifact", description: "Returns artifact metadata, immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content.",
       inputSchema: { artifactId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, getArtifact)
     register("create_artifact", {
@@ -2509,6 +2832,14 @@ const _handler = createMcpHandler(
       title: "Unlink Artifact from Solution", description: "Removes an Artifact-to-Solution link.",
       inputSchema: { artifactId: z.string().uuid(), solutionId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, unlinkArtifact)
+    register("link_artifact_to_decision", {
+      title: "Link Artifact to Decision", description: "Idempotently links an active Artifact to an ordinary tracked Decision in the same workspace as live supporting material, without changing frozen evidence or recorded decisions.",
+      inputSchema: { workspaceId: z.string().uuid(), artifactId: z.string().uuid(), requestId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, linkArtifactDecision)
+    register("unlink_artifact_from_decision", {
+      title: "Unlink Artifact from Decision", description: "Idempotently removes a live Artifact link from an ordinary tracked Decision without modifying its recorded outcome or frozen evidence.",
+      inputSchema: { workspaceId: z.string().uuid(), artifactId: z.string().uuid(), requestId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, unlinkArtifactDecision)
     register("archive_artifact", {
       title: "Archive Artifact", description: "Archives an Artifact while preserving its links and immutable revision history.",
       inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
@@ -2941,6 +3272,8 @@ async function withMcpAuth(req: Request): Promise<Response> {
   return runWithMcpActor({
     userId: auth.userId,
     purpose: auth.purpose,
+    agentId: auth.agentId,
+    credentialId: auth.credentialId,
     scopeWorkspaceId: auth.scopeWorkspaceId,
   }, () => _handler(req))
 }

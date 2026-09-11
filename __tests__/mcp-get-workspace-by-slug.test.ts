@@ -69,7 +69,7 @@ await import("@/app/api/mcp/route")
 function getHandler(name: string): ToolCallback {
   const h = registeredTools[name]
   if (!h) throw new Error(`Tool "${name}" was not registered`)
-  return ((args: Record<string, unknown>) => runWithMcpActor({ userId: null }, () => h(args))) as ToolCallback
+  return ((args: Record<string, unknown>) => runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => h(args))) as ToolCallback
 }
 
 function textOf(result: { content: Array<{ type: string; text: string }> }): string {

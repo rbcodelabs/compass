@@ -34,12 +34,13 @@ import {
   assertScoringModelAccess,
 } from "@/lib/mcp-authz"
 
-const SERVICE = { userId: null }
+const SERVICE = { userId: null, purpose: "SERVICE" as const }
 const USER = { userId: "user-1" }
 const RESEARCH = { userId: "user-1", purpose: "RESEARCH" as const, scopeWorkspaceId: "ws-1" }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
 })
 
 describe("actor context (ALS)", () => {
@@ -63,7 +64,7 @@ describe("assertWorkspaceMember", () => {
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     await expect(assertWorkspaceMember(USER, "ws-1")).resolves.toBeUndefined()
     expect(mockPrisma.workspace.findFirst).toHaveBeenCalledWith({
-      where: { id: "ws-1", members: { some: { userId: "user-1" } } },
+      where: { AND: [{ id: "ws-1" }, { members: { some: { userId: "user-1" } } }] },
       select: { id: true },
     })
   })
@@ -94,6 +95,15 @@ describe("assertWorkspaceAdmin", () => {
 
     mockPrisma.workspaceMember.findFirst.mockResolvedValueOnce(null)
     await expect(assertWorkspaceAdmin(USER, "ws-1")).rejects.toThrow(/not found or access denied/)
+  })
+
+  it("normalizes legacy owner roles and inherits organization admin access", async () => {
+    mockPrisma.workspaceMember.findFirst.mockResolvedValueOnce({ role: "owner" })
+    await expect(assertWorkspaceAdmin(USER, "ws-1")).resolves.toBeUndefined()
+
+    mockPrisma.workspaceMember.findFirst.mockResolvedValueOnce(null)
+    mockPrisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "ADMIN" })
+    await expect(assertWorkspaceAdmin(USER, "ws-1")).resolves.toBeUndefined()
   })
 })
 

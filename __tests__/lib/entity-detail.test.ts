@@ -19,6 +19,8 @@ const models = {
   roadmapItem: { findFirst: vi.fn() },
   task: { findMany: vi.fn() },
   workspaceMember: { findMany: vi.fn() },
+  reviewRequest: { findFirst: vi.fn() },
+  decisionApplication: { findFirst: vi.fn() },
   artifactLink: { findMany: vi.fn() },
   artifact: { findMany: vi.fn() },
   feedbackItem: { findFirst: vi.fn() },
@@ -40,7 +42,7 @@ const ID = "ent-1";
 // scopes it to a workspace (this is the IDOR defense — assert it precisely).
 const CASES: Array<{
   type: EntityType;
-  model: Exclude<keyof typeof models, "task" | "workspaceMember" | "artifact" | "artifactLink">;
+  model: Exclude<keyof typeof models, "task" | "workspaceMember" | "reviewRequest" | "decisionApplication" | "artifact" | "artifactLink">;
   where: Record<string, unknown>;
 }> = [
   { type: "objective", model: "objective", where: { id: ID, cycle: { workspaceId: WS } } },
@@ -65,6 +67,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   models.task.findMany.mockResolvedValue([]);
   models.workspaceMember.findMany.mockResolvedValue([]);
+  models.reviewRequest.findFirst.mockResolvedValue(null);
   models.artifactLink.findMany.mockResolvedValue([]);
   models.artifact.findMany.mockResolvedValue([]);
 });
@@ -107,6 +110,20 @@ describe("getEntityDetail — workspace scoping", () => {
 });
 
 describe("getEntityDetail — return shape", () => {
+  it("only loads linked feedback in the opportunity workspace, newest first with a stable tie break", async () => {
+    models.opportunity.findFirst.mockResolvedValue({ id: ID });
+    await getEntityDetail("opportunity", ID, WS);
+    expect(models.opportunity.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        feedback: {
+          where: { workspaceId: WS },
+          select: { id: true, title: true, type: true, status: true },
+          orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        },
+      }),
+    }));
+  });
+
   it("returns active roadmap delivery tasks and linkable workspace tasks in deterministic delivery order", async () => {
     models.roadmapItem.findFirst.mockResolvedValue({ id: ID, workspaceId: WS });
     models.task.findMany
@@ -137,7 +154,7 @@ describe("getEntityDetail — return shape", () => {
     expect(result).toEqual({
       type: "roadmapItem",
       data: expect.objectContaining({
-        deliveryTasks: [{ id: "blocked", status: "BLOCKED" }],
+        deliveryTasks: [{ id: "blocked", status: "BLOCKED", assignee: null }],
         linkableTasks: [{ id: "candidate", title: "Candidate" }],
         members: [],
       }),

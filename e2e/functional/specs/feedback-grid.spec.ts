@@ -230,7 +230,7 @@ test.describe("Feedback DataGrid", () => {
     await expect(rows(page).first()).toContainText(label(SEED_COUNT - 1));
   });
 
-  test("a status filter narrows the server-side result set and shows in the URL", async ({
+  test("statuses are all selected by default and can narrow to a shareable multi-select subset", async ({
     page,
     base,
   }) => {
@@ -241,8 +241,25 @@ test.describe("Feedback DataGrid", () => {
     await expect(rows(page)).toHaveCount(25);
 
     await page.getByRole("button", { name: "Filters" }).click();
-    await page.getByRole("menuitemradio", { name: "Under review" }).click();
+    for (const label of ["Open", "Under review", "Planned", "In progress", "Completed", "Declined"]) {
+      await expect(page.getByRole("menuitemcheckbox", { name: label, exact: true })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    }
 
+    // Keep OPEN + UNDER_REVIEW by deselecting the other statuses.
+    for (const label of ["Planned", "In progress", "Completed", "Declined"]) {
+      const item = page.getByRole("menuitemcheckbox", { name: label, exact: true });
+      await item.click();
+      await expect(item).toHaveAttribute("aria-checked", "false");
+    }
+
+    await expect(page).toHaveURL(/status=OPEN.*status=UNDER_REVIEW/);
+    await expect(rows(page)).toHaveCount(25);
+
+    // Narrow once more to prove each checkbox independently changes the SQL query.
+    await page.getByRole("menuitemcheckbox", { name: "Open", exact: true }).click();
     await expect(page).toHaveURL(/status=UNDER_REVIEW/);
     await expect(rows(page)).toHaveCount(UNDER_REVIEW_INDEXES.length);
     await expect(page.getByTestId("grid-pagination-summary")).toContainText(

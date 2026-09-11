@@ -1,4 +1,7 @@
 "use client";
+import { Discussion } from "@/components/comments/discussion";
+import { usePanelContext } from "./panel-context";
+import { LinkedFeedback, type LinkedFeedbackItem } from "@/components/discovery/linked-feedback";
 
 import {
   useEntityDetail,
@@ -18,6 +21,7 @@ import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evid
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import { AddSolutionForm } from "@/components/discovery/add-solution-form";
 import { solutionStatusBadge } from "@/lib/solution-status";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 
 type OpportunityData = {
   id: string;
@@ -36,6 +40,7 @@ type OpportunityData = {
   } | null;
   solutions: Array<{ id: string; title: string; status: string }>;
   evidence: EvidenceListItem[];
+  feedback: LinkedFeedbackItem[];
 };
 
 // Matches the actual Opportunity status enum (see lib/entity-mutations.ts /
@@ -46,7 +51,7 @@ const STATUS_MAP: Record<string, { label: string; className: string }> = {
   VALIDATING: { label: "Validating", className: "bg-blue-100 text-blue-700" },
   PRIORITIZED: { label: "Prioritized", className: "bg-indigo-100 text-indigo-700" },
   ACTIVE: { label: "Active", className: "bg-green-100 text-green-700" },
-  ARCHIVED: { label: "Archived", className: "bg-slate-100 text-slate-500" },
+  ARCHIVED: { label: "Archived", className: "bg-surface-inset text-text-subtle" },
 };
 const STATUS_ORDER = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"] as const;
 
@@ -59,6 +64,7 @@ export function OpportunityPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
+  const { openPanel } = usePanelContext();
   const { data, error, mutate, refresh } = useEntityDetail<OpportunityData>(
     "opportunity",
     opportunityId,
@@ -105,6 +111,7 @@ export function OpportunityPanel({
         edit={edit}
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS_MAP }}
       />
+      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} subjectTitle={data.title} />
 
       <EditableText
         value={data.description}
@@ -127,9 +134,13 @@ export function OpportunityPanel({
                 {data.linkedKeyResult.objective.title}
               </p>
             )}
-            <p className="text-sm font-medium leading-snug">
+            <button
+              type="button"
+              onClick={() => openPanel("keyResult", data.linkedKeyResult!.id)}
+              className="text-left text-sm font-medium leading-snug underline underline-offset-2 rounded-sm focus-visible:outline-2 focus-visible:outline-ring break-words"
+            >
               {data.linkedKeyResult.title}
-            </p>
+            </button>
             {krProgress !== null && (
               <div className="flex items-center gap-2 mt-1">
                 <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -149,6 +160,8 @@ export function OpportunityPanel({
           <p className="text-sm text-muted-foreground">No key result linked.</p>
         )}
       </Section>
+
+      <LinkedFeedback feedback={data.feedback} />
 
       <Section label="Solutions" count={data.solutions.length}>
         <div className="flex flex-col gap-2">
@@ -175,6 +188,7 @@ export function OpportunityPanel({
           <EvidenceList evidence={data.evidence} revalidatePathStr={fullPageHref} />
         </div>
       </Section>
+      <Discussion targetType="OPPORTUNITY" targetId={opportunityId} />
     </PanelContainer>
   );
 }

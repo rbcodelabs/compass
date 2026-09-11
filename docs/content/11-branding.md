@@ -12,7 +12,19 @@ Every workspace can customize its accent color, typeface, and logo from **Settin
 
 Workspaces that haven't set any branding render exactly as they always have: the default indigo accent and Jakarta Sans typeface, unchanged.
 
-## What's Themeable
+## Light, Dark, or System Appearance
+
+Open **Settings → Appearance** to choose **Light**, **Dark**, or **System**. System is the default and follows your operating system's appearance, including changes while Compass is open. Light or Dark keeps your chosen appearance regardless of the system setting.
+
+Your choice is saved in this browser on this device and applies across signed-in workspaces. It does not change anyone else's preference. Workspace accent colors and fonts still apply in either appearance. Public marketing, help, and customer portal pages keep their own appearance.
+
+On phones, use the mobile header and bottom navigation to move around your workspace. Appearance controls remain available in Settings.
+
+![Dark appearance on desktop](/screenshots/docs/appearance-desktop.png)
+
+![Dark appearance on mobile](/screenshots/docs/appearance-mobile.png)
+
+## Workspace Branding Options
 
 - **Accent color** — replaces the app's primary indigo across buttons, active navigation states, badges, links, and the logo mark, in both the authenticated app and the public portal.
 - **Font** — replaces the app's default typeface (Plus Jakarta Sans) everywhere body text renders.

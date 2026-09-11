@@ -59,6 +59,7 @@ interface DocEditorProps {
   versions: DocVersionListItem[];
   comments: DocCommentItem[];
   revalidatePathStr: string;
+  decisionAction?: React.ReactNode;
 }
 
 type SaveStatus = "idle" | "saving" | "saved";
@@ -96,7 +97,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, decisionAction }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -341,28 +342,29 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     <div className="flex flex-col h-full">
       {/* Save indicator */}
       <div className="flex justify-end px-8 pt-3 h-7">
-        {saveStatus === "saving" && <span className="text-xs text-slate-400">Saving…</span>}
-        {saveStatus === "saved" && <span className="text-xs text-slate-400">Saved</span>}
+        {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
+        {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
       </div>
 
-      <div className="px-8 pb-2">
+      {/* Icon + title on a single row */}
+      <div className="flex items-center gap-2 px-8 pb-2">
         {/* Icon picker */}
-        <div className="relative mb-2">
+        <div className="relative shrink-0">
           <button
             onClick={() => setShowIconInput((v) => !v)}
-            className="text-3xl leading-none hover:opacity-70 transition-opacity"
+            className="text-2xl leading-none hover:opacity-70 transition-opacity"
             title="Set icon"
           >
             {icon || "📄"}
           </button>
           {showIconInput && (
-            <div className="absolute z-10 mt-1 p-2 bg-white border border-slate-200 rounded-lg shadow-md">
+            <div className="absolute z-10 mt-1 p-2 bg-surface-panel border border-border-default rounded-lg shadow-md">
               <input
                 type="text"
                 autoFocus
                 defaultValue={icon}
                 placeholder="Paste emoji…"
-                className="w-32 text-sm border border-slate-200 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400"
+                className="w-32 text-sm border border-border-default rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleSaveIcon(e.currentTarget.value);
                   if (e.key === "Escape") setShowIconInput(false);
@@ -380,19 +382,16 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           onChange={(e) => setTitle(e.target.value)}
           onBlur={handleSaveTitle}
           placeholder="Untitled"
-          className="w-full text-3xl font-bold text-slate-900 bg-transparent border-none outline-none placeholder:text-slate-300 mb-3"
-        />
-
-        {/* Properties */}
-        <DocProperties
-          docId={doc.id}
-          initialMetadata={(doc.metadata as DocMetadata | null) ?? null}
-          revalidatePathStr={revalidatePathStr}
+          className="flex-1 min-w-0 text-2xl font-bold text-text-primary bg-transparent border-none outline-none placeholder:text-slate-300"
         />
       </div>
 
       {/* Toolbar */}
-      <div className="sticky top-0 z-10 flex items-center gap-0.5 px-8 py-1.5 border-b border-slate-200 bg-white/90 backdrop-blur-sm">
+      <div className="sticky top-0 z-10 flex items-center gap-1 px-4 sm:px-8 py-1.5 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
+        {/* Buttons scroll horizontally on narrow screens instead of wrapping to a
+            second row (which used to eat viewport height) or shrinking to the
+            point of being unreadable/untappable. */}
+        <div className="flex flex-1 min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
           isActive={editor.isActive("bold")}
@@ -407,7 +406,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         >
           <Italic className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-border-default mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
           isActive={editor.isActive("heading", { level: 1 })}
@@ -429,7 +428,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         >
           <Heading3 className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-border-default mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBulletList().run()}
           isActive={editor.isActive("bulletList")}
@@ -451,13 +450,17 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         >
           <Code2 className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-border-default mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
         <ToolbarButton onClick={handleImageButtonClick} title="Add image">
           <ImageIcon className="w-4 h-4" />
         </ToolbarButton>
-        <div className="w-px h-5 bg-border-default mx-1" />
+        </div>
+        {/* Comment/history/version controls stay outside the scroll strip above —
+            their popovers are absolutely positioned and would get clipped by an
+            overflow-x-auto ancestor, so they're pinned here instead of scrolling. */}
+        <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
         {/* Comment on the current selection */}
-        <div className="relative">
+        <div className="relative shrink-0">
           <ToolbarButton
             onClick={handleStartComment}
             disabled={selectionEmpty}
@@ -522,11 +525,11 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             )}
           </span>
         </ToolbarButton>
-        <div className="w-px h-5 bg-border-default mx-1" />
+        <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
         <ToolbarButton onClick={() => setHistoryOpen(true)} title="Version history">
           <History className="w-4 h-4" />
         </ToolbarButton>
-        <div className="relative">
+        <div className="relative shrink-0">
           <ToolbarButton onClick={() => setShowSaveVersionInput((v) => !v)} title="Save named version">
             <BookmarkPlus className="w-4 h-4" />
           </ToolbarButton>
@@ -546,6 +549,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             </div>
           )}
         </div>
+        {decisionAction && <div className="shrink-0 pl-1">{decisionAction}</div>}
       </div>
 
       {/* Hidden file input */}
@@ -559,6 +563,12 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
       {/* Editor */}
       <div className="flex-1 px-8 py-4 overflow-y-auto">
+        {/* Properties — scrolls with the content instead of pinning the viewport */}
+        <DocProperties
+          docId={doc.id}
+          initialMetadata={(doc.metadata as DocMetadata | null) ?? null}
+          revalidatePathStr={revalidatePathStr}
+        />
         <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
       </div>
 
@@ -639,10 +649,10 @@ function ToolbarButton({
       title={title}
       disabled={disabled}
       className={cn(
-        "w-7 h-7 flex items-center justify-center rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
+        "w-7 h-7 shrink-0 flex items-center justify-center rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
         isActive
           ? "bg-indigo-100 text-indigo-700"
-          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          : "text-text-secondary hover:bg-surface-inset hover:text-text-primary"
       )}
     >
       {children}

@@ -4,7 +4,9 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { OpportunityBoard } from "@/components/discovery/opportunity-board";
 import { DiscoveryFilters } from "@/components/discovery/discovery-filters";
-import type { OpportunityStatus, SquadData } from "@/lib/types";
+import { DiscoveryTableView, type DiscoveryTableOpportunity } from "@/components/discovery/discovery-table-view";
+import { DiscoveryViewToggle, type DiscoveryView } from "@/components/discovery/discovery-view-toggle";
+import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { ChevronRight } from "lucide-react";
@@ -17,7 +19,7 @@ export const metadata = {
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string }>;
+  searchParams: Promise<{ squad?: string; view?: string }>;
 };
 
 const ACTIVE_STATUSES: OpportunityStatus[] = [
@@ -32,7 +34,8 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const { squad: squadFilter } = await searchParams;
+  const { squad: squadFilter, view: requestedView } = await searchParams;
+  const view: DiscoveryView = requestedView === "table" ? "table" : "board";
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
@@ -65,6 +68,16 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         sortOrder: true,
         squadId: true,
         _count: { select: { solutions: true, evidence: true } },
+        solutions: {
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            sortOrder: true,
+            _count: { select: { evidence: true, assumptions: true } },
+          },
+        },
       },
     }),
     prisma.opportunity.findMany({
@@ -108,7 +121,15 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
 
   const squadMap = new Map(squads.map((s) => [s.id, s]));
 
-  function toCardData(o: (typeof opportunities)[number]): OpportunityCardData {
+  function toCardData(o: {
+    id: string;
+    title: string;
+    customerSegment: string | null;
+    status: string;
+    sortOrder: number;
+    squadId: string | null;
+    _count: { solutions: number; evidence: number };
+  }): OpportunityCardData {
     return {
       id: o.id,
       title: o.title,
@@ -129,27 +150,56 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     {} as Record<OpportunityStatus, OpportunityCardData[]>
   );
 
+  const tableOpportunities: DiscoveryTableOpportunity[] = ACTIVE_STATUSES.flatMap((status) =>
+    opportunities
+      .filter((opportunity) => opportunity.status === status)
+      .map((opportunity) => ({
+        id: opportunity.id,
+        title: opportunity.title,
+        customerSegment: opportunity.customerSegment,
+        status: opportunity.status as OpportunityStatus,
+        sortOrder: opportunity.sortOrder,
+        squad: opportunity.squadId ? (squadMap.get(opportunity.squadId) ?? null) : null,
+        evidenceCount: opportunity._count.evidence,
+        solutions: opportunity.solutions.map((solution) => ({
+          id: solution.id,
+          title: solution.title,
+          status: solution.status as SolutionStatus,
+          sortOrder: solution.sortOrder,
+          evidenceCount: solution._count.evidence,
+          assumptionCount: solution._count.assumptions,
+        })),
+      }))
+  );
+
   return (
     <WorkspacePage
       title="Discovery"
-      contentClassName="p-0 sm:p-0 md:p-0"
+      contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
       actions={(
         <Suspense>
-          <DiscoveryFilters squads={squads} />
+          <div className="flex items-center gap-2">
+            <DiscoveryViewToggle view={view} />
+            <DiscoveryFilters squads={squads} />
+          </div>
         </Suspense>
       )}
     >
-      <OpportunityBoard
-        key={opportunities.map((o) => o.id).join(",")}
-        opportunitiesByStatus={opportunitiesByStatus}
-        orgSlug={orgSlug}
-        workspaceSlug={workspaceSlug}
-        workspaceId={workspace.id}
-        squads={squads}
-      />
+      {view === "table" ? (
+        <DiscoveryTableView opportunities={tableOpportunities} />
+      ) : (
+        <OpportunityBoard
+          key={opportunities.map((o) => o.id).join(",")}
+          opportunitiesByStatus={opportunitiesByStatus}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          workspaceId={workspace.id}
+          squads={squads}
+        />
+      )}
 
       {archivedOpportunities.length > 0 && (
-        <div className="shrink-0 px-3 pb-3 sm:px-4 sm:pb-4">
+        <div className={view === "board" ? "shrink-0 px-3 pb-3 sm:px-4 sm:pb-4" : "mt-3 shrink-0"}>
           <ArchivedSection
             opportunities={archivedOpportunities.map(toCardData)}
             orgSlug={orgSlug}

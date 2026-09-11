@@ -188,7 +188,7 @@ export function PortalSettingsPanel({
           </div>
 
           {ssoEnabled && (
-            <div className="flex flex-col gap-3 rounded-lg border border-border bg-slate-50 p-3">
+            <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface-app p-3">
               {/* One-time secret reveal */}
               {revealedSecret ? (
                 <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 flex flex-col gap-1.5">
@@ -196,7 +196,7 @@ export function PortalSettingsPanel({
                     Copy this secret now — it will never be shown again.
                   </p>
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 text-xs bg-white border border-emerald-200 rounded px-2 py-1 font-mono break-all">
+                    <code className="flex-1 text-xs bg-surface-panel border border-emerald-200 rounded px-2 py-1 font-mono break-all">
                       {revealedSecret}
                     </code>
                     <Button
@@ -248,16 +248,16 @@ export function PortalSettingsPanel({
 
               {/* Integration reference for the customer's developer */}
               <div className="flex flex-col gap-1 border-t border-border pt-2 text-xs text-muted-foreground">
-                <p className="font-medium text-slate-700">Integration</p>
+                <p className="font-medium text-text-secondary">Integration</p>
                 <p>
                   Your backend signs a short-lived (≤5 minute) HS256 JWT using the secret
                   above with the payload{" "}
-                  <code className="bg-white border border-border rounded px-1 py-0.5">
+                  <code className="bg-surface-panel border border-border rounded px-1 py-0.5">
                     {"{ email, name?, iat, exp }"}
                   </code>
                   , then sends your signed-in user to:
                 </p>
-                <code className="block bg-white border border-border rounded px-2 py-1 break-all">
+                <code className="block bg-surface-panel border border-border rounded px-2 py-1 break-all">
                   {ssoExchangeUrl}
                 </code>
               </div>

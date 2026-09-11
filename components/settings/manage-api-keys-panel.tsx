@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useTransition } from "react"
+import Link from "next/link"
 import { createApiKey, revokeApiKey } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions"
 import { ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -38,14 +39,10 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
         const result = await createApiKey(orgSlug, workspaceSlug, newName.trim())
         setNewKey(result.rawKey)
         setNewName("")
-        // Refresh key list — server action revalidated the path, but since this
-        // is a client component we just refetch by reloading the server-rendered data
-        // The page will re-render with fresh data from the server on next navigation.
-        // For now, add an optimistic stub so the list updates immediately.
         setKeys((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: result.id,
             name: newName.trim(),
             keyPrefix: result.rawKey.slice(4, 12),
             createdAt: new Date(),
@@ -78,6 +75,7 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
 
   return (
     <div className="flex flex-col gap-4">
+      <Link href="/settings/agents" className="text-sm underline">Manage agent identities and keys</Link>
       {/* New key form */}
       <div className="flex gap-2">
         <Input
@@ -107,7 +105,7 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
             Copy this key now — it will never be shown again.
           </p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs bg-white border border-emerald-200 rounded px-2 py-1 font-mono break-all">
+            <code className="flex-1 text-xs bg-surface-panel border border-emerald-200 rounded px-2 py-1 font-mono break-all">
               {newKey}
             </code>
             <Button
@@ -136,24 +134,24 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
       {activeKeys.length > 0 && (
         <div className="rounded-md border border-border overflow-hidden">
           <Table>
-            <TableHeader className="bg-slate-50">
-              <TableRow className="hover:bg-slate-50">
-                <TableHead className="px-3 py-2 text-xs text-slate-500">Name</TableHead>
-                <TableHead className="px-3 py-2 text-xs text-slate-500">Prefix</TableHead>
-                <TableHead className="px-3 py-2 text-xs text-slate-500">Created</TableHead>
-                <TableHead className="px-3 py-2 text-xs text-slate-500">Last used</TableHead>
+            <TableHeader className="bg-surface-app">
+              <TableRow className="hover:bg-surface-app">
+                <TableHead className="px-3 py-2 text-xs text-text-subtle">Name</TableHead>
+                <TableHead className="px-3 py-2 text-xs text-text-subtle">Prefix</TableHead>
+                <TableHead className="px-3 py-2 text-xs text-text-subtle">Created</TableHead>
+                <TableHead className="px-3 py-2 text-xs text-text-subtle">Last used</TableHead>
                 <TableHead className="px-3 py-2"><span className="sr-only">Actions</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {activeKeys.map((k) => (
-                <TableRow key={k.id} className="bg-white">
-                  <TableCell className="px-3 py-2 font-medium text-slate-900">{k.name}</TableCell>
-                  <TableCell className="px-3 py-2 font-mono text-slate-500">cmp_{k.keyPrefix}…</TableCell>
-                  <TableCell className="px-3 py-2 text-slate-500">
+                <TableRow key={k.id} className="bg-surface-panel">
+                  <TableCell className="px-3 py-2 font-medium text-text-primary">{k.name}</TableCell>
+                  <TableCell className="px-3 py-2 font-mono text-text-subtle">cmp_{k.keyPrefix}…</TableCell>
+                  <TableCell className="px-3 py-2 text-text-subtle">
                     {k.createdAt.toLocaleDateString()}
                   </TableCell>
-                  <TableCell className="px-3 py-2 text-slate-500">
+                  <TableCell className="px-3 py-2 text-text-subtle">
                     {k.lastUsedAt ? k.lastUsedAt.toLocaleDateString() : "Never"}
                   </TableCell>
                   <TableCell className="px-3 py-2 text-right">
@@ -194,9 +192,9 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
               <TableBody>
                 {revokedKeys.map((k) => (
                   <TableRow key={k.id} className="bg-muted opacity-60">
-                    <TableCell className="px-3 py-2 font-medium line-through text-slate-500">{k.name}</TableCell>
-                    <TableCell className="px-3 py-2 font-mono text-slate-400">cmp_{k.keyPrefix}…</TableCell>
-                    <TableCell className="px-3 py-2 text-slate-400">
+                    <TableCell className="px-3 py-2 font-medium line-through text-text-subtle">{k.name}</TableCell>
+                    <TableCell className="px-3 py-2 font-mono text-text-subtle">cmp_{k.keyPrefix}…</TableCell>
+                    <TableCell className="px-3 py-2 text-text-subtle">
                       Revoked {k.revokedAt?.toLocaleDateString()}
                     </TableCell>
                   </TableRow>

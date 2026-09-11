@@ -1,19 +1,18 @@
 /**
- * Roadmap "Not yet on the roadmap" functional spec.
+ * Roadmap "Not scheduled" functional spec.
  *
  * Journey:
  *   1. Create a validated Solution via Discovery and a Bug via the public
  *      portal — neither is on the roadmap yet.
- *   2. On the roadmap Board, confirm both appear in the "Not yet on the
- *      roadmap" panel.
- *   3. Drag the Solution card onto the NOW column — confirm it lands there
+ *   2. On the roadmap Board, confirm both appear in the final "Not scheduled"
+ *      Kanban column after Shipped.
+ *   3. Drag the Solution card onto the LATER column — confirm it lands there
  *      and disappears from the unscheduled panel.
  *   4. Use the Bug card's quick-add menu (no drag) to add it to NEXT —
  *      confirm it lands there too.
  *   5. Create a second Solution, switch to Timeline view, confirm it's
- *      listed as unscheduled there too, then drag it onto the Gantt chart
- *      area — confirm the schedule dialog opens, fill in dates, save, and
- *      confirm the item now renders as a bar on the Timeline.
+ *      listed as unscheduled there too, then drop it directly onto a native
+ *      timeline lane and confirm scheduling persists after reload.
  *
  * dnd-kit's PointerSensor needs real mouse movement (not a single jump) to
  * activate past its 8px activation-distance threshold, so drags here are
@@ -21,22 +20,54 @@
  * dragTo (which doesn't reliably trigger pointer-sensor-based DnD).
  */
 import { test, expect } from "../fixtures/index";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
-async function dragTo(page: Page, source: ReturnType<Page["locator"]>, targetBox: { x: number; y: number; width: number; height: number }) {
+async function dragTo(page: Page, source: Locator, target: Locator, scrollContainer?: Locator) {
+  await source.scrollIntoViewIfNeeded();
   const sourceBox = await source.boundingBox();
   if (!sourceBox) throw new Error("drag source has no bounding box");
 
   const startX = sourceBox.x + sourceBox.width / 2;
   const startY = sourceBox.y + sourceBox.height / 2;
-  const endX = targetBox.x + targetBox.width / 2;
-  const endY = targetBox.y + targetBox.height / 2;
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
   // Small initial move past dnd-kit's PointerSensor activation distance (8px).
-  await page.mouse.move(startX + 15, startY + 15, { steps: 5 });
-  await page.mouse.move(endX, endY, { steps: 15 });
+  await page.mouse.move(startX + 15, startY + 15, { steps: 10 });
+
+  // The source and destination can live in distant columns of the horizontally
+  // scrolling board. Hold the pointer at the board edge so dnd-kit's normal
+  // auto-scroll updates its collision geometry as the destination comes into
+  // view; an instant scroll jump leaves dnd-kit aiming at stale column rects.
+  if (scrollContainer) {
+    const scrollBox = await scrollContainer.boundingBox();
+    if (!scrollBox) throw new Error("drag scroll container has no bounding box");
+
+    const edgeY = Math.min(Math.max(startY, scrollBox.y + 16), scrollBox.y + scrollBox.height - 16);
+    await expect
+      .poll(
+        async () => {
+          const box = await target.boundingBox();
+          if (!box) return false;
+          if (box.x >= scrollBox.x && box.x + box.width <= scrollBox.x + scrollBox.width) return true;
+
+          const edgeX = box.x < scrollBox.x ? scrollBox.x + 8 : scrollBox.x + scrollBox.width - 8;
+          await page.mouse.move(edgeX, edgeY, { steps: 5 });
+          return false;
+        },
+        { timeout: 10_000 }
+      )
+      .toBe(true);
+  }
+
+  const targetBox = await target.boundingBox();
+  if (!targetBox) throw new Error("drag target has no bounding box");
+  // Native lanes span the logical canvas, wider than the visible scroll
+  // region. Drop in the visible part rather than outside the browser.
+  const endX = Math.min(targetBox.x + targetBox.width / 2, (page.viewportSize()?.width ?? 1280) - 32);
+  const endY = targetBox.y + targetBox.height / 2;
+
+  await page.mouse.move(endX, endY, { steps: 40 });
   await page.mouse.up();
 }
 
@@ -84,7 +115,7 @@ async function createValidatedSolution(page: Page, base: string, title: string) 
 
 test.describe("Roadmap — not yet on the roadmap", () => {
   test(
-    "drag a solution onto a horizon, quick-add a bug, drag a second solution onto the timeline",
+    "preserves board drag and persists direct timeline placement",
     async ({ page, base, orgSlug, workspaceSlug }) => {
       const ts = Date.now();
       const solTitle = `E2E Board Solution ${ts}`;
@@ -125,12 +156,14 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
 
-      await expect(page.getByText("Not yet on the roadmap")).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByRole("heading", { name: "Not scheduled" })).toBeVisible({ timeout: 10_000 });
+      const boardColumns = page.locator('[data-slot="roadmap-board-track"] > *');
+      await expect(boardColumns.last()).toHaveAttribute("data-testid", "roadmap-unscheduled-column");
       // Scoped to the panel specifically — dnd-kit's DragOverlay renders a
       // second (briefly-persisting, drop-animating) clone of the dragged
       // card elsewhere in the DOM, which would otherwise make these
       // locators ambiguous right after a drop.
-      const unscheduledPanel = page.locator("#unscheduled-items-panel");
+      const unscheduledPanel = page.getByTestId("roadmap-unscheduled-column");
       const solutionUnscheduledCard = unscheduledPanel
         .locator('[data-slot="card"]')
         .filter({ hasText: solTitle });
@@ -138,18 +171,17 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await expect(solutionUnscheduledCard).toBeVisible();
       await expect(bugUnscheduledCard).toBeVisible();
 
-      // ── 3. Drag the solution onto the NOW column ────────────────────────────
+      // ── 3. Drag the solution onto LATER ──────────────────────────────────
       const dragHandle = solutionUnscheduledCard.getByLabel("Drag to schedule");
-      const nowColumnBox = await page.locator("#roadmap-column-NOW").boundingBox();
-      if (!nowColumnBox) throw new Error("NOW column not found");
-      await dragTo(page, dragHandle, nowColumnBox);
+      const laterColumn = page.locator("#roadmap-column-LATER");
+      const roadmapBoard = page.getByRole("region", { name: "Roadmap board" });
+      await dragTo(page, dragHandle, laterColumn, roadmapBoard);
 
       await expect(solutionUnscheduledCard).not.toBeVisible({ timeout: 10_000 });
-      const nowColumn = page.locator("#roadmap-column-NOW");
       // .first() — the promoted item's own title AND its "Solution" link
       // chip both show the same solution title, so this text appears twice
       // on the card; either occurrence confirms it landed here.
-      await expect(nowColumn.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
+      await expect(laterColumn.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
 
       // ── 4. Quick-add the bug to NEXT via its card menu (no drag) ────────────
       await bugUnscheduledCard.hover();
@@ -160,37 +192,39 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       const nextColumn = page.locator("#roadmap-column-NEXT");
       await expect(nextColumn.getByText(bugTitle)).toBeVisible({ timeout: 10_000 });
 
-      // ── 5. Timeline: drag the second solution onto the chart, schedule it ──
+      // ── 5. Timeline: drop the second solution and submit its schedule ──────
+      await page.setViewportSize({ width: 1440, height: 1600 });
       await page.getByRole("tab", { name: "Timeline" }).click();
       await expect(page).toHaveURL(/view=timeline/);
       await page.waitForLoadState("networkidle");
 
-      const sol2UnscheduledCard = unscheduledPanel.locator('[data-slot="card"]').filter({ hasText: sol2Title });
+      const timelineUnscheduledPanel = page.locator("#unscheduled-items-panel");
+      const sol2UnscheduledCard = timelineUnscheduledPanel
+        .locator('[data-slot="card"]')
+        .filter({ hasText: sol2Title });
       await expect(sol2UnscheduledCard).toBeVisible({ timeout: 10_000 });
 
-      const dropZoneBox = await page.locator("#gantt-drop-zone").boundingBox();
-      if (!dropZoneBox) throw new Error("Gantt drop zone not found");
-      await dragTo(page, sol2UnscheduledCard.getByLabel("Drag to schedule"), dropZoneBox);
+      const dropZone = page.getByTestId("timeline-drop-lane:NEXT:unassigned");
+      await dragTo(page, sol2UnscheduledCard.getByLabel("Drag to schedule"), dropZone);
 
-      const dialog = page.getByRole("dialog");
-      await expect(dialog.getByRole("heading", { name: "Schedule on the roadmap" })).toBeVisible({
-        timeout: 10_000,
-      });
-      // The unscheduled panel still shows the card behind the dialog at this
-      // point (it's only removed from state once scheduling succeeds), so
-      // scope to the dialog to avoid matching both.
-      await expect(dialog.getByText(sol2Title)).toBeVisible();
-      // Dates are pre-filled with sensible defaults (today -> +14 days); just submit.
-      await dialog.getByRole("button", { name: "Schedule" }).click();
-
-      await expect(page.getByRole("heading", { name: "Schedule on the roadmap" })).not.toBeVisible({
-        timeout: 10_000,
-      });
-      await expect(sol2UnscheduledCard).not.toBeVisible({ timeout: 10_000 });
-      // The Gantt library renders the task name in both its own grid table
-      // and our custom bar template, so scope to .first() to avoid a
-      // strict-mode violation — either occurrence confirms it rendered.
-      await expect(page.getByText(sol2Title).first()).toBeVisible({ timeout: 10_000 });
+      // Wait for acknowledged removal, not merely an offscreen drag source,
+      // before reloading the route and verifying persistence.
+      await expect(sol2UnscheduledCard).toHaveCount(0, { timeout: 10_000 });
+      await Promise.all([
+        page.waitForEvent("load"),
+        page.getByRole("button", { name: "Reload timeline" }).click(),
+      ]);
+      const persistedBar = page.locator('[data-testid^="timeline-item-"][data-start]').filter({ hasText: sol2Title });
+      await expect(persistedBar).toHaveAttribute("data-start", /^\d{4}-\d{2}-\d{2}$/);
+      await expect(persistedBar).toHaveAttribute("data-end", /^\d{4}-\d{2}-\d{2}$/);
+      await expect(sol2UnscheduledCard).toHaveCount(0);
+      await page.getByRole("tab", { name: "Board" }).click();
+      await expect(page.getByRole("tab", { name: "Board" })).toHaveAttribute("aria-selected", "true");
+      const scheduledCard = page.locator('[data-slot="card"]').filter({ hasText: sol2Title });
+      await expect(scheduledCard.getByText(sol2Title).first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByTestId("roadmap-unscheduled-column")).toContainText(
+        "No items waiting to be scheduled."
+      );
     }
   );
 });
