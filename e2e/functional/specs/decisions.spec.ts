@@ -43,6 +43,35 @@ test.describe("Decisions", () => {
     await expect(page.getByRole("dialog")).toContainText(`Visitors recognize the product ${suffix}`)
   })
 
+  test("keeps the compressed header legible on a phone viewport", async ({ page, base }) => {
+    // WorkspacePage's header is a single non-wrapping row, and the title is
+    // `min-w-0 truncate` — so it yields silently rather than overflowing.
+    // Every control in `actions` must therefore stay compact on small
+    // viewports. A wide inline search box, or a fourth always-labelled
+    // button, squeezes "Decisions" down to a couple of characters; that
+    // regression has happened twice, hence this guard.
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(`${base}/decisions`)
+
+    const heading = page.getByRole("heading", { name: "Decisions", exact: true })
+    await expect(heading).toBeVisible()
+    const headingBox = await heading.boundingBox()
+    expect(headingBox!.width).toBeGreaterThan(60)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+    // The controls stay reachable at this width, collapsed to triggers.
+    await expect(page.getByRole("button", { name: "Search decisions" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Filters" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "New decision" })).toBeVisible()
+
+    // Search still works once opened, and round-trips through the URL so a
+    // filtered view stays a shareable link.
+    await page.getByRole("button", { name: "Search decisions" }).click()
+    await page.getByRole("searchbox", { name: "Search decisions" }).fill("nothing matches this")
+    await expect(page).toHaveURL(/q=nothing\+matches\+this/)
+    await expect(page.getByText("No pending decisions")).toBeVisible()
+  })
+
   test("request → request changes → revise → approve", async ({ page, base }) => {
     const question = `Should we ship the simple decision flow? ${Date.now()}`
     await page.goto(`${base}/decisions`)
