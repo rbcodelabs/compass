@@ -345,12 +345,13 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         {saveStatus === "saved" && <span className="text-xs text-slate-400">Saved</span>}
       </div>
 
-      <div className="px-8 pb-2">
+      {/* Icon + title on a single row */}
+      <div className="flex items-center gap-2 px-8 pb-2">
         {/* Icon picker */}
-        <div className="relative mb-2">
+        <div className="relative shrink-0">
           <button
             onClick={() => setShowIconInput((v) => !v)}
-            className="text-3xl leading-none hover:opacity-70 transition-opacity"
+            className="text-2xl leading-none hover:opacity-70 transition-opacity"
             title="Set icon"
           >
             {icon || "📄"}
@@ -380,14 +381,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           onChange={(e) => setTitle(e.target.value)}
           onBlur={handleSaveTitle}
           placeholder="Untitled"
-          className="w-full text-3xl font-bold text-slate-900 bg-transparent border-none outline-none placeholder:text-slate-300 mb-3"
-        />
-
-        {/* Properties */}
-        <DocProperties
-          docId={doc.id}
-          initialMetadata={(doc.metadata as DocMetadata | null) ?? null}
-          revalidatePathStr={revalidatePathStr}
+          className="flex-1 min-w-0 text-2xl font-bold text-slate-900 bg-transparent border-none outline-none placeholder:text-slate-300"
         />
       </div>
 
@@ -559,6 +553,12 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
       {/* Editor */}
       <div className="flex-1 px-8 py-4 overflow-y-auto">
+        {/* Properties — scrolls with the content instead of pinning the viewport */}
+        <DocProperties
+          docId={doc.id}
+          initialMetadata={(doc.metadata as DocMetadata | null) ?? null}
+          revalidatePathStr={revalidatePathStr}
+        />
         <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
       </div>
 
