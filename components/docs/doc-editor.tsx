@@ -59,6 +59,7 @@ interface DocEditorProps {
   versions: DocVersionListItem[];
   comments: DocCommentItem[];
   revalidatePathStr: string;
+  decisionAction?: React.ReactNode;
 }
 
 type SaveStatus = "idle" | "saving" | "saved";
@@ -96,7 +97,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, decisionAction }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -341,8 +342,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     <div className="flex flex-col h-full">
       {/* Save indicator */}
       <div className="flex justify-end px-8 pt-3 h-7">
-        {saveStatus === "saving" && <span className="text-xs text-slate-400">Saving…</span>}
-        {saveStatus === "saved" && <span className="text-xs text-slate-400">Saved</span>}
+        {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
+        {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
       </div>
 
       {/* Icon + title on a single row */}
@@ -357,13 +358,13 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             {icon || "📄"}
           </button>
           {showIconInput && (
-            <div className="absolute z-10 mt-1 p-2 bg-white border border-slate-200 rounded-lg shadow-md">
+            <div className="absolute z-10 mt-1 p-2 bg-surface-panel border border-border-default rounded-lg shadow-md">
               <input
                 type="text"
                 autoFocus
                 defaultValue={icon}
                 placeholder="Paste emoji…"
-                className="w-32 text-sm border border-slate-200 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400"
+                className="w-32 text-sm border border-border-default rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleSaveIcon(e.currentTarget.value);
                   if (e.key === "Escape") setShowIconInput(false);
@@ -381,12 +382,12 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           onChange={(e) => setTitle(e.target.value)}
           onBlur={handleSaveTitle}
           placeholder="Untitled"
-          className="flex-1 min-w-0 text-2xl font-bold text-slate-900 bg-transparent border-none outline-none placeholder:text-slate-300"
+          className="flex-1 min-w-0 text-2xl font-bold text-text-primary bg-transparent border-none outline-none placeholder:text-slate-300"
         />
       </div>
 
       {/* Toolbar */}
-      <div className="sticky top-0 z-10 flex items-center gap-0.5 px-8 py-1.5 border-b border-slate-200 bg-white/90 backdrop-blur-sm">
+      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-0.5 px-4 sm:px-8 py-1.5 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
           isActive={editor.isActive("bold")}
@@ -540,6 +541,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             </div>
           )}
         </div>
+        {decisionAction && <div className="ml-auto flex w-full justify-end pt-1 sm:w-auto sm:pt-0">{decisionAction}</div>}
       </div>
 
       {/* Hidden file input */}
@@ -642,7 +644,7 @@ function ToolbarButton({
         "w-7 h-7 flex items-center justify-center rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
         isActive
           ? "bg-indigo-100 text-indigo-700"
-          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          : "text-text-secondary hover:bg-surface-inset hover:text-text-primary"
       )}
     >
       {children}

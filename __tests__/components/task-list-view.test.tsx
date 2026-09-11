@@ -40,6 +40,18 @@ function renderList(tasks: TaskCardData[]) {
 describe("TaskListView hierarchy", () => {
   afterEach(() => cleanup());
 
+  it("shows an unavailable agent instead of the external owner label", () => {
+    renderList([task({ id: "assigned", title: "Assigned", ownerName: "External stakeholder", assigneeAgentId: "agent", assignee: { type: "AGENT", id: "agent", displayName: "Engineer", available: false } })]);
+    expect(screen.getByText("Agent: Engineer (unavailable)")).toBeVisible();
+    expect(screen.queryByText("External stakeholder")).not.toBeInTheDocument();
+  });
+
+  it("does not mislabel a departed human as the external owner", () => {
+    renderList([task({ id: "assigned", title: "Assigned", ownerName: "External stakeholder", assigneeUserId: "departed" })]);
+    expect(screen.getByText("Unavailable assignee")).toBeVisible();
+    expect(screen.queryByText("External stakeholder")).not.toBeInTheDocument();
+  });
+
   it("renders every task in a partial forest whose shared parent is absent", () => {
     renderList([
       task({ id: "child-4", title: "Fourth child", parentTaskId: "missing-parent", sortOrder: 4 }),

@@ -20,7 +20,7 @@ import { describe, it, expect } from "vitest"
 import { computeDepsFingerprint } from "@/lib/agent-sandbox"
 
 const EXPECTED_DEPS_FINGERPRINT =
-  "9354174ad461f97ace1d8922c68b290d05d6701cb790306b0a511bc91fbb6421"
+  "d90ecb7be01726222dbffd302749e13e781643a34f894dc14753f6318206a931"
 
 describe("sandbox deps fingerprint drift guard", () => {
   it("matches the pinned fingerprint (update + rebuild the snapshot if this fails)", () => {

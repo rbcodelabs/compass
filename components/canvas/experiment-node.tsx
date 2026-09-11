@@ -27,7 +27,7 @@ function ExperimentNodeComponent({ data }: NodeProps<ExperimentNodeType>) {
   const conclusionBadge = data.conclusion ? CONCLUSION_BADGE[data.conclusion] : null;
 
   return (
-    <div className="flex w-72 flex-col gap-2 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 shadow-sm">
+    <div className="flex w-72 flex-col gap-2 rounded-xl border border-status-success/20 bg-status-success-surface p-3 shadow-sm">
       <Handle type="target" position={Position.Left} className="opacity-0" />
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2 min-w-0">
@@ -39,7 +39,7 @@ function ExperimentNodeComponent({ data }: NodeProps<ExperimentNodeType>) {
               title={data.squad.name}
             />
           )}
-          <h3 className="text-xs font-medium text-slate-800 leading-snug truncate min-w-0 flex-1" title={data.title}>
+          <h3 className="text-xs font-medium text-text-primary leading-snug truncate min-w-0 flex-1" title={data.title}>
             {data.title}
           </h3>
         </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildResearchAgentTurnPrompt, buildResearchPrompt, createResearchToken, hashResearchToken, normalizeResearchAppUrl, parseResearchGuide } from "@/lib/research"
+import { buildResearchAgentTurnPrompt, buildResearchPrompt, createResearchToken, deserializeResearchGuide, hashResearchToken, normalizeResearchAppUrl, parseResearchGuide } from "@/lib/research"
 
 describe("research capture helpers", () => {
   it("creates an opaque token and stores only its SHA-256 hash", () => {
@@ -23,6 +23,10 @@ describe("research capture helpers", () => {
       { id: "1", text: "First question" },
       { id: "2", text: "Second question" },
     ])
+  })
+
+  it("returns an empty guide instead of crashing on corrupt stored JSON", () => {
+    expect(deserializeResearchGuide("[{broken")).toEqual([])
   })
 
   it("builds a neutral one-question-at-a-time interview prompt", () => {
@@ -85,6 +89,10 @@ describe("research capture helpers", () => {
     expect(prompt).toContain("Present exactly one task at a time")
     expect(prompt).toContain("Never identify, name, point to, or recommend a UI control")
     expect(prompt).toContain("https://example.com/app")
+    expect(prompt).toContain("whether they completed the task")
+    expect(prompt).toContain("invite a screenshot")
+    expect(prompt).toContain("What happened right before")
+    expect(prompt).toContain("Why did that matter")
     expect(prompt).not.toContain("Helio")
   })
 })

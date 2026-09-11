@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ExternalLinkIcon, ChevronRightIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { MarkdownContent } from "@/components/markdown-content";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -169,7 +170,7 @@ export function PanelTitle({
         />
       ) : (
         status && (
-          <Badge className={status.className ?? "bg-slate-100 text-slate-700"}>
+          <Badge className={status.className ?? "bg-surface-inset text-text-secondary"}>
             {status.label}
           </Badge>
         )
@@ -269,7 +270,7 @@ export function RelationList({
         >
           {item.badge && (
             <Badge
-              className={`${item.badge.className ?? "bg-slate-100 text-slate-600"} shrink-0 text-xs`}
+              className={`${item.badge.className ?? "bg-surface-inset text-text-secondary"} shrink-0 text-xs`}
             >
               {item.badge.label}
             </Badge>
@@ -371,6 +372,12 @@ export function EditableText({
   }
 
   const isEmpty = !value || value.trim().length === 0;
+  if (multiline) return (
+    <div className={`group/edit relative min-w-0 rounded-md -mx-1 px-1 pr-9 ${saving ? "opacity-60" : ""} ${className ?? ""}`}>
+      {isEmpty ? <span className="text-sm text-muted-foreground italic">{placeholder ?? "Add…"}</span> : <MarkdownContent>{value}</MarkdownContent>}
+      <button type="button" onClick={begin} disabled={saving} aria-label={`Edit ${field}`} className="absolute right-1 top-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">Edit</button>
+    </div>
+  );
   return (
     <button
       type="button"
@@ -439,7 +446,7 @@ export function StatusSelect({
     <Select value={value} onValueChange={onChange} disabled={saving}>
       <SelectTrigger
         size="sm"
-        className={`w-fit border-0 ${map[value]?.className ?? "bg-slate-100 text-slate-700"}`}
+        className={`w-fit border-0 ${map[value]?.className ?? "bg-surface-inset text-text-secondary"}`}
       >
         <span className="text-xs font-medium">{map[value]?.label ?? value}</span>
       </SelectTrigger>

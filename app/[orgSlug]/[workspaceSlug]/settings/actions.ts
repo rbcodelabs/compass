@@ -12,6 +12,9 @@ import { encrypt } from "@/lib/crypto-secrets";
 import { generateSsoSecret } from "@/lib/portal-sso";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
+import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
+import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
+import { revokeMemberAgentGrants, deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
 import type {
   CustomFieldType,
   CustomFieldObjectType,
@@ -72,7 +75,7 @@ export async function deleteSquad(
   await prisma.objective.updateMany({ where: { squadId }, data: { squadId: null } });
   await prisma.opportunity.updateMany({ where: { squadId }, data: { squadId: null } });
   await prisma.experiment.updateMany({ where: { squadId }, data: { squadId: null } });
-  await prisma.roadmapItem.updateMany({ where: { squadId }, data: { squadId: null } });
+  await prisma.roadmapItem.updateMany({ where: { squadId }, data: { squadId: null, updatedAt: new Date() } });
 
   await prisma.squad.delete({ where: { id: squadId } });
 
@@ -97,7 +100,7 @@ export async function assignSquad(
   } else if (objectType === "experiment") {
     await prisma.experiment.update({ where: { id: objectId }, data: { squadId } });
   } else if (objectType === "roadmapItem") {
-    await prisma.roadmapItem.update({ where: { id: objectId }, data: { squadId } });
+    await prisma.roadmapItem.update({ where: { id: objectId }, data: { squadId, updatedAt: new Date() } });
   } else if (objectType === "task") {
     await prisma.task.update({ where: { id: objectId }, data: { squadId, updatedAt: new Date() } });
   }
@@ -239,7 +242,16 @@ export async function removeWorkspaceMember(
     }
   }
 
-  await prisma.workspaceMember.delete({ where: { id: memberId } });
+  await prisma.$transaction(async (tx) => {
+    // Lock before reading grants: PostgreSQL READ COMMITTED must see grants
+    // committed by an earlier holder of this row lock before revoking them.
+    // DSQL also detects the shared write as a grant/removal conflict.
+    // A stale role must not overwrite a concurrent promotion or demotion.
+    const locked = await tx.workspaceMember.updateMany({ where: { id: memberId, role: member.role }, data: { role: member.role } });
+    if (locked.count !== 1) throw new Error("Membership changed; retry the operation");
+    await revokeMemberAgentGrants(tx, workspaceId, member.userId);
+    await tx.workspaceMember.delete({ where: { id: memberId } });
+  });
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }
@@ -378,7 +390,7 @@ export async function createApiKey(
   const keyPrefix = randomHex.slice(0, 8);
   const keyHash = createHash("sha256").update(rawKey).digest("hex");
 
-  await prisma.apiKey.create({
+  const createdKey = await prisma.apiKey.create({
     data: {
       userId: session.user.id,
       name,
@@ -389,7 +401,7 @@ export async function createApiKey(
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
   // Return the raw key — shown ONCE to the user, never stored
-  return { rawKey };
+  return { id: createdKey.id, rawKey };
 }
 
 export async function revokeApiKey(
@@ -445,6 +457,10 @@ export async function deleteWorkspace(
 
   const workspaceId = workspace.id;
   const organizationId = workspace.organizationId;
+
+  // Decision/release/capacity aggregates reference Tasks and RoadmapItems.
+  // DSQL has no FK cascades, so clear the full child graph first.
+  await deleteWorkspaceDecisionData(prisma, workspaceId);
 
   // ── Step 1: Break the Objective <-> KeyResult circular reference ────────────
   // Objective.parentKeyResultId references KeyResult; null it before deleting KRs.
@@ -587,6 +603,8 @@ export async function deleteWorkspace(
 
   // ── Step 15: Delete Artifacts and private blobs ─────────────────────────────
   await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
+  await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
+  await deleteWorkspaceAgentData(prisma, workspaceId);
 
   // ── Step 16: Delete WorkspaceMembers ────────────────────────────────────────
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });

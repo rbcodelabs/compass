@@ -1,0 +1,485 @@
+import pg from "pg";
+import { test, expect } from "../fixtures/index";
+import { assertIsolatedE2EDatabase, isolatedE2EConnectionString } from "../fixtures/isolated-database";
+import type { Locator, Page } from "@playwright/test";
+
+const nativeId = "daf2cdb6-0c38-4c29-bc2b-090bfa391532";
+const nativeBase = "/e2e-test-org/native-dogfood";
+const start = new Date().toISOString().slice(0, 8) + "01";
+const end = new Date().toISOString().slice(0, 8) + "28";
+
+function shiftDate(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+async function targetBounds(target: Locator) {
+  const bounds = await target.boundingBox();
+  expect(bounds).not.toBeNull();
+  return bounds!;
+}
+
+async function scrollToFixtureMonth(page: Page) {
+  const month = new Date(`${start}T12:00:00Z`);
+  const viewportStart = new Date(month);
+  viewportStart.setUTCMonth(viewportStart.getUTCMonth() - 2);
+  const offset = (month.getTime() - viewportStart.getTime()) / 86_400_000 * 12;
+  // The virtualized chart initially starts two months before today. Scroll
+  // the real date region before querying cards outside its render window.
+  await page.getByTestId("native-timeline-scroll").evaluate((element, left) => { element.scrollLeft = left; }, offset);
+}
+
+test.describe("Native timeline default", () => {
+  test.beforeAll(async () => {
+    // A separate fixture workspace proves native does not depend on a dogfood
+    // identity. Global teardown owns this sentinel-protected local fixture.
+    await assertIsolatedE2EDatabase();
+    const pool = new pg.Client({ connectionString: isolatedE2EConnectionString() });
+    await pool.connect();
+    try {
+      await pool.query("BEGIN");
+      const existing = await pool.query(`SELECT w.id FROM compass_dev.workspaces w
+        JOIN compass_dev.organizations o ON o.id = w.organization_id
+        WHERE w.id = $1 AND w.slug = 'native-dogfood' AND o.slug = 'e2e-test-org'`, [nativeId]);
+      if (existing.rowCount) {
+        await pool.query("COMMIT");
+        return; // A failed test restarts its worker, not the owned fixture.
+      }
+      await pool.query(`INSERT INTO compass_dev.workspaces
+        (id, organization_id, slug, name, roadmap_public, feedback_enabled, created_at, updated_at)
+        SELECT $1, id, 'native-dogfood', 'Native timeline dogfood', false, false, NOW(), NOW()
+        FROM compass_dev.organizations WHERE slug = 'e2e-test-org'`, [nativeId]);
+      await pool.query(`INSERT INTO compass_dev.workspace_members (id, workspace_id, user_id, role, created_at)
+        SELECT gen_random_uuid(), $1, id, 'ADMIN', NOW() FROM compass_dev.users WHERE email = 'dev@localhost.dev'`, [nativeId]);
+      for (const name of ["Alpha", "Beta"]) {
+        const { rows: [squad] } = await pool.query(`INSERT INTO compass_dev.squads (id, workspace_id, name, color, created_at)
+          VALUES (gen_random_uuid(), $1, $2, '#6366f1', NOW()) RETURNING id`, [nativeId, name]);
+        await pool.query(`INSERT INTO compass_dev.roadmap_items
+          (id, workspace_id, squad_id, title, horizon, status, sort_order, start_date, end_date, created_at, updated_at)
+          VALUES (gen_random_uuid(), $1, $2, $3, 'NEXT', 'ACTIVE', 0, $4, $5, NOW(), NOW())`, [nativeId, squad.id, `${name} delivery`, start, end]);
+      }
+      await pool.query(`INSERT INTO compass_dev.feedback (id, workspace_id, title, type, status, vote_count, created_at, updated_at)
+        VALUES (gen_random_uuid(), $1, 'Native backlog bug', 'BUG', 'OPEN', 0, NOW(), NOW())`, [nativeId]);
+      await pool.query("COMMIT");
+    } catch (error) {
+      await pool.query("ROLLBACK");
+      throw error;
+    } finally { await pool.end(); }
+  });
+
+  test("legacy partial and reversed schedules render without silent persistence and allow explicit repair", async ({ page }, testInfo) => {
+    await assertIsolatedE2EDatabase();
+    const pool = new pg.Client({ connectionString: isolatedE2EConnectionString() });
+    await pool.connect();
+    const ids: string[] = [];
+    try {
+      const cases = [
+        { title: "Legacy past end only", start: null, end: "2000-01-01" },
+        { title: "Legacy future start only", start: "2099-01-01", end: null },
+        { title: "Legacy reversed dates", start: "2026-10-10", end: "2026-10-01" },
+      ];
+      for (const item of cases) {
+        const { rows: [created] } = await pool.query(`INSERT INTO compass_dev.roadmap_items
+          (id, workspace_id, title, horizon, status, sort_order, start_date, end_date, created_at, updated_at)
+          VALUES (gen_random_uuid(), $1, $2, 'NEXT', 'ACTIVE', 0, $3, $4, NOW(), NOW()) RETURNING id`, [nativeId, item.title, item.start, item.end]);
+        ids.push(created.id);
+      }
+      const readSchedules = () => pool.query(`SELECT id, start_date::text, end_date::text, updated_at::text
+        FROM compass_dev.roadmap_items WHERE workspace_id = $1 AND id = ANY($2::uuid[]) ORDER BY id`, [nativeId, ids]);
+      const before = (await readSchedules()).rows;
+      await page.goto(`${nativeBase}/roadmap?view=timeline`);
+      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      await scrollToFixtureMonth(page);
+      for (const item of cases) {
+        await page.getByRole("button", { name: `Edit dates for ${item.title}`, exact: true }).click();
+        const dialog = page.getByRole("dialog");
+        const shownStart = await dialog.getByLabel("Start", { exact: true }).inputValue();
+        const shownEnd = await dialog.getByLabel("End", { exact: true }).inputValue();
+        expect(shownEnd).toBe(shiftDate(shownStart, 13));
+        await page.keyboard.press("Escape");
+      }
+      await page.reload();
+      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      expect((await readSchedules()).rows).toEqual(before);
+      await scrollToFixtureMonth(page);
+      await page.screenshot({ path: testInfo.outputPath("legacy-schedule-recovery.png"), fullPage: true, style: "nextjs-portal { display: none }" });
+      await page.getByRole("button", { name: "Edit dates for Legacy past end only", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("Start", { exact: true }).fill(start);
+      await dialog.getByLabel("End", { exact: true }).fill(end);
+      await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
+      await expect(dialog).not.toBeVisible();
+      await page.reload();
+      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      const { rows: [repaired] } = await pool.query(`SELECT start_date::date::text AS start, end_date::date::text AS end
+        FROM compass_dev.roadmap_items WHERE workspace_id = $1 AND id = $2`, [nativeId, ids[0]]);
+      expect(repaired).toEqual({ start, end });
+    } finally {
+      // Only this test's inserted rows; the normal suite retains its own fixtures.
+      await pool.query("DELETE FROM compass_dev.roadmap_items WHERE workspace_id = $1 AND id = ANY($2::uuid[])", [nativeId, ids]);
+      await pool.end();
+    }
+  });
+
+  test("compact header supports keyboard options and focus tooltips", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${nativeBase}/roadmap?view=timeline`);
+    const header = page.locator('[data-slot="workspace-header"]');
+    await expect(header.getByRole("heading", { name: "Roadmap" })).toBeVisible();
+    for (const name of ["Previous period", "Go to today", "Next period", "View options", "Reload timeline"]) {
+      const button = header.getByRole("button", { name, exact: true });
+      await button.focus();
+      const tooltip = page.getByRole("tooltip", { name, exact: true });
+      await expect(tooltip).toBeVisible();
+      await expect(button).toHaveAttribute("aria-describedby", await tooltip.getAttribute("id") as string);
+    }
+    const options = header.getByRole("button", { name: "View options", exact: true });
+    await options.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("menuitemradio", { name: "All squads", exact: true })).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(page.getByRole("menuitemradio", { name: "Quarter", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/timelineScale=quarter/);
+    await expect(page.getByRole("menuitemradio", { name: "Quarter", exact: true })).toHaveAttribute("aria-checked", "true");
+    await page.screenshot({ path: "public/screenshots/docs/native-timeline-options-1280.png", style: "nextjs-portal { display: none }" });
+    await page.getByRole("menuitemradio", { name: "Alpha", exact: true }).click();
+    await expect(page).toHaveURL(/squad=/);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu", { name: "View options" })).not.toBeVisible();
+    await options.click();
+    await page.getByRole("menuitem", { name: "Clear filters", exact: true }).click();
+    await expect(page).not.toHaveURL(/squad=/);
+    await expect(page).toHaveURL(/timelineScale=quarter/);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu", { name: "View options" })).not.toBeVisible();
+    await options.click();
+    await expect(page.getByRole("menuitemradio", { name: "Quarter", exact: true })).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
+    await expect(options).toBeFocused();
+    await page.goBack();
+    await expect(page).toHaveURL(/squad=/);
+    await expect(page).toHaveURL(/timelineScale=quarter/);
+    await expect(page.getByText("Dates are inclusive", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Compass native timeline", { exact: true })).toHaveCount(0);
+    await header.getByRole("tab", { name: "Board", exact: true }).click();
+    await expect(header.getByRole("button", { name: "Reload timeline" })).toHaveCount(0);
+    await options.click();
+    await expect(page.getByRole("menuitemradio", { name: "Quarter", exact: true })).toHaveCount(0);
+  });
+
+  for (const width of [320, 390]) {
+    test(`compact header fits ${width}px with touch targets and chart-only horizontal scrolling`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(`${nativeBase}/roadmap?view=timeline`);
+      const header = page.locator('[data-slot="workspace-header"]');
+      const title = await targetBounds(header.getByRole("heading", { name: "Roadmap" }));
+      const toggle = await targetBounds(header.getByRole("tab", { name: "Timeline", exact: true }));
+      const previous = await targetBounds(header.getByRole("button", { name: "Previous period" }));
+      expect(Math.abs(title.y + title.height / 2 - toggle.y - toggle.height / 2)).toBeLessThan(3);
+      expect(previous.y).toBeGreaterThan(title.y + title.height);
+      for (const name of ["Previous period", "Go to today", "Next period", "View options", "Reload timeline"]) {
+        const bounds = await targetBounds(header.getByRole("button", { name, exact: true }));
+        expect(bounds.width).toBeGreaterThanOrEqual(44);
+        expect(bounds.height).toBeGreaterThanOrEqual(44);
+      }
+      await header.getByRole("button", { name: "View options" }).click();
+      const menu = await targetBounds(page.getByRole("menu", { name: "View options" }));
+      expect(menu.x).toBeGreaterThanOrEqual(0);
+      expect(menu.x + menu.width).toBeLessThanOrEqual(width);
+      await page.screenshot({ path: `public/screenshots/docs/native-timeline-options-${width}.png`, style: "nextjs-portal { display: none }" });
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu", { name: "View options" })).not.toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      const chart = page.getByTestId("native-timeline-scroll");
+      expect(await chart.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+      await page.screenshot({ path: `public/screenshots/docs/native-timeline-header-${width}.png`, fullPage: true, style: "nextjs-portal { display: none }" });
+    });
+  }
+
+  for (const theme of ["dark", "light"] as const) {
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+      test(`native timeline ${theme} appearance at ${viewport.width}px`, async ({ page }) => {
+        await page.setViewportSize(viewport);
+        await page.addInitScript((value) => localStorage.setItem("compass-theme", value), theme);
+        await page.goto(`${nativeBase}/roadmap?view=timeline`);
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+        const title = page.getByRole("heading", { name: "Roadmap", exact: true });
+        await expect(title).toBeVisible();
+        // Resolve the actual painted surface, including transparent ancestors,
+        // and convert CSS colors (including oklch) through the browser canvas.
+        const contrast = await title.evaluate((element) => {
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 1;
+          const context = canvas.getContext("2d")!;
+          function luminance(color: string) {
+            context.clearRect(0, 0, 1, 1);
+            context.fillStyle = color;
+            context.fillRect(0, 0, 1, 1);
+            const rgb = Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3).map((value) => {
+              const channel = value / 255;
+              return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+            });
+            return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+          }
+          let surface: Element | null = element;
+          while (surface && getComputedStyle(surface).backgroundColor === "rgba(0, 0, 0, 0)") surface = surface.parentElement;
+          const foreground = luminance(getComputedStyle(element).color);
+          const background = luminance(getComputedStyle(surface!).backgroundColor);
+          return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+        });
+        expect(contrast, "timeline title contrast against its painted toolbar").toBeGreaterThanOrEqual(4.5);
+        const cardColor = await page.evaluate(() => {
+          const probe = document.createElement("div");
+          probe.style.backgroundColor = "var(--card)";
+          document.body.append(probe);
+          const value = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return value;
+        });
+        await expect(title.locator("..")).toHaveAttribute("data-slot", "workspace-header");
+        const scroll = page.getByTestId("native-timeline-scroll");
+        await expect(scroll.locator("../..")).toHaveCSS("background-color", cardColor);
+        await expect(scroll.locator("../div").first()).toHaveCSS("background-color", cardColor);
+        await expect(scroll.locator(":scope > div > div").first()).toHaveCSS("background-color", cardColor);
+        await expect(page.locator("#unscheduled-items-panel [data-slot=badge]").first()).toHaveCSS("background-color", cardColor);
+        const grid = page.getByTestId("timeline-grid");
+        expect(await grid.evaluate((element) => getComputedStyle(element).backgroundImage)).not.toContain("226, 232, 240");
+        await scrollToFixtureMonth(page);
+        await page.screenshot({ path: `public/screenshots/docs/native-timeline-${theme}-${viewport.width}.png`, fullPage: true, style: "nextjs-portal { display: none }" });
+        await page.getByRole("button", { name: "Edit dates for Beta delivery", exact: true }).click();
+        await expect(page.getByRole("dialog").getByLabel("Start", { exact: true })).toHaveValue(start);
+        await expect(page.getByRole("dialog").getByRole("combobox")).toHaveCSS("background-color", cardColor);
+        await expect(page.getByRole("dialog").getByLabel("Start", { exact: true })).toHaveCSS("background-color", cardColor);
+        await expect(page.getByRole("dialog").getByLabel("End", { exact: true })).toHaveCSS("background-color", cardColor);
+        await page.screenshot({ path: `public/screenshots/docs/native-timeline-editor-${theme}-${viewport.width}.png`, style: "nextjs-portal { display: none }" });
+        await page.keyboard.press("Escape");
+      });
+    }
+  }
+
+  test("native scheduling persists across reload, old bookmarks and Board", async ({ page }) => {
+    await page.goto(`${nativeBase}/roadmap`);
+    await page.getByRole("button", { name: "Add item", exact: true }).nth(1).click();
+    await page.getByLabel("Title", { exact: true }).fill("Native rollout scheduling");
+    await page.getByRole("button", { name: "Add Item", exact: true }).click();
+    await expect(page.getByText("Native rollout scheduling", { exact: true })).toBeVisible();
+    await page.getByRole("tab", { name: "Timeline", exact: true }).click();
+    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await page.getByRole("button", { name: "Edit dates for Native rollout scheduling", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Start", { exact: true }).fill(start);
+    await dialog.getByLabel("End", { exact: true }).fill(end);
+    await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await page.reload();
+    await page.getByRole("button", { name: "Edit dates for Native rollout scheduling", exact: true }).click();
+    await expect(dialog.getByLabel("Start", { exact: true })).toHaveValue(start);
+    await expect(dialog.getByLabel("End", { exact: true })).toHaveValue(end);
+    await page.keyboard.press("Escape");
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      await scrollToFixtureMonth(page);
+      await page.screenshot({ path: `public/screenshots/docs/native-timeline-${viewport.width}.png`, fullPage: true, style: "nextjs-portal { display: none }" });
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${nativeBase}/roadmap?view=timeline&timelineEngine=classic`);
+    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await page.getByRole("tab", { name: "Board", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Add item", exact: true }).first()).toBeVisible();
+    await page.getByRole("tab", { name: "Timeline", exact: true }).click();
+    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Use classic timeline" })).toHaveCount(0);
+  });
+
+  test("squad filter drops old rows and survives a full reload", async ({ page }) => {
+    await page.goto(`${nativeBase}/roadmap?view=timeline`);
+    await expect(page.getByRole("button", { name: /Open details for Alpha delivery/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Open details for Beta delivery/ })).toBeVisible();
+    await page.getByRole("button", { name: "View options", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: "Alpha", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: /Open details for Alpha delivery/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Open details for Beta delivery/ })).toHaveCount(0);
+    const squad = new URL(page.url()).searchParams.get("squad");
+    await page.getByRole("button", { name: "Reload timeline" }).click();
+    expect(new URL(page.url()).searchParams.get("squad")).toBe(squad);
+    await expect(page.getByRole("button", { name: /Open details for Beta delivery/ })).toHaveCount(0);
+  });
+
+  test("compact border grips and dotted handle preserve independent pointer and keyboard edits", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${nativeBase}/roadmap?view=timeline`);
+    await scrollToFixtureMonth(page);
+    const move = page.getByRole("button", { name: "Move Alpha delivery", exact: true });
+    const left = page.getByRole("button", { name: "Resize left edge of Alpha delivery", exact: true });
+    const right = page.getByRole("button", { name: "Resize right edge of Alpha delivery", exact: true });
+    const details = page.getByRole("button", { name: /Open details for Alpha delivery/ });
+    const edit = page.getByRole("button", { name: "Edit dates for Alpha delivery", exact: true });
+    const card = page.locator('[data-testid^="timeline-item-"][data-start]').filter({ has: move });
+    await expect(move.locator("svg.lucide-grip-vertical")).toBeVisible();
+    await move.scrollIntoViewIfNeeded();
+
+    const [leftBox, moveBox, detailsBox, editBox, rightBox] = await Promise.all(
+      [left, move, details, edit, right].map(targetBounds),
+    );
+    expect(leftBox.width).toBe(24);
+    expect(moveBox.width).toBe(24);
+    expect(rightBox.width).toBe(24);
+    expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(moveBox.x);
+    expect(moveBox.x + moveBox.width).toBeLessThanOrEqual(detailsBox.x);
+    expect(detailsBox.x + detailsBox.width).toBeLessThanOrEqual(editBox.x);
+    expect(editBox.x + editBox.width).toBeLessThanOrEqual(rightBox.x);
+    // Previously the move gutter was 28 + 24 + 4px and the edit gutter
+    // 24 + 28px. Four adjacent 24px targets now reserve 96 rather than 108px.
+    expect(moveBox.x + moveBox.width - leftBox.x + rightBox.x + rightBox.width - editBox.x).toBe(96);
+
+    const initialStart = (await card.getAttribute("data-start"))!;
+    const initialEnd = (await card.getAttribute("data-end"))!;
+    async function drag(target: Locator, pixels: number) {
+      await target.scrollIntoViewIfNeeded();
+      const box = await targetBounds(target);
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + pixels, box.y + box.height / 2, { steps: 6 });
+      await page.mouse.up();
+    }
+    await drag(left, 12);
+    await expect(card).toHaveAttribute("data-start", shiftDate(initialStart, 1));
+    await expect(move).toBeEnabled();
+    await drag(right, 12);
+    await expect(card).toHaveAttribute("data-end", shiftDate(initialEnd, 1));
+    await expect(move).toBeEnabled();
+    await drag(move, 12);
+    await expect(card).toHaveAttribute("data-start", shiftDate(initialStart, 2));
+    await expect(card).toHaveAttribute("data-end", shiftDate(initialEnd, 2));
+    await expect(move).toBeEnabled();
+    await page.reload();
+    await expect(card).toHaveAttribute("data-start", shiftDate(initialStart, 2));
+    await expect(card).toHaveAttribute("data-end", shiftDate(initialEnd, 2));
+
+    await move.focus();
+    await page.keyboard.press("Alt+ArrowLeft");
+    await expect(card).toHaveAttribute("data-start", shiftDate(initialStart, 1));
+    await expect(move).toBeEnabled();
+    await right.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(card).toHaveAttribute("data-end", initialEnd);
+    await expect(move).toBeEnabled();
+    await move.focus();
+    await page.keyboard.press("d");
+    await expect(page.getByRole("dialog").getByLabel("Start", { exact: true })).toHaveValue(shiftDate(initialStart, 1));
+    await page.keyboard.press("Escape");
+    await details.click();
+    await expect(page).toHaveURL(/detail=roadmapItem/);
+    const detailPanel = page.getByRole("dialog", { name: "Roadmap Item", exact: true });
+    await expect(detailPanel.getByRole("button", { name: "Alpha delivery", exact: true })).toBeVisible({ timeout: 30_000 });
+    await page.keyboard.press("Escape");
+    await expect(page).not.toHaveURL(/detail=/);
+    await expect(detailPanel).not.toBeVisible();
+    await expect(details).toBeFocused();
+    await expect(card).toHaveAttribute("data-start", shiftDate(initialStart, 1));
+    await expect(card).toHaveAttribute("data-end", initialEnd);
+
+    await edit.click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Start", { exact: true }).fill(initialStart);
+    await dialog.getByLabel("End", { exact: true }).fill(shiftDate(initialStart, 10));
+    await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(move).toBeEnabled();
+    expect((await targetBounds(card)).width).toBe(132);
+    expect((await targetBounds(details)).width).toBeGreaterThanOrEqual(24);
+    await expect(details).toHaveCSS("overflow", "hidden");
+    await expect(details.getByLabel("Delivery status: Not Started", { exact: true })).not.toBeVisible();
+    expect((await targetBounds(details.locator("[data-timeline-title]"))).width).toBeGreaterThan(0);
+    await page.screenshot({ path: "public/screenshots/docs/native-timeline-narrow-1280.png", fullPage: true, style: "nextjs-portal { display: none }" });
+    await edit.click();
+    await dialog.getByLabel("End", { exact: true }).fill(shiftDate(initialStart, 9));
+    await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit schedule for Alpha delivery", exact: true })).toBeVisible();
+    await expect(move).toHaveCount(0);
+  });
+
+  test("another workspace gets native without an opt-in", async ({ page, base }) => {
+    await page.goto(`${base}/roadmap?view=timeline`);
+    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Use classic timeline" })).toHaveCount(0);
+  });
+
+  test.describe("touch targets", () => {
+    test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
+
+    test("narrow-looking grips retain independent targets and a tappable date dialog", async ({ page }) => {
+      await page.goto(`${nativeBase}/roadmap?view=timeline`);
+      await scrollToFixtureMonth(page);
+      const move = page.getByRole("button", { name: "Move Beta delivery", exact: true });
+      const left = page.getByRole("button", { name: "Resize left edge of Beta delivery", exact: true });
+      const right = page.getByRole("button", { name: "Resize right edge of Beta delivery", exact: true });
+      const details = page.getByRole("button", { name: /Open details for Beta delivery/ });
+      const edit = page.getByRole("button", { name: "Edit dates for Beta delivery", exact: true });
+      const [leftBox, moveBox, detailsBox, editBox, rightBox] = await Promise.all(
+        [left, move, details, edit, right].map(targetBounds),
+      );
+      for (const box of [leftBox, moveBox, editBox, rightBox]) {
+        expect(box.width).toBeGreaterThanOrEqual(24);
+        expect(box.height).toBeGreaterThanOrEqual(24);
+      }
+      expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(moveBox.x);
+      expect(moveBox.x + moveBox.width).toBeLessThanOrEqual(detailsBox.x);
+      expect(detailsBox.x + detailsBox.width).toBeLessThanOrEqual(editBox.x);
+      expect(editBox.x + editBox.width).toBeLessThanOrEqual(rightBox.x);
+      expect((await targetBounds(left.locator("[data-resize-grip]"))).width).toBe(2);
+      await expect(edit).toHaveCSS("opacity", "1");
+      await edit.tap();
+      await expect(page.getByRole("dialog").getByLabel("Start", { exact: true })).toHaveValue(start);
+      await expect(page.getByRole("dialog").getByLabel("End", { exact: true })).toHaveValue(end);
+      await page.getByRole("button", { name: "Close", exact: true }).first().tap();
+      await expect(page.getByRole("dialog")).not.toBeVisible();
+    });
+  });
+
+  test("failed save rolls back and preserves persisted dates after reload", async ({ page }) => {
+    await page.goto(`${nativeBase}/roadmap?view=timeline`);
+    await scrollToFixtureMonth(page);
+    const card = page.locator('[data-testid^="timeline-item-"][data-start]').filter({ hasText: "Beta delivery" });
+    const previousStart = await card.getAttribute("data-start");
+    const previousEnd = await card.getAttribute("data-end");
+    let blocked = 0;
+    await page.route("**/roadmap*", async (route) => {
+      if (route.request().method() === "POST" && route.request().headers()["next-action"]) {
+        blocked++;
+        await route.abort("failed");
+      } else await route.continue();
+    });
+    await page.getByRole("button", { name: "Edit dates for Beta delivery", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Start", { exact: true }).fill(shiftDate(previousStart!, 1));
+    await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
+    await expect(page.getByTestId("timeline-engine-native").getByRole("status")).toContainText("Changes rolled back; try again.");
+    expect(blocked).toBe(1);
+    await expect(dialog).toBeVisible();
+    await expect(card).toHaveAttribute("data-start", previousStart!);
+    await expect(card).toHaveAttribute("data-end", previousEnd!);
+    await page.keyboard.press("Escape");
+    await page.unroute("**/roadmap*");
+    await page.getByRole("button", { name: "Reload timeline" }).click();
+    await scrollToFixtureMonth(page);
+    await expect(card).toHaveAttribute("data-start", previousStart!);
+    await expect(card).toHaveAttribute("data-end", previousEnd!);
+  });
+
+  test("native backlog quick-add persists on the roadmap", async ({ page }) => {
+    await page.goto(`${nativeBase}/roadmap?view=timeline`);
+    const backlog = page.locator('[data-testid^="unscheduled-item-"]').filter({ hasText: "Native backlog bug" });
+    await backlog.getByRole("button", { name: "Card actions" }).click();
+    await page.getByRole("menuitem", { name: "Add to Next", exact: true }).click();
+    await expect(backlog).toHaveCount(0);
+    await page.reload();
+    await expect(page.locator('[data-testid^="unscheduled-item-"]').filter({ hasText: "Native backlog bug" })).toHaveCount(0);
+    await page.getByRole("tab", { name: "Board", exact: true }).click();
+    await expect(page.getByText("Native backlog bug", { exact: true })).toBeVisible();
+  });
+});

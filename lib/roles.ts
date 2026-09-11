@@ -71,3 +71,8 @@ export function isOrgAdminRole(raw: string | null | undefined): boolean {
   const role = normalizeOrgRole(raw)
   return role === "OWNER" || role === "ADMIN"
 }
+
+/** True when either membership grants human review authority. */
+export function canDecideReview(workspaceRole: string | null | undefined, orgRole: string | null | undefined): boolean {
+  return normalizeWorkspaceRole(workspaceRole) === "ADMIN" || isOrgAdminRole(orgRole)
+}

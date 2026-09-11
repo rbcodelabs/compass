@@ -38,7 +38,7 @@ const STATUS_OPTIONS: { value: LaunchChecklistItemStatus; label: string }[] = [
 ];
 
 const STATUS_TRIGGER_CLASS: Record<string, string> = {
-  PENDING: "bg-slate-100 text-slate-600",
+  PENDING: "bg-surface-inset text-text-secondary",
   DONE: "bg-green-100 text-green-700",
   SKIPPED: "bg-amber-50 text-amber-700",
 };
@@ -48,7 +48,6 @@ export function LaunchChecklist({
   tier,
   items,
   workspaceId,
-  revalidatePathStr,
 }: {
   horizon: string;
   tier: string;
@@ -74,7 +73,7 @@ export function LaunchChecklist({
     setStatuses((s) => ({ ...s, [itemId]: next }));
     startTransition(async () => {
       try {
-        await updateLaunchChecklistItem(itemId, next, workspaceId, revalidatePathStr);
+        await updateLaunchChecklistItem(itemId, next, workspaceId);
       } catch {
         // revert on failure
         setStatuses((s) => ({ ...s, [itemId]: prev }));

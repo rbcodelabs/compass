@@ -6,16 +6,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { addTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import type { TaskCardData } from "./task-card";
+import { TaskAssigneePicker } from "./task-assignee-picker";
+import type { TaskAssignee } from "@/lib/task-assignment";
+import type { MemberData } from "@/lib/types";
 
 type Props = {
   workspaceId: string;
   parentTaskId: string;
   revalidatePathStr: string;
   onAdd: (task: TaskCardData) => void;
+  members?: MemberData[];
 };
 
-export function AddSubtaskForm({ workspaceId, parentTaskId, revalidatePathStr, onAdd }: Props) {
+export function AddSubtaskForm({ workspaceId, parentTaskId, revalidatePathStr, onAdd, members = [] }: Props) {
   const [open, setOpen] = useState(false);
+  const [assignee, setAssignee] = useState<TaskAssignee>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -24,9 +30,10 @@ export function AddSubtaskForm({ workspaceId, parentTaskId, revalidatePathStr, o
     const data = new FormData(e.currentTarget);
     const title = (data.get("title") as string).trim();
     if (!title) return;
-
+    setError(null);
     startTransition(async () => {
-      const task = await addTask(workspaceId, { title, parentTaskId }, revalidatePathStr);
+      try {
+      const task = await addTask(workspaceId, { title, parentTaskId, assignee }, revalidatePathStr);
       onAdd({
         id: task.id,
         title: task.title,
@@ -37,6 +44,8 @@ export function AddSubtaskForm({ workspaceId, parentTaskId, revalidatePathStr, o
         squadId: null,
         squad: null,
         assigneeUserId: task.assigneeUserId ?? null,
+        assigneeAgentId: task.assigneeAgentId ?? null,
+        assignee: task.assignee,
         ownerName: task.ownerName ?? null,
         storyPoints: task.storyPoints ?? null,
         dueDate: task.dueDate ? task.dueDate.toISOString() : null,
@@ -46,7 +55,9 @@ export function AddSubtaskForm({ workspaceId, parentTaskId, revalidatePathStr, o
         links: [],
       });
       setOpen(false);
+      setAssignee(null);
       formRef.current?.reset();
+      } catch (error) { setError(error instanceof Error ? error.message : "Could not add the subtask. Please retry."); }
     });
   }
 
@@ -54,7 +65,7 @@ export function AddSubtaskForm({ workspaceId, parentTaskId, revalidatePathStr, o
     return (
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-indigo-600 transition-colors"
+        className="flex items-center gap-1.5 text-xs font-medium text-text-subtle hover:text-indigo-600 transition-colors"
       >
         <PlusIcon className="w-3.5 h-3.5" />
         Add subtask
@@ -63,14 +74,16 @@ export function AddSubtaskForm({ workspaceId, parentTaskId, revalidatePathStr, o
   }
 
   return (
-    <form ref={formRef} onSubmit={handleSubmit} className="flex items-center gap-2">
+    <form ref={formRef} onSubmit={handleSubmit} className="flex flex-wrap items-center gap-2">
       <Input name="title" placeholder="Subtask title" autoFocus required disabled={isPending} className="h-8 text-sm" />
+      <TaskAssigneePicker members={members} value={assignee} onChange={setAssignee} disabled={isPending} />
       <Button type="submit" size="sm" disabled={isPending}>
         {isPending ? "Adding..." : "Add"}
       </Button>
       <Button type="button" variant="ghost" size="sm" disabled={isPending} onClick={() => setOpen(false)}>
         Cancel
       </Button>
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </form>
   );
 }

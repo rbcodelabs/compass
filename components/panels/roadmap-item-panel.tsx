@@ -20,6 +20,9 @@ import { LaunchChecklist, type LaunchChecklistItemData } from "./launch-checklis
 import { PositioningBriefRow } from "./positioning-brief-row";
 import { RoadmapDeliveryTasks, type RoadmapDeliveryTaskData } from "./roadmap-delivery-tasks";
 import type { MemberData } from "@/lib/types";
+import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { Discussion } from "@/components/comments/discussion";
+import { usePanelContext } from "./panel-context";
 
 type RoadmapItemData = {
   id: string;
@@ -31,6 +34,7 @@ type RoadmapItemData = {
   isPrivate: boolean;
   startDate: string | null;
   endDate: string | null;
+  updatedAt: string;
   squad: { id: string; name: string; color: string } | null;
   solution: { id: string; title: string } | null;
   keyResult: { id: string; title: string } | null;
@@ -65,6 +69,7 @@ export function RoadmapItemPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
+  const { notifyEntityMutated } = usePanelContext();
   const { data, error, mutate, refresh } = useEntityDetail<RoadmapItemData>(
     "roadmapItem",
     id,
@@ -82,7 +87,11 @@ export function RoadmapItemPanel({
     id,
     orgSlug,
     workspaceSlug,
-    onSaved: (d) => mutate(d as RoadmapItemData),
+    onSaved: (d) => {
+      const saved = d as RoadmapItemData;
+      mutate(saved);
+      notifyEntityMutated("roadmapItem", saved.id, { horizon: saved.horizon as import("@/lib/types").Horizon, updatedAt: saved.updatedAt });
+    },
   };
 
   // The five possible origins collapse into one "linked" list.
@@ -96,7 +105,7 @@ export function RoadmapItemPanel({
   if (data.keyResult)
     linked.push({ type: "keyResult", id: data.keyResult.id, title: data.keyResult.title, badge: { label: "Key Result", className: "bg-indigo-100 text-indigo-700" } });
   if (data.feedback)
-    linked.push({ type: "feedback", id: data.feedback.id, title: data.feedback.title, badge: { label: "Feedback", className: "bg-slate-100 text-slate-600" } });
+    linked.push({ type: "feedback", id: data.feedback.id, title: data.feedback.title, badge: { label: "Feedback", className: "bg-surface-inset text-text-secondary" } });
 
   return (
     <PanelContainer>
@@ -108,6 +117,7 @@ export function RoadmapItemPanel({
         edit={edit}
         statusEdit={{ field: "horizon", options: HORIZON_ORDER, map: HORIZON }}
       />
+      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="ROADMAP_ITEM" subjectId={data.id} subjectTitle={data.title} />
 
       <EditableText
         value={data.description}
@@ -124,6 +134,7 @@ export function RoadmapItemPanel({
         <Field label="Votes">{data._count.votes}</Field>
         {data.isPrivate && <Field label="Visibility">Private (hidden from public roadmap)</Field>}
       </div>
+
 
       <Section label="Launch">
         <div className="flex flex-col gap-4">
@@ -168,6 +179,7 @@ export function RoadmapItemPanel({
           onChanged={refresh}
         />
       </Section>
+      <Discussion targetType="ROADMAP_ITEM" targetId={id} />
     </PanelContainer>
   );
 }

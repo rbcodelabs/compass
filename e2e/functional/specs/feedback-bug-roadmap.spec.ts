@@ -5,9 +5,9 @@
  *          via the public portal (using the Bug/Idea type toggle) → sign in
  *          internally and view the feedback board → confirm the bug is badged
  *          and shows the "Promote to roadmap" action (not the opportunity-link
- *          picker that ideas get) → promote it directly to the NOW horizon →
+ *          picker that ideas get) → promote it to the NEXT horizon →
  *          verify it now shows "On roadmap" on the feedback board and appears
- *          as a Bug-badged card in the roadmap's NOW column.
+ *          as a Bug-badged card in the roadmap's NEXT column.
  *
  * This exercises the bug/idea split: bugs skip Opportunity → Solution →
  * Assumption → Experiment discovery entirely and go straight to the roadmap,
@@ -77,8 +77,10 @@ test.describe("Feedback Bug → Roadmap", () => {
       );
 
       // Filter to Bugs. This is a server round trip now, not local state.
-      await page.getByRole("button", { name: "Bugs" }).click();
+      await page.getByRole("button", { name: "Filters", exact: true }).click();
+      await page.getByRole("menuitemradio", { name: "Bugs", exact: true }).click();
       await expect(page).toHaveURL(/type=BUG/);
+      await page.keyboard.press("Escape");
 
       const row = page.getByTestId("grid-row").filter({ hasText: bugTitle });
       await expect(row).toHaveCount(1);
@@ -90,20 +92,20 @@ test.describe("Feedback Bug → Roadmap", () => {
       // Every visible row is a bug, so no idea-only control exists anywhere.
       await expect(page.getByTestId("feedback-link-opportunity")).toHaveCount(0);
 
-      // ── 4. Promote directly to the roadmap (NOW horizon) ───────────────────
+      // ── 4. Promote directly to the roadmap (NEXT; NOW is decision-gated) ───
       await row.getByTestId("feedback-promote").click();
-      await page.getByRole("menuitem", { name: "Now", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Next", exact: true }).click();
 
       // The action cell now shows the "On roadmap" confirmation. Promotion is
       // deliberately pessimistic — it needs the horizon the server returns —
       // so this waits on the real round trip.
       await expect(row.getByTestId("feedback-on-roadmap")).toContainText(
-        /On roadmap \(Now\)/i,
+        /On roadmap \(Next\)/i,
         { timeout: 10_000 },
       );
       await expect(row.getByTestId("feedback-promote")).toHaveCount(0);
 
-      // ── 5. Verify it appears on the roadmap, Bug-badged, in NOW ────────────
+      // ── 5. Verify it appears on the roadmap, Bug-badged, in NEXT ───────────
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
 

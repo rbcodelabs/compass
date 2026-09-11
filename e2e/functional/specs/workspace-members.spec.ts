@@ -47,11 +47,14 @@ test.describe("Workspace Members", () => {
     const roleCombobox = rowControls.getByRole("combobox");
 
     await roleCombobox.click();
+    const roleUpdate = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.request().headers()["next-action"] !== undefined &&
+        response.ok()
+    );
     await page.getByRole("option", { name: "Admin" }).click();
-
-    // No explicit "saving" indicator for inline role changes — allow the
-    // server action to complete, then reload to verify persistence.
-    await page.waitForTimeout(1_500);
+    await roleUpdate;
     await page.reload();
     await page.waitForLoadState("load");
 
@@ -60,7 +63,14 @@ test.describe("Workspace Members", () => {
     ).toContainText(/Admin/i, { timeout: 10_000 });
 
     // ── 4. Remove the member ────────────────────────────────────────────────
+    const removal = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.request().headers()["next-action"] !== undefined &&
+        response.ok()
+    );
     await page.getByRole("button", { name: `Remove ${email}` }).click();
+    await removal;
     await expect(page.getByText(email)).not.toBeVisible({ timeout: 10_000 });
 
     // Confirm removal persisted server-side too.

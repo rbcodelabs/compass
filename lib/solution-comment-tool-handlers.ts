@@ -8,17 +8,28 @@
  * otherwise leaves inline — can be unit-tested. This entity needs full
  * read/write symmetry tested end to end, per .claude/pr-guidelines.md.
  *
- * MCP tool handlers have no access to a resolved per-user identity —
- * validateMcpAuth is only checked once at the top of the route as a gate —
- * so authorName is always a required explicit input here, never derived.
+ * Registered-agent and assistant attribution comes from authenticated identity.
+ * Existing human and service integrations retain explicit author inputs.
  */
 
 import getPrisma from "@/lib/db"
 import { ok, fail } from "@/lib/mcp-output"
+import { getMcpActor } from "@/lib/mcp-authz"
+import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat"
 
 type CommentType = "PLAN" | "COMMENT"
 type AuthorType = "AGENT" | "HUMAN"
 type PlanStatus = "PENDING" | "APPROVED" | "REJECTED"
+
+async function resolveAuthor(authorName: string, authorType: AuthorType) {
+  const actor = getMcpActor()
+  if (actor.purpose === "AGENT_TURN") return { authorName: "Compass assistant", authorType: "AGENT" as const }
+  if (actor.purpose !== "AGENT") return { authorName, authorType }
+  if (!actor.agentId || !actor.userId) throw new Error("Incomplete agent identity")
+  const agent = await getPrisma().agent.findFirst({ where: { id: actor.agentId, ownerUserId: actor.userId, status: "ACTIVE" }, select: { name: true } })
+  if (!agent) throw new Error("Agent is unavailable")
+  return { authorName: agent.name, authorType: "AGENT" as const }
+}
 
 function truncate(s: string, max: number) {
   return s.length > max ? `${s.slice(0, max)}...` : s
@@ -50,11 +61,11 @@ export async function addSolutionPlan({
       solutionId,
       commentType: "PLAN",
       body: body.trim(),
-      authorName,
-      authorType: "AGENT",
+      ...await resolveAuthor(authorName, "AGENT"),
       source: "MCP",
     },
   })
+  try { await mirrorLegacySolutionComment(comment) } catch (error) { await prisma.solutionComment.delete({ where: { id: comment.id } }); throw error }
 
   return ok(
     `**Plan added** to solution "${solution.title}"\n` +
@@ -93,11 +104,11 @@ export async function addSolutionComment({
       solutionId,
       commentType: "COMMENT",
       body: body.trim(),
-      authorName,
-      authorType: authorType ?? "AGENT",
+      ...await resolveAuthor(authorName, authorType ?? "AGENT"),
       source: "MCP",
     },
   })
+  try { await mirrorLegacySolutionComment(comment) } catch (error) { await prisma.solutionComment.delete({ where: { id: comment.id } }); throw error }
 
   return ok(
     `**Comment added** to solution "${solution.title}"\n` +
@@ -196,6 +207,7 @@ export async function updateSolutionComment({
     where: { id: commentId },
     data: { body: body.trim(), updatedAt: new Date() },
   })
+  await updateMirroredComment(commentId, updated.body)
 
   return ok(
     `**Comment updated**\n` +
@@ -222,6 +234,7 @@ export async function deleteSolutionComment({ commentId }: { commentId: string }
   // SolutionComment has no dependent rows (no experiments/evidence attach to
   // it), so — unlike deleteAssumption — there's nothing to null out first.
   await prisma.solutionComment.delete({ where: { id: commentId } })
+  await deleteMirroredComment(commentId)
 
   return ok(
     `**Comment deleted**\n` +
@@ -255,6 +268,7 @@ async function setSolutionPlanStatus(commentId: string, planStatus: PlanStatus) 
     where: { id: commentId },
     data: { planStatus, updatedAt: new Date() },
   })
+  await updateMirroredLegacyPlanStatus(commentId, planStatus)
 
   return ok(
     `**Plan ${planStatus === "APPROVED" ? "approved" : "rejected"}**\n` +

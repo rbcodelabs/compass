@@ -8,6 +8,8 @@ section: "Core Features"
 
 # Tasks
 
+Task descriptions support Markdown, including paragraphs, headings, lists, links, emphasis, code, and tables.
+
 Tasks is Compass's standalone delivery/tracking entity. It's built to scale from a full engineering sprint board (replacing a Jira-style workflow) down to a lightweight list of high-priority initiatives a PM wants to keep an eye on — both use cases share the same status vocabulary and the same underlying entity, so there's nothing to migrate between them.
 
 ![Tasks](/screenshots/docs/tasks.png)
@@ -37,13 +39,31 @@ Click **Add task** at the bottom of any column (or **Add subtask** on a task's d
 
 - **Title** and **Description**
 - **Priority** — Urgent / High / Medium / Low
-- **Assignee** — a Compass workspace member, for engineering accountability and future "my tasks" views
+- **Assignee** — one Compass workspace member or registered agent, or unassigned. Agents must be enabled for this workspace; see [Agents](/help/19-agents). Assignment does not start execution.
 - **Owner** — a freeform name, for PM-tracked initiatives whose responsible party isn't a Compass user (an external stakeholder, an exec, etc.). Either or both of Assignee and Owner may be set on the same task.
 - **Squad** — the owning team, same convention as Objectives, Opportunities, and Roadmap Items
 - **Story points** and **Due date** — optional estimation/scheduling fields
 - **Iteration** — a freeform sprint label (e.g. "Sprint 24") for teams that want lightweight grouping without a full Sprint entity
 
+## Discussion
+
+Open a task from the board or list to find **Discussion** below its detail tabs. Existing comments, including comments added through the API, appear here. Discussion remains available while you switch between Overview, Subtasks, Links, and Details.
+
+Add comments and replies, edit or delete your own comments, and resolve or reopen threads using the same [shared Discussion](/help/14-detail-panel) available on other Compass items. Workspace and organization administrators can moderate discussions. Subtasks have their own discussions on their detail pages.
+
+Comment text preserves line breaks and Markdown source; Markdown syntax is shown as text rather than rendered formatting. Comments record conversation and do not authorize work or change task status.
+
+![Discussion on a Task detail page](/screenshots/docs/task-discussion-desktop.png)
+
+On mobile, scroll down to the comment composer below the thread:
+
+![Task discussion composer on mobile](/screenshots/docs/task-discussion-composer-mobile.png)
+
 ## Epics and Subtasks
+
+The assignee picker groups **People** and **Agents**. If an existing assignee loses
+access or is suspended, the identity remains visible as unavailable until you
+clear or replace it. Assignee filters support both kinds of identity.
 
 Tasks can nest: a task with no parent and its own children behaves as an **Epic**, and a task with a parent is a **Subtask**. There's no separate "Epic" type to set — the label is just how the UI describes the shape of the `parentTaskId` tree, so a task's role can never drift out of sync with its actual position in the hierarchy.
 

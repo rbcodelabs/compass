@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { getWorkspace } from "@/lib/workspace";
+import { assignmentUpdate, type AssignmentInput } from "@/lib/task-assignment";
 
 async function requireRoadmapWorkspace(orgSlug: string, workspaceSlug: string, roadmapItemId: string) {
   const session = await auth();
@@ -15,17 +16,14 @@ async function requireRoadmapWorkspace(orgSlug: string, workspaceSlug: string, r
   return workspace;
 }
 
-export async function addRoadmapDeliveryTask(orgSlug: string, workspaceSlug: string, roadmapItemId: string, data: { title: string; assigneeUserId?: string | null }) {
+export async function addRoadmapDeliveryTask(orgSlug: string, workspaceSlug: string, roadmapItemId: string, data: { title: string } & AssignmentInput) {
   const workspace = await requireRoadmapWorkspace(orgSlug, workspaceSlug, roadmapItemId);
   const title = data.title.trim();
   if (!title) throw new Error("Title is required");
-  if (data.assigneeUserId) {
-    const member = await getPrisma().workspaceMember.findFirst({ where: { workspaceId: workspace.id, userId: data.assigneeUserId }, select: { id: true } });
-    if (!member) throw new Error("Assignee is not in this workspace");
-  }
+  const assignment = await assignmentUpdate(workspace.id, data);
   const lastTask = await getPrisma().task.findFirst({ where: { workspaceId: workspace.id, status: "TODO" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } });
   const task = await getPrisma().task.create({
-    data: { workspaceId: workspace.id, title, status: "TODO", priority: "MEDIUM", assigneeUserId: data.assigneeUserId, sortOrder: lastTask ? lastTask.sortOrder + 1 : 0, links: { create: { linkedType: "ROADMAP_ITEM", linkedId: roadmapItemId } } },
+    data: { workspaceId: workspace.id, title, status: "TODO", priority: "MEDIUM", ...assignment, sortOrder: lastTask ? lastTask.sortOrder + 1 : 0, links: { create: { linkedType: "ROADMAP_ITEM", linkedId: roadmapItemId } } },
   });
   revalidatePath(`/${orgSlug}/${workspaceSlug}/roadmap`);
   return task;

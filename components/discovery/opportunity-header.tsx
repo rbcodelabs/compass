@@ -19,6 +19,8 @@ import {
   linkOpportunityToKeyResult,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import type { OpportunityStatus, SquadData } from "@/lib/types";
+import { MarkdownContent } from "@/components/markdown-content";
+import { usePanelContext } from "@/components/panels/panel-context";
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   EXPLORING: "Exploring",
@@ -34,7 +36,7 @@ const STATUS_BADGE_CLASSES: Record<OpportunityStatus, string> = {
   PRIORITIZED: "bg-blue-100 text-blue-700 border-blue-200",
   ACTIVE:
     "bg-green-100 text-green-700 border-green-200",
-  ARCHIVED: "bg-slate-100 text-slate-500 border-slate-200",
+  ARCHIVED: "bg-surface-inset text-text-subtle border-border-default",
 };
 
 type KR = {
@@ -71,6 +73,7 @@ export function OpportunityHeader({
   revalidatePathStr,
 }: Props) {
   const [isPending, startTransition] = useTransition();
+  const { openPanel } = usePanelContext();
 
   function handleStatusChange(value: string | null) {
     if (!value) return;
@@ -120,7 +123,7 @@ export function OpportunityHeader({
 
         {/* Customer segment pill */}
         {opportunity.customerSegment && (
-          <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-600 px-2.5 py-0.5 text-xs font-medium border border-slate-200">
+          <span className="inline-flex items-center rounded-full bg-surface-inset text-text-secondary px-2.5 py-0.5 text-xs font-medium border border-border-default">
             {opportunity.customerSegment}
           </span>
         )}
@@ -138,15 +141,13 @@ export function OpportunityHeader({
       </div>
 
       {/* Title */}
-      <h1 className="text-2xl font-bold tracking-tight text-slate-900 leading-tight">
+      <h1 className="text-2xl font-bold tracking-tight text-text-primary leading-tight">
         {opportunity.title}
       </h1>
 
       {/* Description */}
       {opportunity.description ? (
-        <p className="text-sm text-muted-foreground leading-relaxed max-w-2xl">
-          {opportunity.description}
-        </p>
+        <MarkdownContent className="text-muted-foreground max-w-2xl">{opportunity.description}</MarkdownContent>
       ) : (
         <p className="text-sm text-muted-foreground/50 italic">
           No description yet.
@@ -154,17 +155,21 @@ export function OpportunityHeader({
       )}
 
       {/* KR row */}
-      <div className="flex items-center gap-2 min-h-[20px]">
+      <div className="flex flex-wrap items-center gap-2 min-h-[20px]">
         {opportunity.linkedKeyResult ? (
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 min-w-0">
             <TrendingUp className="size-3.5 shrink-0 text-indigo-500" />
             <span className="text-xs text-muted-foreground">
               {opportunity.linkedKeyResult.objective.title}
             </span>
             <span className="text-xs text-muted-foreground">/</span>
-            <span className="text-xs font-medium text-foreground">
+            <button
+              type="button"
+              onClick={() => openPanel("keyResult", opportunity.linkedKeyResult!.id)}
+              className="text-left text-xs font-medium text-foreground underline underline-offset-2 rounded-sm focus-visible:outline-2 focus-visible:outline-ring break-words"
+            >
               {opportunity.linkedKeyResult.title}
-            </span>
+            </button>
           </div>
         ) : null}
 

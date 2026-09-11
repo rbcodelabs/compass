@@ -14,6 +14,14 @@
 
 **Standing rule for any secret in this project:** the moment you rotate a value in Vercel, save it to 1Password *before* doing anything else with it (before testing, before moving to the next step) — a dropped connection or a session that dies mid-task should never mean losing the value again. If a saved 1Password copy no longer matches what's live in Vercel (write-only vars can't be read back to confirm), treat it as an incident: rotate fresh, save immediately, redeploy, and verify live — don't assume the stale copy might still work.
 
+## Production data migrations
+
+Production schema and data maintenance runs through the registered migrations in `lib/migrations/runner.ts` and the authenticated `/api/admin/migrate` endpoint. Do not run local scripts directly against Aurora DSQL or use an AWS CLI login as an alternate production write path.
+
+For a targeted migration: deploy the registered migration, use authenticated `GET /api/admin/migrate` to confirm the schema, manifest, preflight, and pending state, then `POST /api/admin/migrate` with `{"script":"<exact migration name>"}`. Do not omit `script` when unrelated migrations are pending. Afterward, repeat the status GET and perform application-level readback. A data migration must finish its postconditions before the runner records a successful receipt; reruns must be idempotent and safely resume unfinished work.
+
+In the agent harness, retrieve the production migration credential as `COMPASS_PRODUCTION_MIGRATION_SECRET` and pass it only as the `x-migration-secret` header (for example by assigning it to `MIGRATION_SECRET` in the command environment). Never print it, persist it in a repository file, or substitute direct database credentials when it is unavailable.
+
 ## Portal SSO Identify — resyncing a drifted customer secret
 
 A customer's SSO Identify integration signs JWTs with a shared secret that

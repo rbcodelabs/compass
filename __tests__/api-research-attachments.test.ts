@@ -15,10 +15,43 @@ vi.mock("@/lib/artifact-storage", () => ({ getResearchArtifactStorage: () => sto
 
 import { POST as upload } from "@/app/api/research/attachments/route"
 import { POST as download } from "@/app/api/research/attachments/[attachmentId]/route"
+import { validateResearchAttachmentUpload } from "@/lib/research-attachments"
+
+function heicBytes() {
+  const bytes = new Uint8Array(24)
+  new DataView(bytes.buffer).setUint32(0, 24)
+  bytes.set(new TextEncoder().encode("ftypheic"), 4)
+  bytes.set(new TextEncoder().encode("mif1heic"), 16)
+  return bytes
+}
 
 afterEach(() => vi.clearAllMocks())
 
 describe("research attachment APIs", () => {
+  it("accepts native HEIC after multipart parsing supplies an octet-stream MIME type", async () => {
+    resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1" }, prisma: {} })
+    createParticipantResearchAttachment.mockImplementationOnce(async (input: { bytes: Uint8Array; mimeType: string; originalName: string }) => ({
+      id: "attachment-1",
+      status: "READY",
+      ...validateResearchAttachmentUpload(input),
+    }))
+    const form = new FormData()
+    form.set("token", "study-token")
+    form.set("sessionId", "session-1")
+    form.set("resumeToken", "resume-secret")
+    form.set("idempotencyKey", "attachment-key-0001")
+    form.set("file", new File([heicBytes()], "photo.heic"))
+
+    const response = await upload(new Request("http://localhost/api/research/attachments", { method: "POST", body: form }))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ originalName: "photo.heic", mimeType: "image/heic" })
+    expect(createParticipantResearchAttachment).toHaveBeenCalledWith(expect.objectContaining({
+      originalName: "photo.heic",
+      mimeType: "application/octet-stream",
+    }))
+  })
+
   it("uploads an authorized file without disclosing private storage provenance", async () => {
     resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1" }, prisma: {} })
     createParticipantResearchAttachment.mockResolvedValue({ id: "attachment-1", status: "READY", originalName: "screen.png", mimeType: "image/png", sizeBytes: 9 })

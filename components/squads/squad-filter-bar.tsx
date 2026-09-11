@@ -27,13 +27,13 @@ export function SquadFilterBar({ squads }: Props) {
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
-      <span className="text-xs text-slate-400 font-medium mr-1">Filter by squad:</span>
+      <span className="text-xs text-text-subtle font-medium mr-1">Filter by squad:</span>
       <button
         onClick={() => setFilter(null)}
         className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
           !activeSquadId
             ? "bg-slate-800 text-white shadow-sm"
-            : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+            : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
         }`}
       >
         All
@@ -45,7 +45,7 @@ export function SquadFilterBar({ squads }: Props) {
           className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
             activeSquadId === squad.id
               ? "text-white shadow-sm"
-              : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+              : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
           }`}
           style={
             activeSquadId === squad.id

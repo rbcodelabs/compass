@@ -32,6 +32,14 @@ function trustedCompassBaseUrl(): URL {
   return parseTrustedOrigin(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000", true)
 }
 
+export function researchVoiceWorkerCallbackBaseUrl(): URL {
+  const base = trustedCompassBaseUrl()
+  if (process.env.VERCEL_ENV === "production" && base.port) {
+    throw new Error("Compass production callback URL must use the default HTTPS port.")
+  }
+  return new URL("/api/internal/research/voice", base)
+}
+
 export function feedbackItemUrl(input: {
   orgSlug: string
   workspaceSlug: string

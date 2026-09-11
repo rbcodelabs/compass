@@ -13,6 +13,7 @@
 import getPrisma from "@/lib/db";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
 import { SETTABLE_HORIZONS } from "@/lib/roadmap";
+type MutationActor = { kind: "USER" | "SERVICE" | "ANONYMOUS" | "SYSTEM"; id: string | null };
 
 type EnumFieldConfig = { field: "status" | "horizon"; options: readonly string[] };
 
@@ -69,8 +70,10 @@ export async function updateEntityField(
   id: string,
   workspaceId: string,
   field: string,
-  value: unknown
+  value: unknown,
+  _actor: MutationActor = { kind: "SYSTEM", id: null },
 ): Promise<UpdateResult> {
+  void _actor;
   const config = EDIT_CONFIG[type];
 
   // ── Validate the field is editable and coerce the value ──────────────────

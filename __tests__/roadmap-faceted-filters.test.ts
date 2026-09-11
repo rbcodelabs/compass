@@ -21,14 +21,14 @@ describe("Roadmap faceted filters", () => {
 
   it("adapts squads to the menu in the Roadmap header and preserves the squad query parameter", () => {
     const page = source("app/[orgSlug]/[workspaceSlug]/roadmap/page.tsx");
-    const adapter = source("components/roadmap/roadmap-filters.tsx");
+    const adapter = source("components/roadmap/roadmap-header.tsx");
 
-    expect(page).toContain("<RoadmapFilters squads={squads} />");
+    expect(page).toContain("<RoadmapHeader squads={squads} />");
     expect(page).not.toContain("toolbar={");
     expect(page).not.toContain("SquadFilterBar");
-    expect(adapter).toContain('params.set("squad", value)');
-    expect(adapter).toContain('params.delete("squad")');
-    expect(adapter).toContain('label: "Squad"');
-    expect(adapter).toContain("onClearAll={clearAll}");
+    expect(adapter).toContain('set({ squad: value === "__all__" ? null : value })');
+    expect(adapter).toContain('set({ squad: null })');
+    expect(adapter).toContain('<DropdownMenuLabel>Squad</DropdownMenuLabel>');
+    expect(adapter).toContain("Clear filters");
   });
 });

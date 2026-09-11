@@ -8,9 +8,12 @@ import { TaskListView } from "@/components/tasks/task-list-view";
 import { TasksViewToggle } from "@/components/tasks/tasks-view-toggle";
 import { TasksFilters } from "@/components/tasks/tasks-filters";
 import type { TaskCardData } from "@/components/tasks/task-card";
-import type { TaskStatus, TaskPriority, SquadData, MemberData } from "@/lib/types";
+import type { SquadData, MemberData } from "@/lib/types";
 import { normalizeWorkspaceRole } from "@/lib/roles";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
+import { buildTaskCards } from "@/lib/task-read-model";
+import { getWorkspace } from "@/lib/workspace";
+import { parseAssigneeFilter, resolveTaskAssignees, taskLinkScope } from "@/lib/task-assignment";
 
 export const metadata = {
   title: "Tasks",
@@ -23,16 +26,14 @@ interface TasksPageProps {
 
 export default async function TasksPage({ params, searchParams }: TasksPageProps) {
   const session = await auth();
-  if (!session) redirect("/login");
+  if (!session?.user?.id) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
   const { squad: squadFilter, assignee: assigneeFilter, priority: priorityFilter, view: viewParam } = await searchParams;
   const view = viewParam === "list" ? "list" : "board";
   const prisma = getPrisma();
 
-  const workspace = await prisma.workspace.findFirst({
-    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-  });
+  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) notFound();
 
   const [rawSquads, rawTasks, rawMembers] = await Promise.all([
@@ -41,14 +42,14 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       where: {
         workspaceId: workspace.id,
         ...(squadFilter ? { squadId: squadFilter } : {}),
-        ...(assigneeFilter ? { assigneeUserId: assigneeFilter } : {}),
+        ...parseAssigneeFilter(assigneeFilter),
         ...(priorityFilter ? { priority: priorityFilter } : {}),
       },
       orderBy: [{ status: "asc" }, { sortOrder: "asc" }],
-      include: {
-        squad: { select: { id: true, name: true, color: true } },
-        links: true,
-        _count: { select: { subtasks: true } },
+      select: {
+        id: true, title: true, description: true, status: true, priority: true,
+        sortOrder: true, squadId: true, assigneeUserId: true, assigneeAgentId: true, ownerName: true,
+        storyPoints: true, dueDate: true, iteration: true, parentTaskId: true,
       },
     }),
     prisma.workspaceMember.findMany({
@@ -68,16 +69,26 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
     role: normalizeWorkspaceRole(m.role),
   }));
 
+  const taskIds = rawTasks.map((task) => task.id);
+  const [taskLinks, subtaskCounts] = taskIds.length === 0
+    ? [[], []]
+    : await Promise.all([
+        prisma.taskLink.findMany({ where: { taskId: { in: taskIds } }, orderBy: { createdAt: "asc" } }),
+        prisma.task.groupBy({
+          by: ["parentTaskId"],
+          where: { workspaceId: workspace.id, parentTaskId: { in: taskIds } },
+          _count: { _all: true },
+        }),
+      ]);
+
   // Batch-resolve linked-object titles across all tasks on this page, grouped
   // by linkedType, mirroring the resolver used by the MCP handlers — a single
   // page load can touch many linkedTypes at once, so this avoids N+1 queries.
   const linksByType = new Map<string, string[]>();
-  for (const task of rawTasks) {
-    for (const link of task.links) {
-      const ids = linksByType.get(link.linkedType) ?? [];
-      ids.push(link.linkedId);
-      linksByType.set(link.linkedType, ids);
-    }
+  for (const link of taskLinks) {
+    const ids = linksByType.get(link.linkedType) ?? [];
+    ids.push(link.linkedId);
+    linksByType.set(link.linkedType, ids);
   }
   const LINK_MODEL = {
     OPPORTUNITY: prisma.opportunity,
@@ -96,36 +107,16 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       if (!delegate) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rows: { id: string; title: string }[] = await (delegate as any).findMany({
-        where: { id: { in: ids } },
+        where: { id: { in: ids }, ...taskLinkScope(workspace.id, linkedType) },
         select: { id: true, title: true },
       });
       for (const row of rows) titleById.set(`${linkedType}:${row.id}`, row.title);
     })
   );
 
-  const tasks: TaskCardData[] = rawTasks.map((t) => ({
-    id: t.id,
-    title: t.title,
-    description: t.description,
-    status: t.status as TaskStatus,
-    priority: t.priority as TaskPriority,
-    sortOrder: t.sortOrder,
-    squadId: t.squadId,
-    squad: t.squad,
-    assigneeUserId: t.assigneeUserId,
-    ownerName: t.ownerName,
-    storyPoints: t.storyPoints,
-    dueDate: t.dueDate ? t.dueDate.toISOString() : null,
-    iteration: t.iteration,
-    parentTaskId: t.parentTaskId,
-    subtaskCount: t._count.subtasks,
-    links: t.links.map((l) => ({
-      id: l.id,
-      linkedType: l.linkedType as TaskCardData["links"][number]["linkedType"],
-      linkedId: l.linkedId,
-      linkedTitle: titleById.get(`${l.linkedType}:${l.linkedId}`) ?? "(deleted)",
-    })),
-  }));
+  const tasks: TaskCardData[] = buildTaskCards({
+    tasks: await resolveTaskAssignees(workspace.id, rawTasks), squads, links: taskLinks, subtaskCounts, linkedTitles: titleById,
+  });
 
   return (
     <WorkspacePage

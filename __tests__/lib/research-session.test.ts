@@ -33,6 +33,15 @@ function context(overrides: Record<string, unknown> = {}) {
         agentCallCount: null,
       }),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findFirst: vi.fn().mockResolvedValue({ id: "participant-token-1" }),
+    },
+    researchStudy: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findUnique: vi.fn().mockResolvedValue({
+        id: "study-1", workspaceId: "workspace-1", name: "Planning", goal: "Understand planning",
+        studyType: "CUSTOMER_INTERVIEW", guide: JSON.stringify([{ id: "1", text: "Tell me about the last time." }]),
+        targetMinutes: 15, appUrl: null, status: "ACTIVE",
+      }),
     },
     researchSession: {
       count: vi.fn().mockResolvedValue(0),
@@ -151,7 +160,14 @@ describe("canonical research persistence", () => {
 
     const result = await startOrResumeResearchSession(fixture.value)
 
-    expect(fixture.prisma.$transaction).toHaveBeenCalledWith(expect.any(Array))
+    expect(fixture.prisma.$transaction).toHaveBeenCalledWith(expect.any(Function))
+    expect(fixture.prisma.researchStudy.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "study-1", status: "ACTIVE" },
+    }))
+    expect(fixture.prisma.researchParticipantToken.findFirst).toHaveBeenCalledWith({
+      where: { id: "participant-token-1", studyId: "study-1", revokedAt: null, expiresAt: { gt: expect.any(Date) } },
+      select: { id: true },
+    })
     expect(fixture.prisma.researchSession.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         id: result.sessionId,
@@ -167,11 +183,55 @@ describe("canonical research persistence", () => {
       .not.toContain(result.resumeToken)
   })
 
-  it("creates a voice session over the same canonical domain for guided UX only", async () => {
+  it.each(["rotation", "revocation"])("rejects start when token %s wins the study-row race", async () => {
+    const fixture = context()
+    let transactionCall = 0
+    fixture.prisma.$transaction.mockImplementation(async (operation: (tx: typeof fixture.prisma) => Promise<unknown>) => {
+      transactionCall += 1
+      return operation(fixture.prisma)
+    })
+    fixture.prisma.researchParticipantToken.findFirst.mockResolvedValue(null)
+
+    await expect(startOrResumeResearchSession(fixture.value)).rejects.toThrow(expect.objectContaining({ status: 404 }))
+    expect(fixture.prisma.researchSession.create).not.toHaveBeenCalled()
+    expect(transactionCall).toBe(1)
+  })
+
+  it("refreshes the token-expiry timestamp after a study-lock retry", async () => {
+    vi.useFakeTimers()
+    try {
+      const firstAttempt = new Date("2026-09-04T12:00:00.000Z")
+      const retryAttempt = new Date("2026-09-04T12:01:00.000Z")
+      vi.setSystemTime(firstAttempt)
+      const fixture = context()
+      let transactionCall = 0
+      fixture.prisma.$transaction.mockImplementation(async (operation: (tx: typeof fixture.prisma) => Promise<unknown>) => {
+        transactionCall += 1
+        if (transactionCall === 1) {
+          vi.setSystemTime(retryAttempt)
+          throw Object.assign(new Error("Concurrent study change"), { code: "P2034" })
+        }
+        return operation(fixture.prisma)
+      })
+
+      await startOrResumeResearchSession(fixture.value)
+
+      expect(fixture.prisma.researchParticipantToken.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ expiresAt: { gt: retryAttempt } }),
+      }))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("creates a guided voice session over the same canonical domain", async () => {
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
     const fixture = context()
     const guidedStudy = (fixture.value as unknown as { study: { studyType: string; appUrl: string | null } }).study
     guidedStudy.studyType = "USABILITY_TEST"
     guidedStudy.appUrl = "https://example.com"
+    fixture.prisma.researchStudy.findUnique.mockResolvedValue((fixture.value as unknown as { study: unknown }).study)
 
     const result = await startOrResumeResearchSession(fixture.value, undefined, "VOICE")
 
@@ -180,6 +240,97 @@ describe("canonical research persistence", () => {
     })
     expect(fixture.prisma.researchTurn.create).not.toHaveBeenCalled()
     expect(result.turns).toEqual([])
+  })
+
+  it("creates a customer-discovery voice session when its rollout gate is enabled", async () => {
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
+    const fixture = context()
+    const result = await startOrResumeResearchSession(fixture.value, undefined, "VOICE")
+    expect(fixture.prisma.researchSession.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ id: result.sessionId, modality: "VOICE" }),
+    })
+    expect(fixture.prisma.researchTurn.create).not.toHaveBeenCalled()
+  })
+
+  it("creates a production browser voice session without the legacy authoritative flag", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    vi.stubEnv("E2E_FUNCTIONAL", "")
+    try {
+      const fixture = context()
+
+      const result = await startOrResumeResearchSession(fixture.value, undefined, "VOICE")
+
+      expect(fixture.prisma.researchSession.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ id: result.sessionId, modality: "VOICE" }),
+      })
+      expect(fixture.prisma.researchTurn.create).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("rejects a new customer-discovery voice session when its production rollout gate is disabled", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    try {
+      const fixture = context()
+      await expect(startOrResumeResearchSession(fixture.value, undefined, "VOICE"))
+        .rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchSessionError>)
+      expect(fixture.prisma.researchSession.create).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("does not spend the final successful start slot on an unavailable voice modality", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    try {
+      const fixture = context()
+      let startCount = MAX_RESEARCH_STARTS_PER_MINUTE - 1
+      fixture.prisma.researchParticipantToken.findUnique.mockImplementation(async () => ({
+        startWindowAt: new Date(),
+        startCount,
+        responseWindowAt: null,
+        responseCount: null,
+        agentWindowAt: null,
+        agentCallCount: null,
+      }))
+      fixture.prisma.researchParticipantToken.updateMany.mockImplementation(async ({ data }: { data: { startCount?: number } }) => {
+        if (typeof data.startCount === "number") startCount = data.startCount
+        return { count: 1 }
+      })
+
+      await expect(startOrResumeResearchSession(fixture.value, undefined, "VOICE"))
+        .rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchSessionError>)
+      await expect(startOrResumeResearchSession(fixture.value, undefined, "CHAT"))
+        .resolves.toMatchObject({ status: "IN_PROGRESS" })
+      expect(startCount).toBe(MAX_RESEARCH_STARTS_PER_MINUTE)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("rejects guided voice before spending start quota while the global gate is disabled", async () => {
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    const fixture = context()
+    const guidedStudy = (fixture.value as unknown as { study: { studyType: string; appUrl: string | null } }).study
+    guidedStudy.studyType = "USABILITY_TEST"
+    guidedStudy.appUrl = "https://example.com"
+    fixture.prisma.researchStudy.findUnique.mockResolvedValue((fixture.value as unknown as { study: unknown }).study)
+
+    await expect(startOrResumeResearchSession(fixture.value, undefined, "VOICE"))
+      .rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchSessionError>)
+    expect(fixture.prisma.researchParticipantToken.updateMany).not.toHaveBeenCalled()
+    expect(fixture.prisma.researchSession.create).not.toHaveBeenCalled()
   })
 
   it("accepts the final start in a token window and rejects the next one", async () => {
@@ -243,6 +394,57 @@ describe("canonical research persistence", () => {
         resumeTokenHash: hashResearchResumeToken("wrong-secret"),
       }),
     }))
+  })
+
+  it("rejects a persisted voice resume in production when the request omits modality", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "")
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "1")
+    vi.stubEnv("E2E_FUNCTIONAL", "1")
+    try {
+      const fixture = context()
+      fixture.prisma.researchSession.findFirst.mockResolvedValue({
+        id: "voice-session-1",
+        modality: "VOICE",
+        status: "IN_PROGRESS",
+        startedAt: new Date(),
+        turns: [],
+      })
+
+      await expect(startOrResumeResearchSession(fixture.value, {
+        sessionId: "voice-session-1",
+        resumeToken: "resume-secret",
+      })).rejects.toMatchObject({ status: 409 } satisfies Partial<ResearchSessionError>)
+      expect(fixture.prisma.researchSession.updateMany).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("resumes a production browser voice session without the legacy authoritative flag", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    vi.stubEnv("E2E_FUNCTIONAL", "")
+    try {
+      const fixture = context()
+      fixture.prisma.researchSession.findFirst.mockResolvedValue({
+        id: "voice-session-1",
+        modality: "VOICE",
+        status: "IN_PROGRESS",
+        startedAt: new Date(),
+        turns: [],
+      })
+
+      await expect(startOrResumeResearchSession(fixture.value, {
+        sessionId: "voice-session-1",
+        resumeToken: "resume-secret",
+      })).resolves.toMatchObject({ sessionId: "voice-session-1", status: "IN_PROGRESS", turns: [] })
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it("returns only terminal status when resuming a completed interview", async () => {
@@ -328,7 +530,12 @@ describe("canonical research persistence", () => {
       .toBeGreaterThanOrEqual(RESEARCH_REQUEST_LEASE_MS)
   })
 
-  it("atomically links authorized READY attachments to the answer and sends private bytes to the tool-free model", async () => {
+  it.each([
+    { answer: "This screen confused me.", mimeType: "image/png" },
+    { answer: "", mimeType: "image/png" },
+    { answer: "", mimeType: "image/gif" },
+    { answer: "", mimeType: "image/heic" },
+  ])("atomically links authorized evidence and sends only supported model bytes %j", async ({ answer, mimeType }) => {
     const fixture = context()
     const now = new Date()
     fixture.prisma.researchSession.findFirst.mockResolvedValue({
@@ -343,14 +550,14 @@ describe("canonical research persistence", () => {
       .mockResolvedValueOnce({ nextSequence: 1 })
     fixture.prisma.researchTurn.findMany.mockResolvedValue([{ id: "participant-turn", role: "PARTICIPANT", content: "This screen confused me.", sequence: 0 }])
     const attachmentId = "00000000-0000-4000-8000-000000000001"
-    const attachment = { id: attachmentId, status: "READY", turnId: null, workspaceId: "workspace-1", studyId: "study-1", sessionId: "session-1", blobPathname: "private/path", originalName: "screen.png", mimeType: "image/png", sizeBytes: 3 }
+    const attachment = { id: attachmentId, status: "READY", turnId: null, workspaceId: "workspace-1", studyId: "study-1", sessionId: "session-1", blobPathname: "private/path", originalName: "evidence", mimeType, sizeBytes: 3 }
     fixture.prisma.researchAttachment.findMany.mockResolvedValue([attachment])
     const loadAttachmentBytes = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]))
     const runAgent = vi.fn().mockResolvedValue("What did you expect to happen?")
 
     await respondToResearchSession({
       context: fixture.value, sessionId: "session-1", resumeToken: "resume-secret",
-      idempotencyKey: "clientturnid0001", answer: "This screen confused me.", baseUrl: "https://compass.test",
+      idempotencyKey: "clientturnid0001", answer, baseUrl: "https://compass.test",
       attachmentIds: [attachmentId], loadAttachmentBytes, runAgent,
     })
 
@@ -358,8 +565,31 @@ describe("canonical research persistence", () => {
       where: { id: { in: [attachmentId] }, sessionId: "session-1", status: "READY", turnId: null },
       data: { turnId: expect.any(String) },
     })
-    expect(runAgent).toHaveBeenCalledWith(expect.objectContaining({ attachments: [{ mimeType: "image/png", originalName: "screen.png", bytes: expect.any(Uint8Array) }] }))
+    if (mimeType === "image/heic") {
+      expect(loadAttachmentBytes).not.toHaveBeenCalled()
+      expect(runAgent).toHaveBeenCalledWith(expect.objectContaining({ attachments: [], prompt: expect.stringContaining("not sent") }))
+    } else expect(runAgent).toHaveBeenCalledWith(expect.objectContaining({ attachments: [{ mimeType, originalName: "evidence", bytes: expect.any(Uint8Array) }] }))
     expect(runAgent.mock.calls[0][0]).not.toHaveProperty("blobPathname")
+  })
+
+  it("resumes saved evidence metadata without exposing private storage paths", async () => {
+    const fixture = context()
+    const now = new Date()
+    fixture.prisma.researchSession.findFirst.mockResolvedValue({
+      id: "session-1", modality: "CHAT", status: "IN_PROGRESS", startedAt: now,
+      turns: [{ id: "turn-1", role: "PARTICIPANT", content: "", sequence: 0 }],
+    })
+    fixture.prisma.researchAttachment.findMany.mockResolvedValue([{
+      id: "attachment-1", turnId: "turn-1", originalName: "screen.png", mimeType: "image/png", sizeBytes: 3,
+      blobPathname: "private/never-public", sha256: "internal-hash",
+    }])
+    const result = await startOrResumeResearchSession(fixture.value, { sessionId: "session-1", resumeToken: "resume-secret" })
+    expect(result.turns[0]).toMatchObject({ attachments: [{ id: "attachment-1", originalName: "screen.png", mimeType: "image/png", sizeBytes: 3 }] })
+    expect(JSON.stringify(result)).not.toContain("private/never-public")
+    expect(JSON.stringify(result)).not.toContain("internal-hash")
+    expect(fixture.prisma.researchAttachment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ workspaceId: "workspace-1", studyId: "study-1", sessionId: "session-1", status: "READY", deletedAt: null }),
+    }))
   })
 
   it("replays a completed idempotent request without invoking the agent", async () => {

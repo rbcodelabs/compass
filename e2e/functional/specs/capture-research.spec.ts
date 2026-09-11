@@ -1,7 +1,61 @@
 import { test, expect } from "../fixtures/index"
+import { awaitResearchReplyReceipt } from "../fixtures/research-reply-receipt"
+import { observeResearchReply } from "../fixtures/research-reply-observer"
+
+function voiceEventIdentity(evidenceMode: string | undefined, id: string, ordinal: number) {
+  return evidenceMode === "PARTICIPANT_SUBMITTED" ? { clientEventId: id, reportedOrdinal: ordinal } : { providerEventId: id }
+}
 
 test.describe("Capture — research study", () => {
-  test("persists and resumes a secure anonymous interview for member review", async ({ page, base, browser, baseURL }) => {
+  test("edits an unused protocol, locks it after participation, and manages the lifecycle", async ({ page, base, browser, baseURL }) => {
+    await page.goto(`${base}/capture/new`)
+    await page.getByLabel("Study name").fill(`E2E lifecycle ${Date.now()}`)
+    await page.getByLabel("What are you trying to learn?").fill("Understand current planning")
+    await page.getByLabel("Target duration").selectOption("20")
+    await page.getByRole("textbox", { name: "Question 1", exact: true }).fill("Tell me about your last planning session.")
+    await page.getByRole("button", { name: "Create and activate study" }).click()
+    await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/, { timeout: 15_000 })
+
+    await page.getByLabel("Study name").fill("E2E lifecycle edited")
+    await page.getByLabel("Research goal").fill("Understand current planning workflows")
+    await page.getByLabel("Discussion guide").fill("Tell me about the last time you planned.\nWhat was hardest?")
+    await page.getByRole("button", { name: "Save study" }).click()
+    await expect(page.getByRole("heading", { name: "E2E lifecycle edited" })).toBeVisible()
+    await expect(page.getByText("Target", { exact: true }).locator("..").getByText("20 minutes", { exact: true })).toBeVisible()
+
+    await page.getByRole("button", { name: "Rotate participant link" }).click()
+    const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
+    const firstToken = new URL(shareUrl).pathname.split("/").at(-1)!
+    const anonymous = await browser.newContext({ storageState: undefined })
+    const started = await anonymous.request.post(`${baseURL}/api/research/start`, {
+      data: { token: firstToken },
+    })
+    expect(started.status()).toBe(200)
+
+    await page.reload()
+    await expect(page.getByText(/protocol is locked/i)).toBeVisible()
+    await expect(page.getByLabel("Research goal")).toBeDisabled()
+    await expect(page.getByLabel("Study name")).toBeEnabled()
+    await page.getByRole("button", { name: "Close study" }).click()
+    await expect(page.getByText("closed", { exact: true })).toBeVisible()
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: firstToken } })).status()).toBe(404)
+    await expect(page.getByRole("button", { name: "Activate study" })).toBeVisible()
+    await page.getByRole("button", { name: "Activate study" }).click()
+    await expect(page).toHaveURL(/\?token=/)
+    await expect(page.getByText("active", { exact: true })).toBeVisible()
+    const secondToken = new URL(await page.getByRole("textbox", { name: "Participant link" }).inputValue()).pathname.split("/").at(-1)!
+    expect(secondToken).not.toBe(firstToken)
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: firstToken } })).status()).toBe(404)
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: secondToken } })).status()).toBe(200)
+    page.once("dialog", (dialog) => dialog.accept())
+    await page.getByRole("button", { name: "Archive study" }).click()
+    await expect(page).toHaveURL(`${base}/capture`)
+    await expect(page.getByRole("heading", { name: "E2E lifecycle edited" })).not.toBeVisible()
+    expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: secondToken } })).status()).toBe(404)
+    await anonymous.close()
+  })
+
+  test("persists and resumes a secure anonymous interview for member review", async ({ page, base, browser, baseURL }, testInfo) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto(`${base}/capture/new`)
     await page.getByLabel("Study name").fill(`E2E interview ${Date.now()}`)
@@ -13,7 +67,7 @@ test.describe("Capture — research study", () => {
 
     await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
     const studyId = new URL(page.url()).pathname.split("/").at(-1)!
-    const shareUrl = await page.getByRole("textbox").inputValue()
+    const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
     expect(shareUrl).toContain("/research/")
     const participantToken = new URL(shareUrl).pathname.split("/").at(-1)!
 
@@ -22,10 +76,21 @@ test.describe("Capture — research study", () => {
     await participant.setViewportSize({ width: 390, height: 844 })
     await participant.goto(shareUrl.replace(/^https?:\/\/[^/]+/, baseURL!))
     await expect(participant.getByRole("heading", { name: /E2E interview/ })).toBeVisible()
+    await participant.getByRole("button", { name: /Use chat/ }).click()
     await participant.getByRole("button", { name: "Start interview" }).click()
     await expect(participant.getByText("Tell me about the last time you planned your week.")).toBeVisible()
+    await participant.getByLabel("Share screenshot or PDF").setInputFiles("e2e/fixtures/test-image.png")
+    await expect(participant.getByText("test-image.png")).toBeVisible()
     await participant.getByRole("textbox", { name: "Your response" }).fill("I use a spreadsheet every Monday.")
+    const observeReply = await observeResearchReply(participant)
     await participant.getByRole("button", { name: "Send" }).click()
+    // Server work (including cold route compilation) and UI rendering have
+    // separate gates. Neither a provisional delta nor HTTP 200 proves a save.
+    const receipt = await awaitResearchReplyReceipt(observeReply(), diagnostic => {
+      testInfo.annotations.push({ type: "research-reply-receipt", description: JSON.stringify(diagnostic) })
+      console.info("[research reply receipt]", JSON.stringify(diagnostic))
+    })
+    expect(receipt.message).toBe("What made that difficult for you?")
     await expect(participant.getByText("What made that difficult for you?")).toBeVisible()
 
     await participant.reload()
@@ -65,6 +130,30 @@ test.describe("Capture — research study", () => {
     const idempotentTurns = idempotentResumeBody.turns as Array<{ role: string; content: string }>
     expect(idempotentTurns.filter((turn) => turn.content === duplicateBody.answer)).toHaveLength(1)
 
+    const disconnectedBody = { ...duplicateBody, idempotencyKey: "e2edisconnectedstream0001", answer: "Save this answer even when the display disconnects." }
+    const provisional = await participant.evaluate(async (body) => {
+      const response = await fetch("/api/research/respond", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" }, body: JSON.stringify(body) })
+      const reader = response.body!.getReader()
+      const first = await reader.read()
+      await reader.cancel()
+      return new TextDecoder().decode(first.value)
+    }, disconnectedBody)
+    expect(provisional).toContain('"type":"delta"')
+    await expect.poll(async () => {
+      // Read-only resume must observe persistence before any respond retry can
+      // run another model invocation and conceal a cancellation failure.
+      const resumed = await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: participantToken, ...idempotentSession } })
+      if (resumed.status() !== 200) return -1
+      const turns = (await resumed.json()).turns as Array<{ role: string }>
+      return turns.filter((turn) => turn.role === "INTERVIEWER").length
+    }, { timeout: 15_000 }).toBe(idempotentTurns.filter((turn) => turn.role === "INTERVIEWER").length + 1)
+    const disconnectedReplay = await anonymous.request.post(`${baseURL}/api/research/respond`, { data: disconnectedBody })
+    expect(disconnectedReplay.status()).toBe(200)
+    expect((await disconnectedReplay.json()).replayed).toBe(true)
+    const afterDisconnect = await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: participantToken, ...idempotentSession } })
+    const disconnectedTurns = (await afterDisconnect.json()).turns as Array<{ content: string }>
+    expect(disconnectedTurns.filter((turn) => turn.content === disconnectedBody.answer)).toHaveLength(1)
+
     const singleFlightStart = await anonymous.request.post(`${baseURL}/api/research/start`, {
       data: { token: participantToken },
     })
@@ -90,12 +179,43 @@ test.describe("Capture — research study", () => {
     })
     const singleFlightTurns = (await singleFlightResume.json()).turns as Array<{ role: string; content: string }>
     expect(singleFlightTurns.filter((turn) => turn.role === "PARTICIPANT")).toHaveLength(1)
+
+    const voiceStart = await anonymous.request.post(`${baseURL}/api/research/start`, {
+      data: { token: participantToken, modality: "VOICE" },
+    })
+    expect(voiceStart.status()).toBe(200)
+    const voiceStarted = await voiceStart.json() as { sessionId: string; resumeToken: string }
+    const voiceSession = { sessionId: voiceStarted.sessionId, resumeToken: voiceStarted.resumeToken }
+    const voiceCredential = await anonymous.request.post(`${baseURL}/api/research/voice-session`, {
+      data: { token: participantToken, ...voiceSession },
+    })
+    expect(voiceCredential.status()).toBe(200)
+    const { leaseId, evidenceMode } = await voiceCredential.json() as { leaseId: string; evidenceMode?: string }
+    expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: {
+      token: participantToken, ...voiceSession, leaseId, action: "FINAL",
+      ...voiceEventIdentity(evidenceMode, "e2e-discovery-participant-1", 0), role: "PARTICIPANT",
+      content: "I plan every Monday because the rest of the week changes quickly.",
+    } })).status()).toBe(200)
+    expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: {
+      token: participantToken, ...voiceSession, leaseId, action: "FINAL",
+      ...voiceEventIdentity(evidenceMode, "e2e-discovery-interviewer-1", 1), role: "INTERVIEWER",
+      content: "Tell me about the last time that plan had to change.",
+    } })).status()).toBe(200)
+    expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: {
+      token: participantToken, ...voiceSession, leaseId, action: "DISCONNECT",
+    } })).status()).toBe(200)
+    expect((await anonymous.request.post(`${baseURL}/api/research/complete`, { data: {
+      token: participantToken, ...voiceSession,
+    } })).status()).toBe(200)
     await anonymous.close()
 
     await page.goto(`${base}/capture/studies/${studyId}`)
-    await expect(page.getByText("completed")).toBeVisible()
+    await expect(page.getByText("completed", { exact: true })).toHaveCount(2)
     await expect(page.getByText("I use a spreadsheet every Monday.")).toBeVisible()
     await expect(page.getByText("What made that difficult for you?").first()).toBeVisible()
+    await expect(page.getByRole("link", { name: "test-image.png" })).toBeVisible()
+    await expect(page.getByText("Voice session")).toBeVisible()
+    await expect(page.getByText("I plan every Monday because the rest of the week changes quickly.")).toBeVisible()
 
     const crossWorkspace = await page.goto(`/rbcodelabs/compass/capture/studies/${studyId}`)
     expect(crossWorkspace?.status()).toBe(404)
@@ -125,12 +245,18 @@ test.describe("Capture — research study", () => {
 
     await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
     const studyId = new URL(page.url()).pathname.split("/").at(-1)!
-    const shareUrl = await page.getByRole("textbox").inputValue()
+    const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
     const participantToken = new URL(shareUrl).pathname.split("/").at(-1)!
-    await expect(page.getByText("Guided usability test")).toBeVisible()
+    await expect(page.getByText("Type", { exact: true }).locator("..").getByText("Guided usability test", { exact: true })).toBeVisible()
     await expect(page.getByRole("link", { name: "https://example.com/pricing" })).toBeVisible()
 
     const anonymous = await browser.newContext({ storageState: undefined })
+    // Controlled external-product fixture; no dependency on a live site's
+    // availability, and screenshots clearly show synthetic study content.
+    await anonymous.route("https://example.com/pricing", (route) => route.fulfill({
+      contentType: "text/html; charset=utf-8",
+      body: '<!doctype html><html><body style="font-family:system-ui;padding:24px;background:#f8fafc;color:#172554"><p>Example product · research fixture</p><h1>Plans for your team</h1><h2>Starter</h2><p>$12 per person / month</p><h2>Team</h2><p>$20 per person / month</p><p>Compare plans, billing and support.</p></body></html>',
+    }))
     const participant = await anonymous.newPage()
     await participant.setViewportSize({ width: 390, height: 844 })
     await participant.goto(shareUrl.replace(/^https?:\/\/[^/]+/, baseURL!))
@@ -142,11 +268,20 @@ test.describe("Capture — research study", () => {
     await expect(participant.locator("iframe")).toHaveAttribute("referrerpolicy", "no-referrer")
     await participant.getByRole("button", { name: "Start session" }).click()
     await expect(participant.getByText(tasks[0])).toBeVisible()
-    await participant.getByLabel("Share screenshot or PDF").setInputFiles("e2e/fixtures/test-image.png")
+    await expect(participant.frameLocator("iframe").getByRole("heading", { name: "Plans for your team" })).toBeVisible()
+    const evidence = await participant.locator("iframe").screenshot()
+    await participant.getByLabel("Share screenshot or PDF").setInputFiles({ name: "test-image.png", mimeType: "image/png", buffer: evidence })
     await expect(participant.getByText("test-image.png")).toBeVisible()
+    // Evidence-only answers and real provisional transport are participant
+    // behavior; the local runner still uses its no-cost agent implementation.
+    await participant.getByRole("button", { name: "Send" }).click()
+    await expect(participant.getByText("Draft — not saved yet")).toBeVisible()
+    await expect(participant.getByText("What made that difficult for you?")).toBeVisible()
+    await expect(participant.getByRole("img", { name: "test-image.png" })).toBeVisible()
+    await expect.poll(() => participant.getByRole("img", { name: "test-image.png" }).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
     await participant.getByRole("textbox", { name: "Your response" }).fill("I expected the team price to be clearer here.")
     await participant.getByRole("button", { name: "Send" }).click()
-    await expect(participant.getByText("What made that difficult for you?")).toBeVisible()
+    await expect(participant.getByText("What made that difficult for you?")).toHaveCount(2)
     const storedChatSession = await participant.evaluate((key) => localStorage.getItem(key), `compass-research-session-${participantToken.slice(-16)}`)
     expect(storedChatSession).not.toBeNull()
     const resumeResponsePromise = participant.waitForResponse((response) => response.url().endsWith("/api/research/start") && response.request().method() === "POST")
@@ -155,7 +290,13 @@ test.describe("Capture — research study", () => {
     const resumeBody = await resumeResponse.json()
     expect(resumeResponse.status(), JSON.stringify(resumeBody)).toBe(200)
     await expect(participant.getByText("I expected the team price to be clearer here.")).toBeVisible()
+    await expect(participant.getByRole("img", { name: "test-image.png" })).toBeVisible()
     expect(await participant.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    if (process.env.RESEARCH_QA_SCREENSHOTS === "1") {
+      await participant.screenshot({ path: "public/screenshots/docs/research-guided-chat-mobile.png", fullPage: true })
+      await participant.setViewportSize({ width: 1280, height: 800 })
+      await participant.screenshot({ path: "public/screenshots/docs/research-guided-chat-desktop.png", fullPage: true })
+    }
     await participant.getByRole("button", { name: "Finish interview" }).click()
     await expect(participant.getByRole("heading", { name: "Thank you" })).toBeVisible()
 
@@ -169,10 +310,10 @@ test.describe("Capture — research study", () => {
       data: { token: participantToken, ...voiceSession },
     })
     expect(voiceCredential.status()).toBe(200)
-    const { leaseId } = await voiceCredential.json() as { leaseId: string }
+    const { leaseId, evidenceMode } = await voiceCredential.json() as { leaseId: string; evidenceMode?: string }
     const participantEvent = {
       token: participantToken, ...voiceSession, leaseId, action: "FINAL",
-      providerEventId: "e2e-participant-final-1", role: "PARTICIPANT",
+      ...voiceEventIdentity(evidenceMode, "e2e-participant-final-1", 0), role: "PARTICIPANT",
       content: "I expected the comparison to explain the tradeoffs.",
     }
     expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: participantEvent })).status()).toBe(200)
@@ -180,7 +321,7 @@ test.describe("Capture — research study", () => {
     expect((await replay.json()).replayed).toBe(true)
     expect((await anonymous.request.post(`${baseURL}/api/research/voice-event`, { data: {
       token: participantToken, ...voiceSession, leaseId, action: "FINAL",
-      providerEventId: "e2e-interviewer-final-1", role: "INTERVIEWER",
+      ...voiceEventIdentity(evidenceMode, "e2e-interviewer-final-1", 1), role: "INTERVIEWER",
       content: "What tradeoff did you expect to see explained?",
     } })).status()).toBe(200)
     const resumedVoice = await anonymous.request.post(`${baseURL}/api/research/start`, {

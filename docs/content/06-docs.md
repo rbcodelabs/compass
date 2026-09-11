@@ -22,7 +22,15 @@ Pages can be dragged to reorder them within their level of the hierarchy.
 
 ## Artifacts
 
+Deployed HTML Artifacts require `ARTIFACT_BLOB_READ_WRITE_TOKEN` for a **private** Vercel Blob store. Configure separate stores and credentials for production and preview. Uploads, reads, and cleanup use this credential explicitly; Compass never falls back to the general `BLOB_READ_WRITE_TOKEN`, which can serve public images. Missing configuration blocks HTML storage operations with “Private artifact storage is not configured.” An incorrectly configured public store is rejected by Vercel. Local database-backed development uses filesystem storage.
+
+When upgrading an existing installation, point this credential at the private store that already contains its Artifact revisions, or migrate those files before switching stores. Revisions retain storage paths, so changing the credential alone does not move existing files.
+
 Artifacts have stable identities and a separate section in the Docs navigator. They are not nested into the Page hierarchy. An Artifact can be linked to multiple Solutions, and a Solution can link to multiple Artifacts.
+
+Artifacts can also be linked to ordinary **Decisions**. Open a Decision and use **Artifact to link** under **Linked to** to choose an active Artifact in the same workspace. The row opens its current preview and shows its current revision and archived status. The Artifact detail page lists reciprocal **Linked decisions**, where a workspace member can remove a link. Existing archived links stay visible and removable, but archived Artifacts cannot be newly linked.
+
+These relationships are **live supporting material, not frozen approval evidence**. Replacing an Artifact revision changes the current preview without reopening a Decision or changing its original subject, captured Sources, history, or recorded outcome. Links remain across Decision revisions. They are available on pending and decided ordinary Decisions, not legacy execution-authorization reviews. Only workspace members can edit the links; organization-admin-only Decision readers do not gain Artifact editing access.
 
 Choose one source when creating an Artifact:
 
@@ -44,6 +52,12 @@ Docs uses a Tiptap-powered rich-text editor. Supported formatting includes:
 - **Links** — Select text and click the link button to add a URL
 - **Horizontal rules** — Type `---` on a blank line
 - **Blockquotes** — Start a line with `>`
+
+## Decisions in the toolbar
+
+Use **Request decision** on the right of the editor toolbar to start a decision with this page already selected. While a decision about the page is pending, the same control shows **Decision pending** and a request count. Click it to open the existing decision. If several requests are pending, **Decisions pending** opens a menu of their questions, newest first.
+
+The count includes only pending decisions whose primary subject is this page, not decisions that merely cite it as supporting material. Recorded decisions leave the count; a revised pending request appears again. To start an additional decision, use **New decision** in Decisions. If status cannot be loaded, **Decision status unavailable** links to Decisions while the editor remains usable.
 
 ## Inserting Screenshots
 
@@ -95,7 +109,7 @@ Leave Google-Docs-style comments anchored to a specific span of a page, so discu
 
 **Doc-level comments.** A comment doesn't have to be anchored — over MCP you can add a general, page-level comment with no anchored text (see below). In the sidebar these are labelled **general**.
 
-Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api) for `add_doc_comment`, `list_doc_comments`, `get_doc_comment`, `update_doc_comment`, `delete_doc_comment`, `resolve_doc_comment`, and `reopen_doc_comment`.
+Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api) for `add_doc_comment`, `list_doc_comments`, `get_doc_comment`, `update_doc_comment`, `delete_doc_comment`, `resolve_doc_comment`, and `reopen_doc_comment`. These Doc-specific tools remain domain-friendly compatibility aliases over shared Comment IDs and preserve inline anchor creation and updates. The generic shared-comment tools can also operate on `DOC` targets by Comment ID, but generic `add_comment` creates an unanchored Doc comment; use `add_doc_comment` when creating an inline anchor.
 
 ## Positioning & Messaging Briefs
 

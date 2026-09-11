@@ -4,13 +4,11 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
-import { RoadmapGantt } from "@/components/roadmap/roadmap-gantt";
-import { RoadmapViewToggle } from "@/components/roadmap/roadmap-view-toggle";
-import { RoadmapFilters } from "@/components/roadmap/roadmap-filters";
+import { NativeTimeline } from "@/components/roadmap/native-timeline/native-timeline";
+import { RoadmapHeader } from "@/components/roadmap/roadmap-header";
 import type { Horizon, SquadData, TaskStatus } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import type { UnscheduledItem } from "@/components/roadmap/unscheduled-items-panel";
-import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { deriveRoadmapDeliveryStatus } from "@/lib/roadmap-delivery-status";
 
 export const metadata = {
@@ -197,6 +195,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     feedbackId: item.feedbackId ?? null,
     startDate: item.startDate ? item.startDate.toISOString() : null,
     endDate: item.endDate ? item.endDate.toISOString() : null,
+    updatedAt: item.updatedAt.toISOString(),
     solution: item.solution ?? null,
     keyResult: item.keyResult
       ? {
@@ -239,41 +238,39 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   ];
 
   return (
-    <WorkspacePage
-      title="Roadmap"
-      contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
-      actions={(
-        <Suspense>
-          <RoadmapFilters squads={squads} />
-          <RoadmapViewToggle view={view} />
-        </Suspense>
-      )}
-    >
+    <>
       {view === "timeline" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <RoadmapGantt
+        <Suspense>
+          <NativeTimeline
+            // A filter change is a new dataset; ordinary refreshes must
+            // preserve in-flight mutation fences and optimistic edits.
+            key={JSON.stringify([workspace.id, squadFilter || null])}
             items={cardItems}
+            squads={squadFilter ? squads.filter((squad) => squad.id === squadFilter) : squads}
+            headerSquads={squads}
             workspaceId={workspace.id}
             unscheduledItems={unscheduledItems}
-            revalidatePathStr={`/${orgSlug}/${workspaceSlug}/roadmap`}
           />
-        </div>
+        </Suspense>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <RoadmapBoard
-            initialItems={cardItems}
-            workspaceId={workspace.id}
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-            availableKRs={availableKRs}
-            availableSolutions={availableSolutions}
-            availableOpportunities={rawOpportunities}
-            availableExperiments={availableExperiments}
-            unscheduledItems={unscheduledItems}
-            squads={squads}
-          />
+        <div className="flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0">
+          <Suspense><RoadmapHeader squads={squads} /></Suspense>
+          <div data-slot="workspace-content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
+            <RoadmapBoard
+              initialItems={cardItems}
+              workspaceId={workspace.id}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+              availableKRs={availableKRs}
+              availableSolutions={availableSolutions}
+              availableOpportunities={rawOpportunities}
+              availableExperiments={availableExperiments}
+              unscheduledItems={unscheduledItems}
+              squads={squads}
+            />
+          </div>
         </div>
       )}
-    </WorkspacePage>
+    </>
   );
 }

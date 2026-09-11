@@ -205,6 +205,66 @@ export async function unlinkArtifactFromSolution(input: { artifactId: string; so
   return { removed: true }
 }
 
+type DecisionArtifactInput = { artifactId: string; requestId: string; workspaceId: string }
+
+async function assertDecisionArtifactTargets(input: DecisionArtifactInput) {
+  const prisma = getPrisma()
+  const [artifact, request] = await Promise.all([
+    prisma.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true, status: true } }),
+    prisma.reviewRequest.findFirst({ where: { id: input.requestId, workspaceId: input.workspaceId, gateType: "TRACKED_DECISION" }, select: { id: true } }),
+  ])
+  if (!artifact || !request) throw new Error("Artifact and Decision must exist in the same workspace")
+  return artifact
+}
+
+function decisionArtifactLinkWhere(input: DecisionArtifactInput) {
+  return { workspaceId: input.workspaceId, artifactId: input.artifactId, linkedType: "REVIEW_REQUEST", linkedId: input.requestId }
+}
+
+export async function linkArtifactToDecision(input: DecisionArtifactInput & { createdById?: string | null; source?: Source }) {
+  const artifact = await assertDecisionArtifactTargets(input)
+  const prisma = getPrisma()
+  const where = decisionArtifactLinkWhere(input)
+  const existing = await prisma.artifactLink.findFirst({ where })
+  if (existing) return { ...existing, created: false }
+  if (artifact.status === "ARCHIVED") throw new Error("Archived Artifacts cannot be linked to a Decision")
+  try {
+    const link = await prisma.artifactLink.create({ data: { ...where, createdById: input.createdById ?? null, source: input.source ?? "UI" } })
+    return { ...link, created: true }
+  } catch (error) {
+    if ((error as { code?: string }).code !== "P2002") throw error
+    const winner = await prisma.artifactLink.findFirst({ where })
+    if (!winner) throw error
+    return { ...winner, created: false }
+  }
+}
+
+export async function unlinkArtifactFromDecision(input: DecisionArtifactInput) {
+  await assertDecisionArtifactTargets(input)
+  const result = await getPrisma().artifactLink.deleteMany({ where: decisionArtifactLinkWhere(input) })
+  return { removed: result.count > 0 }
+}
+
+export async function getDecisionArtifacts(workspaceId: string, requestId: string) {
+  return getPrisma().artifact.findMany({
+    where: { workspaceId, links: { some: { workspaceId, linkedType: "REVIEW_REQUEST", linkedId: requestId } } },
+    select: { id: true, title: true, sourceType: true, status: true, currentRevision: { select: { revisionNumber: true } } },
+    orderBy: [{ title: "asc" }, { id: "asc" }],
+  })
+}
+
+export async function getArtifactDecisions(workspaceId: string, artifactId: string) {
+  const prisma = getPrisma()
+  const links = await prisma.artifactLink.findMany({ where: { workspaceId, artifactId, linkedType: "REVIEW_REQUEST" }, select: { linkedId: true } })
+  if (!links.length) return []
+  const requests = await prisma.reviewRequest.findMany({
+    where: { id: { in: links.map((link) => link.linkedId) }, workspaceId, gateType: "TRACKED_DECISION" },
+    select: { id: true, state: true, currentRevision: { select: { title: true } } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  })
+  return requests.map((request) => ({ id: request.id, title: request.currentRevision?.title ?? "Decision", state: request.state }))
+}
+
 export async function archiveArtifact(input: { artifactId: string; workspaceId: string; updatedById?: string | null }) {
   const prisma = getPrisma()
   const artifact = await prisma.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true } })
@@ -347,7 +407,8 @@ type WorkspaceArtifactCleanupClient = {
 export async function deleteWorkspaceArtifacts(
   prisma: WorkspaceArtifactCleanupClient,
   workspaceId: string,
-  storage: ArtifactStorage
+  storage: ArtifactStorage,
+  retryCleanup = true
 ) {
   const artifacts = await prisma.artifact.findMany({ where: { workspaceId }, select: { id: true } })
   const artifactIds = artifacts.map((artifact) => artifact.id)
@@ -362,5 +423,5 @@ export async function deleteWorkspaceArtifacts(
     await prisma.artifactRevision.deleteMany({ where: { artifactId: { in: artifactIds } } })
   }
   await prisma.artifact.deleteMany({ where: { workspaceId } })
-  await retryArtifactBlobCleanup(prisma, storage)
+  if (retryCleanup) await retryArtifactBlobCleanup(prisma, storage)
 }

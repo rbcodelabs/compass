@@ -8,6 +8,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockRoadmapItem = { update: vi.fn() };
+const mockCapacityReservation = { findUnique: vi.fn(), update: vi.fn() };
+const mockCapacityPlan = { updateMany: vi.fn() };
 const mockChecklistTemplate = { findFirst: vi.fn(), create: vi.fn() };
 const mockChecklistTemplateItem = { createMany: vi.fn() };
 const mockLaunchChecklist = { create: vi.fn() };
@@ -23,9 +25,11 @@ const mockPrisma = {
   checklistTemplateItem: mockChecklistTemplateItem,
   launchChecklist: mockLaunchChecklist,
   launchChecklistItem: mockLaunchChecklistItem,
+  portfolioCapacityReservation: mockCapacityReservation,
+  portfolioCapacityPlan: mockCapacityPlan,
   // Array-form $transaction, matching the real client's behaviour when passed
   // an array of operations (not the interactive-callback form).
-  $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+  $transaction: vi.fn(),
 };
 
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }));
@@ -46,7 +50,8 @@ const CHECKLIST_ID = "checklist-1";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockPrisma.$transaction.mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
+  mockPrisma.$transaction.mockImplementation((operation: Promise<unknown>[] | ((database: typeof mockPrisma) => unknown)) => Array.isArray(operation) ? Promise.all(operation) : operation(mockPrisma));
+  mockCapacityReservation.findUnique.mockResolvedValue(null);
   mockLaunchChecklist.create.mockResolvedValue({ id: CHECKLIST_ID });
   mockLaunchChecklistItem.createMany.mockResolvedValue({ count: 0 });
   mockChecklistTemplateItem.createMany.mockResolvedValue({ count: 0 });
@@ -161,7 +166,7 @@ describe("setLaunchTierCore", () => {
     const result = await setLaunchTierCore(ITEM_ID, "TIER_1", template);
 
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(Array.isArray(mockPrisma.$transaction.mock.calls[0][0])).toBe(true);
+    expect(typeof mockPrisma.$transaction.mock.calls[0][0]).toBe("function");
     expect(order).toEqual([
       "launchChecklist.create",
       "launchChecklistItem.createMany",

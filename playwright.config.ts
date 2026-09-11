@@ -62,11 +62,14 @@ export default defineConfig({
     globalTeardown: "./e2e/functional/global-teardown.ts",
     webServer: {
       command: "pnpm dev",
-      port: FUNCTIONAL_PORT,
+      // TCP can listen before Next has made the login route available.
+      // Probe the actual auth entry point; a 404 must not admit the tests.
+      url: `${FUNCTIONAL_BASE_URL}/login`,
       reuseExistingServer: !process.env.CI,
       env: {
         PORT: String(FUNCTIONAL_PORT),
         COMPASS_RESEARCH_CAPTURE_ENABLED: "1",
+        COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED: "1",
         // Deterministic test-only key; production must provide its own secret.
         SSO_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
       },

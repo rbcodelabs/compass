@@ -16,9 +16,9 @@ export function RoadmapViewToggle({ view }: { view: View }) {
 
   return (
     <Tabs value={view} onValueChange={(value) => setView(value as string)}>
-      <TabsList>
-        <TabsTrigger value="board">Board</TabsTrigger>
-        <TabsTrigger value="timeline">Timeline</TabsTrigger>
+      <TabsList className="min-h-[50px] md:min-h-0">
+        <TabsTrigger className="min-h-11 md:min-h-0" value="board">Board</TabsTrigger>
+        <TabsTrigger className="min-h-11 md:min-h-0" value="timeline">Timeline</TabsTrigger>
       </TabsList>
     </Tabs>
   );

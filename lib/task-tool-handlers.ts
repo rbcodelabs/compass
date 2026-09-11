@@ -14,6 +14,8 @@
 import getPrisma from "@/lib/db"
 import { ok, fail } from "@/lib/mcp-output"
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types"
+import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLinkScope, validateTaskLink, validateTaskReferences, type ResolvedTaskAssignee, type TaskAssignee } from "@/lib/task-assignment"
+import { getMcpActor } from "@/lib/mcp-authz"
 
 // Maps each TaskLinkedType to its Prisma model delegate name. Every target
 // table exposes a plain `title` column, so a single resolver works for all
@@ -31,10 +33,15 @@ const LINK_TARGET_MODEL = {
 
 type LinkRow = { id: string; linkedType: string; linkedId: string }
 
+function assigneeText(assignee: ResolvedTaskAssignee | null) {
+  return assignee ? `Assignee (${assignee.type.toLowerCase()}): ${assignee.displayName} — ${assignee.id}${assignee.available ? "" : " (unavailable)"}` : "Assignee: unassigned"
+}
+
 /** Batch-resolves a task's TaskLink rows to human-readable titles, grouped by linkedType. */
 async function resolveLinkTitles(
   prisma: ReturnType<typeof getPrisma>,
-  links: LinkRow[]
+  links: LinkRow[],
+  workspaceId: string
 ): Promise<Map<string, string>> {
   const byType = new Map<string, string[]>()
   for (const link of links) {
@@ -50,7 +57,7 @@ async function resolveLinkTitles(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const delegate = (prisma as any)[modelName]
     const rows: { id: string; title: string }[] = await delegate.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, ...taskLinkScope(workspaceId, linkedType) },
       select: { id: true, title: true },
     })
     for (const row of rows) titleById.set(`${linkedType}:${row.id}`, row.title)
@@ -58,8 +65,8 @@ async function resolveLinkTitles(
   return titleById
 }
 
-async function formatLinks(prisma: ReturnType<typeof getPrisma>, links: LinkRow[]) {
-  const titleById = await resolveLinkTitles(prisma, links)
+async function formatLinks(prisma: ReturnType<typeof getPrisma>, links: LinkRow[], workspaceId: string) {
+  const titleById = await resolveLinkTitles(prisma, links, workspaceId)
   return links.map((l) => ({
     id: l.id,
     linkedType: l.linkedType as TaskLinkedType,
@@ -79,6 +86,7 @@ export async function createTask({
   squadId,
   parentTaskId,
   assigneeUserId,
+  assignee,
   ownerName,
   storyPoints,
   dueDate,
@@ -91,7 +99,8 @@ export async function createTask({
   priority?: TaskPriority
   squadId?: string
   parentTaskId?: string
-  assigneeUserId?: string
+  assigneeUserId?: string | null
+  assignee?: TaskAssignee
   ownerName?: string
   storyPoints?: number
   dueDate?: string
@@ -115,6 +124,11 @@ export async function createTask({
   }
 
   const resolvedStatus = status ?? "TODO"
+  let assignment
+  try {
+    assignment = await assignmentUpdate(workspaceId, { assignee, assigneeUserId })
+    await validateTaskReferences(workspaceId, { squadId })
+  } catch (error) { return fail(error instanceof Error ? error.message : "Invalid task assignment") }
 
   // Place the new task at the end of its status column, same convention as
   // roadmap/actions.ts addRoadmapItem.
@@ -134,7 +148,7 @@ export async function createTask({
       priority: priority ?? "MEDIUM",
       squadId,
       parentTaskId,
-      assigneeUserId,
+      ...assignment,
       ownerName,
       storyPoints,
       dueDate: dueDate ? new Date(dueDate) : undefined,
@@ -148,7 +162,7 @@ export async function createTask({
       `Status: ${task.status}\n` +
       `Priority: ${task.priority}\n` +
       `ID: ${task.id}`,
-    task,
+    (await resolveTaskAssignees(workspaceId, [task]))[0],
   )
 }
 
@@ -169,7 +183,8 @@ export async function getTask({ taskId }: { taskId: string }) {
     return fail(`Task "${taskId}" not found.`)
   }
 
-  const links = await formatLinks(prisma, task.links)
+  const links = await formatLinks(prisma, task.links, task.workspaceId)
+  const resolved = (await resolveTaskAssignees(task.workspaceId, [task]))[0]
 
   const lines = [
     `**${task.title}**`,
@@ -177,7 +192,7 @@ export async function getTask({ taskId }: { taskId: string }) {
     `Priority: ${task.priority}`,
     task.description ? `Description: ${task.description}` : null,
     task.parentTask ? `Parent: ${task.parentTask.title} (ID: ${task.parentTask.id})` : null,
-    task.assigneeUserId ? `Assignee (user): ${task.assigneeUserId}` : null,
+    assigneeText(resolved.assignee),
     task.ownerName ? `Owner: ${task.ownerName}` : null,
     task.storyPoints != null ? `Story points: ${task.storyPoints}` : null,
     task.dueDate ? `Due: ${task.dueDate.toISOString()}` : null,
@@ -195,10 +210,17 @@ export async function getTask({ taskId }: { taskId: string }) {
     `ID: ${task.id}`,
   ].filter((l) => l !== null)
 
-  return ok(lines.join("\n"), { ...task, links })
+  return ok(lines.join("\n"), { ...resolved, links })
 }
 
 // ─── list_tasks ───────────────────────────────────────────────────────────────
+
+export async function listTaskAssignees({ workspaceId, search, offset = 0, limit = 50 }: { workspaceId: string; search?: string; offset?: number; limit?: number }) {
+  if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 100) return fail("Invalid pagination: offset must be nonnegative and limit between 1 and 100")
+  const options = await eligibleTaskAssignees(workspaceId)
+  const matching = options.filter(option => !search || `${option.displayName} ${option.ownerName ?? ""}`.toLowerCase().includes(search.toLowerCase()))
+  return ok("Available task assignees", { items: matching.slice(offset, offset + limit), count: matching.length, offset, limit })
+}
 
 export async function listTasks({
   workspaceId,
@@ -206,22 +228,39 @@ export async function listTasks({
   priority,
   squadId,
   assigneeUserId,
+  assignee,
   parentTaskId,
   linkedType,
   linkedId,
   includeSubtasks,
+  updatedSince,
+  updatedBefore,
+  assignedToMe,
 }: {
   workspaceId: string
   status?: TaskStatus
   priority?: TaskPriority
   squadId?: string
   assigneeUserId?: string
+  assignee?: TaskAssignee
   parentTaskId?: string | null
   linkedType?: TaskLinkedType
   linkedId?: string
   includeSubtasks?: boolean
+  updatedSince?: string
+  updatedBefore?: string
+  assignedToMe?: boolean
 }) {
   const prisma = getPrisma()
+
+  if (assignee !== undefined && assigneeUserId !== undefined) return fail("Cannot supply both assignee and assigneeUserId")
+  if (assignedToMe) {
+    if (assignee !== undefined || assigneeUserId !== undefined) return fail("Cannot combine assignedToMe with another assignee filter")
+    const actor = getMcpActor()
+    if (actor.purpose === "AGENT" && actor.agentId) assignee = { type: "AGENT", id: actor.agentId }
+    else if ((!actor.purpose || actor.purpose === "USER") && actor.userId) assignee = { type: "USER", id: actor.userId }
+    else return fail("Assigned to me requires a personal or registered agent identity")
+  }
 
   const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } })
   if (!workspace) {
@@ -234,22 +273,44 @@ export async function listTasks({
     ...(status ? { status } : {}),
     ...(priority ? { priority } : {}),
     ...(squadId ? { squadId } : {}),
-    ...(assigneeUserId ? { assigneeUserId } : {}),
+    ...(assignee !== undefined ? assignee === null ? { assigneeUserId: null, assigneeAgentId: null } : assignee.type === "AGENT" ? { assigneeAgentId: assignee.id } : { assigneeUserId: assignee.id } : assigneeUserId ? { assigneeUserId } : {}),
     ...(parentTaskId !== undefined ? { parentTaskId } : {}),
     ...(linkedType && linkedId ? { links: { some: { linkedType, linkedId } } } : {}),
+    ...(updatedSince || updatedBefore
+      ? {
+          updatedAt: {
+            ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
+            ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
+          },
+        }
+      : {}),
   }
 
-  const tasks = await prisma.task.findMany({
+  const matchingTasks = await resolveTaskAssignees(workspaceId, await prisma.task.findMany({
     where,
     include: { _count: { select: { subtasks: true } } },
-    orderBy: [{ status: "asc" }, { sortOrder: "asc" }],
-  })
+    orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
+  }))
 
-  if (!tasks.length) {
+  if (!matchingTasks.length) {
     return fail("No tasks found.")
   }
 
   if (includeSubtasks) {
+    const matchingIds = new Set(matchingTasks.map((task) => task.id))
+    const missingParentIds = [...new Set(
+      matchingTasks
+        .map((task) => task.parentTaskId)
+        .filter((parentId): parentId is string => typeof parentId === "string" && !matchingIds.has(parentId)),
+    )].sort()
+    const missingParents = missingParentIds.length
+      ? await resolveTaskAssignees(workspaceId, await prisma.task.findMany({
+          where: { workspaceId, id: { in: missingParentIds } },
+          include: { _count: { select: { subtasks: true } } },
+          orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
+        }))
+      : []
+    const tasks = [...missingParents, ...matchingTasks]
     const topLevel = tasks.filter((t) => !t.parentTaskId)
     const childrenByParent = new Map<string, typeof tasks>()
     for (const t of tasks) {
@@ -260,9 +321,12 @@ export async function listTasks({
     }
     const lines = topLevel.map((t) => {
       const children = childrenByParent.get(t.id) ?? []
-      const childLines = children.map((c) => `    ↳ [${c.status}] ${c.title} — ID: ${c.id}`)
+      const childLines = children.map((c) => `    ↳ [${c.status}] ${c.title} — ID: ${c.id}\n      ${assigneeText(c.assignee)}`)
       return [
-        `• [${t.status}] **${t.title}** (${t.priority})\n  ID: ${t.id}`,
+        `• [${t.status}] **${t.title}** (${t.priority})` +
+          `\n  ${assigneeText(t.assignee)}` +
+          (t.updatedAt ? `\n  Updated: ${t.updatedAt.toISOString()}` : "") +
+          `\n  ID: ${t.id}`,
         ...childLines,
       ].join("\n")
     })
@@ -272,26 +336,45 @@ export async function listTasks({
         status: t.status,
         title: t.title,
         priority: t.priority,
-        subtasks: (childrenByParent.get(t.id) ?? []).map((c) => ({ id: c.id, status: c.status, title: c.title })),
+        assignee: t.assignee,
+        assigneeUserId: t.assigneeUserId,
+        assigneeAgentId: t.assigneeAgentId,
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+        subtasks: (childrenByParent.get(t.id) ?? []).map((c) => ({
+          id: c.id,
+          status: c.status,
+          title: c.title,
+          assignee: c.assignee,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+        })),
       })),
       count: topLevel.length,
     })
   }
 
-  const lines = tasks.map((t) =>
+  const lines = matchingTasks.map((t) =>
     `• [${t.status}] **${t.title}** (${t.priority})` +
     (t._count.subtasks ? ` — ${t._count.subtasks} subtask(s)` : "") +
+    `\n  ${assigneeText(t.assignee)}` +
+    (t.updatedAt ? `\n  Updated: ${t.updatedAt.toISOString()}` : "") +
     `\n  ID: ${t.id}`
   )
   return ok(lines.join("\n\n"), {
-    items: tasks.map((t) => ({
+    items: matchingTasks.map((t) => ({
       id: t.id,
       status: t.status,
       title: t.title,
       priority: t.priority,
+      assignee: t.assignee,
+      assigneeUserId: t.assigneeUserId,
+      assigneeAgentId: t.assigneeAgentId,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
       subtaskCount: t._count.subtasks,
     })),
-    count: tasks.length,
+    count: matchingTasks.length,
   })
 }
 
@@ -304,6 +387,7 @@ export async function updateTask({
   priority,
   squadId,
   assigneeUserId,
+  assignee,
   ownerName,
   storyPoints,
   dueDate,
@@ -315,6 +399,7 @@ export async function updateTask({
   priority?: TaskPriority
   squadId?: string | null
   assigneeUserId?: string | null
+  assignee?: TaskAssignee
   ownerName?: string | null
   storyPoints?: number | null
   dueDate?: string | null
@@ -322,7 +407,7 @@ export async function updateTask({
 }) {
   const prisma = getPrisma()
 
-  const existing = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true } })
+  const existing = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true, workspaceId: true } })
   if (!existing) {
     return fail(`Task "${taskId}" not found.`)
   }
@@ -332,7 +417,10 @@ export async function updateTask({
   if (description !== undefined) data.description = description
   if (priority !== undefined) data.priority = priority
   if (squadId !== undefined) data.squadId = squadId
-  if (assigneeUserId !== undefined) data.assigneeUserId = assigneeUserId
+  try {
+    Object.assign(data, await assignmentUpdate(existing.workspaceId, { assignee, assigneeUserId }))
+    await validateTaskReferences(existing.workspaceId, { squadId })
+  } catch (error) { return fail(error instanceof Error ? error.message : "Invalid task assignment") }
   if (ownerName !== undefined) data.ownerName = ownerName
   if (storyPoints !== undefined) data.storyPoints = storyPoints
   if (dueDate !== undefined) data.dueDate = dueDate ? new Date(dueDate) : null
@@ -345,7 +433,7 @@ export async function updateTask({
       `Status: ${updated.status}\n` +
       `Priority: ${updated.priority}\n` +
       `ID: ${updated.id}`,
-    updated,
+    (await resolveTaskAssignees(existing.workspaceId, [updated]))[0],
   )
 }
 
@@ -397,7 +485,7 @@ export async function linkTask({
 }) {
   const prisma = getPrisma()
 
-  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true, title: true } })
+  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true, title: true, workspaceId: true } })
   if (!task) {
     return fail(`Task "${taskId}" not found.`)
   }
@@ -409,6 +497,8 @@ export async function linkTask({
   if (!target) {
     return fail(`${linkedType} "${linkedId}" not found.`)
   }
+  try { await validateTaskLink(task.workspaceId, linkedType, linkedId) }
+  catch (error) { return fail(error instanceof Error ? error.message : "Invalid task link") }
 
   const existingLink = await prisma.taskLink.findFirst({
     where: { taskId, linkedType, linkedId },
@@ -457,7 +547,7 @@ export async function unlinkTask({
 export async function listTaskLinks({ taskId }: { taskId: string }) {
   const prisma = getPrisma()
 
-  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true, title: true } })
+  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true, title: true, workspaceId: true } })
   if (!task) {
     return fail(`Task "${taskId}" not found.`)
   }
@@ -467,7 +557,7 @@ export async function listTaskLinks({ taskId }: { taskId: string }) {
     return fail(`Task "${task.title}" has no links.`)
   }
 
-  const links = await formatLinks(prisma, rawLinks)
+  const links = await formatLinks(prisma, rawLinks, task.workspaceId)
 
   const byType = new Map<string, typeof links>()
   for (const l of links) {

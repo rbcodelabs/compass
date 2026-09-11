@@ -22,6 +22,7 @@ import { SquadPicker } from "@/components/squads/squad-picker";
 import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evidence-list";
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import type { OpportunityStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
+import { MarkdownContent } from "@/components/markdown-content";
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   EXPLORING: "Exploring",
@@ -132,7 +133,7 @@ export function OpportunityOverview({
 
       <Field label="Description">
         {opportunity.description ? (
-          <p className="text-sm whitespace-pre-wrap">{opportunity.description}</p>
+          <MarkdownContent>{opportunity.description}</MarkdownContent>
         ) : (
           <p className="text-sm text-muted-foreground">No description provided.</p>
         )}

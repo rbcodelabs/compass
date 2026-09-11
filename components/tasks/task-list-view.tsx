@@ -77,7 +77,7 @@ export function TaskListView({ tasks, orgSlug, workspaceSlug, members }: Props) 
         <TableBody>
           {rows.map(({ task, depth }) => {
             const assigneeMember = task.assigneeUserId ? members.find((m) => m.userId === task.assigneeUserId) : null;
-            const assigneeLabel = assigneeMember?.name || assigneeMember?.email || task.ownerName || "—";
+            const assigneeLabel = task.assignee ? `${task.assignee.type === "AGENT" ? "Agent: " : ""}${task.assignee.displayName}${task.assignee.available ? "" : " (unavailable)"}` : assigneeMember?.name || assigneeMember?.email || (task.assigneeUserId || task.assigneeAgentId ? "Unavailable assignee" : task.ownerName) || "—";
             return (
               <TableRow key={task.id} className="hover:bg-muted/30">
                 <TableCell className="px-3 py-2" style={{ paddingLeft: `${12 + depth * 20}px` }}>

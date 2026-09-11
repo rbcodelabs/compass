@@ -78,7 +78,7 @@ function ownsResearchBlobPath(cleanup: {
     `${cleanup.attachmentId}-`,
   ].join("/")
   const suffix = cleanup.blobPathname.slice(prefix.length)
-  return cleanup.blobPathname.startsWith(prefix) && /^[a-f0-9]{32}\.(?:png|jpg|webp|pdf)$/.test(suffix)
+  return cleanup.blobPathname.startsWith(prefix) && /^[a-f0-9]{32}\.(?:png|jpg|webp|gif|heic|pdf)$/.test(suffix)
 }
 
 export async function retryResearchBlobCleanups({

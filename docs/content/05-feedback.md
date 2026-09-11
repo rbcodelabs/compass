@@ -98,7 +98,7 @@ By default, feedback is ordered by vote count (highest first), then by newest.
 Three controls narrow the list, and they combine:
 
 - **All / Ideas / Bugs** — the quickest way to split the queue by type
-- **Filters** — pick a **Status** and/or a **Type**. **Clear all** removes them again
+- **Filters** — select one or more **Statuses** (all are included by default) and optionally one **Type**. **Clear all** restores the full, unfiltered view
 - **Search** — free text matched against both the title and the description
 
 Like sorting, filtering happens on the server, so the result count and the page numbers always reflect the full filtered set.

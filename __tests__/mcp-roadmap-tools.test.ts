@@ -41,7 +41,9 @@ const mockPrisma = {
     findUnique: vi.fn(),
     update: vi.fn(),
   },
-  $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+  portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
+  portfolioCapacityPlan: { updateMany: vi.fn() },
+  $transaction: vi.fn(),
 }
 
 vi.mock("@/lib/db", () => ({
@@ -77,12 +79,29 @@ await import("@/app/api/mcp/route")
 function getHandler(name: string): ToolCallback {
   const h = registeredTools[name]
   if (!h) throw new Error(`Tool "${name}" was not registered`)
-  return ((args: Record<string, unknown>) => runWithMcpActor({ userId: null }, () => h(args))) as ToolCallback
+  return ((args: Record<string, unknown>) => runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => h(args))) as ToolCallback
 }
 
 function textOf(result: { content: Array<{ type: string; text: string }> }): string {
   return result.content[0].text
 }
+
+beforeEach(() => {
+  mockPrisma.portfolioCapacityReservation.findUnique.mockResolvedValue(null)
+  mockPrisma.$transaction.mockImplementation((operation: Promise<unknown>[] | ((database: typeof mockPrisma) => unknown)) => Array.isArray(operation) ? Promise.all(operation) : operation(mockPrisma))
+})
+
+describe("assign_squad MCP roadmap revision", () => {
+  it("bumps updatedAt when assigning a roadmap item", async () => {
+    vi.clearAllMocks()
+    mockPrisma.roadmapItem.update.mockResolvedValue({ id: "item-1" })
+    await getHandler("assign_squad")({ objectType: "roadmap_item", objectId: "item-1", squadId: "squad-1" })
+    expect(mockPrisma.roadmapItem.update).toHaveBeenCalledWith({
+      where: { id: "item-1" },
+      data: { squadId: "squad-1", updatedAt: expect.any(Date) },
+    })
+  })
+})
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -91,6 +110,8 @@ describe("add_to_roadmap MCP tool — dates", () => {
     vi.clearAllMocks()
     mockPrisma.workspace.findUnique.mockResolvedValue({ name: "My Product" })
     mockPrisma.roadmapItem.findFirst.mockResolvedValue(null)
+    mockPrisma.portfolioCapacityReservation.findUnique.mockResolvedValue(null)
+    mockPrisma.$transaction.mockImplementation((operation: Promise<unknown>[] | ((database: typeof mockPrisma) => unknown)) => Array.isArray(operation) ? Promise.all(operation) : operation(mockPrisma))
   })
 
   it("creates an item with startDate/endDate parsed to Date and returns them", async () => {
@@ -105,7 +126,7 @@ describe("add_to_roadmap MCP tool — dates", () => {
     const result = await handler({
       workspaceId: "ws-1",
       title: "Ship payments",
-      horizon: "NOW",
+      horizon: "NEXT",
       startDate: "2026-07-01",
       endDate: "2026-09-30",
     })
@@ -157,7 +178,7 @@ describe("add_to_roadmap MCP tool — isPrivate", () => {
     })
 
     const handler = getHandler("add_to_roadmap")
-    const result = await handler({ workspaceId: "ws-1", title: "Public item", horizon: "NOW" })
+    const result = await handler({ workspaceId: "ws-1", title: "Public item", horizon: "NEXT" })
 
     const createArgs = mockPrisma.roadmapItem.create.mock.calls[0][0]
     expect(createArgs.data.isPrivate).toBe(false)
@@ -175,7 +196,7 @@ describe("add_to_roadmap MCP tool — isPrivate", () => {
     const result = await handler({
       workspaceId: "ws-1",
       title: "Security fix",
-      horizon: "NOW",
+      horizon: "NEXT",
       isPrivate: true,
     })
 
@@ -378,5 +399,70 @@ describe("list_roadmap_items MCP tool — isPrivate", () => {
 
     expect(text).toMatch(/Security fix.*🔒 PRIVATE/)
     expect(text).not.toMatch(/Public item.*🔒 PRIVATE/)
+  })
+})
+
+describe("list_roadmap_items MCP tool — stable joins and commitment evidence", () => {
+  it("returns linkage IDs, rank, timestamps, and provenance without inferring authorization", async () => {
+    const createdAt = new Date("2026-08-01T00:00:00.000Z")
+    const updatedAt = new Date("2026-09-01T00:00:00.000Z")
+    mockPrisma.roadmapItem.findMany.mockResolvedValueOnce([
+      {
+        id: "roadmap-1",
+        title: "Guided setup",
+        description: "Reduce setup failures",
+        horizon: "NOW",
+        status: "ACTIVE",
+        sortOrder: 2,
+        isPrivate: false,
+        opportunityId: "opportunity-1",
+        solutionId: "solution-1",
+        experimentId: "experiment-1",
+        keyResultId: "kr-1",
+        feedbackId: "feedback-1",
+        squadId: "squad-1",
+        nowCommitmentProvenance: "NATIVE_GATED",
+        nowDecisionRecordId: "decision-1",
+        createdAt,
+        updatedAt,
+        opportunity: { title: "Setup is confusing" },
+        solution: { title: "Guided setup" },
+        experiment: { title: "Concierge onboarding" },
+        squad: { name: "Activation" },
+        startDate: null,
+        endDate: null,
+      },
+    ])
+
+    const result = await getHandler("list_roadmap_items")({ workspaceId: "ws-1", horizon: "NOW" }) as unknown as {
+      structuredContent: { data: { items: Array<Record<string, unknown>> } }
+    }
+    expect(result.structuredContent.data.items[0]).toEqual({
+      id: "roadmap-1",
+      title: "Guided setup",
+      description: "Reduce setup failures",
+      horizon: "NOW",
+      status: "ACTIVE",
+      sortOrder: 2,
+      isPrivate: false,
+      opportunityId: "opportunity-1",
+      opportunity: "Setup is confusing",
+      solutionId: "solution-1",
+      solution: "Guided setup",
+      experimentId: "experiment-1",
+      experiment: "Concierge onboarding",
+      keyResultId: "kr-1",
+      feedbackId: "feedback-1",
+      squadId: "squad-1",
+      squad: "Activation",
+      startDate: null,
+      endDate: null,
+      nowCommitmentProvenance: "NATIVE_GATED",
+      nowDecisionRecordId: "decision-1",
+      createdAt,
+      updatedAt,
+    })
+    expect(result.structuredContent.data.items[0]).not.toHaveProperty("authorized")
+    expect(result.structuredContent.data.items[0]).not.toHaveProperty("eligible")
   })
 })
