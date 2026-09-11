@@ -33,9 +33,14 @@ export function normalizePmInterviewFieldValue(targetType: PmInterviewTargetType
   return (pmInterviewFieldSchemas[targetType] as Record<string, z.ZodType<string | null>>)[field].parse(value)
 }
 
-export function parsePmInterviewBaseline(value: string, targetType: PmInterviewTargetType) {
-  const fields = pmInterviewFieldSchemas[targetType]
-  return z.object({ version: z.literal(1), fields: z.object(fields).strict() }).strict().parse(JSON.parse(value))
+export function parsePmInterviewBaseline(value: string, targetType: PmInterviewTargetType): { version: 1; fields: Record<string, string | null> } {
+  const storedText = z.string().max(1_000_000)
+  const fields = targetType === "OPPORTUNITY"
+    ? { title: z.string().max(255), description: storedText.nullable(), customerSegment: z.string().max(255).nullable() }
+    : targetType === "SOLUTION" || targetType === "ASSUMPTION"
+      ? { title: z.string().max(255), description: storedText.nullable() }
+      : { title: z.string().max(255), hypothesis: storedText, method: storedText, killCondition: storedText }
+  return z.object({ version: z.literal(1), fields: z.object(fields).strict() }).strict().parse(JSON.parse(value)) as { version: 1; fields: Record<string, string | null> }
 }
 
 const proposalField = (value: z.ZodType<string | null>) => z.object({

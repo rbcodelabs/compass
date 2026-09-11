@@ -13,7 +13,6 @@ import {
   parsePmInterviewProposal,
   parsePmInterviewTargetType,
   pmInterviewContextSchema,
-  normalizePmInterviewFieldValue,
   resolvePmInterviewApplyInput,
 } from "@/lib/pm-interview-contracts"
 import { isPmInterviewEnabled } from "@/lib/research-feature"
@@ -59,19 +58,24 @@ const MAX_PM_CONTEXT_CHARS = 24_000
 export function boundPmInterviewContext(value: unknown): PmInterviewContextSnapshot {
   const parsed = pmInterviewContextSchema.parse(value)
   const omissions = [...parsed.omissions]
+  const disclose = (message: string) => {
+    if (omissions.includes(message)) return
+    if (omissions.length >= 20) omissions[19] = "Additional context was truncated or omitted to fit the interview context limit."
+    else omissions.push(message)
+  }
   const fields = Object.fromEntries(Object.entries(parsed.target.fields).map(([field, fieldValue]) => {
     if (typeof fieldValue !== "string" || fieldValue.length <= 4_000) return [field, fieldValue]
-    omissions.push(`The ${field} field was truncated in the interview context.`)
+    disclose(`The ${field} field was truncated in the interview context.`)
     return [field, excerpt(fieldValue, 4_000)]
   }))
   const bounded = { ...parsed, target: { ...parsed.target, fields }, evidence: [...parsed.evidence], feedback: [...parsed.feedback], omissions }
   while (JSON.stringify(bounded).length > MAX_PM_CONTEXT_CHARS && bounded.feedback.length) {
     bounded.feedback.pop()
-    if (!bounded.omissions.includes("Additional directly linked feedback was omitted.")) bounded.omissions.push("Additional directly linked feedback was omitted.")
+    disclose("Additional directly linked feedback was omitted.")
   }
   while (JSON.stringify(bounded).length > MAX_PM_CONTEXT_CHARS && bounded.evidence.length) {
     bounded.evidence.pop()
-    if (!bounded.omissions.includes("Additional directly linked evidence was omitted.")) bounded.omissions.push("Additional directly linked evidence was omitted.")
+    disclose("Additional directly linked evidence was omitted.")
   }
   if (JSON.stringify(bounded).length > MAX_PM_CONTEXT_CHARS) throw new PmInterviewError("The selected item is too large to interview safely", 413)
   return pmInterviewContextSchema.parse(bounded)
@@ -126,10 +130,6 @@ async function targetSnapshot(prisma: PrismaClient, workspaceId: string, targetT
   return boundPmInterviewContext({ version: 1, capturedAt, target: { type: targetType, id: item.id, fields: { title: item.title, hypothesis: item.hypothesis, method: item.method, killCondition: item.killCondition, status: item.status } }, parents, outcome: linked ? { id: linked.id, title: `${linked.objective.title}: ${linked.title}` } : null, evidence: evidence.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.excerpt) })), feedback: feedback.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.description ?? row.title) })), omissions: item.assumption ? [...(evidence.length > 20 ? ["Additional directly linked evidence was omitted."] : []), ...(feedback.length > 20 ? ["Additional directly linked feedback was omitted."] : [])] : ["This experiment has no linked assumption, so no discovery parent chain was available."] })
 }
 
-function baselineFromSnapshot(snapshot: PmInterviewContextSnapshot, targetType: PmInterviewTargetType) {
-  return { version: 1 as const, fields: Object.fromEntries(PM_INTERVIEW_ALLOWED_FIELDS[targetType].map(field => [field, snapshot.target.fields[field] ?? null])) }
-}
-
 function assertEnabled() {
   if (!isPmInterviewEnabled()) throw new PmInterviewError("PM interviews are not enabled", 404)
 }
@@ -140,7 +140,9 @@ export async function createPmInterview(scope: PmInterviewScope, actor: PmInterv
   const prisma = getPrisma(), targetType = parsePmInterviewTargetType(input.targetType)
   const workspaceId = await memberWorkspace(prisma, scope, actor.userId)
   const snapshot = await targetSnapshot(prisma, workspaceId, targetType, input.targetId)
-  const baseline = baselineFromSnapshot(snapshot, targetType)
+  const baselineTarget = await liveTarget(prisma, workspaceId, targetType, input.targetId)
+  if (!baselineTarget) throw new PmInterviewError("PM interview target not found", 404)
+  const baseline = liveBaseline(targetType, baselineTarget as unknown as Record<string, unknown>)
   const id = randomUUID(), studyId = randomUUID(), sessionId = randomUUID(), participantTokenId = randomUUID(), now = new Date()
   const participantTokenHash = createHash("sha256").update(randomUUID()).digest("hex")
   const resumeTokenHash = hashResearchResumeToken(internalResumeToken(id, participantTokenHash))
@@ -285,7 +287,7 @@ async function liveTarget(prisma: PrismaClient | Prisma.TransactionClient, works
 function liveBaseline(targetType: PmInterviewTargetType, target: Record<string, unknown>) {
   return {
     version: 1 as const,
-    fields: Object.fromEntries(PM_INTERVIEW_ALLOWED_FIELDS[targetType].map(field => [field, normalizePmInterviewFieldValue(targetType, field, target[field] ?? null)])),
+    fields: Object.fromEntries(PM_INTERVIEW_ALLOWED_FIELDS[targetType].map(field => [field, target[field] ?? null])),
   }
 }
 
@@ -387,7 +389,7 @@ export async function switchPmInterviewToText(scope: PmInterviewScope, actor: Pm
   const leaseId = input.leaseId === null ? null : typeof input.leaseId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.leaseId) ? input.leaseId : undefined
   if (leaseId === undefined || (input.settlement !== "FINALIZED" && input.settlement !== "DISCARD_PENDING")) throw new PmInterviewError("A valid voice settlement is required", 400)
   const now = new Date()
-  await prisma.$transaction(async tx => {
+  try { await prisma.$transaction(async tx => {
     const member = await tx.workspaceMember.findFirst({ where: { workspaceId: interview.workspaceId, userId: actor.userId }, select: { id: true } })
     if (!member) throw new PmInterviewError("PM interview not found", 404)
     const locked = await tx.pMInterview.findFirst({ where: { id: interview.id, workspaceId: interview.workspaceId, initiatingUserId: actor.userId }, select: { id: true, sessionId: true } })
@@ -401,6 +403,10 @@ export async function switchPmInterviewToText(scope: PmInterviewScope, actor: Pm
     const transitioned = await tx.researchSession.updateMany({ where: { id: session.id, status: "IN_PROGRESS", modality: "VOICE", voiceLeaseId: leaseId }, data: { modality: "CHAT", voiceLeaseId: null, voiceLeaseExpiresAt: null, lastActiveAt: now, updatedAt: now } })
     if (transitioned.count !== 1) throw new PmInterviewError("The active voice connection changed. Refresh before continuing in text.", 409)
     await tx.pMInterview.update({ where: { id: locked.id }, data: { retiredVoiceLeaseId: leaseId, transitionReceiptJson: JSON.stringify({ version: 1, at: now.toISOString(), settlement: input.settlement, finalizedEventCount: events.length, lastFinalizedOrdinal: events.at(-1)?.reportedOrdinal ?? null }), updatedAt: now } })
-  })
+  }) } catch (error) {
+    if (error instanceof PmInterviewError) throw error
+    if (isDsqlWriteConflict(error)) throw new PmInterviewError("The active voice connection changed. Refresh before continuing in text.", 409)
+    throw error
+  }
   return { modality: "CHAT", replayed: false }
 }

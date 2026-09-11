@@ -5,7 +5,7 @@ vi.mock("@/lib/db", () => ({
   default: () => ({ researchParticipantToken: participantToken }),
 }))
 
-import { resolveActiveResearchStudy } from "@/lib/research-access"
+import { resolveActiveResearchStudy, resolveResearchVoiceCleanupStudy } from "@/lib/research-access"
 import { hashResearchToken } from "@/lib/research"
 
 describe("resolveActiveResearchStudy", () => {
@@ -110,5 +110,14 @@ describe("resolveActiveResearchStudy", () => {
 
     await expect(resolveActiveResearchStudy("copied-token")).resolves.toBeNull()
     expect(participantToken.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects an internal PM token even on the public cleanup-only resolver", async () => {
+    participantToken.findUnique.mockResolvedValue({
+      id: "internal-token", kind: "PM_INTERNAL",
+      study: { id: "study-pm", status: "ACTIVE", studyType: "PM_INTERVIEW" },
+    })
+
+    await expect(resolveResearchVoiceCleanupStudy("copied-token")).resolves.toBeNull()
   })
 })

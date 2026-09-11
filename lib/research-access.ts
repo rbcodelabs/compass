@@ -10,7 +10,8 @@ export async function resolveResearchVoiceCleanupStudy(token: string) {
   const participantToken = await prisma.researchParticipantToken.findUnique({
     where: { tokenHash: hashResearchToken(token) }, include: { study: true },
   })
-  return participantToken ? { prisma, study: participantToken.study, participantToken } : null
+  if (!participantToken || !["PRIMARY", "LEGACY_HELIO"].includes(participantToken.kind) || !["CUSTOMER_INTERVIEW", "USABILITY_TEST"].includes(participantToken.study.studyType)) return null
+  return { prisma, study: participantToken.study, participantToken }
 }
 
 export async function resolveActiveResearchStudy(token: string) {
