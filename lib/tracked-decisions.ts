@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto"
 import getPrisma from "@/lib/db"
 
-export const TRACKED_SUBJECT_TYPES = ["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"] as const
-export type TrackedSubjectType = (typeof TRACKED_SUBJECT_TYPES)[number]
-export const TRACKED_SOURCE_TYPES = ["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK", "EVIDENCE"] as const
-export type TrackedSourceType = (typeof TRACKED_SOURCE_TYPES)[number]
+// Re-exported (not redefined) so this stays the single source of truth for
+// server code while client components can import the constants alone from
+// `./tracked-decision-types` without pulling Prisma/`pg` into their bundle.
+export { TRACKED_SUBJECT_TYPES, TRACKED_SUBJECT_LABELS, TRACKED_SOURCE_TYPES, type TrackedSubjectType, type TrackedSourceType } from "./tracked-decision-types"
+import { TRACKED_SOURCE_TYPES, type TrackedSubjectType, type TrackedSourceType } from "./tracked-decision-types"
 export type TrackedDecisionSourceInput = { type: TrackedSourceType; id: string }
 const TRACKED_GATE = "TRACKED_DECISION"
 
