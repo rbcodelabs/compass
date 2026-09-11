@@ -125,6 +125,81 @@ export async function reviseTrackedDecisionRequest(input: { workspaceId: string;
 export type TrackedDecisionListInput = { workspaceId: string; tab?: "PENDING" | "DECIDED"; subjectType?: TrackedSubjectType; outcome?: "APPROVE" | "REQUEST_CHANGES" | "REJECT"; reviewerId?: string; query?: string; from?: Date; to?: Date; page?: number; pageSize?: number; includeLegacy?: boolean }
 
 export type PendingDocDecision = { id: string; title: string }
+export type DecidedDocDecision = { id: string; title: string; outcome: string; outcomeLabel: string; decidedAt: Date; reviewerName: string | null }
+/**
+ * Both halves of a document's decision state. The pending list drives the
+ * actionable "Decision pending" control; `latestDecided` exists so an answered
+ * question does not silently disappear from the document, which previously
+ * made the toolbar fall back to the request-a-decision zero state and invite a
+ * duplicate request.
+ */
+export type DocDecisions = { pending: PendingDocDecision[]; latestDecided: DecidedDocDecision | null }
+
+/**
+ * `packetJson: { contains: docId }` is only a coarse prefilter — the id can
+ * appear in a source, in prose context, or under a different entity type — so
+ * every candidate's packet is parsed and its primary entity checked. Shared by
+ * the pending and decided lookups so the two can never disagree about which
+ * requests belong to a document.
+ */
+function packetTargetsDoc(packetJson: string, docId: string): boolean {
+  let packet: unknown
+  try { packet = JSON.parse(packetJson) } catch { throw new TrackedDecisionError("INVALID_PACKET", "The current decision packet is invalid.") }
+  if (!packet || typeof packet !== "object" || !("schemaVersion" in packet)) throw new TrackedDecisionError("INVALID_PACKET", "The current decision packet is invalid.")
+  if (packet.schemaVersion !== "tracked-decision/v1" && packet.schemaVersion !== "tracked-decision/v2") return false
+  if (!("entity" in packet) || !packet.entity || typeof packet.entity !== "object" || !("type" in packet.entity) || !("id" in packet.entity) || typeof packet.entity.type !== "string" || typeof packet.entity.id !== "string") throw new TrackedDecisionError("INVALID_PACKET", "The current decision subject is invalid.")
+  return packet.entity.type === "DOC" && packet.entity.id === docId
+}
+
+/**
+ * The most recently recorded decision on a document, or null.
+ *
+ * Queried from `DecisionRecord` rather than `ReviewRequest` so it can use the
+ * `[workspaceId, decidedAt]` index and order by when the call was actually
+ * made. Deliberately not filtered by the request's current state: a decision
+ * that was later reopened for revision was still genuinely made, and the
+ * caller gives the live pending list precedence anyway.
+ *
+ * Call only after authorizing access to the workspace and document.
+ */
+export async function findLatestDecidedDocDecision(workspaceId: string, docId: string): Promise<DecidedDocDecision | null> {
+  const prisma = getPrisma()
+  const batchSize = 100
+  let skip = 0
+  while (true) {
+    const candidates = await prisma.decisionRecord.findMany({
+      where: { workspaceId, request: { is: { gateType: TRACKED_GATE } }, revision: { is: { packetJson: { contains: docId } } } },
+      select: { requestId: true, decidedAt: true, actorUserId: true, option: { select: { outcomeClass: true, label: true } }, revision: { select: { title: true, packetJson: true } } },
+      orderBy: [{ decidedAt: "desc" }, { id: "desc" }],
+      skip, take: batchSize,
+    })
+    for (const record of candidates) {
+      if (!record.revision) throw new TrackedDecisionError("INVALID_PACKET", "The decided revision is unavailable.")
+      if (!packetTargetsDoc(record.revision.packetJson, docId)) continue
+      const reviewer = await prisma.user.findUnique({ where: { id: record.actorUserId }, select: { name: true, email: true } })
+      return {
+        id: record.requestId,
+        title: record.revision.title,
+        outcome: record.option.outcomeClass,
+        outcomeLabel: record.option.label,
+        decidedAt: record.decidedAt,
+        reviewerName: reviewer?.name ?? reviewer?.email ?? null,
+      }
+    }
+    if (candidates.length < batchSize) return null
+    skip += batchSize
+  }
+}
+
+/** Call only after authorizing access to the workspace and document. */
+export async function listDocDecisions(workspaceId: string, docId: string): Promise<DocDecisions> {
+  // Sequential, not concurrent: the pending list is what the toolbar shows
+  // when it is non-empty, so there is no reason to pay for the decided lookup
+  // (and its reviewer read) on a document with an open question.
+  const pending = await listPendingDocDecisions(workspaceId, docId)
+  if (pending.length > 0) return { pending, latestDecided: null }
+  return { pending, latestDecided: await findLatestDecidedDocDecision(workspaceId, docId) }
+}
 
 /** Call only after authorizing access to the workspace and document. */
 export async function listPendingDocDecisions(workspaceId: string, docId: string): Promise<PendingDocDecision[]> {
@@ -147,12 +222,7 @@ export async function listPendingDocDecisions(workspaceId: string, docId: string
     })
     for (const request of candidates) {
       if (!request.currentRevision) throw new TrackedDecisionError("INVALID_PACKET", "The current decision revision is unavailable.")
-      let packet: unknown
-      try { packet = JSON.parse(request.currentRevision.packetJson) } catch { throw new TrackedDecisionError("INVALID_PACKET", "The current decision packet is invalid.") }
-      if (!packet || typeof packet !== "object" || !("schemaVersion" in packet)) throw new TrackedDecisionError("INVALID_PACKET", "The current decision packet is invalid.")
-      if (packet.schemaVersion !== "tracked-decision/v1" && packet.schemaVersion !== "tracked-decision/v2") continue
-      if (!("entity" in packet) || !packet.entity || typeof packet.entity !== "object" || !("type" in packet.entity) || !("id" in packet.entity) || typeof packet.entity.type !== "string" || typeof packet.entity.id !== "string") throw new TrackedDecisionError("INVALID_PACKET", "The current decision subject is invalid.")
-      if (packet.entity.type === "DOC" && packet.entity.id === docId) decisions.push({ id: request.id, title: request.currentRevision.title })
+      if (packetTargetsDoc(request.currentRevision.packetJson, docId)) decisions.push({ id: request.id, title: request.currentRevision.title })
     }
     if (candidates.length < batchSize) return decisions
     after = candidates[candidates.length - 1]

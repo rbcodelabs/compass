@@ -26,7 +26,11 @@ test.describe("Docs pending decision toolbar", () => {
     await page.getByRole("button", { name: "Request changes", exact: true }).click()
     await expect(page.getByText(/Decision recorded:/)).toBeVisible()
     await page.getByRole("link", { name: /Launch readiness/ }).first().click()
-    await expect(page.getByRole("link", { name: "Request decision", exact: true })).toBeVisible()
+    // Previously this asserted a bare "Request decision" link — the recorded
+    // decision vanished from the document and invited a duplicate request.
+    // The outcome is now surfaced instead.
+    await expect(page.getByRole("button", { name: /^Changes requested by / })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Request decision", exact: true })).toBeHidden()
     await page.goto(reviewUrl)
     await page.getByRole("link", { name: "Create revised request" }).click()
     await page.getByLabel("Context").fill("Rollout timing is now documented.")
@@ -37,7 +41,19 @@ test.describe("Docs pending decision toolbar", () => {
     await page.getByRole("button", { name: "Approve", exact: true }).click()
     await expect(page.getByText(/Decision recorded:/)).toBeVisible()
     await page.getByRole("link", { name: /Launch readiness/ }).first().click()
-    await expect(page.getByRole("link", { name: "Request decision", exact: true })).toBeVisible()
+
+    // The outcome is durable on the document, and reaches both the decision
+    // itself and a follow-up request without losing the prefilled subject.
+    const outcome = page.getByRole("button", { name: /^Approved by / })
+    await expect(outcome).toBeVisible()
+    await expect(page.getByRole("link", { name: "Request decision", exact: true })).toBeHidden()
+    await outcome.click()
+    const outcomeMenu = page.getByRole("menu")
+    // `reviewUrl` is absolute (page.url()); the href is workspace-relative.
+    await expect(outcomeMenu.getByRole("menuitem", { name: question })).toHaveAttribute("href", new URL(reviewUrl).pathname)
+    await expect(outcomeMenu.getByRole("menuitem", { name: "Request another decision" })).toHaveAttribute("href", new RegExp(`subjectId=${doc.id}`))
+    await outcomeMenu.getByRole("menuitem", { name: question }).click()
+    await expect(page).toHaveURL(reviewUrl)
   })
 
   test("multiple requests, exact association, keyboard links and responsive themes", async ({ page, base, workspaceSlug }) => {
