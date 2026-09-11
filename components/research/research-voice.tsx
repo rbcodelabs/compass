@@ -405,7 +405,8 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...auth, ...session }),
-      signal: AbortSignal.timeout(15_000),
+      // The PM route allows 180s, including generation and cleanup; allow delivery overhead.
+      signal: AbortSignal.timeout(210_000),
     })
       if (!response.ok) throw new Error("The session could not be completed. Retry finishing; your saved transcript is retained.")
       const result = await response.json().catch(() => null)

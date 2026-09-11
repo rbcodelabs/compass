@@ -9,6 +9,16 @@ vi.mock("@/lib/agent-sandbox", () => ({ bootSandboxFromSnapshot }))
 import { ResearchAgentUnavailableError, runResearchInterviewAgent } from "@/lib/research-agent"
 
 describe("runResearchInterviewAgent", () => {
+  it("logs the failing sandbox stage and safe status without provider payloads", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {})
+    bootSandboxFromSnapshot.mockRejectedValueOnce(Object.assign(new Error("private prompt credential"), { status: 403 }))
+    try {
+      await expect(runResearchInterviewAgent({ prompt: "private prompt", baseUrl: "https://example.test" })).rejects.toThrow()
+      expect(log).toHaveBeenCalledWith("Research agent failed", { stage: "sandbox_create", category: "permission_denied", status: 403 })
+      expect(JSON.stringify(log.mock.calls)).not.toContain("private")
+    } finally { log.mockRestore() }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.ANTHROPIC_API_KEY = "test-anthropic-key"

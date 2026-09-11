@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from "@prisma/client"
 import getPrisma from "@/lib/db"
 import { runResearchInterviewAgent } from "@/lib/research-agent"
 import { analysisOperationMs, assertAnalysisDeadline } from "@/lib/research-analysis-deadline"
+import { researchFailureDiagnostic } from "@/lib/research-failure-diagnostics"
 import { completeResearchSession, respondToResearchSession, ResearchSessionError, assertIdempotencyKey, hashResearchResumeToken } from "@/lib/research-session"
 import {
   PM_INTERVIEW_ALLOWED_FIELDS,
@@ -280,20 +281,26 @@ export async function completePmInterview(scope: PmInterviewScope, actor: PmInte
   const claimed = await prisma.pMInterview.updateMany({ where: { id: interview.id, initiatingUserId: actor.userId, OR: [{ generationState: { in: ["NOT_STARTED", "FAILED"] } }, { generationState: "GENERATING", generationClaimedAt: { lt: new Date(now.getTime() - 180_000) } }] }, data: { generationState: "GENERATING", generationClaimId: claimId, generationClaimedAt: now, generationFailureCode: null, sourceFingerprint: fingerprint, updatedAt: now } })
   if (claimed.count !== 1) throw new PmInterviewError("Proposal generation is already in progress", 409)
   const deadline = Date.now() + analysisOperationMs
+  let generationStage = "prepare_prompt"
   try {
     const participant = interview.session.turns.find(turn => turn.role === "PARTICIPANT")
     const fixtureSnapshot = pmInterviewContextSchema.parse(JSON.parse(interview.contextSnapshotJson))
     const fixtureFields = participant ? Object.fromEntries(PM_INTERVIEW_ALLOWED_FIELDS[parsePmInterviewTargetType(interview.targetType)].map(field => [field, { value: fixtureSnapshot.target.fields[field] ?? (field === "title" ? "Clarified item" : "Clarified protocol"), transcriptTurnIds: [participant.id] }])) : {}
     const fixture = { version: 1, brief: "The PM clarified the item and identified remaining unknowns.", proposedFields: fixtureFields, openQuestions: [], suggestedNextSteps: ["Validate the riskiest belief with customer evidence."], unknowns: participant ? [] : ["No PM answers were saved."] }
+    generationStage = "run_agent"
     const raw = process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1" ? JSON.stringify(fixture) : await runResearchInterviewAgent({ prompt: buildPmInterviewProposalPrompt(interview), baseUrl: "https://compass.local", deadline })
     assertAnalysisDeadline(deadline)
+    generationStage = "parse_proposal"
     const parsed = parsePmInterviewProposal(raw.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, ""), parsePmInterviewTargetType(interview.targetType))
     const validTurnIds = new Set(interview.session.turns.map(turn => turn.id))
+    generationStage = "validate_citations"
     for (const proposed of Object.values(parsed.proposedFields)) for (const id of proposed?.transcriptTurnIds ?? []) if (!validTurnIds.has(id)) throw new PmInterviewError("Proposal referenced an unavailable transcript turn")
+    generationStage = "save_proposal"
     const saved = await prisma.pMInterview.updateMany({ where: { id: interview.id, generationState: "GENERATING", generationClaimId: claimId, sourceFingerprint: fingerprint }, data: { generationState: "READY", proposalJson: JSON.stringify(parsed), updatedAt: new Date() } })
     if (saved.count !== 1) throw new PmInterviewError("Proposal changed; refresh before retrying", 409)
     return parsed
   } catch (error) {
+    console.error("PM interview proposal generation failed", { interviewId: interview.id, claimId, stage: generationStage, ...researchFailureDiagnostic(error) })
     await prisma.pMInterview.updateMany({ where: { id: interview.id, generationState: "GENERATING", generationClaimId: claimId }, data: { generationState: "FAILED", generationFailureCode: "GENERATION_FAILED", updatedAt: new Date() } })
     if (error instanceof PmInterviewError) throw error
     throw new PmInterviewError("Proposal generation failed; the transcript is unchanged", 502)

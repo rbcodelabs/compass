@@ -15,21 +15,25 @@ const mocks = vi.hoisted(() => {
   const experiment = { findFirst: vi.fn(), update: vi.fn() }
   const workspaceMember = { findFirst: vi.fn() }
   const researchSession = { findFirst: vi.fn(), updateMany: vi.fn() }
+  const researchParticipantToken = { findFirst: vi.fn() }
   const researchParticipantVoiceEvent = { findMany: vi.fn() }
   const researchVoiceCall = { findFirst: vi.fn(), update: vi.fn() }
   const prisma = {
     workspace, pMInterview, opportunity, solution, assumption, experiment,
-    workspaceMember, researchSession, researchParticipantVoiceEvent, researchVoiceCall,
+    workspaceMember, researchSession, researchParticipantToken, researchParticipantVoiceEvent, researchVoiceCall,
     $transaction: vi.fn(),
   }
-  return { prisma }
+  return { prisma, runAgent: vi.fn(), completeSession: vi.fn() }
 })
 
 vi.mock("@/lib/db", () => ({ default: () => mocks.prisma }))
+vi.mock("@/lib/research-agent", () => ({ runResearchInterviewAgent: mocks.runAgent }))
+vi.mock("@/lib/research-session", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/research-session")>(), completeResearchSession: mocks.completeSession }))
 
 import {
   acknowledgePmInterviewBaseline,
   applyPmInterview,
+  completePmInterview,
   markPmInterviewSpeechPending,
   readPmInterview,
   switchPmInterviewToText,
@@ -37,6 +41,20 @@ import {
 
 const scope = { orgSlug: "acme", workspaceSlug: "product" }
 const actor = { userId: ownerId }
+
+it("records safe parse-stage diagnostics and retains retryable generation state", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {})
+  mocks.prisma.pMInterview.findFirst.mockResolvedValue(interview({ generationState: "FAILED" }))
+  mocks.prisma.researchParticipantToken.findFirst.mockResolvedValue({ tokenHash: "synthetic" })
+  mocks.prisma.pMInterview.updateMany.mockResolvedValue({ count: 1 })
+  mocks.runAgent.mockResolvedValue("private invalid response")
+  try {
+    await expect(completePmInterview(scope, actor, interviewId)).rejects.toThrow("Proposal generation failed")
+    expect(log).toHaveBeenCalledWith("PM interview proposal generation failed", expect.objectContaining({ interviewId, stage: "parse_proposal", category: "invalid_output" }))
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private")
+    expect(mocks.prisma.pMInterview.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ generationState: "FAILED" }) }))
+  } finally { log.mockRestore() }
+})
 
 function proposal(fields: Record<string, string | null>) {
   return JSON.stringify({

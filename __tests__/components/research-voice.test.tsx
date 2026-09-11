@@ -179,6 +179,7 @@ describe("ResearchVoice", () => {
   })
 
   it("retains the lease and failed save until explicit retry, never falsely completes", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout")
     render(<ResearchVoice token="study-token" />)
     fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
     await screen.findByText("Connected — speak naturally")
@@ -202,6 +203,8 @@ describe("ResearchVoice", () => {
     expect(saves[0][1]?.body).toBe(saves[1][1]?.body)
     fireEvent.click(screen.getByRole("button", { name: "Retry finishing session" }))
     expect(await screen.findByRole("heading", { name: "Thank you" })).toBeVisible()
+    expect(timeout).toHaveBeenCalledWith(210_000)
+    timeout.mockRestore()
   })
 
   it("retries once without stale stored resume credentials", async () => {
