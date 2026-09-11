@@ -52,9 +52,22 @@ type ResolveInput = {
 }
 
 export async function resolveAgentHandoffContext(input: ResolveInput): Promise<AgentHandoffContext | null> {
-  if (input.entityType === "solutionPlan") return resolveSolutionPlan(input)
-  if (input.entityType === "decision") return resolveDecision(input)
-  return null
+  try {
+    if (input.entityType === "solutionPlan") return await resolveSolutionPlan(input)
+    if (input.entityType === "decision") return await resolveDecision(input)
+    return null
+  } catch (error) {
+    // The contract above promises `null`, never a throw — callers render a
+    // page or complete an agent turn around this and must not 500 because a
+    // hand-off link was malformed. Every id column here is `@db.Uuid`, so a
+    // non-UUID entityId (hand-edited URL, truncated paste) makes Postgres
+    // reject the cast and Prisma throw before any of our own guards run.
+    console.warn(
+      `[agent-context] resolve failed (entityType=${input.entityType}, entityId=${input.entityId}); treating as no context.`,
+      error
+    )
+    return null
+  }
 }
 
 async function resolveSolutionPlan({ workspaceId, userId, entityId }: ResolveInput): Promise<AgentHandoffContext | null> {

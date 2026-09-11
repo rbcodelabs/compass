@@ -5,7 +5,7 @@ import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { CheckIcon, PlusIcon, SparklesIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   addSolutionComment,
@@ -185,16 +185,19 @@ export function SolutionPlanDiscussion({
               <XIcon />
               Reject
             </Button>
+            {/* Styled as a button but genuinely a link: it navigates, so it
+                keeps the implicit link role. Routing it through Base UI's
+                Button instead would either warn about a non-native button
+                element or, with nativeButton={false}, stamp role="button"
+                over the anchor and misreport a navigation as an action. */}
             {currentPlan.planStatus === "APPROVED" && (
-              <Button
-                type="button"
-                size="xs"
-                variant="outline"
-                render={<Link href={`/${orgSlug}/${workspaceSlug}/agent?entityType=solutionPlan&entityId=${currentPlan.id}`} />}
+              <Link
+                href={`/${orgSlug}/${workspaceSlug}/agent?entityType=solutionPlan&entityId=${currentPlan.id}`}
+                className={buttonVariants({ size: "xs", variant: "outline" })}
               >
                 <SparklesIcon />
                 Send to agent
-              </Button>
+              </Link>
             )}
           </div>
         </div>

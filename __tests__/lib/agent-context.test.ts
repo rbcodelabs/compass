@@ -249,3 +249,26 @@ describe("resolveAgentHandoffContext — decision", () => {
     expect(result!.promptBlock).toContain("Fallback summary text.")
   })
 })
+
+describe("resolveAgentHandoffContext — the query itself throwing", () => {
+  // Regression: every id column involved is `@db.Uuid`, so a non-UUID
+  // entityId (hand-edited URL, truncated paste) makes Postgres reject the
+  // cast and Prisma throw — which used to escape as a 500 on the agent page
+  // and on POST /api/agent/turn. The documented contract is `null`, always:
+  // a bad hand-off link must never take down the page or fail a turn.
+  it.each([
+    ["solutionPlan", "solutionComment"],
+    ["decision", "reviewRequest"],
+  ] as const)("returns null instead of throwing when the %s query rejects", async (entityType, model) => {
+    mockPrisma[model].findFirst.mockRejectedValue(
+      new Error('invalid input syntax for type uuid: "not-a-uuid"')
+    )
+    const result = await resolveAgentHandoffContext({
+      workspaceId: WORKSPACE_ID,
+      userId: USER_ID,
+      entityType,
+      entityId: "not-a-uuid",
+    })
+    expect(result).toBeNull()
+  })
+})

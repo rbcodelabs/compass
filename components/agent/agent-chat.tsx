@@ -235,8 +235,16 @@ export function AgentChat({
         </ScrollArea>
       </aside>
 
-      {/* Thread + composer */}
-      <div className="flex min-h-0 flex-1 flex-col">
+      {/* Thread + composer.
+          min-w-0 is load-bearing: as a flex item this column defaults to
+          min-width:auto, so it refuses to shrink below its content's
+          min-content width. The seed context chip's summary line is
+          `truncate` (white-space:nowrap), whose min-content width is the
+          full untruncated string — that propagated up and inflated this
+          column past the viewport inside the overflow-hidden root, pushing
+          the Send button and the chip's own dismiss control off-screen on
+          any width below ~1000px. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4 sm:p-6">
             {messages.length === 0 && !isStreaming && (
