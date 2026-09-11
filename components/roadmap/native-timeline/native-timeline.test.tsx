@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
+vi.mock("@/hooks/use-url-state", () => ({ useUrlState: () => ({ params: new URLSearchParams(), set: vi.fn() }) }));
+
 type DndHarnessProps = {
   children: React.ReactNode;
   collisionDetection?: unknown;
@@ -106,6 +108,17 @@ function renderTimeline() {
     />,
   );
 }
+
+it("places navigation and reload in the main Roadmap header without a second toolbar", () => {
+  renderTimeline();
+  const header = screen.getByRole("heading", { name: "Roadmap" }).closest("header");
+  expect(header).toContainElement(screen.getByRole("button", { name: "Previous period" }));
+  expect(header).toContainElement(screen.getByRole("button", { name: "Go to today" }));
+  expect(header).toContainElement(screen.getByRole("button", { name: "Next period" }));
+  expect(header).toContainElement(screen.getByRole("button", { name: "View options" }));
+  expect(header).toContainElement(screen.getByRole("button", { name: "Reload timeline" }));
+  expect(screen.queryByText("Reload to pick up deletions or conflicting changes made elsewhere.")).not.toBeInTheDocument();
+});
 
 beforeEach(() => {
   measuredClientWidth = 400;

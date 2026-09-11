@@ -2,6 +2,9 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const viewUrl = vi.hoisted(() => ({ query: "", set: vi.fn() }));
+vi.mock("@/hooks/use-url-state", () => ({ useUrlState: () => ({ params: new URLSearchParams(viewUrl.query), set: viewUrl.set }) }));
+
 const actions = vi.hoisted(() => ({
   promoteFeedbackToRoadmap: vi.fn(),
   promoteToRoadmap: vi.fn(),
@@ -81,6 +84,8 @@ const ack = (horizon = "LATER", startDate = "2026-10-01", endDate = "2026-10-14"
 });
 
 beforeEach(() => {
+  viewUrl.query = "";
+  viewUrl.set.mockReset();
   actions.promoteFeedbackToRoadmap.mockReset();
   actions.promoteToRoadmap.mockReset();
   actions.rescheduleRoadmapItem.mockReset();
@@ -89,6 +94,26 @@ beforeEach(() => {
 });
 
 describe("useTimelineController scheduling failures", () => {
+  it("restores URL scale after remount and browser Back without saving", () => {
+    viewUrl.query = "timelineScale=quarter&squad=alpha";
+    const mounted = renderHook(() => useTimelineController({ initialItems: [], initialUnscheduled: [], workspaceId: "workspace-1" }));
+    expect(mounted.result.current.zoom).toBe("quarter");
+    mounted.unmount();
+    viewUrl.query = "timelineScale=quarter";
+    const fresh = renderHook(() => useTimelineController({ initialItems: [], initialUnscheduled: [], workspaceId: "workspace-1" }));
+    expect(fresh.result.current.zoom).toBe("quarter");
+    viewUrl.query = "";
+    fresh.rerender();
+    expect(fresh.result.current.zoom).toBe("month");
+    act(() => fresh.result.current.setZoom("quarter"));
+    expect(viewUrl.set).toHaveBeenCalledWith({ timelineScale: "quarter" });
+    act(() => fresh.result.current.setZoom("month"));
+    expect(viewUrl.set).toHaveBeenCalledWith({ timelineScale: null });
+    viewUrl.query = "timelineScale=unknown";
+    fresh.rerender();
+    expect(fresh.result.current.zoom).toBe("month");
+    expect(actions.rescheduleRoadmapItem).not.toHaveBeenCalled();
+  });
   it("reconciles authoritative item props after a server refresh", () => {
     const initialItem = {
       id: "item-1", title: "Server-owned", horizon: "NEXT", squad: null,

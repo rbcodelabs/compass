@@ -50,7 +50,11 @@ Toggle between **Board** and **Timeline** at the top of the Roadmap page. Board 
 
 Every workspace uses the **Compass native timeline** when you select Timeline. Existing timeline links continue to work, including bookmarks that previously selected the classic renderer.
 
-The native chart groups items by horizon and squad, with separate tracks for overlapping bars. Use **Month** or **Quarter** to change the visible planning range, **Previous / Next** to navigate, and **Today** to return to the current period. Scroll horizontally to reach dates outside the visible area.
+The native chart groups items by horizon and squad, with separate tracks for overlapping bars. The **Roadmap header** contains icon controls for **Previous period**, **Go to today**, **Next period**, and **Reload timeline**; hover or focus an icon for its tooltip. Open **View options** to filter by **Squad** or choose **Month / Quarter** under **Timeline scale**. **Clear filters** clears only the squad filter. On Board, View options contains squad filtering without timeline controls. Scroll the chart horizontally to reach dates outside the visible area.
+
+On mobile, the title and Board/Timeline tabs share the first header row; navigation and View options/Reload sit below with larger touch targets. The calendar can scroll horizontally without widening the page.
+
+Timeline scale is retained in the page URL: changing or clearing the squad filter preserves Month/Quarter, and browser Back restores the previous selection.
 
 The native timeline follows your workspace's Light, Dark, or System appearance preference, including its calendar, squad labels, backlog, and date editor. Horizon colors remain consistent across themes.
 
