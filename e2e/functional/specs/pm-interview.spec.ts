@@ -1,6 +1,6 @@
 import { test, expect } from "../fixtures/index"
 import getPrisma from "../../../lib/db"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 
 type TargetFixture = {
   type: "OPPORTUNITY" | "SOLUTION" | "ASSUMPTION" | "EXPERIMENT"
@@ -194,6 +194,8 @@ test.describe("Capture — PM interview", () => {
     const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug } })
     const opportunity = await prisma.opportunity.create({ data: { workspaceId: workspace.id, title: `PM adversarial ${Date.now()}`, description: "Original" } })
     const interviewIds: string[] = []
+    const disposableOpportunityIds: string[] = []
+    const disposableExperimentIds: string[] = []
     try {
       const createInterview = async () => {
         const response = await page.request.post(`/api/pm-interviews?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { targetType: "OPPORTUNITY", targetId: opportunity.id } })
@@ -236,7 +238,114 @@ test.describe("Capture — PM interview", () => {
       const anonymous = await browser.newContext({ storageState: undefined })
       try {
         expect((await anonymous.request.post(`${baseURL}/api/research/start`, { data: { token: copiedToken, modality: "CHAT" } })).status()).toBe(404)
+        const anonymousPmRoutes = [
+          anonymous.request.post(`${baseURL}/api/pm-interviews?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { targetType: "OPPORTUNITY", targetId: opportunity.id } }),
+          anonymous.request.get(`${baseURL}/api/pm-interviews/${publicId}?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
+          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/start?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { modality: "VOICE" } }),
+          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/respond?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { answer: "No", idempotencyKey: "anonymous-answer-0001" } }),
+          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/complete?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
+          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/review-baseline?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
+          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/apply?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { selectedFields: ["title"], idempotencyKey: "anonymous-apply-0001" } }),
+          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/dismiss?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { idempotencyKey: "anonymous-dismiss-0001" } }),
+          anonymous.request.post(`${baseURL}/api/pm-interviews/${publicId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId: null, settlement: "FINALIZED" } }),
+        ]
+        expect((await Promise.all(anonymousPmRoutes)).map(response => response.status())).toEqual(Array(9).fill(401))
       } finally { await anonymous.close() }
+
+      const deletedOpportunity = await prisma.opportunity.create({ data: { workspaceId: workspace.id, title: `PM deleted target ${Date.now()}`, description: "Delete after proposal" } })
+      disposableOpportunityIds.push(deletedOpportunity.id)
+      const deletedIdResponse = await page.request.post(`/api/pm-interviews?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { targetType: "OPPORTUNITY", targetId: deletedOpportunity.id } })
+      expect(deletedIdResponse.status()).toBe(201)
+      const deletedId = ((await deletedIdResponse.json()) as { id: string }).id
+      interviewIds.push(deletedId)
+      await prepareProposal(deletedId)
+      await prisma.opportunity.delete({ where: { id: deletedOpportunity.id } })
+      disposableOpportunityIds.splice(disposableOpportunityIds.indexOf(deletedOpportunity.id), 1)
+      const deletedRead = await page.request.get(`/api/pm-interviews/${deletedId}?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`)
+      expect(deletedRead.status()).toBe(200)
+      expect(await deletedRead.json()).toMatchObject({ applicationDisabledReason: "The source item was deleted; interview history remains readable." })
+      expect((await page.request.post(`/api/pm-interviews/${deletedId}/apply?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { selectedFields: ["title"], idempotencyKey: `deleted-${deletedId}` } })).status()).toBe(409)
+
+      const runningExperiment = await prisma.experiment.create({ data: { workspaceId: workspace.id, title: `PM running target ${Date.now()}`, hypothesis: "A prediction", method: "Five sessions", killCondition: "No signal", status: "DESIGNING" } })
+      disposableExperimentIds.push(runningExperiment.id)
+      const experimentResponse = await page.request.post(`/api/pm-interviews?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { targetType: "EXPERIMENT", targetId: runningExperiment.id } })
+      expect(experimentResponse.status()).toBe(201)
+      const experimentInterviewId = ((await experimentResponse.json()) as { id: string }).id
+      interviewIds.push(experimentInterviewId)
+      await prepareProposal(experimentInterviewId)
+      await prisma.experiment.update({ where: { id: runningExperiment.id }, data: { status: "RUNNING", updatedAt: new Date() } })
+      const runningRead = await page.request.get(`/api/pm-interviews/${experimentInterviewId}?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`)
+      expect(runningRead.status()).toBe(200)
+      expect(await runningRead.json()).toMatchObject({ applicationDisabledReason: "Experiment protocol can only change while designing." })
+      expect((await page.request.post(`/api/pm-interviews/${experimentInterviewId}/apply?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { selectedFields: ["title"], idempotencyKey: `running-${experimentInterviewId}` } })).status()).toBe(409)
+
+      const voiceId = await createInterview()
+      const start = await page.request.post(`/api/pm-interviews/${voiceId}/start?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { modality: "VOICE" } })
+      expect(start.status()).toBe(200)
+      const voiceSession = await start.json() as { sessionId: string; resumeToken: string }
+      const provision = await page.request.post(`/api/pm-interviews/${voiceId}/voice-session?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: voiceSession })
+      expect(provision.status()).toBe(200)
+      const { leaseId } = await provision.json() as { leaseId: string }
+      const voiceEvent = { ...voiceSession, leaseId, action: "FINAL", clientEventId: `voice-${voiceId}`, reportedOrdinal: 0, role: "PARTICIPANT", content: "A synthetic finalized PM voice answer" }
+      expect((await page.request.post(`/api/pm-interviews/${voiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: voiceEvent })).status()).toBe(200)
+      expect((await page.request.post(`/api/pm-interviews/${voiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId, settlement: "FINALIZED" } })).status()).toBe(409)
+      expect((await page.request.post(`/api/pm-interviews/${voiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { ...voiceSession, leaseId, action: "SETTLE", settlement: "FINALIZED" } })).status()).toBe(200)
+      expect((await page.request.post(`/api/pm-interviews/${voiceId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId, settlement: "FINALIZED" } })).status()).toBe(200)
+      expect((await page.request.post(`/api/pm-interviews/${voiceId}/voice-event?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { ...voiceEvent, clientEventId: `late-${voiceId}`, reportedOrdinal: 1 } })).status()).toBe(404)
+      const voiceRecord = await prisma.pMInterview.findUniqueOrThrow({ where: { id: voiceId }, include: { session: true } })
+      expect(voiceRecord.session).toMatchObject({ modality: "CHAT", voiceLeaseId: null })
+      expect(JSON.parse(voiceRecord.transitionReceiptJson!)).toMatchObject({ version: 1, phase: "TRANSITIONED", leaseId, settlement: "FINALIZED", finalizedEventCount: 1, lastFinalizedOrdinal: 0 })
+
+      const nonOwnerId = await createInterview()
+      await prepareProposal(nonOwnerId)
+      await prisma.pMInterview.update({ where: { id: nonOwnerId }, data: { initiatingUserId: randomUUID(), updatedAt: new Date() } })
+      const nonOwnerRead = await page.request.get(`/api/pm-interviews/${nonOwnerId}?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`)
+      expect(nonOwnerRead.status()).toBe(200)
+      const nonOwnerHistory = await nonOwnerRead.json() as { owner: boolean; proposal: unknown; session: { turns: unknown[] } }
+      expect(nonOwnerHistory).toMatchObject({ owner: false })
+      expect(nonOwnerHistory.proposal).not.toBeNull()
+      expect(nonOwnerHistory.session.turns.length).toBeGreaterThan(1)
+      const nonOwnerMutations = [
+        page.request.post(`/api/pm-interviews/${nonOwnerId}/start?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { modality: "VOICE" } }),
+        page.request.post(`/api/pm-interviews/${nonOwnerId}/respond?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { answer: "No", idempotencyKey: "non-owner-answer-0001" } }),
+        page.request.post(`/api/pm-interviews/${nonOwnerId}/complete?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
+        page.request.post(`/api/pm-interviews/${nonOwnerId}/review-baseline?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
+        page.request.post(`/api/pm-interviews/${nonOwnerId}/apply?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { selectedFields: ["title"], idempotencyKey: "non-owner-apply-0001" } }),
+        page.request.post(`/api/pm-interviews/${nonOwnerId}/dismiss?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { idempotencyKey: "non-owner-dismiss-0001" } }),
+        page.request.post(`/api/pm-interviews/${nonOwnerId}/continue-in-text?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { leaseId: null, settlement: "FINALIZED" } }),
+        page.request.post(`/api/pm-interviews/${nonOwnerId}/voice-session?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { sessionId: "synthetic", resumeToken: "synthetic" } }),
+      ]
+      expect((await Promise.all(nonOwnerMutations)).map(response => response.status())).toEqual(Array(8).fill(404))
+
+      const rollbackOpportunity = await prisma.opportunity.create({ data: { workspaceId: workspace.id, title: `PM rollback target ${Date.now()}`, description: "Original transaction value" } })
+      disposableOpportunityIds.push(rollbackOpportunity.id)
+      const rollbackIdResponse = await page.request.post(`/api/pm-interviews?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { targetType: "OPPORTUNITY", targetId: rollbackOpportunity.id } })
+      expect(rollbackIdResponse.status()).toBe(201)
+      const rollbackId = ((await rollbackIdResponse.json()) as { id: string }).id
+      interviewIds.push(rollbackId)
+      await expect(prisma.$transaction(async tx => {
+        await tx.opportunity.update({ where: { id: rollbackOpportunity.id }, data: { title: "Must roll back", updatedAt: new Date() } })
+        const finalized = await tx.pMInterview.updateMany({ where: { id: rollbackId, disposition: "APPLIED" }, data: { receiptJson: JSON.stringify({ version: 1, kind: "APPLIED" }), updatedAt: new Date() } })
+        if (finalized.count !== 1) throw new Error("Synthetic receipt finalization failure")
+      })).rejects.toThrow("Synthetic receipt finalization failure")
+      expect((await prisma.opportunity.findUniqueOrThrow({ where: { id: rollbackOpportunity.id } })).title).toBe(rollbackOpportunity.title)
+
+      const removedMemberId = await createInterview()
+      const { initiatingUserId } = await prisma.pMInterview.findUniqueOrThrow({ where: { id: removedMemberId }, select: { initiatingUserId: true } })
+      const membership = await prisma.workspaceMember.findFirstOrThrow({ where: { workspaceId: workspace.id, userId: initiatingUserId }, select: { id: true, workspaceId: true, userId: true, role: true } })
+      await prisma.workspaceMember.delete({ where: { id: membership.id } })
+      try {
+        const removedMemberRequests = [
+          page.request.get(`/api/pm-interviews/${removedMemberId}?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`),
+          page.request.post(`/api/pm-interviews/${removedMemberId}/respond?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { answer: "No", idempotencyKey: "removed-answer-0001" } }),
+          page.request.post(`/api/pm-interviews/${removedMemberId}/apply?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { selectedFields: ["title"], idempotencyKey: "removed-apply-0001" } }),
+          page.request.post(`/api/pm-interviews/${removedMemberId}/dismiss?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { idempotencyKey: "removed-dismiss-0001" } }),
+          page.request.post(`/api/pm-interviews/${removedMemberId}/voice-session?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { sessionId: "synthetic", resumeToken: "synthetic" } }),
+        ]
+        expect((await Promise.all(removedMemberRequests)).map(response => response.status())).toEqual(Array(5).fill(404))
+      } finally {
+        await prisma.workspaceMember.create({ data: membership })
+      }
     } finally {
       const records = await prisma.pMInterview.findMany({ where: { id: { in: interviewIds } }, select: { studyId: true, sessionId: true } })
       const sessionIds = records.map(record => record.sessionId), studyIds = records.map(record => record.studyId)
@@ -250,6 +359,8 @@ test.describe("Capture — PM interview", () => {
       await prisma.researchSession.deleteMany({ where: { id: { in: sessionIds } } })
       await prisma.researchParticipantToken.deleteMany({ where: { studyId: { in: studyIds } } })
       await prisma.researchStudy.deleteMany({ where: { id: { in: studyIds } } })
+      await prisma.experiment.deleteMany({ where: { id: { in: disposableExperimentIds } } })
+      await prisma.opportunity.deleteMany({ where: { id: { in: disposableOpportunityIds } } })
       await prisma.opportunity.delete({ where: { id: opportunity.id } })
     }
   })

@@ -411,6 +411,7 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
     setStatus("connecting")
     setError(null)
     try {
+      const session = sessionRef.current
       const leaseId = leaseRef.current
       const hasPending = Boolean(pendingSpeechRef.current || orderRef.current?.unresolved || captionsRef.current.some(caption => caption.partial))
       if (hasPending && !discardPending) {
@@ -420,7 +421,18 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
       await queueRef.current?.flush()
       acceptingEventsRef.current = false
       closeMedia()
-      if (transport?.atomicTextTransition) await onUseChat?.({ leaseId, settlement: discardPending ? "DISCARD_PENDING" : "FINALIZED" })
+      const settlement = discardPending ? "DISCARD_PENDING" : "FINALIZED"
+      if (transport?.atomicTextTransition) {
+        if (!session || !leaseId) throw new Error("The active voice connection changed. Refresh before continuing in text.")
+        const settled = await fetch(endpoint("voice-event"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...auth, ...session, leaseId, action: "SETTLE", settlement }),
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (!settled.ok) throw new Error("Voice transcript settlement could not be recorded. Retry continuing in text.")
+        await onUseChat?.({ leaseId, settlement })
+      }
       else { await releaseLease(); await onUseChat?.() }
       leaseRef.current = null
       setPendingDiscard(false)

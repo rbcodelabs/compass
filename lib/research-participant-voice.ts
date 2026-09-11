@@ -3,6 +3,7 @@ import type { ResearchStudy } from "@prisma/client"
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
 import { hashResearchResumeToken, MAX_RESEARCH_TURNS, MAX_RESEARCH_TRANSCRIPT_CHARS } from "@/lib/research-session"
 import { ResearchVoiceError } from "@/lib/research-voice"
+import { parsePmInterviewVoiceTransitionReceipt } from "@/lib/pm-interview-contracts"
 
 export const MAX_BROWSER_VOICE_CLAIMS = 5
 type Context = { prisma: AppPrismaClient; study: ResearchStudy; participantToken: { id: string } }
@@ -92,6 +93,11 @@ export async function appendParticipantVoiceEvent(input: SessionInput & {
     await fenceAccess(tx, context, now)
     const session = await tx.researchSession.findFirst({ where: { ...sessionWhere(input), voiceLeaseId: leaseId, voiceLeaseExpiresAt: { gt: now } } })
     if (!session) throw new ResearchVoiceError("Voice connection is not authorized", 404)
+    if (context.study.studyType === "PM_INTERVIEW") {
+      const pmInterview = await tx.pMInterview.findUnique({ where: { sessionId }, select: { transitionReceiptJson: true } })
+      const settlement = parsePmInterviewVoiceTransitionReceipt(pmInterview?.transitionReceiptJson ?? null)
+      if (settlement?.phase === "SETTLED" && settlement.leaseId === leaseId) throw new ResearchVoiceError("Voice transcript intake is already settled", 409)
+    }
     const prior = await tx.researchParticipantVoiceEvent.findUnique({ where: { sessionId_clientEventId: { sessionId, clientEventId } } })
     if (prior) {
       if (prior.workspaceId !== context.study.workspaceId || prior.leaseId !== leaseId || prior.reportedOrdinal !== reportedOrdinal || prior.claimedSpeaker !== role || prior.content !== content) throw new ResearchVoiceError("Client event ID was reused with different content", 409)
@@ -105,9 +111,10 @@ export async function appendParticipantVoiceEvent(input: SessionInput & {
     if (recent >= 30) throw new ResearchVoiceError("Please wait before saving more voice events", 429)
     if ((session.voiceTurnCount ?? 0) >= MAX_RESEARCH_TURNS || (session.voiceTranscriptChars ?? 0) + content.length > MAX_RESEARCH_TRANSCRIPT_CHARS) throw new ResearchVoiceError("This interview has reached its transcript limit", 409)
     const sequence = session.nextSequence ?? 0
+    const sessionFenceAt = new Date(Math.max(now.getTime(), session.updatedAt.getTime() + 1))
     const updated = await tx.researchSession.updateMany({
-      where: { ...sessionWhere(input), voiceLeaseId: leaseId, voiceLeaseExpiresAt: { gt: now }, nextSequence: session.nextSequence },
-      data: { nextSequence: sequence + 1, voiceTurnCount: (session.voiceTurnCount ?? 0) + 1, voiceTranscriptChars: (session.voiceTranscriptChars ?? 0) + content.length, lastActiveAt: now, updatedAt: now },
+      where: { ...sessionWhere(input), voiceLeaseId: leaseId, voiceLeaseExpiresAt: { gt: now }, nextSequence: session.nextSequence, updatedAt: session.updatedAt },
+      data: { nextSequence: sequence + 1, voiceTurnCount: (session.voiceTurnCount ?? 0) + 1, voiceTranscriptChars: (session.voiceTranscriptChars ?? 0) + content.length, lastActiveAt: now, updatedAt: sessionFenceAt },
     })
     if (updated.count !== 1) throw new ResearchVoiceError("Voice transcript changed concurrently", 409)
     const turn = await tx.researchTurn.create({ data: { id: randomUUID(), sessionId, role, content, sequence } })

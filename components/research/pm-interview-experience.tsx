@@ -10,8 +10,9 @@ import { ResearchVoice } from "@/components/research/research-voice"
 
 type Turn = { id: string; role: string; content: string; sequence: number }
 type Proposal = { version: 1; brief: string; proposedFields: Record<string, { value: string | null; transcriptTurnIds: string[] } | undefined>; openQuestions: string[]; suggestedNextSteps: string[]; unknowns: string[] }
+type Receipt = { version: 1; kind: "APPLIED"; selectedFields: string[]; before: Record<string, string | null>; after: Record<string, string | null>; at: string } | { version: 1; kind: "DISMISSED"; at: string }
 
-export function PmInterviewExperience({ interviewId, orgSlug, workspaceSlug, targetType, targetTitle, omissions, initialTurns, initialProposal, initialDisposition, initialGenerationState, initialReviewBaseline, initialContextFields, applicationDisabledReason, owner, voiceEnabled }: { interviewId: string; orgSlug: string; workspaceSlug: string; targetType: PmInterviewTargetType; targetTitle: string; omissions: string[]; initialTurns: Turn[]; initialProposal: Proposal | null; initialDisposition: string; initialGenerationState: string; initialReviewBaseline: { version: 1; fields: Record<string, string | null> }; initialContextFields: Record<string, string | null>; applicationDisabledReason: string | null; owner: boolean; voiceEnabled: boolean }) {
+export function PmInterviewExperience({ interviewId, orgSlug, workspaceSlug, targetType, targetTitle, omissions, initialTurns, initialProposal, initialReceipt, initialDisposition, initialGenerationState, initialReviewBaseline, initialContextFields, applicationDisabledReason, owner, voiceEnabled }: { interviewId: string; orgSlug: string; workspaceSlug: string; targetType: PmInterviewTargetType; targetTitle: string; omissions: string[]; initialTurns: Turn[]; initialProposal: Proposal | null; initialReceipt: Receipt | null; initialDisposition: string; initialGenerationState: string; initialReviewBaseline: { version: 1; fields: Record<string, string | null> }; initialContextFields: Record<string, string | null>; applicationDisabledReason: string | null; owner: boolean; voiceEnabled: boolean }) {
   const [mode, setMode] = useState<"CHOOSE" | "CHAT" | "VOICE">(initialProposal ? "CHAT" : "CHOOSE")
   const [turns, setTurns] = useState(initialTurns)
   const [input, setInput] = useState("")
@@ -19,6 +20,7 @@ export function PmInterviewExperience({ interviewId, orgSlug, workspaceSlug, tar
   const [error, setError] = useState<string | null>(null)
   const [proposal, setProposal] = useState(initialProposal)
   const [disposition, setDisposition] = useState(initialDisposition)
+  const [receipt, setReceipt] = useState(initialReceipt)
   const [generationState, setGenerationState] = useState(initialGenerationState)
   const [reviewBaseline, setReviewBaseline] = useState(initialReviewBaseline)
   const applyKey = useRef<{ fingerprint: string; key: string } | null>(null)
@@ -82,7 +84,7 @@ export function PmInterviewExperience({ interviewId, orgSlug, workspaceSlug, tar
     const selectedFields = fields.map(([field]) => field).filter(field => selected[field] ?? true)
     const fingerprint = JSON.stringify({ selectedFields: [...selectedFields].sort(), editedValues: edits })
     if (applyKey.current?.fingerprint !== fingerprint) applyKey.current = { fingerprint, key: crypto.randomUUID().replaceAll("-", "") }
-    try { await api("/apply", { selectedFields, editedValues: edits, idempotencyKey: applyKey.current.key }); setDisposition("APPLIED") }
+    try { const result = await api("/apply", { selectedFields, editedValues: edits, idempotencyKey: applyKey.current.key }); setReceipt({ version: 1, kind: "APPLIED", selectedFields: result.selectedFields, before: result.before, after: result.after, at: result.at }); setDisposition("APPLIED") }
     catch (caught) {
       await reloadInterview().catch(() => undefined)
       setError(caught instanceof Error ? caught.message : "Changes could not be applied")
@@ -98,7 +100,7 @@ export function PmInterviewExperience({ interviewId, orgSlug, workspaceSlug, tar
   }
 
   async function dismiss() {
-    setBusy(true); try { await api("/dismiss", { idempotencyKey: crypto.randomUUID().replaceAll("-", "") }); setDisposition("DISMISSED") }
+    setBusy(true); try { const result = await api("/dismiss", { idempotencyKey: crypto.randomUUID().replaceAll("-", "") }); setReceipt({ version: 1, kind: "DISMISSED", at: result.at }); setDisposition("DISMISSED") }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Proposal could not be dismissed") }
     finally { setBusy(false) }
   }
@@ -111,7 +113,7 @@ export function PmInterviewExperience({ interviewId, orgSlug, workspaceSlug, tar
       {applicationDisabledReason && <p className="rounded-lg bg-surface-inset p-3 text-sm text-text-subtle">{applicationDisabledReason}</p>}
       {owner && disposition === "PENDING" && <div className="flex flex-wrap gap-2"><Button onClick={apply} disabled={busy || fields.length === 0 || generationState === "STALE" || Boolean(applicationDisabledReason)}>Apply selected changes</Button><Button variant="outline" onClick={dismiss} disabled={busy}>Dismiss proposal</Button></div>}{disposition !== "PENDING" && <p className="rounded-lg bg-surface-inset p-3 text-sm">Proposal {disposition.toLowerCase()}.</p>}
     </section>
-    <aside className="space-y-4"><ReviewList title="Open questions" items={proposal.openQuestions} /><ReviewList title="Suggested next steps" items={proposal.suggestedNextSteps} /><ReviewList title="Explicit unknowns" items={proposal.unknowns} /></aside>
+    <aside className="space-y-4"><ReceiptSummary receipt={receipt} /><Transcript turns={turns} /><ReviewList title="Open questions" items={proposal.openQuestions} /><ReviewList title="Suggested next steps" items={proposal.suggestedNextSteps} /><ReviewList title="Explicit unknowns" items={proposal.unknowns} /></aside>
   </div>
 
   if (!owner) return <section className="mx-auto w-full max-w-3xl rounded-xl border bg-surface-panel p-5"><h2 className="text-lg font-semibold">{targetTitle}</h2><p className="mt-1 text-sm text-text-subtle">Read-only PM interview history</p><ol className="mt-4 space-y-3">{turns.map(turn => <li key={turn.id} className="rounded-lg border p-3 text-sm"><span className="mb-1 block text-xs text-text-muted">{turn.role === "PARTICIPANT" ? "PM" : "Compass"}</span>{turn.content}</li>)}</ol></section>
@@ -123,3 +125,12 @@ export function PmInterviewExperience({ interviewId, orgSlug, workspaceSlug, tar
 }
 
 function ReviewList({ title, items }: { title: string; items: string[] }) { return <section className="rounded-xl border bg-surface-panel p-4"><h3 className="font-medium">{title}</h3>{items.length ? <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-text-subtle">{items.map(item => <li key={item}>{item}</li>)}</ul> : <p className="mt-2 text-sm text-text-muted">None recorded.</p>}</section> }
+
+function Transcript({ turns }: { turns: Turn[] }) { return <section className="rounded-xl border bg-surface-panel p-4"><h3 className="font-medium">Complete transcript</h3><ol className="mt-2 space-y-2">{turns.map(turn => <li className="text-sm text-text-subtle" key={turn.id}><span className="font-medium text-text-primary">{turn.role === "PARTICIPANT" ? "PM" : "Compass"}:</span> {turn.content}</li>)}</ol></section> }
+
+function ReceiptSummary({ receipt }: { receipt: Receipt | null }) {
+  if (!receipt) return null
+  return <section className="rounded-xl border bg-surface-panel p-4"><h3 className="font-medium">Resolution receipt</h3>{receipt.kind === "DISMISSED"
+    ? <p className="mt-2 text-sm text-text-subtle">Dismissed without applying changes · {new Date(receipt.at).toLocaleString()}</p>
+    : <div className="mt-2 space-y-1 text-sm text-text-subtle"><p>Applied {receipt.selectedFields.length} field{receipt.selectedFields.length === 1 ? "" : "s"} · {new Date(receipt.at).toLocaleString()}</p>{receipt.selectedFields.map(field => <p key={field}><span className="font-medium text-text-primary">{field}:</span> {receipt.before[field] ?? "empty"} → {receipt.after[field] ?? "empty"}</p>)}</div>}</section>
+}

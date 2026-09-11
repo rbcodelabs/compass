@@ -30,6 +30,8 @@ vi.mock("@/lib/db", () => ({ default: () => mocks.prisma }))
 import {
   acknowledgePmInterviewBaseline,
   applyPmInterview,
+  readPmInterview,
+  settlePmInterviewVoice,
   switchPmInterviewToText,
 } from "@/lib/pm-interview-service"
 
@@ -63,6 +65,10 @@ function interview(overrides: Record<string, unknown> = {}) {
     disposition: "PENDING",
     dispositionIdempotencyKey: null,
     receiptJson: null,
+    transitionReceiptJson: null,
+    retiredVoiceLeaseId: null,
+    contextSnapshotJson: JSON.stringify({ version: 1, capturedAt: "2026-09-11T12:00:00.000Z", target: { type: "OPPORTUNITY", id: targetId, fields: { title: "Original", description: "Original description", customerSegment: null } }, parents: [], outcome: null, evidence: [], feedback: [], omissions: [] }),
+    createdAt: new Date("2026-09-11T11:00:00Z"),
     updatedAt: new Date("2026-09-11T12:00:00Z"),
     session: { id: sessionId, status: "IN_PROGRESS", modality: "CHAT", participantTokenId: "token-1", voiceLeaseId: null, turns: [] },
     study: { id: "study-1", studyType: "PM_INTERVIEW" },
@@ -116,6 +122,35 @@ describe("PM interview application fences", () => {
     })).rejects.toMatchObject({ status: 404 })
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it("returns complete safe applied history to a non-owner member", async () => {
+    const otherOwner = "00000000-0000-4000-8000-000000000099"
+    mocks.prisma.pMInterview.findFirst.mockResolvedValue(interview({
+      initiatingUserId: otherOwner,
+      disposition: "APPLIED",
+      receiptJson: JSON.stringify({ version: 1, kind: "APPLIED", idempotencyKey: "safe-read-apply-0001", requestFingerprint: "a".repeat(64), actorUserId: otherOwner, selectedFields: ["title"], before: { title: "Original" }, after: { title: "Applied" }, at: "2026-09-11T12:05:00.000Z" }),
+      session: { id: sessionId, status: "COMPLETED", modality: "CHAT", participantTokenId: "secret-token", resumeTokenHash: "secret-hash", voiceLeaseId: "secret-lease", turns: [
+        { id: "00000000-0000-4000-8000-000000000060", role: "PARTICIPANT", content: "Complete answer", sequence: 1, createdAt: new Date("2026-09-11T12:01:00Z") },
+        { id: "00000000-0000-4000-8000-000000000061", role: "INTERVIEWER", content: "Complete follow-up", sequence: 2, createdAt: new Date("2026-09-11T12:02:00Z") },
+      ] },
+    }))
+
+    const result = await readPmInterview(scope, actor, interviewId)
+    expect(result).toMatchObject({ owner: false, disposition: "APPLIED", receipt: { version: 1, kind: "APPLIED", selectedFields: ["title"], before: { title: "Original" }, after: { title: "Applied" } } })
+    expect(result.session.turns.map(turn => turn.content)).toEqual(["Complete answer", "Complete follow-up"])
+    expect(JSON.stringify(result)).not.toContain("secret-")
+  })
+
+  it("returns history with an application-disabled reason after target deletion", async () => {
+    mocks.prisma.opportunity.findFirst.mockResolvedValue(null)
+    await expect(readPmInterview(scope, actor, interviewId)).resolves.toMatchObject({ applicationDisabledReason: "The source item was deleted; interview history remains readable." })
+  })
+
+  it("rechecks membership before non-owner history reads", async () => {
+    mocks.prisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(readPmInterview(scope, actor, interviewId)).rejects.toMatchObject({ status: 404 })
+    expect(mocks.prisma.pMInterview.findFirst).not.toHaveBeenCalled()
   })
 
   it("detects exact field drift even when the target timestamp did not change", async () => {
@@ -212,6 +247,18 @@ describe("PM interview application fences", () => {
     }))
   })
 
+  it("throws after the target write when receipt finalization loses its CAS so the database transaction rolls back", async () => {
+    mocks.prisma.pMInterview.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 })
+
+    await expect(applyPmInterview(scope, actor, interviewId, {
+      selectedFields: ["title"], idempotencyKey: "apply-finalization-rollback-0001",
+    })).rejects.toMatchObject({ status: 409 })
+
+    expect(mocks.prisma.opportunity.update).toHaveBeenCalledTimes(1)
+    expect(mocks.prisma.pMInterview.updateMany).toHaveBeenCalledTimes(2)
+    expect(mocks.prisma.pMInterview.updateMany.mock.invocationCallOrder[1]).toBeGreaterThan(mocks.prisma.opportunity.update.mock.invocationCallOrder[0])
+  })
+
   it("maps a lost apply reservation to a refreshable conflict without writing the target", async () => {
     mocks.prisma.pMInterview.updateMany.mockResolvedValueOnce({ count: 0 })
 
@@ -239,11 +286,50 @@ describe("PM interview voice-to-text transaction", () => {
     mocks.prisma.pMInterview.findFirst.mockResolvedValueOnce(interview({
       session: { id: sessionId, status: "IN_PROGRESS", modality: "VOICE", participantTokenId: "token-1", voiceLeaseId: leaseId, turns: [] },
     })).mockResolvedValue({ id: interviewId, sessionId })
-    mocks.prisma.researchSession.findFirst.mockResolvedValue({ id: sessionId, voiceLeaseId: leaseId })
+    mocks.prisma.researchSession.findFirst.mockResolvedValue({ id: sessionId, voiceLeaseId: leaseId, updatedAt: new Date("2026-09-11T12:00:00Z") })
   })
 
-  it("retires only the exact active lease and records finalized event settlement atomically", async () => {
+  it("records an exact-lease finalized settlement before transition", async () => {
     mocks.prisma.researchParticipantVoiceEvent.findMany.mockResolvedValue([{ reportedOrdinal: 2 }, { reportedOrdinal: 3 }])
+
+    await expect(settlePmInterviewVoice(scope, actor, interviewId, { leaseId, settlement: "FINALIZED" })).resolves.toMatchObject({ phase: "SETTLED", settlement: "FINALIZED" })
+
+    const settlement = JSON.parse(mocks.prisma.pMInterview.updateMany.mock.calls[0][0].data.transitionReceiptJson)
+    expect(settlement).toMatchObject({ version: 1, phase: "SETTLED", leaseId, settlement: "FINALIZED", finalizedEventCount: 2, lastFinalizedOrdinal: 3 })
+  })
+
+  it("advances the settlement session fence even within the same clock millisecond", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-11T12:00:00.000Z"))
+    try {
+      await settlePmInterviewVoice(scope, actor, interviewId, { leaseId, settlement: "FINALIZED" })
+      expect(mocks.prisma.researchSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ updatedAt: new Date("2026-09-11T12:00:00.001Z") }) }))
+    } finally { vi.useRealTimers() }
+  })
+
+  it("does not record settlement when a concurrent final event wins the shared session fence", async () => {
+    mocks.prisma.researchSession.updateMany.mockResolvedValue({ count: 0 })
+    await expect(settlePmInterviewVoice(scope, actor, interviewId, { leaseId, settlement: "FINALIZED" })).rejects.toMatchObject({ status: 409 })
+    expect(mocks.prisma.pMInterview.updateMany).not.toHaveBeenCalled()
+  })
+
+  it("maps a DSQL settlement serialization race to a retryable conflict", async () => {
+    mocks.prisma.$transaction.mockRejectedValueOnce({ code: "P2034" })
+    await expect(settlePmInterviewVoice(scope, actor, interviewId, { leaseId, settlement: "FINALIZED" })).rejects.toMatchObject({ status: 409 })
+  })
+
+  it("rejects a direct finalized transition until the exact lease settlement is proven", async () => {
+    await expect(switchPmInterviewToText(scope, actor, interviewId, { leaseId, settlement: "FINALIZED" })).rejects.toMatchObject({ status: 409 })
+    expect(mocks.prisma.researchSession.updateMany).not.toHaveBeenCalled()
+  })
+
+  it("retires only the exact settled lease and records the completed transition atomically", async () => {
+    mocks.prisma.researchParticipantVoiceEvent.findMany.mockResolvedValue([{ reportedOrdinal: 2 }, { reportedOrdinal: 3 }])
+    mocks.prisma.pMInterview.findFirst.mockReset()
+    mocks.prisma.pMInterview.findFirst.mockResolvedValueOnce(interview({
+      transitionReceiptJson: JSON.stringify({ version: 1, phase: "SETTLED", leaseId, settlement: "FINALIZED", finalizedEventCount: 2, lastFinalizedOrdinal: 3, at: "2026-09-11T12:00:00.000Z" }),
+      session: { id: sessionId, status: "IN_PROGRESS", modality: "VOICE", participantTokenId: "token-1", voiceLeaseId: leaseId, turns: [] },
+    })).mockResolvedValue({ id: interviewId, sessionId, transitionReceiptJson: JSON.stringify({ version: 1, phase: "SETTLED", leaseId, settlement: "FINALIZED", finalizedEventCount: 2, lastFinalizedOrdinal: 3, at: "2026-09-11T12:00:00.000Z" }) })
 
     await expect(switchPmInterviewToText(scope, actor, interviewId, { leaseId, settlement: "FINALIZED" })).resolves.toEqual({ modality: "CHAT", replayed: false })
 
@@ -257,19 +343,28 @@ describe("PM interview voice-to-text transaction", () => {
       data: expect.objectContaining({ retiredVoiceLeaseId: leaseId }),
     }))
     const transition = JSON.parse(mocks.prisma.pMInterview.update.mock.calls[0][0].data.transitionReceiptJson)
-    expect(transition).toMatchObject({ settlement: "FINALIZED", finalizedEventCount: 2, lastFinalizedOrdinal: 3 })
+    expect(transition).toMatchObject({ phase: "TRANSITIONED", leaseId, settlement: "FINALIZED", finalizedEventCount: 2, lastFinalizedOrdinal: 3 })
   })
 
   it("blocks unconfirmed pending speech unless the PM explicitly discards it", async () => {
     mocks.prisma.researchVoiceCall.findFirst.mockResolvedValue({ id: "call-1", transcriptIntegrity: "PENDING" })
 
-    await expect(switchPmInterviewToText(scope, actor, interviewId, { leaseId, settlement: "FINALIZED" })).rejects.toMatchObject({ status: 409 })
-    expect(mocks.prisma.researchSession.updateMany).not.toHaveBeenCalled()
+    await expect(settlePmInterviewVoice(scope, actor, interviewId, { leaseId, settlement: "FINALIZED" })).rejects.toMatchObject({ status: 409 })
+    expect(mocks.prisma.pMInterview.update).not.toHaveBeenCalled()
 
     mocks.prisma.pMInterview.findFirst.mockReset()
     mocks.prisma.pMInterview.findFirst.mockResolvedValueOnce(interview({
       session: { id: sessionId, status: "IN_PROGRESS", modality: "VOICE", participantTokenId: "token-1", voiceLeaseId: leaseId, turns: [] },
-    })).mockResolvedValue({ id: interviewId, sessionId })
+    })).mockResolvedValue({ id: interviewId, sessionId, transitionReceiptJson: null })
+    await expect(settlePmInterviewVoice(scope, actor, interviewId, { leaseId, settlement: "DISCARD_PENDING" })).resolves.toMatchObject({ phase: "SETTLED", settlement: "DISCARD_PENDING" })
+    const receipt = JSON.parse(mocks.prisma.pMInterview.updateMany.mock.calls.at(-1)![0].data.transitionReceiptJson)
+    expect(receipt).toMatchObject({ phase: "SETTLED", settlement: "DISCARD_PENDING" })
+    expect(receipt).not.toHaveProperty("transcriptComplete", true)
+
+    mocks.prisma.pMInterview.findFirst.mockReset()
+    mocks.prisma.pMInterview.findFirst.mockResolvedValueOnce(interview({ transitionReceiptJson: JSON.stringify(receipt),
+      session: { id: sessionId, status: "IN_PROGRESS", modality: "VOICE", participantTokenId: "token-1", voiceLeaseId: leaseId, turns: [] },
+    })).mockResolvedValue({ id: interviewId, sessionId, transitionReceiptJson: JSON.stringify(receipt) })
     await expect(switchPmInterviewToText(scope, actor, interviewId, { leaseId, settlement: "DISCARD_PENDING" })).resolves.toEqual({ modality: "CHAT", replayed: false })
     expect(mocks.prisma.researchVoiceCall.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ endReason: "SWITCH_TO_TEXT_DISCARD" }) }))
   })

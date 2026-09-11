@@ -116,6 +116,19 @@ describe("ResearchVoice", () => {
     expect(onUseChat).toHaveBeenCalledOnce()
   })
 
+  it("durably settles an atomic PM voice lease before requesting the text transition", async () => {
+    const onUseChat = vi.fn().mockResolvedValue(undefined)
+    render(<ResearchVoice transport={{ basePath: "/api/pm-interviews/interview-1", query: "?orgSlug=acme&workspaceSlug=product", identity: "pm-interview-1", atomicTextTransition: true }} onUseChat={onUseChat} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    await screen.findByText("Connected — speak naturally")
+    fireEvent.click(screen.getByRole("button", { name: "Continue in text" }))
+
+    await waitFor(() => expect(onUseChat).toHaveBeenCalledWith({ leaseId: "lease-1", settlement: "FINALIZED" }))
+    const settlementCall = vi.mocked(fetch).mock.calls.findIndex(([url, init]) => String(url).includes("/voice-event?") && String(init?.body).includes('"action":"SETTLE"'))
+    expect(settlementCall).toBeGreaterThan(-1)
+    expect(vi.mocked(fetch).mock.invocationCallOrder[settlementCall]).toBeLessThan(onUseChat.mock.invocationCallOrder[0])
+  })
+
   it("stops the acquired microphone when a stored session has already completed", async () => {
     localStorage.setItem("compass-research-voice-study-token", JSON.stringify({
       sessionId: "session-1",

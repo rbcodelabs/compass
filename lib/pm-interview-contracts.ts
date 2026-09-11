@@ -17,10 +17,10 @@ export function parsePmInterviewTargetType(value: unknown): PmInterviewTargetTyp
   return parsed.data
 }
 
-const nullableFieldValue = z.string().max(20_000).nullable()
+const nullableFieldValue = z.string().trim().max(20_000).nullable().transform(value => value || null)
 const titleFieldValue = z.string().trim().min(1).max(255)
 const customerSegmentFieldValue = z.string().trim().max(255).nullable().transform(value => value || null)
-const requiredTextFieldValue = z.string().max(20_000)
+const requiredTextFieldValue = z.string().trim().min(1).max(20_000)
 const pmInterviewFieldSchemas = {
   OPPORTUNITY: { title: titleFieldValue, description: nullableFieldValue, customerSegment: customerSegmentFieldValue },
   SOLUTION: { title: titleFieldValue, description: nullableFieldValue },
@@ -96,7 +96,32 @@ export const pmInterviewContextSchema = z.object({
   omissions: z.array(z.string().max(500)).max(20),
 }).strict()
 
+export const pmInterviewContextIntakeSchema = pmInterviewContextSchema.extend({
+  target: pmInterviewContextSchema.shape.target.extend({
+    fields: z.record(z.string(), z.string().max(1_000_000).nullable()),
+  }).strict(),
+}).strict()
+
 export type PmInterviewContextSnapshot = z.infer<typeof pmInterviewContextSchema>
+
+const pmVoiceSettlementSchema = z.object({
+  version: z.literal(1),
+  phase: z.literal("SETTLED"),
+  leaseId: z.string().uuid(),
+  settlement: z.enum(["FINALIZED", "DISCARD_PENDING"]),
+  finalizedEventCount: z.number().int().nonnegative(),
+  lastFinalizedOrdinal: z.number().int().nonnegative().nullable(),
+  at: z.string().datetime(),
+}).strict()
+
+const pmVoiceTransitionSchema = pmVoiceSettlementSchema.extend({ phase: z.literal("TRANSITIONED") }).strict()
+
+export type PmInterviewVoiceTransitionReceipt = z.infer<typeof pmVoiceSettlementSchema> | z.infer<typeof pmVoiceTransitionSchema>
+
+export function parsePmInterviewVoiceTransitionReceipt(value: string | null): PmInterviewVoiceTransitionReceipt | null {
+  if (!value) return null
+  return z.discriminatedUnion("phase", [pmVoiceSettlementSchema, pmVoiceTransitionSchema]).parse(JSON.parse(value))
+}
 
 type PmInterviewReadSource = {
   id: string
@@ -106,6 +131,7 @@ type PmInterviewReadSource = {
   contextSnapshotJson: string
   fieldBaselineJson: string
   proposalJson: string | null
+  receiptJson: string | null
   generationState: string
   generationFailureCode: string | null
   disposition: string
@@ -117,6 +143,38 @@ type PmInterviewReadSource = {
     modality: string
     turns: Array<{ id: string; role: string; content: string; sequence: number; createdAt: Date }>
   }
+}
+
+const appliedReceiptSchema = z.object({
+  version: z.literal(1),
+  kind: z.literal("APPLIED"),
+  idempotencyKey: z.string().min(1).max(128),
+  requestFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  actorUserId: z.string().uuid(),
+  selectedFields: z.array(z.string()).min(1).max(4),
+  before: z.record(z.string(), z.string().nullable()),
+  after: z.record(z.string(), z.string().nullable()),
+  at: z.string().datetime(),
+}).strict()
+
+const dismissedReceiptSchema = z.object({
+  version: z.literal(1),
+  kind: z.literal("DISMISSED"),
+  idempotencyKey: z.string().min(1).max(128),
+  actorUserId: z.string().uuid(),
+  at: z.string().datetime(),
+}).strict()
+
+export function parsePmInterviewSafeReceipt(value: string | null, targetType: PmInterviewTargetType) {
+  if (!value) return null
+  const parsed = z.discriminatedUnion("kind", [appliedReceiptSchema, dismissedReceiptSchema]).parse(JSON.parse(value))
+  if (parsed.kind === "DISMISSED") return { version: 1 as const, kind: "DISMISSED" as const, at: parsed.at }
+  const allowed = new Set<string>(PM_INTERVIEW_ALLOWED_FIELDS[targetType])
+  const selected = new Set(parsed.selectedFields)
+  if (selected.size !== parsed.selectedFields.length || parsed.selectedFields.some(field => !allowed.has(field)) ||
+    Object.keys(parsed.before).some(field => !selected.has(field)) || Object.keys(parsed.after).some(field => !selected.has(field)) ||
+    Object.keys(parsed.before).length !== selected.size || Object.keys(parsed.after).length !== selected.size) throw new Error("Stored PM interview receipt contains unsafe fields")
+  return { version: 1 as const, kind: "APPLIED" as const, selectedFields: parsed.selectedFields, before: parsed.before, after: parsed.after, at: parsed.at }
 }
 
 export function buildPmInterviewReadDto(source: PmInterviewReadSource, actorUserId: string) {
@@ -135,6 +193,7 @@ export function buildPmInterviewReadDto(source: PmInterviewReadSource, actorUser
     context: pmInterviewContextSchema.parse(JSON.parse(source.contextSnapshotJson)),
     reviewBaseline: parsePmInterviewBaseline(source.fieldBaselineJson, targetType),
     proposal: source.proposalJson ? parsePmInterviewProposal(source.proposalJson, targetType) : null,
+    receipt: parsePmInterviewSafeReceipt(source.receiptJson, targetType),
     session: {
       id: source.session.id,
       status: source.session.status,
