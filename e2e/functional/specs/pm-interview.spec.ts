@@ -59,10 +59,10 @@ test.describe("Capture — PM interview", () => {
           const startVoiceSession = page.getByRole("button", { name: "Start voice session" })
           if (await startVoiceSession.isVisible().catch(() => false)) {
             await startVoiceSession.click()
-            await expect(page.getByRole("alert")).toContainText("Synthetic microphone unavailable")
+            await expect(page.getByRole("alert").filter({ hasText: "Synthetic microphone unavailable" })).toBeVisible()
             await page.getByRole("button", { name: "Use chat instead" }).click()
           } else {
-            await expect(page.getByRole("alert")).toContainText("Continue in text")
+            await expect(page.getByRole("alert").filter({ hasText: "Continue in text" })).toBeVisible()
           }
         } else {
           await page.getByRole("button", { name: /Use text/ }).click()
@@ -154,6 +154,7 @@ test.describe("Capture — PM interview", () => {
       await page.goto(`${base}/capture/pm/new`)
       await page.getByLabel("Choose an item").selectOption(`OPPORTUNITY:${opportunity.id}`)
       await page.getByRole("button", { name: "Start PM interview" }).click()
+      await expect(page).toHaveURL(/\/capture\/pm\/[a-f0-9-]+$/)
       interviewId = new URL(page.url()).pathname.split("/").at(-1)!
       await page.getByRole("button", { name: /Use text/ }).click()
       await page.getByLabel("Your answer").fill("This needs more evidence before any wording changes.")
