@@ -54,6 +54,27 @@ describe("research voice APIs", () => {
     expect(await response.text()).not.toContain("long-lived-secret")
   })
 
+  it.each(["CUSTOMER_INTERVIEW", "USABILITY_TEST"])("lets %s participants finish their thought while retaining automatic replies and participant interruption", async (studyType) => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1", studyType }, prisma: {} })
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ value: "ephemeral-only", expires_at: Math.floor(Date.now() / 1000) + 60 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const response = await createVoice(request("/api/research/voice-session", {
+      token: "study-token", sessionId: "session-1", resumeToken: "resume-secret",
+    }))
+
+    expect(response.status).toBe(200)
+    const providerBody = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(providerBody.session.audio.input.turn_detection).toEqual({
+      type: "semantic_vad",
+      eagerness: "low",
+      create_response: true,
+      interrupt_response: true,
+    })
+  })
+
   it.each(["revoked", "expired", "closed"])("permits only cleanup through a %s participant link", async () => {
     vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
     resolveActiveResearchStudy.mockResolvedValue(null)

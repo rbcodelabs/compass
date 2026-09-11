@@ -367,9 +367,17 @@ export function ResearchVoice({ token, onUseChat, guided = false }: { token: str
     finishingRef.current = true
     setStatus("connecting")
     try {
-      // Stop new speech first, while allowing final transcription events a bounded drain.
-      streamRef.current?.getTracks().forEach((track) => track.stop())
-      if (dataChannelRef.current?.readyState === "open") await new Promise((resolve) => setTimeout(resolve, 1_500))
+      // Mute new speech but keep silence flowing so semantic VAD can finalize the last thought.
+      streamRef.current?.getTracks().forEach((track) => { track.enabled = false })
+      if (dataChannelRef.current?.readyState === "open") {
+        const deadline = Date.now() + 10_000
+        // Keep the initial grace period for speech/caption events already in flight.
+        await new Promise((resolve) => setTimeout(resolve, 1_500))
+        while (Date.now() < deadline && dataChannelRef.current?.readyState === "open" &&
+          (pendingSpeechRef.current || orderRef.current?.unresolved || captionsRef.current.some((caption) => caption.partial))) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+      }
       acceptingEventsRef.current = false
       closeMedia()
       if (pendingSpeechRef.current || orderRef.current?.unresolved || captionsRef.current.some((caption) => caption.partial)) throw new Error("The final voice caption did not finish. The session is not marked complete; please contact the researcher.")
