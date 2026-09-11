@@ -80,4 +80,28 @@ describe("previewlogin_ session falls through to the ordinary Auth.js adapter", 
     expect(result!.session.expires).toEqual(issued.expiresAt);
     expect(result!.user.email).toBe("preview-owner@preview.invalid");
   });
+
+  it("refuses to extend expiry via updateSession, unlike an ordinary session", async () => {
+    // Auth.js's own core session action calls adapter.updateSession() on
+    // essentially every request once a database session is within
+    // `updateAge` of its stored expiry — and with a 60-minute total
+    // lifetime, that's true from the very next request after login.
+    // Confirmed live against a deployed preview before this guard existed:
+    // the session was silently rolled forward to a ~30-day expiry on the
+    // first subsequent navigation. This test locks in the fix.
+    const { client } = fixture();
+    const issued = await issuePreviewLoginSession(client, "viewer", new Date());
+    const adapter = createLazyPrismaAuthAdapter(() => client);
+
+    const farFuture = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const result = await adapter.updateSession!({ sessionToken: issued.sessionToken, expires: farFuture });
+
+    expect(result).toBeNull();
+    // The underlying row is untouched — session.create's mock is the only
+    // write; no update/upsert call exists on the fixture's session model at
+    // all, so any attempt to extend would throw rather than silently pass.
+    const stored = await client.session.findUnique({ where: { sessionToken: issued.sessionToken } });
+    expect(stored!.expires).toEqual(issued.expiresAt);
+    expect(stored!.expires.getTime()).toBeLessThan(farFuture.getTime());
+  });
 });

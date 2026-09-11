@@ -46,6 +46,22 @@ export function createLazyPrismaAuthAdapter(
       return { user, session };
     },
     async updateSession(data) {
+      // ADR-0009 preview-login sessions (lib/preview-login.ts): Auth.js's own
+      // core session action unconditionally tries to roll a database
+      // session's expiry forward to `now + session.maxAge` (30 days by
+      // default) once it's within `updateAge` of its stored expiry — and
+      // with a 60-minute total lifetime, that window is hit on literally
+      // the next request after login. Confirmed live: without this guard,
+      // the very first subsequent navigation silently re-extended the
+      // session far past its intended hard cap. A `previewlogin_` token has
+      // no run registry to clamp against (unlike `preview_`, handled
+      // below) — its entire security property IS that `expires`, once set
+      // at issuance, is never written again. Returning null here (a valid
+      // "no update performed" adapter result) refuses every such attempt;
+      // Auth.js's own expiry check (`session.expires < now`) then enforces
+      // the original cutoff exactly, independent of what the response
+      // cookie's Max-Age cosmetically claims.
+      if (data.sessionToken.startsWith("previewlogin_")) return null;
       if (!data.sessionToken.startsWith("preview_")) return adapter.updateSession!(data);
       const row = await lazyPrisma.session.findUnique({ where: { sessionToken: data.sessionToken } });
       if (!row) return null;

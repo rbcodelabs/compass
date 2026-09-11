@@ -21,10 +21,12 @@ On a valid code, the visitor picks a persona (Workspace Admin or Team Member) an
 |---|---|---|
 | Purpose | CI / automated product-flow validation | Human clicking around a deployment |
 | Trust boundary | Per-PR isolated schema + scoped IAM runtime role + signed grants | Shared `compass_preview` schema, existing preview DB credentials |
-| Session binding | Run registry; revocable; adapter enforces the run's own deadline | Plain `Session` row; adapter's ordinary expiry check, nothing preview-aware |
+| Session binding | Run registry; revocable; adapter enforces the run's own deadline | Plain `Session` row, frozen at issuance; adapter refuses to extend it, otherwise unmodified |
 | Activation | `PREVIEW_AUTOMATION_ENABLED` + provisioned DSQL roles + signing keypair | `PREVIEW_LOGIN_ENABLED` + `PREVIEW_LOGIN_ACCESS_CODE`, no new infrastructure |
 
-The `previewlogin_` token prefix is deliberately distinct from automation's `preview_` prefix: `createLazyPrismaAuthAdapter` only special-cases `preview_`-prefixed tokens, and only enforces a run deadline when automation is enabled. A `previewlogin_` token instead falls through to the adapter's normal, unmodified `@auth/prisma-adapter` session handling — no changes to `auth.ts` or the adapter were needed or made.
+The `previewlogin_` token prefix is deliberately distinct from automation's `preview_` prefix: `createLazyPrismaAuthAdapter` only special-cases `preview_`-prefixed tokens, and only enforces a run deadline when automation is enabled. A `previewlogin_` token falls through to the adapter's normal, unmodified `@auth/prisma-adapter` session *reads* — no changes to `auth.ts` were needed or made.
+
+One narrow adapter change *was* required, discovered by testing the live deployment rather than assumed: Auth.js's own `@auth/core` session action unconditionally attempts to roll a database session's expiry forward to `now + session.maxAge` (30 days by default) once the session is within `updateAge` of its stored expiry — and with a 60-minute total lifetime, that window is already open on the very next request after login. Confirmed live before the fix: the session cookie was silently re-extended to a ~30-day expiry on the first subsequent page navigation. `createLazyPrismaAuthAdapter`'s `updateSession` now refuses any such write for `previewlogin_`-prefixed tokens (returns `null`, a valid "no update performed" adapter result) — the stored `expires` value is never touched after issuance, so Auth.js's own expiry check (`session.expires < now`) enforces the original 60-minute cutoff exactly. The browser's cookie `Max-Age` still cosmetically reflects Auth.js's default rolling value (`@auth/core` resets the cookie's `Max-Age` unconditionally, independent of what the adapter does), but that is not a security boundary — access is enforced server-side against the frozen database row on every request.
 
 ## Consequences
 
