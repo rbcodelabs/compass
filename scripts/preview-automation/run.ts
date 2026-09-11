@@ -14,6 +14,15 @@ async function main() {
   const runId = randomUUID(), dir = await mkdtemp(join(tmpdir(), "compass-preview-"))
   const bypass = required("PREVIEW_PROTECTION_BYPASS"), key = required("PREVIEW_AUTOMATION_PRIVATE_KEY")
   const exploring = process.argv.includes("--explore")
+  // Optional fixture shape for this run. Validated here purely for a clear
+  // local error; the deployment re-validates it against its own catalog
+  // during grant verification and never trusts this value.
+  const scenarios = ["empty", "full-data", "mid-okr-cycle"] as const
+  const requested = process.argv.find(argument => argument.startsWith("--scenario="))?.slice("--scenario=".length)
+  if (requested !== undefined && !scenarios.includes(requested as (typeof scenarios)[number])) {
+    throw new Error(`Unknown --scenario "${requested}". Expected one of: ${scenarios.join(", ")}`)
+  }
+  const scenario = requested as GrantInput["scenario"] | undefined
   const browser = await chromium.launch({ headless: !exploring && !process.argv.includes("--headed") })
   const context = await browser.newContext()
   const base = { deploymentId: target.deploymentId, origin: target.origin, runId }
@@ -22,9 +31,12 @@ async function main() {
     const expiresNoLaterThan = operation === "bootstrap"
       ? Math.floor(verifyLease(required("PREVIEW_PROVISION_RECEIPT"), required("PREVIEW_AUTOMATION_PUBLIC_KEY"), target).expiresAt / 1000) - 3600
       : now + 300
+    // Optional claims travel in both the signed grant and the body; the
+    // deployment rejects any mismatch between the two.
+    const claims: Partial<GrantInput> = persona ? { persona } : operation === "bootstrap" && scenario ? { scenario } : {}
     const response = await context.request.post(`${target.origin}/api/preview-automation/${operation}`, {
-      headers: { ...originHeaders(target.origin, target.origin, bypass), Authorization: `Bearer ${signGrant({ ...base, operation, ...(persona ? { persona } : {}) }, key, now, expiresNoLaterThan)}` },
-      data: persona ? { persona } : {}, maxRedirects: 0, timeout: 30_000,
+      headers: { ...originHeaders(target.origin, target.origin, bypass), Authorization: `Bearer ${signGrant({ ...base, operation, ...claims }, key, now, expiresNoLaterThan)}` },
+      data: claims, maxRedirects: 0, timeout: 30_000,
     })
     if (!response.ok()) throw new Error(`Preview ${operation} failed (${response.status()})`)
     return response.json()

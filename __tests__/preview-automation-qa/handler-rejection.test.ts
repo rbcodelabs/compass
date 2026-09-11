@@ -48,6 +48,31 @@ describe("independent QA: endpoint rejection precedes database initialization", 
     expect(response.status).toBe(400);
     expect(initialize).not.toHaveBeenCalled();
   });
+  it("rejects an unsigned fixture scenario supplied only in the body", async () => {
+    expect((await handlePreviewAutomation(request("bootstrap", { scenario: "full-data" }), "bootstrap")).status).toBe(400);
+    expect(initialize).not.toHaveBeenCalled();
+  });
+  it("rejects a signed fixture scenario the body omits", async () => {
+    expect((await handlePreviewAutomation(request("bootstrap", {}, { scenario: "full-data" }), "bootstrap")).status).toBe(400);
+    expect(initialize).not.toHaveBeenCalled();
+  });
+  it("rejects disagreement between the signed scenario and request body", async () => {
+    const response = await handlePreviewAutomation(request("bootstrap", { scenario: "mid-okr-cycle" }, { scenario: "full-data" }), "bootstrap");
+    expect(response.status).toBe(400);
+    expect(initialize).not.toHaveBeenCalled();
+  });
+  it.each(["arbitrary", "", "compass_prod"])("rejects an unknown signed scenario %j before any database access", async scenario => {
+    const response = await handlePreviewAutomation(request("bootstrap", { scenario }, { scenario: scenario as never }), "bootstrap");
+    expect(response.status).toBe(401);
+    expect(initialize).not.toHaveBeenCalled();
+  });
+  it("admits a matching signed scenario through to the database", async () => {
+    // initialize() throws by design here, so a 409 with initialize called is
+    // the positive control proving request validation accepted the pair.
+    const response = await handlePreviewAutomation(request("bootstrap", { scenario: "full-data" }, { scenario: "full-data" }), "bootstrap");
+    expect(initialize).toHaveBeenCalled();
+    expect(response.status).toBe(409);
+  });
   it("rejects an origin mismatch despite the valid signing key", async () => {
     const response = await handlePreviewAutomation(request("bootstrap", {}, {}, "https://compass-git-alias-team.vercel.app"), "bootstrap");
     expect(response.status).toBe(401);

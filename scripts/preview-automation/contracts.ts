@@ -27,7 +27,7 @@ export function validateDeployment(d: Deployment, pr: PullRequest, projectId: st
 export function originHeaders(origin: string, url: string, bypass: string): Record<string, string> {
   return new URL(url).origin === origin && bypass ? { "x-vercel-protection-bypass": bypass } : {}
 }
-export interface GrantInput { deploymentId: string; origin: string; runId: string; operation: "bootstrap" | "session" | "teardown"; persona?: "owner" | "viewer" }
+export interface GrantInput { deploymentId: string; origin: string; runId: string; operation: "bootstrap" | "session" | "teardown"; persona?: "owner" | "viewer"; scenario?: "empty" | "full-data" | "mid-okr-cycle" }
 export function signGrant(input: GrantInput, privateKey: string, now = Math.floor(Date.now() / 1000), expiresNoLaterThan = now + 300) {
   const exp = Math.min(now + 300, Math.floor(expiresNoLaterThan))
   if (!Number.isFinite(exp) || exp <= now) throw new Error("No valid grant interval remains")

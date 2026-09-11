@@ -42,7 +42,14 @@ export async function handlePreviewAutomation(request: Request, operation: Previ
     if (!authorization.startsWith("Bearer ")) return reply({ error: "Unauthorized" }, 401);
     grant = verifyPreviewGrant(authorization.slice(7), { deploymentId, origin, publicKey }, operation);
     const body = await readBody(request);
-    if (operation === "session" ? Object.keys(body).length !== 1 || body.persona !== grant.persona : Object.keys(body).length !== 0) return reply({ error: "Invalid request" }, 400);
+    // The body must echo exactly the grant's own optional claims and nothing
+    // else, so a signed grant can never be replayed against a different
+    // persona or fixture than the one it authorizes.
+    const expected: Record<string, unknown> = operation === "session" ? { persona: grant.persona }
+      : operation === "bootstrap" && grant.scenario !== undefined ? { scenario: grant.scenario }
+      : {};
+    const expectedKeys = Object.keys(expected);
+    if (Object.keys(body).length !== expectedKeys.length || expectedKeys.some((key) => body[key] !== expected[key])) return reply({ error: "Invalid request" }, 400);
   } catch { return reply({ error: "Invalid preview request" }, 401); }
   try {
     const prisma = getPrisma();
