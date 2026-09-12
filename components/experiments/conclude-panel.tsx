@@ -37,8 +37,12 @@ const CONCLUSION_CONFIG: Record<
   NOT_PURSUED: {
     label: "Not Pursued",
     description: "Deliberately not running this — no evidence either way",
+    // Semantic status tokens, which already carry their own dark-mode values —
+    // hence no `dark:` variants here. The three options above still use raw
+    // palette values and remain in docs/design/raw-color-baseline.json; they are
+    // legacy awaiting the same treatment, not a different convention.
     className:
-      "border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800/40 dark:text-slate-300 dark:hover:bg-slate-800/60",
+      "border-status-neutral/30 bg-status-neutral-surface text-status-neutral hover:bg-status-neutral-surface/70",
   },
 }
 
