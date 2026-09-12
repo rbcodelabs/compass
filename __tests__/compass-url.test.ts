@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-import { feedbackItemUrl, researchParticipantUrl } from "@/lib/compass-url"
+import { feedbackItemUrl, researchParticipantUrl, reviewRequestUrl } from "@/lib/compass-url"
 
 const KEYS = [
   "VERCEL_ENV",
@@ -53,6 +53,25 @@ describe("feedbackItemUrl deployment origins", () => {
 
   it("encodes slugs and the detail value", () => {
     expect(url()).toBe("http://localhost:3000/Acme%20Org/PM%2FTools/feedback?detail=feedback%3Aitem%3A1")
+  })
+
+  it("builds review links at the human decision surface and encodes every segment", () => {
+    expect(reviewRequestUrl({ orgSlug: "Acme Org", workspaceSlug: "PM/Tools", requestId: "req/1" }))
+      .toBe("http://localhost:3000/Acme%20Org/PM%2FTools/reviews/req%2F1")
+  })
+
+  it("builds review links from the preview origin", () => {
+    process.env.VERCEL_ENV = "preview"
+    process.env.VERCEL_BRANCH_URL = "compass-git-feature-rbcodelabs.vercel.app"
+    expect(reviewRequestUrl({ orgSlug: "rbcodelabs", workspaceSlug: "compass", requestId: "request-1" }))
+      .toBe("https://compass-git-feature-rbcodelabs.vercel.app/rbcodelabs/compass/reviews/request-1")
+  })
+
+  it("rejects an unsafe origin for review links", () => {
+    process.env.VERCEL_ENV = "production"
+    process.env.NEXT_PUBLIC_APP_URL = "http://evil.example.com"
+    expect(() => reviewRequestUrl({ orgSlug: "rbcodelabs", workspaceSlug: "compass", requestId: "request-1" }))
+      .toThrow(/HTTPS|invalid/i)
   })
 
   it("builds participant links from the trusted origin and encodes the token", () => {

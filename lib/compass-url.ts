@@ -54,6 +54,18 @@ export function feedbackItemUrl(input: {
   return url.toString()
 }
 
+export function reviewRequestUrl(input: {
+  orgSlug: string
+  workspaceSlug: string
+  requestId: string
+}): string {
+  const base = trustedCompassBaseUrl()
+  return new URL(
+    `/${encodeURIComponent(input.orgSlug)}/${encodeURIComponent(input.workspaceSlug)}/reviews/${encodeURIComponent(input.requestId)}`,
+    base,
+  ).toString()
+}
+
 export function researchParticipantUrl(token: string): string {
   return new URL(`/research/${encodeURIComponent(token)}`, trustedCompassBaseUrl()).toString()
 }
