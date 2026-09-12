@@ -20,9 +20,9 @@ Compass's MCP endpoint authenticates with a **static bearer API key only**.
 |---|---|---|
 | Token validation | `MCP_API_KEY` env var, or a per-user `cmp_<32 hex>` key looked up by `keyPrefix` + SHA-256 `keyHash` | `lib/mcp-auth.ts` |
 | Acting identity | `McpActor { userId, purpose, scopeWorkspaceId }` carried via `AsyncLocalStorage` | `lib/mcp-authz.ts` |
-| Per-tool policy | Fail-closed gate map; all 108 registered tools must have an entry | `lib/mcp-tool-gates.ts` |
-| Key issuance | `createApiKey` server action, Settings UI, shown once | `app/[orgSlug]/[workspaceSlug]/settings/actions.ts:359` |
-| 401 response | `new Response("Unauthorized", { status: 401, headers: { "WWW-Authenticate": "Bearer" } })` | `app/api/mcp/route.ts:2919` |
+| Per-tool policy | Fail-closed gate map; every registered tool (145 at time of writing) must have an entry | `lib/mcp-tool-gates.ts` |
+| Key issuance | `createApiKey` server action, Settings UI, shown once | `app/[orgSlug]/[workspaceSlug]/settings/actions.ts` (`createApiKey`) |
+| 401 response | `new Response("Unauthorized", { status: 401, headers: { "WWW-Authenticate": "Bearer" } })` | `app/api/mcp/route.ts` (local `withMcpAuth`) |
 | Middleware | `/api/mcp` is in `isPublicPath` so the route can 401 rather than 302 | `lib/route-access.ts` |
 
 There are **no** `.well-known` routes anywhere in the repo, no OAuth client /
@@ -61,7 +61,7 @@ and is connected. No key generation, no config file, no copy-paste secret.
    problem to avoid roughly 600 lines.
 3. **Be our own AS on the same origin.** Chosen. Issuer, resource server, and
    identity provider are all `compass.rbcodelabs.com`. Tokens map 1:1 onto the
-   existing `McpActor`, so **`lib/mcp-authz.ts` and all 108 tool gates are
+   existing `McpActor`, so **`lib/mcp-authz.ts` and every tool gate is
    untouched**. Google remains an upstream *identity* source via NextAuth, not
    the OAuth AS for this resource — which is exactly the architecture the spec
    recommends.
@@ -108,8 +108,8 @@ Both are small, both are required, and neither is about OAuth:
   not-currently-signed-in user, which is the common case (MCP clients open a
   fresh browser). Must preserve the original URL as `callbackUrl`.
 - **`/login` hardcodes its destination.** `app/login/page.tsx` passes
-  `callbackUrl: "/dashboard"` (line 108, Google) and `redirectTo: "/dashboard"`
-  (line 178, magic link). It must read a `callbackUrl` search param and
+  `callbackUrl: "/dashboard"` (Google) and `redirectTo: "/dashboard"`
+  (magic link). It must read a `callbackUrl` search param and
   validate it as a same-origin *relative path* before using it — an
   unvalidated passthrough here is an open redirect.
 
@@ -321,7 +321,7 @@ Serve the document at both the path-inserted URL and the bare root path (the
 spec's client fallback order is path-inserted → root), plus
 `metadataCorsOptionsRequestHandler()` for browser clients.
 
-Compass's local `withMcpAuth` wrapper (`app/api/mcp/route.ts:2917`) becomes the
+Compass's local `withMcpAuth` wrapper (the local `withMcpAuth` in `app/api/mcp/route.ts`) becomes the
 token-verification callback; `runWithMcpActor` still wraps the handler,
 unchanged.
 
@@ -454,14 +454,14 @@ themselves and MUST reject tokens that do not include them in the audience
 claim."*
 
 This is the crux of the design: **an OAuth token is just another way to produce
-a `McpActor`.** All 108 gates, every membership assertion, and the "not found
+a `McpActor`.** Every gate, every membership assertion, and the "not found
 or access denied" non-disclosure behavior carry over untouched.
 
 ## Scopes
 
 Start with `mcp:read` and `mcp:write` (plus `offline_access`). This requires a
 new `TOOL_SCOPES` map beside `TOOL_GATES` in `lib/mcp-tool-gates.ts`,
-classifying all 108 tools — the gates are currently membership-based only and
+classifying every registered tool (145 today) — the gates are currently membership-based only and
 encode no read/write distinction. Extend the existing completeness test
 (`__tests__/mcp-tool-gates.test.ts`) to assert every registered tool has a
 scope entry, so the map cannot drift. `RESEARCH_TOOL_ALLOWLIST` is the
