@@ -678,6 +678,23 @@ Resolved with Rick. These are settled, not open.
    redo DCR per branch. This matters more than usual here: the feature is
    entirely a handshake with external software, and production is the wrong
    place to discover that redirect-URI matching is too strict.
+
+   **Caveat found while probing a live preview (2026-09-12):** Vercel
+   Deployment Protection sits in front of preview deployments and intercepts
+   *every* request before it reaches Compass. An unauthenticated
+   `POST /api/mcp` against a preview returns Vercel's own
+   `401 {"error":{"code":"401","message":"Protected deployment"}}` with
+   `vercel_auth_enabled: true`, and `/.well-known/*` 302s to
+   `vercel.com/sso-api` — none of it is Compass's code running. So a preview is
+   **not** usable for OAuth testing as-is: an MCP client would discover Vercel's
+   SSO redirect instead of Compass's authorization server. The repo already
+   carries `VERCEL_AUTOMATION_BYPASS_SECRET` machinery
+   (`playwright.config.ts`, ADR 0008) which solves this for callers we control,
+   but neither the Geode broker nor Claude can attach
+   `x-vercel-protection-bypass` to its discovery/token requests. **Preview
+   OAuth testing therefore requires deployment protection disabled on that
+   preview**, not just a bypass secret. Decide this before relying on previews
+   as the test bed.
 4. **No static Agent Threads client.** DCR is the one registration path. A
    pre-seeded verified client would save a single HTTP round trip and improve
    some consent wording, but it removes none of the hard requirements — Geode
