@@ -139,10 +139,10 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result |
+| `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
-| `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment |
-| `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts |
+| `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
+| `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `create_opportunity` | Create a new opportunity with title, description, status |
 | `update_opportunity` | Update an existing opportunity's title and/or description; pass `null` to clear its description |
 | `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
@@ -179,7 +179,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs |
+| `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
 | `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
 | `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
@@ -242,7 +242,7 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 |---|---|
 | `create_task` | Create a Task with a title (required); optionally description, status (default TODO), priority (default MEDIUM), squad, parent task (to create a Subtask), assignee, freeform owner name, story points, due date, or iteration label |
 | `get_task` | Return full detail for a Task: fields, parent Epic (if any), subtasks, and resolved links to other Compass objects |
-| `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), a linked object, `updatedSince`, or `updatedBefore`; summaries include created/updated timestamps and can optionally nest subtasks |
+| `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), a linked object, `updatedSince`, or `updatedBefore`; orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`); summaries include created/updated timestamps and can optionally nest subtasks |
 | `update_task` | Update a Task's title, description, priority, assignee, owner, story points, due date, or iteration — does not accept status |
 | `move_task_status` | Dedicated status-transition tool for a Task, including moving it into or out of BLOCKED |
 | `link_task` | Link a Task to another Compass object; idempotent — re-linking the same pair is a no-op |
@@ -323,7 +323,7 @@ Guide generation uses a tool-free runtime with a 45-second work deadline and bou
 
 | Tool | Description |
 |---|---|
-| `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc` |
+| `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc`; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`). A doc whose parent is excluded by a recency filter is rendered at the top level so it stays reachable |
 | `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body, and `docType`/`roadmapItemId` when set |
 | `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted) |
 | `update_doc` | Update an existing doc's title, content, and/or icon |
@@ -389,6 +389,48 @@ Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-te
 | `score_opportunity` | Compute and save an opportunity's score using its workspace's active scoring model |
 | `get_opportunity_score` | Get an opportunity's saved score, including a `stale` flag if the live model has since been updated |
 | `list_top_opportunities` | List scored opportunities ranked by normalized score (0-100); pass `orgSlug` for a cross-workspace comparability view or `workspaceId` for a single workspace |
+
+## Recency filtering and sorting
+
+`list_opportunities`, `list_solutions`, `list_assumptions`, `list_experiments`,
+`list_roadmap_items`, `list_tasks`, `list_docs`, `list_feedback`, and
+`list_release_runs` accept an ISO `updatedSince` and/or `updatedBefore` window.
+Most also accept `sort`, which takes `recentlyUpdated` (most recently updated
+first) or `leastRecentlyUpdated` — the latter is for finding work that has gone
+quiet, such as opportunities still EXPLORING or experiments parked in DESIGNING.
+
+Omitting `sort` preserves each tool's own default ordering. Those defaults carry
+meaning — `list_roadmap_items` groups by horizon then rank, `list_docs` renders a
+parent/child tree, `list_tasks` orders by status then manual `sortOrder` — so
+`sort` is an explicit opt-out rather than something to pass by habit. Recency
+orderings always include a stable `id` tiebreaker, because `updatedAt` is not
+unique and equal timestamps would otherwise return in an arbitrary order that can
+differ between identical calls.
+
+`list_feedback` is the exception worth reading closely: there `updatedSince`
+starts a stable keyset scan paged by an opaque `cursor` (see the feedback section
+above), rather than a simple filter.
+
+### What `updatedAt` does and does not capture
+
+Aurora DSQL has no trigger support, so `updatedAt` is maintained by the
+application rather than the database. A Prisma client extension sets it on every
+`update`, `updateMany`, and `upsert` — including writes inside a transaction — so
+**direct edits to an object are always reflected**, and no individual call site can
+forget.
+
+**Mutating a child record does not mark its parent as updated.** A Solution is not
+reported as recently updated when its plan is approved or rejected, when a comment
+is added or resolved on it, when evidence is attached to it, or when a
+Building-investment decision is recorded against it. The same holds for an
+Opportunity gaining a Solution, a Solution gaining an Assumption, an Experiment
+gaining a result, and a Key Result gaining a check-in.
+
+Agents should therefore **not conclude that a period was quiet from a recency
+query alone.** Agent-driven work produces a high proportion of exactly these child
+writes, so a recency scan can return nothing while the workspace was active.
+Cross-check `list_comments`, `list_solution_comments`, `list_evidence`, and
+`list_decisions` before reporting that nothing changed.
 
 ## Registered agent identities and task assignment
 
