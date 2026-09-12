@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type { Prisma, PrismaClient, PreviewAutomationRun } from "@prisma/client";
+import type { PreviewAutomationRun } from "@prisma/client";
+import type { AppPrismaClient, AppTransactionClient } from "@/lib/db";
 import type { PreviewGrant } from "./grants";
 import { applyPreviewScenario, DEFAULT_PREVIEW_SCENARIO } from "./scenarios";
 import { getActiveSchema } from "@/lib/schema";
@@ -8,7 +9,7 @@ import { deleteParticipantVoiceEvidenceIfPresent } from "@/lib/research-particip
 
 export { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "./cookies";
 /** Revoke first. Retain the registry tombstone so failures can safely retry exact ownership. */
-export async function cleanupPreviewRun(prisma: PrismaClient, runId: string, deploymentId: string) {
+export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, deploymentId: string) {
   const result = { runId, cleaned: true };
   const run = await prisma.previewAutomationRun.findUnique({ where: { id: runId } });
   if (!run) return result;
@@ -60,7 +61,7 @@ export async function cleanupPreviewRun(prisma: PrismaClient, runId: string, dep
   return result;
 }
 
-export async function teardownPreviewRun(prisma: PrismaClient, grant: PreviewGrant) {
+export async function teardownPreviewRun(prisma: AppPrismaClient, grant: PreviewGrant) {
   await prisma.$transaction(async (tx) => {
     await consume(tx, grant);
     const run = await tx.previewAutomationRun.findUnique({ where: { id: grant.runId } });
@@ -80,7 +81,7 @@ export async function teardownPreviewRun(prisma: PrismaClient, grant: PreviewGra
   return cleanupPreviewRun(prisma, grant.runId, grant.deploymentId);
 }
 
-async function consume(tx: Prisma.TransactionClient, grant: PreviewGrant) {
+async function consume(tx: AppTransactionClient, grant: PreviewGrant) {
   await tx.previewAutomationNonce.create({ data: { nonce: grant.nonce, runId: grant.runId, expiresAt: new Date(grant.exp * 1000) } });
 }
 function requireActive(run: PreviewAutomationRun | null, deploymentId: string, now: Date): asserts run is PreviewAutomationRun {
@@ -91,7 +92,7 @@ function describeRun(run: PreviewAutomationRun) {
 }
 
 /** Nonce + registry + all fixtures commit together; a lost response can retry with a fresh grant. */
-export async function bootstrapPreviewRun(prisma: PrismaClient, grant: PreviewGrant, now = new Date()) {
+export async function bootstrapPreviewRun(prisma: AppPrismaClient, grant: PreviewGrant, now = new Date()) {
   return prisma.$transaction(async (tx) => {
     await consume(tx, grant);
     const existing = await tx.previewAutomationRun.findUnique({ where: { id: grant.runId } });
@@ -131,7 +132,7 @@ export async function bootstrapPreviewRun(prisma: PrismaClient, grant: PreviewGr
   });
 }
 
-export async function issuePreviewSession(prisma: PrismaClient, grant: PreviewGrant, now = new Date()) {
+export async function issuePreviewSession(prisma: AppPrismaClient, grant: PreviewGrant, now = new Date()) {
   return prisma.$transaction(async (tx) => {
     await consume(tx, grant);
     const run = await tx.previewAutomationRun.findUnique({ where: { id: grant.runId } });

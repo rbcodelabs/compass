@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto"
-import type { Prisma, PrismaClient, ResearchStudy } from "@prisma/client"
+import type { ResearchStudy } from "@prisma/client"
+import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
 import { hashResearchResumeToken, MAX_RESEARCH_TURNS, MAX_RESEARCH_TRANSCRIPT_CHARS } from "@/lib/research-session"
 import { ResearchVoiceError } from "@/lib/research-voice"
 
 export const MAX_BROWSER_VOICE_CLAIMS = 5
-type Context = { prisma: PrismaClient; study: ResearchStudy; participantToken: { id: string } }
+type Context = { prisma: AppPrismaClient; study: ResearchStudy; participantToken: { id: string } }
 type SessionInput = { context: Context; sessionId: string; resumeToken: string }
 
 // Writes fence concurrent revocation/closure under DSQL snapshot isolation.
-async function fenceAccess(tx: Prisma.TransactionClient, context: Context, now: Date) {
+async function fenceAccess(tx: AppTransactionClient, context: Context, now: Date) {
   const token = await tx.researchParticipantToken.updateMany({
     where: { id: context.participantToken.id, studyId: context.study.id, revokedAt: null, expiresAt: { gt: now } }, data: { lastUsedAt: now },
   })

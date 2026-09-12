@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
 import { describe, expect, it, vi } from "vitest";
 import { bootstrapPreviewRun, issuePreviewSession } from "@/lib/preview-automation/service";
 import type { PreviewGrant } from "@/lib/preview-automation/grants";
@@ -24,7 +24,7 @@ function database(run: unknown = active) {
     user: { createMany: vi.fn() },
   };
   const prisma = { $transaction: vi.fn((callback: (transaction: typeof tx) => unknown) => callback(tx)) };
-  return { tx, prisma: prisma as unknown as PrismaClient };
+  return { tx, prisma: prisma as unknown as AppPrismaClient };
 }
 
 describe("independent QA: session issuance refuses invalid registry state", () => {

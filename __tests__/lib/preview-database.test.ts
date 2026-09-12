@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@prisma/client", () => ({ PrismaClient: vi.fn() }));
+// Partial mock: only the constructor is stubbed. lib/db.ts also reads the real
+// `Prisma.dmmf` at module scope (to derive which models carry `updatedAt`), so a
+// mock that returns PrismaClient alone makes the import itself throw. Neither
+// assertion below touches dmmf — both run before any client is constructed.
+vi.mock("@prisma/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@prisma/client")>()),
+  PrismaClient: vi.fn(),
+}));
 vi.mock("@prisma/adapter-pg", () => ({ PrismaPg: vi.fn() }));
 vi.mock("pg", () => ({ Pool: vi.fn() }));
 import { createPrismaClient, getDatabaseUser } from "@/lib/db";

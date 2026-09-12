@@ -48,9 +48,16 @@ describe("discovery query route registration metadata", () => {
       "opportunityStatus",
       "squadId",
       "hasRoadmapItem",
+      // Recency window and ordering are factual too: they read recorded
+      // timestamps and make no readiness judgment.
+      "updatedSince",
+      "updatedBefore",
+      "sort",
     ])
     expect(tool.inputSchema.status.safeParse("VALIDATED").success).toBe(true)
     expect(tool.inputSchema.hasRoadmapItem.safeParse(false).success).toBe(true)
+    expect(tool.inputSchema.updatedSince.safeParse("2026-09-01T00:00:00.000Z").success).toBe(true)
+    expect(tool.inputSchema.sort.safeParse("recentlyUpdated").success).toBe(true)
     expect("ready" in tool.inputSchema).toBe(false)
     expect("authorized" in tool.inputSchema).toBe(false)
   })
@@ -65,9 +72,16 @@ describe("discovery query route registration metadata", () => {
       "solutionStatus",
       "opportunityStatus",
       "squadId",
+      // Recency window and ordering are factual too: they read recorded
+      // timestamps and make no evidence-sufficiency judgment.
+      "updatedSince",
+      "updatedBefore",
+      "sort",
     ])
     expect(tool.inputSchema.status.safeParse("UNTESTED").success).toBe(true)
     expect(tool.inputSchema.riskLevel.safeParse("HIGH").success).toBe(true)
+    expect(tool.inputSchema.updatedBefore.safeParse("2026-09-10T00:00:00.000Z").success).toBe(true)
+    expect(tool.inputSchema.sort.safeParse("leastRecentlyUpdated").success).toBe(true)
     expect("ready" in tool.inputSchema).toBe(false)
     expect("sufficientEvidence" in tool.inputSchema).toBe(false)
   })

@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/seed-screenshots", () => ({
@@ -35,7 +35,7 @@ function fixture() {
     session: { create: vi.fn().mockImplementation(({ data }) => data) },
     previewAutomationSession: { create: vi.fn() },
   };
-  return { tx, client: { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient };
+  return { tx, client: { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as AppPrismaClient };
 }
 
 beforeEach(() => vi.clearAllMocks());

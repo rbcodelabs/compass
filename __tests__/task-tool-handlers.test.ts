@@ -584,3 +584,56 @@ describe("listTaskLinks", () => {
     expect(text).toContain("ID: link-1")
   })
 })
+
+// ─── listTasks recency sorting ────────────────────────────────────────────────
+
+describe("listTasks recency sorting", () => {
+  it("keeps status/sortOrder/id as the default ordering when sort is absent", async () => {
+    mockTask.findMany.mockResolvedValueOnce([])
+    await listTasks({ workspaceId: WORKSPACE_ID })
+
+    // Tasks carry a manual sortOrder that users drag to arrange; defaulting to
+    // recency would throw that away for every existing caller.
+    expect(mockTask.findMany.mock.calls[0][0].orderBy).toEqual([{ status: "asc" }, { sortOrder: "asc" }, { id: "asc" }])
+  })
+
+  it("sorts most recently updated first with a stable id tiebreaker", async () => {
+    mockTask.findMany.mockResolvedValueOnce([])
+    await listTasks({ workspaceId: WORKSPACE_ID, sort: "recentlyUpdated" })
+
+    expect(mockTask.findMany.mock.calls[0][0].orderBy).toEqual([{ updatedAt: "desc" }, { id: "asc" }])
+  })
+
+  it("sorts least recently updated first for stale-work scans", async () => {
+    mockTask.findMany.mockResolvedValueOnce([])
+    await listTasks({ workspaceId: WORKSPACE_ID, sort: "leastRecentlyUpdated" })
+
+    expect(mockTask.findMany.mock.calls[0][0].orderBy).toEqual([{ updatedAt: "asc" }, { id: "asc" }])
+  })
+
+  it("applies the same ordering to the subtask parent-backfill query", async () => {
+    const stamp = new Date("2026-09-01T00:00:00.000Z")
+    mockTask.findMany
+      .mockResolvedValueOnce([
+        { id: "sub-1", title: "Review fix", status: "IN_REVIEW", priority: "HIGH", parentTaskId: "epic-1", createdAt: stamp, updatedAt: stamp, _count: { subtasks: 0 } },
+      ])
+      .mockResolvedValueOnce([
+        { id: "epic-1", title: "Ship fix", status: "IN_PROGRESS", priority: "HIGH", parentTaskId: null, createdAt: stamp, updatedAt: stamp, _count: { subtasks: 1 } },
+      ])
+
+    await listTasks({ workspaceId: WORKSPACE_ID, includeSubtasks: true, sort: "recentlyUpdated" })
+
+    // Two result sets ordered by different rules would interleave incoherently.
+    expect(mockTask.findMany.mock.calls[0][0].orderBy).toEqual([{ updatedAt: "desc" }, { id: "asc" }])
+    expect(mockTask.findMany.mock.calls[1][0].orderBy).toEqual([{ updatedAt: "desc" }, { id: "asc" }])
+  })
+
+  it("combines the pre-existing recency window with the new recency sort", async () => {
+    mockTask.findMany.mockResolvedValueOnce([])
+    await listTasks({ workspaceId: WORKSPACE_ID, updatedBefore: "2026-09-07T00:00:00.000Z", sort: "leastRecentlyUpdated" })
+
+    const call = mockTask.findMany.mock.calls[0][0]
+    expect(call.where).toMatchObject({ updatedAt: { lt: new Date("2026-09-07T00:00:00.000Z") } })
+    expect(call.orderBy).toEqual([{ updatedAt: "asc" }, { id: "asc" }])
+  })
+})

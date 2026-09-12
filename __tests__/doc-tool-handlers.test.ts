@@ -47,7 +47,7 @@ vi.mock("@/lib/db", () => ({
 }))
 
 // Import handlers AFTER the mock is in place
-import { createDoc, updateDoc, getDoc } from "@/lib/doc-tool-handlers"
+import { createDoc, updateDoc, getDoc, listDocs } from "@/lib/doc-tool-handlers"
 
 // ---------------------------------------------------------------------------
 
@@ -309,5 +309,122 @@ describe("getDoc — roadmapItemId / docType exposure", () => {
     const text = result.content[0].text
     expect(text).not.toContain("Doc Type:")
     expect(text).not.toContain("Linked Roadmap Item:")
+  })
+})
+
+// ─── listDocs recency filtering, sorting, and tree integrity ─────────────────
+
+describe("listDocs recency filtering and sorting", () => {
+  function doc(id: string, parentId: string | null = null, children = 0) {
+    return { id, title: `Doc ${id}`, icon: null, parentId, sortOrder: 0, updatedAt: new Date("2026-09-01T00:00:00.000Z"), _count: { children } }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockWorkspace.findUnique.mockResolvedValue({ name: "Compass" })
+    mockDoc.findMany.mockResolvedValue([doc("root")])
+  })
+
+  function queryFor() {
+    return mockDoc.findMany.mock.calls[0][0] as { where: Record<string, unknown>; orderBy: unknown }
+  }
+
+  it("keeps parentId/sortOrder/createdAt as the default ordering when sort is absent", async () => {
+    await listDocs({ workspaceId: WORKSPACE_ID })
+
+    // The indented tree is built off this ordering; changing the default would
+    // reshuffle sibling order for every existing caller.
+    expect(queryFor().orderBy).toEqual([{ parentId: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }])
+    expect(queryFor().where).toEqual({ workspaceId: WORKSPACE_ID })
+  })
+
+  it("filters on a closed recency window", async () => {
+    await listDocs({
+      workspaceId: WORKSPACE_ID,
+      updatedSince: "2026-09-01T00:00:00.000Z",
+      updatedBefore: "2026-09-10T00:00:00.000Z",
+    })
+
+    expect(queryFor().where.updatedAt).toEqual({
+      gte: new Date("2026-09-01T00:00:00.000Z"),
+      lt: new Date("2026-09-10T00:00:00.000Z"),
+    })
+  })
+
+  it("sorts most recently updated first with a stable id tiebreaker", async () => {
+    await listDocs({ workspaceId: WORKSPACE_ID, sort: "recentlyUpdated" })
+
+    expect(queryFor().orderBy).toEqual([{ updatedAt: "desc" }, { id: "asc" }])
+  })
+
+  it("sorts least recently updated first for stale-work scans", async () => {
+    await listDocs({ workspaceId: WORKSPACE_ID, sort: "leastRecentlyUpdated" })
+
+    expect(queryFor().orderBy).toEqual([{ updatedAt: "asc" }, { id: "asc" }])
+  })
+
+
+  it("still nests children under their parent on an unfiltered call", async () => {
+    mockDoc.findMany.mockResolvedValue([doc("parent", null, 1), doc("child", "parent")])
+
+    const result = await listDocs({ workspaceId: WORKSPACE_ID })
+    const text = result.content[0].text
+
+    expect(text).toContain("• **Doc parent** (1 children)")
+    // Two-space indent marks the child as nested rather than top-level.
+    expect(text).toContain("  • **Doc child**")
+  })
+
+  it("renders a matching child at the top level when the recency filter excluded its parent", async () => {
+    // Only the child matched the window; its parent is absent from the result set.
+    mockDoc.findMany.mockResolvedValue([doc("orphan", "filtered-out-parent")])
+
+    const result = await listDocs({ workspaceId: WORKSPACE_ID, updatedSince: "2026-09-01T00:00:00.000Z" })
+    const data = result.structuredContent.data as { items: Array<{ id: string }>; count: number }
+
+    // Before orphan promotion this doc was counted but unreachable from any
+    // root, so it vanished from the rendered tree while count still said 1.
+    expect(result.content[0].text).toContain("• **Doc orphan**")
+    expect(result.content[0].text).not.toContain("  • **Doc orphan**")
+    expect(data.count).toBe(1)
+    expect(data.items.map((item) => item.id)).toEqual(["orphan"])
+  })
+
+  it("keeps count equal to the number of docs that matched, not the docs rendered", async () => {
+    mockDoc.findMany.mockResolvedValue([doc("a", "missing-1"), doc("b", "missing-2")])
+
+    const result = await listDocs({ workspaceId: WORKSPACE_ID, updatedBefore: "2026-09-10T00:00:00.000Z" })
+    const data = result.structuredContent.data as { count: number }
+
+    // Promotion deliberately does NOT fetch the absent parents, so no
+    // non-matching doc is smuggled into the result.
+    expect(data.count).toBe(2)
+    expect(mockDoc.findMany).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports an empty recency window as a success, not a failure", async () => {
+    // Revised after exercising this live over MCP. The earlier expectation here
+    // was ok:false, which mirrored the unfiltered empty-workspace branch — but
+    // for a recency window "nothing changed" is the normal answer a digest
+    // caller expects on a quiet day, and ok:false reads as an error and invites
+    // pointless retries. That defeats the purpose of the filter.
+    mockDoc.findMany.mockResolvedValue([])
+
+    const result = await listDocs({ workspaceId: WORKSPACE_ID, updatedSince: "2099-01-01T00:00:00.000Z" })
+
+    expect(result.content[0].text).toContain("No docs updated in the requested window")
+    expect(result.structuredContent.ok).toBe(true)
+    expect(result.structuredContent.data).toEqual({ items: [], count: 0 })
+  })
+
+  it("still fails for an entirely empty workspace when no window was requested", async () => {
+    // The unfiltered empty case keeps its original behaviour so existing
+    // callers see no change.
+    mockDoc.findMany.mockResolvedValue([])
+
+    const result = await listDocs({ workspaceId: WORKSPACE_ID })
+
+    expect(result.structuredContent.ok).toBe(false)
+    expect(result.content[0].text).toContain("No docs found")
   })
 })

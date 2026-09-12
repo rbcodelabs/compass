@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
-import type { PrismaClient, ResearchStudy } from "@prisma/client"
+import type { ResearchStudy } from "@prisma/client"
+import type { AppPrismaClient } from "@/lib/db"
 import {
   hashResearchResumeToken,
   MAX_RESEARCH_TRANSCRIPT_CHARS,
@@ -18,7 +19,7 @@ const MAX_VOICE_EVENT_CHARS = 4_000
 const MAX_VOICE_EVENTS_PER_MINUTE = 30
 
 type VoiceContext = {
-  prisma: PrismaClient
+  prisma: AppPrismaClient
   study: ResearchStudy
   participantToken: { id: string }
 }

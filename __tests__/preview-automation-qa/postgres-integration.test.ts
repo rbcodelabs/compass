@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { Pool } from "pg";
 import { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
+import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { bootstrapPreviewRun, cleanupPreviewRun, issuePreviewSession, teardownPreviewRun } from "@/lib/preview-automation/service";
@@ -13,7 +15,7 @@ import type { PreviewGrant } from "@/lib/preview-automation/grants";
 const databaseUrl = process.env.PREVIEW_QA_DATABASE_URL;
 describe.skipIf(!databaseUrl)("real PostgreSQL preview lifecycle (not DSQL isolation evidence)", () => {
   let pool: Pool;
-  let prisma: PrismaClient;
+  let prisma: AppPrismaClient;
   const schema = `compass_pr_999999_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const runA = randomUUID(), runB = randomUUID();
   const deploymentId = "dpl_qaIntegration";
@@ -35,7 +37,7 @@ describe.skipIf(!databaseUrl)("real PostgreSQL preview lifecycle (not DSQL isola
     await pool.query(`CREATE SCHEMA "${schema}"`);
     url.searchParams.set("schema", schema);
     execFileSync("pnpm", ["exec", "prisma", "db", "push", "--url", url.toString()], { encoding: "utf8", stdio: "pipe", timeout: 60_000 });
-    prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) });
+    prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) }).$extends(injectUpdatedAtExtension);
     vi.stubEnv("VERCEL_ENV", "preview"); vi.stubEnv("PREVIEW_AUTOMATION_ENABLED", "1"); vi.stubEnv("VERCEL_DEPLOYMENT_ID", deploymentId);
     console.info(`QA-only PostgreSQL schema: ${schema}`);
   }, 90_000);

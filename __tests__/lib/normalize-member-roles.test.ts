@@ -8,20 +8,20 @@
  * (what is rewritten, what is skipped, what a dry run does).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
 import { normalizeMemberRoles } from "@/lib/normalize-member-roles";
 
 const mockWorkspaceMember = { findMany: vi.fn(), update: vi.fn() };
 const mockOrganizationMember = { findMany: vi.fn(), update: vi.fn() };
 const mockOrganization = { findMany: vi.fn() };
 
-// Structural stand-in for PrismaClient. The cast is confined to this one line
+// Structural stand-in for AppPrismaClient. The cast is confined to this one line
 // so the module under test keeps its real parameter type.
 const prisma = {
   workspaceMember: mockWorkspaceMember,
   organizationMember: mockOrganizationMember,
   organization: mockOrganization,
-} as unknown as PrismaClient;
+} as unknown as AppPrismaClient;
 
 function wsRow(id: string, role: string, email = "a@example.com", slug = "compass") {
   return { id, role, user: { email }, workspace: { slug } };

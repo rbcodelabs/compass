@@ -2,9 +2,10 @@ import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { getActiveSchema } from "./schema";
+import { injectUpdatedAtExtension } from "./prisma-updated-at";
 
 declare global {
-  var __prisma: PrismaClient | undefined;
+  var __prisma: AppPrismaClient | undefined;
 }
 
 export function getDatabaseUser(): string {
@@ -12,12 +13,16 @@ export function getDatabaseUser(): string {
 }
 
 /**
- * Creates a PrismaClient.
+ * Creates the underlying, unextended PrismaClient.
  *
  * Local dev: if DATABASE_URL is set, connects via plain pg (no DSQL/OIDC).
  * Vercel (preview/prod): uses Aurora DSQL with OIDC token exchange.
+ *
+ * Prefer `createPrismaClient()` — this returns a client WITHOUT the
+ * `updatedAt` injection extension and should only be used where that is
+ * explicitly desired (e.g. testing the extension itself).
  */
-export function createPrismaClient(): PrismaClient {
+export function createBasePrismaClient(): PrismaClient {
   const schema = getActiveSchema();
   const automationPreview = process.env.PREVIEW_AUTOMATION_ENABLED === "1";
   if (automationPreview && process.env.DATABASE_URL) {
@@ -74,10 +79,36 @@ export function createPrismaClient(): PrismaClient {
   return new PrismaClient({ adapter });
 }
 
-let _prisma: PrismaClient | undefined;
+/**
+ * Creates a PrismaClient with the `updatedAt` injection extension applied.
+ * This is what the application should use everywhere.
+ */
+export function createPrismaClient() {
+  return createBasePrismaClient().$extends(injectUpdatedAtExtension);
+}
+
+/** The application's PrismaClient type, including client extensions. */
+export type AppPrismaClient = ReturnType<typeof createPrismaClient>;
+
+/**
+ * The client handed to an interactive `$transaction(async (tx) => ...)`
+ * callback on an {@link AppPrismaClient} — the extended equivalent of
+ * `Prisma.TransactionClient`.
+ *
+ * Derived from the client's own `$transaction` signature rather than by
+ * re-listing Prisma's internal deny list (`$on`/`$use`/`$extends`/...) by hand,
+ * so it cannot drift as the extension set changes.
+ */
+type InteractiveTransaction = Extract<
+  Parameters<AppPrismaClient["$transaction"]>[0],
+  (...args: never[]) => unknown
+>;
+export type AppTransactionClient = Parameters<InteractiveTransaction>[0];
+
+let _prisma: AppPrismaClient | undefined;
 
 /** Returns the singleton PrismaClient, creating it on first call. */
-export default function getPrisma(): PrismaClient {
+export default function getPrisma(): AppPrismaClient {
   if (global.__prisma) return global.__prisma;
   if (!_prisma) {
     _prisma = createPrismaClient();

@@ -1,10 +1,10 @@
-import type { PrismaClient } from "@prisma/client"
+import type { AppPrismaClient } from "@/lib/db"
 import { ResearchVoiceControlPlaneError } from "@/lib/research-voice-control-plane"
 import { OpenAIRealtimeProviderError } from "@/lib/research-voice-provider"
 import { ResearchVoiceSandboxLaunchError, stopResearchVoiceSandbox } from "@/lib/research-voice-sandbox"
 import { terminateResearchVoiceCall } from "@/lib/research-voice-termination"
 
-type ProvisioningPrisma = Pick<PrismaClient, "$transaction" | "researchVoiceCall">
+type ProvisioningPrisma = Pick<AppPrismaClient, "$transaction" | "researchVoiceCall">
 type Provider = {
   createCall(input: { offerSdp: string; model: string }): Promise<{ answerSdp: string; providerCallId: string }>
   hangup(providerCallId: string): Promise<{ definite: true }>

@@ -1,5 +1,6 @@
 import getPrisma from "@/lib/db"
 import { ok } from "@/lib/mcp-output"
+import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 
 type OpportunityStatus = "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED"
 type SolutionStatus = "IDEA" | "VALIDATED" | "IN_DELIVERY" | "SHIPPED" | "KILLED"
@@ -12,12 +13,18 @@ export async function listSolutions({
   opportunityStatus,
   squadId,
   hasRoadmapItem,
+  updatedSince,
+  updatedBefore,
+  sort,
 }: {
   workspaceId: string
   status?: SolutionStatus
   opportunityStatus?: OpportunityStatus
   squadId?: string
   hasRoadmapItem?: boolean
+  updatedSince?: string
+  updatedBefore?: string
+  sort?: RecencySort
 }) {
   const solutions = await getPrisma().solution.findMany({
     where: {
@@ -29,6 +36,14 @@ export async function listSolutions({
       },
       ...(hasRoadmapItem === true ? { roadmapItems: { some: {} } } : {}),
       ...(hasRoadmapItem === false ? { roadmapItems: { none: {} } } : {}),
+      ...(updatedSince || updatedBefore
+        ? {
+            updatedAt: {
+              ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
+              ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
+            },
+          }
+        : {}),
     },
     include: {
       opportunity: { select: { id: true, title: true, status: true, squadId: true } },
@@ -37,7 +52,7 @@ export async function listSolutions({
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       },
     },
-    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+    orderBy: recencyOrderBy(sort) ?? [{ updatedAt: "asc" }, { id: "asc" }],
   })
 
   const items = solutions.map((solution) => ({
@@ -69,6 +84,9 @@ export async function listAssumptions({
   solutionStatus,
   opportunityStatus,
   squadId,
+  updatedSince,
+  updatedBefore,
+  sort,
 }: {
   workspaceId: string
   status?: AssumptionStatus
@@ -76,6 +94,9 @@ export async function listAssumptions({
   solutionStatus?: SolutionStatus
   opportunityStatus?: OpportunityStatus
   squadId?: string
+  updatedSince?: string
+  updatedBefore?: string
+  sort?: RecencySort
 }) {
   const assumptions = await getPrisma().assumption.findMany({
     where: {
@@ -89,6 +110,14 @@ export async function listAssumptions({
           ...(squadId ? { squadId } : {}),
         },
       },
+      ...(updatedSince || updatedBefore
+        ? {
+            updatedAt: {
+              ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
+              ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
+            },
+          }
+        : {}),
     },
     include: {
       solution: {
@@ -101,7 +130,7 @@ export async function listAssumptions({
       },
       _count: { select: { experiments: true } },
     },
-    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+    orderBy: recencyOrderBy(sort) ?? [{ updatedAt: "asc" }, { id: "asc" }],
   })
 
   const items = assumptions.map((assumption) => ({

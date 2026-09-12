@@ -18,7 +18,7 @@
  * updatedAt column, they only track createdAt.
  */
 
-import type { PrismaClient } from "@prisma/client"
+import type { AppPrismaClient } from "./db.ts"
 // Relative, with an explicit extension, so this module also resolves when the
 // CLI script is executed directly by Node under --experimental-strip-types.
 // The "@/" path alias is a bundler/TypeScript concept that Node cannot resolve.
@@ -79,7 +79,7 @@ export interface NormalizeReport {
  * does.
  */
 export async function normalizeMemberRoles(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   options: { dryRun?: boolean } = {}
 ): Promise<NormalizeReport> {
   const dryRun = options.dryRun ?? false

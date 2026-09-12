@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-import type { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
 import { getCanvasOverview } from "@/lib/canvas/data";
 
 /**
- * getCanvasOverview takes its PrismaClient as an explicit argument (not via
+ * getCanvasOverview takes its AppPrismaClient as an explicit argument (not via
  * getPrisma()), so — unlike the vi.mock("@/lib/db") pattern used for server
  * actions — a fake client object can just be passed in directly.
  */
@@ -17,7 +17,7 @@ function makeFakePrisma(overrides: {
   experiments?: unknown[];
   roadmapItems?: unknown[];
   positions?: unknown[];
-}): PrismaClient {
+}): AppPrismaClient {
   return {
     squad: {
       findMany: vi.fn().mockResolvedValue(overrides.squads ?? []),

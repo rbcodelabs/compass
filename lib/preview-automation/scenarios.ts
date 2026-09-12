@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { AppTransactionClient } from "@/lib/db";
 import {
   type SqlExec,
   seedSquads,
@@ -63,7 +63,7 @@ export const PREVIEW_SCENARIO_DESCRIPTIONS: Record<PreviewScenario, string> = {
  * behind that teardown has no registered run to find.
  */
 export async function applyPreviewScenario(
-  tx: Prisma.TransactionClient,
+  tx: AppTransactionClient,
   options: { schema: string; workspaceId: string; scenario: PreviewScenario }
 ): Promise<void> {
   const { schema, workspaceId, scenario } = options;

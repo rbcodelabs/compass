@@ -466,3 +466,95 @@ describe("list_roadmap_items MCP tool — stable joins and commitment evidence",
     expect(result.structuredContent.data.items[0]).not.toHaveProperty("eligible")
   })
 })
+
+describe("list_roadmap_items recency filtering and sorting", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockPrisma.roadmapItem.findMany.mockResolvedValue([
+      {
+        id: "item-1",
+        title: "Guided setup",
+        horizon: "NOW",
+        status: "ACTIVE",
+        opportunity: null,
+        solution: null,
+        squad: null,
+        experiment: null,
+      },
+    ])
+  })
+
+  function queryFor() {
+    return mockPrisma.roadmapItem.findMany.mock.calls[0][0] as {
+      where: Record<string, unknown>
+      orderBy: unknown
+    }
+  }
+
+  it("keeps horizon/sortOrder/id as the default ordering when sort is absent", async () => {
+    await getHandler("list_roadmap_items")({ workspaceId: "workspace-1" })
+
+    // The rendered output is grouped into horizon sections off the back of this
+    // ordering; changing the default would reshuffle every existing caller's view.
+    expect(queryFor().orderBy).toEqual([{ horizon: "asc" }, { sortOrder: "asc" }, { id: "asc" }])
+    expect(queryFor().where).not.toHaveProperty("updatedAt")
+  })
+
+  it("still scopes to ACTIVE items when a recency window is supplied", async () => {
+    await getHandler("list_roadmap_items")({
+      workspaceId: "workspace-1",
+      updatedSince: "2026-09-01T00:00:00.000Z",
+      updatedBefore: "2026-09-10T00:00:00.000Z",
+    })
+
+    expect(queryFor().where).toEqual({
+      workspaceId: "workspace-1",
+      status: "ACTIVE",
+      updatedAt: {
+        gte: new Date("2026-09-01T00:00:00.000Z"),
+        lt: new Date("2026-09-10T00:00:00.000Z"),
+      },
+    })
+  })
+
+  it("sorts by recency with a stable id tiebreaker", async () => {
+    await getHandler("list_roadmap_items")({ workspaceId: "workspace-1", sort: "recentlyUpdated" })
+
+    expect(queryFor().orderBy).toEqual([{ updatedAt: "desc" }, { id: "asc" }])
+  })
+
+  it("sorts least recently updated first for stale-work scans", async () => {
+    await getHandler("list_roadmap_items")({ workspaceId: "workspace-1", sort: "leastRecentlyUpdated" })
+
+    expect(queryFor().orderBy).toEqual([{ updatedAt: "asc" }, { id: "asc" }])
+  })
+
+  it("still groups output into horizon sections when sorted by recency", async () => {
+    mockPrisma.roadmapItem.findMany.mockResolvedValue([
+      { id: "item-next", title: "Later thing", horizon: "NEXT", status: "ACTIVE", opportunity: null, solution: null, squad: null, experiment: null },
+      { id: "item-now", title: "Now thing", horizon: "NOW", status: "ACTIVE", opportunity: null, solution: null, squad: null, experiment: null },
+    ])
+
+    const result = await getHandler("list_roadmap_items")({ workspaceId: "workspace-1", sort: "recentlyUpdated" })
+
+    // Sort reorders within a section; the NOW section still precedes NEXT.
+    expect(textOf(result).indexOf("NOW")).toBeLessThan(textOf(result).indexOf("NEXT"))
+  })
+
+  it("combines horizon and squad filters with the recency window", async () => {
+    await getHandler("list_roadmap_items")({
+      workspaceId: "workspace-1",
+      horizon: "NOW",
+      squadId: "11111111-1111-4111-8111-111111111111",
+      updatedSince: "2026-09-01T00:00:00.000Z",
+    })
+
+    expect(queryFor().where).toEqual({
+      workspaceId: "workspace-1",
+      status: "ACTIVE",
+      horizon: "NOW",
+      squadId: "11111111-1111-4111-8111-111111111111",
+      updatedAt: { gte: new Date("2026-09-01T00:00:00.000Z") },
+    })
+  })
+})

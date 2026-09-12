@@ -1,6 +1,6 @@
-import type { PrismaClient } from "@prisma/client"
+import type { AppPrismaClient } from "@/lib/db"
 
-export async function deleteParticipantVoiceEvidenceIfPresent(prisma: PrismaClient, workspaceId: string) {
+export async function deleteParticipantVoiceEvidenceIfPresent(prisma: AppPrismaClient, workspaceId: string) {
   try { await prisma.researchParticipantVoiceEvent.deleteMany({ where: { workspaceId } }) }
   catch (error) {
     // Old default-off deployments can clean their pre-049 fixtures. Never hide
