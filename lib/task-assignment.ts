@@ -1,4 +1,5 @@
 import getPrisma from "@/lib/db";
+import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
 import type { TaskLinkedType } from "@/lib/types";
 
 export type TaskAssignee = { type: "USER" | "AGENT"; id: string } | null;
@@ -31,6 +32,12 @@ export async function assignmentUpdate(workspaceId: string, input: AssignmentInp
 
 export function parseAssigneeFilter(value?: string | null) {
   if (!value) return {};
+  // "Unassigned" has to mean the rendered assignee slot is empty, which
+  // includes ownerName: the display logic falls back to that freeform string,
+  // so a task with ownerName set is owned by somebody even with no user id.
+  if (value === UNASSIGNED_ASSIGNEE_FILTER) {
+    return { assigneeUserId: null, assigneeAgentId: null, OR: [{ ownerName: null }, { ownerName: "" }] };
+  }
   if (value.startsWith("agent:")) return { assigneeAgentId: value.slice(6) };
   return { assigneeUserId: value.startsWith("user:") ? value.slice(5) : value };
 }
