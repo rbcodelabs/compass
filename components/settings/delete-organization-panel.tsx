@@ -24,13 +24,13 @@ export function DeleteOrganizationPanel({ orgSlug, organizationName, workspaces 
     if (!confirmed || isPending) return;
     setError(null);
     startTransition(async () => {
-      try {
-        const result = await deleteOrganization(orgSlug, confirmName);
-        router.push(result.redirectTo);
-        router.refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Something went wrong.");
+      const result = await deleteOrganization(orgSlug, confirmName);
+      if (!result.ok) {
+        setError(result.error);
+        return;
       }
+      router.push(result.redirectTo);
+      router.refresh();
     });
   }
 

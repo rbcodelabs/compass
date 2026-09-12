@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
-import { resolveWorkspaceAdmin } from "@/lib/permissions";
+import { isPermissionError, resolveWorkspaceAdmin } from "@/lib/permissions";
 import { countWorkspaceAdmins, normalizeWorkspaceRole } from "@/lib/roles";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
 import { encrypt } from "@/lib/crypto-secrets";
@@ -652,20 +652,43 @@ export async function deleteWorkspace(
  * the plain resolveWorkspace membership check) — only *picking* the model
  * is admin-gated, per the brainstorm decision.
  */
+/**
+ * Returns a result rather than throwing, for the same transport reason as the
+ * org-level scoring actions — see the header comment in
+ * `app/[orgSlug]/settings/actions.ts`. Its only expected failure is a
+ * permission outcome; a genuine fault is rethrown by `toScoringFailure`.
+ */
+export type SetActiveScoringModelResult = { ok: true } | { ok: false; error: string };
+
+function toScoringFailure(error: unknown): { ok: false; error: string } {
+  if (isPermissionError(error)) {
+    return {
+      ok: false,
+      error: error.message === "Unauthorized" ? "You are not signed in." : error.message,
+    };
+  }
+  throw error;
+}
+
 export async function setActiveScoringModel(
   orgSlug: string,
   workspaceSlug: string,
   scoringModelId: string | null
-) {
-  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+): Promise<SetActiveScoringModelResult> {
+  try {
+    const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
 
-  await prisma.workspaceScoringConfig.upsert({
-    where: { workspaceId },
-    create: { workspaceId, scoringModelId },
-    update: { scoringModelId, updatedAt: new Date() },
-  });
+    await prisma.workspaceScoringConfig.upsert({
+      where: { workspaceId },
+      create: { workspaceId, scoringModelId },
+      update: { scoringModelId, updatedAt: new Date() },
+    });
 
-  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+    revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+    return { ok: true };
+  } catch (error) {
+    return toScoringFailure(error);
+  }
 }
 
 // ─── Portal Settings ──────────────────────────────────────────────────────────
