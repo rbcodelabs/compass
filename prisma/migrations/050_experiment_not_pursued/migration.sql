@@ -1,0 +1,21 @@
+-- Migration 050: NOT_PURSUED experiment conclusion
+--
+-- Adds a NOT_PURSUED conclusion for experiments a human deliberately decided
+-- not to run (as opposed to KILL, an evidence-based failure). NOT_PURSUED and
+-- the new terminal "NOT_PURSUED" experiment status are plain application-level
+-- string values -- `experiments.status` and `experiments.conclusion` are
+-- VARCHAR columns with no DB-level enum/CHECK constraint (validated in
+-- lib/types.ts and the concludeExperiment/conclude_experiment code paths), so
+-- no DDL is required to allow the new values.
+--
+-- The only schema change is a column to hold the human's stated rationale so
+-- it's durable and visible on the experiment, not just tribal knowledge.
+--
+-- DSQL rules:
+--   ALTER TABLE ADD COLUMN must NOT include NOT NULL/DEFAULT (per
+--   014_feedback_type) -- nullable, no backfill: existing concluded
+--   experiments have no reason on record and that's fine, it stays NULL.
+--   No FK constraints -- N/A, this is a plain column.
+--   No index -- this column isn't queried/filtered on.
+
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS conclusion_reason TEXT;

@@ -173,7 +173,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `get_experiment` | Return full details for a single experiment: hypothesis, method, kill condition, linked assumption, all logged results, and conclusion |
 | `create_experiment` | Create a new experiment with hypothesis and method (starts in DESIGNING status) |
 | `log_experiment_result` | Record an observation or data point for a running experiment |
-| `conclude_experiment` | Conclude an experiment with PROCEED, KILL, or ITERATE; automatically updates the linked Assumption's status (PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED) |
+| `conclude_experiment` | Conclude an experiment with PROCEED, KILL, ITERATE, or NOT_PURSUED (deliberately never run — e.g. the feature already shipped); automatically updates the linked Assumption's status (PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED, NOT_PURSUED → UNTESTED). NOT_PURSUED requires a `reason` and lands on its own terminal status distinct from KILLED, so a deliberate non-pursuit is never mistaken for an evidence-based kill |
 
 ### Roadmap
 

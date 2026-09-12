@@ -2,9 +2,10 @@
 
 import { useState, useTransition } from "react"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import { concludeExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
 
-type Conclusion = "PROCEED" | "KILL" | "ITERATE"
+type Conclusion = "PROCEED" | "KILL" | "ITERATE" | "NOT_PURSUED"
 
 interface ConcludePanelProps {
   experimentId: string
@@ -33,20 +34,31 @@ const CONCLUSION_CONFIG: Record<
     className:
       "border-red-300 bg-red-50 text-red-800 hover:bg-red-100 dark:border-red-700 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50",
   },
+  NOT_PURSUED: {
+    label: "Not Pursued",
+    description: "Deliberately not running this — no evidence either way",
+    className:
+      "border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800/40 dark:text-slate-300 dark:hover:bg-slate-800/60",
+  },
 }
 
 export function ConcludePanel({ experimentId, killCondition }: ConcludePanelProps) {
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState<Conclusion | null>(null)
+  const [reason, setReason] = useState("")
   const [isPending, startTransition] = useTransition()
 
+  const reasonRequired = selected === "NOT_PURSUED"
+  const canSubmit = Boolean(selected) && (!reasonRequired || reason.trim().length > 0)
+
   function handleConclude() {
-    if (!selected) return
+    if (!selected || !canSubmit) return
 
     startTransition(async () => {
-      await concludeExperiment(experimentId, selected)
+      await concludeExperiment(experimentId, selected, reason.trim() || undefined)
       setOpen(false)
       setSelected(null)
+      setReason("")
     })
   }
 
@@ -85,7 +97,7 @@ export function ConcludePanel({ experimentId, killCondition }: ConcludePanelProp
       </p>
 
       <div className="flex flex-col gap-2">
-        {(["PROCEED", "ITERATE", "KILL"] as Conclusion[]).map((c) => {
+        {(["PROCEED", "ITERATE", "KILL", "NOT_PURSUED"] as Conclusion[]).map((c) => {
           const config = CONCLUSION_CONFIG[c]
           const isSelected = selected === c
           return (
@@ -104,12 +116,32 @@ export function ConcludePanel({ experimentId, killCondition }: ConcludePanelProp
         })}
       </div>
 
+      {selected && (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="conclude-reason" className="text-xs font-medium text-muted-foreground">
+            Reason{reasonRequired ? " (required)" : " (optional)"}
+          </label>
+          <Textarea
+            id="conclude-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={
+              reasonRequired
+                ? "Why are you closing this without running it? (e.g. the feature already shipped and works)"
+                : "Add context for this conclusion..."
+            }
+            rows={3}
+            className="text-sm"
+          />
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <Button
           onClick={handleConclude}
-          disabled={!selected || isPending}
+          disabled={!canSubmit || isPending}
           size="sm"
-          variant={selected === "KILL" ? "destructive" : "default"}
+          variant={selected === "KILL" ? "destructive" : selected === "NOT_PURSUED" ? "secondary" : "default"}
         >
           {isPending
             ? "Concluding..."
@@ -125,6 +157,7 @@ export function ConcludePanel({ experimentId, killCondition }: ConcludePanelProp
           onClick={() => {
             setOpen(false)
             setSelected(null)
+            setReason("")
           }}
         >
           Cancel
