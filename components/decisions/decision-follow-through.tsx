@@ -125,7 +125,17 @@ export function DecisionFollowThrough({
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="follow-up-assignee">Assignee</Label>
             <Select value={assignee} onValueChange={(value) => setAssignee(value ?? UNASSIGNED)} disabled={pending}>
-              <SelectTrigger id="follow-up-assignee"><SelectValue /></SelectTrigger>
+              {/* The bare <SelectValue /> renders the raw value, which is fine
+                  for selects whose value equals its label (priority, status)
+                  but here would show "USER:<uuid>". Base UI's Value accepts a
+                  formatter, so map back to the display name. */}
+              <SelectTrigger id="follow-up-assignee">
+                <SelectValue>
+                  {(value: string | null) => value && value !== UNASSIGNED
+                    ? assignees.find((option) => key(option) === value)?.displayName ?? "Unassigned"
+                    : "Unassigned"}
+                </SelectValue>
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value={UNASSIGNED}>Unassigned</SelectItem>
                 {assignees.map((option) => (
