@@ -6,7 +6,7 @@
 //     the user deliberately typed
 //   • the common mistakes are caught before the action is called at all
 //   • a failure returned by the action is rendered instead of being swallowed
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -110,6 +110,9 @@ describe("create form — client-side validation runs before the action", () => 
       formulaType: "WEIGHTED_SUM",
       metrics: [expect.objectContaining({ key: "reach", label: "Reach" })],
     })
+    // Let the transition settle before the test ends, so cleanup never tears
+    // the tree down mid-transition.
+    await screen.findByRole("button", { name: /Add scoring model/i })
   })
 })
 
@@ -127,8 +130,52 @@ describe("create form — failures returned by the action are rendered", () => {
     fireEvent.click(screen.getByRole("button", { name: /Create Scoring Model/i }))
 
     expect(await screen.findByText("Forbidden: organization admin required")).toBeVisible()
-    // The form stays open so the user can retry.
-    expect(screen.getByRole("button", { name: /Create Scoring Model/i })).toBeVisible()
+
+    // `setError` runs inside the async `startTransition` scope, so React can
+    // commit the error while `isPending` is still true — and in that commit
+    // the submit button reads "Creating...", not "Create Scoring Model".
+    // Awaiting the idle label (rather than querying for it synchronously)
+    // pins the state this assertion is actually about: the form is open,
+    // settled and usable again.
+    const submit = await screen.findByRole("button", { name: "Create Scoring Model" })
+    expect(submit).toBeEnabled()
+    // ...and the error is still on screen once the transition has settled,
+    // i.e. it was not a transient flash that the settle wiped out.
+    expect(screen.getByText("Forbidden: organization admin required")).toBeVisible()
+  })
+
+  it("disables and relabels the submit button while in flight, then restores it with the error", async () => {
+    // Holds the action open so the pending window is deterministic instead of
+    // a timing accident. This is the exact state a slow CI runner observed:
+    // inputs disabled and *no* "Create Scoring Model" button, because it is
+    // relabelled. Any assertion querying the submit button by its idle name
+    // must therefore await the settle.
+    let settleAction!: (result: unknown) => void
+    actions.createScoringModel.mockReturnValue(
+      new Promise((resolve) => {
+        settleAction = resolve
+      })
+    )
+    openCreateForm()
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "RICE" } })
+    fireEvent.change(keyInput(0), { target: { value: "reach" } })
+    fireEvent.change(labelInput(0), { target: { value: "Reach" } })
+    fireEvent.click(screen.getByRole("button", { name: /Create Scoring Model/i }))
+
+    const pending = await screen.findByRole("button", { name: "Creating..." })
+    expect(pending).toBeDisabled()
+    expect(screen.getByLabelText("Name")).toBeDisabled()
+    expect(screen.queryByRole("button", { name: "Create Scoring Model" })).toBeNull()
+
+    await act(async () => {
+      settleAction({ ok: false, error: "Forbidden: organization admin required" })
+    })
+
+    expect(await screen.findByText("Forbidden: organization admin required")).toBeVisible()
+    const restored = await screen.findByRole("button", { name: "Create Scoring Model" })
+    expect(restored).toBeEnabled()
+    expect(screen.getByLabelText("Name")).toBeEnabled()
   })
 
   it("surfaces a server-returned issue at its own field", async () => {
@@ -152,7 +199,10 @@ describe("create form — failures returned by the action are rendered", () => {
     fireEvent.change(labelInput(0), { target: { value: "Reach" } })
     fireEvent.click(screen.getByRole("button", { name: /Create Scoring Model/i }))
 
-    await waitFor(() => expect(minInput(0)).toHaveAttribute("aria-invalid", "true"))
+    // Await the settled form before reading the field, so this never inspects
+    // a half-committed pending render.
+    await screen.findByRole("button", { name: "Create Scoring Model" })
+    expect(minInput(0)).toHaveAttribute("aria-invalid", "true")
     expect(minInput(0)).toHaveAttribute("aria-describedby", "create-metric-0-min-error")
   })
 
@@ -164,9 +214,12 @@ describe("create form — failures returned by the action are rendered", () => {
     fireEvent.change(labelInput(0), { target: { value: "Reach" } })
     fireEvent.click(screen.getByRole("button", { name: /Create Scoring Model/i }))
 
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /Create Scoring Model/i })).toBeNull()
-    )
+    // Waiting for the submit button to *disappear* would be a false pass: it
+    // is also absent mid-transition, when it reads "Creating...". The
+    // collapsed "Add scoring model" button only renders when the form is
+    // genuinely closed, so that is what this waits for.
+    expect(await screen.findByRole("button", { name: /Add scoring model/i })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Create Scoring Model" })).toBeNull()
     expect(screen.getByText("RICE")).toBeVisible()
   })
 })
