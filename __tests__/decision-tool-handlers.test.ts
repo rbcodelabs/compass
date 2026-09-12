@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockPrepareBuilding, mockApplyBuilding, mockPrepareRelease, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision } = vi.hoisted(() => ({
+const { mockPrepareBuilding, mockApplyBuilding, mockPrepareRelease, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision, mockApplyTracked } = vi.hoisted(() => ({
   mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(),
   mockPrepareRelease: vi.fn(),
   mockQueueRelease: vi.fn(),
   mockFindRequest: vi.fn(),
   mockListRequests: vi.fn(),
   mockFindDecision: vi.fn(),
+  mockApplyTracked: vi.fn(),
 }))
 vi.mock("@/lib/release-authorization", () => ({
   prepareReleaseRun: mockPrepareRelease,
@@ -16,6 +17,7 @@ vi.mock("@/lib/release-authorization", () => ({
 
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ kind: "USER", userId: "user-1" }) }))
 vi.mock("@/lib/building-investment", () => ({ prepareBuildingInvestmentReview: mockPrepareBuilding, applyBuildingInvestmentDecision: mockApplyBuilding }))
+vi.mock("@/lib/tracked-decisions", () => ({ applyTrackedDecision: mockApplyTracked }))
 vi.mock("@/lib/db", () => ({
   default: () => ({
     reviewRequest: { findUnique: mockFindRequest, findMany: mockListRequests },
@@ -75,6 +77,23 @@ describe("decision MCP handlers", () => {
     const result = await applyRecordedDecision({ decisionId: "decision-1" })
     expect(result.structuredContent.ok).toBe(true)
     expect(mockApplyBuilding).toHaveBeenCalledWith("solution-1", "decision-1")
+  })
+
+  // Tracking-only decisions (the ordinary workspace Decisions queue, created via
+  // request_decision) always resolve to continuationKey NO_ACTION — applying one
+  // must not mutate any product state, and must be reachable by a service/agent
+  // actor per the tool's documented contract ("Service actors may apply but
+  // cannot take decisions.").
+  it("applies a tracked (NO_ACTION) decision and returns its durable receipt", async () => {
+    mockFindDecision.mockResolvedValue({ id: "decision-1", revision: { request: { gateType: "TRACKED_DECISION", subjectId: "experiment-1" } } })
+    mockApplyTracked.mockResolvedValue({ id: "receipt-1", receiptKey: "tracked-decision:decision-1:v1", status: "APPLIED" })
+    const result = await applyRecordedDecision({ decisionId: "decision-1" })
+    expect(result.structuredContent.ok).toBe(true)
+    expect(mockApplyTracked).toHaveBeenCalledWith("decision-1")
+    // No BUILDING_INVESTMENT / RELEASE_AUTHORIZATION applicator should ever
+    // run for a tracking-only decision.
+    expect(mockApplyBuilding).not.toHaveBeenCalled()
+    expect(mockQueueRelease).not.toHaveBeenCalled()
   })
 
   it("queues an authorized release through the durable outbox", async () => {

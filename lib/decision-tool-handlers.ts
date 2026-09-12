@@ -4,7 +4,7 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
 import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, prepareBuildingInvestmentReview, prepareBuildingInvestmentRevocationReview, startNewBuildingInvestmentDecisionCycle } from "@/lib/building-investment"
-import { createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { applyTrackedDecision, createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
 
 export async function requestDecision(input: {
   workspaceId: string
@@ -123,6 +123,10 @@ export async function applyRecordedDecision({ decisionId }: { decisionId: string
   const decision = await prisma.decisionRecord.findUnique({ where: { id: decisionId }, include: { revision: { include: { request: true } } } })
   if (!decision) return fail(`Decision "${decisionId}" not found.`)
   try {
+    if (decision.revision.request.gateType === "TRACKED_DECISION") {
+      const receipt = await applyTrackedDecision(decision.id)
+      return ok(`Decision applied.\nID: ${receipt.id}\nReceipt: ${receipt.receiptKey}\nStatus: ${receipt.status}`, receipt)
+    }
     if (decision.revision.request.gateType === "BUILDING_INVESTMENT") {
       const receipt = await applyBuildingInvestmentDecision(decision.revision.request.subjectId, decision.id)
       return ok(`Decision applied.\nID: ${receipt.id}\nReceipt: ${receipt.receiptKey}\nStatus: ${receipt.status}`, receipt)
