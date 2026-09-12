@@ -16,6 +16,9 @@ import { EmptyState } from "@/components/patterns/empty-state"
 import { PageHeader } from "@/components/patterns/page-header"
 import { StatusBadge } from "@/components/patterns/status-badge"
 import { MarkdownContent } from "@/components/markdown-content"
+import { FleshThisOutLink } from "@/components/research/flesh-this-out-link"
+import { PmInterviewHistory } from "@/components/research/pm-interview-history"
+import { isPmInterviewEnabled } from "@/lib/research-feature"
 import type { CustomFieldDefinitionData, CustomFieldType, CustomFieldValue, SquadData } from "@/lib/types"
 
 interface ExperimentDetailPageProps {
@@ -94,6 +97,11 @@ export default async function ExperimentDetailPage({
     name: s.name,
     color: s.color,
   }))
+  const pmInterviews = isPmInterviewEnabled() ? await prisma.pMInterview.findMany({
+    where: { workspaceId: workspace.id, targetType: "EXPERIMENT", targetId: id },
+    orderBy: { createdAt: "desc" }, take: 20,
+    select: { id: true, disposition: true, generationState: true, agentConversationId: true, createdAt: true },
+  }) : []
 
   // Custom fields for this experiment
   const fieldDefs = await prisma.customFieldDefinition.findMany({
@@ -172,6 +180,7 @@ export default async function ExperimentDetailPage({
             </>
           )}
         />
+        {isPmInterviewEnabled() && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="EXPERIMENT" targetId={id} />}
 
         {/* Conclusion rationale — the durable "why" behind the conclusion,
             most important for NOT_PURSUED where no evidence was generated. */}
@@ -337,6 +346,7 @@ export default async function ExperimentDetailPage({
           </div>
         )}
       </div>
+      <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={pmInterviews} />
     </main>
   )
 }

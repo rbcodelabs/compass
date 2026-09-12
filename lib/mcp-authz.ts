@@ -45,6 +45,8 @@ export type McpActor = {
   requiredAgentAccess?: "READ" | "WRITE"
   authorizedWorkspaceId?: string
   scopeWorkspaceId?: string | null
+  scopeConversationId?: string | null
+  scopeClaimId?: string | null
 }
 
 export class McpAuthzError extends Error {

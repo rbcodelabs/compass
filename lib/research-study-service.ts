@@ -145,6 +145,7 @@ async function findMemberStudy(scope: ResearchWorkspaceScope, actor: ResearchStu
     },
   })
   if (!study) throw new ResearchStudyError("Study not found")
+  if (study.studyType === "PM_INTERVIEW") throw new ResearchStudyError("Study not found")
   return { prisma, userId: actor.userId, study }
 }
 

@@ -63,6 +63,9 @@ describe("update_opportunity MCP schema", () => {
       expect(listed?.inputSchema).not.toEqual({ type: "object", properties: {} })
       expect(Object.keys(listed?.inputSchema.properties ?? {})).toEqual([
         "opportunityId",
+        "expectedUpdatedAt",
+        "expectedFieldsFingerprint",
+        "customerSegment",
         "title",
         "description",
       ])

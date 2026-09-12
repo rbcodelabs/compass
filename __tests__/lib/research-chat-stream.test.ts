@@ -7,6 +7,9 @@ function response(frames: unknown[]) {
 }
 
 describe("research provisional stream", () => {
+  it.each([409, 429, 502, 503])("retains server error status %s for participant-safe messaging", async status => {
+    await expect(readResearchChatStream(response([{ type: "error", status }]), vi.fn())).rejects.toMatchObject({ status })
+  })
   it.each(["image/gif", "image/heic"])("accepts saved %s metadata without allowing private paths", (mimeType) => {
     const metadata = { id: "attachment", originalName: "evidence", mimeType, sizeBytes: 24 }
     expect(researchAttachmentMetadata.parse(metadata)).toEqual(metadata)

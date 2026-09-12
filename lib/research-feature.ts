@@ -3,6 +3,11 @@ export function isResearchCaptureEnabled(): boolean {
   return process.env.COMPASS_RESEARCH_CAPTURE_ENABLED === "1"
 }
 
+export function isPmInterviewEnabled(): boolean {
+  if (process.env.NODE_ENV !== "production") return process.env.COMPASS_PM_INTERVIEW_ENABLED !== "0"
+  return process.env.COMPASS_PM_INTERVIEW_ENABLED === "1"
+}
+
 export function isResearchAuthoritativeVoiceEnabled(): boolean {
   return process.env.COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED === "1"
 }

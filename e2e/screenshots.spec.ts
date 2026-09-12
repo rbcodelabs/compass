@@ -51,6 +51,10 @@ const STANDARD_PAGES: StandardScreenshotCase[] = [
   { file: "tasks-list.png",      url: `${WORKSPACE_BASE}/tasks?view=list` },
   { file: "experiments.png",     url: `${WORKSPACE_BASE}/experiments` },
   { file: "feedback.png",        url: `${WORKSPACE_BASE}/feedback` },
+  ...(FUNCTIONAL ? [
+    { file: "pm-interview-picker-desktop.png", url: `${WORKSPACE_BASE}/capture/pm/new` },
+    { file: "pm-interview-picker-mobile.png", url: `${WORKSPACE_BASE}/capture/pm/new`, viewport: { width: 390, height: 844 } },
+  ] : []),
   { file: "docs-editor.png",     url: `${WORKSPACE_BASE}/docs` },
   ...(FUNCTIONAL ? [{ file: "workspace-search.png", url: `${WORKSPACE_BASE}/roadmap`, prepare: "workspace-search" as const }] : []),
   { file: "settings.png",        url: `${WORKSPACE_BASE}/settings` },

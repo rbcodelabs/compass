@@ -32,6 +32,47 @@ Mobile examples: [discovery voice](/screenshots/docs/browser-voice-customer_inte
 
 Capture is the starting point for customer feedback, ideas, and research. It keeps raw input connected to the opportunities and decisions it informs.
 
+## Refinement
+
+Workspace members can start **Refine** from an opportunity, solution,
+assumption, or experiment, or choose **PM interview** in Capture and select an
+existing item. Compass uses only that item, its parent chain, linked outcome, and
+directly linked feedback or evidence. It discloses when bounded context was omitted.
+
+The 15-minute interview is voice-first with text available. Voice uses the same
+Realtime connection, finalized-turn persistence, reconnect limits, and lease
+fencing as participant research, but PM interviews require workspace
+authentication and never expose a participant link. **Continue in text** first
+saves finalized captions and releases the voice lease; the interview cannot switch
+back to voice. Raw audio is not retained.
+
+**Finish and update item** saves the transcript and opens a linked core-agent
+conversation. Finish gives the agent permission to update the interviewed item's
+descriptive fields immediately—there is no separate proposal approval step.
+The conversation shows progress and the saved changes, including before/after
+values and a link to the item. A completed turn with no saved edits says so.
+Other workspace members can read interview history; the agent conversation is
+private to the initiating PM. Concurrent field edits are checked before writing.
+Experiment protocols can only be updated while the experiment is **Designing**.
+
+![Saved PM interview changes in the core agent conversation, using fictional sample data](/screenshots/docs/pm-interview-agent-desktop.png)
+
+[View the saved changes on mobile](/screenshots/docs/pm-interview-agent-mobile.png).
+
+If processing stops, reopen the same interview's agent conversation and use
+**Retry update**. Do not repeat the interview. Reloading does not start duplicate
+processing, and a committed update remains visible even if the stream disconnects.
+Older saved proposals and application receipts remain available in history.
+
+PM statements are internal interpretations, not customer evidence. PM interviews
+do not create evidence, change confidence or lifecycle state, alter relationships,
+or write experiment results. Suggested assumptions and experiments remain written
+next steps in this version.
+
+![PM interview item picker on desktop](/screenshots/docs/pm-interview-picker-desktop.png)
+
+![PM interview item picker on mobile](/screenshots/docs/pm-interview-picker-mobile.png)
+
 ## Studies
 
 Open **Capture** and choose **New study** to create either a customer interview or a guided usability test. Customer interviews use open-ended discussion questions. Guided usability tests add an HTTPS product URL, a 10, 15, 20, or 30 minute target, and five to eight editable participant tasks. Compass can draft realistic tasks from the research goal and product URL; review, edit, add, or remove them before creating the study.
@@ -58,6 +99,11 @@ appears as a clearly labeled draft while it is generated; it becomes part of the
 saved transcript only after Compass confirms the final reply. If the connection
 fails, **Try again** safely reuses the same request. Reloading restores saved
 turns and lets you retry an unconfirmed request without duplicating the answer.
+If the interviewer service cannot complete a reply, choose **Try again**. A
+service failure does not necessarily mean your connection is broken. If it
+continues, or the interviewer is unavailable, contact the research team; do not
+start a new interview to recover the same answer.
+
 An unconfirmed answer is temporarily kept in this browser for recovery, for up
 to the two-hour session window. An open page clears it on expiry; a closed
 browser clears expired recovery data when reopened. Finish becomes available

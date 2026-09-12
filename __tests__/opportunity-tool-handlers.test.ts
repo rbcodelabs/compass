@@ -55,7 +55,7 @@ describe("updateOpportunity", () => {
 
     expect(mockOpportunity.findUnique).toHaveBeenCalledWith({
       where: { id: OPPORTUNITY_ID },
-      select: { id: true, title: true, description: true, status: true },
+      select: { id: true, title: true, description: true, status: true, customerSegment: true, updatedAt: true },
     })
     const data = mockOpportunity.update.mock.calls[0][0].data
     expect(data).toMatchObject({

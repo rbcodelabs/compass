@@ -13,6 +13,7 @@ import { generateSsoSecret } from "@/lib/portal-sso";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
+import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { revokeMemberAgentGrants, deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
 import type {
@@ -461,6 +462,7 @@ export async function deleteWorkspace(
   // Decision/release/capacity aggregates reference Tasks and RoadmapItems.
   // DSQL has no FK cascades, so clear the full child graph first.
   await deleteWorkspaceDecisionData(prisma, workspaceId);
+  await deleteWorkspaceResearchData(prisma, workspaceId);
 
   // ── Step 1: Break the Objective <-> KeyResult circular reference ────────────
   // Objective.parentKeyResultId references KeyResult; null it before deleting KRs.

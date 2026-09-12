@@ -1,5 +1,7 @@
 "use client";
 import { Discussion } from "@/components/comments/discussion";
+import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
+import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 
 import {
   useEntityDetail,
@@ -10,6 +12,7 @@ import {
   PanelTitle,
   Section,
   Field,
+  EditableText,
   RelationList,
   type RelationItem,
   type EditContext,
@@ -17,7 +20,10 @@ import {
 
 type AssumptionData = {
   id: string;
+  pmInterviews: Array<{ id: string; disposition: string; generationState: string; createdAt: string }>;
+  pmInterviewEnabled?: boolean;
   title: string;
+  description: string | null;
   riskLevel: string;
   status: string;
   solution: {
@@ -101,6 +107,7 @@ export function AssumptionPanel({
         edit={edit}
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
       />
+      {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="ASSUMPTION" targetId={id} />}
 
       <Field label="Risk level">
         <span
@@ -110,6 +117,8 @@ export function AssumptionPanel({
         </span>
       </Field>
 
+      <EditableText value={data.description} field="description" edit={edit} multiline placeholder="Add a description…" />
+
       <Section label="Solution">
         <RelationList items={solutionItems} empty="No parent solution." />
       </Section>
@@ -117,6 +126,7 @@ export function AssumptionPanel({
       <Section label="Experiments" count={data.experiments.length}>
         <RelationList items={experimentItems} empty="No experiments yet." />
       </Section>
+      <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={data.pmInterviews} />
       <Discussion targetType="ASSUMPTION" targetId={id} />
     </PanelContainer>
   );

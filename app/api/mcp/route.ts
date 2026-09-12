@@ -14,6 +14,8 @@ import { runWithMcpActor, getMcpActor } from "@/lib/mcp-authz"
 import { applyToolGate, AGENT_TOOL_POLICY } from "@/lib/mcp-tool-gates"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { withAgentActivity } from "@/lib/agent-activity"
+import { getPmInterviewTool, withInterviewMutation } from "@/lib/pm-agent-service"
+import { updateExperiment } from "@/lib/experiment-update-tool"
 import { generateResearchGuideTool, createResearchStudyTool, listResearchStudiesTool, getResearchStudyTool, updateResearchStudyTool, activateResearchStudyTool, closeResearchStudyTool, archiveResearchStudyTool, issueResearchLinkTool, rotateResearchLinkTool, revokeResearchLinksTool } from "@/lib/research-tool-handlers"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import {
@@ -173,7 +175,7 @@ const _handler = createMcpHandler(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ) => (server.registerTool as (...a: any[]) => any)(name, meta, async (args: any, extra: any) => {
       const actor = { ...getMcpActor(), authorizedWorkspaceId: undefined }
-      return runWithMcpActor(actor, () => withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", () => applyToolGate(name, actor, args ?? {}), () => handler(args, extra)))
+      return runWithMcpActor(actor, () => withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", () => applyToolGate(name, actor, args ?? {}), () => withInterviewMutation(name, args ?? {}, () => handler(args, extra))))
     })
 
     register("get_current_identity", { title: "Current Identity", description: "Returns the authenticated caller and currently accessible workspaces.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, async () => {
@@ -184,6 +186,8 @@ const _handler = createMcpHandler(
       return ok("Current authenticated identity", { purpose: actor.purpose ?? "USER", userId: actor.userId, agent, workspaces })
     })
 
+    register("get_pm_interview", { title: "Read PM Interview", description: "Reads a saved interview and the current target for an authorized interview processing attempt. Page through all turns before editing.", inputSchema: { interviewId: z.string().uuid(), offset: z.number().int().min(0).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, getPmInterviewTool)
+    register("update_experiment", { title: "Update Experiment", description: "Updates descriptive protocol fields of a DESIGNING experiment. Does not record results or change status.", inputSchema: z.object({ experimentId: z.string().uuid(), expectedUpdatedAt: z.string().datetime().optional(), expectedFieldsFingerprint: z.string().regex(/^[0-9a-f]{64}$/).optional(), title: z.string().trim().min(1).max(255).optional(), hypothesis: z.string().trim().min(1).max(5000).optional(), method: z.string().trim().min(1).max(5000).optional(), killCondition: z.string().trim().min(1).max(5000).optional() }).strict(), outputSchema: TOOL_OUTPUT_SCHEMA }, updateExperiment)
     const taskAssigneeSchema = z.object({ type: z.enum(["USER", "AGENT"]), id: z.string().uuid() })
     register("list_task_assignees", { title: "List Task Assignees", description: "Lists eligible human and agent assignees in a workspace.", inputSchema: { workspaceId: z.string().uuid(), search: z.string().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listTaskAssignees)
     const researchScope = { workspaceId: z.string().uuid() }
@@ -1140,10 +1144,13 @@ const _handler = createMcpHandler(
         description: "Partially updates an Opportunity's title and/or description. Use null to clear the description.",
         inputSchema: z.object({
           opportunityId: z.string().uuid().describe("UUID of the opportunity"),
+          expectedUpdatedAt: z.string().datetime().optional(),
+          expectedFieldsFingerprint: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+          customerSegment: z.string().trim().max(255).nullable().optional(),
           title: z.string().trim().min(1).max(255).optional().describe("New title for the opportunity"),
           description: z.string().trim().min(1).nullable().optional().describe("New description, or null to clear it"),
         }).strict().refine(
-          ({ title, description }) => title !== undefined || description !== undefined,
+          ({ title, description, customerSegment }) => title !== undefined || description !== undefined || customerSegment !== undefined,
           { message: "Provide at least one editable field: title or description." },
         ),
         outputSchema: TOOL_OUTPUT_SCHEMA,
@@ -1253,11 +1260,13 @@ const _handler = createMcpHandler(
       {
         title: "Update Solution",
         description: "Updates an existing Solution's title or description. Use this to self-correct mistakes without going through status transitions. At least one of title or description must be provided.",
-        inputSchema: {
+        inputSchema: z.object({
+          expectedUpdatedAt: z.string().datetime().optional(),
+          expectedFieldsFingerprint: z.string().regex(/^[0-9a-f]{64}$/).optional(),
           solutionId: z.string().uuid().describe("UUID of the solution"),
           title: z.string().min(1).optional().describe("New title for the solution"),
           description: z.string().optional().describe("New description for the solution (pass empty string to clear)"),
-        },
+        }).strict(),
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateSolution
@@ -1271,22 +1280,24 @@ const _handler = createMcpHandler(
         inputSchema: {
           solutionId: z.string().uuid().describe("UUID of the parent solution"),
           title: z.string().min(1).describe("The assumption to be tested"),
+          description: z.string().optional().describe("Why the belief matters and relevant context"),
           riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).default("MEDIUM").describe("How risky this assumption is if wrong"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ solutionId, title, riskLevel }) => {
+      async ({ solutionId, title, description, riskLevel }) => {
         const prisma = getPrisma()
         const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true } })
         if (!solution) {
           return fail(`Solution "${solutionId}" not found.`)
         }
-        const assumption = await prisma.assumption.create({ data: { solutionId, title: title.trim(), riskLevel, status: "UNTESTED" } })
+        const assumption = await prisma.assumption.create({ data: { solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED" } })
         return ok(
           `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
           {
             id: assumption.id,
             title: assumption.title,
+            description: assumption.description,
             riskLevel: assumption.riskLevel,
             status: assumption.status,
             solutionId,
@@ -1300,12 +1311,15 @@ const _handler = createMcpHandler(
       {
         title: "Update Assumption",
         description: "Updates an existing Assumption's title, risk level, or status. Use this to self-correct mistakes (wrong title, risk level) or advance status outside an experiment conclusion.",
-        inputSchema: {
+        inputSchema: z.object({
+          expectedUpdatedAt: z.string().datetime().optional(),
+          expectedFieldsFingerprint: z.string().regex(/^[0-9a-f]{64}$/).optional(),
           assumptionId: z.string().uuid().describe("UUID of the assumption"),
           title: z.string().min(1).optional().describe("New title for the assumption"),
+          description: z.string().nullable().optional().describe("Updated detail, or null to clear"),
           riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).optional().describe("New risk level"),
           status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]).optional().describe("New status"),
-        },
+        }).strict(),
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateAssumption
@@ -3347,6 +3361,8 @@ async function withMcpAuth(req: Request): Promise<Response> {
     agentId: auth.agentId,
     credentialId: auth.credentialId,
     scopeWorkspaceId: auth.scopeWorkspaceId,
+    scopeConversationId: auth.scopeConversationId,
+    scopeClaimId: auth.scopeClaimId,
   }, () => _handler(req))
 }
 

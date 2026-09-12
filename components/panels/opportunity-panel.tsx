@@ -22,6 +22,8 @@ import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import { AddSolutionForm } from "@/components/discovery/add-solution-form";
 import { solutionStatusBadge } from "@/lib/solution-status";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
+import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 
 type OpportunityData = {
   id: string;
@@ -30,6 +32,8 @@ type OpportunityData = {
   description: string | null;
   customerSegment: string | null;
   workspaceId: string;
+  pmInterviews: Array<{ id: string; disposition: string; generationState: string; createdAt: string }>;
+  pmInterviewEnabled?: boolean;
   linkedKeyResult: {
     id: string;
     title: string;
@@ -112,6 +116,7 @@ export function OpportunityPanel({
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS_MAP }}
       />
       <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} subjectTitle={data.title} />
+      {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="OPPORTUNITY" targetId={opportunityId} />}
 
       <EditableText
         value={data.description}
@@ -188,6 +193,7 @@ export function OpportunityPanel({
           <EvidenceList evidence={data.evidence} revalidatePathStr={fullPageHref} />
         </div>
       </Section>
+      <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={data.pmInterviews} />
       <Discussion targetType="OPPORTUNITY" targetId={opportunityId} />
     </PanelContainer>
   );

@@ -5,7 +5,7 @@ import type { PreviewGrant } from "./grants";
 import { applyPreviewScenario, DEFAULT_PREVIEW_SCENARIO } from "./scenarios";
 import { getActiveSchema } from "@/lib/schema";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
-import { deleteParticipantVoiceEvidenceIfPresent } from "@/lib/research-participant-voice-cleanup";
+import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 
 export { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "./cookies";
 /** Revoke first. Retain the registry tombstone so failures can safely retry exact ownership. */
@@ -35,16 +35,11 @@ export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, 
     await prisma.docComment.deleteMany({ where: { doc: { workspaceId } } });
     await prisma.docVersion.deleteMany({ where: { doc: { workspaceId } } });
     await prisma.agentMessage.deleteMany({ where: { conversation: { workspaceId } } });
+    await prisma.apiKey.deleteMany({ where: { scopeWorkspaceId: workspaceId, scopeConversationId: { not: null } } });
+    await prisma.pMInterview.updateMany({ where: { workspaceId }, data: { agentConversationId: null } });
     await prisma.agentConversation.deleteMany({ where: { workspaceId } });
     await prisma.agentAuditLog.deleteMany({ where: { workspaceId } });
-    await prisma.researchVoiceEvent.deleteMany({ where: { session: { study: { workspaceId } } } });
-    await deleteParticipantVoiceEvidenceIfPresent(prisma, workspaceId);
-    await prisma.researchRequest.deleteMany({ where: { session: { study: { workspaceId } } } });
-    await prisma.researchTurn.deleteMany({ where: { session: { study: { workspaceId } } } });
-    await prisma.researchSession.deleteMany({ where: { study: { workspaceId } } });
-    await prisma.researchParticipantToken.deleteMany({ where: { study: { workspaceId } } });
-    await prisma.researchSynthesis.deleteMany({ where: { study: { workspaceId } } });
-    await prisma.researchStudy.deleteMany({ where: { workspaceId } });
+    await deleteWorkspaceResearchData(prisma, workspaceId);
     await prisma.nowPolicyApplicationEvidence.deleteMany({ where: { workspaceId } });
     await prisma.nowGateEvaluation.deleteMany({ where: { workspaceId } });
     await prisma.portfolioCapacityOperation.deleteMany({ where: { workspaceId } });

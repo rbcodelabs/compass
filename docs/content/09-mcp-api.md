@@ -8,6 +8,32 @@ section: "Developer"
 
 # MCP API
 
+## PM interview processing
+
+`get_pm_interview({ interviewId, offset? })` reads the initiating user's saved
+interview and current target in an authorized workspace. It returns transcript
+pages, permitted descriptive fields, and current `expectedUpdatedAt` and
+`expectedFieldsFingerprint` values. Follow `nextOffset` until it is null. This
+does not expose participant credentials, raw audio, or other users' interviews.
+
+Finishing an interview starts the normal core agent with a temporary credential
+restricted to that interview's exact target. Its edit must supply both returned
+version checks. The server checks the exact fields again at the final write and
+commits a before/after receipt atomically. A changed baseline requires rereading
+and reconsidering the edit, not blindly replacing the version token.
+
+`update_opportunity` supports `customerSegment` in addition to title/description.
+`update_opportunity`, `update_solution`, and `update_assumption` accept optional
+`expectedUpdatedAt` for ordinary optimistic edits. The fingerprint parameter is
+required only for an automatic interview update; it is never a target field.
+
+`update_experiment({ experimentId, title?, hypothesis?, method?, killCondition?,
+expectedUpdatedAt?, expectedFieldsFingerprint? })` edits protocol fields only
+while the experiment is **DESIGNING**. It cannot change status or record results.
+The automatic interview credential cannot edit risk, lifecycle, relationships,
+other items, or customer evidence through any tool. After processing terminates,
+an explicit new chat message uses the user's normal core-agent permissions.
+
 Compass exposes a **Model Context Protocol (MCP)** endpoint that lets AI agents read and write discovery data programmatically. This means you can connect tools like Claude, Cursor, or any MCP-compatible client to your workspace and have AI assistants create OKRs, log opportunities from user research notes, or update experiment results — all without leaving your AI workflow.
 
 ## Endpoint
@@ -151,7 +177,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `update_solution_status` | Update a Solution's lifecycle status (IDEA/VALIDATED/IN_DELIVERY/SHIPPED/KILLED); any valid status may transition directly to any other valid status |
 | `update_solution` | Update an existing Solution's title and/or description (pass an empty string to clear the description); at least one field must be provided |
 | `add_assumption` | Add a testable Assumption to a Solution, with a risk level (HIGH/MEDIUM/LOW); starts UNTESTED |
-| `update_assumption` | Update an Assumption's title, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |
+| `update_assumption` | Update an Assumption's title, description, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |
 | `delete_assumption` | Permanently delete an Assumption; unlinks (does not delete) any Experiments or Evidence that referenced it |
 | `add_solution_plan` | Log a proposed implementation/engineering plan on a Solution as the pinned "current plan" entry in its Plan & Discussion thread; a later call on the same solution supersedes the previous plan |
 | `add_solution_comment` | Add a reply comment to a Solution's Plan & Discussion thread |

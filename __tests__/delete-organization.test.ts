@@ -57,8 +57,13 @@ const mockReviewRevision = { deleteMany: vi.fn() };
 const mockReviewRequest = { updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
+const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
 
 const mockPrisma = {
+  apiKey: { deleteMany: vi.fn() },
+  agentMessage: { deleteMany: vi.fn() },
+  agentAuditLog: { deleteMany: vi.fn() },
+  agentConversation: { deleteMany: vi.fn() },
   agentWorkspaceGrant: { deleteMany: vi.fn() },
   agentToolCall: { deleteMany: vi.fn() },
   organization: mockOrganization,
@@ -114,6 +119,18 @@ const mockPrisma = {
   reviewRequest: mockReviewRequest,
   portfolioCapacityReservation: mockPortfolioCapacityReservation,
   portfolioCapacityPlan: mockPortfolioCapacityPlan,
+  researchVoiceCommand: mockResearchDelete,
+  researchVoiceEvent: mockResearchDelete,
+  researchVoiceCall: mockResearchDelete,
+  researchRequest: mockResearchDelete,
+  researchAttachment: mockResearchDelete,
+  researchParticipantVoiceEvent: mockResearchDelete,
+  researchTurn: mockResearchDelete,
+  pMInterview: mockResearchDelete,
+  researchSession: mockResearchDelete,
+  researchParticipantToken: mockResearchDelete,
+  researchSynthesis: mockResearchDelete,
+  researchStudy: mockResearchDelete,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -298,6 +315,9 @@ describe("deleteOrganization", () => {
 
     const result = await deleteOrganization("acme", ORG_NAME);
 
+    expect(mockPrisma.apiKey.deleteMany).toHaveBeenCalledWith({ where: { scopeWorkspaceId: "ws-1", scopeConversationId: { not: null } } });
+    expect(mockResearchDelete.updateMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, data: { agentConversationId: null } });
+    expect(mockPrisma.agentConversation.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockReleaseDispatch.deleteMany).toHaveBeenCalled();
     expect(mockReleaseRunTask.deleteMany).toHaveBeenCalled();
     expect(mockReleaseRun.deleteMany).toHaveBeenCalled();

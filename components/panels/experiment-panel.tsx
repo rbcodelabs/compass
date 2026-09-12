@@ -1,6 +1,8 @@
 "use client";
 import { Discussion } from "@/components/comments/discussion";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
+import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -12,6 +14,8 @@ import { MarkdownContent } from "@/components/markdown-content";
 
 type ExperimentData = {
   id: string;
+  pmInterviews: Array<{ id: string; disposition: string; generationState: string; createdAt: string }>;
+  pmInterviewEnabled?: boolean;
   title: string;
   status: string;
   hypothesis: string;
@@ -171,6 +175,7 @@ export function ExperimentPanel({
         </div>
       )}
       <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="EXPERIMENT" subjectId={data.id} subjectTitle={data.title} />
+      {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="EXPERIMENT" targetId={experimentId} />}
 
       {/* Kill condition — prominent when active */}
       {isActive && (
@@ -262,6 +267,7 @@ export function ExperimentPanel({
           </div>
         )}
       </div>
+      <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={data.pmInterviews} />
       <Discussion targetType="EXPERIMENT" targetId={experimentId} />
     </div>
   );

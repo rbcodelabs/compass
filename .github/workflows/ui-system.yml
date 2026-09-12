@@ -99,16 +99,18 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e:functional -- e2e/functional/specs/capture-research.spec.ts e2e/functional/specs/research-browser-voice.spec.ts e2e/functional/specs/capture-results.spec.ts e2e/functional/specs/research-mcp.spec.ts e2e/functional/specs/capture-attachment-formats.spec.ts
+      - run: pnpm test:e2e:functional -- e2e/functional/specs/capture-research.spec.ts e2e/functional/specs/research-browser-voice.spec.ts e2e/functional/specs/capture-results.spec.ts e2e/functional/specs/research-mcp.spec.ts e2e/functional/specs/capture-attachment-formats.spec.ts e2e/functional/specs/pm-interview.spec.ts
         env:
           COMPASS_RESEARCH_BROWSER_VOICE_ENABLED: "1"
       - run: pnpm e2e:db:verify-clean
         if: always()
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: compass-authenticated-capture-e2e
-          path: test-results
+          path: |
+            test-results
+            public/screenshots/docs/pm-interview-*.png
 
   screenshots:
     if: ${{ vars.COMPASS_SCREENSHOT_BASE_URL != '' }}

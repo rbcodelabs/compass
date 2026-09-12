@@ -4,6 +4,7 @@ import {
   isResearchCaptureEnabled,
   isResearchDiscoveryVoiceEnabled,
   isResearchLegacyVoiceHarnessEnabled,
+  isPmInterviewEnabled,
 } from "@/lib/research-feature"
 
 describe("research capture feature gate", () => {
@@ -19,6 +20,16 @@ describe("research capture feature gate", () => {
     vi.stubEnv("NODE_ENV", "production")
     vi.stubEnv("COMPASS_RESEARCH_CAPTURE_ENABLED", "1")
     expect(isResearchCaptureEnabled()).toBe(true)
+  })
+
+  it("fails PM interviews closed in production independently of Capture", () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("COMPASS_RESEARCH_CAPTURE_ENABLED", "1")
+    vi.stubEnv("COMPASS_PM_INTERVIEW_ENABLED", "")
+    expect(isResearchCaptureEnabled()).toBe(true)
+    expect(isPmInterviewEnabled()).toBe(false)
+    vi.stubEnv("COMPASS_PM_INTERVIEW_ENABLED", "1")
+    expect(isPmInterviewEnabled()).toBe(true)
   })
 
   it("stays available in development and tests", () => {
