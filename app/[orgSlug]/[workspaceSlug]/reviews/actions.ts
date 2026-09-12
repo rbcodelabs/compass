@@ -7,7 +7,9 @@ import { recordDecision } from "@/lib/decision-service"
 import { isOrgAdminRole } from "@/lib/roles"
 import { queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator } from "@/lib/release-authorization"
 import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh, prepareBuildingInvestmentReview } from "@/lib/building-investment"
-import { createTrackedDecisionRequest, reviseTrackedDecisionRequest, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { createTrackedDecisionRequest, reviseTrackedDecisionRequest, recordDecisionNoAction, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { createDecisionFollowUpTask } from "@/lib/decision-followthrough"
+import type { TaskAssignee } from "@/lib/task-assignment"
 
 async function requireWorkspaceMember(workspaceId: string) {
   const session = await auth()
@@ -100,5 +102,36 @@ export async function decideReviewAction(input: {
     )
     if (dispatch.status === "BLOCKED") throw new Error(`Release dispatch blocked: ${dispatch.code}`)
   }
+  revalidatePath("/", "layout")
+}
+
+// ─── Direction B — decisions produce work ─────────────────────────────────────
+
+/**
+ * Creates a Task from a decided decision and links it back in one step.
+ * Membership is enough to act here: turning an answered decision into work is
+ * follow-through, not a second authorization of the decision itself.
+ */
+export async function createFollowUpTaskAction(input: {
+  workspaceId: string
+  requestId: string
+  title: string
+  description: string
+  assignee: TaskAssignee
+}) {
+  await requireWorkspaceMember(input.workspaceId)
+  const result = await createDecisionFollowUpTask(input)
+  revalidatePath("/", "layout")
+  return result
+}
+
+/**
+ * Records "this decision genuinely needs no work, and here is why", which is
+ * the only honest way out of the awaiting-follow-through lens that isn't
+ * creating a task.
+ */
+export async function closeDecisionNoActionAction(input: { workspaceId: string; requestId: string; reason: string }) {
+  const userId = await requireWorkspaceMember(input.workspaceId)
+  await recordDecisionNoAction({ ...input, actorUserId: userId })
   revalidatePath("/", "layout")
 }

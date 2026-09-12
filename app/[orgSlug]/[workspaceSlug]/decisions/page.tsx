@@ -80,7 +80,7 @@ export default async function DecisionsPage({ params, searchParams }: {
   if (!session?.user?.id) redirect("/login")
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id)
   if (!workspace) notFound()
-  const tab = query.tab === "decided" ? "DECIDED" : "PENDING"
+  const tab = query.tab === "decided" ? "DECIDED" : query.tab === "awaiting" ? "AWAITING_FOLLOW_THROUGH" : "PENDING"
   const subjectType = TRACKED_SUBJECT_TYPES.includes(query.type as TrackedSubjectType) ? query.type as TrackedSubjectType : undefined
   const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1)
   const result = await listTrackedDecisions({
@@ -132,8 +132,12 @@ export default async function DecisionsPage({ params, searchParams }: {
 
         {result.requests.length === 0 ? (
           <EmptyState
-            title={`No ${tab === "PENDING" ? "pending" : "decided"} decisions`}
-            description={tab === "PENDING" ? "Request a decision when the team needs a clear call, or clear your filters." : "Completed decisions will appear here."}
+            title={tab === "PENDING" ? "No pending decisions" : tab === "DECIDED" ? "No decided decisions" : "Nothing awaiting follow-through"}
+            description={
+              tab === "PENDING" ? "Request a decision when the team needs a clear call, or clear your filters."
+              : tab === "DECIDED" ? "Completed decisions will appear here."
+              : "Every decided decision has either produced work or been explicitly closed as needing none."
+            }
           />
         ) : (
           <div className="flex flex-col gap-2">
