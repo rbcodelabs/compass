@@ -3,6 +3,11 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FacetedFilterMenu } from "@/components/patterns/faceted-filter-menu";
 import type { MemberData, SquadData, TaskPriority } from "@/lib/types";
+import {
+  UNASSIGNED_ASSIGNEE_FILTER,
+  UNASSIGNED_ASSIGNEE_LABEL,
+  canonicalAssigneeFilterValue,
+} from "@/lib/task-assignee-display";
 import { assigneeValue, useTaskAssignees } from "./task-assignee-picker";
 
 const PRIORITIES: TaskPriority[] = ["URGENT", "HIGH", "MEDIUM", "LOW"];
@@ -57,12 +62,15 @@ export function TasksFilters({ squads, members }: TasksFiltersProps) {
         {
           id: "assignee",
           label: "Assignee",
-          value: selected && !selected.includes(":") ? `user:${selected}` : selected,
+          value: canonicalAssigneeFilterValue(selected),
           onValueChange: (value) => setFilter("assignee", value),
-          options: options.map((option) => ({
-            value: assigneeValue(option),
-            label: `${option.type === "AGENT" ? "Agent: " : ""}${option.displayName}`,
-          })),
+          options: [
+            { value: UNASSIGNED_ASSIGNEE_FILTER, label: UNASSIGNED_ASSIGNEE_LABEL },
+            ...options.map((option) => ({
+              value: assigneeValue(option),
+              label: `${option.type === "AGENT" ? "Agent: " : ""}${option.displayName}`,
+            })),
+          ],
         },
         {
           id: "priority",

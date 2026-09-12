@@ -13,6 +13,16 @@ import { Badge } from "@/components/ui/badge";
 import { MarkdownContent } from "@/components/markdown-content";
 import { Separator } from "@/components/ui/separator";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  panelSectionStateKey,
+  readPanelSectionState,
+  writePanelSectionOpen,
+} from "@/lib/panel-section-state";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -189,28 +199,87 @@ export function PanelTitle({
   );
 }
 
-/** A labelled section, optionally with a count next to the label. */
+/**
+ * A labelled section, optionally with a count next to the label.
+ *
+ * Non-collapsible by default: every panel that has not opted in renders
+ * exactly the markup it always did. Pass `collapsible` (plus the owning
+ * `panelType`) to turn the label row into a disclosure trigger. `defaultOpen`
+ * is the first-visit state only — once a reader toggles a section, the stored
+ * preference wins on every later visit. The per-type open/closed policy lives
+ * at the composition sites, not here.
+ */
 export function Section({
   label,
   count,
+  collapsible = false,
+  defaultOpen = false,
+  panelType,
+  empty = false,
   children,
 }: {
   label: string;
   count?: number;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  /** Namespaces the persisted state; required when `collapsible`. */
+  panelType?: EntityPanelType;
+  /** Nothing to show and nothing to do — renders shut with a dead trigger. */
+  empty?: boolean;
   children: React.ReactNode;
 }) {
+  const storageKey = panelSectionStateKey(panelType ?? "panel", label);
+
+  // Resolved while rendering, not in an effect, so the first paint is already
+  // correct — see the note in lib/panel-section-state.ts.
+  const [open, setOpen] = useState(() =>
+    collapsible ? readPanelSectionState()[storageKey] ?? defaultOpen : true
+  );
+
+  const labelContent = (
+    <>
+      {label}
+      {typeof count === "number" && count > 0 && (
+        <span className="normal-case font-normal"> ({count})</span>
+      )}
+    </>
+  );
+
+  if (!collapsible) {
+    return (
+      <>
+        <Separator />
+        <div className="flex flex-col gap-2">
+          <p className={LABEL_CLASS}>{labelContent}</p>
+          {children}
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <Separator />
-      <div className="flex flex-col gap-2">
-        <p className={LABEL_CLASS}>
-          {label}
-          {typeof count === "number" && count > 0 && (
-            <span className="normal-case font-normal"> ({count})</span>
-          )}
-        </p>
-        {children}
-      </div>
+      <Collapsible
+        className="group flex flex-col gap-2"
+        open={empty ? false : open}
+        disabled={empty}
+        onOpenChange={(next) => {
+          setOpen(next);
+          writePanelSectionOpen(storageKey, next);
+        }}
+      >
+        <CollapsibleTrigger
+          /* Base UI marks a disabled disclosure with data-disabled (and keeps
+             it focusable) rather than setting the native disabled attribute,
+             so the dimmed state keys off that. */
+          className={`${LABEL_CLASS} flex w-full items-center gap-1.5 text-left transition-colors hover:text-foreground data-disabled:cursor-default data-disabled:opacity-50 data-disabled:hover:text-muted-foreground`}
+        >
+          <ChevronRightIcon className="size-3 shrink-0 transition-transform group-data-open:rotate-90" />
+          <span>{labelContent}</span>
+        </CollapsibleTrigger>
+        <CollapsibleContent>{children}</CollapsibleContent>
+      </Collapsible>
     </>
   );
 }

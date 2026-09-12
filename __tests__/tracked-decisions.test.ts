@@ -4,12 +4,13 @@ const prisma = {
   reviewRequest: { findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), count: vi.fn() },
   reviewRevision: { create: vi.fn(), update: vi.fn() },
   decisionRecord: { findUnique: vi.fn() },
-  opportunity: { findUnique: vi.fn() },
-  solution: { findUnique: vi.fn() },
+  decisionApplication: { findUnique: vi.fn(), create: vi.fn() },
+  opportunity: { findUnique: vi.fn(), update: vi.fn() },
+  solution: { findUnique: vi.fn(), update: vi.fn() },
   assumption: { findUnique: vi.fn() },
-  roadmapItem: { findUnique: vi.fn() },
+  roadmapItem: { findUnique: vi.fn(), update: vi.fn() },
   doc: { findUnique: vi.fn() },
-  experiment: { findUnique: vi.fn() },
+  experiment: { findUnique: vi.fn(), update: vi.fn() },
   feedbackItem: { findUnique: vi.fn() },
   evidence: { findUnique: vi.fn() },
   workspace: { findUnique: vi.fn() },
@@ -21,6 +22,7 @@ vi.mock("@/lib/db", () => ({ default: () => prisma }))
 
 import {
   TrackedDecisionError,
+  applyTrackedDecision,
   createTrackedDecisionRequest,
   listTrackedDecisions,
   recordDecisionNoAction,
@@ -411,5 +413,95 @@ describe("tracked decisions", () => {
       expect(result.total).toBe(3)
       expect(result.pageCount).toBe(2)
     })
+  })
+})
+
+// applyTrackedDecision is the applicator for the ordinary workspace Decisions
+// queue (gateType TRACKED_DECISION). Every option on a tracked decision has
+// continuationKey NO_ACTION (this is a tracking-only provider — see the
+// `options` array above), so applying one must never touch product state; it
+// only ever records a durable DecisionApplication receipt.
+describe("applyTrackedDecision", () => {
+  const decidedTrackedDecision = {
+    id: "decision-1",
+    requestId: "request-1",
+    revisionId: "revision-1",
+    optionId: "option-1",
+    fingerprint: "fp-1",
+    revision: {
+      id: "revision-1",
+      supersededAt: null,
+      fingerprint: "fp-1",
+      options: [{ id: "option-1" }],
+      request: { id: "request-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-1" },
+    },
+    option: { id: "option-1", continuationKey: "NO_ACTION" },
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) => fn(prisma))
+    prisma.decisionApplication.findUnique.mockResolvedValue(null)
+    prisma.decisionRecord.findUnique.mockResolvedValue(decidedTrackedDecision)
+  })
+
+  it("applies a decided tracked decision and returns a durable NO_ACTION receipt", async () => {
+    const receipt = { id: "application-1", decisionId: "decision-1", continuationKey: "NO_ACTION", targetType: "TRACKED_DECISION", targetId: "request-1", status: "APPLIED", receiptKey: "tracked-decision:decision-1:v1" }
+    prisma.decisionApplication.create.mockResolvedValue(receipt)
+
+    await expect(applyTrackedDecision("decision-1")).resolves.toEqual(receipt)
+
+    expect(prisma.decisionApplication.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      decisionId: "decision-1", continuationKey: "NO_ACTION", targetType: "TRACKED_DECISION", targetId: "request-1", status: "APPLIED", receiptKey: "tracked-decision:decision-1:v1",
+    }) })
+  })
+
+  it("triggers no product mutation as a side effect of applying", async () => {
+    prisma.decisionApplication.create.mockResolvedValue({ id: "application-1", status: "APPLIED" })
+
+    await applyTrackedDecision("decision-1")
+
+    for (const model of [prisma.opportunity, prisma.solution, prisma.roadmapItem, prisma.experiment, prisma.feedbackItem, prisma.assumption]) {
+      if ("update" in model) expect(model.update).not.toHaveBeenCalled()
+      if ("create" in model) expect(model.create).not.toHaveBeenCalled()
+    }
+    // The only write this ever performs is the receipt itself.
+    expect(prisma.decisionApplication.create).toHaveBeenCalledOnce()
+  })
+
+  it("is idempotent: a repeat apply replays the existing receipt without re-deriving or re-creating it", async () => {
+    const existing = { id: "application-1", decisionId: "decision-1", continuationKey: "NO_ACTION", targetType: "TRACKED_DECISION", targetId: "request-1", status: "APPLIED", receiptKey: "tracked-decision:decision-1:v1" }
+    prisma.decisionApplication.findUnique.mockResolvedValue(existing)
+
+    await expect(applyTrackedDecision("decision-1")).resolves.toBe(existing)
+
+    expect(prisma.decisionRecord.findUnique).not.toHaveBeenCalled()
+    expect(prisma.decisionApplication.create).not.toHaveBeenCalled()
+  })
+
+  it("returns the winning receipt when two applications race", async () => {
+    const winner = { id: "application-1", decisionId: "decision-1", continuationKey: "NO_ACTION", targetType: "TRACKED_DECISION", targetId: "request-1", status: "APPLIED", receiptKey: "tracked-decision:decision-1:v1" }
+    prisma.decisionApplication.create.mockRejectedValue({ code: "P2002" })
+    prisma.decisionApplication.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(winner)
+
+    await expect(applyTrackedDecision("decision-1")).resolves.toBe(winner)
+  })
+
+  it("rejects a decision that has not reached a terminal DECIDED state", async () => {
+    prisma.decisionRecord.findUnique.mockResolvedValue({
+      ...decidedTrackedDecision,
+      revision: { ...decidedTrackedDecision.revision, request: { ...decidedTrackedDecision.revision.request, state: "PENDING" } },
+    })
+    await expect(applyTrackedDecision("decision-1")).rejects.toEqual(expect.objectContaining({ code: "DECISION_MISMATCH" }))
+    expect(prisma.decisionApplication.create).not.toHaveBeenCalled()
+  })
+
+  it("rejects a decision from a different gate type", async () => {
+    prisma.decisionRecord.findUnique.mockResolvedValue({
+      ...decidedTrackedDecision,
+      revision: { ...decidedTrackedDecision.revision, request: { ...decidedTrackedDecision.revision.request, gateType: "BUILDING_INVESTMENT" } },
+    })
+    await expect(applyTrackedDecision("decision-1")).rejects.toEqual(expect.objectContaining({ code: "DECISION_MISMATCH" }))
+    expect(prisma.decisionApplication.create).not.toHaveBeenCalled()
   })
 })
