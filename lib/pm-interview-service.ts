@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
-import type { Prisma, PrismaClient } from "@prisma/client"
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppPrismaClient, type AppTransactionClient } from "@/lib/db"
 import { runResearchInterviewAgent } from "@/lib/research-agent"
 import { analysisOperationMs, assertAnalysisDeadline } from "@/lib/research-analysis-deadline"
 import { researchFailureDiagnostic } from "@/lib/research-failure-diagnostics"
@@ -43,7 +42,7 @@ const guideByType: Record<PmInterviewTargetType, string[]> = {
   EXPERIMENT: ["What do you predict will happen?", "What method will make that observable?", "What result would support the prediction?", "What result would cause you to stop?", "What could make the result misleading?"],
 }
 
-async function memberWorkspace(prisma: PrismaClient, scope: PmInterviewScope, userId: string) {
+async function memberWorkspace(prisma: AppPrismaClient, scope: PmInterviewScope, userId: string) {
   const workspace = await prisma.workspace.findFirst({
     where: { slug: scope.workspaceSlug, organization: { slug: scope.orgSlug }, members: { some: { userId } } },
     select: { id: true },
@@ -103,7 +102,7 @@ export function boundPmInterviewContext(value: unknown): PmInterviewContextSnaps
   return pmInterviewContextSchema.parse(bounded)
 }
 
-async function targetSnapshot(prisma: PrismaClient, workspaceId: string, targetType: PmInterviewTargetType, targetId: string): Promise<PmInterviewContextSnapshot> {
+async function targetSnapshot(prisma: AppPrismaClient, workspaceId: string, targetType: PmInterviewTargetType, targetId: string): Promise<PmInterviewContextSnapshot> {
   const capturedAt = new Date().toISOString()
   if (targetType === "OPPORTUNITY") {
     const item = await prisma.opportunity.findFirst({ where: { id: targetId, workspaceId }, include: { linkedKeyResult: { include: { objective: true } }, evidence: { take: 21, orderBy: { createdAt: "desc" } }, feedback: { where: { workspaceId }, take: 21, orderBy: { createdAt: "desc" } } } })
@@ -307,7 +306,7 @@ export async function completePmInterview(scope: PmInterviewScope, actor: PmInte
   }
 }
 
-async function liveTarget(prisma: PrismaClient | Prisma.TransactionClient, workspaceId: string, type: PmInterviewTargetType, id: string) {
+async function liveTarget(prisma: AppPrismaClient | AppTransactionClient, workspaceId: string, type: PmInterviewTargetType, id: string) {
   if (type === "OPPORTUNITY") return prisma.opportunity.findFirst({ where: { id, workspaceId } })
   if (type === "SOLUTION") return prisma.solution.findFirst({ where: { id, opportunity: { workspaceId } } })
   if (type === "ASSUMPTION") return prisma.assumption.findFirst({ where: { id, solution: { opportunity: { workspaceId } } } })
