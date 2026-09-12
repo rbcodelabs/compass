@@ -13,7 +13,9 @@ const mocks = vi.hoisted(() => ({
   complete: vi.fn(),
   agent: vi.fn(),
   workspace: { findFirst: vi.fn() },
-  pMInterview: { findFirst: vi.fn(), updateMany: vi.fn() },
+  pMInterview: { findFirst: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
+  agentConversation: { create: vi.fn(), findFirst: vi.fn() },
+  transaction: vi.fn(),
   participantToken: { findFirst: vi.fn() },
 }))
 
@@ -21,6 +23,8 @@ vi.mock("@/lib/db", () => ({ default: () => ({
   workspace: mocks.workspace,
   pMInterview: mocks.pMInterview,
   researchParticipantToken: mocks.participantToken,
+  agentConversation: mocks.agentConversation,
+  $transaction: mocks.transaction,
 }) }))
 vi.mock("@/lib/research-agent", () => ({ runResearchInterviewAgent: mocks.agent }))
 vi.mock("@/lib/research-session", async importOriginal => {
@@ -77,6 +81,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.workspace.findFirst.mockResolvedValue({ id: "workspace-1" })
   mocks.pMInterview.findFirst.mockResolvedValue(interview())
+  mocks.pMInterview.findUnique.mockResolvedValue(interview())
+  mocks.agentConversation.create.mockResolvedValue({ id: "conversation-1" })
+  mocks.agentConversation.findFirst.mockResolvedValue({ id: "conversation-1", interviewProcessingJson: JSON.stringify({ status: "PENDING", interviewId: ids.interview }) })
+  mocks.transaction.mockImplementation(async callback => callback({ pMInterview: mocks.pMInterview, agentConversation: mocks.agentConversation }))
   mocks.participantToken.findFirst.mockResolvedValue({ id: "internal-token-id", studyId: "study-1", kind: "PM_INTERNAL", tokenHash: "a".repeat(64) })
   mocks.respond.mockResolvedValue({ message: "What observation would challenge that?", replayed: false })
   mocks.complete.mockResolvedValue({ completed: true })
@@ -105,57 +113,51 @@ describe("authenticated PM interview transport", () => {
     expect(call.buildPrompt({ defaultPrompt: "Interview rules" })).toContain("Never describe PM interpretation as customer evidence")
   })
 
-  it("completes the canonical session before claiming generation from its reloaded transcript", async () => {
-    const completed = interview({ session: { ...interview().session, status: "COMPLETED" } })
-    mocks.pMInterview.findFirst.mockResolvedValueOnce(interview()).mockResolvedValue(completed)
-
+  it("completes the canonical session before linking the core-agent conversation without generating a proposal", async () => {
     await expect(completePmInterview(scope, actor, ids.interview)).resolves.toMatchObject({
-      brief: "The PM clarified the opportunity.",
-      proposedFields: { title: { transcriptTurnIds: [ids.turn] } },
+      conversationId: "conversation-1", conversationUrl: "/acme/product/agent?c=conversation-1", processingStatus: "PENDING",
     })
-
-    expect(mocks.complete).toHaveBeenCalledTimes(1)
-    expect(mocks.complete.mock.invocationCallOrder[0]).toBeLessThan(mocks.pMInterview.updateMany.mock.invocationCallOrder[0])
-    expect(mocks.pMInterview.updateMany.mock.calls[0][0]).toMatchObject({
-      where: expect.objectContaining({ initiatingUserId: ids.owner }),
-      data: expect.objectContaining({ generationState: "GENERATING", sourceFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) }),
-    })
-    expect(mocks.pMInterview.updateMany.mock.calls[1][0]).toMatchObject({
-      where: expect.objectContaining({ generationState: "GENERATING" }),
-      data: expect.objectContaining({ generationState: "READY" }),
-    })
+    expect(mocks.complete).toHaveBeenCalledOnce()
+    expect(mocks.complete.mock.invocationCallOrder[0]).toBeLessThan(mocks.transaction.mock.invocationCallOrder[0])
+    expect(mocks.agentConversation.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ workspaceId: "workspace-1", userId: ids.owner }),
+    }))
+    expect(mocks.pMInterview.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: ids.interview, agentConversationId: null, disposition: "PENDING" },
+      data: expect.objectContaining({ agentConversationId: "conversation-1", generationClaimId: null }),
+    }))
+    expect(mocks.agent).not.toHaveBeenCalled()
   })
 
-  it("replays an already-ready proposal without completing or allocating another model call", async () => {
-    const readyProposal = await mocks.agent()
-    mocks.agent.mockClear()
-    mocks.pMInterview.findFirst.mockResolvedValue(interview({ generationState: "READY", proposalJson: readyProposal }))
-
-    await expect(completePmInterview(scope, actor, ids.interview)).resolves.toMatchObject({ brief: "The PM clarified the opportunity." })
+  it("replays an already-linked conversation without completing or allocating another model call", async () => {
+    mocks.pMInterview.findFirst.mockResolvedValue(interview({ agentConversationId: "conversation-1" }))
+    await expect(completePmInterview(scope, actor, ids.interview)).resolves.toMatchObject({ conversationId: "conversation-1" })
     expect(mocks.complete).not.toHaveBeenCalled()
     expect(mocks.agent).not.toHaveBeenCalled()
+    expect(mocks.transaction).not.toHaveBeenCalled()
     expect(mocks.pMInterview.updateMany).not.toHaveBeenCalled()
   })
 
-  it("preserves the transcript on generation failure and succeeds on an explicit retry", async () => {
-    const completed = interview({ session: { ...interview().session, status: "COMPLETED" } })
-    mocks.pMInterview.findFirst.mockResolvedValueOnce(interview()).mockResolvedValueOnce(completed)
-    mocks.agent.mockRejectedValueOnce(new Error("synthetic provider failure"))
+  it("retains canonical completion after a handoff failure and retries linking without model generation", async () => {
+    mocks.transaction.mockRejectedValueOnce(new Error("synthetic transaction failure"))
+    await expect(completePmInterview(scope, actor, ids.interview)).rejects.toThrow("synthetic transaction failure")
+    expect(mocks.complete).toHaveBeenCalledOnce()
+    expect(mocks.pMInterview.updateMany).not.toHaveBeenCalled()
+    mocks.pMInterview.findFirst.mockResolvedValue(interview({ session: { ...interview().session, status: "COMPLETED" } }))
+    await expect(completePmInterview(scope, actor, ids.interview)).resolves.toMatchObject({ conversationId: "conversation-1" })
+    expect(mocks.agentConversation.create).toHaveBeenCalledOnce()
+    expect(mocks.agent).not.toHaveBeenCalled()
+  })
 
-    await expect(completePmInterview(scope, actor, ids.interview)).rejects.toMatchObject({ status: 502 })
-    expect(mocks.pMInterview.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ generationState: "FAILED", generationFailureCode: "GENERATION_FAILED" }),
-    }))
-
-    mocks.pMInterview.findFirst.mockReset()
-    mocks.pMInterview.findFirst.mockResolvedValueOnce(interview({ generationState: "FAILED", session: { ...interview().session, status: "COMPLETED" } })).mockResolvedValueOnce(completed)
-    mocks.agent.mockResolvedValueOnce(JSON.stringify({
-      version: 1, brief: "Retry succeeded.",
-      proposedFields: { title: { value: "New teams struggle to activate", transcriptTurnIds: [ids.turn] } },
-      openQuestions: [], suggestedNextSteps: [], unknowns: [],
-    }))
-
-    await expect(completePmInterview(scope, actor, ids.interview)).resolves.toMatchObject({ brief: "Retry succeeded." })
-    expect(mocks.pMInterview.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ generationState: "READY" }) }))
+  it("keeps a legacy ready proposal unchanged when Finish hands off to the core agent", async () => {
+    const proposalJson = JSON.stringify({ brief: "Historical proposal" })
+    const legacy = interview({ generationState: "READY", proposalJson })
+    mocks.pMInterview.findFirst.mockResolvedValue(legacy)
+    mocks.pMInterview.findUnique.mockResolvedValue(legacy)
+    await expect(completePmInterview(scope, actor, ids.interview)).resolves.toMatchObject({ conversationId: "conversation-1" })
+    expect(mocks.complete).toHaveBeenCalledOnce()
+    expect(mocks.agent).not.toHaveBeenCalled()
+    expect(mocks.pMInterview.updateMany.mock.calls[0][0].data).not.toHaveProperty("proposalJson")
+    expect(legacy.proposalJson).toBe(proposalJson)
   })
 })

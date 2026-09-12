@@ -49,6 +49,7 @@ const mockCustomFieldValue = {
   upsert: vi.fn(),
 };
 const mockApiKey = {
+  deleteMany: vi.fn(),
   create: vi.fn(),
   findFirst: vi.fn(),
   update: vi.fn(),
@@ -111,9 +112,12 @@ const mockReviewRevision = { deleteMany: vi.fn() };
 const mockReviewRequest = { updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
-const mockResearchDelete = { deleteMany: vi.fn() };
+const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
 
 const mockPrisma = {
+  agentMessage: { deleteMany: vi.fn() },
+  agentAuditLog: { deleteMany: vi.fn() },
+  agentConversation: { deleteMany: vi.fn() },
   $transaction: vi.fn(),
   agent: { findMany: vi.fn().mockResolvedValue([]) },
   agentWorkspaceGrant: { deleteMany: vi.fn(), updateMany: vi.fn() },
@@ -823,6 +827,9 @@ describe("deleteWorkspace", () => {
 
     const result = await deleteWorkspace("org", "ws");
 
+    expect(mockApiKey.deleteMany).toHaveBeenCalledWith({ where: { scopeWorkspaceId: "ws-1", scopeConversationId: { not: null } } });
+    expect(mockResearchDelete.updateMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, data: { agentConversationId: null } });
+    expect(mockPrisma.agentConversation.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockReleaseDispatch.deleteMany).toHaveBeenCalled();
     expect(mockReleaseRunTask.deleteMany).toHaveBeenCalled();
     expect(mockReleaseRun.deleteMany).toHaveBeenCalled();
