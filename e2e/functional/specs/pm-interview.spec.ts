@@ -146,6 +146,13 @@ test.describe("Capture — PM interview", () => {
         await page.reload()
         await expect(page.getByText("PM interview brief")).toBeVisible({ timeout: 10_000 })
         await expect(page.getByRole("heading", { name: "Proposed changes" })).toBeVisible()
+        // SSR headings are visible before hydration. A controlled Base UI
+        // checkbox transition proves React is handling input before screenshots
+        // touch caret styles or fill replaces a controlled textarea value.
+        const deselectedProposal = page.locator("label").filter({ has: page.getByText(target.deselectedField, { exact: true }) })
+        const deselectedCheckbox = deselectedProposal.getByRole("checkbox")
+        await deselectedCheckbox.uncheck()
+        await expect(deselectedCheckbox).not.toBeChecked()
         if (index === 0) {
           await page.screenshot({ path: "public/screenshots/docs/pm-interview-review-desktop.png", fullPage: true })
           await page.setViewportSize({ width: 390, height: 844 })
@@ -157,12 +164,13 @@ test.describe("Capture — PM interview", () => {
         const editedTitle = `Clarified ${target.type.toLowerCase()} ${suffix}`
         const titleProposal = page.locator("label").filter({ has: page.getByText("title", { exact: true }) })
         await titleProposal.locator("textarea").fill(editedTitle)
-        const deselectedProposal = page.locator("label").filter({ has: page.getByText(target.deselectedField, { exact: true }) })
-        await deselectedProposal.getByRole("checkbox").uncheck()
+        await titleProposal.locator("textarea").blur()
+        await expect(titleProposal.locator("textarea")).toHaveValue(editedTitle)
         const [applyResponse] = await Promise.all([
           page.waitForResponse(response => response.url().includes(`/api/pm-interviews/${interviewId}/apply`) && response.request().method() === "POST", { timeout: 20_000 }),
           page.getByRole("button", { name: "Apply selected changes" }).click(),
         ])
+        expect(applyResponse.request().postDataJSON().editedValues.title).toBe(editedTitle)
         expect(applyResponse.ok(), await applyResponse.text()).toBe(true)
         await expect(page.getByText("Proposal applied.")).toBeVisible({ timeout: 10_000 })
 
