@@ -226,6 +226,41 @@ its `client_id` in Geode's Compass preset removes the per-install DCR round
 trip and makes the consent screen trustworthy. Worth doing once the dynamic
 path works — not before.
 
+## Client compatibility — Geode first, everyone else not foreclosed
+
+Geode is the first consumer, not the only target. The test for every phase-1
+decision is therefore: does it *also* work for a client connecting directly?
+Each Geode-driven choice below is strictly more permissive than the spec
+minimum, so none of them narrows the door.
+
+| Phase-1 decision | Driven by | Effect on other clients |
+|---|---|---|
+| Expose `registration_endpoint` (DCR) | Geode (blocking) | **Universal win.** Claude falls back to DCR when CIMD isn't advertised; Cursor is DCR-first; VS Code does DCR or a built-in static client; `mcp-remote` needs DCR. DCR alone covers every client shipping today |
+| Port-agnostic loopback matching | Geode (blocking) | Also required by Claude Code (`http://localhost/callback` + `http://127.0.0.1/callback`, ephemeral port) |
+| `resource` optional, audience defaulted | Geode, `mcp-remote` | Strictly more permissive. Clients that *do* send it still get exact audience binding |
+| Refresh token issued unconditionally | Geode | Claude appends `offline_access` when advertised and gets a refresh token either way. No conflict |
+| PRM at path-inserted **and** root URL | Geode discovers from the resource URL | Matches the spec's client fallback order — path-inserted, then root |
+| Hand-rolled 401/403 challenge with `scope` | Claude (consent breadth) | Not needed by Geode, included anyway — without it Claude requests every scope in `scopes_supported` |
+| Both `oauth-authorization-server` and `openid-configuration` | Spec (clients MUST support both) | Universal |
+
+Nothing here is a one-way door. The remaining gaps are additive and land in
+phase 2: **CIMD** (matters only when DCR is eventually removed — deprecated
+features get ≥12 months, and no shipping client requires CIMD today) and **RFC
+9207 `iss`** (clients proceed normally when an AS neither advertises nor sends
+it, so deferring is safe; it is also only a few lines, so fold it into phase 1
+if convenient).
+
+Two failure modes are invisible to a Geode-only test and must be checked
+separately before claiming broad support:
+
+- **Consent breadth.** Only surfaces with a client that honors the challenge's
+  `scope` parameter. Keep `scopes_supported` short and verify Claude's consent
+  screen lists what you expect, not everything.
+- **The 10 s discovery/registration/token timeout** Claude enforces. A cold
+  Vercel function plus a DSQL IAM-signed connection can approach it. Geode's
+  5-minute consent window hides this entirely. Keep the `.well-known` documents
+  static and DB-free, and measure `/token` on a cold preview.
+
 ## Protocol surface
 
 ### Resource server
@@ -511,19 +546,20 @@ path-insertion gaps have been closed before hand-rolling around them.
 
 ## Phasing
 
-**Phase 1 — make the Geode broker work end to end.** This is the shippable
-unit, and the broker defines its exact contents: PRM at the path-inserted URL,
-AS metadata at both well-known paths, **DCR**, authorize + consent, token
-endpoint with PKCE and lenient `resource`, refresh tokens issued by default,
-RFC 7009 revocation for public clients, opaque access tokens,
-`mcp:read`/`mcp:write`, the `validateMcpAuth` branch, and the two NextAuth
-fixes. Metadata without a working AS is worse than no metadata.
+**Phase 1 — a general OAuth AS, with Geode as the acceptance test.** PRM at the
+path-inserted and root URLs, AS metadata at both well-known paths, **DCR**,
+authorize + consent, token endpoint with PKCE and lenient `resource`, refresh
+tokens issued by default, RFC 7009 revocation for public clients, opaque access
+tokens, `mcp:read`/`mcp:write`, the `validateMcpAuth` branch, and the two
+NextAuth fixes. Nothing in this set is Geode-specific (see *Client
+compatibility*) — Geode is simply the first client to prove it end to end, and
+a direct Claude connection should be verified in the same PR. Metadata without
+a working AS is worse than no metadata.
 
 **Phase 2 — lifecycle and reach.** Refresh rotation with reuse detection, a
 "Connected apps" panel in Settings (client, scopes, last used, revoke)
-alongside the existing API-keys panel, CIMD support plus RFC 9207 `iss` for
-direct Claude.ai / Cursor connections, and a verified static client for Agent
-Threads shipped as a Geode preset.
+alongside the existing API-keys panel, CIMD plus RFC 9207 `iss`, and a verified
+static client for Agent Threads shipped as a Geode preset.
 
 **Phase 3 — hardening.** Workspace-scoped consent, a verified-client allowlist,
 audit log of authorizations.
@@ -545,13 +581,17 @@ Static `cmp_…` API keys stay supported indefinitely for server-to-server use;
   on the response → `POST /token` → `initialize` against `/api/mcp` → assert a
   foreign-`resource` token is rejected. This is exactly what a real client
   does.
-- **Manual (the acceptance test):** add Compass as an OAuth MCP server in Geode
-  via `mcp_register_server` with `type: "oauth"`, complete consent in the Web
-  Viewer, and call a Compass tool through `OAuthMcpProxy`. Then force a 401 to
-  prove the proxy's auto-refresh path, and revoke from Settings. Secondary:
-  Claude and one non-Anthropic client (Cursor or VS Code) against a preview
-  deploy. Screenshots of the consent screen per the `pr-checklist`
-  visual-verification steps.
+- **Manual — per-client acceptance matrix.** Phase 1 is not done until row 1
+  and row 2 both pass; rows 3–4 are strong signals that the AS is genuinely
+  general rather than Geode-shaped. Screenshots of each consent screen per the
+  `pr-checklist` visual-verification steps.
+
+  | # | Client | Proves |
+  |---|---|---|
+  | 1 | **Geode / Agent Threads** — `mcp_register_server` with `type: "oauth"`, consent in the Web Viewer, call a tool through `OAuthMcpProxy`, force a 401 to exercise auto-refresh, then revoke from Settings | DCR, loopback port-agnosticism, absent `resource`, refresh, RFC 7009 |
+  | 2 | **Claude** (claude.ai or Desktop connector) against a preview deploy | DCR fallback when CIMD is unadvertised, `https://claude.ai/api/mcp/auth_callback` redirect, consent breadth from the challenge's `scope`, and the 10 s timeout budget on a cold function |
+  | 3 | **`mcp-remote`** | The lowest-common-denominator DCR path |
+  | 4 | **Cursor or VS Code** | A second independent DCR implementation |
 - **Cross-repo regression:** re-authorize twice in a row from the same Geode
   install. The second authorization binds a different ephemeral port — if
   port-agnostic loopback matching is wrong, this is where it fails, and only
