@@ -172,7 +172,7 @@ export async function createPmInterview(scope: PmInterviewScope, actor: PmInterv
     prisma.researchParticipantToken.create({ data: { id: participantTokenId, studyId, tokenHash: participantTokenHash, kind: "PM_INTERNAL", expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000), createdById: actor.userId } }),
     prisma.researchSession.create({ data: { id: sessionId, studyId, participantTokenId, resumeTokenHash, modality: "CHAT", status: "IN_PROGRESS", startedAt: now, lastActiveAt: now, nextSequence: 1, updatedAt: now } }),
     prisma.pMInterview.create({ data: { id, workspaceId, studyId, sessionId, initiatingUserId: actor.userId, targetType, targetId: input.targetId, contextSnapshotJson: JSON.stringify(snapshot), fieldBaselineJson: JSON.stringify(baseline), updatedAt: now } }),
-    prisma.researchTurn.create({ data: { sessionId, role: "INTERVIEWER", sequence: 0, content: `Let’s flesh this out. ${guide[0].text}` } }),
+    prisma.researchTurn.create({ data: { sessionId, role: "INTERVIEWER", sequence: 0, content: `Let’s refine this. ${guide[0].text}` } }),
   ])
   return { id, studyId, sessionId }
 }

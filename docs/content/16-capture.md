@@ -32,9 +32,9 @@ Mobile examples: [discovery voice](/screenshots/docs/browser-voice-customer_inte
 
 Capture is the starting point for customer feedback, ideas, and research. It keeps raw input connected to the opportunities and decisions it informs.
 
-## Flesh out a product item with a PM interview
+## Refinement
 
-Workspace members can start **Flesh this out** from an opportunity, solution,
+Workspace members can start **Refine** from an opportunity, solution,
 assumption, or experiment, or choose **PM interview** in Capture and select an
 existing item. Compass uses only that item, its parent chain, linked outcome, and
 directly linked feedback or evidence. It discloses when bounded context was omitted.

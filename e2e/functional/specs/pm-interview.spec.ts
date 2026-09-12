@@ -94,7 +94,7 @@ test.describe("Capture — PM interview", () => {
       })
       for (const [index, target] of targets.entries()) {
         await page.goto(`${base}/capture/pm/new`)
-        await expect(page.getByRole("heading", { name: "Flesh this out" })).toBeVisible()
+        await expect(page.getByRole("heading", { name: "Refinement" })).toBeVisible()
         if (index === 0) {
           await page.setViewportSize({ width: 1280, height: 960 })
           await page.screenshot({ path: "public/screenshots/docs/pm-interview-picker-desktop.png", fullPage: true })
