@@ -4,6 +4,9 @@
 - **Date:** 2026-09-12
 - **Target spec revision:** MCP **2026-07-28** (current; substantively identical
   to `draft` for authorization)
+- **Primary consumer:** the OAuth MCP broker already shipped in Geode / Agent
+  Threads (`obsidian-claude-threads`, `src/OAuthMcpFlow.ts`). Its observed
+  behavior is normative for this design — see *Client profile* below.
 - **Scope:** Add MCP-conformant OAuth 2.1 discovery and authorization to
   `POST /api/mcp`, so an MCP client can connect with a URL alone. Does not
   change the tool catalog, the `McpActor` authorization model, or any existing
@@ -132,6 +135,15 @@ back to DCR."* Meanwhile `mcp-remote` cannot perform the CIMD flow at all even
 when advertised (geelen/mcp-remote#224), Cursor is reportedly DCR-first, and
 Claude Code has had repeated CIMD regressions.
 
+**The Geode broker settles this: DCR is required.** It is DCR-only —
+`OAuthMcpRegistry.ts` hard-fails with *"authorization server does not support
+Dynamic Client Registration and no clientId was supplied"* when
+`registration_endpoint` is absent, and there is no CIMD code path in
+`OAuthMcpFlow.ts`. So `registration_endpoint` is a **blocking** requirement for
+the primary consumer, not a compatibility nicety. CIMD is additive — ship it for
+direct Claude.ai / Cursor connections and for forward-compatibility, but it
+cannot replace DCR here.
+
 **Decision: implement both.** Advertise CIMD (spec-preferred, forward-looking)
 *and* expose `registration_endpoint` (what deployed clients actually use).
 Under CIMD the `client_id` **is** an HTTPS URL with a path component; the AS
@@ -144,6 +156,75 @@ hand-written.
 
 Do **not** emit `"registration_endpoint": null` when unsupported — Claude Code
 Zod-fails on it (anthropics/claude-code#38102). Omit the key entirely.
+
+## Client profile — the Geode Agent Threads broker
+
+Geode already ships a complete OAuth 2.1 + PKCE broker for OAuth-gated remote
+MCP servers. Compass supplying the authorization side is the other half of a
+one-click setup. Because the broker is *already written*, its actual behavior —
+not the spec's ideal — defines what Compass must accept.
+
+Shape: the broker is a **per-user public client running on the user's own
+machine**, with a loopback redirect. It is not a multi-tenant proxy, so the
+confused-deputy hazard that applies to hosted MCP proxies does not apply here.
+`OAuthMcpProxy.ts` then presents the remote server to the local harness as an
+ordinary `http` MCP server behind an `X-Capability-Token`, injecting
+`Authorization: Bearer <access_token>` on the way out — so on this path Claude's
+own DCR/CIMD quirks never come into play. The broker is the only OAuth client.
+
+Verified behavior, read from source:
+
+| Aspect | What the broker does | What Compass must therefore do |
+|---|---|---|
+| Discovery | `discoverOAuthServerInfo(entry.authorizationServerUrl ?? entry.url)` — falls back to the **resource URL**, so the SDK performs RFC 9728 path insertion | **Must** serve PRM at `/.well-known/oauth-protected-resource/api/mcp` — the root path alone is not enough |
+| Registration | DCR only, via the SDK's `registerClient` | **Must** expose `registration_endpoint` |
+| Client metadata | `client_name: "Agent Threads"`, `token_endpoint_auth_method: "none"`, `grant_types: ["authorization_code","refresh_token"]`, `response_types: ["code"]` | **Must** accept public clients (`"none"`) |
+| Redirect URI at DCR | `http://127.0.0.1/callback` — **portless** | See below |
+| Redirect URI at authorize | `http://127.0.0.1:<ephemeral>/callback` — a **different port every time** | **Must** match loopback port-agnostically |
+| PKCE | Always `S256`, verifier generated per flow | Advertise `code_challenge_methods_supported` |
+| `state` | 16 random bytes, validated on callback | — |
+| `resource` (RFC 8707) | **Never sent**, at authorize or token exchange | **Must not** require it — default the audience |
+| `iss` (RFC 9207) | Ignored on the callback | Harmless to emit |
+| Refresh | `refreshAuthorization` with `client_id` only; proxy auto-refreshes on upstream 401 | **Must** issue a refresh token for the auth-code grant |
+| Revocation | RFC 7009 POST with `token`, `token_type_hint`, `client_id`, no secret | `/revoke` must accept a public client |
+| Consent timeout | 5 minutes | Comfortable |
+
+Three of these are load-bearing enough to restate:
+
+1. **Port-agnostic loopback matching is blocking, not optional.** The broker
+   registers a portless `http://127.0.0.1/callback` and then authorizes with
+   whatever ephemeral port its callback server binds. The code comments name
+   the dependency explicitly — RFC 8252 §7.3, *"the authorization server MUST
+   allow any port to be specified at the time of the request"* — and flag that
+   *"an AS that instead enforces exact redirect_uri port matching will reject
+   the later authorize() callback."* Compass must compare scheme + host + path
+   and ignore the port for `127.0.0.1` and `localhost`. Everything else stays
+   exact string matching.
+2. **`resource` must be optional.** The broker never sends it, and neither does
+   `mcp-remote`. The spec says clients MUST send it, but a Compass that
+   *rejects* on its absence breaks its own primary consumer on day one. Rule:
+   when `resource` is absent, default the token's audience to Compass's
+   canonical MCP URI; when present and different, reject. Compass is the only
+   resource this AS serves, so the default is unambiguous. (Adding `resource`
+   to the broker is a good follow-up on the Geode side — it just must not be a
+   precondition.)
+3. **Issue refresh tokens unconditionally for the authorization-code grant.**
+   The broker requests the `refresh_token` grant at DCR but does **not** append
+   `offline_access` to its scope string, and its proxy depends on refresh to
+   recover from a 401. Gating refresh-token issuance on an `offline_access`
+   scope — which is what Claude's behavior would suggest — would leave every
+   Geode user re-authorizing by hand on token expiry.
+
+### Static client registration as a later optimization
+
+The broker short-circuits DCR entirely when `entry.clientId` is set. Since
+every Geode install otherwise registers its own dynamic client with the same
+`client_name: "Agent Threads"`, Compass will accumulate one registered client
+per install, and every user's consent screen will name an unverified client.
+Pre-seeding a single **verified static client** for Agent Threads and shipping
+its `client_id` in Geode's Compass preset removes the per-install DCR round
+trip and makes the consent screen trustworthy. Worth doing once the dynamic
+path works — not before.
 
 ## Protocol surface
 
@@ -364,15 +445,20 @@ Optionally add a workspace picker on the consent screen, writing
   Advertise `code_challenge_methods_supported` or clients must refuse to
   proceed.
 - **Exact `redirect_uri` string matching** against registered values — no
-  wildcards, no prefix matching — **plus a port-agnostic loopback exception**.
-  Claude Code uses an RFC 8252 loopback on an ephemeral port and declares
-  `http://localhost/callback` and `http://127.0.0.1/callback`; hosted Claude
-  surfaces use `https://claude.ai/api/mcp/auth_callback`. Both must work.
-- **Resource indicators (RFC 8707).** Capture `resource` at **both** authorize
-  and token, bind the token's audience to
-  `https://compass.rbcodelabs.com/api/mcp`, and reject any token at the
-  resource server whose `resource` differs. Never accept a token in a URI
-  query string.
+  wildcards, no prefix matching — **plus a port-agnostic loopback exception**
+  (RFC 8252 §7.3). Required by the Geode broker (registers portless
+  `http://127.0.0.1/callback`, authorizes on an ephemeral port) and by Claude
+  Code, which declares both `http://localhost/callback` and
+  `http://127.0.0.1/callback`. Hosted Claude surfaces use
+  `https://claude.ai/api/mcp/auth_callback`. All must work. Ignore the port
+  **only** for the two loopback hosts; never for any other host.
+- **Resource indicators (RFC 8707), leniently.** Accept `resource` at both
+  authorize and token and bind the token's audience to
+  `https://compass.rbcodelabs.com/api/mcp`. **Absent → default to that
+  audience; present and different → reject.** Do not make presence a
+  precondition: the Geode broker and `mcp-remote` both omit it. The resource
+  server still enforces the audience on every request, so the security
+  property is preserved. Never accept a token in a URI query string.
 - **RFC 9207 `iss`** on the authorization response, with
   `authorization_response_iss_parameter_supported: true`.
 - **Single-use codes, 60 s TTL**, consumed atomically. On DSQL use a
@@ -425,18 +511,22 @@ path-insertion gaps have been closed before hand-rolling around them.
 
 ## Phasing
 
-**Phase 1 — connect by URL.** PRM + AS metadata (both well-known paths), CIMD
-**and** DCR, authorize + consent, token endpoint with PKCE + RFC 8707 + RFC
-9207, opaque access tokens, `mcp:read`/`mcp:write`, the `validateMcpAuth`
-branch, and the two NextAuth fixes. This is the shippable unit; metadata
-without a working AS is worse than no metadata.
+**Phase 1 — make the Geode broker work end to end.** This is the shippable
+unit, and the broker defines its exact contents: PRM at the path-inserted URL,
+AS metadata at both well-known paths, **DCR**, authorize + consent, token
+endpoint with PKCE and lenient `resource`, refresh tokens issued by default,
+RFC 7009 revocation for public clients, opaque access tokens,
+`mcp:read`/`mcp:write`, the `validateMcpAuth` branch, and the two NextAuth
+fixes. Metadata without a working AS is worse than no metadata.
 
-**Phase 2 — lifecycle.** Refresh rotation with reuse detection, revocation
-endpoint, and a "Connected apps" panel in Settings (client, scopes, last used,
-revoke) alongside the existing API-keys panel.
+**Phase 2 — lifecycle and reach.** Refresh rotation with reuse detection, a
+"Connected apps" panel in Settings (client, scopes, last used, revoke)
+alongside the existing API-keys panel, CIMD support plus RFC 9207 `iss` for
+direct Claude.ai / Cursor connections, and a verified static client for Agent
+Threads shipped as a Geode preset.
 
-**Phase 3 — hardening.** Workspace-scoped consent, a verified-client allowlist
-for known-good MCP clients, audit log of authorizations.
+**Phase 3 — hardening.** Workspace-scoped consent, a verified-client allowlist,
+audit log of authorizations.
 
 Static `cmp_…` API keys stay supported indefinitely for server-to-server use;
 `MCP_API_KEY` service-account behavior is unchanged.
@@ -455,10 +545,17 @@ Static `cmp_…` API keys stay supported indefinitely for server-to-server use;
   on the response → `POST /token` → `initialize` against `/api/mcp` → assert a
   foreign-`resource` token is rejected. This is exactly what a real client
   does.
-- **Manual:** connect Claude and one non-Anthropic client (Cursor or VS Code)
-  against a preview deploy, plus `mcp-remote` to prove the DCR fallback,
-  with screenshots of the consent screen per the `pr-checklist`
+- **Manual (the acceptance test):** add Compass as an OAuth MCP server in Geode
+  via `mcp_register_server` with `type: "oauth"`, complete consent in the Web
+  Viewer, and call a Compass tool through `OAuthMcpProxy`. Then force a 401 to
+  prove the proxy's auto-refresh path, and revoke from Settings. Secondary:
+  Claude and one non-Anthropic client (Cursor or VS Code) against a preview
+  deploy. Screenshots of the consent screen per the `pr-checklist`
   visual-verification steps.
+- **Cross-repo regression:** re-authorize twice in a row from the same Geode
+  install. The second authorization binds a different ephemeral port — if
+  port-agnostic loopback matching is wrong, this is where it fails, and only
+  here.
 - **Migration:** new tables via `/api/admin/migrate` using the `dsql-migrate`
   skill; `ASYNC` indexes; one DDL per transaction.
 
@@ -485,8 +582,12 @@ routing.
    with rate limits?
 3. Preview deploys: per-branch OAuth (feasible via `VERCEL_BRANCH_URL`) or
    production-only?
-4. Is this net-new, or does it converge with the `feat/oauth-mcp-broker` work
-   running in parallel sessions? Resolve before implementation starts.
+4. Should the Geode broker be updated to send RFC 8707 `resource`? Good
+   hygiene and spec-conformant, but Compass must tolerate its absence either
+   way (see *Client profile*), so this is not a blocker in either direction.
+5. Phase 2 or sooner for the verified static Agent Threads client? It removes a
+   round trip and fixes the "unverified client" consent wording, at the cost of
+   coordinating a `client_id` across two repos.
 
 ## References
 
