@@ -17,6 +17,18 @@ import { test, expect } from "../fixtures/index";
 import type { Page } from "@playwright/test";
 
 async function dragTo(page: Page, source: ReturnType<Page["locator"]>, targetBox: { x: number; y: number; width: number; height: number }) {
+  // Each board column body is its own `overflow-y-auto` scroll region, and new
+  // tasks are appended to the bottom of their column. Once a column holds more
+  // cards than fit, the newest card sits outside the visible part of that
+  // region — but `boundingBox()` still reports its geometric box and Playwright
+  // still calls it visible, so nothing upstream catches it. Driving raw
+  // pointer events at those coordinates presses on empty page: measured at a
+  // 7-card TODO column, the handle's box was y=935 with a 720px-tall viewport
+  // and `document.elementFromPoint` returned null, so no drag ever started and
+  // the awaited server action never fired. Scroll the handle into its column's
+  // view first, then measure — unlike Playwright's own actions, mouse.* does
+  // no auto-scrolling.
+  await source.scrollIntoViewIfNeeded();
   const sourceBox = await source.boundingBox();
   if (!sourceBox) throw new Error("drag source has no bounding box");
 

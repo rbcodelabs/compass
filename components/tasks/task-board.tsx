@@ -52,6 +52,16 @@ function findStatus(columns: ColumnMap, taskId: string): TaskStatus | null {
   return null;
 }
 
+/**
+ * Seeds its columns from `initialTasks` once, on mount, so drag-and-drop and the
+ * other card edits can move cards optimistically without a revalidation
+ * clobbering them.
+ *
+ * That makes the board deliberately *not* reactive to `initialTasks` changing.
+ * A filter change therefore has to remount it, which the page does by passing a
+ * `key` built from `taskBoardFilterKey` — see that helper for why keying on the
+ * filter beats reacting to the task set.
+ */
 export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, members }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/tasks`;
 

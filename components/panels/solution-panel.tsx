@@ -60,6 +60,13 @@ type SolutionData = {
 const STATUS = SOLUTION_STATUS;
 const STATUS_ORDER = SOLUTION_STATUS_ORDER;
 
+// Which sections a solution opens on first visit is a per-type editorial call,
+// so it is declared here rather than inside Section: a solution is read
+// top-down for what it is and what it assumes; evidence, roadmap, plan and
+// artifacts are reference material you open when you want them. After a reader
+// toggles a section, their stored preference wins over these defaults.
+const SECTION = { collapsible: true, panelType: "solution" } as const;
+
 export function SolutionPanel({
   id,
   orgSlug,
@@ -130,11 +137,11 @@ export function SolutionPanel({
         className="text-sm text-foreground/80 leading-relaxed"
       />
 
-      <Section label="Opportunity">
+      <Section {...SECTION} defaultOpen label="Opportunity" empty={oppItems.length === 0}>
         <RelationList items={oppItems} empty="No parent opportunity." />
       </Section>
 
-      <Section label="Assumptions" count={data.assumptions.length}>
+      <Section {...SECTION} defaultOpen label="Assumptions" count={data.assumptions.length}>
         {data.opportunity ? (
           <SolutionAssumptions
             // Remount when the assumption set actually changes (add/delete)
@@ -153,7 +160,7 @@ export function SolutionPanel({
       </Section>
 
       {data.opportunity && (
-        <Section label="Evidence" count={data.evidence.length}>
+        <Section {...SECTION} label="Evidence" count={data.evidence.length}>
           <div className="flex flex-col gap-2">
             <AddEvidenceDialog
               workspaceId={data.opportunity.workspaceId}
@@ -167,7 +174,7 @@ export function SolutionPanel({
         </Section>
       )}
 
-      <Section label="Roadmap" count={data.roadmapItems.length}>
+      <Section {...SECTION} label="Roadmap" count={data.roadmapItems.length}>
         <div className="flex flex-col gap-2">
           <RelationList items={roadmapItems} empty="Not on the roadmap." />
           {canPromote && data.opportunity && (
@@ -194,6 +201,7 @@ export function SolutionPanel({
       )}
 
       <Section
+        {...SECTION}
         label="Current Plan"
         count={data.comments.filter((comment) => comment.commentType === "PLAN").length}
       >
@@ -208,7 +216,7 @@ export function SolutionPanel({
       </Section>
 
       {data.opportunity && (
-        <Section label="Artifacts" count={data.artifacts.length}>
+        <Section {...SECTION} label="Artifacts" count={data.artifacts.length}>
           <SolutionArtifacts
             solutionId={data.id}
             workspaceId={data.opportunity.workspaceId}

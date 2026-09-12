@@ -13,6 +13,7 @@ import { normalizeWorkspaceRole } from "@/lib/roles";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { buildTaskCards } from "@/lib/task-read-model";
 import { getWorkspace } from "@/lib/workspace";
+import { taskBoardFilterKey } from "@/lib/task-filters";
 import { parseAssigneeFilter, resolveTaskAssignees, taskLinkScope } from "@/lib/task-assignment";
 
 export const metadata = {
@@ -133,7 +134,15 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
         <TaskListView tasks={tasks} orgSlug={orgSlug} workspaceSlug={workspaceSlug} members={members} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
+          {/*
+            The board seeds its column state on mount and is intentionally not
+            reactive to `initialTasks`, so that optimistic drag-and-drop
+            survives revalidation. Keying it on the active filters remounts it
+            when — and only when — the filter changes, which is the one moment
+            the client should drop its optimistic state and show server truth.
+          */}
           <TaskBoard
+            key={taskBoardFilterKey({ squad: squadFilter, assignee: assigneeFilter, priority: priorityFilter })}
             initialTasks={tasks}
             workspaceId={workspace.id}
             orgSlug={orgSlug}

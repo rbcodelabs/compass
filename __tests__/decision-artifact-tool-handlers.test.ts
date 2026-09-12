@@ -27,7 +27,9 @@ it.each(["decision", "review"])("adds live artifact metadata to the %s getter wi
   mocks.tracked.mockResolvedValue(request); mocks.review.mockResolvedValue(request)
   mocks.artifacts.mockResolvedValue([{ id: "artifact", title: "Prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }])
   const result = kind === "decision" ? await getDecision(input) : await getReviewRequest(input)
-  expect(result.structuredContent.data).toEqual({ ...request, artifacts: [{ id: "artifact", title: "Prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }] })
+  // reviewUrl is additive alongside artifacts and is null here because this file's
+  // prisma mock has no `workspace` delegate to resolve org/workspace slugs from.
+  expect(result.structuredContent.data).toEqual({ ...request, reviewUrl: null, artifacts: [{ id: "artifact", title: "Prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }] })
   expect(mocks.artifacts).toHaveBeenCalledWith("workspace", "decision")
 })
 it("does not expose supporting links for legacy reviews", async () => {
