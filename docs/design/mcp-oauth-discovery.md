@@ -113,7 +113,7 @@ Both are small, both are required, and neither is about OAuth:
   validate it as a same-origin *relative path* before using it — an
   unvalidated passthrough here is an open redirect.
 
-## Client registration — CIMD **and** DCR
+## Client registration — DCR only
 
 This is the part that changed recently and is easy to get wrong.
 
@@ -140,22 +140,28 @@ Claude Code has had repeated CIMD regressions.
 Dynamic Client Registration and no clientId was supplied"* when
 `registration_endpoint` is absent, and there is no CIMD code path in
 `OAuthMcpFlow.ts`. So `registration_endpoint` is a **blocking** requirement for
-the primary consumer, not a compatibility nicety. CIMD is additive — ship it for
-direct Claude.ai / Cursor connections and for forward-compatibility, but it
-cannot replace DCR here.
+the primary consumer, not a compatibility nicety.
 
-**Decision: implement both.** Advertise CIMD (spec-preferred, forward-looking)
-*and* expose `registration_endpoint` (what deployed clients actually use).
-Under CIMD the `client_id` **is** an HTTPS URL with a path component; the AS
-**MUST** verify the fetched document's `client_id` matches that URL exactly and
-**MUST** validate `redirect_uris` against the document.
+**Decision: DCR only (decision 5).** Expose `registration_endpoint`; do not
+advertise `client_id_metadata_document_supported`, and do not build CIMD.
 
-Note `@modelcontextprotocol/sdk@1.26.0` has **no server-side CIMD support** —
-`client_id_metadata_document` appears only under `client/`. CIMD validation is
-hand-written.
+The reasoning is that CIMD currently buys nothing. Every client Compass cares
+about falls back to DCR when CIMD is unadvertised, so DCR alone is complete
+coverage — and maintaining two registration paths costs real complexity for a
+mechanism no shipping client requires. `@modelcontextprotocol/sdk@1.26.0` has
+**no server-side CIMD support** either (`client_id_metadata_document` appears
+only under `client/`), so it would be hand-written from scratch.
 
-Do **not** emit `"registration_endpoint": null` when unsupported — Claude Code
-Zod-fails on it (anthropics/claude-code#38102). Omit the key entirely.
+Revisit when either becomes true: a client Compass wants to support requires
+CIMD, or DCR's removal date firms up (deprecated MCP features get ≥12 months,
+so this is not near-term). The migration is additive — add
+`client_id_metadata_document_supported` to the metadata and a
+`clientIdMetadataUrl` column, keeping DCR alongside.
+
+One thing to get right even though we are not building CIMD: do **not** emit
+`"registration_endpoint": null` for anything unsupported — Claude Code
+Zod-fails on a null here (anthropics/claude-code#38102). Omit unsupported keys
+entirely rather than nulling them.
 
 ## Client profile — the Geode Agent Threads broker
 
@@ -205,9 +211,18 @@ Three of these are load-bearing enough to restate:
    *rejects* on its absence breaks its own primary consumer on day one. Rule:
    when `resource` is absent, default the token's audience to Compass's
    canonical MCP URI; when present and different, reject. Compass is the only
-   resource this AS serves, so the default is unambiguous. (Adding `resource`
-   to the broker is a good follow-up on the Geode side — it just must not be a
-   precondition.)
+   resource this AS serves, so the default is unambiguous.
+
+   Worth being precise about how little this matters in practice: omitting
+   `resource` has been observed working against other MCP servers, and that is
+   the expected result, not luck. A single-tenant MCP server that is its own AS
+   serves exactly one resource, so `resource` is redundant — there is nothing
+   for the AS to disambiguate. It only becomes load-bearing when a resource
+   server fronts a *separate* AS that issues tokens for several resources and
+   therefore needs to be told which audience to mint (the hosted-AS pattern:
+   Auth0, WorkOS, Entra fronting multiple MCP servers). Compass is emphatically
+   not that. So this is a latent conformance gap on the Geode side, not an
+   observed bug, and not worth scheduling.
 3. **Issue refresh tokens unconditionally for the authorization-code grant.**
    The broker requests the `refresh_token` grant at DCR but does **not** append
    `offline_access` to its scope string, and its proxy depends on refresh to
@@ -215,16 +230,16 @@ Three of these are load-bearing enough to restate:
    scope — which is what Claude's behavior would suggest — would leave every
    Geode user re-authorizing by hand on token expiry.
 
-### Static client registration as a later optimization
+### Consequence: one registered client per Geode install
 
-The broker short-circuits DCR entirely when `entry.clientId` is set. Since
-every Geode install otherwise registers its own dynamic client with the same
-`client_name: "Agent Threads"`, Compass will accumulate one registered client
-per install, and every user's consent screen will name an unverified client.
-Pre-seeding a single **verified static client** for Agent Threads and shipping
-its `client_id` in Geode's Compass preset removes the per-install DCR round
-trip and makes the consent screen trustworthy. Worth doing once the dynamic
-path works — not before.
+The broker would short-circuit DCR if `entry.clientId` were set, but we are
+deliberately not doing that (decision 4). So every Geode install registers its
+own dynamic client, all carrying `client_name: "Agent Threads"`, and Compass
+accumulates one row per install. That is the accepted cost of having a single
+registration path. It makes two things load-bearing rather than optional: the
+`/register` rate limit and TTL pruning, and the consent screen's "unverified"
+treatment — since a user cannot distinguish their own Geode's client from
+anyone else's by name alone, only by redirect host.
 
 ## Client compatibility — Geode first, everyone else not foreclosed
 
@@ -243,12 +258,11 @@ minimum, so none of them narrows the door.
 | Hand-rolled 401/403 challenge with `scope` | Claude (consent breadth) | Not needed by Geode, included anyway — without it Claude requests every scope in `scopes_supported` |
 | Both `oauth-authorization-server` and `openid-configuration` | Spec (clients MUST support both) | Universal |
 
-Nothing here is a one-way door. The remaining gaps are additive and land in
-phase 2: **CIMD** (matters only when DCR is eventually removed — deprecated
-features get ≥12 months, and no shipping client requires CIMD today) and **RFC
-9207 `iss`** (clients proceed normally when an AS neither advertises nor sends
-it, so deferring is safe; it is also only a few lines, so fold it into phase 1
-if convenient).
+Nothing here is a one-way door. The two deliberate omissions are both additive
+later: **CIMD** is unscheduled (decision 5 — every client falls back to DCR, so
+it buys nothing today), and **RFC 9207 `iss`** sits in phase 2 (clients proceed
+normally when an AS neither advertises nor sends it, so deferring is safe; it is
+also only a few lines, so fold it into phase 1 if convenient).
 
 Two failure modes are invisible to a Geode-only test and must be checked
 separately before claiming broad support:
@@ -369,11 +383,15 @@ into the confused-deputy vulnerability.
   "grant_types_supported": ["authorization_code", "refresh_token"],
   "code_challenge_methods_supported": ["S256"],
   "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
-  "client_id_metadata_document_supported": true,
   "authorization_response_iss_parameter_supported": true,
   "scopes_supported": ["mcp:read", "mcp:write", "offline_access"]
 }
 ```
+
+`client_id_metadata_document_supported` is deliberately **absent**, not `false`
+— per decision 5 we do not implement CIMD, and advertising it would make Claude
+attempt a flow that does not exist rather than falling back to DCR. Omit
+unsupported keys; never null them.
 
 Field-by-field rationale for the non-obvious entries:
 
@@ -381,8 +399,11 @@ Field-by-field rationale for the non-obvious entries:
   `code_challenge_methods_supported` is absent, the authorization server does
   not support PKCE and MCP clients MUST refuse to proceed."* Omitting it breaks
   every client.
-- `"none"` in `token_endpoint_auth_methods_supported` is required for Claude's
-  CIMD path (public client), and is correct regardless for loopback clients.
+- `"none"` in `token_endpoint_auth_methods_supported` is correct because every
+  client here is public — Geode registers with `token_endpoint_auth_method:
+  "none"`, and loopback clients cannot hold a secret. (It also happens to be
+  one of the two flags Claude's CIMD path requires, but we are not advertising
+  CIMD, so that is incidental.)
 - `authorization_response_iss_parameter_supported` pairs with RFC 9207 `iss`,
   **new in 2026-07-28**: record the validated issuer alongside the PKCE
   verifier, and emit `iss` on the authorization response. The spec flags this
@@ -407,12 +428,14 @@ Store `redirectUris` and `grantTypes` as `Json` columns rather than Postgres
 arrays — the schema already uses `Json` in several places and it sidesteps an
 array-type question on DSQL.
 
-- **`OAuthClient`** — `clientId`, `clientIdMetadataUrl?` (set for CIMD
-  clients), `clientSecretHash?` (null for public clients), `clientName`,
-  `redirectUris Json`, `grantTypes Json`, `scope`,
-  `tokenEndpointAuthMethod`, `logoUri?`, `clientUri?`, `softwareId?`,
-  `registrationAccessTokenHash?`, `registrationMode` (`DCR` | `CIMD` |
-  `STATIC`), `metadataFetchedAt?`, `createdAt`, `lastUsedAt`.
+- **`OAuthClient`** — `clientId`, `clientSecretHash?` (null for public clients,
+  which is every client today), `clientName`, `redirectUris Json`,
+  `grantTypes Json`, `scope`, `tokenEndpointAuthMethod`, `logoUri?`,
+  `clientUri?`, `softwareId?`, `registrationAccessTokenHash?`, `createdAt`,
+  `lastUsedAt`. No `registrationMode` discriminator and no
+  `clientIdMetadataUrl` — DCR is the only path (decision 5), and adding those
+  columns later is a trivial additive migration if CIMD ever lands. Expect one
+  row per Geode install; `lastUsedAt` is what TTL pruning keys off.
 - **`OAuthAuthorizationCode`** — `codeHash` (unique), `clientId`, `userId`,
   `redirectUri`, `codeChallenge`, `codeChallengeMethod`, `scope`, `resource`,
   `expiresAt` (60 s), `consumedAt?`.
@@ -504,9 +527,13 @@ Optionally add a workspace picker on the consent screen, writing
 - **Rate-limit and prune `/register`.** DCR is unauthenticated by design; cap
   per-IP and garbage-collect clients that never completed a flow.
 - **Consent screen hardening.** Show `client_name`, the `redirect_uri` host,
-  and the requested scopes; visibly mark unverified dynamic clients (anyone can
-  register a client named "Compass Official" — the redirect host is the only
-  honest signal a user has). CSRF protection, `X-Frame-Options: DENY` /
+  the requested scopes, and **an explicit list of the orgs and workspaces being
+  granted** (per decision 1 the grant spans every membership the user has, which
+  is broader than people assume). Visibly mark unverified dynamic clients —
+  anyone can register a client named "Compass Official", and since we run open
+  DCR with no static clients, *every* client is dynamic and unverified; the
+  redirect host is the only signal a user has that cannot be forged. CSRF
+  protection, `X-Frame-Options: DENY` /
   `frame-ancestors 'none'`, `__Host-`-prefixed `Secure`/`HttpOnly`/
   `SameSite=Lax` signed consent cookie bound to the specific `client_id`, and
   do not set the state cookie until after approval.
@@ -539,10 +566,14 @@ users are sent to `/login` and returned afterward.
 ## Dependency versions
 
 Compass pins `@modelcontextprotocol/sdk@1.26.0` (latest 1.30.0) and
-`mcp-handler@^1.1.0` (latest 2.1.1). Neither upgrade is a prerequisite — 1.26.0
-already carries `client_id_metadata_document_supported` in its shared metadata
-schemas — but check 2.x of `mcp-handler` for whether the `scope`-parameter and
-path-insertion gaps have been closed before hand-rolling around them.
+`mcp-handler@^1.1.0` (latest 2.1.1). Neither upgrade is a prerequisite: we use
+the SDK only for its framework-neutral zod schemas and `AuthInfo` type, all of
+which 1.26.0 already has. Do check 2.x of `mcp-handler` before hand-rolling
+around the `scope`-parameter and path-insertion gaps — they may already be
+closed.
+
+For reference, Geode's broker is on `@modelcontextprotocol/sdk@^1.29.0`. The
+two sides do not need to match; they only share the wire protocol.
 
 ## Phasing
 
@@ -556,13 +587,15 @@ compatibility*) — Geode is simply the first client to prove it end to end, and
 a direct Claude connection should be verified in the same PR. Metadata without
 a working AS is worse than no metadata.
 
-**Phase 2 — lifecycle and reach.** Refresh rotation with reuse detection, a
-"Connected apps" panel in Settings (client, scopes, last used, revoke)
-alongside the existing API-keys panel, CIMD plus RFC 9207 `iss`, and a verified
-static client for Agent Threads shipped as a Geode preset.
+**Phase 2 — lifecycle.** Refresh rotation with reuse detection, a "Connected
+apps" panel in Settings (client, scopes, last used, revoke) alongside the
+existing API-keys panel, `/register` rate limiting and TTL pruning if the open
+registration surface starts attracting noise, and RFC 9207 `iss`.
 
-**Phase 3 — hardening.** Workspace-scoped consent, a verified-client allowlist,
-audit log of authorizations.
+**Not scheduled.** CIMD (decision 5 — revisit when a client requires it or
+DCR's removal date firms up), workspace-scoped consent (decision 1 — the
+`assertActorWorkspaceScope` primitive is already there if we want it), a static
+or verified-client allowlist (decision 4), and an authorization audit log.
 
 Static `cmp_…` API keys stay supported indefinitely for server-to-server use;
 `MCP_API_KEY` service-account behavior is unchanged.
@@ -605,29 +638,56 @@ Static `cmp_…` API keys stay supported indefinitely for server-to-server use;
 |---|---|
 | Prisma models + DSQL migration | 0.5 d |
 | AS endpoints (authorize, token, register, revoke, ×2 metadata) | 1.5 d |
-| CIMD support (document fetch, validation, caching) | 0.5 d |
-| Consent screen + `/login` `callbackUrl` + `proxy.ts` fix | 0.5 d |
+| Consent screen (incl. org/workspace enumeration) + `/login` `callbackUrl` + `proxy.ts` fix | 0.5 d |
 | Resource-server wiring + `validateMcpAuth` branch + `TOOL_SCOPES` | 0.5 d |
 | Tests (unit + probe script) | 1 d |
 | Docs (`09-mcp-api.md`) + ADR | 0.5 d |
 
-≈ **5 days** for Phase 1, assuming no surprises from DSQL or `.well-known`
-routing.
+≈ **4.5 days** for Phase 1, assuming no surprises from DSQL or `.well-known`
+routing. The 2026-09-12 decisions removed CIMD (0.5 d) and the static-client
+coordination from this scope; they did not change anything else, because every
+other decision confirmed the cheaper option that was already specced.
 
-## Open questions
+## Decisions (2026-09-12)
 
-1. Does Phase 1 include the workspace picker on consent, or does every OAuth
-   token start org-wide within the user's memberships?
-2. Do we gate DCR behind any signal at all, or accept fully open registration
-   with rate limits?
-3. Preview deploys: per-branch OAuth (feasible via `VERCEL_BRANCH_URL`) or
-   production-only?
-4. Should the Geode broker be updated to send RFC 8707 `resource`? Good
-   hygiene and spec-conformant, but Compass must tolerate its absence either
-   way (see *Client profile*), so this is not a blocker in either direction.
-5. Phase 2 or sooner for the verified static Agent Threads client? It removes a
-   round trip and fixes the "unverified client" consent wording, at the cost of
-   coordinating a `client_id` across two repos.
+Resolved with Rick. These are settled, not open.
+
+1. **No workspace picker on consent.** An OAuth token carries the same reach a
+   per-user `cmp_…` key already has — every workspace the user is a member of,
+   across every org. This matches the existing key model rather than inventing
+   a second scoping concept, and `assertActorWorkspaceScope` already exists if
+   we want to narrow it later (existing tokens would carry
+   `scopeWorkspaceId: null` = all memberships, so it stays additive).
+   **In exchange, the consent screen must enumerate the orgs and workspaces
+   being granted** — the grant spans organizations, which is broader than
+   people will assume, and naming them is nearly free.
+2. **DCR stays open.** Gating it is not actually available: registration
+   happens before any user is involved (`OAuthMcpRegistry` calls
+   `registerClient()` and only then `authorize()`), so an auth requirement
+   would break the primary consumer. Rate-limit per IP and TTL-expire clients
+   that never complete an authorization; monitor and revisit only if abuse
+   shows up. The defense against a client registering itself as "Compass
+   Official" is the consent screen showing the **redirect host**, which is the
+   one thing an attacker cannot forge.
+3. **Previews are in scope.** The Vercel plan limitation that was blocking
+   preview deployments is fixed. Use `trustedCompassBaseUrl()` as-is — it
+   already resolves `VERCEL_BRANCH_URL`, which is stable per branch (unlike
+   `VERCEL_URL`, which is per deployment), so `issuer` stays byte-stable across
+   pushes, which is what clients validate. Previews run the `compass_preview`
+   schema, so registered clients don't leak between environments; expect to
+   redo DCR per branch. This matters more than usual here: the feature is
+   entirely a handshake with external software, and production is the wrong
+   place to discover that redirect-URI matching is too strict.
+4. **No static Agent Threads client.** DCR is the one registration path. A
+   pre-seeded verified client would save a single HTTP round trip and improve
+   some consent wording, but it removes none of the hard requirements — Geode
+   still binds ephemeral ports, so port-agnostic loopback matching is needed
+   either way — and it adds cross-repo coupling on a shared constant. Not worth
+   maintaining two paths.
+5. **CIMD is not scheduled.** Deprecated-but-supported DCR covers every client
+   shipping today. Revisit only when a client Compass cares about actually
+   requires CIMD, or when DCR's removal timeline becomes concrete (deprecated
+   MCP features get ≥12 months).
 
 ## References
 
