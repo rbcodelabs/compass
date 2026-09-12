@@ -59,6 +59,17 @@ test.describe("Tasks assignee filter", () => {
       await page.getByRole("menuitemradio", { name: "Unassigned", exact: true }).click();
       await page.waitForURL(/assignee=__unassigned__/, { timeout: 15_000 });
 
+      // Base UI's Menu.RadioItem keeps the menu open (`closeOnClick` defaults to
+      // false, unlike a plain MenuItem), so the menu must be dismissed before the
+      // trigger can reopen it in step 5 — clicking "Filters" again while it is
+      // still open just toggles it shut, and the "Clear all" item then detaches
+      // mid-close instead of becoming clickable. Same reason
+      // native-timeline-rollout.spec.ts escapes before reopening "View options".
+      await page.keyboard.press("Escape");
+      await expect(
+        page.getByRole("menuitemradio", { name: "Unassigned", exact: true })
+      ).toHaveCount(0);
+
       // The board must narrow, not just the URL.
       await expect(cardIn(unassignedTitle)).toBeVisible({ timeout: 10_000 });
       await expect(cardIn(assignedTitle)).toHaveCount(0);
