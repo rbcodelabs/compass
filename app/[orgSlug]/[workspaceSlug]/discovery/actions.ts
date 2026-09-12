@@ -209,6 +209,38 @@ export async function reorderOpportunity(
   revalidatePath(revalidatePathStr);
 }
 
+// ─── Move Solution (cross-column status change within its own Opportunity) ────
+// Mirrors moveOpportunity's find-last-then-append pattern, but scoped to
+// { opportunityId, status } rather than just { status } — the "last item"
+// lookup must be per-lane (this Opportunity's own column), not global across
+// the workspace, since a swimlane board has one status column per
+// Opportunity. Never touches opportunityId: reparenting a Solution to a
+// different Opportunity is a deliberate action in its panel, not a side
+// effect of a drag on this board.
+
+export async function moveSolutionStatus(
+  solutionId: string,
+  status: SolutionStatus,
+  opportunityId: string,
+  workspaceId: string,
+  revalidatePathStr: string
+) {
+  const prisma = getPrisma();
+
+  const lastItem = await prisma.solution.findFirst({
+    where: { opportunityId, status, NOT: { id: solutionId } },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
+
+  await prisma.solution.update({
+    where: { id: solutionId },
+    data: { status, sortOrder },
+  });
+  revalidatePath(revalidatePathStr);
+}
+
 // ─── Reorder Solution ─────────────────────────────────────────────────────────
 
 export async function reorderSolution(

@@ -31,6 +31,15 @@ Opportunities move through four columns on the kanban board:
 
 Drag cards between columns to update status. Use **Filters** at the top of the page to filter opportunities by squad, or switch between **Board** and **Tree** views using the view control.
 
+### Grouping: Status or Opportunity
+
+In Board view, use the **Status | Opportunity** toggle next to Filters to switch how cards are grouped:
+
+- **Status** (default) — the Opportunity board described above, columns are Opportunity statuses.
+- **Opportunity** — a swimlane board for Solutions, the middle tier of the OST that otherwise only appears in a flat list inside an Opportunity's detail panel. Each active Opportunity gets its own collapsible lane (click the chevron to collapse or expand it), with five columns for the Solution lifecycle: **Idea**, **Validated**, **In delivery**, **Shipped**, **Killed**. Drag a Solution card to a different column to change its status; drag it to reorder within a column. Use **+ Add Solution** at the bottom of a lane to create a new Solution directly on that Opportunity.
+
+Dragging a Solution card only ever changes its status within its own lane — dropping it on a different Opportunity's lane snaps it back with no change. Re-parenting a Solution to a different Opportunity is a deliberate action from its detail panel, not something a board drag can do by accident.
+
 ## Discovery Rail
 
 The Discovery Rail is a collapsible left-side panel that lists every opportunity in the workspace, independent of which view (board or tree) or which opportunity you're currently looking at. Use the search box at the top to filter opportunities by title; results are grouped by status (Exploring, Validating, Prioritized, Active), with Archived opportunities tucked into a collapsible section at the bottom.
