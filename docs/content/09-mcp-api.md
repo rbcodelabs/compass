@@ -209,14 +209,27 @@ the immutable packet. If any source is missing or belongs to another workspace,
 the whole request fails and no review is created. Put readable reasoning in the
 Markdown `context`; do not embed source UUIDs there.
 
-`apply_recorded_decision` is queue-only for release authorization. It validates
-the authoritative provider snapshot outside the database transaction, then a
-short transaction binds the unchanged snapshot and human decision to a durable
-dispatch row. Compass does not merge, deploy, or otherwise invoke external
-release automation in this implementation. Provider validation is unconfigured
-by default and therefore fails closed (`PR_NOT_READY`); a dispatch worker must
-use a configured provider and repeat the same head/check/policy revalidation at
-the dispatch-claim boundary before any future external side effect.
+`apply_recorded_decision` applies a decided review request through the
+applicator matching its `gateType`, and is idempotent: a repeat call replays
+the existing receipt rather than reapplying or creating a second one. A
+registered agent may call it (it is classified as an agent WRITE, not
+human-only) but can never take the underlying decision — only a signed-in
+human admin chooses an option, via the review URL above.
+
+- **`TRACKED_DECISION`** (the default queue created by `request_decision`):
+  every outcome resolves to `NO_ACTION`. Applying only records a durable
+  receipt confirming the decision was carried out; it never mutates product
+  state.
+- **`BUILDING_INVESTMENT`** / **`BUILDING_INVESTMENT_REVOCATION`**: authorizes
+  or revokes delivery investment in a Solution.
+- **`RELEASE_AUTHORIZATION`**: validates the authoritative provider snapshot
+  outside the database transaction, then a short transaction binds the
+  unchanged snapshot and human decision to a durable dispatch row. Compass
+  does not merge, deploy, or otherwise invoke external release automation in
+  this implementation. Provider validation is unconfigured by default and
+  therefore fails closed (`PR_NOT_READY`); a dispatch worker must use a
+  configured provider and repeat the same head/check/policy revalidation at
+  the dispatch-claim boundary before any future external side effect.
 
 `list_release_runs` reports Compass ledger facts only. A release-run state does
 not prove that GitHub merged the PR, that a deployment reached production, or

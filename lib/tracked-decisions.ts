@@ -244,3 +244,59 @@ export async function listTrackedDecisions(input: TrackedDecisionListInput) {
 }
 
 export async function getTrackedDecision(workspaceId: string, requestId: string) { return getPrisma().reviewRequest.findFirst({ where: { id: requestId, workspaceId, gateType: TRACKED_GATE }, include: { currentRevision: { include: { options: { orderBy: { sortOrder: "asc" } }, decisions: { include: { option: true } } } }, revisions: { orderBy: { revisionNumber: "desc" }, include: { decisions: { include: { option: true } } } } } }) }
+
+/**
+ * Applies a decided TRACKED_DECISION (the ordinary workspace Decisions
+ * queue created via `createTrackedDecisionRequest`/`request_decision`).
+ * Every option on this gate has `continuationKey: "NO_ACTION"` — Compass
+ * Decisions are tracking-only here, so "applying" never mutates product
+ * state. It only records a durable `DecisionApplication` receipt, exactly
+ * mirroring the idempotent create-or-replay pattern in
+ * `applyBuildingInvestmentDecision` (lib/building-investment.ts): a stable
+ * `receiptKey` makes repeat calls (or a race between two callers) return the
+ * same row instead of creating a second one or re-deriving anything.
+ */
+export async function applyTrackedDecision(decisionId: string) {
+  const prisma = getPrisma()
+  const receiptKey = `tracked-decision:${decisionId}:v1`
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const replay = await tx.decisionApplication.findUnique({ where: { receiptKey } })
+      if (replay) {
+        if (replay.decisionId !== decisionId || replay.continuationKey !== "NO_ACTION" || replay.targetType !== "TRACKED_DECISION" || replay.status !== "APPLIED") {
+          throw new TrackedDecisionError("RECEIPT_CONFLICT", "The application receipt does not match this decision.")
+        }
+        return replay
+      }
+      // A single relation path (decision.revision.request) is the sole
+      // source of truth here — unlike applyBuildingInvestmentDecision, there
+      // is no separate target entity (e.g. a Solution) to cross-check a
+      // second request reference against, since a tracked decision applies
+      // to nothing but itself.
+      const decision = await tx.decisionRecord.findUnique({
+        where: { id: decisionId },
+        include: { revision: { include: { request: true, options: { select: { id: true } } } }, option: true },
+      })
+      const request = decision?.revision.request
+      const selectedBelongsToRevision = Boolean(decision?.revision.options.some((option) => option.id === decision.optionId))
+      if (!decision || !request
+        || request.gateType !== TRACKED_GATE
+        || request.state !== "DECIDED" || request.currentRevisionId !== decision.revisionId
+        || decision.fingerprint !== decision.revision.fingerprint || decision.revision.supersededAt || !selectedBelongsToRevision
+        || decision.option.continuationKey !== "NO_ACTION") {
+        throw new TrackedDecisionError("DECISION_MISMATCH", "Decision is not a current tracked (NO_ACTION) decision.")
+      }
+      return tx.decisionApplication.create({ data: {
+        decisionId, continuationKey: "NO_ACTION", targetType: "TRACKED_DECISION", targetId: request.id,
+        status: "APPLIED", receiptKey, attemptCount: 1, appliedAt: new Date(), updatedAt: new Date(),
+      } })
+    })
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") {
+      const winner = await prisma.decisionApplication.findUnique({ where: { receiptKey } })
+      if (winner?.decisionId === decisionId && winner.status === "APPLIED" && winner.targetType === "TRACKED_DECISION" && winner.continuationKey === "NO_ACTION") return winner
+      throw new TrackedDecisionError("RECEIPT_CONFLICT", "A concurrent application receipt does not match this decision.")
+    }
+    throw error
+  }
+}
