@@ -13,6 +13,7 @@ import { Markdown } from "@/components/agent/markdown";
 import { EditTaskDialog } from "./edit-task-dialog";
 import { moveTaskStatus } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import { STATUS_CONFIG } from "./task-column";
+import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
 import type { TaskCardData } from "./task-card";
 import type { TaskStatus, SquadData, MemberData } from "@/lib/types";
 
@@ -55,8 +56,7 @@ export function TaskHeader({ task: initialTask, workspaceId, squads, members, re
     });
   }
 
-  const assigneeMember = task.assigneeUserId ? members.find((m) => m.userId === task.assigneeUserId) : null;
-  const assigneeLabel = task.assignee ? `${task.assignee.type === "AGENT" ? "Agent: " : ""}${task.assignee.displayName}${task.assignee.available ? "" : " (unavailable)"}` : assigneeMember?.name || assigneeMember?.email || (task.assigneeUserId || task.assigneeAgentId ? "Unavailable assignee" : task.ownerName) || null;
+  const assignee = taskAssigneeDisplay(task, members);
   const dueLabel = formatDueDate(task.dueDate);
 
   return (
@@ -111,7 +111,10 @@ export function TaskHeader({ task: initialTask, workspaceId, squads, members, re
       )}
 
       <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-        {assigneeLabel && <span>Assignee: {assigneeLabel}</span>}
+        <span>
+          Assignee:{" "}
+          <span className={assignee.assigned ? undefined : UNASSIGNED_ASSIGNEE_CLASS}>{assignee.label}</span>
+        </span>
         {dueLabel && (
           <span className="flex items-center gap-1">
             <CalendarDays className="size-3.5" />

@@ -7,6 +7,7 @@ const { prisma } = vi.hoisted(() => ({ prisma: {
 } }));
 vi.mock("@/lib/db", () => ({ default: () => prisma }));
 import { assignmentUpdate, parseAssigneeFilter, resolveTaskAssignees } from "@/lib/task-assignment";
+import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -53,6 +54,27 @@ describe("single task assignment", () => {
     expect(parseAssigneeFilter("human")).toEqual({ assigneeUserId: "human" });
     expect(parseAssigneeFilter("user:human")).toEqual({ assigneeUserId: "human" });
     expect(parseAssigneeFilter("agent:agent")).toEqual({ assigneeAgentId: "agent" });
+  });
+  it("returns no assignee constraint when the filter is absent", () => {
+    expect(parseAssigneeFilter(undefined)).toEqual({});
+    expect(parseAssigneeFilter(null)).toEqual({});
+    expect(parseAssigneeFilter("")).toEqual({});
+  });
+  it("translates the unassigned sentinel into an empty-assignee-slot predicate", () => {
+    // "Unassigned" has to mean the rendered assignee slot is empty: no person,
+    // no agent, and no freeform ownerName that the display logic falls back to.
+    expect(parseAssigneeFilter(UNASSIGNED_ASSIGNEE_FILTER)).toEqual({
+      assigneeUserId: null,
+      assigneeAgentId: null,
+      OR: [{ ownerName: null }, { ownerName: "" }],
+    });
+  });
+  it("never passes the sentinel through as a uuid assignee id", () => {
+    // assigneeUserId is @db.Uuid — leaking the sentinel into that filter would
+    // make Postgres reject the whole query.
+    const where = parseAssigneeFilter(UNASSIGNED_ASSIGNEE_FILTER) as Record<string, unknown>;
+    expect(where.assigneeUserId).toBeNull();
+    expect(JSON.stringify(where)).not.toContain(UNASSIGNED_ASSIGNEE_FILTER);
   });
   it("preserves unavailable agent identity in reads", async () => {
     prisma.agent.findMany.mockResolvedValue([{ id: "agent", name: "Engineer", ownerUserId: "owner", status: "SUSPENDED" }]);
