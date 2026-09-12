@@ -37,6 +37,22 @@ type Props = {
   members: MemberData[];
 };
 
+/**
+ * Identity of the server-provided task set.
+ *
+ * Deliberately keyed on task ids alone. A filter change swaps the set of tasks
+ * the page renders, which is exactly what this has to detect. Drag-and-drop and
+ * the other optimistic edits never add or remove ids — they only change
+ * `status` and `sortOrder`, and the client already holds the correct values for
+ * those. Including those fields would make the board replace its optimistic
+ * state the moment revalidation landed, which is a visible revert whenever the
+ * server's ordering does not match the client's (`updateSortOrder` only
+ * persists the dragged task's index, so it frequently does not).
+ */
+export function taskSetSignature(tasks: Pick<TaskCardData, "id">[]): string {
+  return tasks.map((task) => task.id).sort().join("|");
+}
+
 function buildColumnMap(tasks: TaskCardData[]): ColumnMap {
   const map = {} as ColumnMap;
   for (const status of ALL_STATUSES) {
@@ -59,6 +75,20 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
   const [activeTask, setActiveTask] = useState<TaskCardData | null>(null);
   const [dragSourceStatus, setDragSourceStatus] = useState<TaskStatus | null>(null);
   const [showCancelled, setShowCancelled] = useState(false);
+
+  // A filter change re-renders the server page with a different task set, but
+  // this client component is not remounted — without resyncing, the board keeps
+  // rendering the pre-filter tasks while the URL says otherwise. Adjusting
+  // during render (rather than in an effect) means the correct set is painted
+  // in the same commit, so there is no flash of stale cards. Skipped mid-drag so
+  // an unrelated revalidation cannot yank cards out from under the pointer; the
+  // mismatch is still pending, so it resyncs on the render after the drag ends.
+  const serverSignature = taskSetSignature(initialTasks);
+  const [syncedSignature, setSyncedSignature] = useState(serverSignature);
+  if (serverSignature !== syncedSignature && !activeTask) {
+    setSyncedSignature(serverSignature);
+    setColumns(buildColumnMap(initialTasks));
+  }
 
   const [, startTransition] = useTransition();
 
