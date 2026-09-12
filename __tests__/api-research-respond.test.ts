@@ -39,6 +39,16 @@ function request(stream = false) {
 }
 
 describe("research interviewer response", () => {
+  it("logs only a safe diagnostic for streamed sandbox startup failures", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      respondToResearchSession.mockRejectedValue({ response: { status: 403 }, json: { secret: "private runtime credential" } })
+      const response = await POST(request(true))
+      expect(await response.text()).toBe('{"type":"error","status":502}\n')
+      expect(log).toHaveBeenCalledWith("Research reply failed", { category: "permission_denied", status: 403 })
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/private|credential|secret/)
+    } finally { log.mockRestore() }
+  })
   beforeEach(() => {
     resolveActiveResearchStudy.mockResolvedValue({
       study: {

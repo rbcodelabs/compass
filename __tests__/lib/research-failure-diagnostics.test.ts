@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest"
 import { researchFailureDiagnostic } from "@/lib/research-failure-diagnostics"
 
 describe("safe research failure diagnostics", () => {
+  it.each([[401, "authentication_failed"], [403, "permission_denied"], [404, "resource_not_found"], [429, "rate_limited"], [500, "upstream_unavailable"], [503, "upstream_unavailable"]])("reads SDK response status %s without exposing response payloads", (status, category) => {
+    expect(researchFailureDiagnostic({ message: "Status code is not ok", response: { status }, json: { secret: "private" } })).toEqual({ category, status })
+  })
+  it("recognizes the fixed deployed OIDC error name", () => {
+    expect(researchFailureDiagnostic({ name: "VercelOidcContextError", message: "private OIDC details" })).toEqual({ category: "configuration_missing" })
+  })
+  it("recognizes a nested network code without emitting the cause", () => {
+    expect(researchFailureDiagnostic({ cause: { code: "ECONNRESET", message: "private host" } })).toEqual({ category: "network_failure" })
+  })
+  it.each(["403 private", 399, 600, NaN, { secret: "private" }])("does not emit invalid nested status %#", status => {
+    expect(researchFailureDiagnostic({ response: { status }, json: { secret: "private" } })).toEqual({ category: "unexpected_failure" })
+  })
   it.each([
     [Object.assign(new Error("private file"), { code: "ENOENT" }), "file_not_found"],
     [Object.assign(new Error("private file"), { code: "EACCES" }), "permission_denied"],

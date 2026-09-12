@@ -225,7 +225,7 @@ describe("ResearchChat", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:private-preview")
   })
 
-  it("shows provisional text separately, discards it on failure, and retries the same request", async () => {
+  it.each([[502, "The interviewer service couldn’t complete the reply"], [503, "The interviewer is unavailable"], [429, "Please wait a moment"], [409, "The session couldn’t accept this reply yet"]])("shows truthful error %s, discards provisional text, and retries the same request", async (status, expectedMessage) => {
     let controller!: ReadableStreamDefaultController<Uint8Array>
     const stream = new ReadableStream<Uint8Array>({ start(value) { controller = value } })
     const fetchMock = vi.fn()
@@ -240,7 +240,9 @@ describe("ResearchChat", () => {
     await act(async () => { controller.enqueue(new TextEncoder().encode('{"type":"delta","text":"Unsaved question"}\n')) })
     expect(await screen.findByText("Unsaved question")).toBeVisible()
     expect(screen.getByText(/not saved yet/i)).toBeVisible()
-    await act(async () => { controller.enqueue(new TextEncoder().encode('{"type":"error","status":502}\n')); controller.close() })
+    await act(async () => { controller.enqueue(new TextEncoder().encode(JSON.stringify({ type: "error", status }) + '\n')); controller.close() })
+    expect(await screen.findByRole("alert")).toHaveTextContent(String(expectedMessage))
+    expect(screen.getByRole("alert")).not.toHaveTextContent("check your connection")
     expect(await screen.findByRole("button", { name: "Try again" })).toBeEnabled()
     expect(screen.queryByText("Unsaved question")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Try again" }))

@@ -99,6 +99,11 @@ appears as a clearly labeled draft while it is generated; it becomes part of the
 saved transcript only after Compass confirms the final reply. If the connection
 fails, **Try again** safely reuses the same request. Reloading restores saved
 turns and lets you retry an unconfirmed request without duplicating the answer.
+If the interviewer service cannot complete a reply, choose **Try again**. A
+service failure does not necessarily mean your connection is broken. If it
+continues, or the interviewer is unavailable, contact the research team; do not
+start a new interview to recover the same answer.
+
 An unconfirmed answer is temporarily kept in this browser for recovery, for up
 to the two-hour session window. An open page clears it on expiry; a closed
 browser clears expired recovery data when reopened. Finish becomes available
