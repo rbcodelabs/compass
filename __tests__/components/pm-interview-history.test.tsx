@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs"
 afterEach(cleanup)
 it("labels the existing refinement action without changing its route", () => {
   render(<FleshThisOutLink orgSlug="org" workspaceSlug="workspace" targetType="OPPORTUNITY" targetId="target" />)
-  expect(screen.getByRole("link", { name: "Refine", exact: true })).toHaveAttribute("href", "/org/workspace/capture/pm/new?targetType=OPPORTUNITY&targetId=target")
+  expect(screen.getByRole("link", { name: /^Refine$/ })).toHaveAttribute("href", "/org/workspace/capture/pm/new?targetType=OPPORTUNITY&targetId=target")
 })
 it("uses Refinement page titles and the new opening only for newly created transcripts", () => {
   for (const page of ["new", "[interviewId]"]) {
