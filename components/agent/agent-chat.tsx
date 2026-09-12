@@ -18,11 +18,13 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { parseSseFrames } from "@/lib/sse-frames"
 import { humanizeToolName } from "@/lib/agent-tools"
 import { Markdown } from "@/components/agent/markdown"
+import { SeedContextChip } from "@/components/agent/seed-context-chip"
 
 type Role = "user" | "assistant"
 type ToolStep = { id: string; label: string; status: "running" | "done" }
 type Message = { id: string; role: Role; content: string; toolCalls?: ToolStep[] }
 type ConversationSummary = { id: string; title: string | null }
+type SeedEntity = { entityType: string; entityId: string; label: string; summary: string; sourceUrl: string }
 
 type Props = {
   workspaceId: string
@@ -31,6 +33,9 @@ type Props = {
   activeConversationId: string | null
   initialMessages: Message[]
   userInitials: string
+  /** "Send to agent" hand-off (lib/agent-context.ts) — only ever set for a brand-new chat. */
+  seedEntity?: SeedEntity
+  suggestedInstruction?: string
 }
 
 type StreamPhase = "idle" | "booting" | "running"
@@ -42,10 +47,20 @@ export function AgentChat({
   activeConversationId,
   initialMessages,
   userInitials,
+  seedEntity,
+  suggestedInstruction,
 }: Props) {
   const router = useRouter()
   const [messages, setMessages] = useState<Message[]>(initialMessages)
-  const [input, setInput] = useState("")
+  // Prefilled (editable) composer instruction from a "Send to agent" hand-off
+  // — only for a brand-new chat. Lazy initializer so this never overwrites
+  // composer text when resuming a past conversation (activeConversationId set).
+  const [input, setInput] = useState(() => (!activeConversationId ? (suggestedInstruction ?? "") : ""))
+  // The hand-off's context chip. Cleared on dismiss (composer text untouched)
+  // and cleared the moment its seedContext is sent on the first turn, so it's
+  // never resent — belt-and-suspenders alongside the server's own
+  // conversationId-presence guard (app/api/agent/turn/route.ts).
+  const [pendingSeedEntity, setPendingSeedEntity] = useState<SeedEntity | undefined>(seedEntity)
   const [phase, setPhase] = useState<StreamPhase>("idle")
   const [streamingText, setStreamingText] = useState("")
   const [liveToolSteps, setLiveToolSteps] = useState<ToolStep[]>([])
@@ -76,6 +91,16 @@ export function AgentChat({
     setStreamingText("")
     setLiveToolSteps([])
 
+    // Only turn 1 of a brand-new conversation carries seedContext — never a
+    // resumed thread. Clear it immediately so a second send() in this same
+    // session (before the server round-trip updates activeConversationId)
+    // can't resend it.
+    const seedContextForThisTurn =
+      !activeConversationId && pendingSeedEntity
+        ? { entityType: pendingSeedEntity.entityType, entityId: pendingSeedEntity.entityId }
+        : undefined
+    if (seedContextForThisTurn) setPendingSeedEntity(undefined)
+
     let assembled = ""
     let steps: ToolStep[] = []
     let newConversationId: string | null = null
@@ -83,7 +108,12 @@ export function AgentChat({
       const res = await fetch("/api/agent/turn", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workspaceId, message: text, conversationId: activeConversationId ?? undefined }),
+        body: JSON.stringify({
+          workspaceId,
+          message: text,
+          conversationId: activeConversationId ?? undefined,
+          ...(seedContextForThisTurn ? { seedContext: seedContextForThisTurn } : {}),
+        }),
       })
       if (!res.ok || !res.body) {
         const serverMsg = await res.text().catch(() => "")
@@ -161,7 +191,7 @@ export function AgentChat({
       setLiveToolSteps([])
       setPhase("idle")
     }
-  }, [input, isStreaming, workspaceId, activeConversationId, basePath, router])
+  }, [input, isStreaming, workspaceId, activeConversationId, basePath, router, pendingSeedEntity])
 
   const phaseLabel = useMemo(() => {
     if (phase === "booting") return "Starting the agent…"
@@ -205,8 +235,16 @@ export function AgentChat({
         </ScrollArea>
       </aside>
 
-      {/* Thread + composer */}
-      <div className="flex min-h-0 flex-1 flex-col">
+      {/* Thread + composer.
+          min-w-0 is load-bearing: as a flex item this column defaults to
+          min-width:auto, so it refuses to shrink below its content's
+          min-content width. The seed context chip's summary line is
+          `truncate` (white-space:nowrap), whose min-content width is the
+          full untruncated string — that propagated up and inflated this
+          column past the viewport inside the overflow-hidden root, pushing
+          the Send button and the chip's own dismiss control off-screen on
+          any width below ~1000px. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4 sm:p-6">
             {messages.length === 0 && !isStreaming && (
@@ -244,6 +282,16 @@ export function AgentChat({
         </ScrollArea>
 
         <div className="border-t border-default bg-surface-panel p-3 sm:p-4">
+          {pendingSeedEntity && (
+            <div className="mb-2">
+              <SeedContextChip
+                label={pendingSeedEntity.label}
+                summary={pendingSeedEntity.summary}
+                sourceUrl={pendingSeedEntity.sourceUrl}
+                onDismiss={() => setPendingSeedEntity(undefined)}
+              />
+            </div>
+          )}
           <div className="mx-auto flex w-full max-w-3xl items-end gap-2">
             <Textarea
               value={input}

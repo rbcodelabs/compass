@@ -201,6 +201,8 @@ export function SolutionPanel({
           solutionId={data.id}
           comments={data.comments.filter((comment) => comment.commentType === "PLAN")}
           revalidatePathStr={revalidatePathStr}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
           onChanged={refresh}
         />
       </Section>

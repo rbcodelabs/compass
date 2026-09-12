@@ -30,7 +30,7 @@ afterEach(() => {
 describe("SolutionPlanDiscussion", () => {
   it("preserves current-plan decisions but excludes ordinary comments", async () => {
     approveSolutionPlan.mockResolvedValue(undefined)
-    render(<SolutionPlanDiscussion solutionId="solution-1" comments={[ordinary, plan]} revalidatePathStr="/discovery" />)
+    render(<SolutionPlanDiscussion solutionId="solution-1" comments={[ordinary, plan]} revalidatePathStr="/discovery" orgSlug="acme" workspaceSlug="product" />)
 
     expect(screen.getByTestId("current-plan")).toHaveTextContent("Keep the current plan")
     expect(screen.queryByText("Shown by shared Discussion")).toBeNull()
@@ -43,12 +43,31 @@ describe("SolutionPlanDiscussion", () => {
 
   it("creates only plan updates from the specialized composer", async () => {
     addSolutionComment.mockResolvedValue({ ...plan, id: "plan-2", body: "Next plan" })
-    render(<SolutionPlanDiscussion solutionId="solution-1" comments={[]} revalidatePathStr="/discovery" />)
+    render(<SolutionPlanDiscussion solutionId="solution-1" comments={[]} revalidatePathStr="/discovery" orgSlug="acme" workspaceSlug="product" />)
 
     fireEvent.click(screen.getByRole("button", { name: "Add Plan Update" }))
     fireEvent.change(screen.getByPlaceholderText("Write a plan update…"), { target: { value: "Next plan" } })
     fireEvent.click(screen.getByRole("button", { name: "Post plan update" }))
     await waitFor(() => expect(addSolutionComment).toHaveBeenCalledWith("solution-1", { body: "Next plan", commentType: "PLAN" }, "/discovery"))
     expect(screen.getAllByText("Next plan").length).toBeGreaterThan(0)
+  })
+
+  it("shows a \"Send to agent\" link to the approved plan's hand-off route", () => {
+    const approvedPlan: SolutionComment = { ...plan, planStatus: "APPROVED" }
+    render(<SolutionPlanDiscussion solutionId="solution-1" comments={[approvedPlan]} revalidatePathStr="/discovery" orgSlug="acme" workspaceSlug="product" />)
+
+    const link = screen.getByRole("link", { name: /send to agent/i })
+    expect(link).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1")
+  })
+
+  it("hides \"Send to agent\" while the plan is still pending", () => {
+    render(<SolutionPlanDiscussion solutionId="solution-1" comments={[plan]} revalidatePathStr="/discovery" orgSlug="acme" workspaceSlug="product" />)
+    expect(screen.queryByRole("link", { name: /send to agent/i })).toBeNull()
+  })
+
+  it("hides \"Send to agent\" when the plan was rejected", () => {
+    const rejectedPlan: SolutionComment = { ...plan, planStatus: "REJECTED" }
+    render(<SolutionPlanDiscussion solutionId="solution-1" comments={[rejectedPlan]} revalidatePathStr="/discovery" orgSlug="acme" workspaceSlug="product" />)
+    expect(screen.queryByRole("link", { name: /send to agent/i })).toBeNull()
   })
 })

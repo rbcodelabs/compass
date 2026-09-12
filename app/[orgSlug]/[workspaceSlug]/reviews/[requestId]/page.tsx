@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation"
+import Link from "next/link"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { decideReviewAction } from "../actions"
@@ -136,6 +137,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
           <p>Decision recorded: <strong>{decided.option.label}</strong> by {decided.actorRole} at {decided.decidedAt.toLocaleString()}.</p>
           <DecisionLongForm className="text-foreground" content={decided.rationale} />
           {isTracked && decided.option.outcomeClass === "REQUEST_CHANGES" && <a className="inline-block font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/decisions/new?reviseRequestId=${request.id}`}>Create revised request</a>}
+          {isTracked && decided.option.outcomeClass === "APPROVE" && <Link className="inline-block font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/agent?entityType=decision&entityId=${request.id}`}>Send to agent</Link>}
         </section>
       ) : isTracked && canDecide ? (
         <DecisionActions workspaceId={request.workspaceId} revisionId={revision.id} fingerprint={revision.fingerprint} options={revision.options.map((option) => ({ id: option.id, label: option.label, outcomeClass: option.outcomeClass }))} />

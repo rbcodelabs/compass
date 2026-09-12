@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import { useRef, useState, useTransition } from "react";
-import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
+import Link from "next/link";
+import { CheckIcon, PlusIcon, SparklesIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   addSolutionComment,
@@ -54,6 +55,9 @@ type Props = {
   solutionId: string;
   comments: SolutionComment[];
   revalidatePathStr: string;
+  /** Used to build the "Send to agent" hand-off link (`/${orgSlug}/${workspaceSlug}/agent?...`). */
+  orgSlug: string;
+  workspaceSlug: string;
   /**
    * Notify the panel that the comment set changed. The thread itself renders
    * from local state below, but the enclosing <Section label="Plan & Discussion"
@@ -68,6 +72,8 @@ export function SolutionPlanDiscussion({
   solutionId,
   comments: initialComments,
   revalidatePathStr,
+  orgSlug,
+  workspaceSlug,
   onChanged,
 }: Props) {
   // This component owns comment mutations (add/approve/reject all update local
@@ -179,6 +185,20 @@ export function SolutionPlanDiscussion({
               <XIcon />
               Reject
             </Button>
+            {/* Styled as a button but genuinely a link: it navigates, so it
+                keeps the implicit link role. Routing it through Base UI's
+                Button instead would either warn about a non-native button
+                element or, with nativeButton={false}, stamp role="button"
+                over the anchor and misreport a navigation as an action. */}
+            {currentPlan.planStatus === "APPROVED" && (
+              <Link
+                href={`/${orgSlug}/${workspaceSlug}/agent?entityType=solutionPlan&entityId=${currentPlan.id}`}
+                className={buttonVariants({ size: "xs", variant: "outline" })}
+              >
+                <SparklesIcon />
+                Send to agent
+              </Link>
+            )}
           </div>
         </div>
       )}
