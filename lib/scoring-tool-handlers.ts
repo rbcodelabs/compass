@@ -15,6 +15,7 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { Prisma } from "@prisma/client"
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring"
+import { isScoreStale } from "@/lib/scoring-model"
 import type { ScoringFormulaType, MetricDirection, FormulaSnapshotMetric } from "@/lib/types"
 
 interface MetricInput {
@@ -456,7 +457,7 @@ export async function getOpportunityScore({ opportunityId }: { opportunityId: st
     return fail(`No score found for opportunity "${opportunityId}".`)
   }
 
-  const stale = score.modelVersion < score.scoringModel.version
+  const stale = isScoreStale(score.modelVersion, score.scoringModel.version)
   const lines = [
     `**Score for opportunity ${opportunityId}**`,
     `Model: ${score.scoringModel.name} (scored at v${score.modelVersion}, live v${score.scoringModel.version})`,

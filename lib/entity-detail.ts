@@ -159,6 +159,17 @@ async function fetchOpportunity(id: string, workspaceId: string) {
       score: {
         select: { normalizedScore: true, rawScore: true, modelVersion: true, scoredAt: true },
       },
+      // Nested on the existing opportunity fetch (no extra round trip) so the
+      // panel can apply the same gate as the board: show a score only when the
+      // workspace has an active model, and derive staleness from its live
+      // version. See lib/scoring-model.ts.
+      workspace: {
+        select: {
+          scoringConfig: {
+            select: { scoringModel: { select: { id: true, name: true, version: true } } },
+          },
+        },
+      },
       feedback: {
         where: { workspaceId },
         select: { id: true, title: true, type: true, status: true },

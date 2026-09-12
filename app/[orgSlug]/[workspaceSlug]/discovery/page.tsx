@@ -7,7 +7,9 @@ import { DiscoveryFilters } from "@/components/discovery/discovery-filters";
 import { DiscoveryTableView, type DiscoveryTableOpportunity } from "@/components/discovery/discovery-table-view";
 import { DiscoveryViewToggle, type DiscoveryView } from "@/components/discovery/discovery-view-toggle";
 import { DiscoveryGroupByToggle, type DiscoveryGroupBy } from "@/components/discovery/discovery-group-by-toggle";
+import { DiscoverySortToggle, type DiscoverySort } from "@/components/discovery/discovery-sort-toggle";
 import { SolutionSwimlaneBoard, type SwimlaneOpportunity } from "@/components/discovery/solution-swimlane-board";
+import { resolveWorkspaceScoringModel, toScoreSummary } from "@/lib/scoring-model";
 import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
@@ -21,7 +23,7 @@ export const metadata = {
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string; view?: string; groupBy?: string }>;
+  searchParams: Promise<{ squad?: string; view?: string; groupBy?: string; sort?: string }>;
 };
 
 const ACTIVE_STATUSES: OpportunityStatus[] = [
@@ -36,9 +38,15 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const { squad: squadFilter, view: requestedView, groupBy: requestedGroupBy } = await searchParams;
+  const {
+    squad: squadFilter,
+    view: requestedView,
+    groupBy: requestedGroupBy,
+    sort: requestedSort,
+  } = await searchParams;
   const view: DiscoveryView = requestedView === "table" ? "table" : "board";
   const groupBy: DiscoveryGroupBy = requestedGroupBy === "opportunity" ? "opportunity" : "status";
+  const sort: DiscoverySort = requestedSort === "score" ? "score" : "manual";
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
@@ -51,7 +59,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
 
   if (!workspace) notFound();
 
-  const [rawSquads, opportunities, archivedOpportunities, evidenceSourceCounts] = await Promise.all([
+  const [rawSquads, opportunities, archivedOpportunities, evidenceSourceCounts, scoringModel] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { createdAt: "asc" },
@@ -70,6 +78,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         status: true,
         sortOrder: true,
         squadId: true,
+        score: { select: { normalizedScore: true, modelVersion: true } },
         _count: { select: { solutions: true, evidence: true } },
         solutions: {
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
@@ -98,6 +107,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         status: true,
         sortOrder: true,
         squadId: true,
+        score: { select: { normalizedScore: true, modelVersion: true } },
         _count: { select: { solutions: true, evidence: true } },
       },
     }),
@@ -106,7 +116,12 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       by: ["opportunityId", "sourceType"],
       where: { workspaceId: workspace.id, opportunityId: { not: null } },
     }),
+    // null when the workspace has no active model — the board then renders no
+    // score UI and no sort toggle at all, same gate as the detail page.
+    resolveWorkspaceScoringModel(workspace.id),
   ]);
+
+  const hasActiveScoringModel = scoringModel !== null;
 
   const sourceCountByOpportunity = new Map<string, number>();
   for (const row of evidenceSourceCounts) {
@@ -132,6 +147,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     status: string;
     sortOrder: number;
     squadId: string | null;
+    score: { normalizedScore: number; modelVersion: number } | null;
     _count: { solutions: number; evidence: number };
   }): OpportunityCardData {
     return {
@@ -143,6 +159,8 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       _count: o._count,
       evidenceSourceCount: sourceCountByOpportunity.get(o.id) ?? 0,
       squad: o.squadId ? (squadMap.get(o.squadId) ?? null) : null,
+      // null whenever there is no score row *or* no active model.
+      score: toScoreSummary(o.score, scoringModel),
     };
   }
 
@@ -202,6 +220,9 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
           <div className="flex items-center gap-2">
             <DiscoveryViewToggle view={view} />
             {view === "board" && <DiscoveryGroupByToggle groupBy={groupBy} />}
+            {view === "board" && groupBy === "status" && hasActiveScoringModel && (
+              <DiscoverySortToggle sort={sort} />
+            )}
             <DiscoveryFilters squads={squads} />
           </div>
         </Suspense>
@@ -228,6 +249,8 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
           workspaceSlug={workspaceSlug}
           workspaceId={workspace.id}
           squads={squads}
+          hasActiveScoringModel={hasActiveScoringModel}
+          sortByScore={sort === "score"}
         />
       )}
 
