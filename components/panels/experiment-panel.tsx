@@ -62,11 +62,15 @@ const STATUS_MAP: Record<string, { label: string; className: string }> = {
 };
 const STATUS_ORDER = ["DESIGNING", "RUNNING", "COMPLETE", "KILLED"] as const;
 
+// Semantic status tokens rather than raw palette values: they already carry
+// their own dark-mode values, so no `dark:` variants are needed. NOT_PURSUED is
+// neutral on purpose — it means "never tested", which is distinct from KILL's
+// "tested and invalidated".
 const CONCLUSION_CLASS: Record<string, string> = {
-  PROCEED: "border-green-300 text-green-700",
-  KILL: "border-red-300 text-red-700",
-  ITERATE: "border-amber-300 text-amber-700",
-  NOT_PURSUED: "border-slate-300 text-slate-600",
+  PROCEED: "border-status-success/30 text-status-success",
+  KILL: "border-status-danger/30 text-status-danger",
+  ITERATE: "border-status-warning/30 text-status-warning",
+  NOT_PURSUED: "border-status-neutral/30 text-status-neutral",
 };
 
 export function ExperimentPanel({
