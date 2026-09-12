@@ -24,6 +24,8 @@ import { solutionStatusBadge } from "@/lib/solution-status";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
+import { ScoreBadge } from "@/components/discovery/score-badge";
+import { toScoreSummary } from "@/lib/score-summary";
 
 type OpportunityData = {
   id: string;
@@ -45,6 +47,12 @@ type OpportunityData = {
   solutions: Array<{ id: string; title: string; status: string }>;
   evidence: EvidenceListItem[];
   feedback: LinkedFeedbackItem[];
+  /** Null when this opportunity has never been scored. */
+  score: { normalizedScore: number; modelVersion: number } | null;
+  /** Null when the workspace has no active scoring model — render no score UI. */
+  workspace: {
+    scoringConfig: { scoringModel: { id: string; name: string; version: number } | null } | null;
+  } | null;
 };
 
 // Matches the actual Opportunity status enum (see lib/entity-mutations.ts /
@@ -89,6 +97,11 @@ export function OpportunityPanel({
 
   const fullPageHref = `/${orgSlug}/${workspaceSlug}/discovery/${opportunityId}`;
 
+  // Same gate and the same staleness derivation as the Discovery board — see
+  // lib/score-summary.ts. No active model means no score UI anywhere.
+  const activeScoringModel = data.workspace?.scoringConfig?.scoringModel ?? null;
+  const scoreSummary = toScoreSummary(data.score, activeScoringModel);
+
   const krProgress =
     data.linkedKeyResult && data.linkedKeyResult.target > 0
       ? Math.round((data.linkedKeyResult.current / data.linkedKeyResult.target) * 100)
@@ -129,6 +142,12 @@ export function OpportunityPanel({
 
       {data.customerSegment && (
         <Field label="Customer Segment">{data.customerSegment}</Field>
+      )}
+
+      {activeScoringModel && (
+        <Field label="Score">
+          <ScoreBadge score={scoreSummary} scoringHref={`${fullPageHref}?tab=scoring`} />
+        </Field>
       )}
 
       <Section label="Driving Key Result">

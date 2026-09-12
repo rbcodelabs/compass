@@ -28,6 +28,7 @@ import {
   moveOpportunity,
   reorderOpportunity,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
+import { orderCards, planDragEnd } from "@/lib/discovery-board-ordering";
 import type { OpportunityStatus, SquadData } from "@/lib/types";
 
 const COLUMNS: { status: OpportunityStatus; label: string; accent: "neutral" | "info" | "warning" | "success" }[] = [
@@ -52,6 +53,20 @@ function buildColumnMap(
   }, {} as ColumnMap);
 }
 
+/**
+ * Score sort is a *view* on top of the canonical sortOrder state — `columns`
+ * always holds manual order, and this derives the displayed order from it.
+ * Keeping the two separate is what lets the board fall straight back to Rick's
+ * manual order when the toggle goes off, with nothing re-persisted.
+ */
+function displayColumns(columns: ColumnMap, sortByScore: boolean): ColumnMap {
+  if (!sortByScore) return columns;
+  return ALL_STATUSES.reduce((acc, status) => {
+    acc[status] = orderCards(columns[status], true);
+    return acc;
+  }, {} as ColumnMap);
+}
+
 function findStatus(columns: ColumnMap, itemId: string): OpportunityStatus | null {
   for (const status of ALL_STATUSES) {
     if (columns[status].some((i) => i.id === itemId)) return status;
@@ -70,6 +85,8 @@ function DiscoveryColumn({
   workspaceSlug,
   workspaceId,
   squads,
+  showScore,
+  dragEnabled,
 }: {
   status: OpportunityStatus;
   label: string;
@@ -79,12 +96,35 @@ function DiscoveryColumn({
   workspaceSlug: string;
   workspaceId: string;
   squads: SquadData[];
+  showScore: boolean;
+  dragEnabled: boolean;
 }) {
   const itemIds = items.map((i) => i.id);
   const { setNodeRef, isOver } = useDroppable({
     id: `column-${status}`,
     data: { status },
   });
+
+  const cards =
+    items.length === 0 ? (
+      <EmptyState
+        compact
+        icon={<Lightbulb className="size-4" />}
+        title="No opportunities yet"
+        className={isOver ? "border-border-interactive" : undefined}
+      />
+    ) : (
+      items.map((opp) => (
+        <OpportunityCard
+          key={opp.id}
+          opportunity={opp}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          showScore={showScore}
+          dragEnabled={dragEnabled}
+        />
+      ))
+    );
 
   return (
     <BoardColumn
@@ -96,20 +136,13 @@ function DiscoveryColumn({
       bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`}
       footer={<CreateOpportunityForm workspaceId={workspaceId} defaultStatus={status} squads={squads} />}
     >
-        <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-          {items.length === 0 ? (
-            <EmptyState compact icon={<Lightbulb className="size-4" />} title="No opportunities yet" className={isOver ? "border-border-interactive" : undefined} />
-          ) : (
-            items.map((opp) => (
-              <OpportunityCard
-                key={opp.id}
-                opportunity={opp}
-                orgSlug={orgSlug}
-                workspaceSlug={workspaceSlug}
-              />
-            ))
-          )}
-        </SortableContext>
+        {dragEnabled ? (
+          <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+            {cards}
+          </SortableContext>
+        ) : (
+          cards
+        )}
     </BoardColumn>
   );
 }
@@ -122,6 +155,10 @@ type Props = {
   workspaceSlug: string;
   workspaceId: string;
   squads?: SquadData[];
+  /** True when the workspace has an active scoring model. */
+  hasActiveScoringModel?: boolean;
+  /** "Sort by score" view mode. Never persisted — see planDragEnd. */
+  sortByScore?: boolean;
 };
 
 export function OpportunityBoard({
@@ -130,8 +167,14 @@ export function OpportunityBoard({
   workspaceSlug,
   workspaceId,
   squads = [],
+  hasActiveScoringModel = false,
+  sortByScore = false,
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/discovery`;
+
+  // Score sort is only meaningful when there is a model to score against.
+  const scoreSortActive = hasActiveScoringModel && sortByScore;
+  const dragEnabled = !scoreSortActive;
 
   const [columns, setColumns] = useState<ColumnMap>(() =>
     buildColumnMap(opportunitiesByStatus)
@@ -147,6 +190,7 @@ export function OpportunityBoard({
   );
 
   function handleDragStart(event: DragStartEvent) {
+    if (!dragEnabled) return;
     const id = event.active.id as string;
     for (const status of ALL_STATUSES) {
       const found = columns[status].find((i) => i.id === id);
@@ -159,6 +203,7 @@ export function OpportunityBoard({
   }
 
   function handleDragOver(event: DragOverEvent) {
+    if (!dragEnabled) return;
     const { active, over } = event;
     if (!over) return;
 
@@ -210,46 +255,40 @@ export function OpportunityBoard({
     const { active, over } = event;
     setActiveItem(null);
 
-    if (!over) {
-      setDragSourceStatus(null);
-      return;
-    }
-
     const activeId = active.id as string;
-    const overId = over.id as string;
-
+    const overId = (over?.id as string | undefined) ?? null;
     const currentStatus = findStatus(columns, activeId);
-    if (!currentStatus) {
-      setDragSourceStatus(null);
-      return;
-    }
+    const columnItems = currentStatus ? columns[currentStatus] : [];
 
-    if (dragSourceStatus && dragSourceStatus !== currentStatus) {
-      // Cross-column move — persist
+    const plan = planDragEnd({
+      activeId,
+      overId,
+      currentStatus,
+      dragSourceStatus,
+      oldIndex: columnItems.findIndex((i) => i.id === activeId),
+      newIndex: overId ? columnItems.findIndex((i) => i.id === overId) : -1,
+      scoreSortActive,
+    });
+
+    if (plan.kind === "move") {
       startTransition(async () => {
-        await moveOpportunity(activeId, currentStatus, workspaceId, revalidatePathStr);
+        await moveOpportunity(activeId, plan.status, workspaceId, revalidatePathStr);
       });
-    } else if (!overId.startsWith("column-") && overId !== activeId) {
-      // Same-column reorder
-      const columnItems = columns[currentStatus];
-      const oldIndex = columnItems.findIndex((i) => i.id === activeId);
-      const newIndex = columnItems.findIndex((i) => i.id === overId);
+    } else if (plan.kind === "reorder" && currentStatus) {
+      const reordered = arrayMove(columnItems, plan.oldIndex, plan.newIndex).map(
+        (item, idx) => ({ ...item, sortOrder: idx })
+      );
+      setColumns((prev) => ({ ...prev, [currentStatus]: reordered }));
 
-      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-        const reordered = arrayMove(columnItems, oldIndex, newIndex).map((item, idx) => ({
-          ...item,
-          sortOrder: idx,
-        }));
-        setColumns((prev) => ({ ...prev, [currentStatus]: reordered }));
-
-        startTransition(async () => {
-          await reorderOpportunity(activeId, newIndex, revalidatePathStr);
-        });
-      }
+      startTransition(async () => {
+        await reorderOpportunity(activeId, plan.newIndex, revalidatePathStr);
+      });
     }
 
     setDragSourceStatus(null);
   }
+
+  const visibleColumns = displayColumns(columns, scoreSortActive);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
@@ -274,11 +313,13 @@ export function OpportunityBoard({
                 status={status}
                 label={label}
                 accent={accent}
-                items={columns[status]}
+                items={visibleColumns[status]}
                 orgSlug={orgSlug}
                 workspaceSlug={workspaceSlug}
                 workspaceId={workspaceId}
                 squads={squads}
+                showScore={hasActiveScoringModel}
+                dragEnabled={dragEnabled}
               />
             ))}
           </div>
@@ -291,6 +332,7 @@ export function OpportunityBoard({
                 opportunity={activeItem}
                 orgSlug={orgSlug}
                 workspaceSlug={workspaceSlug}
+                showScore={hasActiveScoringModel}
               />
             </div>
           ) : null}
