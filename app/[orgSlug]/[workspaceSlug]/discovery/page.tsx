@@ -6,6 +6,8 @@ import { OpportunityBoard } from "@/components/discovery/opportunity-board";
 import { DiscoveryFilters } from "@/components/discovery/discovery-filters";
 import { DiscoveryTableView, type DiscoveryTableOpportunity } from "@/components/discovery/discovery-table-view";
 import { DiscoveryViewToggle, type DiscoveryView } from "@/components/discovery/discovery-view-toggle";
+import { DiscoveryGroupByToggle, type DiscoveryGroupBy } from "@/components/discovery/discovery-group-by-toggle";
+import { SolutionSwimlaneBoard, type SwimlaneOpportunity } from "@/components/discovery/solution-swimlane-board";
 import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
@@ -19,7 +21,7 @@ export const metadata = {
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string; view?: string }>;
+  searchParams: Promise<{ squad?: string; view?: string; groupBy?: string }>;
 };
 
 const ACTIVE_STATUSES: OpportunityStatus[] = [
@@ -34,8 +36,9 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const { squad: squadFilter, view: requestedView } = await searchParams;
+  const { squad: squadFilter, view: requestedView, groupBy: requestedGroupBy } = await searchParams;
   const view: DiscoveryView = requestedView === "table" ? "table" : "board";
+  const groupBy: DiscoveryGroupBy = requestedGroupBy === "opportunity" ? "opportunity" : "status";
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
@@ -73,6 +76,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
           select: {
             id: true,
             title: true,
+            description: true,
             status: true,
             sortOrder: true,
             _count: { select: { evidence: true, assumptions: true } },
@@ -172,6 +176,23 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       }))
   );
 
+  // Lanes are exactly the Opportunities shown on today's board — same
+  // ACTIVE_STATUSES + squad filter, same order — mapped into the shape
+  // SolutionSwimlaneBoard needs instead of bucketed by Opportunity status.
+  const swimlaneOpportunities: SwimlaneOpportunity[] = opportunities.map((opportunity) => ({
+    id: opportunity.id,
+    title: opportunity.title,
+    squad: opportunity.squadId ? (squadMap.get(opportunity.squadId) ?? null) : null,
+    solutions: opportunity.solutions.map((solution) => ({
+      id: solution.id,
+      title: solution.title,
+      description: solution.description,
+      status: solution.status as SolutionStatus,
+      sortOrder: solution.sortOrder,
+      _count: solution._count,
+    })),
+  }));
+
   return (
     <WorkspacePage
       title="Discovery"
@@ -180,6 +201,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         <Suspense>
           <div className="flex items-center gap-2">
             <DiscoveryViewToggle view={view} />
+            {view === "board" && <DiscoveryGroupByToggle groupBy={groupBy} />}
             <DiscoveryFilters squads={squads} />
           </div>
         </Suspense>
@@ -187,6 +209,17 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     >
       {view === "table" ? (
         <DiscoveryTableView opportunities={tableOpportunities} />
+      ) : groupBy === "opportunity" ? (
+        <SolutionSwimlaneBoard
+          key={opportunities
+            .map((o) => o.id)
+            .concat(opportunities.flatMap((o) => o.solutions.map((s) => s.id)))
+            .join(",")}
+          opportunities={swimlaneOpportunities}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          workspaceId={workspace.id}
+        />
       ) : (
         <OpportunityBoard
           key={opportunities.map((o) => o.id).join(",")}
