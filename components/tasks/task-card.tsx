@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { cancelTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import { EditTaskDialog } from "./edit-task-dialog";
 import { TaskLinksBadge } from "./task-links-badge";
+import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
 import type { MemberData } from "@/lib/types";
 
@@ -86,8 +87,7 @@ export function TaskCard({ task, revalidatePathStr, orgSlug, workspaceSlug, memb
     });
   }
 
-  const assigneeMember = task.assigneeUserId ? members.find((m) => m.userId === task.assigneeUserId) : null;
-  const assigneeLabel = task.assignee ? `${task.assignee.type === "AGENT" ? "Agent: " : ""}${task.assignee.displayName}${task.assignee.available ? "" : " (unavailable)"}` : assigneeMember?.name || assigneeMember?.email || (task.assigneeUserId || task.assigneeAgentId ? "Unavailable assignee" : task.ownerName) || null;
+  const assignee = taskAssigneeDisplay(task, members);
   const dueLabel = formatDueDate(task.dueDate);
   const detailHref = `/${orgSlug}/${workspaceSlug}/tasks/${task.id}`;
 
@@ -136,7 +136,9 @@ export function TaskCard({ task, revalidatePathStr, orgSlug, workspaceSlug, memb
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground/70">
-            {assigneeLabel && <span className="truncate max-w-[140px]">{assigneeLabel}</span>}
+            <span className={`truncate max-w-[140px] ${assignee.assigned ? "" : UNASSIGNED_ASSIGNEE_CLASS}`}>
+              {assignee.label}
+            </span>
             {dueLabel && (
               <span className="flex items-center gap-1">
                 <CalendarDays className="size-3 shrink-0" />

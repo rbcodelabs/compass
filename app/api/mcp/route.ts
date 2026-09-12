@@ -138,7 +138,7 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
-import { applyRecordedDecision, getDecision, getReviewRequest, listDecisions, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
 import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
 
@@ -1513,7 +1513,7 @@ const _handler = createMcpHandler(
         description: "Lists experiments in a workspace with optional status and squad filters.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          status: z.enum(["DESIGNING", "RUNNING", "COMPLETE", "KILLED"]).optional().describe("Filter by status"),
+          status: z.enum(["DESIGNING", "RUNNING", "COMPLETE", "KILLED", "NOT_PURSUED"]).optional().describe("Filter by status"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
           hasResults: z.boolean().optional().describe("Filter by whether at least one result has been logged"),
           updatedSince: z.string().datetime().optional().describe("Filter to experiments updated at or after this ISO timestamp"),
@@ -1728,14 +1728,15 @@ const _handler = createMcpHandler(
       "conclude_experiment",
       {
         title: "Conclude Experiment",
-        description: "Concludes an experiment with PROCEED (hypothesis validated), KILL (invalidated), or ITERATE (inconclusive). Automatically updates the linked Assumption status: PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED.",
+        description: "Concludes an experiment with PROCEED (hypothesis validated), KILL (invalidated), ITERATE (inconclusive), or NOT_PURSUED (a human deliberately decided not to run this experiment at all — e.g. the feature already shipped and works, so testing it is unnecessary). Automatically updates the linked Assumption status: PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED, NOT_PURSUED → UNTESTED (unchanged — it was never tested, so it is not disproven; do not invent evidence). NOT_PURSUED lands on its own terminal status distinct from KILLED, so a deliberate non-pursuit is never mistaken for an evidence-based kill. `reason` is required for NOT_PURSUED and is stored on the experiment as a durable, visible rationale.",
         inputSchema: {
           experimentId: z.string().uuid().describe("UUID of the experiment"),
-          conclusion: z.enum(["PROCEED", "KILL", "ITERATE"]).describe("The outcome of the experiment"),
+          conclusion: z.enum(["PROCEED", "KILL", "ITERATE", "NOT_PURSUED"]).describe("The outcome of the experiment"),
+          reason: z.string().trim().min(1).max(2000).optional().describe("Rationale for the conclusion, preserved on the experiment. Required for NOT_PURSUED — the human's stated reason for deliberately not pursuing this experiment."),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ experimentId, conclusion }) => {
+      async ({ experimentId, conclusion, reason }) => {
         const prisma = getPrisma()
         const experiment = await prisma.experiment.findUnique({
           where: { id: experimentId },
@@ -1744,14 +1745,18 @@ const _handler = createMcpHandler(
         if (!experiment) {
           return fail(`Experiment "${experimentId}" not found.`)
         }
-        if (experiment.status === "KILLED" || experiment.status === "COMPLETE") {
+        if (experiment.status === "KILLED" || experiment.status === "COMPLETE" || experiment.status === "NOT_PURSUED") {
           return fail(`Experiment "${experiment.title}" is already concluded (${experiment.status}).`)
         }
+        const trimmedReason = reason?.trim() ?? ""
+        if (conclusion === "NOT_PURSUED" && !trimmedReason) {
+          return fail(`NOT_PURSUED requires a "reason" explaining why this experiment was deliberately not pursued.`)
+        }
 
-        const newStatus = conclusion === "KILL" ? "KILLED" : "COMPLETE"
+        const newStatus = conclusion === "KILL" ? "KILLED" : conclusion === "NOT_PURSUED" ? "NOT_PURSUED" : "COMPLETE"
         await prisma.experiment.update({
           where: { id: experimentId },
-          data: { status: newStatus, conclusion, endDate: new Date() },
+          data: { status: newStatus, conclusion, conclusionReason: trimmedReason || null, endDate: new Date() },
         })
 
         let assumptionUpdate = ""
@@ -1762,12 +1767,13 @@ const _handler = createMcpHandler(
         }
 
         return ok(
-          `**"${experiment.title}"** concluded as **${conclusion}**\nStatus: ${newStatus}${assumptionUpdate}`,
+          `**"${experiment.title}"** concluded as **${conclusion}**\nStatus: ${newStatus}${trimmedReason ? `\nReason: ${trimmedReason}` : ""}${assumptionUpdate}`,
           {
             id: experimentId,
             title: experiment.title,
             status: newStatus,
             conclusion,
+            conclusionReason: trimmedReason || null,
             assumptionId: experiment.assumptionId,
           },
         )
@@ -1840,7 +1846,7 @@ const _handler = createMcpHandler(
         description: "Lists tracking-only decision requests in a workspace, newest first.",
         inputSchema: {
           workspaceId: z.string().uuid(),
-          state: z.enum(["PENDING", "DECIDED"]).optional(),
+          state: z.enum(["PENDING", "DECIDED", "AWAITING_FOLLOW_THROUGH"]).optional().describe("AWAITING_FOLLOW_THROUGH: DECIDED decisions with no linked follow-up Task and not explicitly closed as no-action-needed."),
           subjectType: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"]).optional(),
           outcome: z.enum(["APPROVE", "REQUEST_CHANGES", "REJECT"]).optional(),
           reviewerId: z.string().uuid().optional(),
@@ -1857,11 +1863,30 @@ const _handler = createMcpHandler(
       "get_decision",
       {
         title: "Get Decision",
-        description: "Reads one tracking-only decision request, its immutable revision history, and live supporting artifacts (separate from frozen evidence).",
+        description: "Reads one tracking-only decision request, its immutable revision history, live supporting artifacts (separate from frozen evidence), the resolved requester (user or agent), and any linked follow-up Tasks.",
         inputSchema: { workspaceId: z.string().uuid(), requestId: z.string().uuid() },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getDecision,
+    )
+
+    register(
+      "close_decision_no_action",
+      {
+        title: "Close Decision — No Action Needed",
+        description:
+          "Explicitly closes a DECIDED decision as needing no follow-up work, with a required reason. Refuses if the " +
+          "decision already has a linked follow-up Task (unlink it first) or was already closed this way. This is " +
+          "the honest close-out for the AWAITING_FOLLOW_THROUGH list_decisions state — use it instead of silently " +
+          "leaving a decided decision unlinked.",
+        inputSchema: {
+          workspaceId: z.string().uuid(),
+          requestId: z.string().uuid(),
+          reason: z.string().min(1).max(2000).describe("Why this decision needs no follow-up work"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      closeDecisionNoAction,
     )
 
     register(
@@ -2428,7 +2453,7 @@ const _handler = createMcpHandler(
           assignee: taskAssigneeSchema.optional(),
           assignedToMe: z.boolean().optional(),
           parentTaskId: z.string().uuid().nullable().optional().describe("Filter by parent task; pass null for top-level tasks/Epics only"),
-          linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM"]).optional().describe("Filter to tasks linked to this object type (pair with linkedId)"),
+          linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM", "DECISION"]).optional().describe("Filter to tasks linked to this object type (pair with linkedId)"),
           linkedId: z.string().uuid().optional().describe("UUID of the linked object (pair with linkedType)"),
           includeSubtasks: z.boolean().optional().describe("Nest subtasks under their parent in the response"),
           updatedSince: z.string().datetime().optional().describe("Filter to tasks updated at or after this ISO timestamp"),
@@ -2490,7 +2515,7 @@ const _handler = createMcpHandler(
           "Experiment, or Feedback Item). Idempotent — re-linking the same pair is a no-op, not an error.",
         inputSchema: {
           taskId: z.string().uuid().describe("UUID of the task"),
-          linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM"]).describe("Type of the object to link"),
+          linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM", "DECISION"]).describe("Type of the object to link"),
           linkedId: z.string().uuid().describe("UUID of the object to link"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
@@ -2505,7 +2530,7 @@ const _handler = createMcpHandler(
         description: "Removes a link between a Task and another Compass object.",
         inputSchema: {
           taskId: z.string().uuid().describe("UUID of the task"),
-          linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM"]).describe("Type of the linked object"),
+          linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM", "DECISION"]).describe("Type of the linked object"),
           linkedId: z.string().uuid().describe("UUID of the linked object"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,

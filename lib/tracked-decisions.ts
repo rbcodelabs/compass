@@ -70,7 +70,7 @@ const options = [
   { actionKey: "REJECT", label: "Reject", outcomeClass: "REJECT", continuationKey: "NO_ACTION", sortOrder: 2 },
 ]
 
-export async function createTrackedDecisionRequest(input: { workspaceId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; idempotencyKey: string; sources?: TrackedDecisionSourceInput[]; requestedById?: string | null; assignedToId?: string | null }) {
+export async function createTrackedDecisionRequest(input: { workspaceId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; idempotencyKey: string; sources?: TrackedDecisionSourceInput[]; requestedById?: string | null; requestedByAgentId?: string | null; assignedToId?: string | null }) {
   const question = required(input.question, "Question", 255), context = required(input.context, "Context", 20_000), identity = uuid(input.idempotencyKey, "Idempotency key")
   const normalizedSourceInputs = normalizeSourceInputs(input.sources, { type: input.subjectType, id: input.subjectId })
   const prisma = getPrisma(), [entity, sources] = await Promise.all([resolveEntity(prisma, input.workspaceId, input.subjectType, input.subjectId), resolveSources(prisma, input.workspaceId, normalizedSourceInputs)])
@@ -81,7 +81,7 @@ export async function createTrackedDecisionRequest(input: { workspaceId: string;
   if (existing) return replay()
   try {
     return await prisma.$transaction(async tx => {
-      const request = await tx.reviewRequest.create({ data: { ...identityWhere, state: "DRAFT", requestedById: input.requestedById ?? null, assignedToId: input.assignedToId ?? null } })
+      const request = await tx.reviewRequest.create({ data: { ...identityWhere, state: "DRAFT", requestedById: input.requestedById ?? null, requestedByAgentId: input.requestedByAgentId ?? null, assignedToId: input.assignedToId ?? null } })
       const revisionNumber = 1, decisionCycle = 1
       const fingerprint = createHash("sha256").update(JSON.stringify({ requestId: request.id, decisionCycle, revisionNumber, packet })).digest("hex")
       const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, fingerprint, title: question, summary: context, packetJson: JSON.stringify(packet), requiredRole: "ADMIN", options: { create: options } } })
@@ -91,7 +91,7 @@ export async function createTrackedDecisionRequest(input: { workspaceId: string;
   } catch (error) { if (isUnique(error)) return replay(); throw error }
 }
 
-export async function reviseTrackedDecisionRequest(input: { workspaceId: string; requestId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; expectedDecisionId: string; reason: string; requestedById?: string | null; assignedToId?: string | null }) {
+export async function reviseTrackedDecisionRequest(input: { workspaceId: string; requestId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; expectedDecisionId: string; reason: string; requestedById?: string | null; requestedByAgentId?: string | null; assignedToId?: string | null }) {
   const question = required(input.question, "Question", 255), context = required(input.context, "Context", 20_000), reason = required(input.reason, "Revision reason", 2_000)
   const prisma = getPrisma(), entity = await resolveEntity(prisma, input.workspaceId, input.subjectType, input.subjectId)
   let packet: Packet
@@ -114,7 +114,7 @@ export async function reviseTrackedDecisionRequest(input: { workspaceId: string;
       const revisionNumber = request.revisionCount + 1, decisionCycle = request.decisionCycle + 1
       const fingerprint = createHash("sha256").update(JSON.stringify({ requestId: request.id, decisionCycle, revisionNumber, packet })).digest("hex")
       const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, fingerprint, title: question, summary: context, packetJson: JSON.stringify(packet), requiredRole: "ADMIN", options: { create: options } } })
-      const claimed = await tx.reviewRequest.updateMany({ where: { id: request.id, state: "DECIDED", currentRevisionId: request.currentRevisionId, decisionCycle: request.decisionCycle }, data: { state: "PENDING", currentRevisionId: revision.id, revisionCount: revisionNumber, decisionCycle, requestedById: input.requestedById ?? request.requestedById, assignedToId: input.assignedToId ?? request.assignedToId, reopenReason: reason, reopenedById: input.requestedById ?? null, reconsidersDecisionId: input.expectedDecisionId, updatedAt: new Date() } })
+      const claimed = await tx.reviewRequest.updateMany({ where: { id: request.id, state: "DECIDED", currentRevisionId: request.currentRevisionId, decisionCycle: request.decisionCycle }, data: { state: "PENDING", currentRevisionId: revision.id, revisionCount: revisionNumber, decisionCycle, requestedById: input.requestedById ?? request.requestedById, requestedByAgentId: input.requestedByAgentId ?? request.requestedByAgentId, assignedToId: input.assignedToId ?? request.assignedToId, reopenReason: reason, reopenedById: input.requestedById ?? null, reconsidersDecisionId: input.expectedDecisionId, updatedAt: new Date() } })
       if (claimed.count !== 1) throw new TrackedDecisionError("REVISION_CONFLICT", "The decision changed before the revision could be created.")
       await tx.reviewRevision.update({ where: { id: request.currentRevisionId }, data: { supersededAt: new Date() } })
       return revision
@@ -122,7 +122,71 @@ export async function reviseTrackedDecisionRequest(input: { workspaceId: string;
   } catch (error) { if (isUnique(error)) throw new TrackedDecisionError("REVISION_CONFLICT", "The decision changed before the revision could be created."); throw error }
 }
 
-export type TrackedDecisionListInput = { workspaceId: string; tab?: "PENDING" | "DECIDED"; subjectType?: TrackedSubjectType; outcome?: "APPROVE" | "REQUEST_CHANGES" | "REJECT"; reviewerId?: string; query?: string; from?: Date; to?: Date; page?: number; pageSize?: number; includeLegacy?: boolean }
+export type TrackedDecisionListInput = { workspaceId: string; tab?: "PENDING" | "DECIDED" | "AWAITING_FOLLOW_THROUGH"; subjectType?: TrackedSubjectType; outcome?: "APPROVE" | "REQUEST_CHANGES" | "REJECT"; reviewerId?: string; query?: string; from?: Date; to?: Date; page?: number; pageSize?: number; includeLegacy?: boolean }
+
+/**
+ * True when a DECIDED decision already has follow-up work linked to it
+ * (a TaskLink with linkedType "DECISION" pointing at this request), or has
+ * been explicitly closed with "no action needed". Either one means the
+ * decision is no longer "awaiting follow-through" -- see
+ * `listAwaitingFollowThrough` and `recordDecisionNoAction` below.
+ *
+ * TaskLink has no Prisma relation back to ReviewRequest (bare linkedId, same
+ * reasoning as every other TaskLink target -- see lib/task-tool-handlers.ts),
+ * so this can't be expressed as a nested Prisma filter and is checked with a
+ * direct batch query instead.
+ */
+async function linkedRequestIds(prisma: ReturnType<typeof getPrisma>, requestIds: string[]): Promise<Set<string>> {
+  if (!requestIds.length) return new Set()
+  const links = await prisma.taskLink.findMany({ where: { linkedType: "DECISION", linkedId: { in: requestIds } }, select: { linkedId: true } })
+  return new Set(links.map((link) => link.linkedId))
+}
+
+/**
+ * Decided-but-not-followed-through decisions: state DECIDED, not explicitly
+ * closed with "no action needed", and no DECISION-type TaskLink pointing at
+ * them. This workspace's decision volume is small (dozens, not thousands),
+ * so candidates are loaded in full and filtered/paginated in application
+ * code rather than pushed into a single SQL query -- the same tradeoff
+ * `listPendingDocDecisions` makes above, just without its cursor loop since
+ * a single bounded fetch is enough at this scale.
+ */
+async function listAwaitingFollowThrough(prisma: ReturnType<typeof getPrisma>, workspaceId: string, page: number, pageSize: number) {
+  const MAX_CANDIDATES = 1000
+  const candidates = await prisma.reviewRequest.findMany({
+    where: { workspaceId, gateType: TRACKED_GATE, state: "DECIDED", noActionAt: null },
+    include: { currentRevision: { include: { options: { orderBy: { sortOrder: "asc" } }, decisions: { include: { option: true } } } } },
+    orderBy: { updatedAt: "desc" },
+    take: MAX_CANDIDATES,
+  })
+  const linked = await linkedRequestIds(prisma, candidates.map((request) => request.id))
+  const requests = candidates.filter((request) => !linked.has(request.id))
+  const total = requests.length
+  return { requests: requests.slice((page - 1) * pageSize, page * pageSize), total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) }
+}
+
+/**
+ * Records that a DECIDED decision genuinely needs no follow-up work, with a
+ * required reason -- the explicit close-out for the "awaiting follow-through"
+ * lens (item 4 of the decision->task bridge). Refuses to close a decision
+ * that already has follow-up work linked (closing it "no action" alongside
+ * real linked work would be a contradictory, misleading state) or one that
+ * has already been closed this way.
+ */
+export async function recordDecisionNoAction(input: { workspaceId: string; requestId: string; reason: string; actorUserId: string | null }) {
+  const reason = required(input.reason, "Reason", 2_000)
+  const prisma = getPrisma()
+  const request = await prisma.reviewRequest.findFirst({ where: { id: input.requestId, workspaceId: input.workspaceId, gateType: TRACKED_GATE } })
+  if (!request) throw new TrackedDecisionError("REQUEST_NOT_FOUND", "The decision was not found.")
+  if (request.state !== "DECIDED") throw new TrackedDecisionError("NOT_DECIDED", "Only a decided decision can be closed as no action needed.")
+  if (request.noActionAt) throw new TrackedDecisionError("ALREADY_CLOSED", "This decision was already closed as no action needed.")
+  const linked = await linkedRequestIds(prisma, [request.id])
+  if (linked.has(request.id)) throw new TrackedDecisionError("HAS_LINKED_WORK", "This decision already has follow-up work linked to it. Unlink it first if it truly needs no action.")
+  return prisma.reviewRequest.update({
+    where: { id: request.id },
+    data: { noActionAt: new Date(), noActionById: input.actorUserId, noActionReason: reason, updatedAt: new Date() },
+  })
+}
 
 export type PendingDocDecision = { id: string; title: string }
 export type DecidedDocDecision = { id: string; title: string; outcome: string; outcomeLabel: string; decidedAt: Date; reviewerName: string | null }
@@ -232,6 +296,11 @@ export async function listPendingDocDecisions(workspaceId: string, docId: string
 export async function listTrackedDecisions(input: TrackedDecisionListInput) {
   const prisma = getPrisma(), pageSize = Math.min(50, Math.max(1, input.pageSize ?? 20)), page = Math.max(1, input.page ?? 1), query = input.query?.trim()
   if (input.reviewerId) uuid(input.reviewerId, "Reviewer")
+  // Awaiting-follow-through is not expressible as a plain `state` filter (it
+  // additionally excludes decisions with linked work or an explicit no-action
+  // close-out), so it gets its own query path rather than folding into the
+  // generic `where` below.
+  if (input.tab === "AWAITING_FOLLOW_THROUGH") return listAwaitingFollowThrough(prisma, input.workspaceId, page, pageSize)
   const decisionWhere = { ...(input.outcome ? { option: { outcomeClass: input.outcome } } : {}), ...(input.reviewerId ? { actorUserId: input.reviewerId } : {}), ...((input.from || input.to) ? { decidedAt: { ...(input.from ? { gte: input.from } : {}), ...(input.to ? { lte: input.to } : {}) } } : {}) }
   const revisionPredicates = [
     ...(query ? [{ OR: [{ title: { contains: query, mode: "insensitive" as const } }, { summary: { contains: query, mode: "insensitive" as const } }] }] : []),
@@ -244,3 +313,59 @@ export async function listTrackedDecisions(input: TrackedDecisionListInput) {
 }
 
 export async function getTrackedDecision(workspaceId: string, requestId: string) { return getPrisma().reviewRequest.findFirst({ where: { id: requestId, workspaceId, gateType: TRACKED_GATE }, include: { currentRevision: { include: { options: { orderBy: { sortOrder: "asc" } }, decisions: { include: { option: true } } } }, revisions: { orderBy: { revisionNumber: "desc" }, include: { decisions: { include: { option: true } } } } } }) }
+
+/**
+ * Applies a decided TRACKED_DECISION (the ordinary workspace Decisions
+ * queue created via `createTrackedDecisionRequest`/`request_decision`).
+ * Every option on this gate has `continuationKey: "NO_ACTION"` — Compass
+ * Decisions are tracking-only here, so "applying" never mutates product
+ * state. It only records a durable `DecisionApplication` receipt, exactly
+ * mirroring the idempotent create-or-replay pattern in
+ * `applyBuildingInvestmentDecision` (lib/building-investment.ts): a stable
+ * `receiptKey` makes repeat calls (or a race between two callers) return the
+ * same row instead of creating a second one or re-deriving anything.
+ */
+export async function applyTrackedDecision(decisionId: string) {
+  const prisma = getPrisma()
+  const receiptKey = `tracked-decision:${decisionId}:v1`
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const replay = await tx.decisionApplication.findUnique({ where: { receiptKey } })
+      if (replay) {
+        if (replay.decisionId !== decisionId || replay.continuationKey !== "NO_ACTION" || replay.targetType !== "TRACKED_DECISION" || replay.status !== "APPLIED") {
+          throw new TrackedDecisionError("RECEIPT_CONFLICT", "The application receipt does not match this decision.")
+        }
+        return replay
+      }
+      // A single relation path (decision.revision.request) is the sole
+      // source of truth here — unlike applyBuildingInvestmentDecision, there
+      // is no separate target entity (e.g. a Solution) to cross-check a
+      // second request reference against, since a tracked decision applies
+      // to nothing but itself.
+      const decision = await tx.decisionRecord.findUnique({
+        where: { id: decisionId },
+        include: { revision: { include: { request: true, options: { select: { id: true } } } }, option: true },
+      })
+      const request = decision?.revision.request
+      const selectedBelongsToRevision = Boolean(decision?.revision.options.some((option) => option.id === decision.optionId))
+      if (!decision || !request
+        || request.gateType !== TRACKED_GATE
+        || request.state !== "DECIDED" || request.currentRevisionId !== decision.revisionId
+        || decision.fingerprint !== decision.revision.fingerprint || decision.revision.supersededAt || !selectedBelongsToRevision
+        || decision.option.continuationKey !== "NO_ACTION") {
+        throw new TrackedDecisionError("DECISION_MISMATCH", "Decision is not a current tracked (NO_ACTION) decision.")
+      }
+      return tx.decisionApplication.create({ data: {
+        decisionId, continuationKey: "NO_ACTION", targetType: "TRACKED_DECISION", targetId: request.id,
+        status: "APPLIED", receiptKey, attemptCount: 1, appliedAt: new Date(), updatedAt: new Date(),
+      } })
+    })
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") {
+      const winner = await prisma.decisionApplication.findUnique({ where: { receiptKey } })
+      if (winner?.decisionId === decisionId && winner.status === "APPLIED" && winner.targetType === "TRACKED_DECISION" && winner.continuationKey === "NO_ACTION") return winner
+      throw new TrackedDecisionError("RECEIPT_CONFLICT", "A concurrent application receipt does not match this decision.")
+    }
+    throw error
+  }
+}

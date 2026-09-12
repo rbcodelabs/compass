@@ -107,6 +107,16 @@ export default async function TaskDetailPage({ params }: Props) {
   const titleById = new Map<string, string>();
   await Promise.all(
     Array.from(linksByType.entries()).map(async ([linkedType, ids]) => {
+      // DECISION (ReviewRequest) has no flat `title` column -- see the
+      // LINK_TARGET_MODEL comment in lib/task-tool-handlers.ts.
+      if (linkedType === "DECISION") {
+        const rows = await prisma.reviewRequest.findMany({
+          where: { id: { in: ids }, workspaceId: workspace.id },
+          select: { id: true, currentRevision: { select: { title: true } } },
+        });
+        for (const row of rows) titleById.set(`DECISION:${row.id}`, row.currentRevision?.title ?? "Untitled decision");
+        return;
+      }
       const delegate = LINK_MODEL[linkedType as keyof typeof LINK_MODEL];
       if (!delegate) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -120,7 +130,7 @@ export default async function TaskDetailPage({ params }: Props) {
 
   // Candidate pools for the "link to another item" dialog — same shape used
   // by the roadmap add-item form's availableX lists.
-  const [opps, sols, roadmapItems, objectives, keyResults, docs, experiments, feedbackItems] = await Promise.all([
+  const [opps, sols, roadmapItems, objectives, keyResults, docs, experiments, feedbackItems, decisionRequests] = await Promise.all([
     prisma.opportunity.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
     prisma.solution.findMany({ where: { opportunity: { workspaceId: workspace.id } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
     prisma.roadmapItem.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
@@ -129,7 +139,9 @@ export default async function TaskDetailPage({ params }: Props) {
     prisma.doc.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
     prisma.experiment.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
     prisma.feedbackItem.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+    prisma.reviewRequest.findMany({ where: { workspaceId: workspace.id, gateType: "TRACKED_DECISION" }, select: { id: true, currentRevision: { select: { title: true } } }, orderBy: { createdAt: "asc" } }),
   ]);
+  const decisions = decisionRequests.map((r) => ({ id: r.id, title: r.currentRevision?.title ?? "Untitled decision" }));
 
   const linkableTargets: LinkableTargets = {
     OPPORTUNITY: opps,
@@ -140,6 +152,7 @@ export default async function TaskDetailPage({ params }: Props) {
     DOC: docs,
     EXPERIMENT: experiments,
     FEEDBACK_ITEM: feedbackItems,
+    DECISION: decisions,
   };
 
   const taskCard: TaskCardData = {

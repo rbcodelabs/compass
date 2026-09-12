@@ -38,6 +38,9 @@ vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: () 
 const mockCheckLimit = vi.fn()
 vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => mockCheckLimit() }))
 
+const mockResolveAgentHandoffContext = vi.fn()
+vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: (...args: unknown[]) => mockResolveAgentHandoffContext(...args) }))
+
 import { POST } from "@/app/api/agent/turn/route"
 
 function req(body: unknown): NextRequest {
@@ -62,6 +65,7 @@ beforeEach(() => {
   mockCheckLimit.mockResolvedValue({ allowed: true })
   mockMintKey.mockResolvedValue({ token: "token", apiKeyId: "key-1" })
   mockPreparePacks.mockResolvedValue({ files: [], pluginPaths: [], skillIds: [], provenanceJson: "[]", systemPromptAppendices: [] })
+  mockResolveAgentHandoffContext.mockResolvedValue(null)
 })
 
 describe("agent turn route — guards", () => {
@@ -216,5 +220,89 @@ describe("agent turn route — guards", () => {
     expect(mockPrisma.agentAuditLog.createMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ toolName: "create_opportunity", packProvenance: provenance })] })
     expect(stop).toHaveBeenCalled()
     expect(mockRevokeKey).toHaveBeenCalledWith("key-1")
+  })
+
+  describe("seedContext hand-off (\"Send to agent\")", () => {
+    const HANDOFF = {
+      label: "Approved plan · Redesigned onboarding",
+      summary: "Ship a redesigned onboarding flow.",
+      suggestedInstruction: "Help me move forward with the approved plan.",
+      promptBlock: "SEED_BLOCK_CANARY: Approved Solution Plan for \"Redesigned onboarding\"",
+      sourceUrl: "/acme-org/acme-workspace/discovery/opp-1?detail=solution:sol-1",
+    }
+
+    function setupHappyRun() {
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", name: "Test", slug: "test", organization: { slug: "org" } })
+      mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+      mockPrisma.agentMessage.findMany.mockResolvedValue([{ role: "user", content: "hi" }])
+      const runCommand = vi.fn().mockResolvedValue({ async *logs() { yield { stream: "stdout", data: 'AGENT_ERROR {"message":"test stop"}\n' } }, wait: vi.fn() })
+      mockBootSandbox.mockResolvedValue({ writeFiles: vi.fn(), runCommand, stop: vi.fn() })
+      return runCommand
+    }
+
+    it("folds the resolved promptBlock into the assembled prompt on a brand-new conversation", async () => {
+      const runCommand = setupHappyRun()
+      mockResolveAgentHandoffContext.mockResolvedValue(HANDOFF)
+
+      const res = await POST(req({ workspaceId: "ws-1", message: "hi", seedContext: { entityType: "solutionPlan", entityId: "plan-1" } }))
+      await res.text()
+
+      expect(mockResolveAgentHandoffContext).toHaveBeenCalledWith({
+        workspaceId: "ws-1",
+        userId: "user-1",
+        entityType: "solutionPlan",
+        entityId: "plan-1",
+      })
+      const prompt = runCommand.mock.calls[0][0].env.AGENT_PROMPT as string
+      expect(prompt).toContain("SEED_BLOCK_CANARY")
+      expect(prompt).toContain("Context you're starting from")
+    })
+
+    it.each([false, true])("ignores seedContext for an existing conversation (PM handoff: %s)", async pmHandoff => {
+      const runCommand = setupHappyRun()
+      mockPrisma.agentConversation.findFirst.mockResolvedValue({ id: "c-1", ...(pmHandoff ? { interviewProcessingJson: JSON.stringify({ status: "SUCCEEDED", interviewId: "interview", receipt: { changedFields: [], targetUrl: "/item" } }) } : {}) })
+      mockResolveAgentHandoffContext.mockResolvedValue(HANDOFF)
+
+      const res = await POST(req({
+        workspaceId: "ws-1",
+        message: "hi",
+        conversationId: "c-1",
+        ...(pmHandoff ? { continue: true } : {}),
+        seedContext: { entityType: "solutionPlan", entityId: "plan-1" },
+      }))
+      await res.text()
+
+      expect(mockResolveAgentHandoffContext).not.toHaveBeenCalled()
+      const prompt = runCommand.mock.calls[0][0].env.AGENT_PROMPT as string
+      expect(prompt).not.toContain("SEED_BLOCK_CANARY")
+    })
+
+    it("proceeds silently (no failed turn) when resolveAgentHandoffContext returns null", async () => {
+      const runCommand = setupHappyRun()
+      mockResolveAgentHandoffContext.mockResolvedValue(null)
+
+      const res = await POST(req({ workspaceId: "ws-1", message: "hi", seedContext: { entityType: "solutionPlan", entityId: "stale-plan" } }))
+      const text = await res.text()
+
+      expect(mockResolveAgentHandoffContext).toHaveBeenCalled()
+      expect(runCommand).toHaveBeenCalled()
+      const prompt = runCommand.mock.calls[0][0].env.AGENT_PROMPT as string
+      expect(prompt).not.toContain("Context you're starting from")
+      expect(text).not.toBe("")
+    })
+
+    it("persists only the user's literal typed message — never the resolved seed context text", async () => {
+      setupHappyRun()
+      mockResolveAgentHandoffContext.mockResolvedValue(HANDOFF)
+
+      await (await POST(req({ workspaceId: "ws-1", message: "hi", seedContext: { entityType: "solutionPlan", entityId: "plan-1" } }))).text()
+
+      const userMessageCall = mockPrisma.agentMessage.create.mock.calls.find(
+        (call) => call[0]?.data?.role === "user"
+      )
+      expect(userMessageCall).toBeDefined()
+      expect(userMessageCall![0].data.content).toBe("hi")
+      expect(userMessageCall![0].data.content).not.toContain("SEED_BLOCK_CANARY")
+    })
   })
 })

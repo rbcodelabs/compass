@@ -60,6 +60,12 @@ const HORIZON: Record<string, { label: string; className: string }> = Object.fro
 // current LAUNCHING value still works via the map above.
 const HORIZON_ORDER = SETTABLE_HORIZONS;
 
+// Per-type disclosure defaults, declared here rather than inside Section: a
+// roadmap item is read for how it launches and what is left to do, so those
+// two open; "Linked to" is provenance you consult on demand. A reader's own
+// toggle is remembered and takes precedence on later visits.
+const SECTION = { collapsible: true, panelType: "roadmapItem" } as const;
+
 export function RoadmapItemPanel({
   id,
   orgSlug,
@@ -136,7 +142,7 @@ export function RoadmapItemPanel({
       </div>
 
 
-      <Section label="Launch">
+      <Section {...SECTION} defaultOpen label="Launch">
         <div className="flex flex-col gap-4">
           {data.launchChecklist ? (
             <LaunchChecklist
@@ -164,11 +170,11 @@ export function RoadmapItemPanel({
         </div>
       </Section>
 
-      <Section label="Linked to" count={linked.length}>
+      <Section {...SECTION} label="Linked to" count={linked.length} empty={linked.length === 0}>
         <RelationList items={linked} empty="Not linked to any discovery item." />
       </Section>
 
-      <Section label="Delivery tasks" count={data.deliveryTasks.length}>
+      <Section {...SECTION} defaultOpen label="Delivery tasks" count={data.deliveryTasks.length}>
         <RoadmapDeliveryTasks
           roadmapItemId={id}
           orgSlug={orgSlug}

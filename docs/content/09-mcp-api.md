@@ -165,10 +165,10 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result |
+| `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
-| `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment |
-| `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts |
+| `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
+| `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `create_opportunity` | Create a new opportunity with title, description, status |
 | `update_opportunity` | Update an existing opportunity's title and/or description; pass `null` to clear its description |
 | `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
@@ -199,18 +199,19 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `get_experiment` | Return full details for a single experiment: hypothesis, method, kill condition, linked assumption, all logged results, and conclusion |
 | `create_experiment` | Create a new experiment with hypothesis and method (starts in DESIGNING status) |
 | `log_experiment_result` | Record an observation or data point for a running experiment |
-| `conclude_experiment` | Conclude an experiment with PROCEED, KILL, or ITERATE; automatically updates the linked Assumption's status (PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED) |
+| `conclude_experiment` | Conclude an experiment with PROCEED, KILL, ITERATE, or NOT_PURSUED (deliberately never run — e.g. the feature already shipped); automatically updates the linked Assumption's status (PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED, NOT_PURSUED → UNTESTED). NOT_PURSUED requires a `reason` and lands on its own terminal status distinct from KILLED, so a deliberate non-pursuit is never mistaken for an evidence-based kill |
 
 ### Roadmap
 
 | Tool | Description |
 |---|---|
-| `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs |
+| `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
 | `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
 | `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
-| `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state, linked item type, outcome, reviewer, or search text |
-| `get_decision` | Read one tracking-only decision and its immutable revision history |
+| `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state (`PENDING`, `DECIDED`, or `AWAITING_FOLLOW_THROUGH`), linked item type, outcome, reviewer, or search text |
+| `get_decision` | Read one tracking-only decision, its immutable revision history, the resolved requester (the human or Agent who raised it), and any linked follow-up Tasks |
+| `close_decision_no_action` | Explicitly close a DECIDED decision as needing no follow-up work, with a required reason. Refuses if the decision already has a linked follow-up Task or was already closed this way |
 | `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. This operation never takes the human decision or invokes release automation |
 | `list_release_runs` | List recorded release-authorization runs by ledger state, covered Task, or `updatedSince`, including exact repository/PR/head SHA, Task IDs, authorization Decision ID, dispatch state, and a stable GitHub PR URL |
 | `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
@@ -226,6 +227,16 @@ Decision-taking is deliberately absent from MCP. A signed-in human reviewer open
 the stable Compass review URL and chooses one option. Agents may prepare and read
 packets, then apply a recorded decision; they cannot impersonate the reviewer.
 
+`AWAITING_FOLLOW_THROUGH` is a computed `list_decisions` state, not a stored
+column: a DECIDED decision with no `DECISION`-type Task link pointing at it and
+not explicitly closed via `close_decision_no_action`. Linking a follow-up Task
+(`link_task` with `linkedType: "DECISION"`) or calling
+`close_decision_no_action` both remove it from this list — the pairing makes
+"we decided but never acted on it" a queryable, honest state instead of a
+silent gap. `request_decision` also records which Agent (if any) raised the
+request, distinct from the API key's owning user, so `get_decision`'s resolved
+requester can point at the Agent that was blocked waiting on the answer.
+
 `request_decision.sources` is an optional array of `{ type, id }` references.
 Supported types are `WORKSPACE`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`,
 `ROADMAP_ITEM`, `DOC`, `EXPERIMENT`, `FEEDBACK`, and `EVIDENCE`. Compass removes
@@ -235,14 +246,27 @@ the immutable packet. If any source is missing or belongs to another workspace,
 the whole request fails and no review is created. Put readable reasoning in the
 Markdown `context`; do not embed source UUIDs there.
 
-`apply_recorded_decision` is queue-only for release authorization. It validates
-the authoritative provider snapshot outside the database transaction, then a
-short transaction binds the unchanged snapshot and human decision to a durable
-dispatch row. Compass does not merge, deploy, or otherwise invoke external
-release automation in this implementation. Provider validation is unconfigured
-by default and therefore fails closed (`PR_NOT_READY`); a dispatch worker must
-use a configured provider and repeat the same head/check/policy revalidation at
-the dispatch-claim boundary before any future external side effect.
+`apply_recorded_decision` applies a decided review request through the
+applicator matching its `gateType`, and is idempotent: a repeat call replays
+the existing receipt rather than reapplying or creating a second one. A
+registered agent may call it (it is classified as an agent WRITE, not
+human-only) but can never take the underlying decision — only a signed-in
+human admin chooses an option, via the review URL above.
+
+- **`TRACKED_DECISION`** (the default queue created by `request_decision`):
+  every outcome resolves to `NO_ACTION`. Applying only records a durable
+  receipt confirming the decision was carried out; it never mutates product
+  state.
+- **`BUILDING_INVESTMENT`** / **`BUILDING_INVESTMENT_REVOCATION`**: authorizes
+  or revokes delivery investment in a Solution.
+- **`RELEASE_AUTHORIZATION`**: validates the authoritative provider snapshot
+  outside the database transaction, then a short transaction binds the
+  unchanged snapshot and human decision to a durable dispatch row. Compass
+  does not merge, deploy, or otherwise invoke external release automation in
+  this implementation. Provider validation is unconfigured by default and
+  therefore fails closed (`PR_NOT_READY`); a dispatch worker must use a
+  configured provider and repeat the same head/check/policy revalidation at
+  the dispatch-claim boundary before any future external side effect.
 
 `list_release_runs` reports Compass ledger facts only. A release-run state does
 not prove that GitHub merged the PR, that a deployment reached production, or
@@ -262,13 +286,13 @@ state.
 
 ### Tasks
 
-Task is the standalone delivery/tracking entity used both for full engineering sprint delivery (replacing a Jira-style board) and lightweight PM initiative tracking — one status vocabulary, `BACKLOG → TODO → IN_PROGRESS → BLOCKED ⇄ IN_REVIEW → DONE`, with `CANCELLED` as a terminal state and `BLOCKED` a first-class column. Tasks link to other Compass objects (Opportunity, Solution, Roadmap Item, Objective, Key Result, Doc, Experiment, Feedback Item) many-to-many via `TaskLink`, and support Epic → Task → Subtask hierarchy via `parentTaskId`.
+Task is the standalone delivery/tracking entity used both for full engineering sprint delivery (replacing a Jira-style board) and lightweight PM initiative tracking — one status vocabulary, `BACKLOG → TODO → IN_PROGRESS → BLOCKED ⇄ IN_REVIEW → DONE`, with `CANCELLED` as a terminal state and `BLOCKED` a first-class column. Tasks link to other Compass objects (Opportunity, Solution, Roadmap Item, Objective, Key Result, Doc, Experiment, Feedback Item, Decision) many-to-many via `TaskLink`, and support Epic → Task → Subtask hierarchy via `parentTaskId`. A `DECISION` link points at a tracking-only decision request (see `request_decision`/`list_decisions` above) and is how a decided-but-actionable decision gets its follow-up work tracked — see `AWAITING_FOLLOW_THROUGH` in the Roadmap section.
 
 | Tool | Description |
 |---|---|
 | `create_task` | Create a Task with a title (required); optionally description, status (default TODO), priority (default MEDIUM), squad, parent task (to create a Subtask), assignee, freeform owner name, story points, due date, or iteration label |
 | `get_task` | Return full detail for a Task: fields, parent Epic (if any), subtasks, and resolved links to other Compass objects |
-| `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), a linked object, `updatedSince`, or `updatedBefore`; summaries include created/updated timestamps and can optionally nest subtasks |
+| `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), a linked object, `updatedSince`, or `updatedBefore`; orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`); summaries include created/updated timestamps and can optionally nest subtasks |
 | `update_task` | Update a Task's title, description, priority, assignee, owner, story points, due date, or iteration — does not accept status |
 | `move_task_status` | Dedicated status-transition tool for a Task, including moving it into or out of BLOCKED |
 | `link_task` | Link a Task to another Compass object; idempotent — re-linking the same pair is a no-op |
@@ -349,7 +373,7 @@ Guide generation uses a tool-free runtime with a 45-second work deadline and bou
 
 | Tool | Description |
 |---|---|
-| `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc` |
+| `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc`; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`). A doc whose parent is excluded by a recency filter is rendered at the top level so it stays reachable |
 | `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body, and `docType`/`roadmapItemId` when set |
 | `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted) |
 | `update_doc` | Update an existing doc's title, content, and/or icon |
@@ -415,6 +439,48 @@ Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-te
 | `score_opportunity` | Compute and save an opportunity's score using its workspace's active scoring model |
 | `get_opportunity_score` | Get an opportunity's saved score, including a `stale` flag if the live model has since been updated |
 | `list_top_opportunities` | List scored opportunities ranked by normalized score (0-100); pass `orgSlug` for a cross-workspace comparability view or `workspaceId` for a single workspace |
+
+## Recency filtering and sorting
+
+`list_opportunities`, `list_solutions`, `list_assumptions`, `list_experiments`,
+`list_roadmap_items`, `list_tasks`, `list_docs`, `list_feedback`, and
+`list_release_runs` accept an ISO `updatedSince` and/or `updatedBefore` window.
+Most also accept `sort`, which takes `recentlyUpdated` (most recently updated
+first) or `leastRecentlyUpdated` — the latter is for finding work that has gone
+quiet, such as opportunities still EXPLORING or experiments parked in DESIGNING.
+
+Omitting `sort` preserves each tool's own default ordering. Those defaults carry
+meaning — `list_roadmap_items` groups by horizon then rank, `list_docs` renders a
+parent/child tree, `list_tasks` orders by status then manual `sortOrder` — so
+`sort` is an explicit opt-out rather than something to pass by habit. Recency
+orderings always include a stable `id` tiebreaker, because `updatedAt` is not
+unique and equal timestamps would otherwise return in an arbitrary order that can
+differ between identical calls.
+
+`list_feedback` is the exception worth reading closely: there `updatedSince`
+starts a stable keyset scan paged by an opaque `cursor` (see the feedback section
+above), rather than a simple filter.
+
+### What `updatedAt` does and does not capture
+
+Aurora DSQL has no trigger support, so `updatedAt` is maintained by the
+application rather than the database. A Prisma client extension sets it on every
+`update`, `updateMany`, and `upsert` — including writes inside a transaction — so
+**direct edits to an object are always reflected**, and no individual call site can
+forget.
+
+**Mutating a child record does not mark its parent as updated.** A Solution is not
+reported as recently updated when its plan is approved or rejected, when a comment
+is added or resolved on it, when evidence is attached to it, or when a
+Building-investment decision is recorded against it. The same holds for an
+Opportunity gaining a Solution, a Solution gaining an Assumption, an Experiment
+gaining a result, and a Key Result gaining a check-in.
+
+Agents should therefore **not conclude that a period was quiet from a recency
+query alone.** Agent-driven work produces a high proportion of exactly these child
+writes, so a recency scan can return nothing while the workspace was active.
+Cross-check `list_comments`, `list_solution_comments`, `list_evidence`, and
+`list_decisions` before reporting that nothing changed.
 
 ## Registered agent identities and task assignment
 

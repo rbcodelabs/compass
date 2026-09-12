@@ -80,4 +80,59 @@ test.describe("Experiments", () => {
       await expect(page.getByText("Proceed")).toBeVisible();
     }
   );
+
+  test(
+    "create → conclude as Not Pursued directly from Designing, with a required reason",
+    async ({ page, base }) => {
+      const ts = Date.now();
+      const expTitle = `E2E Not Pursued Experiment ${ts}`;
+      const reason = "Feature already shipped and works in production; no need to test.";
+
+      // ── 1. Create an experiment, leave it in DESIGNING (never start it) ────
+      await page.goto(`${base}/experiments`);
+      await page.waitForLoadState("networkidle");
+
+      await page.getByRole("button", { name: "New Experiment" }).click();
+      await page.getByLabel("Title").fill(expTitle);
+      await page.getByLabel("Hypothesis").fill("We believe that this will work.");
+      await page.getByLabel("Method").fill("A/B test with equal split.");
+      await page.getByLabel("Kill Condition").fill(
+        "Stop if fewer than 10% of users engage after 14 days."
+      );
+      await page.getByRole("button", { name: "Create Experiment" }).click();
+      await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
+
+      await page.getByRole("button", { name: expTitle }).click();
+      await expect(page).toHaveURL(/detail=experiment/);
+      await page.getByRole("link", { name: "Open full page" }).click();
+      await expect(page.getByRole("heading", { name: expTitle })).toBeVisible();
+      await expect(page.getByText("Designing").first()).toBeVisible();
+
+      // ── 2. Open Conclude and pick Not Pursued — no reason yet ──────────────
+      await page.getByRole("button", { name: "Conclude Experiment" }).click();
+      await page.getByRole("button", { name: "Not Pursued" }).click();
+
+      // Reason is required for Not Pursued: the conclude button stays
+      // disabled until something is typed.
+      const concludeButton = page.getByRole("button", { name: "Conclude as Not Pursued" });
+      await expect(concludeButton).toBeDisabled();
+
+      await page.getByPlaceholder(/why are you closing this/i).fill(reason);
+      await expect(concludeButton).toBeEnabled();
+      await concludeButton.click();
+
+      // ── 3. Distinguishable from Killed/Complete, reason is durable ─────────
+      // Scoped to <main> (the detail page content) rather than the whole
+      // page: Next.js dev mode can leave a hydration-warning overlay mounted
+      // whose pseudo-HTML dump literally contains the strings "Complete" and
+      // "Designing" from the board page navigated away from, which would
+      // otherwise produce false collisions on a page-wide text search (see
+      // the existing "Designing" .first() workaround above in this file).
+      const content = page.locator("main");
+      await expect(content.getByText("Not Pursued").first()).toBeVisible({ timeout: 10_000 });
+      await expect(content.getByText("Killed")).toHaveCount(0);
+      await expect(content.getByText("Complete")).toHaveCount(0);
+      await expect(content.getByText(reason)).toBeVisible();
+    }
+  );
 });

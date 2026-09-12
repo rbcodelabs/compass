@@ -2,16 +2,19 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const { auth, findFirst, findArtifacts, linkedArtifacts, ensureBuildingInvestmentRevisionFresh } = vi.hoisted(() => ({
+const { auth, findFirst, findArtifacts, linkedArtifacts, ensureBuildingInvestmentRevisionFresh, findTaskLinks, eligibleAssignees } = vi.hoisted(() => ({
   auth: vi.fn(),
   findFirst: vi.fn(),
   findArtifacts: vi.fn(), linkedArtifacts: vi.fn(),
   ensureBuildingInvestmentRevisionFresh: vi.fn(),
+  // Direction B: the decided branch now loads follow-through data.
+  findTaskLinks: vi.fn(), eligibleAssignees: vi.fn(),
 }))
 
 vi.mock("@/auth", () => ({ auth }))
-vi.mock("@/lib/db", () => ({ default: () => ({ reviewRequest: { findFirst }, artifact: { findMany: findArtifacts } }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ reviewRequest: { findFirst }, artifact: { findMany: findArtifacts }, taskLink: { findMany: findTaskLinks } }) }))
 vi.mock("@/lib/artifacts", () => ({ getDecisionArtifacts: linkedArtifacts }))
+vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: eligibleAssignees }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({ linkArtifactDecision: vi.fn(), unlinkArtifactDecision: vi.fn() }))
 vi.mock("@/lib/building-investment", () => ({
   ensureBuildingInvestmentRevisionFresh,
@@ -64,6 +67,8 @@ describe("review request page eyebrow", () => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
     ensureBuildingInvestmentRevisionFresh.mockResolvedValue({ stale: false })
+    findTaskLinks.mockResolvedValue([])
+    eligibleAssignees.mockResolvedValue([])
     findArtifacts.mockResolvedValue([{ id: "new", title: "New prototype" }])
     linkedArtifacts.mockResolvedValue([{ id: "linked", title: "Existing prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }])
   })
@@ -103,5 +108,52 @@ describe("review request page eyebrow", () => {
     expect(screen.queryByRole("combobox", { name: "Artifact to link" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Unlink Existing prototype" })).toBeNull()
     expect(findArtifacts).not.toHaveBeenCalled()
+  })
+})
+
+describe("review request page — \"Send to agent\" on a decided banner", () => {
+  afterEach(cleanup)
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    auth.mockResolvedValue({ user: { id: "user-1" } })
+    ensureBuildingInvestmentRevisionFresh.mockResolvedValue({ stale: false })
+    findTaskLinks.mockResolvedValue([])
+    eligibleAssignees.mockResolvedValue([])
+    findArtifacts.mockResolvedValue([])
+    linkedArtifacts.mockResolvedValue([])
+  })
+
+  function decidedRequest(gateType: "TRACKED_DECISION" | "BUILDING_INVESTMENT", outcomeClass: "APPROVE" | "REJECT" | "REQUEST_CHANGES") {
+    const request = reviewRequest(gateType)
+    request.currentRevision.decisions = [
+      { option: { label: outcomeClass === "APPROVE" ? "Approve" : outcomeClass === "REJECT" ? "Reject" : "Request changes", outcomeClass }, actorRole: "ADMIN", decidedAt: new Date("2026-09-01T00:00:00Z"), rationale: "Because." },
+    ] as never[]
+    return request
+  }
+
+  it("shows a Send to agent link for a decided TRACKED_DECISION with outcome APPROVE", async () => {
+    findFirst.mockResolvedValue(decidedRequest("TRACKED_DECISION", "APPROVE"))
+    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    const link = screen.getByRole("link", { name: /send to agent/i })
+    expect(link.getAttribute("href")).toBe("/acme/product/agent?entityType=decision&entityId=request-1")
+  })
+
+  it("hides the link when the decided TRACKED_DECISION outcome is REJECT", async () => {
+    findFirst.mockResolvedValue(decidedRequest("TRACKED_DECISION", "REJECT"))
+    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    expect(screen.queryByRole("link", { name: /send to agent/i })).toBeNull()
+  })
+
+  it("hides the link when the decided TRACKED_DECISION outcome is REQUEST_CHANGES", async () => {
+    findFirst.mockResolvedValue(decidedRequest("TRACKED_DECISION", "REQUEST_CHANGES"))
+    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    expect(screen.queryByRole("link", { name: /send to agent/i })).toBeNull()
+  })
+
+  it("hides the link on a decided banner for a different gateType (BUILDING_INVESTMENT), even with outcome APPROVE", async () => {
+    findFirst.mockResolvedValue(decidedRequest("BUILDING_INVESTMENT", "APPROVE"))
+    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    expect(screen.queryByRole("link", { name: /send to agent/i })).toBeNull()
   })
 })

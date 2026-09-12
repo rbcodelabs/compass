@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation"
+import Link from "next/link"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { decideReviewAction } from "../actions"
@@ -8,7 +9,10 @@ import { DecisionActions } from "@/components/decisions/decision-actions"
 import { DecisionDetailsGrid, DecisionLongForm, DecisionSummary } from "@/components/decisions/decision-long-form"
 import { DecisionSources, parseTrackedDecisionPacket } from "@/components/decisions/decision-sources"
 import { DecisionArtifacts } from "@/components/decisions/decision-artifacts"
+import { DecisionFollowThrough } from "@/components/decisions/decision-follow-through"
 import { getDecisionArtifacts } from "@/lib/artifacts"
+import { buildFollowUpDraft, suggestFollowUpAssignee } from "@/lib/decision-followthrough"
+import { eligibleTaskAssignees } from "@/lib/task-assignment"
 
 function parsePacket(raw: string): Record<string, unknown> {
   try { return JSON.parse(raw) as Record<string, unknown> } catch { return {} }
@@ -77,6 +81,23 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
   }) : []
   const supportingArtifacts = isTracked ? <DecisionArtifacts workspaceId={request.workspaceId} requestId={requestId} basePath={`/${orgSlug}/${workspaceSlug}/docs`} canEdit={canEditArtifacts} artifacts={artifacts} availableArtifacts={availableArtifacts} /> : null
 
+  // Direction B: a decided decision shows the work it produced, and offers the
+  // two ways to resolve producing none. Only loaded once a decision exists —
+  // there is nothing to follow through on before then.
+  const decidedForFollowUp = isTracked ? revision.decisions[0] : undefined
+  const [followUpLinks, assigneeOptions] = decidedForFollowUp
+    ? await Promise.all([
+        prisma.taskLink.findMany({
+          where: { linkedType: "DECISION", linkedId: requestId },
+          select: { task: { select: { id: true, title: true, status: true } } },
+        }),
+        canEditArtifacts ? eligibleTaskAssignees(request.workspaceId) : Promise.resolve([]),
+      ])
+    : [[], []]
+  const suggestedAssignee = decidedForFollowUp && canEditArtifacts
+    ? await suggestFollowUpAssignee(request.workspaceId, { requestedByAgentId: request.requestedByAgentId, requestedById: request.requestedById })
+    : null
+
   return (
     <main className="mx-auto w-full min-w-0 max-w-3xl space-y-6 overflow-x-hidden p-4 sm:p-6">
       <div>
@@ -136,6 +157,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
           <p>Decision recorded: <strong>{decided.option.label}</strong> by {decided.actorRole} at {decided.decidedAt.toLocaleString()}.</p>
           <DecisionLongForm className="text-foreground" content={decided.rationale} />
           {isTracked && decided.option.outcomeClass === "REQUEST_CHANGES" && <a className="inline-block font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/decisions/new?reviseRequestId=${request.id}`}>Create revised request</a>}
+          {isTracked && decided.option.outcomeClass === "APPROVE" && <Link className="inline-block font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/agent?entityType=decision&entityId=${request.id}`}>Send to agent</Link>}
         </section>
       ) : isTracked && canDecide ? (
         <DecisionActions workspaceId={request.workspaceId} revisionId={revision.id} fingerprint={revision.fingerprint} options={revision.options.map((option) => ({ id: option.id, label: option.label, outcomeClass: option.outcomeClass }))} />
@@ -150,6 +172,17 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
           ))}
         </div>
       )}
+      {decidedForFollowUp && <DecisionFollowThrough
+        workspaceId={request.workspaceId}
+        requestId={requestId}
+        tasksBasePath={`/${orgSlug}/${workspaceSlug}/tasks`}
+        tasks={followUpLinks.map((link) => link.task)}
+        assignees={assigneeOptions.map((option) => ({ type: option.type, id: option.id, displayName: option.displayName, ownerName: option.ownerName }))}
+        suggested={suggestedAssignee}
+        draft={buildFollowUpDraft({ question: revision.title, outcomeLabel: decidedForFollowUp.option.label, rationale: decidedForFollowUp.rationale })}
+        noAction={request.noActionAt ? { reason: request.noActionReason, at: request.noActionAt } : null}
+        canEdit={canEditArtifacts}
+      />}
       {isTracked && request.revisions.length > 1 && <section className="space-y-3"><h2 className="text-lg font-semibold">History</h2>{request.revisions.map((item) => <div key={item.id} className="rounded-lg border p-4 text-sm"><div className="flex justify-between gap-3"><strong>Revision {item.revisionNumber}</strong><span className="text-muted-foreground">{item.createdAt.toLocaleString()}</span></div><p className="mt-1">{item.title}</p>{item.decisions[0] && <div className="mt-2 text-muted-foreground"><p>{item.decisions[0].option.label}</p><DecisionLongForm content={item.decisions[0].rationale} /></div>}</div>)}</section>}
     </main>
   )

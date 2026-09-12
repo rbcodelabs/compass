@@ -895,6 +895,12 @@ model Experiment {
   startDate     DateTime?          @map("start_date")
   endDate       DateTime?          @map("end_date")
   conclusion    String?            @db.VarChar(50)
+  /// Human-provided rationale behind `conclusion`. Not backed by evidence for
+  /// NOT_PURSUED (a deliberate decision not to run the experiment) — durable
+  /// record of "why" so it's visible on the experiment, not just in someone's
+  /// memory. Optional for PROCEED/KILL/ITERATE; required by app code for
+  /// NOT_PURSUED. See app/[orgSlug]/[workspaceSlug]/experiments/actions.ts.
+  conclusionReason String?         @map("conclusion_reason") @db.Text
   createdAt     DateTime           @default(now()) @map("created_at")
   updatedAt     DateTime           @default(now()) @map("updated_at")
   workspace     Workspace          @relation(fields: [workspaceId], references: [id])
@@ -984,9 +990,24 @@ model ReviewRequest {
   reopenedById       String?          @map("reopened_by_id") @db.Uuid
   reconsidersDecisionId String?       @map("reconsiders_decision_id") @db.Uuid
   requestedById      String?          @map("requested_by_id") @db.Uuid
+  /// The Agent that called request_decision, when the request was raised by
+  /// an agent identity (McpActor.purpose === "AGENT") rather than a human.
+  /// Distinct from requestedById, which is always the API key's owning user
+  /// (an agent's owner) even for agent-raised requests -- see feedback
+  /// f546cf13-e6a0-4213-8be9-0cfdebbf4ff7. Null for every pre-existing
+  /// decision and for human-raised requests going forward.
+  requestedByAgentId String?          @map("requested_by_agent_id") @db.Uuid
   assignedToId       String?          @map("assigned_to_id") @db.Uuid
   dueAt               DateTime?        @map("due_at")
   expiresAt           DateTime?        @map("expires_at")
+  /// Set together to record "no action needed" on a DECIDED decision with no
+  /// linked follow-up work -- the explicit close-out path for the
+  /// "awaiting follow-through" lens (see docs/decisions and opportunity
+  /// 80cb853b). All three are null until closed this way; noActionReason is
+  /// required (non-empty) at write time by application code.
+  noActionAt          DateTime?        @map("no_action_at")
+  noActionById        String?          @map("no_action_by_id") @db.Uuid
+  noActionReason      String?          @map("no_action_reason") @db.Text
   createdAt           DateTime         @default(now()) @map("created_at")
   updatedAt           DateTime         @default(now()) @map("updated_at")
   workspace           Workspace        @relation(fields: [workspaceId], references: [id])
@@ -1944,7 +1965,7 @@ model AgentToolCall {
 // columns, one parent per row) — a Task can relate to MULTIPLE objects across
 // MULTIPLE types at once (e.g. one Task tied to both a Solution and a Doc).
 // One row per (task, linked object) pair. linkedId carries no Prisma
-// @relation because a single UUID column can't type-safely join into eight
+// @relation because a single UUID column can't type-safely join into nine
 // different target tables — same reasoning as CustomFieldValue.objectId
 // above. Cross-type reads are resolved in application code (group links by
 // linkedType, batch-fetch each type, stitch results back together), not via
@@ -1954,9 +1975,10 @@ model TaskLink {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   taskId      String   @map("task_id") @db.Uuid
   /// One of: OPPORTUNITY | SOLUTION | ROADMAP_ITEM | OBJECTIVE | KEY_RESULT |
-  /// DOC | EXPERIMENT | FEEDBACK_ITEM. Squad is deliberately excluded — a
-  /// Task's squad is its first-class owning Task.squadId column, not a
-  /// generic link.
+  /// DOC | EXPERIMENT | FEEDBACK_ITEM | DECISION (ReviewRequest — see
+  /// lib/task-tool-handlers.ts LINK_TARGET_MODEL comment for why DECISION is
+  /// handled separately there). Squad is deliberately excluded — a Task's
+  /// squad is its first-class owning Task.squadId column, not a generic link.
   linkedType  String   @map("linked_type") @db.VarChar(30)
   linkedId    String   @map("linked_id") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at")

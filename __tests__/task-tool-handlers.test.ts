@@ -27,6 +27,7 @@ const mockOpportunity = { findFirst: vi.fn(), findUnique: vi.fn(), findMany: vi.
 const mockSolution = { findUnique: vi.fn(), findMany: vi.fn() }
 const mockRoadmapItem = { findUnique: vi.fn(), findMany: vi.fn() }
 const mockDoc = { findUnique: vi.fn(), findMany: vi.fn() }
+const mockReviewRequest = { findUnique: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() }
 
 const mockPrisma = {
   agent: { findUnique: vi.fn(), findMany: vi.fn() },
@@ -44,6 +45,7 @@ const mockPrisma = {
   doc: mockDoc,
   experiment: { findUnique: vi.fn(), findMany: vi.fn() },
   feedbackItem: { findUnique: vi.fn(), findMany: vi.fn() },
+  reviewRequest: mockReviewRequest,
 }
 
 vi.mock("@/lib/db", () => ({
@@ -536,6 +538,32 @@ describe("linkTask", () => {
     expect(mockTaskLink.create).not.toHaveBeenCalled()
     expect(textOf(result)).toContain("already linked")
   })
+
+  it("links to a DECISION (ReviewRequest), reading its title from currentRevision", async () => {
+    const DECISION_ID = "decision-1"
+    mockTaskLink.findFirst.mockResolvedValueOnce(null)
+    mockReviewRequest.findUnique.mockResolvedValueOnce({ id: DECISION_ID, currentRevision: { title: "Ship the export flow?" } })
+    // validateTaskLink's own workspace-scoping lookup (task-assignment.ts) —
+    // separate from the title lookup above.
+    mockReviewRequest.findFirst.mockResolvedValueOnce({ id: DECISION_ID, workspaceId: WORKSPACE_ID })
+    mockTaskLink.create.mockResolvedValueOnce({ id: "link-2" })
+
+    const result = await linkTask({ taskId: TASK_ID, linkedType: "DECISION", linkedId: DECISION_ID })
+
+    expect(mockTaskLink.create).toHaveBeenCalledWith({
+      data: { taskId: TASK_ID, linkedType: "DECISION", linkedId: DECISION_ID },
+    })
+    const text = textOf(result)
+    expect(text).toContain("Ship the export flow?")
+    expect(text).toContain("ID: link-2")
+  })
+
+  it("returns a not-found message for a DECISION target that doesn't exist", async () => {
+    mockReviewRequest.findUnique.mockResolvedValueOnce(null)
+    const result = await linkTask({ taskId: TASK_ID, linkedType: "DECISION", linkedId: "missing-decision" })
+    expect(textOf(result)).toContain("not found")
+    expect(mockTaskLink.create).not.toHaveBeenCalled()
+  })
 })
 
 // ─── unlinkTask ───────────────────────────────────────────────────────────────
@@ -582,6 +610,19 @@ describe("listTaskLinks", () => {
     expect(text).toContain("OPPORTUNITY:")
     expect(text).toContain("Reduce churn")
     expect(text).toContain("ID: link-1")
+  })
+
+  it("resolves a DECISION link's title from currentRevision, not a flat title column", async () => {
+    mockTaskLink.findMany.mockResolvedValueOnce([
+      { id: "link-2", linkedType: "DECISION", linkedId: "decision-1" },
+    ])
+    mockReviewRequest.findMany.mockResolvedValueOnce([{ id: "decision-1", currentRevision: { title: "Ship the export flow?" } }])
+
+    const result = await listTaskLinks({ taskId: TASK_ID })
+    const text = textOf(result)
+    expect(text).toContain("DECISION:")
+    expect(text).toContain("Ship the export flow?")
+    expect(text).toContain("ID: link-2")
   })
 })
 

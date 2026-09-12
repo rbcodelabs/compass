@@ -11,6 +11,7 @@ const mockOpportunity = {
 const mockSolution = {
   create: vi.fn(),
   update: vi.fn(),
+  findFirst: vi.fn(),
 };
 const mockAssumption = {
   create: vi.fn(),
@@ -57,6 +58,7 @@ import {
   reorderSolution,
   reorderAssumption,
   saveOpportunityScore,
+  moveSolutionStatus,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 
 const mockAuth = vi.mocked(auth);
@@ -68,6 +70,7 @@ beforeEach(() => {
   mockOpportunity.findFirst.mockResolvedValue(null); // no last item by default
   mockSolution.create.mockResolvedValue({ id: "sol-1", title: "Test Sol" });
   mockSolution.update.mockResolvedValue({ id: "sol-1" });
+  mockSolution.findFirst.mockResolvedValue(null); // no last item by default
   mockAssumption.create.mockResolvedValue({ id: "ass-1", title: "Test Assumption" });
   mockAssumption.update.mockResolvedValue({ id: "ass-1" });
   mockAssumption.delete.mockResolvedValue({ id: "ass-1" });
@@ -292,6 +295,41 @@ describe("reorderAssumption", () => {
       where: { id: "ass-1" },
       data: { sortOrder: 1 },
     });
+  });
+});
+
+// ─── moveSolutionStatus ───────────────────────────────────────────────────────
+
+describe("moveSolutionStatus", () => {
+  it("places item at sortOrder 0 when no existing items in destination", async () => {
+    mockSolution.findFirst.mockResolvedValue(null);
+    await moveSolutionStatus("sol-1", "VALIDATED", "opp-1", "ws-1", "/path");
+    const updateCall = mockSolution.update.mock.calls[0][0];
+    expect(updateCall.where).toEqual({ id: "sol-1" });
+    expect(updateCall.data.sortOrder).toBe(0);
+    expect(updateCall.data.status).toBe("VALIDATED");
+  });
+
+  it("places item after the last item in the destination status within the same opportunity", async () => {
+    mockSolution.findFirst.mockResolvedValue({ sortOrder: 5 });
+    await moveSolutionStatus("sol-1", "IN_DELIVERY", "opp-1", "ws-1", "/path");
+    const updateCall = mockSolution.update.mock.calls[0][0];
+    expect(updateCall.data.sortOrder).toBe(6);
+  });
+
+  it("scopes the last-item lookup to the given opportunity and status, not just the workspace", async () => {
+    await moveSolutionStatus("sol-1", "VALIDATED", "opp-1", "ws-1", "/path");
+    expect(mockSolution.findFirst).toHaveBeenCalledWith({
+      where: { opportunityId: "opp-1", status: "VALIDATED", NOT: { id: "sol-1" } },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
+    });
+  });
+
+  it("never touches opportunityId — reparenting is not exposed via this action", async () => {
+    await moveSolutionStatus("sol-1", "VALIDATED", "opp-1", "ws-1", "/path");
+    const updateCall = mockSolution.update.mock.calls[0][0];
+    expect(updateCall.data.opportunityId).toBeUndefined();
   });
 });
 

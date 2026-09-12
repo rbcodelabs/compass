@@ -63,6 +63,12 @@ export const EXPERIMENT_STATUS_BADGE: Record<
   RUNNING: { label: "Running", className: "bg-blue-100 text-blue-700" },
   COMPLETE: { label: "Complete", className: "bg-emerald-100 text-emerald-700" },
   KILLED: { label: "Killed", className: "bg-red-100 text-red-500" },
+  // Deliberately not run — kept visually distinct (neutral) from both KILLED
+  // (red, evidence-based failure) and COMPLETE (green) so it can never be
+  // mistaken for a tested-and-failed experiment. Uses the semantic status
+  // tokens, which carry their own dark-mode values; the raw-palette siblings
+  // above render a light pill on a dark canvas and are legacy pending cleanup.
+  NOT_PURSUED: { label: "Not Pursued", className: "bg-status-neutral-surface text-status-neutral" },
 };
 
 export const CONCLUSION_BADGE: Record<
@@ -72,6 +78,8 @@ export const CONCLUSION_BADGE: Record<
   PROCEED: { label: "Proceed", className: "bg-green-100 text-green-700" },
   KILL: { label: "Kill", className: "bg-red-100 text-red-500" },
   ITERATE: { label: "Iterate", className: "bg-amber-100 text-amber-700" },
+  // Semantic tokens (dark-aware) — see the note in EXPERIMENT_STATUS_BADGE above.
+  NOT_PURSUED: { label: "Not Pursued", className: "bg-status-neutral-surface text-status-neutral" },
 };
 
 /** Ported from components/roadmap/roadmap-column.tsx's HORIZON_CONFIG — that

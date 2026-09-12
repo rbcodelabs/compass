@@ -30,6 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
   RUNNING: "Running",
   COMPLETE: "Complete",
   KILLED: "Killed",
+  NOT_PURSUED: "Not Pursued",
 }
 
 const STATUS_TONE = {
@@ -37,18 +38,23 @@ const STATUS_TONE = {
   RUNNING: "info",
   COMPLETE: "success",
   KILLED: "danger",
+  NOT_PURSUED: "neutral",
 } as const
 
 const CONCLUSION_TONE = {
   PROCEED: "success",
   KILL: "danger",
   ITERATE: "warning",
+  // Neutral, not danger — this was never tested, so it must read differently
+  // from KILL (an evidence-based failure) at a glance.
+  NOT_PURSUED: "neutral",
 } as const
 
 const CONCLUSION_LABELS: Record<string, string> = {
   PROCEED: "Proceed",
   KILL: "Kill",
   ITERATE: "Iterate",
+  NOT_PURSUED: "Not Pursued",
 }
 
 export default async function ExperimentDetailPage({
@@ -175,6 +181,19 @@ export default async function ExperimentDetailPage({
           )}
         />
         {isPmInterviewEnabled() && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="EXPERIMENT" targetId={id} />}
+
+        {/* Conclusion rationale — the durable "why" behind the conclusion,
+            most important for NOT_PURSUED where no evidence was generated. */}
+        {experiment.conclusionReason && (
+          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+            <p className="text-xs font-medium text-muted-foreground mb-0.5">
+              Reason
+            </p>
+            <p className="text-sm text-foreground/80 whitespace-pre-wrap">
+              {experiment.conclusionReason}
+            </p>
+          </div>
+        )}
 
         {/* Dates */}
         {(experiment.startDate || experiment.endDate) && (

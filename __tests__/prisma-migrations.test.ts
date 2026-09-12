@@ -29,6 +29,15 @@ function registeredMigrations(): string[] {
   return [...src.matchAll(/name:\s*"([^"]+)"/g)].map((m) => m[1]);
 }
 
+it("preserves independently deployed PM and main migrations sharing numeric prefixes", () => {
+  const names = registeredMigrations()
+  for (const name of ["050_pm_interviews", "050_experiment_not_pursued", "051_pm_agent_handoff", "051_decision_task_bridge"]) {
+    expect(names.filter(item => item === name)).toHaveLength(1)
+    expect(existsSync(path.join(MIGRATIONS_DIR, name, "migration.sql"))).toBe(true)
+  }
+  expect(names.indexOf("050_pm_interviews")).toBeLessThan(names.indexOf("051_pm_agent_handoff"))
+})
+
 /** Migration directories on disk that contain a migration.sql. */
 function migrationDirsOnDisk(): string[] {
   return readdirSync(MIGRATIONS_DIR, { withFileTypes: true })

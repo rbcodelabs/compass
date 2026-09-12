@@ -18,6 +18,7 @@ import path from "node:path"
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
+import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
@@ -49,7 +50,8 @@ type WorkspaceContext = {
 function assemblePrompt(
   ws: WorkspaceContext,
   history: { role: string; content: string }[],
-  userMessage: string
+  userMessage: string,
+  seedContextBlock?: string
 ): string {
   // Give the agent its bearings up front so it doesn't waste turns calling
   // list_workspaces / get_workspace_by_slug just to figure out where it is.
@@ -63,10 +65,15 @@ function assemblePrompt(
     `workspace's opportunities, solutions, assumptions, experiments, roadmap, ` +
     `OKRs, feedback, tasks, docs, and scoring. Act directly rather than ` +
     `exploring to orient. Be concise, and when you change data, say what you changed.`
+  // "Send to agent" hand-off (turn 1 of a new conversation only — see
+  // resolveAgentHandoffContext in lib/agent-context.ts). Purely additive:
+  // omitted entirely when there's no seed context, so existing callers see
+  // an unchanged prompt.
+  const seedSection = seedContextBlock ? `### Context you're starting from\n${seedContextBlock}\n` : ""
   const transcript = history
     .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`)
     .join("\n")
-  return [framing, transcript, `User: ${userMessage}`, "Assistant:"]
+  return [framing, seedSection, transcript, `User: ${userMessage}`, "Assistant:"]
     .filter(Boolean)
     .join("\n\n")
 }
@@ -88,6 +95,26 @@ export async function POST(request: NextRequest) {
     return new Response("workspaceId and a non-empty message are required.", { status: 400 })
   }
   let turnMessage = message.trim()
+
+  // "Send to agent" hand-off (see lib/agent-context.ts). Only ever honored on
+  // turn 1 of a brand-new conversation — a client-supplied conversationId
+  // means this is a continuation, and any seedContext it sends is ignored
+  // server-side, not just by client discipline.
+  const isNewConversationRequest = typeof conversationId !== "string"
+  const seedContextRaw = body.seedContext as unknown
+  let seedContext: { entityType: string; entityId: string } | undefined
+  if (
+    isNewConversationRequest &&
+    seedContextRaw &&
+    typeof seedContextRaw === "object" &&
+    typeof (seedContextRaw as Record<string, unknown>).entityType === "string" &&
+    typeof (seedContextRaw as Record<string, unknown>).entityId === "string"
+  ) {
+    seedContext = {
+      entityType: (seedContextRaw as Record<string, unknown>).entityType as string,
+      entityId: (seedContextRaw as Record<string, unknown>).entityId as string,
+    }
+  }
 
   // ── Authorize: caller must be a member of the workspace ─────────────────────
   const workspace = await prisma.workspace.findFirst({
@@ -131,6 +158,27 @@ export async function POST(request: NextRequest) {
     })
   }
   const conversationIdResolved = convo.id
+
+  // ── Resolve the "Send to agent" hand-off, if any (turn 1 only) ──────────────
+  // Never trust anything the client claims about the entity beyond its type/id
+  // — re-resolve fresh, scoped to this workspace + user, server-side. A stale
+  // or rejected entity degrades to no context block rather than failing the turn.
+  let seedContextBlock: string | undefined
+  if (seedContext) {
+    const handoff = await resolveAgentHandoffContext({
+      workspaceId: workspace.id,
+      userId,
+      entityType: seedContext.entityType,
+      entityId: seedContext.entityId,
+    })
+    if (handoff) {
+      seedContextBlock = handoff.promptBlock
+    } else {
+      console.warn(
+        `[agent-turn] seedContext did not resolve (entityType=${seedContext.entityType}, entityId=${seedContext.entityId}); proceeding without it.`
+      )
+    }
+  }
 
   // ── Runtime prerequisites ──────────────────────────────────────────────────
   const snapshotId = await getGoldenSnapshotId().catch(async error => {
@@ -183,7 +231,8 @@ export async function POST(request: NextRequest) {
       workspaceSlug: workspace.slug,
     },
     historyRows.reverse(),
-    turnMessage
+    turnMessage,
+    seedContextBlock
   )
 
   const attachments = await prisma.workspaceCapabilityPack.findMany({

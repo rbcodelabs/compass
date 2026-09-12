@@ -1,15 +1,21 @@
 import { beforeEach, expect, it, vi } from "vitest"
 
-const mocks = vi.hoisted(() => ({ link: vi.fn(), unlink: vi.fn(), artifacts: vi.fn(), decisions: vi.fn(), tracked: vi.fn(), review: vi.fn(), artifact: vi.fn() }))
+const mocks = vi.hoisted(() => ({ link: vi.fn(), unlink: vi.fn(), artifacts: vi.fn(), decisions: vi.fn(), tracked: vi.fn(), review: vi.fn(), artifact: vi.fn(), taskLink: vi.fn(), agent: vi.fn(), user: vi.fn() }))
 vi.mock("@/lib/artifacts", () => ({ linkArtifactToDecision: mocks.link, unlinkArtifactFromDecision: mocks.unlink, getDecisionArtifacts: mocks.artifacts, getArtifactDecisions: mocks.decisions }))
 vi.mock("@/lib/tracked-decisions", () => ({ getTrackedDecision: mocks.tracked }))
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ userId: "agent-owner" }) }))
-vi.mock("@/lib/db", () => ({ default: () => ({ reviewRequest: { findUnique: mocks.review }, artifact: { findUnique: mocks.artifact } }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({
+  reviewRequest: { findUnique: mocks.review },
+  artifact: { findUnique: mocks.artifact },
+  taskLink: { findMany: mocks.taskLink },
+  agent: { findUnique: mocks.agent },
+  user: { findUnique: mocks.user },
+}) }))
 import * as handlers from "@/lib/artifact-tool-handlers"
 import { getDecision, getReviewRequest } from "@/lib/decision-tool-handlers"
 
 const input = { workspaceId: "workspace", artifactId: "artifact", requestId: "decision" }
-beforeEach(() => { vi.resetAllMocks(); mocks.artifacts.mockResolvedValue([]); mocks.decisions.mockResolvedValue([]) })
+beforeEach(() => { vi.resetAllMocks(); mocks.artifacts.mockResolvedValue([]); mocks.decisions.mockResolvedValue([]); mocks.taskLink.mockResolvedValue([]) })
 it("attributes MCP links and returns stable relationship identifiers", async () => {
   mocks.link.mockResolvedValue({ id: "link", created: false })
   const result = await handlers.linkArtifactDecision(input)
@@ -27,7 +33,13 @@ it.each(["decision", "review"])("adds live artifact metadata to the %s getter wi
   mocks.tracked.mockResolvedValue(request); mocks.review.mockResolvedValue(request)
   mocks.artifacts.mockResolvedValue([{ id: "artifact", title: "Prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }])
   const result = kind === "decision" ? await getDecision(input) : await getReviewRequest(input)
-  expect(result.structuredContent.data).toEqual({ ...request, artifacts: [{ id: "artifact", title: "Prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }] })
+  // reviewUrl is additive alongside artifacts and is null here because this file's
+  // prisma mock has no `workspace` delegate to resolve org/workspace slugs from.
+  // getDecision additionally resolves requestedBy/followUpTasks/noAction (all
+  // null/empty here since the fixture has no requestedById/requestedByAgentId,
+  // no linked task_links, and no noActionAt); getReviewRequest does not.
+  const extra = kind === "decision" ? { requestedBy: null, followUpTasks: [], noAction: null } : {}
+  expect(result.structuredContent.data).toEqual({ ...request, reviewUrl: null, artifacts: [{ id: "artifact", title: "Prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }], ...extra })
   expect(mocks.artifacts).toHaveBeenCalledWith("workspace", "decision")
 })
 it("does not expose supporting links for legacy reviews", async () => {
