@@ -31,6 +31,7 @@ import {
   reorderSolution,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { SOLUTION_STATUS, SOLUTION_STATUS_ORDER } from "@/lib/solution-status";
+import { cn } from "@/lib/utils";
 import type { SolutionStatus } from "@/lib/types";
 
 export type SwimlaneOpportunity = {
@@ -136,20 +137,38 @@ function SwimlaneColumn({
 
   return (
     <BoardColumn
+      // Nested in a lane: no sticky header, no negative-margin bleed, no own
+      // scroll region — see BoardColumn's `nested` docs.
+      nested
       title={SOLUTION_STATUS[status].label}
       count={items.length}
       className="min-w-[220px] flex-1"
       bodyRef={setNodeRef}
-      bodyClassName={isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : undefined}
+      bodyClassName={cn(
+        "flex flex-col",
+        isOver && "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25"
+      )}
     >
       <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
         {items.length === 0 ? (
-          <EmptyState
-            compact
-            icon={<Lightbulb className="size-4" />}
-            title="No solutions"
-            className={isOver ? "border-border-interactive" : undefined}
-          />
+          // Deliberately NOT the shared EmptyState: `compact` is still
+          // min-h-32 plus an icon bubble, so five of them stacked across a
+          // lane turned a single empty opportunity into ~200px of dashed
+          // boxes. Its bg-surface-inset also matches the column background
+          // exactly, so those boxes read as floating grey slabs rather than
+          // drop zones. A lane needs a slim hint, not a page-level empty state.
+          <div
+            className={cn(
+              // flex-1 so the hint *is* the drop zone and fills the column
+              // instead of sitting at the top of it with dead space beneath.
+              "flex min-h-20 flex-1 items-center justify-center rounded-lg border border-dashed px-3 text-center text-xs",
+              isOver
+                ? "border-border-interactive text-text-secondary"
+                : "border-border-default text-text-subtle"
+            )}
+          >
+            No solutions
+          </div>
         ) : (
           items.map((solution) => (
             // No status badge: this card already sits in its status's column,
@@ -189,7 +208,16 @@ function SwimlaneRow({
 
   return (
     <Collapsible
-      className="group rounded-xl border border-border-default bg-surface-panel"
+      // shrink-0 is load-bearing. Lanes are flex children of a height-capped
+      // `flex-col overflow-y-auto` container, so the default flex-shrink:1 let
+      // flexbox squash each lane *below its content height*. The content then
+      // spilled out of the lane's box — which is what made column backgrounds
+      // paint outside the lane's rounded border and column headers collide
+      // with the lane header above. Natural height + let the parent scroll.
+      //
+      // overflow-hidden then keeps the horizontally scrolling Board (and each
+      // column's background) inside the lane's rounded corners.
+      className="group shrink-0 overflow-hidden rounded-xl border border-border-default bg-surface-panel"
       open={!isCollapsed}
       onOpenChange={onOpenChange}
     >
@@ -210,7 +238,12 @@ function SwimlaneRow({
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="flex flex-col gap-3 px-3 pb-3">
+        {/*
+          border-t separates the lane header from its columns, and pt-3 gives
+          them room — previously the columns butted straight against the
+          trigger with no gap at all.
+        */}
+        <div className="flex flex-col gap-3 border-t border-border-default px-3 pt-3 pb-3">
           <Board label={`${opportunity.title} solutions`} className="pb-0">
             {SOLUTION_STATUS_ORDER.map((status) => (
               <SwimlaneColumn

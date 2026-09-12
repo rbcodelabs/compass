@@ -218,6 +218,25 @@ describe("SolutionSwimlaneBoard rendering", () => {
     expect(within(lane as HTMLElement).getByRole("button", { name: "Add Solution" })).toBeInTheDocument();
   });
 
+  // Regression: lanes are flex children of a height-capped
+  // `flex-col overflow-y-auto` container, so the default flex-shrink:1 let
+  // flexbox squash each lane *below its content height*. The content then
+  // spilled out of the lane box — column backgrounds painting outside the
+  // lane's rounded border, column headers colliding with the lane header
+  // above. Without shrink-0 the layout silently breaks again, and
+  // overflow-hidden turns that spill into hard clipping instead.
+  it("keeps each lane at its natural height and clips content to its rounded border", () => {
+    renderBoard();
+
+    const lane = screen
+      .getByText("Reduce onboarding drop-off")
+      .closest("button")!
+      .closest("[data-slot='collapsible']");
+    expect(lane).not.toBeNull();
+    expect(lane).toHaveClass("shrink-0");
+    expect(lane).toHaveClass("overflow-hidden");
+  });
+
   it("collapsing a lane hides its columns", async () => {
     renderBoard();
 
