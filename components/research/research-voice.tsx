@@ -261,6 +261,11 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
       if (started.status === "COMPLETED") {
         localStorage.removeItem(storageKey(identity))
         closeMedia()
+        if (transport?.atomicTextTransition && onCompleted) {
+          const response = await fetch(endpoint("complete"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(auth) })
+          if (!response.ok) throw new Error("The agent conversation could not be opened. Your transcript is saved.")
+          onCompleted(await response.json())
+        }
         setStatus("complete")
         return
       }
@@ -510,7 +515,7 @@ export function ResearchVoice({ token = "", transport, onUseChat, onCompleted, g
     }
   }
 
-  if (status === "complete") return <div className="m-auto text-center"><h2 className="font-semibold">Thank you</h2><p className="mt-2 text-sm text-text-muted">Your finalized transcript has been shared with the research team.</p></div>
+  if (status === "complete") return <div className="m-auto text-center"><h2 className="font-semibold">{transport?.atomicTextTransition ? "Opening agent conversation" : "Thank you"}</h2><p className="mt-2 text-sm text-text-muted">{transport?.atomicTextTransition ? "Your transcript is saved. Follow the item update in the agent conversation." : "Your finalized transcript has been shared with the research team."}</p></div>
 
   if (status === "idle" || status === "error") return <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
     <div className="flex size-20 items-center justify-center rounded-full bg-muted"><MicIcon className="size-8 text-text-muted" /></div>

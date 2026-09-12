@@ -30,6 +30,16 @@ describe("ResearchVoice", () => {
   })
   afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
+  it("hands a completed PM voice session back to the core conversation", async () => {
+    const result = { conversationUrl: "/org/workspace/agent?c=conversation" }
+    vi.mocked(fetch).mockReset().mockResolvedValueOnce(new Response(JSON.stringify({ status: "COMPLETED" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify(result), { status: 200 }))
+    const completed = vi.fn()
+    render(<ResearchVoice transport={{ basePath: "/api/pm-interviews/interview", query: "?orgSlug=synthetic-org&workspaceSlug=synthetic-workspace", identity: "pm-interview", atomicTextTransition: true }} onCompleted={completed} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    await waitFor(() => expect(completed).toHaveBeenCalledWith(result))
+    expect(screen.queryByText("Thank you")).not.toBeInTheDocument()
+  })
+
   it("connects with an ephemeral credential and persists finalized events incrementally", async () => {
     render(<ResearchVoice token="study-token" />)
     expect(screen.getByRole("heading", { name: "Voice interview" })).toBeVisible()

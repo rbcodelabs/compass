@@ -32,6 +32,7 @@ import {
   assertEntityAccess,
   assertScoringModelAccess,
 } from "@/lib/mcp-authz"
+import { gateInterviewTool } from "@/lib/pm-agent-service"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Args = Record<string, any> // runtime-validated by each tool's zod inputSchema
@@ -116,6 +117,8 @@ async function assertChildInDeclaredWorkspace(
 // ── The policy: every MCP tool → its gate ───────────────────────────────────
 
 export const TOOL_GATES: Record<string, Gate> = {
+  get_pm_interview: async () => {},
+  update_experiment: async (a, x) => void (await assertEntityAccess(a, "experiment", x.experimentId)),
   get_current_identity: async () => {},
   list_task_assignees: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   generate_research_guide: (a, x) => assertWorkspaceMember(a, x.workspaceId),
@@ -389,6 +392,8 @@ export const TOOL_GATES: Record<string, Gate> = {
 
 // Every operation is explicitly classified. Unlisted tools fail closed for agents.
 export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Object.fromEntries([
+  ["get_pm_interview", "READ"],
+  ["update_experiment", "WRITE"],
   // Research tools landed separately; retain fail-closed agent access until reviewed.
   ...["generate_research_guide", "create_research_study", "list_research_studies", "get_research_study", "update_research_study", "activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
@@ -407,6 +412,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
  * policy entry is denied.
  */
 export async function applyToolGate(toolName: string, actor: McpActor, args: Args): Promise<void> {
+  await gateInterviewTool(actor, toolName, args)
   // The shared service key is trusted/global — skip gating entirely. Gates
   // (and fail-closed denial of unmapped tools) apply only to per-user keys,
   // which is exactly the untrusted surface we're protecting.

@@ -295,6 +295,7 @@ model PMInterview {
   initiatingUserId          String          @map("initiating_user_id") @db.Uuid
   targetType                String          @map("target_type") @db.VarChar(30)
   targetId                  String          @map("target_id") @db.Uuid
+  agentConversationId       String?         @unique(map: "idx_pm_interviews_agent_conversation") @map("agent_conversation_id") @db.Uuid
   contextSnapshotJson       String          @map("context_snapshot_json") @db.Text
   fieldBaselineJson         String          @map("field_baseline_json") @db.Text
   generationState           String          @default("NOT_STARTED") @map("generation_state") @db.VarChar(20)
@@ -1453,6 +1454,8 @@ model ApiKey {
   purpose          String?   @db.VarChar(30)
   agentId          String?   @map("agent_id") @db.Uuid
   scopeWorkspaceId String?   @map("scope_workspace_id") @db.Uuid
+  scopeConversationId String? @map("scope_conversation_id") @db.Uuid
+  scopeClaimId String? @map("scope_claim_id") @db.Uuid
   expiresAt        DateTime? @map("expires_at")
   lastUsedAt       DateTime? @map("last_used_at")
   revokedAt        DateTime? @map("revoked_at")
@@ -2004,6 +2007,7 @@ model AgentConversation {
   workspaceId String   @map("workspace_id") @db.Uuid
   userId      String   @map("user_id") @db.Uuid
   title       String?  @db.VarChar(255)
+  interviewProcessingJson String? @map("interview_processing_json") @db.Text
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @map("updated_at")
 

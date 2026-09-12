@@ -3,6 +3,35 @@
 **Date:** 2026-09-11
 **Status:** Accepted
 
+## Revision — 2026-09-12: Finish authorizes core-agent editing
+
+This revision supersedes the dedicated proposal-generation/application decision below
+for new PM completions. Voice and text still save canonical research-session turns,
+but Finish now creates one linked private core-agent conversation and authorizes
+an immediate descriptive edit of the interviewed item. The core agent reads the
+saved interview through `get_pm_interview` and uses the ordinary update tools.
+
+We considered continuing the dedicated generator, adding a proposal-only core-agent
+workflow, and direct normal-tool editing. Direct editing was approved because it
+removes the separate generator, model-output parser and approval UI. We give up
+pre-application proposal review; the Finish label must make that permission clear.
+
+Initial ephemeral credentials are bound to one conversation claim, workspace,
+owner and target. The server rejects non-descriptive fields and unrelated tools.
+Expected timestamp and exact-field fingerprints protect concurrent edits; the
+ordinary handler executes in the same transaction as an immutable before/after
+receipt. Receipt presence—not assistant prose—is authoritative evidence of a write.
+
+Bounded claim/deadline metadata lives on AgentConversation (no new run domain).
+Duplicate Finish/dispatch opens the same work; failures expose explicit retry.
+Browser disconnection does not prevent persistence, but this is request-bound
+execution, not a durable background queue. After a terminal attempt, an explicit
+new chat message uses normal user-directed agent authorization. Historical proposals
+and receipts remain readable; applied/dismissed interviews are not reprocessed.
+
+The main risk is lost execution between server steps; deadlines, claim fencing and
+atomic receipts make recovery honest without promising uninterrupted execution.
+
 ## Context
 
 Compass users can capture customer interviews and usability studies through a

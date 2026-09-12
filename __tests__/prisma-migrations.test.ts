@@ -106,7 +106,7 @@ describe("PM interview migration (050)", () => {
   });
 
   it("can resume after a timed-out async index wait and verifies the full catalog before receipt", () => {
-    expect(runner).toContain('migration.name === "049_agent_identity" || migration.name === "050_pm_interviews"');
+    expect(runner).toContain('["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff"].includes(migration.name)');
     expect(runner).toContain("to_regclass(format('%I.pm_interviews', $1::text))")
     expect(runner).toContain('if (migration.name === "050_pm_interviews") await assertPmInterviewPostconditions(client, schema)');
     expect(runner.indexOf('if (migration.name === "050_pm_interviews") await assertPmInterviewPostconditions')).toBeLessThan(

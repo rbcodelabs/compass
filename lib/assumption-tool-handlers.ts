@@ -4,7 +4,7 @@
  * Mirrors the add_assumption tool (still inline in app/api/mcp/route.ts).
  */
 
-import getPrisma from "@/lib/db"
+import { getToolPrisma as getPrisma, getToolExpectedWhere } from "@/lib/mcp-tool-db"
 import { ok, fail } from "@/lib/mcp-output"
 
 // ── update_assumption ───────────────────────────────────────────────────────
@@ -15,18 +15,20 @@ export async function updateAssumption({
   description,
   riskLevel,
   status,
+  expectedUpdatedAt,
 }: {
   assumptionId: string
   title?: string
   description?: string | null
   riskLevel?: "HIGH" | "MEDIUM" | "LOW"
   status?: "UNTESTED" | "TESTING" | "VALIDATED" | "INVALIDATED"
+  expectedUpdatedAt?: string
 }) {
   const prisma = getPrisma()
 
   const existing = await prisma.assumption.findUnique({
     where: { id: assumptionId },
-    select: { id: true, title: true },
+    select: { id: true, title: true, updatedAt: true },
   })
   if (!existing) {
     return fail(`Assumption "${assumptionId}" not found.`)
@@ -34,14 +36,14 @@ export async function updateAssumption({
 
   // Build update payload imperatively to satisfy Prisma's union type constraints
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const updateData: Record<string, any> = { updatedAt: new Date() }
+  const updateData: Record<string, any> = { updatedAt: new Date(Math.max(Date.now(), (existing.updatedAt?.getTime() ?? 0) + 1)) }
   if (title !== undefined) updateData.title = title.trim()
   if (description !== undefined) updateData.description = description?.trim() || null
   if (riskLevel !== undefined) updateData.riskLevel = riskLevel
   if (status !== undefined) updateData.status = status
 
   const updated = await prisma.assumption.update({
-    where: { id: assumptionId },
+    where: { id: assumptionId, ...(expectedUpdatedAt ? { updatedAt: new Date(expectedUpdatedAt) } : {}), ...getToolExpectedWhere() },
     data: updateData,
   })
 

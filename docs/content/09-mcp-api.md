@@ -8,6 +8,32 @@ section: "Developer"
 
 # MCP API
 
+## PM interview processing
+
+`get_pm_interview({ interviewId, offset? })` reads the initiating user's saved
+interview and current target in an authorized workspace. It returns transcript
+pages, permitted descriptive fields, and current `expectedUpdatedAt` and
+`expectedFieldsFingerprint` values. Follow `nextOffset` until it is null. This
+does not expose participant credentials, raw audio, or other users' interviews.
+
+Finishing an interview starts the normal core agent with a temporary credential
+restricted to that interview's exact target. Its edit must supply both returned
+version checks. The server checks the exact fields again at the final write and
+commits a before/after receipt atomically. A changed baseline requires rereading
+and reconsidering the edit, not blindly replacing the version token.
+
+`update_opportunity` supports `customerSegment` in addition to title/description.
+`update_opportunity`, `update_solution`, and `update_assumption` accept optional
+`expectedUpdatedAt` for ordinary optimistic edits. The fingerprint parameter is
+required only for an automatic interview update; it is never a target field.
+
+`update_experiment({ experimentId, title?, hypothesis?, method?, killCondition?,
+expectedUpdatedAt?, expectedFieldsFingerprint? })` edits protocol fields only
+while the experiment is **DESIGNING**. It cannot change status or record results.
+The automatic interview credential cannot edit risk, lifecycle, relationships,
+other items, or customer evidence through any tool. After processing terminates,
+an explicit new chat message uses the user's normal core-agent permissions.
+
 Compass exposes a **Model Context Protocol (MCP)** endpoint that lets AI agents read and write discovery data programmatically. This means you can connect tools like Claude, Cursor, or any MCP-compatible client to your workspace and have AI assistants create OKRs, log opportunities from user research notes, or update experiment results — all without leaving your AI workflow.
 
 ## Endpoint

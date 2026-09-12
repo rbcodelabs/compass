@@ -10,8 +10,66 @@ type TargetFixture = {
   deselectedValue: string | null
 }
 
+async function seedLegacyProposal(interviewId: string) {
+  const prisma = getPrisma()
+  const interview = await prisma.pMInterview.findUniqueOrThrow({ where: { id: interviewId }, include: { session: { include: { turns: true } } } })
+  const baseline = JSON.parse(interview.fieldBaselineJson) as { fields: Record<string, string | null> }
+  const turnIds = interview.session.turns.filter(turn => turn.role === "PARTICIPANT").map(turn => turn.id)
+  await prisma.pMInterview.update({ where: { id: interviewId }, data: { generationState: "READY", proposalJson: JSON.stringify({ version: 1, brief: "Previously generated interview brief", proposedFields: Object.fromEntries(Object.entries(baseline.fields).map(([field, value]) => [field, { value, transcriptTurnIds: turnIds }])), openQuestions: [], suggestedNextSteps: [], unknowns: [] }) } })
+  await prisma.researchSession.update({ where: { id: interview.sessionId }, data: { status: "COMPLETED" } })
+}
+
 test.describe("Capture — PM interview", () => {
-  test("uses the real UI to launch, interview, review, edit, select, and apply every supported target", async ({ page, base, workspaceSlug }) => {
+  test("Finish saves one pending core conversation and repeated Finish reuses it", async ({ page, base, workspaceSlug }) => {
+    const prisma = getPrisma()
+    const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug } })
+    const opportunity = await prisma.opportunity.create({ data: { workspaceId: workspace.id, title: `PM handoff ${randomUUID()}`, description: "Original description" } })
+    let interviewId: string | undefined
+    let conversationId: string | undefined
+    try {
+      const created = await page.request.post(`/api/pm-interviews?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { targetType: "OPPORTUNITY", targetId: opportunity.id } })
+      expect(created.status()).toBe(201)
+      interviewId = (await created.json()).id
+      const responded = await page.request.post(`/api/pm-interviews/${interviewId}/respond?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { answer: "Teams cannot find their previous decisions.", idempotencyKey: randomUUID() } })
+      expect(responded.status()).toBe(200)
+      // Do not open the agent page: real provider processing has its own smoke gate.
+      const finish = () => page.request.post(`/api/pm-interviews/${interviewId}/complete?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`)
+      const first = await finish()
+      expect(first.status(), await first.text()).toBe(200)
+      const handoff = await first.json()
+      conversationId = handoff.conversationId
+      expect(handoff).toMatchObject({ conversationUrl: `${base}/agent?c=${conversationId}`, processingStatus: "PENDING" })
+      const second = await finish()
+      expect(second.status()).toBe(200)
+      expect(await second.json()).toEqual(handoff)
+      const status = await page.request.get(`/api/agent/conversations/${conversationId}/processing?workspaceId=${workspace.id}`)
+      expect(status.status()).toBe(200)
+      expect(await status.json()).toMatchObject({ status: "PENDING", interviewId, receipt: null })
+      const interview = await prisma.pMInterview.findUniqueOrThrow({ where: { id: interviewId }, include: { session: true } })
+      expect(interview.agentConversationId).toBe(conversationId)
+      expect(interview.session.status).toBe("COMPLETED")
+      expect((await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunity.id } })).description).toBe("Original description")
+    } finally {
+      if (interviewId) {
+        const interview = await prisma.pMInterview.findUnique({ where: { id: interviewId } })
+        if (interview) {
+          await prisma.researchRequest.deleteMany({ where: { sessionId: interview.sessionId } })
+          await prisma.researchTurn.deleteMany({ where: { sessionId: interview.sessionId } })
+          await prisma.pMInterview.delete({ where: { id: interviewId } })
+          await prisma.researchSession.delete({ where: { id: interview.sessionId } })
+          await prisma.researchParticipantToken.deleteMany({ where: { studyId: interview.studyId } })
+          await prisma.researchStudy.delete({ where: { id: interview.studyId } })
+        }
+      }
+      if (conversationId) {
+        await prisma.agentMessage.deleteMany({ where: { conversationId } })
+        await prisma.agentConversation.delete({ where: { id: conversationId } })
+      }
+      await prisma.opportunity.delete({ where: { id: opportunity.id } })
+    }
+  })
+
+  test("preserves legacy proposal review, edit, selection, and apply for every supported target", async ({ page, base, workspaceSlug }) => {
     const prisma = getPrisma()
     const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug } })
     const suffix = Date.now().toString()
@@ -83,11 +141,9 @@ test.describe("Capture — PM interview", () => {
           await expect(page.getByText("What concrete observation would most challenge that belief?")).toBeVisible()
         }
 
-        const [completeResponse] = await Promise.all([
-          page.waitForResponse(response => response.url().includes(`/api/pm-interviews/${interviewId}/complete`) && response.request().method() === "POST", { timeout: 20_000 }),
-          page.getByRole("button", { name: "Finish and review" }).click(),
-        ])
-        expect(completeResponse.ok(), await completeResponse.text()).toBe(true)
+        // Historical proposals remain reviewable; new Finish never generates them.
+        await seedLegacyProposal(interviewId)
+        await page.reload()
         await expect(page.getByText("PM interview brief")).toBeVisible({ timeout: 10_000 })
         await expect(page.getByRole("heading", { name: "Proposed changes" })).toBeVisible()
         if (index === 0) {
@@ -172,7 +228,8 @@ test.describe("Capture — PM interview", () => {
       await page.getByLabel("Your answer").fill("This needs more evidence before any wording changes.")
       await page.getByRole("button", { name: "Send answer" }).click()
       await expect(page.getByText("What concrete observation would most challenge that belief?")).toBeVisible()
-      await page.getByRole("button", { name: "Finish and review" }).click()
+      await seedLegacyProposal(interviewId)
+      await page.reload()
       await expect(page.getByText("PM interview brief")).toBeVisible()
       const [dismissResponse] = await Promise.all([
         page.waitForResponse(response => response.url().includes(`/api/pm-interviews/${interviewId}/dismiss`) && response.request().method() === "POST", { timeout: 20_000 }),
@@ -214,7 +271,7 @@ test.describe("Capture — PM interview", () => {
       }
       const prepareProposal = async (id: string) => {
         expect((await page.request.post(`/api/pm-interviews/${id}/respond?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`, { data: { answer: "A bounded PM answer", idempotencyKey: `answer-${id}` } })).status()).toBe(200)
-        expect((await page.request.post(`/api/pm-interviews/${id}/complete?orgSlug=e2e-test-org&workspaceSlug=${workspaceSlug}`)).status()).toBe(200)
+        await seedLegacyProposal(id)
       }
 
       const raceId = await createInterview()

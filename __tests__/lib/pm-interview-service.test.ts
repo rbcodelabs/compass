@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
   const researchParticipantVoiceEvent = { findMany: vi.fn() }
   const researchVoiceCall = { findFirst: vi.fn(), update: vi.fn() }
   const prisma = {
+    agentConversation: { findFirst: vi.fn(), create: vi.fn() },
     workspace, pMInterview, opportunity, solution, assumption, experiment,
     workspaceMember, researchSession, researchParticipantToken, researchParticipantVoiceEvent, researchVoiceCall,
     $transaction: vi.fn(),
@@ -34,6 +35,7 @@ import {
   acknowledgePmInterviewBaseline,
   applyPmInterview,
   completePmInterview,
+  dismissPmInterview,
   markPmInterviewSpeechPending,
   readPmInterview,
   switchPmInterviewToText,
@@ -42,18 +44,21 @@ import {
 const scope = { orgSlug: "acme", workspaceSlug: "product" }
 const actor = { userId: ownerId }
 
-it("records safe parse-stage diagnostics and retains retryable generation state", async () => {
-  const log = vi.spyOn(console, "error").mockImplementation(() => {})
+it("rejects stale proposal mutation controls after core-agent handoff", async () => {
+  mocks.prisma.pMInterview.findFirst.mockResolvedValue(interview({ agentConversationId: "linked" }))
+  await expect(dismissPmInterview(scope, actor, interviewId, "dismiss-after-handoff")).rejects.toThrow(/agent conversation/)
+  await expect(acknowledgePmInterviewBaseline(scope, actor, interviewId)).rejects.toThrow(/agent conversation/)
+  await expect(applyPmInterview(scope, actor, interviewId, { selectedFields: ["title"], editedValues: {}, idempotencyKey: "apply-after-handoff" })).rejects.toThrow(/agent conversation/)
+})
+
+it("hands off a saved interview without running the old proposal generator", async () => {
   mocks.prisma.pMInterview.findFirst.mockResolvedValue(interview({ generationState: "FAILED" }))
   mocks.prisma.researchParticipantToken.findFirst.mockResolvedValue({ tokenHash: "synthetic" })
   mocks.prisma.pMInterview.updateMany.mockResolvedValue({ count: 1 })
-  mocks.runAgent.mockResolvedValue("private invalid response")
-  try {
-    await expect(completePmInterview(scope, actor, interviewId)).rejects.toThrow("Proposal generation failed")
-    expect(log).toHaveBeenCalledWith("PM interview proposal generation failed", expect.objectContaining({ interviewId, stage: "parse_proposal", category: "invalid_output" }))
-    expect(JSON.stringify(log.mock.calls)).not.toContain("private")
-    expect(mocks.prisma.pMInterview.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ generationState: "FAILED" }) }))
-  } finally { log.mockRestore() }
+  mocks.prisma.agentConversation.create.mockResolvedValue({ id: "conversation-1" })
+  mocks.prisma.pMInterview.findUnique.mockResolvedValue(interview({ generationState: "FAILED" }))
+  expect(await completePmInterview(scope, actor, interviewId)).toMatchObject({ conversationId: "conversation-1", processingStatus: "PENDING" })
+  expect(mocks.runAgent).not.toHaveBeenCalled()
 })
 
 function proposal(fields: Record<string, string | null>) {
@@ -190,7 +195,7 @@ describe("PM interview application fences", () => {
 
     expect(mocks.prisma.opportunity.update).not.toHaveBeenCalled()
     expect(mocks.prisma.pMInterview.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: interviewId },
+      where: { id: interviewId, AND: { agentConversationId: null } },
       data: expect.objectContaining({ generationState: "STALE", generationFailureCode: "BASELINE_CHANGED" }),
     }))
   })

@@ -3,6 +3,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, describe, expect, it, vi } from "vitest"
+const push = vi.hoisted(() => vi.fn())
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
 
 vi.mock("@/components/research/research-voice", () => ({
   ResearchVoice: ({ onUseChat }: { onUseChat?: () => void }) => <button onClick={() => onUseChat?.()}>Microphone unavailable fallback</button>,
@@ -28,6 +30,23 @@ const base = {
 
 describe("PM interview member history", () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+  it("finishes into the core conversation instead of interpreting a proposal", async () => {
+    const url = "/synthetic-org/synthetic-workspace/agent?c=conversation"
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ conversationUrl: url }) }))
+    render(<PmInterviewExperience {...base} initialProposal={null} initialDisposition="PENDING" initialReceipt={null} owner />)
+    fireEvent.click(screen.getByRole("button", { name: /Use text/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Finish and update item" }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith(url))
+  })
+
+  it("reopens a linked interview without starting another voice session", () => {
+    render(<PmInterviewExperience {...base} initialProposal={null} initialDisposition="PENDING" initialReceipt={null} initialAgentConversationId="linked" owner />)
+    fireEvent.click(screen.getByRole("button", { name: "Open agent conversation" }))
+    expect(push).toHaveBeenCalledWith("/synthetic-org/synthetic-workspace/agent?c=linked")
+    expect(screen.queryByRole("button", { name: /Start voice/ })).not.toBeInTheDocument()
+    expect(screen.getByText("New workspace admins.")).toBeVisible()
+  })
 
   it("enters chat without settling a lease when microphone access failed before voice startup", async () => {
     const fetch = vi.fn()

@@ -135,7 +135,7 @@ export default async function OpportunityDetailPage({ params }: Props) {
   const pmInterviews = isPmInterviewEnabled() ? await prisma.pMInterview.findMany({
     where: { workspaceId: workspace.id, targetType: "OPPORTUNITY", targetId: opportunityId },
     orderBy: { createdAt: "desc" }, take: 20,
-    select: { id: true, disposition: true, generationState: true, createdAt: true },
+    select: { id: true, disposition: true, generationState: true, agentConversationId: true, createdAt: true },
   }) : [];
 
   const evidence = await prisma.evidence.findMany({

@@ -1,8 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import getPrisma, { type AppPrismaClient, type AppTransactionClient } from "@/lib/db"
 import { runResearchInterviewAgent } from "@/lib/research-agent"
-import { analysisOperationMs, assertAnalysisDeadline } from "@/lib/research-analysis-deadline"
-import { researchFailureDiagnostic } from "@/lib/research-failure-diagnostics"
+import { parseProcessingState, processingStatus } from "@/lib/pm-agent-processing"
 import { completeResearchSession, respondToResearchSession, ResearchSessionError, assertIdempotencyKey, hashResearchResumeToken } from "@/lib/research-session"
 import {
   PM_INTERVIEW_ALLOWED_FIELDS,
@@ -256,54 +255,43 @@ export function buildPmInterviewProposalPrompt(interview: Awaited<ReturnType<typ
 }
 
 export async function completePmInterview(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string) {
-  let loaded = await loadInterview(scope, actor, interviewId, true)
-  if (loaded.interview.generationState === "READY" && loaded.interview.proposalJson) return parsePmInterviewProposal(loaded.interview.proposalJson, parsePmInterviewTargetType(loaded.interview.targetType))
+  const loaded = await loadInterview(scope, actor, interviewId, true)
+  if (loaded.interview.agentConversationId) return interviewHandoff(loaded.prisma, scope, loaded.interview.agentConversationId, actor.userId, loaded.interview.workspaceId)
+  if (loaded.interview.disposition !== "PENDING") throw new PmInterviewError("This interview is already resolved", 409)
+  if (loaded.interview.generationState === "GENERATING" && loaded.interview.generationClaimedAt && loaded.interview.generationClaimedAt.getTime() > Date.now() - 180_000) throw new PmInterviewError("Previous processing is still finishing; try again shortly", 409)
   if (!loaded.interview.session.participantTokenId) throw new PmInterviewError("Interview session is unavailable", 409)
   const participantToken = await loaded.prisma.researchParticipantToken.findFirst({ where: { id: loaded.interview.session.participantTokenId, studyId: loaded.interview.studyId, kind: "PM_INTERNAL" } })
   if (!participantToken) throw new PmInterviewError("Interview session is unavailable", 409)
   try {
-    await completeResearchSession(
-      { prisma: loaded.prisma, study: loaded.interview.study, participantToken },
-      loaded.interview.sessionId,
-      internalResumeToken(loaded.interview.id, participantToken.tokenHash),
-    )
+    await completeResearchSession({ prisma: loaded.prisma, study: loaded.interview.study, participantToken }, loaded.interview.sessionId, internalResumeToken(loaded.interview.id, participantToken.tokenHash))
   } catch (error) {
     if (error instanceof ResearchSessionError) throw new PmInterviewError(error.message, error.status)
     throw error
   }
-  // Completion is the transcript fence. Reload after it so the generation
-  // fingerprint and citations are always based on the canonical saved turns.
-  loaded = await loadInterview(scope, actor, interviewId, true)
-  const { prisma, interview } = loaded
-  const fingerprint = createHash("sha256").update(interview.contextSnapshotJson).update(JSON.stringify(interview.session.turns.map(({ id, role, sequence, content }) => ({ id, role, sequence, content })))).digest("hex")
-  const claimId = randomUUID(), now = new Date()
-  const claimed = await prisma.pMInterview.updateMany({ where: { id: interview.id, initiatingUserId: actor.userId, OR: [{ generationState: { in: ["NOT_STARTED", "FAILED"] } }, { generationState: "GENERATING", generationClaimedAt: { lt: new Date(now.getTime() - 180_000) } }] }, data: { generationState: "GENERATING", generationClaimId: claimId, generationClaimedAt: now, generationFailureCode: null, sourceFingerprint: fingerprint, updatedAt: now } })
-  if (claimed.count !== 1) throw new PmInterviewError("Proposal generation is already in progress", 409)
-  const deadline = Date.now() + analysisOperationMs
-  let generationStage = "prepare_prompt"
-  try {
-    const participant = interview.session.turns.find(turn => turn.role === "PARTICIPANT")
-    const fixtureSnapshot = pmInterviewContextSchema.parse(JSON.parse(interview.contextSnapshotJson))
-    const fixtureFields = participant ? Object.fromEntries(PM_INTERVIEW_ALLOWED_FIELDS[parsePmInterviewTargetType(interview.targetType)].map(field => [field, { value: fixtureSnapshot.target.fields[field] ?? (field === "title" ? "Clarified item" : "Clarified protocol"), transcriptTurnIds: [participant.id] }])) : {}
-    const fixture = { version: 1, brief: "The PM clarified the item and identified remaining unknowns.", proposedFields: fixtureFields, openQuestions: [], suggestedNextSteps: ["Validate the riskiest belief with customer evidence."], unknowns: participant ? [] : ["No PM answers were saved."] }
-    generationStage = "run_agent"
-    const raw = process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1" ? JSON.stringify(fixture) : await runResearchInterviewAgent({ prompt: buildPmInterviewProposalPrompt(interview), baseUrl: "https://compass.local", deadline })
-    assertAnalysisDeadline(deadline)
-    generationStage = "parse_proposal"
-    const parsed = parsePmInterviewProposal(raw.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, ""), parsePmInterviewTargetType(interview.targetType))
-    const validTurnIds = new Set(interview.session.turns.map(turn => turn.id))
-    generationStage = "validate_citations"
-    for (const proposed of Object.values(parsed.proposedFields)) for (const id of proposed?.transcriptTurnIds ?? []) if (!validTurnIds.has(id)) throw new PmInterviewError("Proposal referenced an unavailable transcript turn")
-    generationStage = "save_proposal"
-    const saved = await prisma.pMInterview.updateMany({ where: { id: interview.id, generationState: "GENERATING", generationClaimId: claimId, sourceFingerprint: fingerprint }, data: { generationState: "READY", proposalJson: JSON.stringify(parsed), updatedAt: new Date() } })
-    if (saved.count !== 1) throw new PmInterviewError("Proposal changed; refresh before retrying", 409)
-    return parsed
-  } catch (error) {
-    console.error("PM interview proposal generation failed", { interviewId: interview.id, claimId, stage: generationStage, ...researchFailureDiagnostic(error) })
-    await prisma.pMInterview.updateMany({ where: { id: interview.id, generationState: "GENERATING", generationClaimId: claimId }, data: { generationState: "FAILED", generationFailureCode: "GENERATION_FAILED", updatedAt: new Date() } })
-    if (error instanceof PmInterviewError) throw error
-    throw new PmInterviewError("Proposal generation failed; the transcript is unchanged", 502)
-  }
+  const conversationId = await loaded.prisma.$transaction(async tx => {
+    const interview = await tx.pMInterview.findUnique({ where: { id: interviewId } })
+    if (!interview || interview.initiatingUserId !== actor.userId || interview.workspaceId !== loaded.interview.workspaceId) throw new PmInterviewError("Interview not found", 404)
+    if (interview.agentConversationId) return interview.agentConversationId
+    let opportunityId = interview.targetId
+    if (interview.targetType === "SOLUTION") opportunityId = (await tx.solution.findUnique({ where: { id: interview.targetId }, select: { opportunityId: true } }))?.opportunityId ?? interview.targetId
+    if (interview.targetType === "ASSUMPTION") opportunityId = (await tx.assumption.findUnique({ where: { id: interview.targetId }, select: { solution: { select: { opportunityId: true } } } }))?.solution.opportunityId ?? interview.targetId
+    const targetUrl = `/${scope.orgSlug}/${scope.workspaceSlug}/${interview.targetType === "EXPERIMENT" ? "experiments" : "discovery"}/${interview.targetType === "EXPERIMENT" ? interview.targetId : opportunityId}`
+    const conversation = await tx.agentConversation.create({ data: { workspaceId: interview.workspaceId, userId: actor.userId, title: "Update item from interview", interviewProcessingJson: JSON.stringify({ status: "PENDING", interviewId, targetUrl }), updatedAt: new Date() } })
+    const linked = await tx.pMInterview.updateMany({ where: { id: interviewId, agentConversationId: null, disposition: "PENDING" }, data: { agentConversationId: conversation.id, generationClaimId: null, updatedAt: new Date() } })
+    if (linked.count !== 1) throw new PmInterviewError("Interview handoff changed; reopen it", 409)
+    return conversation.id
+  }).catch(async error => {
+    const replay = await loaded.prisma.pMInterview.findFirst({ where: { id: interviewId, initiatingUserId: actor.userId, workspaceId: loaded.interview.workspaceId } })
+    if (replay?.agentConversationId) return replay.agentConversationId
+    throw error
+  })
+  return interviewHandoff(loaded.prisma, scope, conversationId, actor.userId, loaded.interview.workspaceId)
+}
+
+async function interviewHandoff(prisma: AppPrismaClient, scope: PmInterviewScope, conversationId: string, userId: string, workspaceId: string) {
+  const conversation = await prisma.agentConversation.findFirst({ where: { id: conversationId, userId, workspaceId } })
+  const state = parseProcessingState(conversation?.interviewProcessingJson)
+  return { conversationId, conversationUrl: `/${scope.orgSlug}/${scope.workspaceSlug}/agent?c=${conversationId}`, processingStatus: state ? processingStatus(state) : "PENDING" }
 }
 
 async function liveTarget(prisma: AppPrismaClient | AppTransactionClient, workspaceId: string, type: PmInterviewTargetType, id: string) {
@@ -329,6 +317,7 @@ export async function applyPmInterview(scope: PmInterviewScope, actor: PmIntervi
   const idempotencyKey = assertIdempotencyKey(input.idempotencyKey)
   const { prisma, interview } = await loadInterview(scope, actor, interviewId, true)
   const targetType = parsePmInterviewTargetType(interview.targetType), allowed = PM_INTERVIEW_ALLOWED_FIELDS[targetType] as readonly string[]
+  if (interview.agentConversationId) throw new PmInterviewError("Use the linked agent conversation; this proposal is historical", 409)
   if (!interview.proposalJson || interview.generationState !== "READY") throw new PmInterviewError("Proposal is not ready", 409)
   const proposal = parsePmInterviewProposal(interview.proposalJson, targetType), baseline = parsePmInterviewBaseline(interview.fieldBaselineJson, targetType)
   let selection: ReturnType<typeof resolvePmInterviewApplyInput>
@@ -340,6 +329,7 @@ export async function applyPmInterview(scope: PmInterviewScope, actor: PmIntervi
     if (!membership) throw new PmInterviewError("PM interview not found", 404)
     const locked = await tx.pMInterview.findUnique({ where: { id: interview.id } })
     if (!locked || locked.initiatingUserId !== actor.userId) throw new PmInterviewError("PM interview not found", 404)
+    if (locked.agentConversationId) throw new PmInterviewError("Use the linked agent conversation; this proposal is historical", 409)
     if (locked.disposition === "APPLIED" && locked.dispositionIdempotencyKey === idempotencyKey) {
       const receipt = JSON.parse(locked.receiptJson!) as { requestFingerprint?: string }
       if (receipt.requestFingerprint !== selection.requestFingerprint) throw new PmInterviewError("Idempotency key was already used for different changes", 409)
@@ -353,11 +343,11 @@ export async function applyPmInterview(scope: PmInterviewScope, actor: PmIntervi
     const stale = allowed.filter(field => (targetRecord[field] ?? null) !== (baseline.fields as Record<string, unknown>)[field])
     if (stale.length) {
       const refreshed = liveBaseline(targetType, targetRecord)
-      await tx.pMInterview.update({ where: { id: interview.id }, data: { generationState: "STALE", generationFailureCode: "BASELINE_CHANGED", fieldBaselineJson: JSON.stringify(refreshed), updatedAt: new Date() } })
+      await tx.pMInterview.update({ where: { id: interview.id, AND: { agentConversationId: null } }, data: { generationState: "STALE", generationFailureCode: "BASELINE_CHANGED", fieldBaselineJson: JSON.stringify(refreshed), updatedAt: new Date() } })
       return { stale } as const
     }
     const reservationAt = new Date()
-    const reserved = await tx.pMInterview.updateMany({ where: { id: locked.id, disposition: "PENDING", updatedAt: locked.updatedAt }, data: { updatedAt: reservationAt } })
+    const reserved = await tx.pMInterview.updateMany({ where: { id: locked.id, disposition: "PENDING", agentConversationId: null, updatedAt: locked.updatedAt }, data: { updatedAt: reservationAt } })
     if (reserved.count !== 1) throw Object.assign(new Error("Concurrent PM interview apply"), { code: "P2034" })
     const before: Record<string, unknown> = {}, after: Record<string, unknown> = {}, data: Record<string, unknown> = { updatedAt: new Date(), updatedById: actor.userId }
     for (const field of selection.selectedFields) {
@@ -370,7 +360,7 @@ export async function applyPmInterview(scope: PmInterviewScope, actor: PmIntervi
     else await tx.experiment.update({ where: { id: interview.targetId }, data })
     if (testHooks?.failReceiptFinalization) throw new Error("Injected PM receipt finalization failure")
     const receipt = { version: 1, kind: "APPLIED", idempotencyKey, requestFingerprint: selection.requestFingerprint, actorUserId: actor.userId, selectedFields: selection.selectedFields, before, after, at: new Date().toISOString() }
-    const finalized = await tx.pMInterview.updateMany({ where: { id: interview.id, disposition: "PENDING", updatedAt: reservationAt }, data: { disposition: "APPLIED", dispositionIdempotencyKey: idempotencyKey, receiptJson: JSON.stringify(receipt), appliedAt: new Date(), updatedAt: new Date() } })
+    const finalized = await tx.pMInterview.updateMany({ where: { id: interview.id, disposition: "PENDING", agentConversationId: null, updatedAt: reservationAt }, data: { disposition: "APPLIED", dispositionIdempotencyKey: idempotencyKey, receiptJson: JSON.stringify(receipt), appliedAt: new Date(), updatedAt: new Date() } })
     if (finalized.count !== 1) throw Object.assign(new Error("Concurrent PM interview apply"), { code: "P2034" })
     return receipt
     })
@@ -385,6 +375,7 @@ export async function applyPmInterview(scope: PmInterviewScope, actor: PmIntervi
 
 export async function acknowledgePmInterviewBaseline(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string) {
   const { prisma, interview } = await loadInterview(scope, actor, interviewId, true)
+  if (interview.agentConversationId) throw new PmInterviewError("Use the linked agent conversation; this proposal is historical", 409)
   if (interview.generationState !== "STALE" || !interview.proposalJson) throw new PmInterviewError("There is no refreshed comparison to review", 409)
   const targetType = parsePmInterviewTargetType(interview.targetType)
   const baseline = parsePmInterviewBaseline(interview.fieldBaselineJson, targetType)
@@ -396,7 +387,7 @@ export async function acknowledgePmInterviewBaseline(scope: PmInterviewScope, ac
     if (targetType === "EXPERIMENT" && "status" in target && target.status !== "DESIGNING") throw new PmInterviewError("Experiment protocol can only change while designing", 409)
     const current = liveBaseline(targetType, target as unknown as Record<string, unknown>)
     if (JSON.stringify(current.fields) !== JSON.stringify(baseline.fields)) throw new PmInterviewError("The source item changed again. Refresh the comparison.", 409)
-    const reviewed = await tx.pMInterview.updateMany({ where: { id: interview.id, initiatingUserId: actor.userId, generationState: "STALE", fieldBaselineJson: interview.fieldBaselineJson }, data: { generationState: "READY", generationFailureCode: null, updatedAt: new Date() } })
+    const reviewed = await tx.pMInterview.updateMany({ where: { id: interview.id, initiatingUserId: actor.userId, agentConversationId: null, generationState: "STALE", fieldBaselineJson: interview.fieldBaselineJson }, data: { generationState: "READY", generationFailureCode: null, updatedAt: new Date() } })
     if (reviewed.count !== 1) throw new PmInterviewError("The comparison changed. Refresh and review again.", 409)
     return { reviewed: true, baseline: current }
   })
@@ -405,10 +396,11 @@ export async function acknowledgePmInterviewBaseline(scope: PmInterviewScope, ac
 
 export async function dismissPmInterview(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string, idempotencyValue: unknown) {
   const idempotencyKey = assertIdempotencyKey(idempotencyValue), { prisma, interview } = await loadInterview(scope, actor, interviewId, true)
+  if (interview.agentConversationId) throw new PmInterviewError("Use the linked agent conversation; this proposal is historical", 409)
   if (interview.disposition === "DISMISSED" && interview.dispositionIdempotencyKey === idempotencyKey) return JSON.parse(interview.receiptJson!)
   if (interview.disposition !== "PENDING") throw new PmInterviewError("This proposal has already been resolved", 409)
   const receipt = { version: 1, kind: "DISMISSED", idempotencyKey, actorUserId: actor.userId, at: new Date().toISOString() }
-  const changed = await prisma.pMInterview.updateMany({ where: { id: interview.id, initiatingUserId: actor.userId, disposition: "PENDING" }, data: { disposition: "DISMISSED", dispositionIdempotencyKey: idempotencyKey, receiptJson: JSON.stringify(receipt), dismissedAt: new Date(), updatedAt: new Date() } })
+  const changed = await prisma.pMInterview.updateMany({ where: { id: interview.id, initiatingUserId: actor.userId, disposition: "PENDING", agentConversationId: null }, data: { disposition: "DISMISSED", dispositionIdempotencyKey: idempotencyKey, receiptJson: JSON.stringify(receipt), dismissedAt: new Date(), updatedAt: new Date() } })
   if (changed.count !== 1) throw new PmInterviewError("This proposal has already been resolved", 409)
   return receipt
 }

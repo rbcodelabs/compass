@@ -46,13 +46,19 @@ authentication and never expose a participant link. **Continue in text** first
 saves finalized captions and releases the voice lease; the interview cannot switch
 back to voice. Raw audio is not retained.
 
-Finishing creates an editable brief with proposed field changes, transcript
-references, open questions, explicit unknowns, and suggested next steps. The
-initiating PM selects and edits fields before applying them. Other workspace
-members can read the history, but cannot continue or apply it. If the source item
-changed after the interview began, Compass preserves the draft and requires a new
-comparison instead of overwriting those edits. Experiment protocols can only be
-updated while the experiment is **Designing**.
+**Finish and update item** saves the transcript and opens a linked core-agent
+conversation. Finish gives the agent permission to update the interviewed item's
+descriptive fields immediately—there is no separate proposal approval step.
+The conversation shows progress and the saved changes, including before/after
+values and a link to the item. A completed turn with no saved edits says so.
+Other workspace members can read interview history; the agent conversation is
+private to the initiating PM. Concurrent field edits are checked before writing.
+Experiment protocols can only be updated while the experiment is **Designing**.
+
+If processing stops, reopen the same interview's agent conversation and use
+**Retry update**. Do not repeat the interview. Reloading does not start duplicate
+processing, and a committed update remains visible even if the stream disconnects.
+Older saved proposals and application receipts remain available in history.
 
 PM statements are internal interpretations, not customer evidence. PM interviews
 do not create evidence, change confidence or lifecycle state, alter relationships,

@@ -35,6 +35,8 @@ export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, 
     await prisma.docComment.deleteMany({ where: { doc: { workspaceId } } });
     await prisma.docVersion.deleteMany({ where: { doc: { workspaceId } } });
     await prisma.agentMessage.deleteMany({ where: { conversation: { workspaceId } } });
+    await prisma.apiKey.deleteMany({ where: { scopeWorkspaceId: workspaceId, scopeConversationId: { not: null } } });
+    await prisma.pMInterview.updateMany({ where: { workspaceId }, data: { agentConversationId: null } });
     await prisma.agentConversation.deleteMany({ where: { workspaceId } });
     await prisma.agentAuditLog.deleteMany({ where: { workspaceId } });
     await deleteWorkspaceResearchData(prisma, workspaceId);

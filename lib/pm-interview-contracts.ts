@@ -131,6 +131,7 @@ export function parsePmInterviewVoiceTransitionReceipt(value: string | null): Pm
 }
 
 type PmInterviewReadSource = {
+  agentConversationId?: string | null
   id: string
   targetType: string
   targetId: string
@@ -189,6 +190,7 @@ export function buildPmInterviewReadDto(source: PmInterviewReadSource, actorUser
   return {
     version: 1 as const,
     id: source.id,
+    agentConversationId: source.initiatingUserId === actorUserId ? source.agentConversationId ?? null : null,
     targetType,
     targetId: source.targetId,
     generationState: source.generationState,

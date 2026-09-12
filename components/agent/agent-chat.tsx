@@ -34,6 +34,12 @@ type Props = {
 }
 
 type StreamPhase = "idle" | "booting" | "running"
+type Processing = {
+  status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "INTERRUPTED"
+  interviewId: string
+  canContinue?: boolean
+  receipt: { changedFields: string[]; targetUrl: string; before?: Record<string, unknown>; after?: Record<string, unknown> } | null
+}
 
 export function AgentChat({
   workspaceId,
@@ -51,8 +57,19 @@ export function AgentChat({
   const [liveToolSteps, setLiveToolSteps] = useState<ToolStep[]>([])
   const [error, setError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const [processing, setProcessing] = useState<Processing | null>(null)
+  const [processingLoading, setProcessingLoading] = useState(Boolean(activeConversationId))
+  const started = useRef(new Set<string>())
+  const sending = useRef(false)
+  const streamController = useRef<AbortController | null>(null)
 
   const isStreaming = phase !== "idle"
+  const composerBlocked = processingLoading || Boolean(processing && (!processing.canContinue || processing.status === "RUNNING" || processing.status === "PENDING"))
+
+  useEffect(() => () => {
+    streamController.current?.abort()
+    sending.current = false
+  }, [activeConversationId])
 
   useEffect(() => {
     setMessages(initialMessages)
@@ -66,9 +83,12 @@ export function AgentChat({
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
   }, [messages, streamingText, liveToolSteps, phase])
 
-  const send = useCallback(async () => {
-    const text = input.trim()
-    if (!text || isStreaming) return
+  const send = useCallback(async (handoff = false, retry = false) => {
+    const text = handoff ? "Use my saved interview to update the item." : input.trim()
+    if (!text || sending.current) return
+    sending.current = true
+    const controller = new AbortController()
+    streamController.current = controller
     setInput("")
     setError(null)
     setMessages((m) => [...m, { id: `local-${Date.now()}`, role: "user", content: text }])
@@ -83,8 +103,10 @@ export function AgentChat({
       const res = await fetch("/api/agent/turn", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workspaceId, message: text, conversationId: activeConversationId ?? undefined }),
+        signal: controller.signal,
+        body: JSON.stringify({ workspaceId, message: text, conversationId: activeConversationId ?? undefined, ...(retry ? { retry: true } : {}), ...(!handoff && processing?.canContinue ? { continue: true } : {}) }),
       })
+      if (controller.signal.aborted) return
       if (!res.ok || !res.body) {
         const serverMsg = await res.text().catch(() => "")
         throw new Error(
@@ -98,6 +120,7 @@ export function AgentChat({
       let buffer = ""
       for (;;) {
         const { value, done } = await reader.read()
+        if (controller.signal.aborted) return
         if (done) break
         buffer += decoder.decode(value, { stream: true })
         const { frames, rest } = parseSseFrames(buffer)
@@ -156,12 +179,46 @@ export function AgentChat({
         router.refresh()
       }
     } catch (err) {
+      if (controller.signal.aborted) return
       setError(err instanceof Error ? err.message : "Something went wrong.")
       setStreamingText("")
       setLiveToolSteps([])
       setPhase("idle")
+    } finally {
+      if (streamController.current === controller) sending.current = false
     }
-  }, [input, isStreaming, workspaceId, activeConversationId, basePath, router])
+  }, [input, workspaceId, activeConversationId, basePath, router, processing?.canContinue])
+
+  const sendRef = useRef(send)
+  useEffect(() => { sendRef.current = send }, [send])
+  useEffect(() => {
+    setProcessing(null)
+    setProcessingLoading(Boolean(activeConversationId))
+    if (!activeConversationId) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+    async function refreshProcessing() {
+      try {
+        const response = await fetch(`/api/agent/conversations/${activeConversationId}/processing?workspaceId=${encodeURIComponent(workspaceId)}`)
+        if (cancelled) return
+        if (response.status === 404) { setProcessingLoading(false); return }
+        if (!response.ok) throw new Error("Unable to check processing status. Reload before retrying.")
+        const state = await response.json() as Processing
+        if (cancelled) return
+        setProcessing(state)
+        setProcessingLoading(false)
+        if (state.status === "PENDING" && !started.current.has(activeConversationId!)) {
+          started.current.add(activeConversationId!)
+          void sendRef.current(true)
+        }
+        if (state.status === "PENDING" || state.status === "RUNNING") timer = setTimeout(() => void refreshProcessing(), 2000)
+      } catch (caught) {
+        if (!cancelled) { setError(caught instanceof Error ? caught.message : "Unable to check processing status."); timer = setTimeout(() => void refreshProcessing(), 5000) }
+      }
+    }
+    void refreshProcessing()
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [activeConversationId, workspaceId, phase])
 
   const phaseLabel = useMemo(() => {
     if (phase === "booting") return "Starting the agent…"
@@ -209,7 +266,13 @@ export function AgentChat({
       <div className="flex min-h-0 flex-1 flex-col">
         <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4 sm:p-6">
-            {messages.length === 0 && !isStreaming && (
+            {processing && <section aria-live="polite" className="space-y-2 rounded-lg border p-4 text-sm">
+              <p className="font-medium">{processing.receipt ? (processing.receipt.changedFields.length ? "Item updated" : "No changes saved") : processing.status === "RUNNING" || processing.status === "PENDING" ? "Updating your item…" : "The update did not finish"}</p>
+              {processing.receipt ? <><dl className="space-y-3">{processing.receipt.changedFields.map(field => <div key={field}><dt className="font-medium">{field}</dt>{processing.receipt?.before && processing.receipt?.after && <dd className="grid gap-2 sm:grid-cols-2"><div><span className="text-text-subtle">Before</span><p className="whitespace-pre-wrap">{String(processing.receipt.before[field] ?? "empty")}</p></div><div><span className="text-text-subtle">After</span><p className="whitespace-pre-wrap">{String(processing.receipt.after[field] ?? "empty")}</p></div></dd>}</div>)}</dl><Link className="underline" href={processing.receipt.targetUrl}>Open updated item</Link></> : <p>Your transcript is saved. {processing.status === "RUNNING" ? "An update is already running; no additional request is needed." : "Follow the agent’s progress here."}</p>}
+              <Link className="block underline" href={`${basePath}/capture/pm/${processing.interviewId}`}>View saved interview</Link>
+              {!processing.receipt && (processing.status === "FAILED" || processing.status === "INTERRUPTED") && <Button disabled={isStreaming} onClick={() => void send(true, true)}>Retry update</Button>}
+            </section>}
+            {messages.length === 0 && !isStreaming && !processing && !processingLoading && (
               <div className="flex flex-col items-center gap-3 py-16 text-center">
                 <div className="flex size-12 items-center justify-center rounded-full bg-surface-interactive text-text-secondary">
                   <Sparkles className="size-6" aria-hidden="true" />
@@ -256,10 +319,10 @@ export function AgentChat({
               }}
               placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
               rows={1}
-              disabled={isStreaming}
+              disabled={isStreaming || composerBlocked}
               className="max-h-40 flex-1"
             />
-            <Button size="icon" onClick={() => void send()} disabled={isStreaming || !input.trim()} aria-label="Send message">
+            <Button size="icon" onClick={() => void send()} disabled={isStreaming || composerBlocked || !input.trim()} aria-label="Send message">
               <Send className="size-4" aria-hidden="true" />
             </Button>
           </div>

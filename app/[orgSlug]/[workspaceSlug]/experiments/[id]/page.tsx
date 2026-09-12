@@ -94,7 +94,7 @@ export default async function ExperimentDetailPage({
   const pmInterviews = isPmInterviewEnabled() ? await prisma.pMInterview.findMany({
     where: { workspaceId: workspace.id, targetType: "EXPERIMENT", targetId: id },
     orderBy: { createdAt: "desc" }, take: 20,
-    select: { id: true, disposition: true, generationState: true, createdAt: true },
+    select: { id: true, disposition: true, generationState: true, agentConversationId: true, createdAt: true },
   }) : []
 
   // Custom fields for this experiment
