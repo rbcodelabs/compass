@@ -55,6 +55,10 @@ Other workspace members can read interview history; the agent conversation is
 private to the initiating PM. Concurrent field edits are checked before writing.
 Experiment protocols can only be updated while the experiment is **Designing**.
 
+![Saved PM interview changes in the core agent conversation, using fictional sample data](/screenshots/docs/pm-interview-agent-desktop.png)
+
+[View the saved changes on mobile](/screenshots/docs/pm-interview-agent-mobile.png).
+
 If processing stops, reopen the same interview's agent conversation and use
 **Retry update**. Do not repeat the interview. Reloading does not start duplicate
 processing, and a committed update remains visible even if the stream disconnects.
