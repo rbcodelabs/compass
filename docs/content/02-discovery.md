@@ -81,6 +81,8 @@ The pinned **Current Plan** carries a legacy status — **Pending**, **Approved*
 
 Phase 3 will route reviews of new Solution Plans through tracked Decisions. Until that capability ships, treat legacy plan status as non-authoritative review context rather than a Decision or authorization.
 
+Once the Current Plan is approved, **Send to agent** appears alongside these buttons and opens the in-app agent on that plan — see [Send to agent](/help/20-send-to-agent).
+
 ## Assumptions
 
 Assumptions are the riskiest beliefs that need to be true for a solution to succeed. Click **+ Add Assumption** on any solution to capture them. Each assumption can be linked to an Experiment for testing.

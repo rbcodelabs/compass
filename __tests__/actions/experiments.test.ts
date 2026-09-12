@@ -235,6 +235,62 @@ describe("concludeExperiment", () => {
     await concludeExperiment("exp-1", "PROCEED");
     expect(mockAssumption.update).not.toHaveBeenCalled();
   });
+
+  // ── NOT_PURSUED ──────────────────────────────────────────────────────────
+  // A human deliberately decided not to run this experiment. It never
+  // generated evidence, so it must not be confused with an evidence-based
+  // KILL: distinct terminal status, assumption cascade stays UNTESTED
+  // (unchanged), and the human's stated reason is preserved.
+
+  it("sets status to NOT_PURSUED when conclusion is NOT_PURSUED", async () => {
+    await concludeExperiment("exp-1", "NOT_PURSUED", "Feature already shipped and works; no need to test.");
+    const data = mockExperiment.update.mock.calls[0][0].data;
+    expect(data.status).toBe("NOT_PURSUED");
+    expect(data.conclusion).toBe("NOT_PURSUED");
+    expect(data.endDate).toBeInstanceOf(Date);
+  });
+
+  it("NOT_PURSUED status is distinguishable from KILLED", async () => {
+    await concludeExperiment("exp-1", "NOT_PURSUED", "Not needed.");
+    const data = mockExperiment.update.mock.calls[0][0].data;
+    expect(data.status).not.toBe("KILLED");
+  });
+
+  it("persists the reason as conclusionReason", async () => {
+    await concludeExperiment("exp-1", "NOT_PURSUED", "Feature already shipped and works; no need to test.");
+    const data = mockExperiment.update.mock.calls[0][0].data;
+    expect(data.conclusionReason).toBe("Feature already shipped and works; no need to test.");
+  });
+
+  it("throws when NOT_PURSUED is given no reason", async () => {
+    await expect(concludeExperiment("exp-1", "NOT_PURSUED")).rejects.toThrow(/reason/i);
+    expect(mockExperiment.update).not.toHaveBeenCalled();
+  });
+
+  it("throws when NOT_PURSUED is given a blank reason", async () => {
+    await expect(concludeExperiment("exp-1", "NOT_PURSUED", "   ")).rejects.toThrow(/reason/i);
+    expect(mockExperiment.update).not.toHaveBeenCalled();
+  });
+
+  it("leaves linked assumption UNTESTED when NOT_PURSUED (never tested, not disproven)", async () => {
+    mockExperiment.update.mockResolvedValue({
+      id: "exp-1",
+      status: "NOT_PURSUED",
+      conclusion: "NOT_PURSUED",
+      assumptionId: "ass-1",
+    });
+    await concludeExperiment("exp-1", "NOT_PURSUED", "Not needed.");
+    expect(mockAssumption.update).toHaveBeenCalledWith({
+      where: { id: "ass-1" },
+      data: { status: "UNTESTED" },
+    });
+  });
+
+  it("does not set conclusionReason when reason is omitted for non-NOT_PURSUED conclusions", async () => {
+    await concludeExperiment("exp-1", "KILL");
+    const data = mockExperiment.update.mock.calls[0][0].data;
+    expect(data.conclusionReason).toBeNull();
+  });
 });
 
 // ─── archiveExperiment ────────────────────────────────────────────────────────

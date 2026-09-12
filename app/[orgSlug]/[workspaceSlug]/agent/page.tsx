@@ -4,12 +4,13 @@ import getPrisma from "@/lib/db"
 import { PageHeader } from "@/components/patterns/page-header"
 import { AgentChat } from "@/components/agent/agent-chat"
 import { listAgentConversations, getAgentConversationMessages } from "@/lib/agent-conversations"
+import { resolveAgentHandoffContext } from "@/lib/agent-context"
 
 export const metadata = { title: "Agent" }
 
 interface AgentPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>
-  searchParams: Promise<{ c?: string }>
+  searchParams: Promise<{ c?: string; entityType?: string; entityId?: string }>
 }
 
 function initialsOf(nameOrEmail: string | null | undefined): string {
@@ -25,7 +26,7 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
   if (!session?.user?.id) redirect("/login")
 
   const { orgSlug, workspaceSlug } = await params
-  const { c: conversationId } = await searchParams
+  const { c: conversationId, entityType, entityId } = await searchParams
   const prisma = getPrisma()
 
   // Membership is enforced by the workspace layout; scope by org+workspace slug here.
@@ -54,6 +55,19 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
     }
   }
 
+  // "Send to agent" hand-off: only consulted for a brand-new chat — an
+  // existing conversation selected via ?c= always wins (e.g. after a page
+  // refresh), so we never re-seed/resolve anything once a thread exists.
+  let seedEntity: { entityType: string; entityId: string; label: string; summary: string; sourceUrl: string } | undefined
+  let suggestedInstruction: string | undefined
+  if (!conversationId && entityType && entityId) {
+    const handoff = await resolveAgentHandoffContext({ workspaceId: workspace.id, userId, entityType, entityId })
+    if (handoff) {
+      seedEntity = { entityType, entityId, label: handoff.label, summary: handoff.summary, sourceUrl: handoff.sourceUrl }
+      suggestedInstruction = handoff.suggestedInstruction
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 sm:p-6 md:p-8">
       <PageHeader
@@ -67,6 +81,8 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
         activeConversationId={activeConversationId}
         initialMessages={initialMessages}
         userInitials={initialsOf(session.user.name ?? session.user.email)}
+        seedEntity={seedEntity}
+        suggestedInstruction={suggestedInstruction}
       />
     </div>
   )

@@ -18,6 +18,7 @@ type ExperimentData = {
   method: string;
   killCondition: string;
   conclusion: string | null;
+  conclusionReason: string | null;
   startDate: string | null;
   endDate: string | null;
   assumption: { id: string; title: string; riskLevel: string } | null;
@@ -29,6 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
   RUNNING: "Running",
   COMPLETE: "Complete",
   KILLED: "Killed",
+  NOT_PURSUED: "Not Pursued",
 };
 
 const STATUS_CLASS: Record<string, string> = {
@@ -36,6 +38,9 @@ const STATUS_CLASS: Record<string, string> = {
   RUNNING: "bg-blue-100 text-blue-700",
   COMPLETE: "bg-green-100 text-green-700",
   KILLED: "bg-red-100 text-red-700",
+  // Neutral, distinct from KILLED's red — a deliberate non-pursuit, not a
+  // tested-and-failed experiment.
+  NOT_PURSUED: "bg-surface-inset text-text-secondary",
 };
 
 const RISK_CLASS: Record<string, string> = {
@@ -49,8 +54,20 @@ const STATUS_MAP: Record<string, { label: string; className: string }> = {
   RUNNING: { label: STATUS_LABELS.RUNNING, className: STATUS_CLASS.RUNNING },
   COMPLETE: { label: STATUS_LABELS.COMPLETE, className: STATUS_CLASS.COMPLETE },
   KILLED: { label: STATUS_LABELS.KILLED, className: STATUS_CLASS.KILLED },
+  // Intentionally NOT in STATUS_ORDER below — NOT_PURSUED is only reachable
+  // through the deliberate Conclude flow (which captures a reason and
+  // cascades the linked Assumption), never through this raw quick-edit
+  // status dropdown. Still mapped here so it renders correctly once set.
+  NOT_PURSUED: { label: STATUS_LABELS.NOT_PURSUED, className: STATUS_CLASS.NOT_PURSUED },
 };
 const STATUS_ORDER = ["DESIGNING", "RUNNING", "COMPLETE", "KILLED"] as const;
+
+const CONCLUSION_CLASS: Record<string, string> = {
+  PROCEED: "border-green-300 text-green-700",
+  KILL: "border-red-300 text-red-700",
+  ITERATE: "border-amber-300 text-amber-700",
+  NOT_PURSUED: "border-slate-300 text-slate-600",
+};
 
 export function ExperimentPanel({
   experimentId,
@@ -131,8 +148,8 @@ export function ExperimentPanel({
             edit={edit}
           />
           {data.conclusion && (
-            <Badge variant="outline" className="text-xs">
-              {data.conclusion}
+            <Badge variant="outline" className={`text-xs ${CONCLUSION_CLASS[data.conclusion] ?? ""}`}>
+              {data.conclusion === "NOT_PURSUED" ? "Not Pursued" : data.conclusion}
             </Badge>
           )}
         </div>
@@ -143,6 +160,12 @@ export function ExperimentPanel({
           className="text-base font-semibold leading-snug w-full"
         />
       </div>
+      {data.conclusionReason && (
+        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+          <p className="text-xs font-medium text-muted-foreground mb-0.5">Reason</p>
+          <p className="text-sm text-foreground/80 whitespace-pre-wrap">{data.conclusionReason}</p>
+        </div>
+      )}
       <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="EXPERIMENT" subjectId={data.id} subjectTitle={data.title} />
 
       {/* Kill condition — prominent when active */}
