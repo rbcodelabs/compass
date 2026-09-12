@@ -152,7 +152,14 @@ function SwimlaneColumn({
           />
         ) : (
           items.map((solution) => (
-            <SolutionCard key={solution.id} solution={solution} revalidatePathStr={revalidatePathStr} />
+            // No status badge: this card already sits in its status's column,
+            // and the badge would steal width from the title.
+            <SolutionCard
+              key={solution.id}
+              solution={solution}
+              revalidatePathStr={revalidatePathStr}
+              showStatus={false}
+            />
           ))
         )}
       </SortableContext>
@@ -397,7 +404,8 @@ export function SolutionSwimlaneBoard({ opportunities, orgSlug, workspaceSlug, w
         <DragOverlay>
           {activeItem ? (
             <div className="rotate-1 scale-105">
-              <SolutionCard solution={activeItem} revalidatePathStr={revalidatePathStr} />
+              {/* Matches the in-column cards so the card doesn't change shape mid-drag. */}
+              <SolutionCard solution={activeItem} revalidatePathStr={revalidatePathStr} showStatus={false} />
             </div>
           ) : null}
         </DragOverlay>

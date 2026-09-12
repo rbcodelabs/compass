@@ -158,9 +158,10 @@ describe("SolutionSwimlaneBoard rendering", () => {
     expect(screen.getByText("Reduce onboarding drop-off")).toBeInTheDocument();
     expect(screen.getByText("Improve reporting accuracy")).toBeInTheDocument();
 
-    // 5 statuses x 2 lanes = 10 column headings (BoardColumn renders its
-    // title as an <h3>; scoping to the heading role excludes the "Idea"
-    // status badge that also appears on sol-1's own card).
+    // 5 statuses x 2 lanes = 10 column headings, which BoardColumn renders as
+    // <h3>. Scoped to the heading role so this keeps asserting *columns* even
+    // if a status label ever appears elsewhere in a lane again (cards no
+    // longer carry a status badge — see the dedicated test below).
     expect(screen.getAllByRole("heading", { name: "Idea" })).toHaveLength(2);
     expect(screen.getAllByRole("heading", { name: "Validated" })).toHaveLength(2);
     expect(screen.getAllByRole("heading", { name: "In delivery" })).toHaveLength(2);
@@ -175,6 +176,25 @@ describe("SolutionSwimlaneBoard rendering", () => {
     expect(screen.getByText("Inline tooltips")).toBeInTheDocument();
     expect(screen.getByText("2 assumptions")).toBeInTheDocument();
     expect(screen.getByText("1 assumption")).toBeInTheDocument();
+  });
+
+  it("omits each card's status badge — the column it sits in already says the status", () => {
+    renderBoard();
+
+    // The badge would be pure redundancy here and, being a shrink-0 sibling of
+    // the title in EntityCard, it steals width and truncates the title. Same
+    // reason OpportunityCard passes no status prop on the Opportunity board.
+    const ideaCard = screen.getByText("Guided setup wizard").closest("[data-slot=card]");
+    expect(ideaCard).not.toBeNull();
+    expect(within(ideaCard as HTMLElement).queryByText("Idea")).not.toBeInTheDocument();
+
+    const validatedCard = screen.getByText("Inline tooltips").closest("[data-slot=card]");
+    expect(validatedCard).not.toBeNull();
+    expect(within(validatedCard as HTMLElement).queryByText("Validated")).not.toBeInTheDocument();
+
+    // Only the two column headings carry each label, never a third copy on a card.
+    expect(screen.getAllByText("Idea")).toHaveLength(2);
+    expect(screen.getAllByText("Validated")).toHaveLength(2);
   });
 
   it("shows the squad color dot on a lane whose opportunity has a squad, and omits it otherwise", () => {
