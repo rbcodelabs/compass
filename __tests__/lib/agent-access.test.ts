@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest"
-const prisma = { agent: { findFirst: vi.fn() }, agentWorkspaceGrant: { findMany: vi.fn() }, workspace: { findFirst: vi.fn() }, solutionComment: { findUnique: vi.fn() }, comment: { findUnique: vi.fn() }, docComment: { findUnique: vi.fn() } }
+const prisma = { agent: { findFirst: vi.fn() }, agentWorkspaceGrant: { findMany: vi.fn() }, workspace: { findFirst: vi.fn() }, solutionComment: { findUnique: vi.fn() }, comment: { findUnique: vi.fn() }, docComment: { findUnique: vi.fn() }, decisionRecord: { findUnique: vi.fn() } }
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
@@ -21,9 +21,19 @@ it("requires write grants for mutation gates", async () => {
   await applyToolGate("create_task", { ...actor }, { workspaceId: "one" })
   expect(prisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ access: "WRITE" }) }))
 })
-it.each(["approve_solution_plan", "reject_solution_plan", "create_workspace", "apply_recorded_decision", "unknown_tool"])("denies human-only and unclassified operation %s", async tool => {
+it.each(["approve_solution_plan", "reject_solution_plan", "create_workspace", "unknown_tool"])("denies human-only and unclassified operation %s", async tool => {
   await expect(applyToolGate(tool, { ...actor }, {})).rejects.toThrow(/human identity/)
   expect(prisma.workspace.findFirst).not.toHaveBeenCalled()
+})
+// apply_recorded_decision's own registered description says "Service actors
+// may apply but cannot take decisions" — unlike the human-only tools above,
+// an agent must reach its gate (assertEntityAccess via decisionRecord), not
+// be denied before ever touching the workspace lookup.
+it("lets a service/agent identity reach apply_recorded_decision's own gate instead of denying on identity alone", async () => {
+  prisma.decisionRecord.findUnique.mockResolvedValue({ workspaceId: "one" })
+  prisma.workspace.findFirst.mockResolvedValue({ id: "one" })
+  await expect(applyToolGate("apply_recorded_decision", { ...actor }, { decisionId: "decision-1" })).resolves.toBeUndefined()
+  expect(prisma.workspace.findFirst).toHaveBeenCalled()
 })
 it("scopes built-in assistant reads to the initiating workspace", async () => {
   expect(await agentWorkspaceWhere({ purpose: "AGENT_TURN", userId: "owner", scopeWorkspaceId: "one" })).toEqual({ members: { some: { userId: "owner" } }, id: "one" })

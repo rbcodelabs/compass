@@ -23,6 +23,7 @@ const mockPrisma = {
   feedbackItem: { findUnique: vi.fn() },
   doc: { findUnique: vi.fn() },
   reviewRequest: { findUnique: vi.fn() },
+  decisionRecord: { findUnique: vi.fn() },
   researchStudy: { findUnique: vi.fn() },
   agent: { findFirst: vi.fn() },
   agentWorkspaceGrant: { findMany: vi.fn() },
@@ -81,6 +82,25 @@ describe("Decision Artifact mutation boundaries", () => {
       } finally { vi.unstubAllEnvs() }
     })
   }
+})
+
+describe("apply_recorded_decision service-actor access", () => {
+  // The tool's own registered description says "Service actors may apply but
+  // cannot take decisions." — this asserts the policy actually matches that
+  // contract (regression guard for the human-only-list mistake).
+  it("is classified as an agent write, not human-only", () => {
+    expect(AGENT_TOOL_POLICY.apply_recorded_decision).toBe("WRITE")
+  })
+  it("lets an agent identity reach the decisionRecord workspace gate", async () => {
+    mockPrisma.decisionRecord.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    try {
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent" })
+      mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }])
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      await expect(applyToolGate("apply_recorded_decision", { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { decisionId: "decision-1" })).resolves.toBeUndefined()
+    } finally { vi.unstubAllEnvs() }
+  })
 })
 
 describe("TOOL_GATES completeness", () => {

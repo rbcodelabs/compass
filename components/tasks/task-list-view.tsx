@@ -5,6 +5,7 @@ import { CalendarDays } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TaskLinksBadge } from "./task-links-badge";
+import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
 import type { TaskCardData } from "./task-card";
 import type { MemberData } from "@/lib/types";
 
@@ -76,8 +77,7 @@ export function TaskListView({ tasks, orgSlug, workspaceSlug, members }: Props) 
         </TableHeader>
         <TableBody>
           {rows.map(({ task, depth }) => {
-            const assigneeMember = task.assigneeUserId ? members.find((m) => m.userId === task.assigneeUserId) : null;
-            const assigneeLabel = task.assignee ? `${task.assignee.type === "AGENT" ? "Agent: " : ""}${task.assignee.displayName}${task.assignee.available ? "" : " (unavailable)"}` : assigneeMember?.name || assigneeMember?.email || (task.assigneeUserId || task.assigneeAgentId ? "Unavailable assignee" : task.ownerName) || "—";
+            const assignee = taskAssigneeDisplay(task, members);
             return (
               <TableRow key={task.id} className="hover:bg-muted/30">
                 <TableCell className="px-3 py-2" style={{ paddingLeft: `${12 + depth * 20}px` }}>
@@ -88,7 +88,9 @@ export function TaskListView({ tasks, orgSlug, workspaceSlug, members }: Props) 
                     {task.title}
                   </Link>
                 </TableCell>
-                <TableCell className="px-3 py-2 text-muted-foreground">{assigneeLabel}</TableCell>
+                <TableCell className="px-3 py-2 text-muted-foreground">
+                  <span className={assignee.assigned ? undefined : UNASSIGNED_ASSIGNEE_CLASS}>{assignee.label}</span>
+                </TableCell>
                 <TableCell className="px-3 py-2">
                   {task.squad ? (
                     <span className="flex items-center gap-1.5 text-muted-foreground">
