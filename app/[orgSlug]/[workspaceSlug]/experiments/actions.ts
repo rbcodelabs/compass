@@ -74,24 +74,45 @@ export async function logResult(
 
 export async function concludeExperiment(
   experimentId: string,
-  conclusion: "PROCEED" | "KILL" | "ITERATE"
+  conclusion: "PROCEED" | "KILL" | "ITERATE" | "NOT_PURSUED",
+  reason?: string
 ) {
   const prisma = getPrisma()
 
+  const trimmedReason = reason?.trim() ?? ""
+  if (conclusion === "NOT_PURSUED" && !trimmedReason) {
+    throw new Error(
+      "NOT_PURSUED requires a reason explaining why this experiment was deliberately not pursued."
+    )
+  }
+
+  // NOT_PURSUED is a deliberate human decision not to run the experiment at
+  // all — it must land on its own terminal status, distinct from KILLED
+  // (an evidence-based failure) and COMPLETE (a finished, evidence-bearing
+  // run), so an OST reader can never mistake "we chose not to test this"
+  // for "we tested it and it failed."
   const newStatus: ExperimentStatus =
-    conclusion === "KILL" ? "KILLED" : "COMPLETE"
+    conclusion === "KILL"
+      ? "KILLED"
+      : conclusion === "NOT_PURSUED"
+        ? "NOT_PURSUED"
+        : "COMPLETE"
 
   const experiment = await prisma.experiment.update({
     where: { id: experimentId },
     data: {
       status: newStatus,
       conclusion,
+      conclusionReason: trimmedReason || null,
       endDate: new Date(),
     },
   })
 
   // Update the linked assumption status if there is one
   if (experiment.assumptionId) {
+    // NOT_PURSUED, like ITERATE, leaves the assumption UNTESTED — the
+    // experiment never ran, so the assumption was never disproven, only
+    // left unexamined. Do not invent evidence by marking it INVALIDATED.
     const assumptionStatus: AssumptionStatus =
       conclusion === "PROCEED"
         ? "VALIDATED"

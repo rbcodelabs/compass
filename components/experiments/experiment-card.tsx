@@ -27,10 +27,11 @@ const STATUS_LABELS: Record<ExperimentStatus, string> = {
   RUNNING: "Running",
   COMPLETE: "Complete",
   KILLED: "Killed",
+  NOT_PURSUED: "Not Pursued",
 }
 
 const STATUS_TONE: Record<ExperimentStatus, "neutral" | "info" | "success" | "danger"> = {
-  DESIGNING: "neutral", RUNNING: "info", COMPLETE: "success", KILLED: "danger",
+  DESIGNING: "neutral", RUNNING: "info", COMPLETE: "success", KILLED: "danger", NOT_PURSUED: "neutral",
 }
 
 interface ExperimentCardProps {

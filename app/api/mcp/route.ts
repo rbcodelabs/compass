@@ -1499,7 +1499,7 @@ const _handler = createMcpHandler(
         description: "Lists experiments in a workspace with optional status and squad filters.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          status: z.enum(["DESIGNING", "RUNNING", "COMPLETE", "KILLED"]).optional().describe("Filter by status"),
+          status: z.enum(["DESIGNING", "RUNNING", "COMPLETE", "KILLED", "NOT_PURSUED"]).optional().describe("Filter by status"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
           hasResults: z.boolean().optional().describe("Filter by whether at least one result has been logged"),
           updatedSince: z.string().datetime().optional().describe("Filter to experiments updated at or after this ISO timestamp"),
@@ -1714,14 +1714,15 @@ const _handler = createMcpHandler(
       "conclude_experiment",
       {
         title: "Conclude Experiment",
-        description: "Concludes an experiment with PROCEED (hypothesis validated), KILL (invalidated), or ITERATE (inconclusive). Automatically updates the linked Assumption status: PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED.",
+        description: "Concludes an experiment with PROCEED (hypothesis validated), KILL (invalidated), ITERATE (inconclusive), or NOT_PURSUED (a human deliberately decided not to run this experiment at all — e.g. the feature already shipped and works, so testing it is unnecessary). Automatically updates the linked Assumption status: PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED, NOT_PURSUED → UNTESTED (unchanged — it was never tested, so it is not disproven; do not invent evidence). NOT_PURSUED lands on its own terminal status distinct from KILLED, so a deliberate non-pursuit is never mistaken for an evidence-based kill. `reason` is required for NOT_PURSUED and is stored on the experiment as a durable, visible rationale.",
         inputSchema: {
           experimentId: z.string().uuid().describe("UUID of the experiment"),
-          conclusion: z.enum(["PROCEED", "KILL", "ITERATE"]).describe("The outcome of the experiment"),
+          conclusion: z.enum(["PROCEED", "KILL", "ITERATE", "NOT_PURSUED"]).describe("The outcome of the experiment"),
+          reason: z.string().trim().min(1).max(2000).optional().describe("Rationale for the conclusion, preserved on the experiment. Required for NOT_PURSUED — the human's stated reason for deliberately not pursuing this experiment."),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ experimentId, conclusion }) => {
+      async ({ experimentId, conclusion, reason }) => {
         const prisma = getPrisma()
         const experiment = await prisma.experiment.findUnique({
           where: { id: experimentId },
@@ -1730,14 +1731,18 @@ const _handler = createMcpHandler(
         if (!experiment) {
           return fail(`Experiment "${experimentId}" not found.`)
         }
-        if (experiment.status === "KILLED" || experiment.status === "COMPLETE") {
+        if (experiment.status === "KILLED" || experiment.status === "COMPLETE" || experiment.status === "NOT_PURSUED") {
           return fail(`Experiment "${experiment.title}" is already concluded (${experiment.status}).`)
         }
+        const trimmedReason = reason?.trim() ?? ""
+        if (conclusion === "NOT_PURSUED" && !trimmedReason) {
+          return fail(`NOT_PURSUED requires a "reason" explaining why this experiment was deliberately not pursued.`)
+        }
 
-        const newStatus = conclusion === "KILL" ? "KILLED" : "COMPLETE"
+        const newStatus = conclusion === "KILL" ? "KILLED" : conclusion === "NOT_PURSUED" ? "NOT_PURSUED" : "COMPLETE"
         await prisma.experiment.update({
           where: { id: experimentId },
-          data: { status: newStatus, conclusion, endDate: new Date() },
+          data: { status: newStatus, conclusion, conclusionReason: trimmedReason || null, endDate: new Date() },
         })
 
         let assumptionUpdate = ""
@@ -1748,12 +1753,13 @@ const _handler = createMcpHandler(
         }
 
         return ok(
-          `**"${experiment.title}"** concluded as **${conclusion}**\nStatus: ${newStatus}${assumptionUpdate}`,
+          `**"${experiment.title}"** concluded as **${conclusion}**\nStatus: ${newStatus}${trimmedReason ? `\nReason: ${trimmedReason}` : ""}${assumptionUpdate}`,
           {
             id: experimentId,
             title: experiment.title,
             status: newStatus,
             conclusion,
+            conclusionReason: trimmedReason || null,
             assumptionId: experiment.assumptionId,
           },
         )

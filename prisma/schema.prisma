@@ -856,6 +856,12 @@ model Experiment {
   startDate     DateTime?          @map("start_date")
   endDate       DateTime?          @map("end_date")
   conclusion    String?            @db.VarChar(50)
+  /// Human-provided rationale behind `conclusion`. Not backed by evidence for
+  /// NOT_PURSUED (a deliberate decision not to run the experiment) — durable
+  /// record of "why" so it's visible on the experiment, not just in someone's
+  /// memory. Optional for PROCEED/KILL/ITERATE; required by app code for
+  /// NOT_PURSUED. See app/[orgSlug]/[workspaceSlug]/experiments/actions.ts.
+  conclusionReason String?         @map("conclusion_reason") @db.Text
   createdAt     DateTime           @default(now()) @map("created_at")
   updatedAt     DateTime           @default(now()) @map("updated_at")
   workspace     Workspace          @relation(fields: [workspaceId], references: [id])
