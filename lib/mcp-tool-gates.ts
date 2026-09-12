@@ -49,7 +49,9 @@ const ASSIGN_SQUAD_ENTITY: Record<string, WorkspaceEntityType> = {
   task: "task",
 }
 
-// Mirrors LINK_TARGET_MODEL in lib/task-tool-handlers.ts.
+// Mirrors LINK_TARGET_MODEL in lib/task-tool-handlers.ts, plus DECISION
+// (ReviewRequest), which that map deliberately excludes (see its comment)
+// but which is still a valid link_task/unlink_task target needing a gate.
 const TASK_LINK_ENTITY: Record<string, WorkspaceEntityType> = {
   OPPORTUNITY: "opportunity",
   SOLUTION: "solution",
@@ -59,6 +61,7 @@ const TASK_LINK_ENTITY: Record<string, WorkspaceEntityType> = {
   DOC: "doc",
   EXPERIMENT: "experiment",
   FEEDBACK_ITEM: "feedbackItem",
+  DECISION: "reviewRequest",
 }
 
 const DECISION_SUBJECT_ENTITY: Record<string, WorkspaceEntityType> = {
@@ -222,6 +225,7 @@ export const TOOL_GATES: Record<string, Gate> = {
   },
   list_decisions: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_decision: (a, x) => assertChildInDeclaredWorkspace(a, "reviewRequest", x.requestId, x.workspaceId),
+  close_decision_no_action: (a, x) => assertChildInDeclaredWorkspace(a, "reviewRequest", x.requestId, x.workspaceId),
   request_building_investment: async (a, x) => void (await assertEntityAccess(a, "solution", x.solutionId)),
   reconsider_building_investment: async (a, x) => {
     await assertEntityAccess(a, "solution", x.solutionId)
@@ -396,7 +400,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision",
-    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "request_building_investment", "reconsider_building_investment", "request_building_investment_revocation", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity",
+    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "request_building_investment", "reconsider_building_investment", "request_building_investment_revocation", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity",
   ].map(name => [name, "WRITE"]),
   // Legacy comments lack a durable agent author ID; body edits could retain a human label or approval badge.
   ...["update_comment", "update_solution_comment", "update_doc_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization", "apply_recorded_decision", "create_scoring_model", "update_scoring_model", "archive_scoring_model", "set_workspace_scoring_model"].map(name => [name, "DENY"]),

@@ -18,11 +18,13 @@ const LINKED_TYPE_LABELS: Record<TaskLinkedType, string> = {
   DOC: "Doc",
   EXPERIMENT: "Experiment",
   FEEDBACK_ITEM: "Feedback Item",
+  DECISION: "Decision",
 };
 
-// DOC has no corresponding entity-detail panel — it navigates to the doc page
-// instead. `assumption` is a valid panel type but has no TaskLinkedType
-// counterpart, so it's intentionally absent from this map.
+// DOC and DECISION have no corresponding entity-detail panel — they navigate
+// to the doc page / review page instead. `assumption` is a valid panel type
+// but has no TaskLinkedType counterpart, so it's intentionally absent from
+// this map.
 const TASK_LINK_TO_PANEL_TYPE: Partial<Record<TaskLinkedType, EntityPanelType>> = {
   OPPORTUNITY: "opportunity",
   SOLUTION: "solution",
@@ -75,6 +77,13 @@ export function TaskLinksPanel({ taskId, initialLinks, revalidatePathStr, linkab
                   {link.linkedType === "DOC" ? (
                     <Link
                       href={`/${orgSlug}/${workspaceSlug}/docs/${link.linkedId}`}
+                      className="text-sm truncate hover:underline underline-offset-2"
+                    >
+                      {link.linkedTitle}
+                    </Link>
+                  ) : link.linkedType === "DECISION" ? (
+                    <Link
+                      href={`/${orgSlug}/${workspaceSlug}/reviews/${link.linkedId}`}
                       className="text-sm truncate hover:underline underline-offset-2"
                     >
                       {link.linkedTitle}

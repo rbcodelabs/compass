@@ -4,7 +4,7 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
 import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, prepareBuildingInvestmentReview, prepareBuildingInvestmentRevocationReview, startNewBuildingInvestmentDecisionCycle } from "@/lib/building-investment"
-import { createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, recordDecisionNoAction, TrackedDecisionError, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
 import { reviewRequestUrl } from "@/lib/compass-url"
 
 /**
@@ -60,6 +60,37 @@ function withUrlLine(text: string, url: string | null): string {
   return url ? `${text}\nURL: ${url}` : text
 }
 
+export type ResolvedRequester = { type: "USER" | "AGENT"; id: string; name: string } | null
+
+/**
+ * Resolves who actually raised a decision, preferring the Agent identity
+ * (requestedByAgentId) over the API-key-owning user (requestedById) when
+ * both are present -- an agent-raised request always has requestedById set
+ * too (it's the agent's owner), but the agent is the one that was blocked
+ * waiting on the answer, so it's the more useful "who asked" identity for a
+ * suggested-assignee default. See feedback f546cf13-e6a0-4213-8be9-0cfdebbf4ff7
+ * and the requested_by_agent_id column comment in prisma/schema.prisma.
+ */
+async function resolveRequester(request: { requestedById: string | null; requestedByAgentId: string | null }): Promise<ResolvedRequester> {
+  const prisma = getPrisma()
+  if (request.requestedByAgentId) {
+    const agent = await prisma.agent.findUnique({ where: { id: request.requestedByAgentId }, select: { id: true, name: true } })
+    if (agent) return { type: "AGENT", id: agent.id, name: agent.name }
+  }
+  if (request.requestedById) {
+    const user = await prisma.user.findUnique({ where: { id: request.requestedById }, select: { id: true, name: true, email: true } })
+    if (user) return { type: "USER", id: user.id, name: user.name ?? user.email }
+  }
+  return null
+}
+
+/** Follow-up work linked to a decision via the DECISION TaskLink type (item 3: reciprocal display). */
+async function resolveFollowUpTasks(requestId: string) {
+  const prisma = getPrisma()
+  const links = await prisma.taskLink.findMany({ where: { linkedType: "DECISION", linkedId: requestId }, select: { task: { select: { id: true, title: true, status: true } } } })
+  return links.map((link) => link.task)
+}
+
 export async function requestDecision(input: {
   workspaceId: string
   subjectType: TrackedSubjectType
@@ -71,7 +102,13 @@ export async function requestDecision(input: {
 }) {
   const actor = getMcpActor()
   try {
-    const revision = await createTrackedDecisionRequest({ ...input, requestedById: actor.userId })
+    // requestedById is always the API key's owning user, even when the
+    // caller is an agent (an agent's owner) -- see the schema comment on
+    // requestedByAgentId. Only persist an agent id when the actor is
+    // genuinely acting as an agent, so a suggested assignee later points at
+    // the agent that was blocked waiting on this decision, not its owner.
+    const requestedByAgentId = actor.purpose === "AGENT" ? (actor.agentId ?? null) : null
+    const revision = await createTrackedDecisionRequest({ ...input, requestedById: actor.userId, requestedByAgentId })
     const reviewUrl = await reviewUrlByWorkspace(input.workspaceId, revision.requestId)
     return ok(
       withUrlLine(`Decision requested.\nID: ${revision.requestId}\nRevision ID: ${revision.id}`, reviewUrl),
@@ -95,7 +132,11 @@ export async function listDecisions(input: {
   try {
     const result = await listTrackedDecisions({ ...input, tab: input.state })
     const slugs = await workspaceSlugs(input.workspaceId)
-    const requests = result.requests.map((request) => ({ ...request, reviewUrl: buildReviewUrl(slugs, request.id) }))
+    const requests = await Promise.all(result.requests.map(async (request) => ({
+      ...request,
+      reviewUrl: buildReviewUrl(slugs, request.id),
+      requestedBy: await resolveRequester(request),
+    })))
     return ok(requests.length
       ? requests.map((request) => {
           const line = `• ${request.currentRevision?.title ?? request.subjectId} [${request.state}] (${request.id})`
@@ -111,14 +152,41 @@ export async function getDecision({ workspaceId, requestId }: { workspaceId: str
   try {
     const request = await getTrackedDecision(workspaceId, requestId)
     if (!request) return fail(`Decision "${requestId}" not found.`)
-    const artifacts = await getDecisionArtifacts(workspaceId, requestId)
+    const [artifacts, requestedBy, followUpTasks] = await Promise.all([
+      getDecisionArtifacts(workspaceId, requestId),
+      resolveRequester(request),
+      resolveFollowUpTasks(requestId),
+    ])
     const reviewUrl = await reviewUrlByWorkspace(workspaceId, request.id)
+    const noAction = request.noActionAt ? { at: request.noActionAt, reason: request.noActionReason } : null
+    const lines = [
+      `${request.currentRevision?.title ?? "Decision"} [${request.state}]`,
+      requestedBy ? `Requested by: ${requestedBy.name} (${requestedBy.type.toLowerCase()})` : null,
+      followUpTasks.length ? `Follow-up work (${followUpTasks.length}):\n` + followUpTasks.map((task) => `  • [${task.status}] ${task.title} — ID: ${task.id}`).join("\n") : null,
+      noAction ? `No action needed: ${noAction.reason}` : null,
+      `ID: ${request.id}`,
+    ].filter((line): line is string => line !== null)
     return ok(
-      withUrlLine(`${request.currentRevision?.title ?? "Decision"} [${request.state}]\nID: ${request.id}`, reviewUrl),
-      { ...request, artifacts, reviewUrl },
+      withUrlLine(lines.join("\n"), reviewUrl),
+      { ...request, artifacts, reviewUrl, requestedBy, followUpTasks, noAction },
     )
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Could not get decision.")
+  }
+}
+
+export async function closeDecisionNoAction({ workspaceId, requestId, reason }: { workspaceId: string; requestId: string; reason: string }) {
+  const actor = getMcpActor()
+  try {
+    const request = await recordDecisionNoAction({ workspaceId, requestId, reason, actorUserId: actor.userId })
+    const reviewUrl = await reviewUrlByWorkspace(workspaceId, request.id)
+    return ok(
+      withUrlLine(`**Closed, no action needed.**\nReason: ${reason}\nID: ${request.id}`, reviewUrl),
+      { ...request, reviewUrl },
+    )
+  } catch (error) {
+    if (error instanceof TrackedDecisionError) return fail(error.message)
+    return fail(error instanceof Error ? error.message : "Could not close decision.")
   }
 }
 

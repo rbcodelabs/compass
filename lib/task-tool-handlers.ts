@@ -20,7 +20,9 @@ import { getMcpActor } from "@/lib/mcp-authz"
 
 // Maps each TaskLinkedType to its Prisma model delegate name. Every target
 // table exposes a plain `title` column, so a single resolver works for all
-// eight types.
+// of them -- except DECISION (ReviewRequest), whose title lives on
+// currentRevision.title. DECISION is deliberately absent from this map and
+// handled by its own branch in resolveLinkTitles/linkTask below.
 const LINK_TARGET_MODEL = {
   OPPORTUNITY: "opportunity",
   SOLUTION: "solution",
@@ -30,7 +32,7 @@ const LINK_TARGET_MODEL = {
   DOC: "doc",
   EXPERIMENT: "experiment",
   FEEDBACK_ITEM: "feedbackItem",
-} as const satisfies Record<TaskLinkedType, string>
+} as const satisfies Record<Exclude<TaskLinkedType, "DECISION">, string>
 
 type LinkRow = { id: string; linkedType: string; linkedId: string }
 
@@ -53,7 +55,18 @@ async function resolveLinkTitles(
 
   const titleById = new Map<string, string>()
   for (const [linkedType, ids] of byType) {
-    const modelName = LINK_TARGET_MODEL[linkedType as TaskLinkedType]
+    // DECISION (ReviewRequest) has no flat `title` column -- its title lives
+    // on currentRevision.title -- so it can't go through the generic
+    // findMany({select: {id, title}}) path below. Handled separately.
+    if (linkedType === "DECISION") {
+      const rows = await prisma.reviewRequest.findMany({
+        where: { id: { in: ids }, workspaceId },
+        select: { id: true, currentRevision: { select: { title: true } } },
+      })
+      for (const row of rows) titleById.set(`DECISION:${row.id}`, row.currentRevision?.title ?? "Untitled decision")
+      continue
+    }
+    const modelName = LINK_TARGET_MODEL[linkedType as Exclude<TaskLinkedType, "DECISION">]
     if (!modelName) continue
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const delegate = (prisma as any)[modelName]
@@ -497,10 +510,18 @@ export async function linkTask({
     return fail(`Task "${taskId}" not found.`)
   }
 
-  const modelName = LINK_TARGET_MODEL[linkedType]
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const delegate = (prisma as any)[modelName]
-  const target = await delegate.findUnique({ where: { id: linkedId }, select: { id: true, title: true } })
+  // DECISION (ReviewRequest) has no flat `title` column -- see the comment on
+  // LINK_TARGET_MODEL and resolveLinkTitles above.
+  let target: { id: string; title: string } | null
+  if (linkedType === "DECISION") {
+    const row = await prisma.reviewRequest.findUnique({ where: { id: linkedId }, select: { id: true, currentRevision: { select: { title: true } } } })
+    target = row ? { id: row.id, title: row.currentRevision?.title ?? "Untitled decision" } : null
+  } else {
+    const modelName = LINK_TARGET_MODEL[linkedType]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const delegate = (prisma as any)[modelName]
+    target = await delegate.findUnique({ where: { id: linkedId }, select: { id: true, title: true } })
+  }
   if (!target) {
     return fail(`${linkedType} "${linkedId}" not found.`)
   }
