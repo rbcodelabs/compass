@@ -41,3 +41,50 @@ describe("getDoc", () => {
     );
   });
 });
+
+describe("identity and access help page", () => {
+  it("renders with its credential-comparison tables as real table markup", async () => {
+    const doc = await getDoc("21-identity-and-access");
+    expect(doc).not.toBeNull();
+    expect(doc!.title).toBe("Identity and Access");
+    expect(doc!.html).toContain("<table>");
+    expect(doc!.html).toContain("<th>");
+    // Raw pipe-table syntax must not leak through as literal text
+    expect(doc!.html).not.toMatch(/\|\s*Credential\s*\|\s*Acts as\s*\|/);
+  });
+
+  it("states that authorization depends on the credential, not the client", async () => {
+    const doc = await getDoc("21-identity-and-access");
+    expect(doc!.html).toContain("The client does not matter");
+  });
+
+  it("names every credential type the MCP endpoint accepts", async () => {
+    const doc = await getDoc("21-identity-and-access");
+    for (const credential of [
+      "Personal API key",
+      "Agent key",
+      "In-app assistant",
+      "Participant research link",
+      "Service key",
+    ]) {
+      expect(doc!.html).toContain(credential);
+    }
+  });
+
+  it("documents the fail-closed agent tool policy and the human-only operations", async () => {
+    const doc = await getDoc("21-identity-and-access");
+    expect(doc!.html).toContain("anything unclassified is denied");
+    expect(doc!.html).toContain("Human administrator required.");
+    expect(doc!.html).toContain("Approvals.");
+  });
+
+  it("is cross-linked from the MCP API and Agents pages", async () => {
+    for (const slug of ["09-mcp-api", "19-agents"]) {
+      const doc = await getDoc(slug);
+      expect(doc, `${slug} should exist`).not.toBeNull();
+      expect(doc!.html, `${slug} should link to the identity page`).toContain(
+        "/help/21-identity-and-access",
+      );
+    }
+  });
+});

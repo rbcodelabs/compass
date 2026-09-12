@@ -28,6 +28,8 @@ Authorization: Bearer compass_your_api_key_here
 
 Personal keys act with their owner's access and any credential restrictions. Registered-agent keys work across explicitly granted workspaces and are limited by the owner's current membership, grant level, and permitted tools. Treat API keys like passwords — revoke and replace a key if it is compromised.
 
+Access is determined entirely by the key in the request. The client sending it — a desktop AI app, an editor, a script, or an unattended scheduled job — makes no difference, so give an automation the narrowest credential that still does the job. For a comparison of every credential type and guidance on choosing between them, see [Identity and Access](/help/21-identity-and-access).
+
 ## Required Request Headers
 
 Every **POST** request must include these headers:
