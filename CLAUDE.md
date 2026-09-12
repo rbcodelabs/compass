@@ -14,6 +14,19 @@
 
 **Standing rule for any secret in this project:** the moment you rotate a value in Vercel, save it to 1Password *before* doing anything else with it (before testing, before moving to the next step) — a dropped connection or a session that dies mid-task should never mean losing the value again. If a saved 1Password copy no longer matches what's live in Vercel (write-only vars can't be read back to confirm), treat it as an incident: rotate fresh, save immediately, redeploy, and verify live — don't assume the stale copy might still work.
 
+### Reading a secret: the only correct order
+
+Vercel env values are **write-only**. `vercel env pull` and `vercel env ls` will happily return a var as present-but-blank, and that tells you **nothing** about the value the running deployment actually has.
+
+1. **1Password is the system of record. Look there FIRST.** `op item list | grep -i compass` — the items are named `Compass Prod MIGRATION_SECRET`, `Compass Preview MIGRATION_SECRET`, `Compass Prod REPAIR_SECRET`, etc. There is a **preview** secret as well as a prod one; don't assume only prod exists.
+2. **Agent-harness env vars (`COMPASS_*_MIGRATION_SECRET`) are a convenience cache, not the source of truth.** They go stale. If one 401s, the harness value is wrong — that is the *likely* explanation, not an infrastructure fault.
+3. **Verify a secret only by using it against the live endpoint** (authenticated `GET /api/admin/migrate`). Never by comparing pulled values or hashes.
+4. **Never propose rotating a secret until you have confirmed 1Password does not already hold a working value.** Rotation is destructive and needs a redeploy; it is close to never the right first move.
+
+**Forbidden inference — this has already cost a session:** a blank/0-char value from `vercel env pull` is **not** evidence that the deployment's var is empty, and therefore **not** an explanation for a `401`. Concluding "the var is an empty string, so `checkAuth()` rejects everything" from pulled output is a fabricated diagnosis. The real cause of a `401` is almost always that *you* sent the wrong value. Go to 1Password and retry before theorising about infrastructure, and never propose an env-var rotation or a redeploy on the strength of a pulled blank.
+
+Related: when checking whether a migration is applied, compare **exact names**, never substrings. `"051" in name` matches `051_pm_agent_handoff` as readily as `051_decision_task_bridge`. Note also that duplicate leading numbers are normal and accepted here (`main` carries two `049_*` migrations) because the runner keys on the exact name — a collision is not a bug to "fix", and branch previews share one `compass_preview` schema, so its applied list routinely contains migrations from branches other than yours.
+
 ## Production data migrations
 
 Production schema and data maintenance runs through the registered migrations in `lib/migrations/runner.ts` and the authenticated `/api/admin/migrate` endpoint. Do not run local scripts directly against Aurora DSQL or use an AWS CLI login as an alternate production write path.

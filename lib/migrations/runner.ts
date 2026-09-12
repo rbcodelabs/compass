@@ -249,6 +249,10 @@ const MIGRATIONS = [
     name: "050_experiment_not_pursued",
     filePath: path.join(process.cwd(), "prisma/migrations/050_experiment_not_pursued/migration.sql"),
   },
+  {
+    name: "051_decision_task_bridge",
+    filePath: path.join(process.cwd(), "prisma/migrations/051_decision_task_bridge/migration.sql"),
+  },
 ];
 
 const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "decision_evidence_refs", "now_policy_application_evidence", "now_gate_evaluations", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"] as const;

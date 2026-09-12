@@ -183,8 +183,9 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
 | `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
 | `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
-| `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state, linked item type, outcome, reviewer, or search text |
-| `get_decision` | Read one tracking-only decision and its immutable revision history |
+| `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state (`PENDING`, `DECIDED`, or `AWAITING_FOLLOW_THROUGH`), linked item type, outcome, reviewer, or search text |
+| `get_decision` | Read one tracking-only decision, its immutable revision history, the resolved requester (the human or Agent who raised it), and any linked follow-up Tasks |
+| `close_decision_no_action` | Explicitly close a DECIDED decision as needing no follow-up work, with a required reason. Refuses if the decision already has a linked follow-up Task or was already closed this way |
 | `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. This operation never takes the human decision or invokes release automation |
 | `list_release_runs` | List recorded release-authorization runs by ledger state, covered Task, or `updatedSince`, including exact repository/PR/head SHA, Task IDs, authorization Decision ID, dispatch state, and a stable GitHub PR URL |
 | `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
@@ -199,6 +200,16 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 Decision-taking is deliberately absent from MCP. A signed-in human reviewer opens
 the stable Compass review URL and chooses one option. Agents may prepare and read
 packets, then apply a recorded decision; they cannot impersonate the reviewer.
+
+`AWAITING_FOLLOW_THROUGH` is a computed `list_decisions` state, not a stored
+column: a DECIDED decision with no `DECISION`-type Task link pointing at it and
+not explicitly closed via `close_decision_no_action`. Linking a follow-up Task
+(`link_task` with `linkedType: "DECISION"`) or calling
+`close_decision_no_action` both remove it from this list — the pairing makes
+"we decided but never acted on it" a queryable, honest state instead of a
+silent gap. `request_decision` also records which Agent (if any) raised the
+request, distinct from the API key's owning user, so `get_decision`'s resolved
+requester can point at the Agent that was blocked waiting on the answer.
 
 `request_decision.sources` is an optional array of `{ type, id }` references.
 Supported types are `WORKSPACE`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`,
@@ -249,7 +260,7 @@ state.
 
 ### Tasks
 
-Task is the standalone delivery/tracking entity used both for full engineering sprint delivery (replacing a Jira-style board) and lightweight PM initiative tracking — one status vocabulary, `BACKLOG → TODO → IN_PROGRESS → BLOCKED ⇄ IN_REVIEW → DONE`, with `CANCELLED` as a terminal state and `BLOCKED` a first-class column. Tasks link to other Compass objects (Opportunity, Solution, Roadmap Item, Objective, Key Result, Doc, Experiment, Feedback Item) many-to-many via `TaskLink`, and support Epic → Task → Subtask hierarchy via `parentTaskId`.
+Task is the standalone delivery/tracking entity used both for full engineering sprint delivery (replacing a Jira-style board) and lightweight PM initiative tracking — one status vocabulary, `BACKLOG → TODO → IN_PROGRESS → BLOCKED ⇄ IN_REVIEW → DONE`, with `CANCELLED` as a terminal state and `BLOCKED` a first-class column. Tasks link to other Compass objects (Opportunity, Solution, Roadmap Item, Objective, Key Result, Doc, Experiment, Feedback Item, Decision) many-to-many via `TaskLink`, and support Epic → Task → Subtask hierarchy via `parentTaskId`. A `DECISION` link points at a tracking-only decision request (see `request_decision`/`list_decisions` above) and is how a decided-but-actionable decision gets its follow-up work tracked — see `AWAITING_FOLLOW_THROUGH` in the Roadmap section.
 
 | Tool | Description |
 |---|---|

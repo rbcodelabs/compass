@@ -212,6 +212,7 @@ export type TaskLinkedType =
   | "DOC"
   | "EXPERIMENT"
   | "FEEDBACK_ITEM"
+  | "DECISION"
 
 export interface TaskLinkData {
   id: string

@@ -97,6 +97,7 @@ export async function validateTaskLink(workspaceId: string, linkedType: TaskLink
     : linkedType === "KEY_RESULT" ? prisma.keyResult.findFirst({ where: { id: linkedId, objective: { cycle: { workspaceId } } } })
     : linkedType === "DOC" ? prisma.doc.findFirst({ where })
     : linkedType === "EXPERIMENT" ? prisma.experiment.findFirst({ where })
+    : linkedType === "DECISION" ? prisma.reviewRequest.findFirst({ where })
     : prisma.feedbackItem.findFirst({ where }));
   if (!target) throw new Error("Linked object belongs to a different workspace or does not exist");
   return target;

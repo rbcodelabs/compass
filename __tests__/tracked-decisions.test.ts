@@ -14,6 +14,7 @@ const prisma = {
   feedbackItem: { findUnique: vi.fn() },
   evidence: { findUnique: vi.fn() },
   workspace: { findUnique: vi.fn() },
+  taskLink: { findMany: vi.fn() },
   $transaction: vi.fn(),
 }
 
@@ -24,6 +25,7 @@ import {
   applyTrackedDecision,
   createTrackedDecisionRequest,
   listTrackedDecisions,
+  recordDecisionNoAction,
   reviseTrackedDecisionRequest,
 } from "@/lib/tracked-decisions"
 
@@ -39,6 +41,7 @@ describe("tracked decisions", () => {
     prisma.reviewRevision.create.mockResolvedValue({ id: "revision-1", requestId: "request-1", fingerprint: "fp" })
     prisma.reviewRequest.update.mockResolvedValue({})
     prisma.reviewRequest.updateMany.mockResolvedValue({ count: 1 })
+    prisma.taskLink.findMany.mockResolvedValue([])
   })
 
   it("creates a pending tracking-only request for a workspace-scoped entity", async () => {
@@ -297,6 +300,119 @@ describe("tracked decisions", () => {
     const call = prisma.reviewRequest.findMany.mock.calls[0][0]
     expect(call.where.decisions).toBeUndefined()
     expect(JSON.stringify(call.where.currentRevision)).toContain("decisions")
+  })
+
+  it("persists requestedByAgentId alongside requestedById on create", async () => {
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+
+    await createTrackedDecisionRequest({
+      workspaceId: "ws-1", subjectType: "SOLUTION", subjectId: "solution-1",
+      question: "Should we build this?", context: "Customers asked for it.",
+      requestedById: "user-1", requestedByAgentId: "agent-1", idempotencyKey: key1,
+    })
+
+    expect(prisma.reviewRequest.create).toHaveBeenCalledWith({ data: expect.objectContaining({ requestedById: "user-1", requestedByAgentId: "agent-1" }) })
+  })
+
+  it("preserves the existing requestedByAgentId on revise when none is supplied", async () => {
+    prisma.feedbackItem.findUnique.mockResolvedValue({ id: "feedback-1", title: "Export", workspaceId: "ws-1" })
+    prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1, requestedByAgentId: "agent-original", currentRevision: { packetJson: JSON.stringify({ entity: { type: "FEEDBACK", id: "feedback-1" } }) } })
+    prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", requestId: "request-1", revisionId: "revision-old", option: { outcomeClass: "REQUEST_CHANGES" } })
+
+    await reviseTrackedDecisionRequest({ requestId: "request-1", workspaceId: "ws-1", subjectType: "FEEDBACK", subjectId: "feedback-1", question: "Again?", context: "Updated.", expectedDecisionId: "decision-1", reason: "Changed" })
+
+    expect(prisma.reviewRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ requestedByAgentId: "agent-original" }) }))
+  })
+
+  describe("recordDecisionNoAction", () => {
+    it("closes a decided decision with no linked work", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", noActionAt: null })
+      prisma.taskLink.findMany.mockResolvedValue([])
+      prisma.reviewRequest.update.mockResolvedValue({ id: "request-1", noActionAt: new Date(), noActionReason: "Informational only" })
+
+      await recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "Informational only", actorUserId: "user-1" })
+
+      expect(prisma.reviewRequest.update).toHaveBeenCalledWith({
+        where: { id: "request-1" },
+        data: expect.objectContaining({ noActionById: "user-1", noActionReason: "Informational only", noActionAt: expect.any(Date) }),
+      })
+    })
+
+    it("rejects a missing decision", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue(null)
+      await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "Why", actorUserId: "user-1" }))
+        .rejects.toEqual(expect.objectContaining({ code: "REQUEST_NOT_FOUND" }))
+    })
+
+    it("rejects a decision that is not yet DECIDED", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "PENDING", noActionAt: null })
+      await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "Why", actorUserId: "user-1" }))
+        .rejects.toEqual(expect.objectContaining({ code: "NOT_DECIDED" }))
+      expect(prisma.reviewRequest.update).not.toHaveBeenCalled()
+    })
+
+    it("rejects a decision already closed as no action needed", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", noActionAt: new Date() })
+      await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "Why", actorUserId: "user-1" }))
+        .rejects.toEqual(expect.objectContaining({ code: "ALREADY_CLOSED" }))
+      expect(prisma.reviewRequest.update).not.toHaveBeenCalled()
+    })
+
+    it("refuses to close a decision that already has linked follow-up work", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", noActionAt: null })
+      prisma.taskLink.findMany.mockResolvedValue([{ linkedId: "request-1" }])
+      await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "Why", actorUserId: "user-1" }))
+        .rejects.toEqual(expect.objectContaining({ code: "HAS_LINKED_WORK" }))
+      expect(prisma.reviewRequest.update).not.toHaveBeenCalled()
+    })
+
+    it("requires a non-empty reason", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", noActionAt: null })
+      await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "  ", actorUserId: "user-1" }))
+        .rejects.toThrow()
+      expect(prisma.reviewRequest.update).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("AWAITING_FOLLOW_THROUGH tab", () => {
+    it("excludes decided decisions that already have linked follow-up work", async () => {
+      prisma.reviewRequest.findMany.mockResolvedValue([
+        { id: "request-linked", updatedAt: new Date() },
+        { id: "request-unlinked", updatedAt: new Date() },
+      ])
+      prisma.taskLink.findMany.mockResolvedValue([{ linkedId: "request-linked" }])
+
+      const result = await listTrackedDecisions({ workspaceId: "ws-1", tab: "AWAITING_FOLLOW_THROUGH" })
+
+      expect(prisma.reviewRequest.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", noActionAt: null }),
+      }))
+      expect(result.requests.map((request) => request.id)).toEqual(["request-unlinked"])
+      expect(result.total).toBe(1)
+    })
+
+    it("returns an empty page without querying task links when there are no DECIDED candidates", async () => {
+      prisma.reviewRequest.findMany.mockResolvedValue([])
+
+      const result = await listTrackedDecisions({ workspaceId: "ws-1", tab: "AWAITING_FOLLOW_THROUGH" })
+
+      expect(prisma.taskLink.findMany).not.toHaveBeenCalled()
+      expect(result.requests).toEqual([])
+      expect(result.total).toBe(0)
+    })
+
+    it("paginates after filtering out linked/closed decisions", async () => {
+      prisma.reviewRequest.findMany.mockResolvedValue(
+        Array.from({ length: 3 }, (_, index) => ({ id: `request-${index}`, updatedAt: new Date() })),
+      )
+      prisma.taskLink.findMany.mockResolvedValue([])
+
+      const result = await listTrackedDecisions({ workspaceId: "ws-1", tab: "AWAITING_FOLLOW_THROUGH", page: 2, pageSize: 2 })
+
+      expect(result.requests.map((request) => request.id)).toEqual(["request-2"])
+      expect(result.total).toBe(3)
+      expect(result.pageCount).toBe(2)
+    })
   })
 })
 
