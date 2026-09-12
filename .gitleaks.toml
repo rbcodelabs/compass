@@ -1,0 +1,84 @@
+title = "Compass gitleaks configuration"
+
+# Inherit every rule from the gitleaks default ruleset. We deliberately do NOT
+# use `disabledRules` — each known false positive below is allowlisted by its
+# specific value or line shape, so the underlying rule stays armed everywhere
+# else in the repo.
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# generic-api-key
+#
+# Our test suites use human-readable idempotency keys as fixtures
+# (e.g. `idempotencyKey: "voice-hangup-0001"`). These are high-entropy enough
+# to trip the generic detector but are not credentials.
+#
+# Scoped with condition = "AND": the finding is only ignored when it is BOTH
+# inside a test path AND on a line declaring an idempotencyKey. A real API key
+# committed to a test file is still reported.
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "Test-fixture idempotency keys are not credentials"
+  condition = "AND"
+  regexTarget = "line"
+  regexes = ['''idempotencyKey''']
+  paths = [
+    '''__tests__/.*''',
+    '''e2e/.*''',
+    # docs/ is included so documentation can quote these fixtures verbatim.
+    '''docs/.*''',
+  ]
+
+# ---------------------------------------------------------------------------
+# private-key
+#
+# e2e/functional/fixtures/native-policy-config.ts contains a throwaway Ed25519
+# keypair generated solely to sign policy fixtures inside the functional test
+# suite. Its public half sits beside it in the same file and it grants no
+# access to any real system.
+#
+# Allowlisted by the exact key material rather than by path, so ANY other
+# private key — including a different one added to this same file — is still
+# reported.
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "private-key"
+
+  [[rules.allowlists]]
+  description = "Throwaway Ed25519 keypair used to sign e2e policy fixtures"
+  regexTarget = "secret"
+  regexes = ['''MC4CAQAwBQYDK2VwBCIEIBKAvKc4PJgkE\+Xm3DfFRqk9dwgxhWf5C3liv7ypMIAF''']
+
+# ---------------------------------------------------------------------------
+# curl-auth-header
+#
+# The MCP API docs show an example request with a self-evident placeholder
+# token. Matched on the placeholder shape (`your_..._here`) so that a real
+# token pasted into the docs is still reported.
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "curl-auth-header"
+
+  [[rules.allowlists]]
+  description = "Documentation placeholder tokens"
+  regexTarget = "secret"
+  regexes = ['''(?i)your_[a-z0-9_]*_here''']
+
+# ---------------------------------------------------------------------------
+# Repo-wide allowlist
+# ---------------------------------------------------------------------------
+[allowlist]
+description = "Global exclusions"
+paths = [
+  # Generated build/coverage output — never contains hand-written secrets and
+  # is excluded from version control anyway. Listed so that `--no-git`
+  # (working-tree) scans stay fast and quiet.
+  '''(^|/)\.next/''',
+  '''(^|/)coverage/''',
+  '''(^|/)node_modules/''',
+  '''(^|/)\.worktrees/''',
+]
