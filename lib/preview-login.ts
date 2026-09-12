@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { AppPrismaClient, AppTransactionClient } from "@/lib/db";
 import { applyPreviewScenario } from "./preview-automation/scenarios";
 import { getActiveSchema } from "./schema";
 
@@ -62,7 +62,7 @@ export interface SampleWorkspace {
 }
 
 async function lookupSampleWorkspace(
-  prisma: Pick<PrismaClient, "organization" | "workspace" | "user">
+  prisma: Pick<AppPrismaClient, "organization" | "workspace" | "user">
 ): Promise<SampleWorkspace | null> {
   const org = await prisma.organization.findUnique({ where: { slug: SAMPLE_ORG_SLUG } });
   if (!org) return null;
@@ -75,8 +75,8 @@ async function lookupSampleWorkspace(
   return { orgSlug: org.slug, workspaceSlug: workspace.slug, ownerUserId: ownerUser.id, viewerUserId: viewerUser.id };
 }
 
-async function createSampleWorkspace(prisma: PrismaClient): Promise<SampleWorkspace> {
-  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+async function createSampleWorkspace(prisma: AppPrismaClient): Promise<SampleWorkspace> {
+  return prisma.$transaction(async (tx: AppTransactionClient) => {
     const now = new Date();
     const org = await tx.organization.create({ data: { slug: SAMPLE_ORG_SLUG, name: "Preview Sample" } });
     const [ownerUser, viewerUser] = await Promise.all([
@@ -107,7 +107,7 @@ async function createSampleWorkspace(prisma: PrismaClient): Promise<SampleWorksp
  * from lib/preview-automation/scenarios.ts are not designed to be applied
  * twice against the same workspace.
  */
-export async function ensureSampleWorkspace(prisma: PrismaClient): Promise<SampleWorkspace> {
+export async function ensureSampleWorkspace(prisma: AppPrismaClient): Promise<SampleWorkspace> {
   const existing = await lookupSampleWorkspace(prisma);
   if (existing) return existing;
   try {
@@ -137,7 +137,7 @@ export interface PreviewLoginSession {
  * adapter's ordinary, unmodified session handling.
  */
 export async function issuePreviewLoginSession(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   persona: PreviewLoginPersona,
   now = new Date()
 ): Promise<PreviewLoginSession> {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/preview-automation/scenarios", () => ({ applyPreviewScenario: vi.fn() }));
@@ -106,7 +106,7 @@ function fixture() {
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(tx)),
     session: { create: vi.fn().mockImplementation(({ data }) => data) },
   };
-  return { tx, client: client as unknown as PrismaClient, raw: client };
+  return { tx, client: client as unknown as AppPrismaClient, raw: client };
 }
 
 describe("ensureSampleWorkspace", () => {

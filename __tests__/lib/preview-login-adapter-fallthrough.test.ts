@@ -12,7 +12,7 @@
  * for this adapter, and __tests__/lib/preview-login.test.ts's fixture for
  * issuePreviewLoginSession.
  */
-import type { PrismaClient } from "@prisma/client";
+import type { AppPrismaClient } from "@/lib/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/preview-automation/scenarios", () => ({ applyPreviewScenario: vi.fn() }));
@@ -53,7 +53,7 @@ function fixture() {
       }),
     },
   };
-  return { client: client as unknown as PrismaClient };
+  return { client: client as unknown as AppPrismaClient };
 }
 
 describe("previewlogin_ session falls through to the ordinary Auth.js adapter", () => {
