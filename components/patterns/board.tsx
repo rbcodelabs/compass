@@ -41,7 +41,19 @@ type BoardColumnProps = Omit<ComponentProps<"section">, "title"> & {
 export function BoardColumn({ title, count, description, accent, actions, children, emptyState, footer, className, bodyClassName, bodyRef, bodyId, nested = false, ...props }: BoardColumnProps) {
   const accents = { neutral: "bg-status-neutral", info: "bg-status-info", success: "bg-status-success", warning: "bg-status-warning", danger: "bg-status-danger" };
   return (
-    <section className={cn("flex w-72 shrink-0 snap-start flex-col rounded-xl border border-border-default bg-surface-inset p-3", className)} {...props}>
+    <section
+      className={cn(
+        "flex w-72 shrink-0 snap-start flex-col rounded-xl border bg-surface-inset p-3",
+        // Nested inside a lane that already has its own border, a second
+        // visible border stacks three bordered surfaces (lane > column >
+        // card) and reads as cards piled inside cards. Keep the fill for
+        // grouping, drop the outline. Border width is retained so nested and
+        // top-level columns measure identically.
+        nested ? "border-transparent" : "border-border-default",
+        className
+      )}
+      {...props}
+    >
       {/*
         md+: the header pins to the top of THIS column's own scroll region (the body div
         below), so it stays visible while just that column's cards scroll — no coordination

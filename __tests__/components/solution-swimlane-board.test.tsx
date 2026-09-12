@@ -218,6 +218,28 @@ describe("SolutionSwimlaneBoard rendering", () => {
     expect(within(lane as HTMLElement).getByRole("button", { name: "Add Solution" })).toBeInTheDocument();
   });
 
+  // Regression: the lane header used `<Button variant="ghost">`, whose variant
+  // classes include `aria-expanded:bg-muted`. CollapsibleTrigger sets
+  // aria-expanded="true" while a lane is open, and `--surface-inset` IS
+  // `--muted` — so an expanded lane painted its header in the exact same fill
+  // as its columns, as a rounded box inset inside the lane card. It read as a
+  // separate card stacked on the lane instead of the lane's own header.
+  it("renders the lane header as part of the lane card, not as its own filled box", () => {
+    renderBoard();
+
+    const trigger = screen.getByText("Reduce onboarding drop-off").closest("button")!;
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    // No expanded-state fill that would match the column background.
+    expect(trigger.className).not.toMatch(/aria-expanded:bg-muted/);
+    expect(trigger.className).not.toMatch(/\bbg-muted\b/);
+    // No radius of its own — the lane's overflow-hidden clips this row to the
+    // card's top corners, so it cannot read as an inset box.
+    expect(trigger.className).not.toMatch(/\brounded-/);
+    // Spans the full card width rather than sitting inside it.
+    expect(trigger).toHaveClass("w-full");
+  });
+
   // Regression: lanes are flex children of a height-capped
   // `flex-col overflow-y-auto` container, so the default flex-shrink:1 let
   // flexbox squash each lane *below its content height*. The content then

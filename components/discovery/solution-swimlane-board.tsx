@@ -22,7 +22,6 @@ import {
 } from "@dnd-kit/sortable";
 import { ChevronRight, Lightbulb } from "lucide-react";
 import { Board, BoardColumn, EmptyState } from "@/components/patterns";
-import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SolutionCard, type SolutionCardData } from "./solution-card";
 import { AddSolutionForm } from "./add-solution-form";
@@ -221,8 +220,25 @@ function SwimlaneRow({
       open={!isCollapsed}
       onOpenChange={onOpenChange}
     >
+      {/*
+        Deliberately a plain button, not <Button variant="ghost">. The ghost
+        variant carries `aria-expanded:bg-muted`, and `--surface-inset` IS
+        `--muted` — so an expanded lane painted its header in the exact same
+        fill as the columns below it, as a `rounded-lg` box inset inside the
+        lane's `rounded-xl` card. That read as a separate card stacked on top
+        of the lane rather than the lane's own header. That `aria-expanded`
+        fill exists for dropdown triggers; a group header is not one.
+
+        Square corners + the lane's overflow-hidden mean this row is clipped
+        to the card's top radius, so it reads as the card's own header band.
+      */}
       <CollapsibleTrigger
-        render={<Button type="button" variant="ghost" className="w-full justify-start gap-2 px-3 py-2" />}
+        render={
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-surface-inset/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-border-focus"
+          />
+        }
       >
         <ChevronRight className="size-4 shrink-0 transition-transform group-data-open:rotate-90" />
         {opportunity.squad && (
