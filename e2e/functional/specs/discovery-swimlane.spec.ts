@@ -74,8 +74,15 @@ function laneFor(page: Page, opportunityTitle: string) {
   });
 }
 
+// Targets the column's own data-slot rather than its tag. The previous version
+// matched `section`, which only worked while a lane column was a BoardColumn;
+// lane columns are now purpose-built (the lane is the only filled surface), so
+// a tag-based locator silently matched nothing. Still scoped by the visible
+// status heading so this keeps asserting the label renders.
 function columnFor(lane: Locator, statusLabel: string) {
-  return lane.locator("section", { has: lane.page().getByRole("heading", { name: statusLabel }) });
+  return lane.locator("[data-slot='swimlane-column']", {
+    has: lane.page().getByRole("heading", { name: statusLabel }),
+  });
 }
 
 test.describe("Discovery swimlane (group by Opportunity)", () => {

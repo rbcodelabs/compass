@@ -21,7 +21,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { ChevronRight, Lightbulb } from "lucide-react";
-import { Board, BoardColumn, EmptyState } from "@/components/patterns";
+import { Board, EmptyState } from "@/components/patterns";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SolutionCard, type SolutionCardData } from "./solution-card";
 import { AddSolutionForm } from "./add-solution-form";
@@ -41,6 +41,20 @@ export type SwimlaneOpportunity = {
 };
 
 type ColumnsMap = Record<string, SolutionCardData[]>;
+
+/**
+ * The rail that identifies each status column. With the columns themselves
+ * unfilled, this plus the label and count is what makes a column legible —
+ * so it maps to the same status accents the rest of the app uses rather than
+ * inventing a palette.
+ */
+const STATUS_RAIL: Record<SolutionStatus, string> = {
+  IDEA: "bg-status-neutral",
+  VALIDATED: "bg-status-success",
+  IN_DELIVERY: "bg-status-info",
+  SHIPPED: "bg-primary",
+  KILLED: "bg-status-danger",
+};
 
 // ─── Column id namespacing ─────────────────────────────────────────────────────
 // A single DndContext spans every lane on this board, so plain status values
@@ -135,53 +149,90 @@ function SwimlaneColumn({
   });
 
   return (
-    <BoardColumn
-      // Nested in a lane: no sticky header, no negative-margin bleed, no own
-      // scroll region — see BoardColumn's `nested` docs.
-      nested
-      title={SOLUTION_STATUS[status].label}
-      count={items.length}
-      className="min-w-[220px] flex-1"
-      bodyRef={setNodeRef}
-      bodyClassName={cn(
-        "flex flex-col",
-        isOver && "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25"
-      )}
+    /*
+      Deliberately NOT `BoardColumn`. That component is built for a top-level
+      board column: a filled, bordered, rounded box that owns its own scroll
+      region and a sticky header. Nested in a lane, every one of those is
+      wrong — and adapting it was what produced the stacked-cards look
+      (lane card > filled column box > solution card, three bordered
+      surfaces). A lane column is a different thing: the lane is the only
+      surface, and each column is identified by a status rail, a label and a
+      count rather than by being its own box.
+    */
+    /*
+      min-w tuned so all five statuses fit at the 1280 desktop breakpoint
+      (≈1036px of lane interior once the sidebar and lane padding are taken
+      out: 5 × 184 + 4 × 12 gap = 968). Seeing the whole lifecycle at once is
+      the point of this view, so it should not need horizontal scrolling at
+      the primary width — narrower viewports still scroll.
+    */
+    <div
+      // Stable hooks for tests. Previously the e2e spec located a column as
+      // the `<section>` BoardColumn happened to render, which broke the moment
+      // this became a purpose-built element. data-slot matches the convention
+      // used elsewhere (data-slot="card", "collapsible", "sheet-content").
+      data-slot="swimlane-column"
+      data-status={status}
+      data-opportunity={opportunityId}
+      className="flex min-w-[184px] flex-1 flex-col"
     >
-      <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-        {items.length === 0 ? (
-          // Deliberately NOT the shared EmptyState: `compact` is still
-          // min-h-32 plus an icon bubble, so five of them stacked across a
-          // lane turned a single empty opportunity into ~200px of dashed
-          // boxes. Its bg-surface-inset also matches the column background
-          // exactly, so those boxes read as floating grey slabs rather than
-          // drop zones. A lane needs a slim hint, not a page-level empty state.
-          <div
-            className={cn(
-              // flex-1 so the hint *is* the drop zone and fills the column
-              // instead of sitting at the top of it with dead space beneath.
-              "flex min-h-20 flex-1 items-center justify-center rounded-lg border border-dashed px-3 text-center text-xs",
-              isOver
-                ? "border-border-interactive text-text-secondary"
-                : "border-border-default text-text-subtle"
-            )}
-          >
-            No solutions
-          </div>
-        ) : (
-          items.map((solution) => (
-            // No status badge: this card already sits in its status's column,
-            // and the badge would steal width from the title.
-            <SolutionCard
-              key={solution.id}
-              solution={solution}
-              revalidatePathStr={revalidatePathStr}
-              showStatus={false}
-            />
-          ))
+      <div className="mb-2 flex items-center gap-2">
+        <span
+          aria-hidden
+          className={cn("h-3 w-[3px] shrink-0 rounded-full", STATUS_RAIL[status])}
+        />
+        <h4 className="truncate text-xs font-semibold tracking-wide text-text-secondary uppercase">
+          {SOLUTION_STATUS[status].label}
+        </h4>
+        <span
+          aria-label={`${items.length} items`}
+          className="ml-auto shrink-0 text-[11px] tabular-nums text-text-subtle"
+        >
+          {items.length}
+        </span>
+      </div>
+
+      <div
+        ref={setNodeRef}
+        className={cn(
+          "flex flex-1 flex-col gap-2 rounded-lg",
+          // The drop target only draws itself during a drag. That's when a
+          // column needs to read as an explicit bucket; the rest of the time
+          // the rail + label carry it without adding chrome.
+          isOver && "bg-primary/5 ring-2 ring-inset ring-ring/25"
         )}
-      </SortableContext>
-    </BoardColumn>
+      >
+        <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+          {items.length === 0 ? (
+            // Not the shared EmptyState: `compact` is still min-h-32 plus an
+            // icon bubble, and most opportunities have no solutions, so five
+            // across a lane turned one empty opportunity into ~200px of dashed
+            // boxes. A lane needs a slim hint that is itself the drop zone.
+            <div
+              className={cn(
+                "flex min-h-16 flex-1 items-center justify-center rounded-lg border border-dashed px-3 text-center text-xs",
+                isOver
+                  ? "border-border-interactive text-text-secondary"
+                  : "border-border-default text-text-subtle"
+              )}
+            >
+              No solutions
+            </div>
+          ) : (
+            items.map((solution) => (
+              // No status badge: this card already sits in its status's column,
+              // and the badge would steal width from the title.
+              <SolutionCard
+                key={solution.id}
+                solution={solution}
+                revalidatePathStr={revalidatePathStr}
+                showStatus={false}
+              />
+            ))
+          )}
+        </SortableContext>
+      </div>
+    </div>
   );
 }
 
@@ -216,7 +267,11 @@ function SwimlaneRow({
       //
       // overflow-hidden then keeps the horizontally scrolling Board (and each
       // column's background) inside the lane's rounded corners.
-      className="group shrink-0 overflow-hidden rounded-xl border border-border-default bg-surface-panel"
+      //
+      // The lane is the ONLY surface in here: its columns are unfilled and
+      // unbordered (see SwimlaneColumn), so the card + the solution cards are
+      // the two levels of chrome, not four.
+      className="group shrink-0 overflow-hidden rounded-xl border border-border-default bg-surface-panel shadow-[var(--shadow-card)]"
       open={!isCollapsed}
       onOpenChange={onOpenChange}
     >
@@ -260,7 +315,12 @@ function SwimlaneRow({
           trigger with no gap at all.
         */}
         <div className="flex flex-col gap-3 border-t border-border-default px-3 pt-3 pb-3">
-          <Board label={`${opportunity.title} solutions`} className="pb-0">
+          {/* items-stretch so every column shares the tallest column's height,
+              which is what keeps the unfilled columns reading as one row. */}
+          <Board
+            label={`${opportunity.title} solutions`}
+            className="items-stretch gap-3 pb-0"
+          >
             {SOLUTION_STATUS_ORDER.map((status) => (
               <SwimlaneColumn
                 key={status}

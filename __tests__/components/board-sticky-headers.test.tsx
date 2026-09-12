@@ -45,35 +45,4 @@ describe("BoardColumn sticky header + independently scrolling body", () => {
     expect(body).toHaveClass("md:overflow-y-auto");
     expect(body?.className).toMatch(/md:max-h-/);
   });
-
-  // A column nested inside a lane (the Discovery swimlane board) must NOT use
-  // any of the above. `sticky` resolves against the nearest scrolling
-  // ancestor, which when nested is the lane/board rather than this column — so
-  // a sticky header detaches from its own column and rides up over the lane
-  // header above it, and the header's negative-margin background bleed paints
-  // outside the lane's rounded border. Both were visible bugs on the swimlane
-  // board before `nested` existed.
-  it("drops the sticky header, the margin bleed, and its own scroll region when nested", () => {
-    const { container } = render(
-      <Board>
-        <BoardColumn title="Idea" bodyId="nested-body" nested>
-          <div>card 1</div>
-        </BoardColumn>
-      </Board>
-    );
-
-    const header = container.querySelector("header");
-    expect(header).not.toHaveClass("md:sticky");
-    expect(header).not.toHaveClass("sticky");
-    expect(header).not.toHaveClass("md:top-0");
-    expect(header).not.toHaveClass("md:z-10");
-    // No negative-margin background bleed past the column's padding box.
-    expect(header?.className).not.toMatch(/-mx-3|-mt-3/);
-
-    // The lane owns scrolling, so a nested column caps nothing and scrolls
-    // nothing of its own.
-    const body = container.querySelector("#nested-body");
-    expect(body).not.toHaveClass("md:overflow-y-auto");
-    expect(body?.className).not.toMatch(/max-h-/);
-  });
 });
