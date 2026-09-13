@@ -2,11 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import Image from "@tiptap/extension-image";
-import Link from "@tiptap/extension-link";
-import Placeholder from "@tiptap/extension-placeholder";
-import { Markdown, type MarkdownStorage } from "tiptap-markdown";
+import { type MarkdownStorage } from "tiptap-markdown";
 import {
   Bold,
   Italic,
@@ -40,11 +36,11 @@ import {
   type DocCommentItem,
 } from "@/components/docs/doc-comments-sidebar";
 import {
-  CommentHighlight,
   setCommentHighlights,
   projectDocText,
   type CommentAnchorData,
 } from "@/components/docs/comment-highlight-extension";
+import { createDocEditorExtensions } from "@/components/docs/doc-editor-extensions";
 import { resolveCommentAnchor } from "@/lib/comment-anchor";
 
 interface DocEditorProps {
@@ -146,14 +142,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   );
 
   const editor = useEditor({
-    extensions: [
-      StarterKit,
-      Image.configure({ inline: false }),
-      Link.configure({ openOnClick: false }),
-      Placeholder.configure({ placeholder: "Start writing…" }),
-      Markdown.configure({ html: false, transformCopiedText: true }),
-      CommentHighlight.configure({ comments: initialAnchorData, activeId: null }),
-    ],
+    extensions: createDocEditorExtensions(initialAnchorData),
     content: doc.content ?? "",
     onUpdate: ({ editor }) => {
       const markdown = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();

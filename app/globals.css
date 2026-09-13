@@ -248,6 +248,29 @@ body {
   @apply text-muted-foreground/60 float-left pointer-events-none;
 }
 
+/* Tables (GFM pipe tables). Mirrors the .docs-content table treatment below —
+   bordered cells, emphasised header row — but expressed in semantic tokens so
+   it adapts to dark mode, matching the rest of this .ProseMirror block.
+
+   The table node view wraps every table in a .tableWrapper div; that wrapper,
+   not the table, owns horizontal overflow, so a wide table (the docs that
+   triggered this have 8 columns) scrolls within the editor column instead of
+   pushing the whole page sideways. Cells carry a min-width so columns stay
+   readable rather than collapsing to fit a narrow viewport. */
+.ProseMirror .tableWrapper { @apply overflow-x-auto mb-3; }
+.ProseMirror table { @apply w-full text-sm border-collapse; }
+.ProseMirror th,
+.ProseMirror td {
+  @apply border border-border align-top px-3 py-2 min-w-24;
+}
+.ProseMirror th { @apply bg-muted font-semibold text-left; }
+/* Each cell holds a paragraph; its default bottom margin would pad every row. */
+.ProseMirror th > p:last-child,
+.ProseMirror td > p:last-child { @apply mb-0; }
+/* prosemirror-tables marks a multi-cell selection with .selectedCell. Without
+   this the user gets no feedback at all when dragging across cells. */
+.ProseMirror .selectedCell { @apply bg-accent; }
+
 /* Inline comment anchor highlight — a view-layer decoration, never part of the
    saved markdown. Uses semantic status tokens (so it auto-adapts to dark mode)
    rather than a raw amber/yellow. The active thread gets a stronger surface +
