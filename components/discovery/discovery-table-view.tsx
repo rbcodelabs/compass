@@ -68,7 +68,16 @@ export function DiscoveryTableView({ opportunities }: { opportunities: Discovery
   }
 
   return (
-    <div className="rounded-xl border border-border-default bg-surface-panel">
+    // `min-h-0` + `overflow-y-auto` make this div the actual scroll viewport
+    // inside `WorkspacePage`'s `md:overflow-hidden` content area (which
+    // assumes each view manages its own scrolling, the way the board views
+    // do internally). Without it, rows and the table's own horizontal
+    // scrollbar past the fold were silently clipped with no way to reach
+    // them — the "table doesn't scroll" bug.
+    <div
+      data-testid="discovery-table-scroll"
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded-xl border border-border-default bg-surface-panel"
+    >
       <Table aria-label="Discovery opportunities">
         <TableHeader>
           <TableRow>
