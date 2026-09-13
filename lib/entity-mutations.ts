@@ -48,7 +48,7 @@ export const EDIT_CONFIG: Record<EntityType, EntityEditConfig> = {
   keyResult: { model: "keyResult", title: true, description: false },
   opportunity: { model: "opportunity", title: true, description: true, enum: { field: "status", options: OPPORTUNITY_STATUS } },
   solution: { model: "solution", title: true, description: true, enum: { field: "status", options: SOLUTION_STATUS } },
-  assumption: { model: "assumption", title: true, description: false, enum: { field: "status", options: ASSUMPTION_STATUS } },
+  assumption: { model: "assumption", title: true, description: true, enum: { field: "status", options: ASSUMPTION_STATUS } },
   experiment: { model: "experiment", title: true, description: false, enum: { field: "status", options: EXPERIMENT_STATUS } },
   roadmapItem: { model: "roadmapItem", title: true, description: true, enum: { field: "horizon", options: ROADMAP_HORIZON } },
   feedback: { model: "feedbackItem", title: true, description: true, enum: { field: "status", options: FEEDBACK_STATUS } },

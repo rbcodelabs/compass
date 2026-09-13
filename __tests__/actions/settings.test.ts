@@ -49,6 +49,7 @@ const mockCustomFieldValue = {
   upsert: vi.fn(),
 };
 const mockApiKey = {
+  deleteMany: vi.fn(),
   create: vi.fn(),
   findFirst: vi.fn(),
   update: vi.fn(),
@@ -111,8 +112,12 @@ const mockReviewRevision = { deleteMany: vi.fn() };
 const mockReviewRequest = { updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
+const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
 
 const mockPrisma = {
+  agentMessage: { deleteMany: vi.fn() },
+  agentAuditLog: { deleteMany: vi.fn() },
+  agentConversation: { deleteMany: vi.fn() },
   $transaction: vi.fn(),
   agent: { findMany: vi.fn().mockResolvedValue([]) },
   agentWorkspaceGrant: { deleteMany: vi.fn(), updateMany: vi.fn() },
@@ -160,6 +165,18 @@ const mockPrisma = {
   reviewRequest: mockReviewRequest,
   portfolioCapacityReservation: mockPortfolioCapacityReservation,
   portfolioCapacityPlan: mockPortfolioCapacityPlan,
+  researchVoiceCommand: mockResearchDelete,
+  researchVoiceEvent: mockResearchDelete,
+  researchVoiceCall: mockResearchDelete,
+  researchRequest: mockResearchDelete,
+  researchAttachment: mockResearchDelete,
+  researchParticipantVoiceEvent: mockResearchDelete,
+  researchTurn: mockResearchDelete,
+  pMInterview: mockResearchDelete,
+  researchSession: mockResearchDelete,
+  researchParticipantToken: mockResearchDelete,
+  researchSynthesis: mockResearchDelete,
+  researchStudy: mockResearchDelete,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -810,6 +827,9 @@ describe("deleteWorkspace", () => {
 
     const result = await deleteWorkspace("org", "ws");
 
+    expect(mockApiKey.deleteMany).toHaveBeenCalledWith({ where: { scopeWorkspaceId: "ws-1", scopeConversationId: { not: null } } });
+    expect(mockResearchDelete.updateMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, data: { agentConversationId: null } });
+    expect(mockPrisma.agentConversation.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockReleaseDispatch.deleteMany).toHaveBeenCalled();
     expect(mockReleaseRunTask.deleteMany).toHaveBeenCalled();
     expect(mockReleaseRun.deleteMany).toHaveBeenCalled();
@@ -1307,24 +1327,32 @@ describe("setActiveScoringModel", () => {
     expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalled();
   });
 
-  it("throws Unauthorized when session is missing", async () => {
+  // Permission outcomes are returned as values, not thrown: a thrown Server
+  // Action error loses its message to Next's production mask before the client
+  // can read it. See app/[orgSlug]/settings/actions.ts.
+  it("returns a clean error when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
-    await expect(setActiveScoringModel("org", "ws", "model-1")).rejects.toThrow("Unauthorized");
+    await expect(setActiveScoringModel("org", "ws", "model-1")).resolves.toEqual({
+      ok: false,
+      error: "You are not signed in.",
+    });
     expect(mockWorkspaceScoringConfig.upsert).not.toHaveBeenCalled();
   });
 
-  it("throws Workspace not found when caller is not a member", async () => {
+  it("returns Workspace not found when caller is not a member", async () => {
     mockWorkspace.findFirst.mockResolvedValue(null);
-    await expect(setActiveScoringModel("org", "ws", "model-1")).rejects.toThrow(
-      "Workspace not found"
-    );
+    await expect(setActiveScoringModel("org", "ws", "model-1")).resolves.toEqual({
+      ok: false,
+      error: "Workspace not found",
+    });
   });
 
-  it("throws Forbidden when caller is a workspace MEMBER, not admin", async () => {
+  it("returns Forbidden when caller is a workspace MEMBER, not admin", async () => {
     mockAdminWorkspace("MEMBER");
-    await expect(setActiveScoringModel("org", "ws", "model-1")).rejects.toThrow(
-      "Forbidden: workspace admin required"
-    );
+    await expect(setActiveScoringModel("org", "ws", "model-1")).resolves.toEqual({
+      ok: false,
+      error: "Forbidden: workspace admin required",
+    });
     expect(mockWorkspaceScoringConfig.upsert).not.toHaveBeenCalled();
   });
 });

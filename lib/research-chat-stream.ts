@@ -1,5 +1,16 @@
 import { z } from "zod"
 
+export class ResearchChatResponseError extends Error {
+  constructor(readonly status: number) {
+    super(status === 503 ? "The interviewer is unavailable. Please let the research team know and try again later."
+      : status >= 500 ? "The interviewer service couldn’t complete the reply. Try again; if it keeps failing, contact the research team."
+      : status === 429 ? "Please wait a moment before trying again. The interviewer is receiving too many requests."
+      : status === 409 ? "The session couldn’t accept this reply yet. Wait a moment and retry; if it keeps failing, contact the research team."
+      : "The session couldn’t accept this reply. Please contact the research team.")
+    this.name = "ResearchChatResponseError"
+  }
+}
+
 export const researchAttachmentMetadata = z.object({
   id: z.string().min(1).max(128), originalName: z.string().min(1).max(255),
   mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif", "image/heic", "application/pdf"]),
@@ -27,7 +38,8 @@ export async function readResearchChatStream(response: Response, onDelta: (text:
   let committed: z.infer<typeof result> | null = null
   function consume(line: string) {
     const event = frame.parse(JSON.parse(line))
-    if (committed || event.type === "error") throw new Error("Reply stream failed")
+    if (committed) throw new Error("Reply stream failed")
+    if (event.type === "error") throw new ResearchChatResponseError(event.status)
     if (event.type === "final") {
       committed = parseResearchChatReply(event.result)
     } else {

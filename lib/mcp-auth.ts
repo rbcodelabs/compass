@@ -14,6 +14,8 @@ export async function validateMcpAuth(
   agentId?: string | null
   credentialId?: string
   scopeWorkspaceId: string | null
+  scopeConversationId?: string | null
+  scopeClaimId?: string | null
 } | { valid: false }> {
   const authHeader = request.headers.get("authorization")
   if (!authHeader?.startsWith("Bearer ")) return { valid: false }
@@ -38,7 +40,7 @@ export async function validateMcpAuth(
       revokedAt: null,
       OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
-    select: { id: true, userId: true, purpose: true, agentId: true, scopeWorkspaceId: true, expiresAt: true },
+    select: { id: true, userId: true, purpose: true, agentId: true, scopeWorkspaceId: true, scopeConversationId: true, scopeClaimId: true, expiresAt: true },
   })
 
   if (!apiKey) return { valid: false }
@@ -68,5 +70,7 @@ export async function validateMcpAuth(
     agentId: apiKey.agentId,
     credentialId: apiKey.id,
     scopeWorkspaceId: apiKey.scopeWorkspaceId,
+    scopeConversationId: apiKey.scopeConversationId,
+    scopeClaimId: apiKey.scopeClaimId,
   }
 }

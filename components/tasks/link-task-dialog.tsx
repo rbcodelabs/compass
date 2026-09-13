@@ -35,6 +35,7 @@ const LINKED_TYPE_LABELS: Record<TaskLinkedType, string> = {
   DOC: "Doc",
   EXPERIMENT: "Experiment",
   FEEDBACK_ITEM: "Feedback Item",
+  DECISION: "Decision",
 };
 
 export type LinkableTarget = { id: string; title: string };

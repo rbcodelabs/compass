@@ -24,11 +24,21 @@ describe("ResearchVoice", () => {
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: stopTrack }] }) } })
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ephemeralToken: "short-secret", leaseId: "lease-1" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ephemeralToken: "short-secret", leaseId: "lease-1", evidenceMode: "PARTICIPANT_SUBMITTED" }), { status: 200 }))
       .mockResolvedValueOnce(new Response("answer-sdp", { status: 200 }))
       .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })))
   })
   afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it("hands a completed PM voice session back to the core conversation", async () => {
+    const result = { conversationUrl: "/org/workspace/agent?c=conversation" }
+    vi.mocked(fetch).mockReset().mockResolvedValueOnce(new Response(JSON.stringify({ status: "COMPLETED" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify(result), { status: 200 }))
+    const completed = vi.fn()
+    render(<ResearchVoice transport={{ basePath: "/api/pm-interviews/interview", query: "?orgSlug=synthetic-org&workspaceSlug=synthetic-workspace", identity: "pm-interview", atomicTextTransition: true }} onCompleted={completed} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    await waitFor(() => expect(completed).toHaveBeenCalledWith(result))
+    expect(screen.queryByText("Thank you")).not.toBeInTheDocument()
+  })
 
   it("connects with an ephemeral credential and persists finalized events incrementally", async () => {
     render(<ResearchVoice token="study-token" />)
@@ -42,7 +52,9 @@ describe("ResearchVoice", () => {
 
     channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "conversation.item.input_audio_transcription.completed", item_id: "user-1", transcript: "I expected pricing here." }) }))
     expect(await screen.findByText("I expected pricing here.")).toBeVisible()
-    expect(fetch).toHaveBeenCalledWith("/api/research/voice-event", expect.objectContaining({ body: expect.stringContaining('"providerEventId":"input:user-1"') }))
+    const finalSave = vi.mocked(fetch).mock.calls.find(([url, init]) => url === "/api/research/voice-event" && String(init?.body).includes('"action":"FINAL"'))
+    expect(finalSave?.[1]?.body).toContain('"clientEventId"')
+    expect(finalSave?.[1]?.body).not.toContain('"speechId"')
   })
 
   it("uploads a screenshot, links it to the canonical transcript, and shares bytes with realtime", async () => {
@@ -116,6 +128,30 @@ describe("ResearchVoice", () => {
     expect(onUseChat).toHaveBeenCalledOnce()
   })
 
+  it("durably orders PM speech lifecycle and final transcript before the atomic text transition", async () => {
+    vi.mocked(fetch).mockReset()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: "session-1", resumeToken: "resume-secret", status: "IN_PROGRESS", turns: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ephemeralToken: "short-secret", leaseId: "lease-1", evidenceMode: "PARTICIPANT_SUBMITTED" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("answer-sdp", { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    const onUseChat = vi.fn().mockResolvedValue(undefined)
+    render(<ResearchVoice transport={{ basePath: "/api/pm-interviews/interview-1", query: "?orgSlug=acme&workspaceSlug=product", identity: "pm-interview-1", atomicTextTransition: true }} onUseChat={onUseChat} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
+    await screen.findByText("Connected — speak naturally")
+    channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "input_audio_buffer.speech_started", item_id: "user-1" }) }))
+    channel.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "conversation.item.input_audio_transcription.completed", item_id: "user-1", transcript: "A saved answer" }) }))
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url).includes("/voice-event?") && String(init?.body).includes('"action":"FINAL"'))).toBe(true))
+    fireEvent.click(screen.getByRole("button", { name: "Continue in text" }))
+
+    await waitFor(() => expect(onUseChat).toHaveBeenCalledWith({ leaseId: "lease-1", settlement: "FINALIZED" }))
+    const speechCall = vi.mocked(fetch).mock.calls.findIndex(([url, init]) => String(url).includes("/voice-event?") && String(init?.body).includes('"action":"SPEECH_START"'))
+    const finalCall = vi.mocked(fetch).mock.calls.findIndex(([url, init]) => String(url).includes("/voice-event?") && String(init?.body).includes('"action":"FINAL"'))
+    expect(speechCall).toBeGreaterThan(-1)
+    expect(finalCall).toBeGreaterThan(speechCall)
+    expect(String(vi.mocked(fetch).mock.calls[finalCall][1]?.body)).toContain('"speechId":"input:user-1"')
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => String(init?.body).includes('"action":"SETTLE"'))).toBe(false)
+  })
+
   it("stops the acquired microphone when a stored session has already completed", async () => {
     localStorage.setItem("compass-research-voice-study-token", JSON.stringify({
       sessionId: "session-1",
@@ -153,6 +189,7 @@ describe("ResearchVoice", () => {
   })
 
   it("retains the lease and failed save until explicit retry, never falsely completes", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout")
     render(<ResearchVoice token="study-token" />)
     fireEvent.click(screen.getByRole("button", { name: "Start voice session" }))
     await screen.findByText("Connected — speak naturally")
@@ -176,6 +213,8 @@ describe("ResearchVoice", () => {
     expect(saves[0][1]?.body).toBe(saves[1][1]?.body)
     fireEvent.click(screen.getByRole("button", { name: "Retry finishing session" }))
     expect(await screen.findByRole("heading", { name: "Thank you" })).toBeVisible()
+    expect(timeout).toHaveBeenCalledWith(210_000)
+    timeout.mockRestore()
   })
 
   it("retries once without stale stored resume credentials", async () => {

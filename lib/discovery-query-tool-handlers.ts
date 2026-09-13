@@ -136,6 +136,7 @@ export async function listAssumptions({
   const items = assumptions.map((assumption) => ({
     id: assumption.id,
     title: assumption.title,
+    description: assumption.description,
     status: assumption.status,
     riskLevel: assumption.riskLevel,
     solutionId: assumption.solutionId,
@@ -152,6 +153,7 @@ export async function listAssumptions({
   const message = items.length
     ? items.map((item) =>
       `• **${item.title}** [${item.status}/${item.riskLevel}] — ID: ${item.id}\n` +
+      (item.description ? `  Description: ${item.description}\n` : "") +
       `  Solution: ${item.solutionTitle} [${item.solutionStatus}] — ID: ${item.solutionId}\n` +
       `  Opportunity: ${item.opportunityTitle} [${item.opportunityStatus}] — ID: ${item.opportunityId}\n` +
       `  Experiments: ${item.experimentCount}`,

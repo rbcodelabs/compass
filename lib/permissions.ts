@@ -19,6 +19,31 @@ import getPrisma from "@/lib/db"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 
 /**
+ * Marker subclass for the *expected* authorization outcomes below (not signed
+ * in / not a member / insufficient role).
+ *
+ * Server actions need to tell these apart from a genuine fault (a dropped
+ * database connection inside the same lookup) so they can return the former to
+ * the caller as a value and let the latter keep throwing. Matching on
+ * `error.message` would work today but breaks the moment a message is reworded,
+ * so the distinction is carried by the type instead.
+ *
+ * The messages are unchanged, so existing `.rejects.toThrow("Unauthorized")`
+ * assertions — and every non-action caller that relies on these throwing —
+ * behave exactly as before.
+ */
+export class PermissionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "PermissionError"
+  }
+}
+
+export function isPermissionError(error: unknown): error is PermissionError {
+  return error instanceof PermissionError
+}
+
+/**
  * Resolves the caller's organization admin membership by org slug.
  * Throws "Unauthorized" if not signed in, "Organization not found" if the
  * org doesn't exist or the caller isn't a member, and
@@ -27,7 +52,7 @@ import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
  */
 export async function resolveOrgAdmin(orgSlug: string) {
   const session = await auth()
-  if (!session?.user?.id) throw new Error("Unauthorized")
+  if (!session?.user?.id) throw new PermissionError("Unauthorized")
 
   const prisma = getPrisma()
   const member = await prisma.organizationMember.findFirst({
@@ -38,12 +63,12 @@ export async function resolveOrgAdmin(orgSlug: string) {
     select: { role: true, organizationId: true },
   })
 
-  if (!member) throw new Error("Organization not found")
+  if (!member) throw new PermissionError("Organization not found")
   // Normalized rather than matched exactly, for the same reason as
   // resolveWorkspaceAdmin: the column is a bare VarChar and has held
   // lowercase values. One definition of org admin lives in lib/roles.ts.
   if (!isOrgAdminRole(member.role)) {
-    throw new Error("Forbidden: organization admin required")
+    throw new PermissionError("Forbidden: organization admin required")
   }
 
   return { prisma, organizationId: member.organizationId }
@@ -71,7 +96,7 @@ export async function resolveOrgAdmin(orgSlug: string) {
  */
 export async function resolveWorkspaceAdmin(orgSlug: string, workspaceSlug: string) {
   const session = await auth()
-  if (!session?.user?.id) throw new Error("Unauthorized")
+  if (!session?.user?.id) throw new PermissionError("Unauthorized")
 
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findFirst({
@@ -98,14 +123,14 @@ export async function resolveWorkspaceAdmin(orgSlug: string, workspaceSlug: stri
     },
   })
 
-  if (!workspace) throw new Error("Workspace not found")
+  if (!workspace) throw new PermissionError("Workspace not found")
 
   const isWorkspaceAdmin = normalizeWorkspaceRole(workspace.members[0]?.role) === "ADMIN"
   // Optional chaining on a non-nullable relation is deliberate: it keeps a
   // partially-selected or mocked workspace object from throwing here.
   const isOrgAdmin = isOrgAdminRole(workspace.organization?.members[0]?.role)
   if (!isWorkspaceAdmin && !isOrgAdmin) {
-    throw new Error("Forbidden: workspace admin required")
+    throw new PermissionError("Forbidden: workspace admin required")
   }
 
   return { prisma, workspaceId: workspace.id, organizationId: workspace.organizationId }

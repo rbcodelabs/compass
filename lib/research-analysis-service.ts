@@ -15,7 +15,7 @@ async function studyAccess(studyId: string, userId?: string) {
   const study = await getPrisma().researchStudy.findFirst({
     where: { id: studyId, ...(userId ? { workspace: { members: { some: { userId } } } } : {}) },
   })
-  if (!study) throw new ResearchAnalysisError("Study not found", 404)
+  if (!study || study.studyType === "PM_INTERVIEW") throw new ResearchAnalysisError("Study not found", 404)
   return study
 }
 

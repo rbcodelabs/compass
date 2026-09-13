@@ -7,7 +7,7 @@ import { AlertCircleIcon, LoaderCircleIcon, PaperclipIcon, SendIcon, XIcon } fro
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ResearchAttachmentPreview } from "@/components/research/research-attachment-preview"
-import { parseResearchChatReply, readResearchChatStream, type ResearchChatAttachment } from "@/lib/research-chat-stream"
+import { parseResearchChatReply, readResearchChatStream, ResearchChatResponseError, type ResearchChatAttachment } from "@/lib/research-chat-stream"
 
 type Message = { id?: string; role: "INTERVIEWER" | "PARTICIPANT"; content: string; sequence?: number; attachments?: ResearchChatAttachment[] }
 type StoredSession = { sessionId: string; resumeToken: string }
@@ -212,8 +212,8 @@ export function ResearchChat({ token, guided = false }: { token: string; guided?
       setPending(null)
       removePendingReply(token, sessionId, request)
       setAttachments([])
-    } catch {
-      setError("The interviewer couldn’t respond. Please check your connection and try again.")
+    } catch (error) {
+      setError(error instanceof ResearchChatResponseError ? error.message : fallbackError)
     } finally {
       setProvisional("")
       setBusy(false)

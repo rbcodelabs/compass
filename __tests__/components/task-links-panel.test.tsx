@@ -23,6 +23,7 @@ import type { TaskLinkData } from "@/lib/types";
 const baseLinks: TaskLinkData[] = [
   { id: "link-1", linkedType: "OPPORTUNITY", linkedId: "opp-1", linkedTitle: "Faster onboarding" },
   { id: "link-2", linkedType: "DOC", linkedId: "doc-1", linkedTitle: "Design spec" },
+  { id: "link-3", linkedType: "DECISION", linkedId: "decision-1", linkedTitle: "Ship the export flow?" },
 ];
 
 function renderPanel(links: TaskLinkData[] = baseLinks) {
@@ -40,6 +41,7 @@ function renderPanel(links: TaskLinkData[] = baseLinks) {
         DOC: [],
         EXPERIMENT: [],
         FEEDBACK_ITEM: [],
+        DECISION: [],
       }}
       orgSlug="rbcodelabs"
       workspaceSlug="compass"
@@ -69,6 +71,17 @@ describe("TaskLinksPanel", () => {
     expect(docLink).toHaveAttribute("href", "/rbcodelabs/compass/docs/doc-1");
 
     fireEvent.click(docLink);
+    expect(openPanelMock).not.toHaveBeenCalled();
+  });
+
+  it("renders a DECISION link as a real anchor to the review page instead of calling openPanel", () => {
+    renderPanel();
+
+    const decisionLink = screen.getByText("Ship the export flow?");
+    expect(decisionLink.tagName).toBe("A");
+    expect(decisionLink).toHaveAttribute("href", "/rbcodelabs/compass/reviews/decision-1");
+
+    fireEvent.click(decisionLink);
     expect(openPanelMock).not.toHaveBeenCalled();
   });
 

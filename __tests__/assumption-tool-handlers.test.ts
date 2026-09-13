@@ -96,6 +96,16 @@ describe("updateAssumption", () => {
     })
   })
 
+  it("updates and returns an assumption description", async () => {
+    const result = await updateAssumption({ assumptionId: ASSUMPTION_ID, description: "Why this belief matters" })
+
+    expect(mockAssumption.update).toHaveBeenCalledWith({
+      where: { id: ASSUMPTION_ID },
+      data: expect.objectContaining({ description: "Why this belief matters" }),
+    })
+    expect(result.structuredContent.data).toEqual(expect.objectContaining({ description: "Why this belief matters" }))
+  })
+
   it("always sets updatedAt explicitly (no DB trigger on DSQL)", async () => {
     await updateAssumption({ assumptionId: ASSUMPTION_ID, title: "New title" })
 

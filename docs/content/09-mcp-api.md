@@ -8,6 +8,32 @@ section: "Developer"
 
 # MCP API
 
+## PM interview processing
+
+`get_pm_interview({ interviewId, offset? })` reads the initiating user's saved
+interview and current target in an authorized workspace. It returns transcript
+pages, permitted descriptive fields, and current `expectedUpdatedAt` and
+`expectedFieldsFingerprint` values. Follow `nextOffset` until it is null. This
+does not expose participant credentials, raw audio, or other users' interviews.
+
+Finishing an interview starts the normal core agent with a temporary credential
+restricted to that interview's exact target. Its edit must supply both returned
+version checks. The server checks the exact fields again at the final write and
+commits a before/after receipt atomically. A changed baseline requires rereading
+and reconsidering the edit, not blindly replacing the version token.
+
+`update_opportunity` supports `customerSegment` in addition to title/description.
+`update_opportunity`, `update_solution`, and `update_assumption` accept optional
+`expectedUpdatedAt` for ordinary optimistic edits. The fingerprint parameter is
+required only for an automatic interview update; it is never a target field.
+
+`update_experiment({ experimentId, title?, hypothesis?, method?, killCondition?,
+expectedUpdatedAt?, expectedFieldsFingerprint? })` edits protocol fields only
+while the experiment is **DESIGNING**. It cannot change status or record results.
+The automatic interview credential cannot edit risk, lifecycle, relationships,
+other items, or customer evidence through any tool. After processing terminates,
+an explicit new chat message uses the user's normal core-agent permissions.
+
 Compass exposes a **Model Context Protocol (MCP)** endpoint that lets AI agents read and write discovery data programmatically. This means you can connect tools like Claude, Cursor, or any MCP-compatible client to your workspace and have AI assistants create OKRs, log opportunities from user research notes, or update experiment results — all without leaving your AI workflow.
 
 ## Endpoint
@@ -153,7 +179,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `update_solution_status` | Update a Solution's lifecycle status (IDEA/VALIDATED/IN_DELIVERY/SHIPPED/KILLED); any valid status may transition directly to any other valid status |
 | `update_solution` | Update an existing Solution's title and/or description (pass an empty string to clear the description); at least one field must be provided |
 | `add_assumption` | Add a testable Assumption to a Solution, with a risk level (HIGH/MEDIUM/LOW); starts UNTESTED |
-| `update_assumption` | Update an Assumption's title, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |
+| `update_assumption` | Update an Assumption's title, description, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |
 | `delete_assumption` | Permanently delete an Assumption; unlinks (does not delete) any Experiments or Evidence that referenced it |
 | `add_solution_plan` | Log a proposed implementation/engineering plan on a Solution as the pinned "current plan" entry in its Plan & Discussion thread; a later call on the same solution supersedes the previous plan |
 | `add_solution_comment` | Add a reply comment to a Solution's Plan & Discussion thread |
@@ -185,8 +211,9 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
 | `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
 | `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
-| `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state, linked item type, outcome, reviewer, or search text |
-| `get_decision` | Read one tracking-only decision and its immutable revision history |
+| `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state (`PENDING`, `DECIDED`, or `AWAITING_FOLLOW_THROUGH`), linked item type, outcome, reviewer, or search text |
+| `get_decision` | Read one tracking-only decision, its immutable revision history, the resolved requester (the human or Agent who raised it), and any linked follow-up Tasks |
+| `close_decision_no_action` | Explicitly close a DECIDED decision as needing no follow-up work, with a required reason. Refuses if the decision already has a linked follow-up Task or was already closed this way |
 | `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. This operation never takes the human decision or invokes release automation |
 | `list_release_runs` | List recorded release-authorization runs by ledger state, covered Task, or `updatedSince`, including exact repository/PR/head SHA, Task IDs, authorization Decision ID, dispatch state, and a stable GitHub PR URL |
 | `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
@@ -202,6 +229,16 @@ Decision-taking is deliberately absent from MCP. A signed-in human reviewer open
 the stable Compass review URL and chooses one option. Agents may prepare and read
 packets, then apply a recorded decision; they cannot impersonate the reviewer.
 
+`AWAITING_FOLLOW_THROUGH` is a computed `list_decisions` state, not a stored
+column: a DECIDED decision with no `DECISION`-type Task link pointing at it and
+not explicitly closed via `close_decision_no_action`. Linking a follow-up Task
+(`link_task` with `linkedType: "DECISION"`) or calling
+`close_decision_no_action` both remove it from this list — the pairing makes
+"we decided but never acted on it" a queryable, honest state instead of a
+silent gap. `request_decision` also records which Agent (if any) raised the
+request, distinct from the API key's owning user, so `get_decision`'s resolved
+requester can point at the Agent that was blocked waiting on the answer.
+
 `request_decision.sources` is an optional array of `{ type, id }` references.
 Supported types are `WORKSPACE`, `OPPORTUNITY`, `SOLUTION`, `ASSUMPTION`,
 `ROADMAP_ITEM`, `DOC`, `EXPERIMENT`, `FEEDBACK`, and `EVIDENCE`. Compass removes
@@ -211,14 +248,27 @@ the immutable packet. If any source is missing or belongs to another workspace,
 the whole request fails and no review is created. Put readable reasoning in the
 Markdown `context`; do not embed source UUIDs there.
 
-`apply_recorded_decision` is queue-only for release authorization. It validates
-the authoritative provider snapshot outside the database transaction, then a
-short transaction binds the unchanged snapshot and human decision to a durable
-dispatch row. Compass does not merge, deploy, or otherwise invoke external
-release automation in this implementation. Provider validation is unconfigured
-by default and therefore fails closed (`PR_NOT_READY`); a dispatch worker must
-use a configured provider and repeat the same head/check/policy revalidation at
-the dispatch-claim boundary before any future external side effect.
+`apply_recorded_decision` applies a decided review request through the
+applicator matching its `gateType`, and is idempotent: a repeat call replays
+the existing receipt rather than reapplying or creating a second one. A
+registered agent may call it (it is classified as an agent WRITE, not
+human-only) but can never take the underlying decision — only a signed-in
+human admin chooses an option, via the review URL above.
+
+- **`TRACKED_DECISION`** (the default queue created by `request_decision`):
+  every outcome resolves to `NO_ACTION`. Applying only records a durable
+  receipt confirming the decision was carried out; it never mutates product
+  state.
+- **`BUILDING_INVESTMENT`** / **`BUILDING_INVESTMENT_REVOCATION`**: authorizes
+  or revokes delivery investment in a Solution.
+- **`RELEASE_AUTHORIZATION`**: validates the authoritative provider snapshot
+  outside the database transaction, then a short transaction binds the
+  unchanged snapshot and human decision to a durable dispatch row. Compass
+  does not merge, deploy, or otherwise invoke external release automation in
+  this implementation. Provider validation is unconfigured by default and
+  therefore fails closed (`PR_NOT_READY`); a dispatch worker must use a
+  configured provider and repeat the same head/check/policy revalidation at
+  the dispatch-claim boundary before any future external side effect.
 
 `list_release_runs` reports Compass ledger facts only. A release-run state does
 not prove that GitHub merged the PR, that a deployment reached production, or
@@ -238,7 +288,7 @@ state.
 
 ### Tasks
 
-Task is the standalone delivery/tracking entity used both for full engineering sprint delivery (replacing a Jira-style board) and lightweight PM initiative tracking — one status vocabulary, `BACKLOG → TODO → IN_PROGRESS → BLOCKED ⇄ IN_REVIEW → DONE`, with `CANCELLED` as a terminal state and `BLOCKED` a first-class column. Tasks link to other Compass objects (Opportunity, Solution, Roadmap Item, Objective, Key Result, Doc, Experiment, Feedback Item) many-to-many via `TaskLink`, and support Epic → Task → Subtask hierarchy via `parentTaskId`.
+Task is the standalone delivery/tracking entity used both for full engineering sprint delivery (replacing a Jira-style board) and lightweight PM initiative tracking — one status vocabulary, `BACKLOG → TODO → IN_PROGRESS → BLOCKED ⇄ IN_REVIEW → DONE`, with `CANCELLED` as a terminal state and `BLOCKED` a first-class column. Tasks link to other Compass objects (Opportunity, Solution, Roadmap Item, Objective, Key Result, Doc, Experiment, Feedback Item, Decision) many-to-many via `TaskLink`, and support Epic → Task → Subtask hierarchy via `parentTaskId`. A `DECISION` link points at a tracking-only decision request (see `request_decision`/`list_decisions` above) and is how a decided-but-actionable decision gets its follow-up work tracked — see `AWAITING_FOLLOW_THROUGH` in the Roadmap section.
 
 | Tool | Description |
 |---|---|

@@ -2,16 +2,19 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const { auth, findFirst, findArtifacts, linkedArtifacts, ensureBuildingInvestmentRevisionFresh } = vi.hoisted(() => ({
+const { auth, findFirst, findArtifacts, linkedArtifacts, ensureBuildingInvestmentRevisionFresh, findTaskLinks, eligibleAssignees } = vi.hoisted(() => ({
   auth: vi.fn(),
   findFirst: vi.fn(),
   findArtifacts: vi.fn(), linkedArtifacts: vi.fn(),
   ensureBuildingInvestmentRevisionFresh: vi.fn(),
+  // Direction B: the decided branch now loads follow-through data.
+  findTaskLinks: vi.fn(), eligibleAssignees: vi.fn(),
 }))
 
 vi.mock("@/auth", () => ({ auth }))
-vi.mock("@/lib/db", () => ({ default: () => ({ reviewRequest: { findFirst }, artifact: { findMany: findArtifacts } }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ reviewRequest: { findFirst }, artifact: { findMany: findArtifacts }, taskLink: { findMany: findTaskLinks } }) }))
 vi.mock("@/lib/artifacts", () => ({ getDecisionArtifacts: linkedArtifacts }))
+vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: eligibleAssignees }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({ linkArtifactDecision: vi.fn(), unlinkArtifactDecision: vi.fn() }))
 vi.mock("@/lib/building-investment", () => ({
   ensureBuildingInvestmentRevisionFresh,
@@ -64,6 +67,8 @@ describe("review request page eyebrow", () => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
     ensureBuildingInvestmentRevisionFresh.mockResolvedValue({ stale: false })
+    findTaskLinks.mockResolvedValue([])
+    eligibleAssignees.mockResolvedValue([])
     findArtifacts.mockResolvedValue([{ id: "new", title: "New prototype" }])
     linkedArtifacts.mockResolvedValue([{ id: "linked", title: "Existing prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }])
   })
@@ -113,6 +118,8 @@ describe("review request page — \"Send to agent\" on a decided banner", () => 
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
     ensureBuildingInvestmentRevisionFresh.mockResolvedValue({ stale: false })
+    findTaskLinks.mockResolvedValue([])
+    eligibleAssignees.mockResolvedValue([])
     findArtifacts.mockResolvedValue([])
     linkedArtifacts.mockResolvedValue([])
   })

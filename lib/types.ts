@@ -171,6 +171,22 @@ export interface OpportunityScoreData {
   stale: boolean
 }
 
+/**
+ * Minimal score projection for list/board surfaces (the Discovery board card
+ * badge). Deliberately narrower than OpportunityScoreData so the board query
+ * does not have to pull formula snapshots and raw values for every card.
+ */
+export interface OpportunityScoreSummary {
+  /** 0-100. Round at the render boundary, not here. */
+  normalizedScore: number
+  /** ScoringModel.version this score was saved under. */
+  modelVersion: number
+  /** The workspace's active ScoringModel.version right now. */
+  liveModelVersion: number
+  /** True when modelVersion is behind liveModelVersion. */
+  stale: boolean
+}
+
 // Launch Tiers & Checklists
 export type LaunchTier = "TIER_1" | "TIER_2" | "TIER_3"
 export type ChecklistTemplateStatus = "ACTIVE" | "ARCHIVED"
@@ -212,6 +228,7 @@ export type TaskLinkedType =
   | "DOC"
   | "EXPERIMENT"
   | "FEEDBACK_ITEM"
+  | "DECISION"
 
 export interface TaskLinkData {
   id: string

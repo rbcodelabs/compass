@@ -28,6 +28,7 @@
  * it.
  */
 import getPrisma from "@/lib/db";
+import { isPmInterviewEnabled } from "@/lib/research-feature";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
 
 export const ENTITY_TYPES = [
@@ -130,8 +131,13 @@ function fetchKeyResult(id: string, workspaceId: string) {
   });
 }
 
-function fetchOpportunity(id: string, workspaceId: string) {
-  return getPrisma().opportunity.findFirst({
+async function pmInterviewHistory(workspaceId: string, targetType: string, targetId: string) {
+  const delegate = getPrisma().pMInterview
+  return delegate?.findMany ? delegate.findMany({ where: { workspaceId, targetType, targetId }, select: { id: true, disposition: true, generationState: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 20 }) : []
+}
+
+async function fetchOpportunity(id: string, workspaceId: string) {
+  const item = await getPrisma().opportunity.findFirst({
     where: { id, workspaceId },
     include: {
       linkedKeyResult: {
@@ -153,6 +159,17 @@ function fetchOpportunity(id: string, workspaceId: string) {
       score: {
         select: { normalizedScore: true, rawScore: true, modelVersion: true, scoredAt: true },
       },
+      // Nested on the existing opportunity fetch (no extra round trip) so the
+      // panel can apply the same gate as the board: show a score only when the
+      // workspace has an active model, and derive staleness from its live
+      // version. See lib/scoring-model.ts.
+      workspace: {
+        select: {
+          scoringConfig: {
+            select: { scoringModel: { select: { id: true, name: true, version: true } } },
+          },
+        },
+      },
       feedback: {
         where: { workspaceId },
         select: { id: true, title: true, type: true, status: true },
@@ -161,6 +178,7 @@ function fetchOpportunity(id: string, workspaceId: string) {
       roadmapItems: { select: { id: true, title: true, horizon: true } },
     },
   });
+  return item ? { ...item, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews: await pmInterviewHistory(workspaceId, "OPPORTUNITY", id) } : null
 }
 
 async function fetchSolution(id: string, workspaceId: string) {
@@ -195,11 +213,11 @@ async function fetchSolution(id: string, workspaceId: string) {
     prisma.artifact.findMany({ where: { workspaceId, status: "ACTIVE" }, select: { id: true, title: true, sourceType: true }, orderBy: { title: "asc" } }),
   ])
   const linkedIds = new Set(links.map((link) => link.artifactId))
-  return { ...solution, artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts }
+  return { ...solution, artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews: await pmInterviewHistory(workspaceId, "SOLUTION", id) }
 }
 
-function fetchAssumption(id: string, workspaceId: string) {
-  return getPrisma().assumption.findFirst({
+async function fetchAssumption(id: string, workspaceId: string) {
+  const item = await getPrisma().assumption.findFirst({
     where: { id, solution: { opportunity: { workspaceId } } },
     include: {
       solution: {
@@ -213,10 +231,11 @@ function fetchAssumption(id: string, workspaceId: string) {
       evidence: { orderBy: { createdAt: "desc" } },
     },
   });
+  return item ? { ...item, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews: await pmInterviewHistory(workspaceId, "ASSUMPTION", id) } : null
 }
 
-function fetchExperiment(id: string, workspaceId: string) {
-  return getPrisma().experiment.findFirst({
+async function fetchExperiment(id: string, workspaceId: string) {
+  const item = await getPrisma().experiment.findFirst({
     where: { id, workspaceId },
     include: {
       assumption: {
@@ -235,6 +254,7 @@ function fetchExperiment(id: string, workspaceId: string) {
       roadmapItems: { select: { id: true, title: true, horizon: true } },
     },
   });
+  return item ? { ...item, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews: await pmInterviewHistory(workspaceId, "EXPERIMENT", id) } : null
 }
 
 async function fetchRoadmapItem(id: string, workspaceId: string) {

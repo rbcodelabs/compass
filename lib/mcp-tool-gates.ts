@@ -32,6 +32,7 @@ import {
   assertEntityAccess,
   assertScoringModelAccess,
 } from "@/lib/mcp-authz"
+import { gateInterviewTool } from "@/lib/pm-agent-service"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Args = Record<string, any> // runtime-validated by each tool's zod inputSchema
@@ -49,7 +50,9 @@ const ASSIGN_SQUAD_ENTITY: Record<string, WorkspaceEntityType> = {
   task: "task",
 }
 
-// Mirrors LINK_TARGET_MODEL in lib/task-tool-handlers.ts.
+// Mirrors LINK_TARGET_MODEL in lib/task-tool-handlers.ts, plus DECISION
+// (ReviewRequest), which that map deliberately excludes (see its comment)
+// but which is still a valid link_task/unlink_task target needing a gate.
 const TASK_LINK_ENTITY: Record<string, WorkspaceEntityType> = {
   OPPORTUNITY: "opportunity",
   SOLUTION: "solution",
@@ -59,6 +62,7 @@ const TASK_LINK_ENTITY: Record<string, WorkspaceEntityType> = {
   DOC: "doc",
   EXPERIMENT: "experiment",
   FEEDBACK_ITEM: "feedbackItem",
+  DECISION: "reviewRequest",
 }
 
 const DECISION_SUBJECT_ENTITY: Record<string, WorkspaceEntityType> = {
@@ -116,6 +120,8 @@ async function assertChildInDeclaredWorkspace(
 // ── The policy: every MCP tool → its gate ───────────────────────────────────
 
 export const TOOL_GATES: Record<string, Gate> = {
+  get_pm_interview: async () => {},
+  update_experiment: async (a, x) => void (await assertEntityAccess(a, "experiment", x.experimentId)),
   get_current_identity: async () => {},
   list_task_assignees: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   generate_research_guide: (a, x) => assertWorkspaceMember(a, x.workspaceId),
@@ -222,6 +228,7 @@ export const TOOL_GATES: Record<string, Gate> = {
   },
   list_decisions: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_decision: (a, x) => assertChildInDeclaredWorkspace(a, "reviewRequest", x.requestId, x.workspaceId),
+  close_decision_no_action: (a, x) => assertChildInDeclaredWorkspace(a, "reviewRequest", x.requestId, x.workspaceId),
   request_building_investment: async (a, x) => void (await assertEntityAccess(a, "solution", x.solutionId)),
   reconsider_building_investment: async (a, x) => {
     await assertEntityAccess(a, "solution", x.solutionId)
@@ -235,6 +242,13 @@ export const TOOL_GATES: Record<string, Gate> = {
   list_release_runs: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_review_request: async (a, x) => void (await assertEntityAccess(a, "reviewRequest", x.requestId)),
   list_review_requests: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  // Classified WRITE below (not human-only): the tool's registered
+  // description ("Service actors may apply but cannot take decisions") is the
+  // actual security contract. A service/agent actor may apply an already-
+  // DECIDED record and receive its receipt; the decide step itself
+  // (recordDecision in lib/decision-service.ts) is a separate, un-exposed
+  // code path that independently throws HUMAN_ACTOR_REQUIRED for any
+  // non-USER actor kind. Do not move this back to DENY.
   apply_recorded_decision: async (a, x) => void (await assertEntityAccess(a, "decisionRecord", x.decisionId)),
 
   // Launch tiers / checklists ----------------------------------------------
@@ -389,6 +403,8 @@ export const TOOL_GATES: Record<string, Gate> = {
 
 // Every operation is explicitly classified. Unlisted tools fail closed for agents.
 export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Object.fromEntries([
+  ["get_pm_interview", "READ"],
+  ["update_experiment", "WRITE"],
   // Research tools landed separately; retain fail-closed agent access until reviewed.
   ...["generate_research_guide", "create_research_study", "list_research_studies", "get_research_study", "update_research_study", "activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
@@ -396,10 +412,10 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision",
-    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "request_building_investment", "reconsider_building_investment", "request_building_investment_revocation", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity",
+    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "request_building_investment", "reconsider_building_investment", "request_building_investment_revocation", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity",
   ].map(name => [name, "WRITE"]),
   // Legacy comments lack a durable agent author ID; body edits could retain a human label or approval badge.
-  ...["update_comment", "update_solution_comment", "update_doc_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization", "apply_recorded_decision", "create_scoring_model", "update_scoring_model", "archive_scoring_model", "set_workspace_scoring_model"].map(name => [name, "DENY"]),
+  ...["update_comment", "update_solution_comment", "update_doc_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization", "create_scoring_model", "update_scoring_model", "archive_scoring_model", "set_workspace_scoring_model"].map(name => [name, "DENY"]),
 ])
 
 /**
@@ -407,6 +423,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
  * policy entry is denied.
  */
 export async function applyToolGate(toolName: string, actor: McpActor, args: Args): Promise<void> {
+  await gateInterviewTool(actor, toolName, args)
   // The shared service key is trusted/global — skip gating entirely. Gates
   // (and fail-closed denial of unmapped tools) apply only to per-user keys,
   // which is exactly the untrusted surface we're protecting.

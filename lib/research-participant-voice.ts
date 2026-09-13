@@ -3,6 +3,7 @@ import type { ResearchStudy } from "@prisma/client"
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
 import { hashResearchResumeToken, MAX_RESEARCH_TURNS, MAX_RESEARCH_TRANSCRIPT_CHARS } from "@/lib/research-session"
 import { ResearchVoiceError } from "@/lib/research-voice"
+import { parsePmInterviewVoiceTransitionReceipt } from "@/lib/pm-interview-contracts"
 
 export const MAX_BROWSER_VOICE_CLAIMS = 5
 type Context = { prisma: AppPrismaClient; study: ResearchStudy; participantToken: { id: string } }
@@ -82,11 +83,11 @@ export async function releaseParticipantVoiceLease(input: SessionInput & { lease
 
 export async function appendParticipantVoiceEvent(input: SessionInput & {
   leaseId: string; clientEventId: string; reportedOrdinal: number;
-  role: "PARTICIPANT" | "INTERVIEWER"; content: string; attachmentId?: string;
+  role: "PARTICIPANT" | "INTERVIEWER"; content: string; attachmentId?: string; speechId?: string;
 }) {
-  const { context, sessionId, leaseId, clientEventId, reportedOrdinal, role, attachmentId } = input
+  const { context, sessionId, leaseId, clientEventId, reportedOrdinal, role, attachmentId, speechId } = input
   const content = input.content.trim()
-  if (!/^[A-Za-z0-9_.:-]{1,255}$/.test(clientEventId) || !Number.isSafeInteger(reportedOrdinal) || reportedOrdinal < 0 || reportedOrdinal >= MAX_RESEARCH_TURNS || !["PARTICIPANT", "INTERVIEWER"].includes(role) || !content || content.length > 4_000 || (attachmentId && role !== "PARTICIPANT")) throw new ResearchVoiceError("Invalid participant voice event", 400)
+  if (!/^[A-Za-z0-9_.:-]{1,255}$/.test(clientEventId) || !Number.isSafeInteger(reportedOrdinal) || reportedOrdinal < 0 || reportedOrdinal >= MAX_RESEARCH_TURNS || !["PARTICIPANT", "INTERVIEWER"].includes(role) || !content || content.length > 4_000 || (attachmentId && role !== "PARTICIPANT") || (speechId !== undefined && !/^(?:input|output):[A-Za-z0-9_.:-]{1,255}$/.test(speechId))) throw new ResearchVoiceError("Invalid participant voice event", 400)
   return context.prisma.$transaction(async (tx) => {
     const now = new Date()
     await fenceAccess(tx, context, now)
@@ -99,15 +100,31 @@ export async function appendParticipantVoiceEvent(input: SessionInput & {
       if (attachments.length !== (attachmentId ? 1 : 0) || (attachmentId && attachments[0]?.id !== attachmentId)) throw new ResearchVoiceError("Client event ID was reused with a different attachment", 409)
       return { replayed: true, source: "PARTICIPANT_SUBMITTED", turn: await tx.researchTurn.findUnique({ where: { id: prior.turnId } }) }
     }
+    let pendingReceiptJsonToClear: string | null = null
+    if (context.study.studyType === "PM_INTERVIEW") {
+      const pmInterview = await tx.pMInterview.findUnique({ where: { sessionId }, select: { transitionReceiptJson: true } })
+      const pendingReceiptJson = pmInterview?.transitionReceiptJson ?? null
+      const lifecycle = parsePmInterviewVoiceTransitionReceipt(pendingReceiptJson)
+      if (lifecycle?.phase === "SETTLED" || lifecycle?.phase === "TRANSITIONED") throw new ResearchVoiceError("Voice transcript intake is already settled", 409)
+      if (role === "INTERVIEWER") {
+        if (speechId !== undefined) throw new ResearchVoiceError("Interviewer voice events cannot claim participant speech", 400)
+      } else if (lifecycle?.phase === "SPEECH_PENDING") {
+        if (lifecycle.leaseId !== leaseId || lifecycle.speechId !== speechId) throw new ResearchVoiceError("Finalized speech does not match the pending utterance", 409)
+        pendingReceiptJsonToClear = pendingReceiptJson
+      } else if (speechId !== undefined) {
+        throw new ResearchVoiceError("Finalized speech has no matching pending utterance", 409)
+      }
+    }
     const last = await tx.researchParticipantVoiceEvent.findFirst({ where: { sessionId, leaseId }, orderBy: { reportedOrdinal: "desc" } })
     if (reportedOrdinal !== (last ? last.reportedOrdinal + 1 : 0)) throw new ResearchVoiceError("Voice transcript order does not match the next expected event", 409)
     const recent = await tx.researchParticipantVoiceEvent.count({ where: { sessionId, createdAt: { gte: new Date(now.getTime() - 60_000) } } })
     if (recent >= 30) throw new ResearchVoiceError("Please wait before saving more voice events", 429)
     if ((session.voiceTurnCount ?? 0) >= MAX_RESEARCH_TURNS || (session.voiceTranscriptChars ?? 0) + content.length > MAX_RESEARCH_TRANSCRIPT_CHARS) throw new ResearchVoiceError("This interview has reached its transcript limit", 409)
     const sequence = session.nextSequence ?? 0
+    const sessionFenceAt = new Date(Math.max(now.getTime(), session.updatedAt.getTime() + 1))
     const updated = await tx.researchSession.updateMany({
-      where: { ...sessionWhere(input), voiceLeaseId: leaseId, voiceLeaseExpiresAt: { gt: now }, nextSequence: session.nextSequence },
-      data: { nextSequence: sequence + 1, voiceTurnCount: (session.voiceTurnCount ?? 0) + 1, voiceTranscriptChars: (session.voiceTranscriptChars ?? 0) + content.length, lastActiveAt: now, updatedAt: now },
+      where: { ...sessionWhere(input), voiceLeaseId: leaseId, voiceLeaseExpiresAt: { gt: now }, nextSequence: session.nextSequence, updatedAt: session.updatedAt },
+      data: { nextSequence: sequence + 1, voiceTurnCount: (session.voiceTurnCount ?? 0) + 1, voiceTranscriptChars: (session.voiceTranscriptChars ?? 0) + content.length, lastActiveAt: now, updatedAt: sessionFenceAt },
     })
     if (updated.count !== 1) throw new ResearchVoiceError("Voice transcript changed concurrently", 409)
     const turn = await tx.researchTurn.create({ data: { id: randomUUID(), sessionId, role, content, sequence } })
@@ -116,6 +133,10 @@ export async function appendParticipantVoiceEvent(input: SessionInput & {
       if (linked.count !== 1) throw new ResearchVoiceError("Attachment is not available", 409)
     }
     await tx.researchParticipantVoiceEvent.create({ data: { workspaceId: context.study.workspaceId, sessionId, leaseId, clientEventId, reportedOrdinal, claimedSpeaker: role, content, turnId: turn.id } })
+    if (pendingReceiptJsonToClear) {
+      const cleared = await tx.pMInterview.updateMany({ where: { sessionId, transitionReceiptJson: pendingReceiptJsonToClear }, data: { transitionReceiptJson: null, updatedAt: now } })
+      if (cleared.count !== 1) throw new ResearchVoiceError("Voice activity changed concurrently", 409)
+    }
     return { replayed: false, source: "PARTICIPANT_SUBMITTED", turn }
   })
 }

@@ -24,11 +24,31 @@ export interface ScoringMetricDef {
 }
 
 /**
+ * The single source of truth for the MULTIPLICATIVE minValue message, shared
+ * by the throwing validator and the value-returning one below so the two can
+ * never drift.
+ */
+function multiplicativeMinValueMessage(key: string): string {
+  return (
+    `Metric "${key}" must have a minValue greater than 0 for MULTIPLICATIVE formulas ` +
+    `(guards against divide-by-zero and keeps the formula monotonic).`
+  )
+}
+
+/**
  * MULTIPLICATIVE formulas divide by the product of NEGATIVE-direction
  * metrics, so every metric's minValue must be strictly greater than 0 to
  * avoid a divide-by-zero and to keep the formula monotonic/well-defined.
- * Call this at scoring-model create/update time (before persisting) and
- * defensively before computing a score.
+ *
+ * Throwing. Retained unchanged for the two callers that want an exception:
+ * `computeRawScore`/`theoreticalBounds` (a defensive assertion on a stored
+ * formula snapshot, where a violation is a genuine invariant break, not user
+ * input) and the MCP handlers, which already wrap it in try/catch → `fail()`.
+ *
+ * **Do not call this from a server action.** A thrown Server Action error is
+ * replaced by Next with an opaque "An error occurred in the Server Components
+ * render." in production builds, which destroys the message in transit. Use
+ * {@link findMetricConfigIssues} there and return the issues as a value.
  */
 export function validateMetricsForFormula(
   metrics: ScoringMetricDef[],
@@ -37,12 +57,118 @@ export function validateMetricsForFormula(
   if (formulaType !== "MULTIPLICATIVE") return
   for (const metric of metrics) {
     if (metric.minValue <= 0) {
-      throw new Error(
-        `Metric "${metric.key}" must have a minValue greater than 0 for MULTIPLICATIVE formulas ` +
-          `(guards against divide-by-zero and keeps the formula monotonic).`
-      )
+      throw new Error(multiplicativeMinValueMessage(metric.key))
     }
   }
+}
+
+/**
+ * The minimum a *new* metric should start at under a given formula.
+ *
+ * 0 is the natural default for WEIGHTED_SUM but is never valid under
+ * MULTIPLICATIVE, where it divides by zero — offering it there hands the user
+ * a value guaranteed to be rejected.
+ */
+export function defaultMinValueForFormula(formulaType: ScoringFormulaType): number {
+  return formulaType === "MULTIPLICATIVE" ? 1 : 0
+}
+
+/**
+ * Re-bases existing metric minimums when the formula type changes.
+ *
+ * Only a minValue of exactly 0 is rewritten, and only when switching *to*
+ * MULTIPLICATIVE. 0 is both the old default and the one value that can never
+ * be valid under this formula, so promoting it to 1 cannot destroy a
+ * deliberate choice — whereas a typed 0.5, 2 or -3 is real input and is left
+ * exactly as entered. A negative minimum is deliberately *not* auto-corrected:
+ * it is a genuine mistake, and the user is better served by the explicit error
+ * than by a silent guess.
+ *
+ * Switching back to WEIGHTED_SUM rewrites nothing — 1 is a perfectly valid
+ * minimum there, and churning the field on every toggle would be worse than
+ * leaving it.
+ */
+export function rebaseMinValuesForFormula<T extends { minValue: number }>(
+  metrics: T[],
+  nextFormulaType: ScoringFormulaType
+): T[] {
+  if (nextFormulaType !== "MULTIPLICATIVE") return metrics
+  return metrics.map((m) => (m.minValue === 0 ? { ...m, minValue: 1 } : m))
+}
+
+/** Which form input the user has to change to clear a given issue. */
+export type MetricConfigIssueField = "key" | "minValue"
+
+export interface MetricConfigIssue {
+  /** Position of the offending metric in the submitted array, for field-level display. */
+  index: number
+  field: MetricConfigIssueField
+  /** The offending metric's key (empty string when the key itself is blank). */
+  metricKey: string
+  message: string
+}
+
+/**
+ * Value-returning counterpart to {@link validateMetricsForFormula}: reports
+ * every way a submitted metric set is invalid, without throwing.
+ *
+ * Deliberately shared by the server actions and the client form so the two
+ * enforce byte-identical rules — the client can pre-validate and surface each
+ * issue at its own field, and the server re-checks the same way because a
+ * client check is never a trust boundary.
+ *
+ * Covers three user-caused failures, all of which previously reached the
+ * database and surfaced as an opaque masked error:
+ *   1. blank key — checked first so a pair of blank rows reports "blank"
+ *      rather than a nonsensical `duplicate key ""`.
+ *   2. duplicate key — `@@unique([scoringModelId, key])` would otherwise raise
+ *      Prisma P2002 *after* the parent ScoringModel row was already written,
+ *      leaving an orphan model with zero metrics.
+ *   3. MULTIPLICATIVE minValue <= 0 — divide-by-zero guard.
+ *
+ * Issues are returned in metric order so `issues[0]` is a sensible headline.
+ */
+export function findMetricConfigIssues(
+  metrics: ScoringMetricDef[],
+  formulaType: ScoringFormulaType
+): MetricConfigIssue[] {
+  const issues: MetricConfigIssue[] = []
+  const firstIndexByKey = new Map<string, number>()
+
+  metrics.forEach((metric, index) => {
+    const key = metric.key?.trim() ?? ""
+
+    if (key === "") {
+      issues.push({
+        index,
+        field: "key",
+        metricKey: "",
+        message: `Metric ${index + 1} needs a key (a short machine name such as "reach").`,
+      })
+    } else if (firstIndexByKey.has(key)) {
+      issues.push({
+        index,
+        field: "key",
+        metricKey: key,
+        message:
+          `Duplicate metric key "${key}" (rows ${(firstIndexByKey.get(key) as number) + 1} and ${index + 1}). ` +
+          `Each metric in a scoring model needs a unique key.`,
+      })
+    } else {
+      firstIndexByKey.set(key, index)
+    }
+
+    if (formulaType === "MULTIPLICATIVE" && metric.minValue <= 0) {
+      issues.push({
+        index,
+        field: "minValue",
+        metricKey: key,
+        message: multiplicativeMinValueMessage(key || `#${index + 1}`),
+      })
+    }
+  })
+
+  return issues
 }
 
 function effectiveValue(metric: ScoringMetricDef, rawValue: number): number {

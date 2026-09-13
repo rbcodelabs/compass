@@ -4,6 +4,7 @@ import { resolveActiveResearchStudy } from "@/lib/research-access"
 import { ResearchSessionError, respondToResearchSession } from "@/lib/research-session"
 import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
 import { getResearchArtifactStorage } from "@/lib/artifact-storage"
+import { researchFailureDiagnostic } from "@/lib/research-failure-diagnostics"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -70,6 +71,7 @@ export async function POST(request: Request) {
               emit({ type: "final", result })
             } catch (error) {
               const status = error instanceof ResearchSessionError ? error.status : error instanceof ResearchAgentUnavailableError ? 503 : 502
+              console.error("Research reply failed", researchFailureDiagnostic(error))
               emit({ type: "error", status })
             } finally {
               if (!cancelled) controller.close()

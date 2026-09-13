@@ -8,13 +8,14 @@ import { GripVertical } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EntityCard } from "@/components/patterns/entity-card";
 import { EvidenceBadge } from "@/components/discovery/evidence-badge";
+import { ScoreBadge } from "@/components/discovery/score-badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import {
   updateOpportunityStatus,
   archiveOpportunity,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
-import type { OpportunityStatus } from "@/lib/types";
+import type { OpportunityScoreSummary, OpportunityStatus } from "@/lib/types";
 
 const STATUS_ORDER: OpportunityStatus[] = [
   "EXPLORING",
@@ -40,15 +41,34 @@ export type OpportunityCardData = {
   _count: { solutions: number; evidence: number };
   evidenceSourceCount?: number;
   squad?: { id: string; name: string; color: string } | null;
+  /** null when the opportunity has not been scored under the active model. */
+  score?: OpportunityScoreSummary | null;
 };
 
 type Props = {
   opportunity: OpportunityCardData;
   orgSlug: string;
   workspaceSlug: string;
+  /**
+   * True when the workspace has an active scoring model. False renders no
+   * score UI at all, matching the detail page's hasActiveScoringModel gate.
+   */
+  showScore?: boolean;
+  /**
+   * False while the board is in "sort by score" view mode. The board's order is
+   * then derived from score, not from the persisted sortOrder, so dragging is
+   * turned off entirely rather than allowed to write a meaningless index.
+   */
+  dragEnabled?: boolean;
 };
 
-export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) {
+export function OpportunityCard({
+  opportunity,
+  orgSlug,
+  workspaceSlug,
+  showScore = false,
+  dragEnabled = true,
+}: Props) {
   const [isPending, startTransition] = useTransition();
   const { openPanel } = usePanelContext();
 
@@ -98,15 +118,17 @@ export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) 
         description={opportunity.customerSegment}
         leading={
           <div className="flex items-center gap-1.5">
-            <button
-              ref={setActivatorNodeRef}
-              {...attributes}
-              {...listeners}
-              className="shrink-0 cursor-grab touch-none rounded text-text-subtle/60 hover:text-text-subtle active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
-              aria-label="Drag to reorder"
-            >
-              <GripVertical className="size-3.5" />
-            </button>
+            {dragEnabled && (
+              <button
+                ref={setActivatorNodeRef}
+                {...attributes}
+                {...listeners}
+                className="shrink-0 cursor-grab touch-none rounded text-text-subtle/60 hover:text-text-subtle active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
+                aria-label="Drag to reorder"
+              >
+                <GripVertical className="size-3.5" />
+              </button>
+            )}
             {opportunity.squad && (
               <span
                 className="size-2.5 rounded-full shrink-0"
@@ -133,6 +155,12 @@ export function OpportunityCard({ opportunity, orgSlug, workspaceSlug }: Props) 
         data-dragging={isDragging ? true : undefined}
       >
         <div className="flex flex-wrap items-center gap-1.5">
+          {showScore && (
+            <ScoreBadge
+              score={opportunity.score}
+              scoringHref={`${boardPath}/${opportunity.id}?tab=scoring`}
+            />
+          )}
           <Badge variant="secondary">{opportunity._count.solutions} {opportunity._count.solutions === 1 ? "solution" : "solutions"}</Badge>
           <EvidenceBadge count={opportunity._count.evidence} sourceCount={opportunity.evidenceSourceCount} />
         </div>

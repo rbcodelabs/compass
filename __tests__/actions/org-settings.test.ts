@@ -42,13 +42,18 @@ const weightedSumMetrics = [
   { key: "effort", label: "Effort", minValue: 0, maxValue: 10, weight: 1, direction: "NEGATIVE" as const },
 ];
 
+/** Shaped like a Prisma unique-constraint violation. */
+function uniqueConstraintError() {
+  return Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T>
     ? T
     : never);
   mockOrganizationMember.findFirst.mockResolvedValue({ role: "ADMIN", organizationId: "org-1" });
-  mockScoringModel.create.mockResolvedValue({ id: "model-1" });
+  mockScoringModel.create.mockResolvedValue({ id: "model-1", version: 1 });
   mockScoringModelMetric.createMany.mockResolvedValue({ count: 2 });
   mockScoringModelMetric.deleteMany.mockResolvedValue({ count: 0 });
   mockScoringModel.findUnique.mockResolvedValue({ formulaType: "WEIGHTED_SUM", version: 1 });
@@ -59,12 +64,13 @@ beforeEach(() => {
 
 describe("createScoringModel", () => {
   it("creates the model then its metrics in declared order", async () => {
-    await createScoringModel("org", {
+    const result = await createScoringModel("org", {
       name: "RICE",
       formulaType: "WEIGHTED_SUM",
       metrics: weightedSumMetrics,
     });
 
+    expect(result).toEqual({ ok: true, model: { id: "model-1", version: 1 } });
     expect(mockScoringModel.create).toHaveBeenCalledWith({
       data: {
         organizationId: "org-1",
@@ -82,25 +88,83 @@ describe("createScoringModel", () => {
   });
 
   it("skips creating metrics when the array is empty", async () => {
-    await createScoringModel("org", { name: "Empty", formulaType: "WEIGHTED_SUM", metrics: [] });
+    const result = await createScoringModel("org", {
+      name: "Empty",
+      formulaType: "WEIGHTED_SUM",
+      metrics: [],
+    });
+    expect(result.ok).toBe(true);
     expect(mockScoringModelMetric.createMany).not.toHaveBeenCalled();
   });
 
-  it("rejects MULTIPLICATIVE models where a metric has minValue <= 0", async () => {
-    await expect(
-      createScoringModel("org", {
-        name: "RICE",
-        formulaType: "MULTIPLICATIVE",
-        metrics: [
-          { key: "reach", label: "Reach", minValue: 0, maxValue: 1000, weight: 1, direction: "POSITIVE" },
-        ],
-      })
-    ).rejects.toThrow(/minValue greater than 0/);
+  // ── Validation failures come back as values, not throws ──────────────────
+  //
+  // This is the whole point of the fix: a *thrown* Server Action error has its
+  // message replaced by Next in production builds, so the specific reason
+  // never reaches the form. `.rejects.toThrow()` here would mean the bug is
+  // back.
+
+  it("returns (does not throw) when a MULTIPLICATIVE metric has minValue <= 0", async () => {
+    const promise = createScoringModel("org", {
+      name: "RICE",
+      formulaType: "MULTIPLICATIVE",
+      metrics: [
+        { key: "reach", label: "Reach", minValue: 0, maxValue: 1000, weight: 1, direction: "POSITIVE" },
+      ],
+    });
+
+    await expect(promise).resolves.toBeDefined();
+    const result = await promise;
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.error).toMatch(/minValue greater than 0/);
+    expect(result.issues).toEqual([
+      expect.objectContaining({ index: 0, field: "minValue", metricKey: "reach" }),
+    ]);
+    // No orphan rows: validation precedes every write.
+    expect(mockScoringModel.create).not.toHaveBeenCalled();
+    expect(mockScoringModelMetric.createMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate metric keys, naming the key, before writing anything", async () => {
+    const result = await createScoringModel("org", {
+      name: "RICE",
+      formulaType: "WEIGHTED_SUM",
+      metrics: [
+        { key: "reach", label: "Reach", minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE" },
+        { key: "reach", label: "Reach again", minValue: 0, maxValue: 10, weight: 1, direction: "NEGATIVE" },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.error).toContain('"reach"');
+    expect(result.issues).toEqual([
+      expect.objectContaining({ index: 1, field: "key", metricKey: "reach" }),
+    ]);
+    // The pre-existing bug: the parent model row was created and *then*
+    // createMany tripped the unique index, leaving a model with zero metrics.
+    expect(mockScoringModel.create).not.toHaveBeenCalled();
+    expect(mockScoringModelMetric.createMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a blank metric key before writing anything", async () => {
+    const result = await createScoringModel("org", {
+      name: "RICE",
+      formulaType: "WEIGHTED_SUM",
+      metrics: [
+        { key: "", label: "Nameless", minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE" },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.error).toMatch(/needs a key/);
     expect(mockScoringModel.create).not.toHaveBeenCalled();
   });
 
   it("accepts MULTIPLICATIVE models where every metric has minValue > 0", async () => {
-    await createScoringModel("org", {
+    const result = await createScoringModel("org", {
       name: "True RICE",
       formulaType: "MULTIPLICATIVE",
       metrics: [
@@ -108,30 +172,70 @@ describe("createScoringModel", () => {
         { key: "effort", label: "Effort", minValue: 0.5, maxValue: 10, weight: 1, direction: "NEGATIVE" },
       ],
     });
+    expect(result.ok).toBe(true);
     expect(mockScoringModel.create).toHaveBeenCalled();
   });
 
-  it("throws Unauthorized when session is missing", async () => {
+  // ── Permission failures come back as values too ──────────────────────────
+
+  it("returns a clean error when the session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
-    await expect(
-      createScoringModel("org", { name: "RICE", formulaType: "WEIGHTED_SUM", metrics: [] })
-    ).rejects.toThrow("Unauthorized");
+    const result = await createScoringModel("org", {
+      name: "RICE",
+      formulaType: "WEIGHTED_SUM",
+      metrics: [],
+    });
+
+    expect(result).toEqual({ ok: false, error: "You are not signed in." });
     expect(mockScoringModel.create).not.toHaveBeenCalled();
   });
 
-  it("throws Organization not found when caller is not an org member", async () => {
+  it("returns a clean error when the caller is not an org member", async () => {
     mockOrganizationMember.findFirst.mockResolvedValue(null);
-    await expect(
-      createScoringModel("org", { name: "RICE", formulaType: "WEIGHTED_SUM", metrics: [] })
-    ).rejects.toThrow("Organization not found");
+    const result = await createScoringModel("org", {
+      name: "RICE",
+      formulaType: "WEIGHTED_SUM",
+      metrics: [],
+    });
+    expect(result).toEqual({ ok: false, error: "Organization not found" });
   });
 
-  it("throws Forbidden when caller is a MEMBER, not org admin", async () => {
+  it("returns a clean error when the caller is a MEMBER, not an org admin", async () => {
     mockOrganizationMember.findFirst.mockResolvedValue({ role: "MEMBER", organizationId: "org-1" });
+    const result = await createScoringModel("org", {
+      name: "RICE",
+      formulaType: "WEIGHTED_SUM",
+      metrics: [],
+    });
+
+    expect(result).toEqual({ ok: false, error: "Forbidden: organization admin required" });
+    expect(mockScoringModel.create).not.toHaveBeenCalled();
+  });
+
+  // ── Unexpected faults still fail loudly ──────────────────────────────────
+
+  it("rethrows an unexpected database fault rather than returning it as a friendly string", async () => {
+    mockScoringModel.create.mockRejectedValue(new Error("connection terminated unexpectedly"));
+
     await expect(
       createScoringModel("org", { name: "RICE", formulaType: "WEIGHTED_SUM", metrics: [] })
-    ).rejects.toThrow("Forbidden: organization admin required");
-    expect(mockScoringModel.create).not.toHaveBeenCalled();
+    ).rejects.toThrow("connection terminated unexpectedly");
+  });
+
+  it("still converts a unique-constraint violation to a result (defence in depth)", async () => {
+    // Unreachable through the form now that keys are validated up front, but
+    // a concurrent create could still race into the unique index.
+    mockScoringModelMetric.createMany.mockRejectedValue(uniqueConstraintError());
+
+    const result = await createScoringModel("org", {
+      name: "RICE",
+      formulaType: "WEIGHTED_SUM",
+      metrics: weightedSumMetrics,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.error).toMatch(/unique/i);
   });
 });
 
@@ -139,8 +243,9 @@ describe("createScoringModel", () => {
 
 describe("updateScoringModelDetails", () => {
   it("updates name/description without touching version", async () => {
-    await updateScoringModelDetails("org", "model-1", { name: "New name" });
+    const result = await updateScoringModelDetails("org", "model-1", { name: "New name" });
 
+    expect(result).toEqual({ ok: true });
     expect(mockScoringModel.update).toHaveBeenCalledWith({
       where: { id: "model-1" },
       data: { name: "New name", updatedAt: expect.any(Date) },
@@ -149,18 +254,20 @@ describe("updateScoringModelDetails", () => {
     expect(data.version).toBeUndefined();
   });
 
-  it("throws Unauthorized when session is missing", async () => {
+  it("returns a clean error when the session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
-    await expect(updateScoringModelDetails("org", "model-1", { name: "X" })).rejects.toThrow(
-      "Unauthorized"
-    );
+    await expect(updateScoringModelDetails("org", "model-1", { name: "X" })).resolves.toEqual({
+      ok: false,
+      error: "You are not signed in.",
+    });
   });
 
-  it("throws Forbidden when caller is not an org admin", async () => {
+  it("returns a clean error when the caller is not an org admin", async () => {
     mockOrganizationMember.findFirst.mockResolvedValue({ role: "MEMBER", organizationId: "org-1" });
-    await expect(updateScoringModelDetails("org", "model-1", { name: "X" })).rejects.toThrow(
-      "Forbidden: organization admin required"
-    );
+    await expect(updateScoringModelDetails("org", "model-1", { name: "X" })).resolves.toEqual({
+      ok: false,
+      error: "Forbidden: organization admin required",
+    });
   });
 });
 
@@ -168,8 +275,9 @@ describe("updateScoringModelDetails", () => {
 
 describe("updateScoringModelMetrics", () => {
   it("replaces metrics and increments version", async () => {
-    await updateScoringModelMetrics("org", "model-1", { metrics: weightedSumMetrics });
+    const result = await updateScoringModelMetrics("org", "model-1", { metrics: weightedSumMetrics });
 
+    expect(result).toEqual({ ok: true });
     expect(mockScoringModelMetric.deleteMany).toHaveBeenCalledWith({ where: { scoringModelId: "model-1" } });
     expect(mockScoringModelMetric.createMany).toHaveBeenCalledWith({
       data: [
@@ -184,7 +292,7 @@ describe("updateScoringModelMetrics", () => {
   });
 
   it("allows switching formula type as part of a metrics edit", async () => {
-    await updateScoringModelMetrics("org", "model-1", {
+    const result = await updateScoringModelMetrics("org", "model-1", {
       formulaType: "MULTIPLICATIVE",
       metrics: [
         { key: "reach", label: "Reach", minValue: 1, maxValue: 1000, weight: 1, direction: "POSITIVE" },
@@ -192,32 +300,50 @@ describe("updateScoringModelMetrics", () => {
       ],
     });
 
+    expect(result.ok).toBe(true);
     const data = mockScoringModel.update.mock.calls[0][0].data;
     expect(data.formulaType).toBe("MULTIPLICATIVE");
   });
 
-  it("rejects switching to MULTIPLICATIVE if a metric has minValue <= 0", async () => {
-    await expect(
-      updateScoringModelMetrics("org", "model-1", {
-        formulaType: "MULTIPLICATIVE",
-        metrics: weightedSumMetrics, // reach has minValue 0
-      })
-    ).rejects.toThrow(/minValue greater than 0/);
+  it("returns an issue when switching to MULTIPLICATIVE with a metric at minValue <= 0", async () => {
+    const result = await updateScoringModelMetrics("org", "model-1", {
+      formulaType: "MULTIPLICATIVE",
+      metrics: weightedSumMetrics, // reach has minValue 0
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.error).toMatch(/minValue greater than 0/);
+    // Critically: the existing metrics were NOT deleted by the rejected edit.
     expect(mockScoringModelMetric.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("throws Scoring model not found when the model does not exist", async () => {
+  it("rejects duplicate keys before the destructive deleteMany", async () => {
+    const result = await updateScoringModelMetrics("org", "model-1", {
+      metrics: [
+        { key: "reach", label: "Reach", minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE" },
+        { key: "reach", label: "Dup", minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE" },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.error).toContain('"reach"');
+    expect(mockScoringModelMetric.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("returns Scoring model not found when the model does not exist", async () => {
     mockScoringModel.findUnique.mockResolvedValue(null);
     await expect(
       updateScoringModelMetrics("org", "missing", { metrics: weightedSumMetrics })
-    ).rejects.toThrow("Scoring model not found");
+    ).resolves.toEqual({ ok: false, error: "Scoring model not found" });
   });
 
-  it("throws Unauthorized when session is missing", async () => {
+  it("returns a clean error when the session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
     await expect(
       updateScoringModelMetrics("org", "model-1", { metrics: weightedSumMetrics })
-    ).rejects.toThrow("Unauthorized");
+    ).resolves.toEqual({ ok: false, error: "You are not signed in." });
   });
 });
 
@@ -225,24 +351,29 @@ describe("updateScoringModelMetrics", () => {
 
 describe("archiveScoringModel", () => {
   it("sets status ARCHIVED and updatedAt", async () => {
-    await archiveScoringModel("org", "model-1");
+    const result = await archiveScoringModel("org", "model-1");
 
+    expect(result).toEqual({ ok: true });
     expect(mockScoringModel.update).toHaveBeenCalledWith({
       where: { id: "model-1" },
       data: { status: "ARCHIVED", updatedAt: expect.any(Date) },
     });
   });
 
-  it("throws Unauthorized when session is missing", async () => {
+  it("returns a clean error when the session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
-    await expect(archiveScoringModel("org", "model-1")).rejects.toThrow("Unauthorized");
+    await expect(archiveScoringModel("org", "model-1")).resolves.toEqual({
+      ok: false,
+      error: "You are not signed in.",
+    });
     expect(mockScoringModel.update).not.toHaveBeenCalled();
   });
 
-  it("throws Forbidden when caller is not an org admin", async () => {
+  it("returns a clean error when the caller is not an org admin", async () => {
     mockOrganizationMember.findFirst.mockResolvedValue({ role: "MEMBER", organizationId: "org-1" });
-    await expect(archiveScoringModel("org", "model-1")).rejects.toThrow(
-      "Forbidden: organization admin required"
-    );
+    await expect(archiveScoringModel("org", "model-1")).resolves.toEqual({
+      ok: false,
+      error: "Forbidden: organization admin required",
+    });
   });
 });

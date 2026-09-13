@@ -48,9 +48,20 @@ export type SolutionCardData = {
 type Props = {
   solution: SolutionCardData;
   revalidatePathStr: string;
+  /**
+   * Whether to show the status badge. Defaults to `true` for the Opportunity
+   * panel's flat `SolutionsList`, where the badge is the *only* status signal.
+   *
+   * Boards whose columns already are statuses should pass `false`: the badge
+   * is redundant there, and because `EntityCard` lays it out as a `shrink-0`
+   * sibling of the `min-w-0 flex-1` title block, it claims fixed width and
+   * pushes the title into `line-clamp-2` truncation. `OpportunityCard` avoids
+   * this by passing no status at all — same reasoning, same fix.
+   */
+  showStatus?: boolean;
 };
 
-export function SolutionCard({ solution, revalidatePathStr }: Props) {
+export function SolutionCard({ solution, revalidatePathStr, showStatus = true }: Props) {
   const { openPanel } = usePanelContext();
   const [isPending, startTransition] = useTransition();
 
@@ -82,6 +93,11 @@ export function SolutionCard({ solution, revalidatePathStr }: Props) {
     });
   }
 
+  // Both chips self-hide at 0 (EvidenceBadge already returned null there), so
+  // with neither to show the row would be empty but still cost EntityCard's
+  // `mt-3` children gap. Skip the whole block instead of leaving a blank row.
+  const hasMetadata = solution._count.assumptions > 0 || solution._count.evidence > 0;
+
   return (
     <div ref={setNodeRef} style={style} className="touch-none group">
       <EntityCard
@@ -108,11 +124,13 @@ export function SolutionCard({ solution, revalidatePathStr }: Props) {
           </button>
         }
         status={
-          <span
-            className={`inline-flex h-5 items-center rounded px-1.5 text-xs font-medium ${SOLUTION_STATUS[solution.status].className}`}
-          >
-            {SOLUTION_STATUS[solution.status].label}
-          </span>
+          showStatus ? (
+            <span
+              className={`inline-flex h-5 items-center rounded px-1.5 text-xs font-medium ${SOLUTION_STATUS[solution.status].className}`}
+            >
+              {SOLUTION_STATUS[solution.status].label}
+            </span>
+          ) : undefined
         }
         actions={
           <CardMenu
@@ -130,12 +148,16 @@ export function SolutionCard({ solution, revalidatePathStr }: Props) {
         data-pending={isPending ? true : undefined}
         data-dragging={isDragging ? true : undefined}
       >
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="secondary">
-            {solution._count.assumptions} {solution._count.assumptions === 1 ? "assumption" : "assumptions"}
-          </Badge>
-          <EvidenceBadge count={solution._count.evidence} />
-        </div>
+        {hasMetadata && (
+          <div data-slot="solution-card-meta" className="flex flex-wrap items-center gap-1.5">
+            {solution._count.assumptions > 0 && (
+              <Badge variant="secondary">
+                {solution._count.assumptions} {solution._count.assumptions === 1 ? "assumption" : "assumptions"}
+              </Badge>
+            )}
+            <EvidenceBadge count={solution._count.evidence} />
+          </div>
+        )}
       </EntityCard>
     </div>
   );

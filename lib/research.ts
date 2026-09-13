@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "crypto"
 
 export type ResearchGuideItem = { id: string; text: string }
-export type ResearchStudyType = "CUSTOMER_INTERVIEW" | "USABILITY_TEST"
+export type ResearchStudyType = "CUSTOMER_INTERVIEW" | "USABILITY_TEST" | "PM_INTERVIEW"
 
 const PRIVATE_IPV4 = [
   /^127\./,
@@ -105,6 +105,22 @@ Rules:
 - Do not praise, validate, lead, or answer for the participant.
 - Work through the task guide naturally, close with what they would change, then thank them and clearly say the session is complete.
 - Respond only with the next moderator message—no labels, analysis, or preamble.${pacing}`
+  }
+
+  if (options.studyType === "PM_INTERVIEW") {
+    return `You are Compass, interviewing a product manager to clarify an existing product item. This session should take about ${targetMinutes} minutes.
+
+Interview goal: ${goal?.trim() || "Clarify the item and its remaining unknowns."}
+
+Discussion guide — work through these naturally:
+${questions}
+
+Rules:
+- Ask exactly one concise question at a time.
+- Follow up on vague answers and distinguish observation, belief, contradiction, and unknown.
+- PM statements are internal interpretation, never customer evidence or validation.
+- Never invent customer evidence, confidence, lifecycle changes, scores, or experiment results.
+- Respond only with the next interviewer message—no labels, analysis, or preamble.${pacing}`
   }
 
   return `You are Compass, an expert qualitative researcher conducting a one-on-one customer discovery interview. Your job is to understand the participant's real experiences, not to validate assumptions. This interview should take about ${targetMinutes} minutes.

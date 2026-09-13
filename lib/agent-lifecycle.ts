@@ -8,6 +8,11 @@ export async function revokeMemberAgentGrants(prisma: AppTransactionClient, work
 
 /** This schema uses application-managed relations. Personal identities outlive workspaces. */
 export async function deleteWorkspaceAgentData(prisma: AppPrismaClient, workspaceId: string) {
+  await prisma.apiKey.deleteMany({ where: { scopeWorkspaceId: workspaceId, scopeConversationId: { not: null } } });
+  await prisma.pMInterview.updateMany({ where: { workspaceId }, data: { agentConversationId: null } });
+  await prisma.agentMessage.deleteMany({ where: { conversation: { workspaceId } } });
+  await prisma.agentAuditLog.deleteMany({ where: { workspaceId } });
+  await prisma.agentConversation.deleteMany({ where: { workspaceId } });
   await prisma.agentToolCall.deleteMany({ where: { workspaceId } });
   await prisma.agentWorkspaceGrant.deleteMany({ where: { workspaceId } });
 }

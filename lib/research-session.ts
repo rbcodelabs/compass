@@ -576,6 +576,7 @@ async function releaseRequestLease(prisma: AppPrismaClient, sessionId: string, r
 export async function respondToResearchSession({
   context, sessionId, resumeToken, idempotencyKey: idempotencyValue,
   answer: answerValue, attachmentIds: attachmentIdValues = [], loadAttachmentBytes, runAgent, baseUrl, onDelta,
+  buildPrompt,
 }: {
   context: ResearchContext
   sessionId: string
@@ -587,6 +588,7 @@ export async function respondToResearchSession({
   runAgent: (input: { prompt: string; baseUrl: string; onDelta?: (text: string) => void; attachments?: Array<{ mimeType: ResearchModelAttachmentMime; originalName: string; bytes: Uint8Array }> }) => Promise<string>
   baseUrl: string
   onDelta?: (text: string) => void
+  buildPrompt?: (input: { defaultPrompt: string; turns: CanonicalTurn[] }) => string
 }) {
   const idempotencyKey = assertIdempotencyKey(idempotencyValue)
   if (!Array.isArray(attachmentIdValues) || attachmentIdValues.length > 3 ||
@@ -688,7 +690,7 @@ export async function respondToResearchSession({
       select: { id: true, role: true, content: true, sequence: true },
     }) as CanonicalTurn[]
     const guide = JSON.parse(context.study.guide) as ResearchGuideItem[]
-    const prompt = buildResearchAgentTurnPrompt({
+    const defaultPrompt = buildResearchAgentTurnPrompt({
       guide,
       targetMinutes: context.study.targetMinutes,
       goal: context.study.goal,
@@ -696,9 +698,10 @@ export async function respondToResearchSession({
       messages: canonicalTurns.map((turn) => ({
         role: turn.role as "INTERVIEWER" | "PARTICIPANT", content: turn.content,
       })),
-      studyType: context.study.studyType as "CUSTOMER_INTERVIEW" | "USABILITY_TEST",
+      studyType: context.study.studyType as "CUSTOMER_INTERVIEW" | "USABILITY_TEST" | "PM_INTERVIEW",
       appUrl: context.study.appUrl,
     })
+    const prompt = buildPrompt ? buildPrompt({ defaultPrompt, turns: canonicalTurns }) : defaultPrompt
     const attachmentRows = attachmentIds.length === 0 ? [] : await prisma.researchAttachment.findMany({
       where: {
         id: { in: attachmentIds },

@@ -14,7 +14,8 @@ import { ok, fail } from "@/lib/mcp-output"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { Prisma } from "@prisma/client"
-import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring"
+import { computeScore, findMetricConfigIssues, type ScoringMetricDef } from "@/lib/scoring"
+import { isScoreStale } from "@/lib/scoring-model"
 import type { ScoringFormulaType, MetricDirection, FormulaSnapshotMetric } from "@/lib/types"
 
 interface MetricInput {
@@ -140,10 +141,15 @@ export async function createScoringModel({
     weight: m.weight,
     direction: m.direction,
   }))
-  try {
-    validateMetricsForFormula(metricDefs, formulaType)
-  } catch (err) {
-    return fail(err instanceof Error ? err.message : "Invalid metrics")
+  // findMetricConfigIssues supersedes the previous try/catch around
+  // validateMetricsForFormula: it enforces the same MULTIPLICATIVE rule and
+  // additionally rejects blank/duplicate keys up front. Without that, a
+  // duplicate key tripped `@@unique([scoring_model_id, key])` only on the
+  // createMany below — after the parent ScoringModel row was already written,
+  // leaving an orphan model with zero metrics.
+  const issues = findMetricConfigIssues(metricDefs, formulaType)
+  if (issues.length > 0) {
+    return fail(issues[0].message)
   }
 
   const model = await prisma.scoringModel.create({
@@ -213,10 +219,11 @@ export async function updateScoringModel({
       weight: m.weight,
       direction: m.direction,
     }))
-    try {
-      validateMetricsForFormula(metricDefs, effectiveFormulaType)
-    } catch (err) {
-      return fail(err instanceof Error ? err.message : "Invalid metrics")
+    // Checked before the destructive deleteMany, so a rejected edit leaves the
+    // model's existing metrics intact.
+    const issues = findMetricConfigIssues(metricDefs, effectiveFormulaType)
+    if (issues.length > 0) {
+      return fail(issues[0].message)
     }
 
     await prisma.scoringModelMetric.deleteMany({ where: { scoringModelId } })
@@ -456,7 +463,7 @@ export async function getOpportunityScore({ opportunityId }: { opportunityId: st
     return fail(`No score found for opportunity "${opportunityId}".`)
   }
 
-  const stale = score.modelVersion < score.scoringModel.version
+  const stale = isScoreStale(score.modelVersion, score.scoringModel.version)
   const lines = [
     `**Score for opportunity ${opportunityId}**`,
     `Model: ${score.scoringModel.name} (scored at v${score.modelVersion}, live v${score.scoringModel.version})`,

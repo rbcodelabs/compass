@@ -29,6 +29,15 @@ function registeredMigrations(): string[] {
   return [...src.matchAll(/name:\s*"([^"]+)"/g)].map((m) => m[1]);
 }
 
+it("preserves independently deployed PM and main migrations sharing numeric prefixes", () => {
+  const names = registeredMigrations()
+  for (const name of ["050_pm_interviews", "050_experiment_not_pursued", "051_pm_agent_handoff", "051_decision_task_bridge"]) {
+    expect(names.filter(item => item === name)).toHaveLength(1)
+    expect(existsSync(path.join(MIGRATIONS_DIR, name, "migration.sql"))).toBe(true)
+  }
+  expect(names.indexOf("050_pm_interviews")).toBeLessThan(names.indexOf("051_pm_agent_handoff"))
+})
+
 /** Migration directories on disk that contain a migration.sql. */
 function migrationDirsOnDisk(): string[] {
   return readdirSync(MIGRATIONS_DIR, { withFileTypes: true })
@@ -91,6 +100,27 @@ describe("Aurora DSQL DDL constraints", () => {
       .map((s) => s.trim().replace(/\s+/g, " ").slice(0, 90));
     // DSQL's CREATE INDEX grammar has no sort direction — only NULLS FIRST|LAST.
     expect(offending).toEqual([]);
+  });
+});
+
+describe("PM interview migration (050)", () => {
+  const sql = sqlFor("050_pm_interviews");
+  const runner = readFileSync(ROUTE, "utf-8");
+
+  it("is registered with additive, retry-safe DDL", () => {
+    expect(registered).toContain("050_pm_interviews");
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS description TEXT");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS pm_interviews");
+    expect(sql.match(/CREATE (?:UNIQUE )?INDEX ASYNC IF NOT EXISTS/g)).toHaveLength(6);
+  });
+
+  it("can resume after a timed-out async index wait and verifies the full catalog before receipt", () => {
+    expect(runner).toContain('["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff"].includes(migration.name)');
+    expect(runner).toContain("to_regclass(format('%I.pm_interviews', $1::text))")
+    expect(runner).toContain('if (migration.name === "050_pm_interviews") await assertPmInterviewPostconditions(client, schema)');
+    expect(runner.indexOf('if (migration.name === "050_pm_interviews") await assertPmInterviewPostconditions')).toBeLessThan(
+      runner.indexOf('UPDATE "${schema}"._prisma_migrations SET finished_at = CURRENT_TIMESTAMP'),
+    );
   });
 });
 

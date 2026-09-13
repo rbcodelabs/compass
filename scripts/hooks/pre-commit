@@ -1,0 +1,58 @@
+#!/bin/sh
+#
+# Compass pre-commit hook — scans staged changes for secrets with gitleaks.
+#
+# Enable with:  pnpm hooks:install
+# Disable with: pnpm hooks:uninstall
+#
+# This is a convenience gate that gives you the answer in under a second,
+# before a secret ever reaches the remote. It is NOT the authoritative check:
+# .github/workflows/secret-scan.yml scans full history on every PR, and GitHub
+# push protection backstops both. If gitleaks isn't installed locally we warn
+# and let the commit through rather than blocking contributors who haven't
+# installed it.
+
+set -e
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  printf '\033[33m[pre-commit]\033[0m gitleaks not installed — skipping local secret scan.\n' >&2
+  printf '             Install it with: brew install gitleaks\n' >&2
+  printf '             (CI still scans this branch on every PR.)\n' >&2
+  exit 0
+fi
+
+repo_root=$(git rev-parse --show-toplevel)
+
+if gitleaks git "$repo_root" \
+  --staged \
+  --config "$repo_root/.gitleaks.toml" \
+  --redact \
+  --no-banner \
+  --log-level error \
+  --exit-code 1; then
+  exit 0
+fi
+
+cat >&2 <<'EOF'
+
+────────────────────────────────────────────────────────────────────────
+  COMMIT BLOCKED — gitleaks found a possible secret in your staged changes.
+  (Values above are redacted; rerun without --redact locally to inspect.)
+
+  If it IS a real secret:
+    1. Remove it from the code and commit again.
+    2. Rotate the credential — assume it is burned.
+    3. Do NOT just amend it away if you already pushed; the value stays in
+       history. Say so and get help rewriting history.
+
+  If it is a FALSE POSITIVE, pick the narrowest fix:
+    - Add a `gitleaks:allow` trailing comment on that specific line, or
+    - Add a scoped allowlist to .gitleaks.toml, matching the exact value or
+      line shape — never a blanket path or a disabled rule.
+
+  To bypass in an emergency (CI will still catch it):
+      git commit --no-verify
+────────────────────────────────────────────────────────────────────────
+
+EOF
+exit 1

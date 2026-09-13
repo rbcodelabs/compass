@@ -15,7 +15,7 @@ vi.mock("@/auth", () => ({ auth: () => mockAuth() }))
 
 const mockPrisma = {
   workspace: { findFirst: vi.fn() },
-  agentConversation: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+  agentConversation: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   agentMessage: { create: vi.fn(), findMany: vi.fn() },
   agentAuditLog: { createMany: vi.fn() },
   workspaceCapabilityPack: { findMany: vi.fn() },
@@ -59,6 +59,7 @@ beforeEach(() => {
   process.env.ANTHROPIC_API_KEY = "sk-ant-test"
   mockAuth.mockResolvedValue(SESSION)
   mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+  mockPrisma.agentConversation.findFirst.mockResolvedValue(null)
   mockPrisma.workspaceCapabilityPack.findMany.mockResolvedValue([])
   mockGetGoldenSnapshotId.mockResolvedValue("snap_abc")
   mockCheckLimit.mockResolvedValue({ allowed: true })
@@ -68,6 +69,41 @@ beforeEach(() => {
 })
 
 describe("agent turn route — guards", () => {
+  it.each(["usage", "snapshot"])("makes a pending handoff retryable when the %s prerequisite throws", async cause => {
+    const error = new Error("prerequisite lookup failed")
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ id: "c-1", interviewProcessingJson: JSON.stringify({ status: "PENDING", interviewId: "interview" }) })
+    mockPrisma.agentConversation.updateMany.mockResolvedValue({ count: 1 })
+    if (cause === "usage") mockCheckLimit.mockRejectedValueOnce(error)
+    else mockGetGoldenSnapshotId.mockRejectedValueOnce(error)
+    await expect(POST(req({ workspaceId: "ws-1", conversationId: "c-1", message: "Finish interview" }))).rejects.toBe(error)
+    expect(mockPrisma.agentConversation.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "c-1", userId: "user-1", workspaceId: "ws-1" }) }))
+    expect(JSON.parse(mockPrisma.agentConversation.updateMany.mock.calls[0][0].data.interviewProcessingJson).status).toBe("FAILED")
+    expect(mockMintKey).not.toHaveBeenCalled()
+  })
+  it.each(["usage", "runtime"])("persists pending interview %s preflight failure so retry is explicit", async cause => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ id: "c-1", interviewProcessingJson: JSON.stringify({ status: "PENDING", interviewId: "interview" }) })
+    mockPrisma.agentConversation.updateMany.mockResolvedValue({ count: 1 })
+    if (cause === "usage") mockCheckLimit.mockResolvedValue({ allowed: false, reason: "limit" })
+    else mockGetGoldenSnapshotId.mockResolvedValue(null)
+    const response = await POST(req({ workspaceId: "ws-1", conversationId: "c-1", message: "Finish interview" }))
+    expect(response.status).toBe(cause === "usage" ? 429 : 503)
+    const data = mockPrisma.agentConversation.updateMany.mock.calls[0][0].data
+    expect(JSON.parse(data.interviewProcessingJson).status).toBe("FAILED")
+    expect(mockMintKey).not.toHaveBeenCalled()
+  })
+  it("loads the latest bounded history and excludes the current message by identity", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", name: "Test", slug: "test", organization: { slug: "org" } })
+    mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+    mockPrisma.agentMessage.create.mockResolvedValue({ id: "current-message" })
+    mockPrisma.agentMessage.findMany.mockResolvedValue([{ role: "assistant", content: "latest prior answer" }, { role: "user", content: "earlier question" }])
+    const runCommand = vi.fn().mockResolvedValue({ async *logs() { yield { stream: "stdout", data: 'AGENT_ERROR {"message":"test stop"}\n' } }, wait: vi.fn() })
+    mockBootSandbox.mockResolvedValue({ writeFiles: vi.fn(), runCommand, stop: vi.fn() })
+    await (await POST(req({ workspaceId: "ws-1", message: "unique current input" }))).text()
+    expect(mockPrisma.agentMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { conversationId: "c-1", id: { not: "current-message" } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 20 }))
+    const prompt = runCommand.mock.calls[0][0].env.AGENT_PROMPT as string
+    expect(prompt.match(/unique current input/g)).toHaveLength(1)
+    expect(prompt.indexOf("earlier question")).toBeLessThan(prompt.indexOf("latest prior answer"))
+  })
   it("runs without dedicated pack storage when no packs are active", async () => {
     const actual = await vi.importActual<typeof import("@/lib/capability-pack-runtime")>("@/lib/capability-pack-runtime")
     mockPreparePacks.mockImplementation(actual.prepareCapabilityPacksForTurn)
@@ -222,15 +258,16 @@ describe("agent turn route — guards", () => {
       expect(prompt).toContain("Context you're starting from")
     })
 
-    it("ignores seedContext when conversationId is present on the request body", async () => {
+    it.each([false, true])("ignores seedContext for an existing conversation (PM handoff: %s)", async pmHandoff => {
       const runCommand = setupHappyRun()
-      mockPrisma.agentConversation.findFirst.mockResolvedValue({ id: "c-1" })
+      mockPrisma.agentConversation.findFirst.mockResolvedValue({ id: "c-1", ...(pmHandoff ? { interviewProcessingJson: JSON.stringify({ status: "SUCCEEDED", interviewId: "interview", receipt: { changedFields: [], targetUrl: "/item" } }) } : {}) })
       mockResolveAgentHandoffContext.mockResolvedValue(HANDOFF)
 
       const res = await POST(req({
         workspaceId: "ws-1",
         message: "hi",
         conversationId: "c-1",
+        ...(pmHandoff ? { continue: true } : {}),
         seedContext: { entityType: "solutionPlan", entityId: "plan-1" },
       }))
       await res.text()

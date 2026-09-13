@@ -32,13 +32,26 @@ export function WorkspaceScoringPanel({
   currentScoringModelId,
 }: Props) {
   const [selected, setSelected] = useState(currentScoringModelId ?? NONE_VALUE);
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function handleChange(value: string | null) {
     const next = value ?? NONE_VALUE;
+    const previous = selected;
     setSelected(next);
+    setError(null);
     startTransition(async () => {
-      await setActiveScoringModel(orgSlug, workspaceSlug, next === NONE_VALUE ? null : next);
+      const result = await setActiveScoringModel(
+        orgSlug,
+        workspaceSlug,
+        next === NONE_VALUE ? null : next
+      );
+      // The select is updated optimistically above; roll it back rather than
+      // leaving the UI claiming a model is active when the write was refused.
+      if (!result.ok) {
+        setSelected(previous);
+        setError(result.error);
+      }
     });
   }
 
@@ -77,6 +90,7 @@ export function WorkspaceScoringPanel({
           ))}
         </SelectContent>
       </Select>
+      {error && <p className="text-xs text-destructive">{error}</p>}
       <p className="text-xs text-muted-foreground">
         Opportunities in this workspace will show a Scoring tab using the selected model&apos;s
         metrics.

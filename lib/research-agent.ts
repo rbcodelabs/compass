@@ -4,11 +4,12 @@ import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { Sandbox } from "@vercel/sandbox"
 import { analysisStep, assertAnalysisDeadline } from "@/lib/research-analysis-deadline"
+import { researchFailureDiagnostic } from "@/lib/research-failure-diagnostics"
 
 async function stopBoundedSandbox(sandbox: Sandbox) {
   const controller = new AbortController()
   try { await analysisStep(() => sandbox.stop({ signal: controller.signal }), Date.now() + 5_000, controller) }
-  catch { console.error("Research guide sandbox cleanup failed") }
+  catch (error) { console.error("Research guide sandbox cleanup failed", researchFailureDiagnostic(error)) }
 }
 
 export class ResearchAgentUnavailableError extends Error {
@@ -40,17 +41,20 @@ export async function runResearchInterviewAgent({
 }): Promise<string> {
   const controller = new AbortController()
   const step = <T>(start: () => Promise<T>) => deadline === undefined ? start() : analysisStep(start, deadline, controller)
-  const snapshotId = await step(getGoldenSnapshotId)
-  if (!snapshotId) {
-    throw new ResearchAgentUnavailableError("Agent runtime is not initialized")
-  }
-  const anthropicApiKey = process.env.ANTHROPIC_API_KEY
-  if (!anthropicApiKey) {
-    throw new ResearchAgentUnavailableError("ANTHROPIC_API_KEY is not configured")
-  }
-
+  let stage = "runtime_configuration"
+  let exitCode: number | undefined
   let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>> | undefined
   try {
+    const snapshotId = await step(getGoldenSnapshotId)
+    if (!snapshotId) {
+      throw new ResearchAgentUnavailableError("Agent runtime is not initialized")
+    }
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY
+    if (!anthropicApiKey) {
+      throw new ResearchAgentUnavailableError("ANTHROPIC_API_KEY is not configured")
+    }
+
+    stage = "sandbox_create"
     sandbox = deadline === undefined ? await bootSandboxFromSnapshot(snapshotId) : await analysisStep(() => Sandbox.create({ source: { type: "snapshot", snapshotId }, timeout: Math.max(1, deadline - Date.now()), signal: controller.signal }), deadline, controller, stopBoundedSandbox)
     const active = sandbox
     if (attachments.length > 3 || attachments.reduce((sum, item) => sum + item.bytes.byteLength, 0) > 15 * 1024 * 1024) {
@@ -65,10 +69,12 @@ export async function runResearchInterviewAgent({
         data: Buffer.from(attachment.bytes).toString("base64"),
       })),
     }
+    stage = "sandbox_upload"
     await step(() => active.writeFiles([
       { path: "entry.ts", content: readEntryScript() },
       { path: "prompt.json", content: JSON.stringify(payload) },
     ], deadline === undefined ? undefined : { signal: controller.signal }))
+    stage = "sandbox_dispatch"
     const run = await step(() => active.runCommand({
       cmd: "node",
       args: ["entry.ts"],
@@ -93,6 +99,7 @@ export async function runResearchInterviewAgent({
         yield next.value
       }
     }
+    stage = "provider_stream"
     for await (const log of deadline === undefined ? logs : boundedLogs()) {
       if (log.stream !== "stdout") continue
       buffer += log.data
@@ -120,12 +127,17 @@ export async function runResearchInterviewAgent({
       if (buffer.length > 64 * 1024) throw new Error("Research agent frame exceeded its limit")
     }
 
+    stage = "provider_result"
     const result = await step(() => run.wait(deadline === undefined ? undefined : { signal: controller.signal }))
+    if (Number.isInteger(result.exitCode)) exitCode = result.exitCode
     if (result.exitCode !== 0 || !responseText?.trim()) {
       throw new Error(agentError || `Research agent exited with code ${result.exitCode}`)
     }
     if (deadline !== undefined) assertAnalysisDeadline(deadline)
     return responseText.trim()
+  } catch (error) {
+    console.error("Research agent failed", { stage, ...researchFailureDiagnostic(error), ...(exitCode === undefined ? {} : { exitCode }) })
+    throw error
   } finally {
     controller.abort()
     if (sandbox) {

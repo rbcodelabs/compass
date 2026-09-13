@@ -4,7 +4,7 @@
  * Mirrors the updateAssumption pattern in lib/assumption-tool-handlers.ts.
  */
 
-import getPrisma from "@/lib/db"
+import { getToolPrisma as getPrisma, getToolExpectedWhere } from "@/lib/mcp-tool-db"
 import { ok, fail } from "@/lib/mcp-output"
 
 // ── update_solution ──────────────────────────────────────────────────────────
@@ -13,16 +13,18 @@ export async function updateSolution({
   solutionId,
   title,
   description,
+  expectedUpdatedAt,
 }: {
   solutionId: string
   title?: string
   description?: string
+  expectedUpdatedAt?: string
 }) {
   const prisma = getPrisma()
 
   const existing = await prisma.solution.findUnique({
     where: { id: solutionId },
-    select: { id: true, title: true, description: true },
+    select: { id: true, title: true, description: true, updatedAt: true },
   })
   if (!existing) {
     return fail(`Solution "${solutionId}" not found.`)
@@ -34,14 +36,14 @@ export async function updateSolution({
 
   // Build update payload imperatively to satisfy Prisma's union type constraints
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const updateData: Record<string, any> = { updatedAt: new Date() }
+  const updateData: Record<string, any> = { updatedAt: new Date(Math.max(Date.now(), (existing.updatedAt?.getTime() ?? 0) + 1)) }
   if (title !== undefined) updateData.title = title.trim()
   // Empty string is a valid "clear the description" value — only `undefined`
   // means "not provided", so don't special-case "" here.
   if (description !== undefined) updateData.description = description.trim()
 
   const updated = await prisma.solution.update({
-    where: { id: solutionId },
+    where: { id: solutionId, ...(expectedUpdatedAt ? { updatedAt: new Date(expectedUpdatedAt) } : {}), ...getToolExpectedWhere() },
     data: updateData,
   })
 
