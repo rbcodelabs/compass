@@ -9,22 +9,25 @@ vi.mock("next/navigation", () => ({ usePathname: () => pathname }))
 
 import { HelpAnchorScroll } from "@/components/help-anchor-scroll"
 
-describe("HelpAnchorScroll", () => {
-  const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
-  let scrollIntoView: ReturnType<typeof vi.fn>
+const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
 
+describe("HelpAnchorScroll", () => {
   beforeEach(() => {
     pathname = "/help/04-roadmap"
     document.body.innerHTML = ""
     window.location.hash = ""
-    scrollIntoView = vi.fn()
-    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    // Matches the established stub pattern in workspace-search-palette.test.tsx —
+    // assigning a bare `vi.fn()` here (rather than a separately-typed variable)
+    // lets TS contextually infer a signature matching the DOM lib's declaration.
+    HTMLElement.prototype.scrollIntoView = vi.fn()
   })
 
   afterEach(() => {
     cleanup()
     HTMLElement.prototype.scrollIntoView = originalScrollIntoView
   })
+
+  const scrollIntoView = () => vi.mocked(HTMLElement.prototype.scrollIntoView)
 
   it("scrolls the hash target into view on mount when a hash is present", () => {
     const target = document.createElement("div")
@@ -34,13 +37,13 @@ describe("HelpAnchorScroll", () => {
 
     render(<HelpAnchorScroll />)
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" })
+    expect(scrollIntoView()).toHaveBeenCalledWith({ block: "start" })
   })
 
   it("does nothing when there is no hash", () => {
     render(<HelpAnchorScroll />)
 
-    expect(scrollIntoView).not.toHaveBeenCalled()
+    expect(scrollIntoView()).not.toHaveBeenCalled()
   })
 
   it("does nothing when the hash matches no element in the document", () => {
@@ -48,7 +51,7 @@ describe("HelpAnchorScroll", () => {
 
     render(<HelpAnchorScroll />)
 
-    expect(scrollIntoView).not.toHaveBeenCalled()
+    expect(scrollIntoView()).not.toHaveBeenCalled()
   })
 
   it("re-scrolls after a client-side route change lands on a different doc with a different hash", () => {
@@ -62,7 +65,7 @@ describe("HelpAnchorScroll", () => {
     window.location.hash = "#section-a"
 
     const { rerender } = render(<HelpAnchorScroll />)
-    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(scrollIntoView()).toHaveBeenCalledTimes(1)
 
     const second = document.createElement("div")
     second.id = "section-b"
@@ -72,8 +75,8 @@ describe("HelpAnchorScroll", () => {
 
     rerender(<HelpAnchorScroll />)
 
-    expect(scrollIntoView).toHaveBeenCalledTimes(2)
-    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "start" })
+    expect(scrollIntoView()).toHaveBeenCalledTimes(2)
+    expect(scrollIntoView()).toHaveBeenLastCalledWith({ block: "start" })
   })
 
   it("re-scrolls once a still-loading doc image finishes and shifts layout", () => {
@@ -90,10 +93,10 @@ describe("HelpAnchorScroll", () => {
     document.body.appendChild(wrapper)
 
     render(<HelpAnchorScroll />)
-    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(scrollIntoView()).toHaveBeenCalledTimes(1)
 
     img.dispatchEvent(new Event("load"))
 
-    expect(scrollIntoView).toHaveBeenCalledTimes(2)
+    expect(scrollIntoView()).toHaveBeenCalledTimes(2)
   })
 })
