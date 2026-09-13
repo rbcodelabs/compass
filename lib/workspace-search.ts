@@ -1,4 +1,5 @@
 import getPrisma from "@/lib/db"
+import { searchHelp } from "@/lib/docs"
 
 export const WORKSPACE_SEARCH_GROUPS = [
   { type: "opportunity", label: "Opportunities" },
@@ -8,6 +9,7 @@ export const WORKSPACE_SEARCH_GROUPS = [
   { type: "task", label: "Tasks" },
   { type: "feedback", label: "Feedback" },
   { type: "doc", label: "Docs" },
+  { type: "help", label: "Help" },
 ] as const
 
 export type WorkspaceSearchType = (typeof WORKSPACE_SEARCH_GROUPS)[number]["type"]
@@ -73,6 +75,8 @@ export async function searchWorkspace(input: {
       prisma.doc.findMany({ ...queryOptions, where: directWhere, select: { id: true, title: true, docType: true } }),
     ])
 
+  const helpResults = searchHelp(input.query, 5)
+
   const base = `/${encodeURIComponent(input.orgSlug)}/${encodeURIComponent(input.workspaceSlug)}`
   const detailHref = (path: string, type: string, id: string) =>
     `${base}/${path}?detail=${encodeURIComponent(`${type}:${id}`)}`
@@ -87,6 +91,17 @@ export async function searchWorkspace(input: {
       { type: "task", label: "Tasks", items: tasks.map((item) => ({ type: "task", id: item.id, title: item.title, context: context(item.status, item.priority), href: `${base}/tasks/${item.id}` })) },
       { type: "feedback", label: "Feedback", items: feedback.map((item) => ({ type: "feedback", id: item.id, title: item.title, context: context(item.type, item.status), href: detailHref("feedback", "feedback", item.id) })) },
       { type: "doc", label: "Docs", items: docs.map((item) => ({ type: "doc", id: item.id, title: item.title, context: item.docType, href: `${base}/docs/${item.id}` })) },
+      {
+        type: "help",
+        label: "Help",
+        items: helpResults.map((item) => ({
+          type: "help",
+          id: `${item.slug}:${item.anchor ?? "root"}`,
+          title: item.title,
+          context: context(item.heading ?? item.section),
+          href: `/help/${item.slug}${item.anchor ? "#" + item.anchor : ""}`,
+        })),
+      },
     ],
   }
 }

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getAllDocs, getDoc } from "@/lib/docs";
 import type { Metadata } from "next";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { HelpAnchorScroll } from "@/components/help-anchor-scroll";
 
 export const dynamic = "force-static";
 
@@ -41,6 +42,7 @@ export default async function HelpSlugPage({
 
   return (
     <article>
+      <HelpAnchorScroll />
       <div
         className="docs-content"
         dangerouslySetInnerHTML={{ __html: doc.html }}

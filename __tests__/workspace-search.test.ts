@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/lib/db", () => ({ default: vi.fn() }))
+vi.mock("@/lib/docs", () => ({ searchHelp: vi.fn().mockReturnValue([]) }))
 
 import getPrisma from "@/lib/db"
+import { searchHelp } from "@/lib/docs"
 import {
   normalizeWorkspaceSearchQuery,
   searchWorkspace,
@@ -59,6 +61,7 @@ describe("workspace search", () => {
         orderBy: [{ title: "asc" }, { id: "asc" }],
       }))
     }
+    expect(searchHelp).toHaveBeenCalledWith("plan", 5)
   })
 
   it("returns display-safe grouped results in fixed order with canonical destinations", async () => {
@@ -71,6 +74,17 @@ describe("workspace search", () => {
     prisma.feedbackItem.findMany.mockResolvedValue([{ id: "feed-1", title: "Plan request", status: "OPEN", type: "IDEA" }])
     prisma.doc.findMany.mockResolvedValue([{ id: "doc-1", title: "Plan notes", docType: "STANDARD" }])
     vi.mocked(getPrisma).mockReturnValue(prisma as never)
+    vi.mocked(searchHelp).mockReturnValue([
+      {
+        slug: "04-roadmap",
+        title: "Roadmap",
+        section: "Delivery",
+        heading: "Not Yet on the Roadmap",
+        anchor: "not-yet-on-the-roadmap",
+        excerpt: "...",
+        score: 8,
+      },
+    ])
 
     const result = await searchWorkspace({
       workspaceId: "workspace-1",
@@ -80,7 +94,7 @@ describe("workspace search", () => {
     })
 
     expect(result.groups.map((group) => group.type)).toEqual([
-      "opportunity", "solution", "experiment", "roadmapItem", "task", "feedback", "doc",
+      "opportunity", "solution", "experiment", "roadmapItem", "task", "feedback", "doc", "help",
     ])
     expect(result.groups.flatMap((group) => group.items)).toEqual([
       { type: "opportunity", id: "opp-1", title: "Plan onboarding", context: "ACTIVE", href: "/Acme%20Org/Product%2FOne/discovery/opp-1" },
@@ -90,6 +104,35 @@ describe("workspace search", () => {
       { type: "task", id: "task-1", title: "Plan QA", context: "TODO · HIGH", href: "/Acme%20Org/Product%2FOne/tasks/task-1" },
       { type: "feedback", id: "feed-1", title: "Plan request", context: "IDEA · OPEN", href: "/Acme%20Org/Product%2FOne/feedback?detail=feedback%3Afeed-1" },
       { type: "doc", id: "doc-1", title: "Plan notes", context: "STANDARD", href: "/Acme%20Org/Product%2FOne/docs/doc-1" },
+      { type: "help", id: "04-roadmap:not-yet-on-the-roadmap", title: "Roadmap", context: "Not Yet on the Roadmap", href: "/help/04-roadmap#not-yet-on-the-roadmap" },
+    ])
+  })
+
+  it("falls back to section and omits the anchor for whole-doc help matches", async () => {
+    const prisma = prismaMock()
+    vi.mocked(getPrisma).mockReturnValue(prisma as never)
+    vi.mocked(searchHelp).mockReturnValue([
+      {
+        slug: "01-getting-started",
+        title: "Getting Started",
+        section: "Basics",
+        heading: null,
+        anchor: null,
+        excerpt: "...",
+        score: 3,
+      },
+    ])
+
+    const result = await searchWorkspace({
+      workspaceId: "workspace-1",
+      orgSlug: "Acme Org",
+      workspaceSlug: "Product/One",
+      query: "plan",
+    })
+
+    const helpGroup = result.groups.find((group) => group.type === "help")
+    expect(helpGroup?.items).toEqual([
+      { type: "help", id: "01-getting-started:root", title: "Getting Started", context: "Basics", href: "/help/01-getting-started" },
     ])
   })
 })

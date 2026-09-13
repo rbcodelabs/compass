@@ -168,4 +168,38 @@ describe("WorkspaceSearchPalette", () => {
     expect(screen.getByText("No results for “missing”")).toBeInTheDocument()
     expect(input).toHaveAttribute("aria-expanded", "true")
   })
+
+  it("renders a Help group and navigates to its href on Enter", async () => {
+    const resultsWithHelp = {
+      query: "plan",
+      groups: [
+        { type: "opportunity", label: "Opportunities", items: [
+          { type: "opportunity", id: "opp-1", title: "Plan onboarding", context: "ACTIVE", href: "/acme/product/discovery/opp-1" },
+        ] },
+        { type: "task", label: "Tasks", items: [
+          { type: "task", id: "task-1", title: "Plan QA", context: "TODO · HIGH", href: "/acme/product/tasks/task-1" },
+        ] },
+        { type: "help", label: "Help", items: [
+          { type: "help", id: "04-roadmap:not-yet-on-the-roadmap", title: "Roadmap", context: "Not Yet on the Roadmap", href: "/help/04-roadmap#not-yet-on-the-roadmap" },
+        ] },
+      ],
+    }
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => resultsWithHelp } as Response)
+    renderPalette()
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true })
+    const input = screen.getByRole("combobox", { name: "Search workspace" })
+    fireEvent.change(input, { target: { value: "plan" } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+
+    expect(screen.getByRole("group", { name: "Help" })).toBeInTheDocument()
+    const helpOption = screen.getByRole("option", { name: /Roadmap/ })
+    expect(helpOption).toHaveAttribute("href", "/help/04-roadmap#not-yet-on-the-roadmap")
+
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(helpOption).toHaveAttribute("aria-selected", "true")
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(push).toHaveBeenCalledWith("/help/04-roadmap#not-yet-on-the-roadmap")
+  })
 })
