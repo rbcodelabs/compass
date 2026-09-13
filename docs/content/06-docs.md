@@ -52,6 +52,7 @@ Docs uses a Tiptap-powered rich-text editor. Supported formatting includes:
 - **Links** — Select text and click the link button to add a URL
 - **Horizontal rules** — Type `---` on a blank line
 - **Blockquotes** — Start a line with `>`
+- **Tables** — GitHub-flavored Markdown pipe tables (`| a | b |` with a `| --- | --- |` separator row). Column alignment (`:---`, `:---:`, `---:`) is preserved, and a literal `|` inside a cell must be escaped as `\|`. Wide tables scroll horizontally within the page rather than stretching the layout. There are currently no toolbar controls for inserting or editing tables — write them as Markdown, or paste Markdown in.
 
 ## Decisions in the toolbar
 
