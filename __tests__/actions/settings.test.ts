@@ -1327,24 +1327,32 @@ describe("setActiveScoringModel", () => {
     expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalled();
   });
 
-  it("throws Unauthorized when session is missing", async () => {
+  // Permission outcomes are returned as values, not thrown: a thrown Server
+  // Action error loses its message to Next's production mask before the client
+  // can read it. See app/[orgSlug]/settings/actions.ts.
+  it("returns a clean error when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
-    await expect(setActiveScoringModel("org", "ws", "model-1")).rejects.toThrow("Unauthorized");
+    await expect(setActiveScoringModel("org", "ws", "model-1")).resolves.toEqual({
+      ok: false,
+      error: "You are not signed in.",
+    });
     expect(mockWorkspaceScoringConfig.upsert).not.toHaveBeenCalled();
   });
 
-  it("throws Workspace not found when caller is not a member", async () => {
+  it("returns Workspace not found when caller is not a member", async () => {
     mockWorkspace.findFirst.mockResolvedValue(null);
-    await expect(setActiveScoringModel("org", "ws", "model-1")).rejects.toThrow(
-      "Workspace not found"
-    );
+    await expect(setActiveScoringModel("org", "ws", "model-1")).resolves.toEqual({
+      ok: false,
+      error: "Workspace not found",
+    });
   });
 
-  it("throws Forbidden when caller is a workspace MEMBER, not admin", async () => {
+  it("returns Forbidden when caller is a workspace MEMBER, not admin", async () => {
     mockAdminWorkspace("MEMBER");
-    await expect(setActiveScoringModel("org", "ws", "model-1")).rejects.toThrow(
-      "Forbidden: workspace admin required"
-    );
+    await expect(setActiveScoringModel("org", "ws", "model-1")).resolves.toEqual({
+      ok: false,
+      error: "Forbidden: workspace admin required",
+    });
     expect(mockWorkspaceScoringConfig.upsert).not.toHaveBeenCalled();
   });
 });

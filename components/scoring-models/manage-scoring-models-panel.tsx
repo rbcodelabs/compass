@@ -21,6 +21,12 @@ import {
   archiveScoringModel,
   type ScoringMetricInput,
 } from "@/app/[orgSlug]/settings/actions";
+import {
+  defaultMinValueForFormula,
+  findMetricConfigIssues,
+  rebaseMinValuesForFormula,
+  type MetricConfigIssue,
+} from "@/lib/scoring";
 import type { ScoringModelData, ScoringFormulaType, MetricDirection } from "@/lib/types";
 
 const FORMULA_TYPE_LABELS: Record<ScoringFormulaType, string> = {
@@ -33,14 +39,23 @@ const DIRECTION_LABELS: Record<MetricDirection, string> = {
   NEGATIVE: "Negative",
 };
 
-function emptyMetric(): ScoringMetricInput {
+function emptyMetric(formulaType: ScoringFormulaType): ScoringMetricInput {
   return {
     key: "",
     label: "",
-    minValue: 0,
+    minValue: defaultMinValueForFormula(formulaType),
     maxValue: 10,
     weight: 1,
     direction: "POSITIVE",
+  };
+}
+
+/** Indexes the issues for a single metric row by the field they belong to. */
+function issuesForRow(issues: MetricConfigIssue[], index: number) {
+  const row = issues.filter((issue) => issue.index === index);
+  return {
+    key: row.find((issue) => issue.field === "key")?.message,
+    minValue: row.find((issue) => issue.field === "minValue")?.message,
   };
 }
 
@@ -52,14 +67,17 @@ function MetricRow({
   onChange,
   onRemove,
   keyEditable,
+  issues,
 }: {
   rowId: string;
   metric: ScoringMetricInput;
   onChange: (m: ScoringMetricInput) => void;
   onRemove: () => void;
   keyEditable: boolean;
+  issues: { key?: string; minValue?: string };
 }) {
   return (
+    <div className="flex flex-col gap-1">
     <div className="grid grid-cols-[1fr_1fr_5rem_5rem_5rem_7rem_auto] gap-2 items-end">
       <div className="flex flex-col gap-1">
         <Label htmlFor={`${rowId}-key`} className="text-[11px] text-muted-foreground">
@@ -71,6 +89,8 @@ function MetricRow({
           value={metric.key}
           disabled={!keyEditable}
           placeholder="reach"
+          aria-invalid={issues.key ? true : undefined}
+          aria-describedby={issues.key ? `${rowId}-key-error` : undefined}
           onChange={(e) =>
             onChange({ ...metric, key: e.target.value.trim().toLowerCase().replace(/\s+/g, "_") })
           }
@@ -97,6 +117,8 @@ function MetricRow({
           className="h-7 text-xs"
           type="number"
           value={metric.minValue}
+          aria-invalid={issues.minValue ? true : undefined}
+          aria-describedby={issues.minValue ? `${rowId}-min-error` : undefined}
           onChange={(e) => onChange({ ...metric, minValue: parseFloat(e.target.value) || 0 })}
         />
       </div>
@@ -156,6 +178,21 @@ function MetricRow({
         <TrashIcon className="size-3.5" />
       </button>
     </div>
+    {(issues.key || issues.minValue) && (
+      <div className="flex flex-col gap-0.5">
+        {issues.key && (
+          <p id={`${rowId}-key-error`} className="text-[11px] text-destructive">
+            {issues.key}
+          </p>
+        )}
+        {issues.minValue && (
+          <p id={`${rowId}-min-error`} className="text-[11px] text-destructive">
+            {issues.minValue}
+          </p>
+        )}
+      </div>
+    )}
+    </div>
   );
 }
 
@@ -164,11 +201,15 @@ function MetricsBuilder({
   metrics,
   setMetrics,
   keysEditable,
+  formulaType,
+  issues,
 }: {
   idPrefix: string;
   metrics: ScoringMetricInput[];
   setMetrics: (m: ScoringMetricInput[]) => void;
   keysEditable: boolean;
+  formulaType: ScoringFormulaType;
+  issues: MetricConfigIssue[];
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -178,13 +219,14 @@ function MetricsBuilder({
           rowId={`${idPrefix}-metric-${i}`}
           metric={metric}
           keyEditable={keysEditable}
+          issues={issuesForRow(issues, i)}
           onChange={(m) => setMetrics(metrics.map((existing, idx) => (idx === i ? m : existing)))}
           onRemove={() => setMetrics(metrics.filter((_, idx) => idx !== i))}
         />
       ))}
       <button
         type="button"
-        onClick={() => setMetrics([...metrics, emptyMetric()])}
+        onClick={() => setMetrics([...metrics, emptyMetric(formulaType)])}
         className="flex items-center gap-1.5 w-fit rounded-lg border border-dashed border-border/60 py-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors"
       >
         <PlusIcon className="w-3 h-3" />
@@ -207,15 +249,25 @@ function AddScoringModelForm({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [formulaType, setFormulaType] = useState<ScoringFormulaType>("WEIGHTED_SUM");
-  const [metrics, setMetrics] = useState<ScoringMetricInput[]>([emptyMetric()]);
+  const [metrics, setMetrics] = useState<ScoringMetricInput[]>([emptyMetric("WEIGHTED_SUM")]);
   const [error, setError] = useState<string | null>(null);
+  const [issues, setIssues] = useState<MetricConfigIssue[]>([]);
   const [isPending, startTransition] = useTransition();
 
   function reset() {
     setName("");
     setDescription("");
     setFormulaType("WEIGHTED_SUM");
-    setMetrics([emptyMetric()]);
+    setMetrics([emptyMetric("WEIGHTED_SUM")]);
+    setError(null);
+    setIssues([]);
+  }
+
+  function handleFormulaTypeChange(next: ScoringFormulaType) {
+    setFormulaType(next);
+    setMetrics((current) => rebaseMinValuesForFormula(current, next));
+    // Stale issues were computed against the previous formula.
+    setIssues([]);
     setError(null);
   }
 
@@ -223,31 +275,50 @@ function AddScoringModelForm({
     e.preventDefault();
     if (!name.trim()) return;
     setError(null);
+    setIssues([]);
+
+    const submittedMetrics = metrics.filter((m) => m.key && m.label);
+
+    // Pre-flight with the same pure validator the action uses, so the common
+    // mistakes never round-trip and each one can be shown at its own field.
+    // This is convenience, not a trust boundary — the action re-checks.
+    const localIssues = findMetricConfigIssues(submittedMetrics, formulaType);
+    if (localIssues.length > 0) {
+      setIssues(localIssues);
+      setError(localIssues[0].message);
+      return;
+    }
 
     startTransition(async () => {
-      try {
-        const model = await createScoringModel(orgSlug, {
-          name: name.trim(),
-          description: description.trim() || undefined,
-          formulaType,
-          metrics: metrics.filter((m) => m.key && m.label),
-        });
-        onAdded({
-          id: model.id,
-          name: name.trim(),
-          description: description.trim() || null,
-          status: "ACTIVE",
-          formulaType,
-          version: 1,
-          metrics: metrics
-            .filter((m) => m.key && m.label)
-            .map((m, i) => ({ id: `${model.id}-${i}`, ...m, description: m.description ?? null, order: i })),
-        });
-        setOpen(false);
-        reset();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to create scoring model");
+      const result = await createScoringModel(orgSlug, {
+        name: name.trim(),
+        description: description.trim() || undefined,
+        formulaType,
+        metrics: submittedMetrics,
+      });
+
+      if (!result.ok) {
+        setError(result.error);
+        setIssues(result.issues ?? []);
+        return;
       }
+
+      onAdded({
+        id: result.model.id,
+        name: name.trim(),
+        description: description.trim() || null,
+        status: "ACTIVE",
+        formulaType,
+        version: result.model.version,
+        metrics: submittedMetrics.map((m, i) => ({
+          id: `${result.model.id}-${i}`,
+          ...m,
+          description: m.description ?? null,
+          order: i,
+        })),
+      });
+      setOpen(false);
+      reset();
     });
   }
 
@@ -287,7 +358,7 @@ function AddScoringModelForm({
           <Label htmlFor="scoring-model-formula">Formula Type</Label>
           <Select
             value={formulaType}
-            onValueChange={(v) => setFormulaType(v as ScoringFormulaType)}
+            onValueChange={(v) => handleFormulaTypeChange(v as ScoringFormulaType)}
             disabled={isPending}
             items={FORMULA_TYPE_LABELS}
           >
@@ -326,7 +397,14 @@ function AddScoringModelForm({
 
       <div className="flex flex-col gap-1.5">
         <Label>Metrics</Label>
-        <MetricsBuilder idPrefix="create" metrics={metrics} setMetrics={setMetrics} keysEditable />
+        <MetricsBuilder
+          idPrefix="create"
+          metrics={metrics}
+          setMetrics={setMetrics}
+          keysEditable
+          formulaType={formulaType}
+          issues={issues}
+        />
       </div>
 
       {error && <p className="text-xs text-destructive">{error}</p>}
@@ -381,6 +459,7 @@ function ScoringModelRow({
     }))
   );
   const [error, setError] = useState<string | null>(null);
+  const [issues, setIssues] = useState<MetricConfigIssue[]>([]);
   const [isPending, startTransition] = useTransition();
 
   const metricsChanged =
@@ -399,44 +478,69 @@ function ScoringModelRow({
       );
   const detailsChanged = name !== model.name || description !== (model.description ?? "");
 
+  function handleFormulaTypeChange(next: ScoringFormulaType) {
+    setFormulaType(next);
+    setMetrics((current) => rebaseMinValuesForFormula(current, next));
+    setIssues([]);
+    setError(null);
+  }
+
   function handleSaveDetails() {
     setError(null);
     startTransition(async () => {
-      try {
-        await updateScoringModelDetails(orgSlug, model.id, {
-          name: name.trim(),
-          description: description.trim() || undefined,
-        });
-        onUpdated({ ...model, name: name.trim(), description: description.trim() || null });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to update details");
+      const result = await updateScoringModelDetails(orgSlug, model.id, {
+        name: name.trim(),
+        description: description.trim() || undefined,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
       }
+      onUpdated({ ...model, name: name.trim(), description: description.trim() || null });
     });
   }
 
   function handleSaveMetrics() {
     setError(null);
+    setIssues([]);
+
+    const localIssues = findMetricConfigIssues(metrics, formulaType);
+    if (localIssues.length > 0) {
+      setIssues(localIssues);
+      setError(localIssues[0].message);
+      return;
+    }
+
     startTransition(async () => {
-      try {
-        await updateScoringModelMetrics(orgSlug, model.id, {
-          formulaType,
-          metrics,
-        });
-        onUpdated({
-          ...model,
-          formulaType,
-          version: model.version + 1,
-          metrics: metrics.map((m, i) => ({ id: `${model.id}-${i}`, ...m, description: m.description ?? null, order: i })),
-        });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to update metrics");
+      const result = await updateScoringModelMetrics(orgSlug, model.id, {
+        formulaType,
+        metrics,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        setIssues(result.issues ?? []);
+        return;
       }
+      onUpdated({
+        ...model,
+        formulaType,
+        version: model.version + 1,
+        metrics: metrics.map((m, i) => ({ id: `${model.id}-${i}`, ...m, description: m.description ?? null, order: i })),
+      });
     });
   }
 
   function handleArchive() {
+    setError(null);
     startTransition(async () => {
-      await archiveScoringModel(orgSlug, model.id);
+      // Previously uncaught: a failure here became an unhandled rejection and
+      // the row still optimistically flipped to ARCHIVED.
+      const result = await archiveScoringModel(orgSlug, model.id);
+      if (!result.ok) {
+        setError(result.error);
+        setExpanded(true);
+        return;
+      }
       onArchived();
     });
   }
@@ -501,7 +605,7 @@ function ScoringModelRow({
               <Label htmlFor={`edit-formula-${model.id}`}>Formula Type</Label>
               <Select
                 value={formulaType}
-                onValueChange={(v) => setFormulaType(v as ScoringFormulaType)}
+                onValueChange={(v) => handleFormulaTypeChange(v as ScoringFormulaType)}
                 disabled={isPending}
                 items={FORMULA_TYPE_LABELS}
               >
@@ -544,6 +648,8 @@ function ScoringModelRow({
               metrics={metrics}
               setMetrics={setMetrics}
               keysEditable={false}
+              formulaType={formulaType}
+              issues={issues}
             />
           </div>
 

@@ -115,3 +115,106 @@ test.describe("Scoring Models", () => {
     }
   );
 });
+
+/**
+ * Error-path journeys for the create form.
+ *
+ * These exist because the failures below used to surface as Next's opaque
+ * "An error occurred in the Server Components render." — the actions threw,
+ * and a thrown Server Action error loses its message in a production build.
+ * The actions now return `{ ok: false, error, issues }`, and the form
+ * pre-validates with the same pure rules, so each failure names what is wrong
+ * and where.
+ *
+ * Note these assertions pass in `next dev` too, but the bug they guard only
+ * ever manifested in a production build — dev forwards the real message.
+ */
+test.describe("Scoring Models — invalid input", () => {
+  test("MULTIPLICATIVE with a zero minimum reports the specific reason and creates nothing", async ({
+    page,
+    orgSlug,
+  }) => {
+    const modelName = `E2E Invalid Min ${Date.now()}`;
+
+    await page.goto(`/${orgSlug}/settings`);
+    await page.waitForLoadState("networkidle");
+
+    await page.getByRole("button", { name: "Add scoring model" }).click();
+    await page.getByLabel("Name").fill(modelName);
+
+    await page.getByRole("combobox", { name: "Formula Type" }).click();
+    await page.getByRole("option", { name: /Multiplicative/ }).click();
+
+    await page.locator("#create-metric-0-key").fill("reach");
+    await page.locator("#create-metric-0-label").fill("Reach");
+    await page.locator("#create-metric-0-min").fill("0");
+
+    await page.getByRole("button", { name: "Create Scoring Model" }).click();
+
+    // The real message, not the production mask.
+    await expect(page.locator("#create-metric-0-min-error")).toContainText(
+      /minValue greater than 0/,
+      { timeout: 10_000 }
+    );
+    await expect(page.getByText(/An error occurred in the Server Components render/)).toHaveCount(0);
+    // Surfaced at the offending field, not only as a banner.
+    await expect(page.locator("#create-metric-0-min")).toHaveAttribute("aria-invalid", "true");
+
+    // Nothing was persisted — no orphan model row.
+    await page.reload();
+    await page.waitForLoadState("load");
+    await expect(page.getByText(modelName)).toHaveCount(0);
+  });
+
+  test("duplicate metric keys name the offending key and create nothing", async ({
+    page,
+    orgSlug,
+  }) => {
+    const modelName = `E2E Duplicate Key ${Date.now()}`;
+
+    await page.goto(`/${orgSlug}/settings`);
+    await page.waitForLoadState("networkidle");
+
+    await page.getByRole("button", { name: "Add scoring model" }).click();
+    await page.getByLabel("Name").fill(modelName);
+
+    await page.locator("#create-metric-0-key").fill("reach");
+    await page.locator("#create-metric-0-label").fill("Reach");
+
+    await page.getByRole("button", { name: "Add metric" }).click();
+    await page.locator("#create-metric-1-key").fill("reach");
+    await page.locator("#create-metric-1-label").fill("Reach Again");
+
+    await page.getByRole("button", { name: "Create Scoring Model" }).click();
+
+    await expect(page.locator("#create-metric-1-key-error")).toContainText('"reach"', {
+      timeout: 10_000,
+    });
+    await expect(page.getByText(/An error occurred in the Server Components render/)).toHaveCount(0);
+    await expect(page.locator("#create-metric-1-key")).toHaveAttribute("aria-invalid", "true");
+
+    // Previously this reached the DB: the parent model row was written and
+    // only then did createMany trip the unique index, leaving a model with
+    // zero metrics behind.
+    await page.reload();
+    await page.waitForLoadState("load");
+    await expect(page.getByText(modelName)).toHaveCount(0);
+  });
+
+  test("selecting MULTIPLICATIVE raises an untouched zero minimum to 1", async ({
+    page,
+    orgSlug,
+  }) => {
+    await page.goto(`/${orgSlug}/settings`);
+    await page.waitForLoadState("networkidle");
+
+    await page.getByRole("button", { name: "Add scoring model" }).click();
+    await expect(page.locator("#create-metric-0-min")).toHaveValue("0");
+
+    await page.getByRole("combobox", { name: "Formula Type" }).click();
+    await page.getByRole("option", { name: /Multiplicative/ }).click();
+
+    // A default of 0 is invalid for this formula, so the form stops offering it.
+    await expect(page.locator("#create-metric-0-min")).toHaveValue("1");
+  });
+});

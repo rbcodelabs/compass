@@ -260,30 +260,38 @@ beforeEach(() => {
 });
 
 describe("deleteOrganization", () => {
-  it("rejects Unauthorized when not signed in", async () => {
+  it("returns a clean Unauthorized result when not signed in", async () => {
     mockAuth.mockResolvedValue(null as never);
-    await expect(deleteOrganization("acme", ORG_NAME)).rejects.toThrow("Unauthorized");
+    await expect(deleteOrganization("acme", ORG_NAME)).resolves.toEqual({
+      ok: false,
+      error: "You are not signed in.",
+    });
     expect(mockOrganization.delete).not.toHaveBeenCalled();
   });
 
-  it("rejects Organization not found when caller is not an org member", async () => {
+  it("returns a clean result when caller is not an org member", async () => {
     mockOrganizationMember.findFirst.mockResolvedValue(null);
-    await expect(deleteOrganization("acme", ORG_NAME)).rejects.toThrow("Organization not found");
+    await expect(deleteOrganization("acme", ORG_NAME)).resolves.toEqual({
+      ok: false,
+      error: "Organization not found",
+    });
     expect(mockOrganization.delete).not.toHaveBeenCalled();
   });
 
   it("rejects Forbidden when caller is a MEMBER, not an org admin", async () => {
     mockOrganizationMember.findFirst.mockResolvedValue({ role: "MEMBER", organizationId: "org-1" });
-    await expect(deleteOrganization("acme", ORG_NAME)).rejects.toThrow(
-      "Forbidden: organization admin required"
-    );
+    await expect(deleteOrganization("acme", ORG_NAME)).resolves.toEqual({
+      ok: false,
+      error: "Forbidden: organization admin required",
+    });
     expect(mockOrganization.delete).not.toHaveBeenCalled();
   });
 
-  it("rejects and deletes nothing when the confirmation name does not match", async () => {
-    await expect(deleteOrganization("acme", "Wrong Name")).rejects.toThrow(
-      "Confirmation text does not match"
-    );
+  it("returns a result and deletes nothing when the confirmation name does not match", async () => {
+    await expect(deleteOrganization("acme", "Wrong Name")).resolves.toEqual({
+      ok: false,
+      error: "Confirmation text does not match",
+    });
     // No destructive call of any kind should have fired.
     expect(mockWorkspace.delete).not.toHaveBeenCalled();
     expect(mockOrganization.delete).not.toHaveBeenCalled();
@@ -296,13 +304,13 @@ describe("deleteOrganization", () => {
     mockOrganizationMember.findFirst.mockResolvedValue({ role: "ADMIN", organizationId: "org-1" });
     const result = await deleteOrganization("acme", ORG_NAME);
 
-    expect(result).toEqual({ redirectTo: "/dashboard" });
+    expect(result).toEqual({ ok: true, redirectTo: "/dashboard" });
     expect(mockOrganization.delete).toHaveBeenCalledWith({ where: { id: "org-1" } });
   });
 
   it("trims surrounding whitespace on the confirmation name", async () => {
     const result = await deleteOrganization("acme", `  ${ORG_NAME}  `);
-    expect(result).toEqual({ redirectTo: "/dashboard" });
+    expect(result).toEqual({ ok: true, redirectTo: "/dashboard" });
     expect(mockOrganization.delete).toHaveBeenCalled();
   });
 
@@ -439,6 +447,6 @@ describe("deleteOrganization", () => {
     // ── Revalidation + return ──
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
-    expect(result).toEqual({ redirectTo: "/dashboard" });
+    expect(result).toEqual({ ok: true, redirectTo: "/dashboard" });
   });
 });
