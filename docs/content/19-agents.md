@@ -25,8 +25,13 @@ The same key works in every workspace where the agent has an active grant and
 you remain a member. Adding or removing a workspace grant does not require a new
 key. An agent can be registered and assigned tasks before you generate a key.
 
-Existing personal API keys remain personal credentials. Generate an agent key
-when you want authenticated agent attribution.
+Existing personal API keys remain personal credentials — they carry your full
+access across every workspace you belong to, administrative permissions included.
+An agent key is deliberately narrower: it reaches only granted workspaces, cannot
+administer anything, and can be revoked without disturbing your own access. Prefer
+an agent key whenever an AI assistant is doing the calling, and reserve your
+personal key for work you operate yourself. See
+[Identity and Access](/help/21-identity-and-access) for the full comparison.
 
 ![Account-wide agent settings](/screenshots/docs/agents-desktop.png)
 
