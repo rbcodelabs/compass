@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
@@ -38,6 +38,24 @@ const opportunities: DiscoveryTableOpportunity[] = [
 ];
 
 describe("DiscoveryTableView", () => {
+  // The grid reads `matchMedia` through `useIsMobile`; jsdom does not ship one.
+  beforeEach(() => {
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    });
+  });
+
   afterEach(() => {
     cleanup();
     openPanel.mockReset();
@@ -80,19 +98,93 @@ describe("DiscoveryTableView", () => {
     expect(openPanel).toHaveBeenNthCalledWith(2, "solution", "sol-1");
   });
 
+  it("renders one row per visible opportunity, plus its solutions once expanded", () => {
+    render(<DiscoveryTableView opportunities={opportunities} />);
+
+    const titles = () =>
+      screen
+        .getAllByTestId("grid-row")
+        .map((row) => row.querySelector('[data-col="item"] button:last-of-type')?.textContent);
+
+    expect(titles()).toEqual(["Understand onboarding friction", "Improve reporting"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Understand onboarding friction" }));
+
+    // Children are spliced in directly after their parent, not appended.
+    expect(titles()).toEqual([
+      "Understand onboarding friction",
+      "Guided setup",
+      "Retired wizard",
+      "Improve reporting",
+    ]);
+
+    // A solution row is visually distinguished from its parent.
+    const solutionRow = screen.getByText("Guided setup").closest("tr");
+    expect(solutionRow?.className).toMatch(/bg-surface-inset/);
+  });
+
+  // `table.FlexRender` unmounts and remounts a cell's entire subtree whenever
+  // the column definition's identity changes. Expansion state therefore has to
+  // ride on the row data, not on a closure captured by the column — otherwise
+  // toggling a row destroys and recreates the very button the user activated,
+  // and keyboard focus jumps to the document body mid-interaction.
+  it("keeps focus on the disclosure button across a toggle", () => {
+    render(<DiscoveryTableView opportunities={opportunities} />);
+
+    const expand = screen.getByRole("button", { name: "Expand Understand onboarding friction" });
+    expand.focus();
+    expect(document.activeElement).toBe(expand);
+
+    fireEvent.click(expand);
+
+    // Same DOM node, updated in place — not a replacement.
+    expect(screen.getByRole("button", { name: "Collapse Understand onboarding friction" })).toBe(expand);
+    expect(document.activeElement).toBe(expand);
+  });
+
+  it("gives the table an accessible name via its caption", () => {
+    render(<DiscoveryTableView opportunities={opportunities} />);
+    // e2e/functional/specs/discovery-table.spec.ts locates the table by this
+    // exact name. A <caption> is the accname for role=table.
+    expect(screen.getByRole("table", { name: "Discovery opportunities" })).toBeInTheDocument();
+  });
+
   // Regression: the wrapper around the table used a bare, unbounded div, so
   // inside WorkspacePage's `md:overflow-hidden` content area it inherited
   // clipping instead of scrolling — rows and the table's own horizontal
   // scrollbar past the fold were unreachable ("the table doesn't scroll"
-  // bug). The wrapper must be the scroll viewport itself: bounded height
+  // bug). This view must own a real scroll viewport: bounded height
   // (`min-h-0 flex-1`) and `overflow-y-auto`, never a bare `overflow-hidden`.
-  it("makes its own wrapper the scroll viewport instead of clipping overflow", () => {
+  //
+  // The viewport has since moved OFF the page-level wrapper this view used to
+  // render and ONTO the grid's own `table-container`, because that div is
+  // already a scroll container (`overflow-x: auto` computes `overflow-y` to
+  // `auto`) and is therefore where a sticky `<th>` resolves. A wrapper outside
+  // it would scroll the header away with the rows.
+  it("makes the grid's own table-container the scroll viewport", () => {
+    const { container } = render(<DiscoveryTableView opportunities={opportunities} />);
+
+    const scrollContainer = container.querySelector('[data-slot="table-container"]');
+    expect(scrollContainer).not.toBeNull();
+    expect(scrollContainer!.className).not.toMatch(/(?:^|\s)overflow-hidden(?:\s|$)/);
+    expect(scrollContainer!.className).toMatch(/(?:^|\s)overflow-y-auto(?:\s|$)/);
+    expect(scrollContainer!.className).toMatch(/(?:^|\s)min-h-0(?:\s|$)/);
+    expect(scrollContainer!.className).toMatch(/(?:^|\s)flex-1(?:\s|$)/);
+    // The horizontal axis is untouched — the mobile E2E asserts it directly.
+    expect(scrollContainer!.className).toMatch(/(?:^|\s)overflow-x-auto(?:\s|$)/);
+  });
+
+  // The other half of the same invariant: rows scrolling past the header are
+  // only useful if the header stays put and stays opaque.
+  it("sticks the header row to the top of the viewport", () => {
     render(<DiscoveryTableView opportunities={opportunities} />);
 
-    const scrollContainer = screen.getByTestId("discovery-table-scroll");
-    expect(scrollContainer.className).not.toMatch(/(?:^|\s)overflow-hidden(?:\s|$)/);
-    expect(scrollContainer.className).toMatch(/(?:^|\s)overflow-y-auto(?:\s|$)/);
-    expect(scrollContainer.className).toMatch(/(?:^|\s)min-h-0(?:\s|$)/);
-    expect(scrollContainer.className).toMatch(/(?:^|\s)flex-1(?:\s|$)/);
+    const heads = screen.getAllByRole("columnheader");
+    expect(heads).toHaveLength(6);
+    for (const head of heads) {
+      expect(head.className).toMatch(/(?:^|\s)sticky(?:\s|$)/);
+      expect(head.className).toMatch(/(?:^|\s)top-0(?:\s|$)/);
+      expect(head.className).toMatch(/(?:^|\s)bg-surface-panel(?:\s|$)/);
+    }
   });
 });

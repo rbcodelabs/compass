@@ -30,7 +30,16 @@ export function SubtasksPanel({
   return (
     <div className="flex flex-col gap-3">
       {subtasks.length > 0 && (
-        <TaskListView tasks={subtasks} orgSlug={orgSlug} workspaceSlug={workspaceSlug} members={members} />
+        /* `natural`, not `fill`: this panel sits in a normally-scrolling
+           column, where a `flex-1 min-h-0` grid would have no height to claim. */
+        <TaskListView
+          tasks={subtasks}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          members={members}
+          height="natural"
+          gridId="task-subtasks"
+        />
       )}
       <AddSubtaskForm
         members={members}

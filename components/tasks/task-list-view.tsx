@@ -1,9 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { CalendarDays } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DataGrid, type GridColumnDef } from "@/components/data-grid";
 import { TaskLinksBadge } from "./task-links-badge";
 import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
 import { TASK_PRIORITY_LABELS, TASK_STATUS_LABELS } from "@/lib/task-meta";
@@ -15,8 +16,41 @@ type Props = {
   orgSlug: string;
   workspaceSlug: string;
   members: MemberData[];
+  /**
+   * `"fill"` for the full-page list view, which lives inside `WorkspacePage`'s
+   * `md:overflow-hidden` content area and must own its own scrolling.
+   * `"natural"` for the subtasks panel, which sits in a normally-scrolling
+   * column where a `flex-1` child would be inert at best.
+   */
+  height?: "fill" | "natural";
+  /**
+   * Namespace for persisted column preferences. The two call sites get their
+   * own so they cannot silently share column state if the column menu is ever
+   * turned on for one of them.
+   */
+  gridId?: string;
 };
 
+/**
+ * One flattened row: a task, the hierarchy depth it renders at, and its
+ * resolved assignee label.
+ *
+ * The assignee is resolved here rather than inside the cell renderer so the
+ * column definitions never have to close over `members`. `table.FlexRender`
+ * unmounts and remounts a cell's whole subtree whenever the column
+ * definition's identity changes (verified directly against 9.1.2), and
+ * `members` arrives as a fresh array on every server render — closing over it
+ * would tear down and rebuild every cell in the table on each one.
+ */
+type TaskGridRow = {
+  rowKey: string;
+  depth: number;
+  task: TaskCardData;
+  assignee: ReturnType<typeof taskAssigneeDisplay>;
+};
+
+// Deliberately distinct from the formatter in `task-card.tsx`, which omits the
+// year — a dense card and a wide table row want different amounts of date.
 function formatDueDate(iso: string | null): string | null {
   if (!iso) return null;
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(iso));
@@ -54,87 +88,155 @@ function flattenByHierarchy(tasks: TaskCardData[]): { task: TaskCardData; depth:
   return result;
 }
 
-export function TaskListView({ tasks, orgSlug, workspaceSlug, members }: Props) {
-  const rows = flattenByHierarchy(tasks);
+export function TaskListView({
+  tasks,
+  orgSlug,
+  workspaceSlug,
+  members,
+  height = "fill",
+  gridId = "task-list",
+}: Props) {
+  const rows = useMemo<TaskGridRow[]>(
+    () =>
+      flattenByHierarchy(tasks).map(({ task, depth }) => ({
+        rowKey: task.id,
+        depth,
+        task,
+        assignee: taskAssigneeDisplay(task, members),
+      })),
+    [tasks, members],
+  );
 
+  // Column definitions stay in this file rather than a sibling `*-columns`
+  // module: `scripts/check-ui-colors.mjs` keys its baseline on `file::class`,
+  // so moving markup into a new file starts it at a baseline of zero.
+  //
+  // Every column except Title carries an explicit width. Under `table-fixed`
+  // those are authoritative and Title absorbs whatever remains, which is the
+  // same shape the Feedback grid uses.
+  const columns = useMemo<GridColumnDef<TaskGridRow>[]>(
+    () => [
+      {
+        id: "title",
+        header: "Title",
+        // `hideable: false` pins Title first and keeps it out of the column
+        // menu — a row with no title is not a useful view.
+        meta: { label: "Title", hideable: false },
+        cell: ({ row }) => {
+          const { task, depth } = row.original;
+          return (
+            // Indentation lives on an inner div rather than the `<td>`: the
+            // grid's TableCell takes a className, never a style, and encoding
+            // depth in the cell's own padding fights its base padding.
+            <div
+              data-depth={depth}
+              className="truncate"
+              style={{ paddingLeft: `${depth * 20}px` }}
+            >
+              <Link
+                href={`/${orgSlug}/${workspaceSlug}/tasks/${task.id}`}
+                className="font-medium hover:underline underline-offset-2"
+              >
+                {task.title}
+              </Link>
+            </div>
+          );
+        },
+      },
+      {
+        id: "assignee",
+        header: "Assignee",
+        meta: { label: "Assignee", width: "9rem", cellClassName: "text-muted-foreground" },
+        cell: ({ row }) => {
+          const { assignee } = row.original;
+          return (
+            <span className={assignee.assigned ? undefined : UNASSIGNED_ASSIGNEE_CLASS}>
+              {assignee.label}
+            </span>
+          );
+        },
+      },
+      {
+        id: "squad",
+        header: "Squad",
+        meta: { label: "Squad", width: "8rem" },
+        cell: ({ row }) => {
+          const { squad } = row.original.task;
+          if (!squad) return <span className="text-muted-foreground">—</span>;
+          return (
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: squad.color }} />
+              <span className="truncate">{squad.name}</span>
+            </span>
+          );
+        },
+      },
+      {
+        id: "priority",
+        header: "Priority",
+        meta: { label: "Priority", width: "7rem" },
+        cell: ({ row }) => <Badge variant="outline">{TASK_PRIORITY_LABELS[row.original.task.priority]}</Badge>,
+      },
+      {
+        id: "status",
+        header: "Status",
+        meta: { label: "Status", width: "7rem" },
+        cell: ({ row }) => <Badge variant="secondary">{TASK_STATUS_LABELS[row.original.task.status]}</Badge>,
+      },
+      {
+        id: "due",
+        header: "Due",
+        meta: { label: "Due", width: "8rem", cellClassName: "text-muted-foreground" },
+        cell: ({ row }) => {
+          const { dueDate } = row.original.task;
+          if (!dueDate) return "—";
+          return (
+            <span className="flex items-center gap-1">
+              <CalendarDays className="size-3 shrink-0" />
+              {formatDueDate(dueDate)}
+            </span>
+          );
+        },
+      },
+      {
+        id: "points",
+        header: "Points",
+        meta: { label: "Points", width: "5rem", cellClassName: "text-muted-foreground" },
+        cell: ({ row }) => row.original.task.storyPoints ?? "—",
+      },
+      {
+        id: "links",
+        header: "Links",
+        meta: { label: "Links", width: "6rem" },
+        cell: ({ row }) => <TaskLinksBadge count={row.original.task.links.length} />,
+      },
+    ],
+    // Both are plain strings, so the column definitions are referentially
+    // stable for the lifetime of a workspace view and cells update in place.
+    [orgSlug, workspaceSlug],
+  );
+
+  // The "nothing at all" case stays an early return rather than the grid's
+  // `emptyState`, which would nest a message inside the grid's own chrome.
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground py-8 text-center">No tasks match the current filters.</p>;
   }
 
   return (
-    // `min-h-0` + `overflow-y-auto` (not `overflow-hidden`) make this div the
-    // actual scroll viewport inside `WorkspacePage`'s `md:overflow-hidden`
-    // content area — see the matching fix/comment in discovery-table-view.tsx.
-    // `overflow-hidden` here silently clipped rows and the table's own
-    // horizontal scrollbar past the fold with no way to reach them.
-    <div
-      data-testid="task-list-scroll"
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded-xl border border-border"
-    >
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-muted/40 text-xs text-muted-foreground hover:bg-muted/40">
-            <TableHead className="px-3 py-2">Title</TableHead>
-            <TableHead className="px-3 py-2">Assignee</TableHead>
-            <TableHead className="px-3 py-2">Squad</TableHead>
-            <TableHead className="px-3 py-2">Priority</TableHead>
-            <TableHead className="px-3 py-2">Status</TableHead>
-            <TableHead className="px-3 py-2">Due</TableHead>
-            <TableHead className="px-3 py-2">Points</TableHead>
-            <TableHead className="px-3 py-2">Links</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map(({ task, depth }) => {
-            const assignee = taskAssigneeDisplay(task, members);
-            return (
-              <TableRow key={task.id} className="hover:bg-muted/30">
-                <TableCell className="px-3 py-2" style={{ paddingLeft: `${12 + depth * 20}px` }}>
-                  <Link
-                    href={`/${orgSlug}/${workspaceSlug}/tasks/${task.id}`}
-                    className="font-medium hover:underline underline-offset-2"
-                  >
-                    {task.title}
-                  </Link>
-                </TableCell>
-                <TableCell className="px-3 py-2 text-muted-foreground">
-                  <span className={assignee.assigned ? undefined : UNASSIGNED_ASSIGNEE_CLASS}>{assignee.label}</span>
-                </TableCell>
-                <TableCell className="px-3 py-2">
-                  {task.squad ? (
-                    <span className="flex items-center gap-1.5 text-muted-foreground">
-                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: task.squad.color }} />
-                      {task.squad.name}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </TableCell>
-                <TableCell className="px-3 py-2">
-                  <Badge variant="outline">{TASK_PRIORITY_LABELS[task.priority]}</Badge>
-                </TableCell>
-                <TableCell className="px-3 py-2">
-                  <Badge variant="secondary">{TASK_STATUS_LABELS[task.status]}</Badge>
-                </TableCell>
-                <TableCell className="px-3 py-2 text-muted-foreground">
-                  {task.dueDate ? (
-                    <span className="flex items-center gap-1">
-                      <CalendarDays className="size-3 shrink-0" />
-                      {formatDueDate(task.dueDate)}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </TableCell>
-                <TableCell className="px-3 py-2 text-muted-foreground">{task.storyPoints ?? "—"}</TableCell>
-                <TableCell className="px-3 py-2">
-                  <TaskLinksBadge count={task.links.length} />
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
+    // Panel chrome lives on the grid root, not on a scrolling wrapper: the
+    // scroll viewport is the grid's own `table-container`, so the border stays
+    // put while rows and the sticky header move inside it.
+    <DataGrid<TaskGridRow>
+      gridId={gridId}
+      columns={columns}
+      rows={rows}
+      getRowId={(row) => row.rowKey}
+      caption="Tasks"
+      height={height}
+      maxHeight={height === "natural" ? "24rem" : undefined}
+      pagination={false}
+      toolbar={false}
+      className="overflow-hidden rounded-xl border border-border bg-surface-panel"
+    />
   );
 }
