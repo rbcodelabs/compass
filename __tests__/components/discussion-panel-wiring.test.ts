@@ -10,8 +10,12 @@ const panels = [
 
 describe("entity panel discussion wiring", () => {
   it("connects Task detail to its own TASK discussion", () => {
-    const source = readFileSync(new URL("../../app/[orgSlug]/[workspaceSlug]/tasks/[taskId]/page.tsx", import.meta.url), "utf8")
-    expect(source).toContain('<Discussion targetType="TASK" targetId={task.id} />')
+    // TaskDetail is the shared "one component, two mount points" body (the
+    // panel sidebar and the standalone page both render it) — same place
+    // every other entity type wires up its Discussion, not the page route.
+    const source = readFileSync(new URL("../../components/tasks/task-detail.tsx", import.meta.url), "utf8")
+    expect(source).toContain('import { Discussion } from "@/components/comments/discussion"')
+    expect(source).toContain('<Discussion targetType="TASK" targetId={taskId} />')
   })
 
   it.each(panels)("wires %s to %s", (filename, targetType) => {

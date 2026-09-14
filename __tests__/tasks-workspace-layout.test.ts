@@ -6,11 +6,11 @@ const root = process.cwd();
 const source = (path: string) => readFileSync(join(root, path), "utf8");
 
 describe("Tasks dashboard workspace layout", () => {
-  it("keeps long assignee labels inside the edit dialog and wraps menu choices", () => {
-    const dialog = source("components/tasks/edit-task-dialog.tsx");
+  it("keeps long assignee labels inside the inline field and wraps menu choices", () => {
+    const field = source("components/tasks/inline-assignee-field.tsx");
     const picker = source("components/tasks/task-assignee-picker.tsx");
 
-    expect(dialog).toContain('className="flex min-w-0 flex-col gap-4"');
+    expect(field).toContain('className="flex min-w-0 flex-col gap-1.5"');
     expect(picker).toContain('className="flex min-w-0 flex-col gap-1"');
     expect(picker).toContain('className="w-full min-w-0 [&>[data-slot=combobox-value]]:block"');
     expect(picker).toContain('className="min-w-0 truncate"');

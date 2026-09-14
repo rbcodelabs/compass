@@ -1,9 +1,10 @@
 "use client";
 
-import Link from "next/link";
+import { useEffect, useState } from "react";
 import { CalendarDays } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { usePanelContext } from "@/components/panels/panel-context";
 import { TaskLinksBadge } from "./task-links-badge";
 import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
 import { TASK_PRIORITY_LABELS, TASK_STATUS_LABELS } from "@/lib/task-meta";
@@ -54,7 +55,26 @@ function flattenByHierarchy(tasks: TaskCardData[]): { task: TaskCardData; depth:
   return result;
 }
 
-export function TaskListView({ tasks, orgSlug, workspaceSlug, members }: Props) {
+export function TaskListView({ tasks: initialTasks, members }: Props) {
+  const { openPanel, subscribeEntityMutated } = usePanelContext();
+  const [tasks, setTasks] = useState(initialTasks);
+
+  // Re-sync when the server hands down a fresh list (e.g. a filter change).
+  useEffect(() => {
+    setTasks(initialTasks);
+  }, [initialTasks]);
+
+  // The panel (PanelShell) is a layout sibling of this list, not a child, so
+  // an edit made there reaches this table's own local state via the
+  // notify/subscribe escape hatch — same pattern TaskBoard.handleUpdate uses.
+  useEffect(() => {
+    return subscribeEntityMutated("task", (_id, patch) => {
+      const updated = patch?.task;
+      if (!updated) return;
+      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    });
+  }, [subscribeEntityMutated]);
+
   const rows = flattenByHierarchy(tasks);
 
   if (rows.length === 0) {
@@ -90,12 +110,13 @@ export function TaskListView({ tasks, orgSlug, workspaceSlug, members }: Props) 
             return (
               <TableRow key={task.id} className="hover:bg-muted/30">
                 <TableCell className="px-3 py-2" style={{ paddingLeft: `${12 + depth * 20}px` }}>
-                  <Link
-                    href={`/${orgSlug}/${workspaceSlug}/tasks/${task.id}`}
-                    className="font-medium hover:underline underline-offset-2"
+                  <button
+                    type="button"
+                    onClick={() => openPanel("task", task.id)}
+                    className="text-left font-medium hover:underline underline-offset-2"
                   >
                     {task.title}
-                  </Link>
+                  </button>
                 </TableCell>
                 <TableCell className="px-3 py-2 text-muted-foreground">
                   <span className={assignee.assigned ? undefined : UNASSIGNED_ASSIGNEE_CLASS}>{assignee.label}</span>

@@ -36,6 +36,28 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
   )
 }
 
+// Side-specific position/size defaults, keyed by the actual `side` prop
+// rather than a `data-[side=x]:` attribute-selector variant. Those variants
+// compile to an attribute-selector-qualified rule (e.g. `&[data-side=right]`),
+// which carries higher CSS specificity than a plain utility class. Since
+// `data-side` is always set on this element, that higher-specificity default
+// always won the cascade even when a caller passed an overriding className
+// (e.g. panel-shell.tsx's `w-full sm:max-w-md`) — `cn()`/tailwind-merge can't
+// dedupe them either, because `data-[side=right]:w-3/4` and a bare `w-full`
+// carry different modifier chains and are treated as non-conflicting, so both
+// stayed in the output and the higher-specificity one painted. Computing the
+// side classes in JS keeps them plain utilities (no attribute selector), so
+// they merge and get overridden by a trailing `className` exactly like any
+// other shadcn/ui variant.
+const sheetSideClasses: Record<"top" | "right" | "bottom" | "left", string> = {
+  top: "inset-x-0 top-0 h-auto border-b data-ending-style:translate-y-[-2.5rem] data-starting-style:translate-y-[-2.5rem]",
+  right:
+    "inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm data-ending-style:translate-x-[2.5rem] data-starting-style:translate-x-[2.5rem]",
+  bottom:
+    "inset-x-0 bottom-0 h-auto border-t data-ending-style:translate-y-[2.5rem] data-starting-style:translate-y-[2.5rem]",
+  left: "inset-y-0 left-0 h-full w-3/4 border-r sm:max-w-sm data-ending-style:translate-x-[-2.5rem] data-starting-style:translate-x-[-2.5rem]",
+}
+
 function SheetContent({
   className,
   children,
@@ -53,7 +75,8 @@ function SheetContent({
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          "fixed z-50 flex flex-col gap-4 bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition duration-200 ease-in-out data-ending-style:opacity-0 data-starting-style:opacity-0 data-[side=bottom]:inset-x-0 data-[side=bottom]:bottom-0 data-[side=bottom]:h-auto data-[side=bottom]:border-t data-[side=bottom]:data-ending-style:translate-y-[2.5rem] data-[side=bottom]:data-starting-style:translate-y-[2.5rem] data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:h-full data-[side=left]:w-3/4 data-[side=left]:border-r data-[side=left]:data-ending-style:translate-x-[-2.5rem] data-[side=left]:data-starting-style:translate-x-[-2.5rem] data-[side=right]:inset-y-0 data-[side=right]:right-0 data-[side=right]:h-full data-[side=right]:w-3/4 data-[side=right]:border-l data-[side=right]:data-ending-style:translate-x-[2.5rem] data-[side=right]:data-starting-style:translate-x-[2.5rem] data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:h-auto data-[side=top]:border-b data-[side=top]:data-ending-style:translate-y-[-2.5rem] data-[side=top]:data-starting-style:translate-y-[-2.5rem] data-[side=left]:sm:max-w-sm data-[side=right]:sm:max-w-sm",
+          "fixed z-50 flex flex-col gap-4 bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition duration-200 ease-in-out data-ending-style:opacity-0 data-starting-style:opacity-0",
+          sheetSideClasses[side],
           className
         )}
         {...props}

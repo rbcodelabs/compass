@@ -31,7 +31,6 @@ type Props = {
   members: MemberData[];
   onTaskAdded: (task: TaskCardData) => void;
   onCancel: (taskId: string) => void;
-  onUpdate: (task: TaskCardData) => void;
 };
 
 export function TaskColumn({
@@ -44,7 +43,6 @@ export function TaskColumn({
   members,
   onTaskAdded,
   onCancel,
-  onUpdate,
 }: Props) {
   const { label, emptyText } = STATUS_CONFIG[status];
   const accent = ({ BACKLOG: "neutral", TODO: "info", IN_PROGRESS: "info", BLOCKED: "danger", IN_REVIEW: "warning", DONE: "success", CANCELLED: "neutral" } as const)[status];
@@ -67,7 +65,6 @@ export function TaskColumn({
                 workspaceSlug={workspaceSlug}
                 members={members}
                 onCancel={onCancel}
-                onUpdate={onUpdate}
               />
             ))
           )}

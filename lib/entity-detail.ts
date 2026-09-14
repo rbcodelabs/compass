@@ -40,6 +40,7 @@ export const ENTITY_TYPES = [
   "experiment",
   "roadmapItem",
   "feedback",
+  "task",
 ] as const;
 
 export type EntityType = (typeof ENTITY_TYPES)[number];
@@ -68,6 +69,7 @@ export function entityScopeWhere(type: EntityType, id: string, workspaceId: stri
     case "experiment":
     case "roadmapItem":
     case "feedback":
+    case "task":
       return { id, workspaceId };
   }
 }
@@ -361,6 +363,162 @@ function fetchFeedback(id: string, workspaceId: string) {
   });
 }
 
+// The candidate pools for TaskDetail's "link to another item" picker — same
+// shape LinkTaskDialog's `LinkableTargets` already consumes.
+const LINK_TARGET_MODEL = {
+  OPPORTUNITY: "opportunity",
+  SOLUTION: "solution",
+  ROADMAP_ITEM: "roadmapItem",
+  OBJECTIVE: "objective",
+  KEY_RESULT: "keyResult",
+  DOC: "doc",
+  EXPERIMENT: "experiment",
+  FEEDBACK_ITEM: "feedbackItem",
+} as const;
+
+/**
+ * Task is materially heavier than the other eight types: unlike a Solution or
+ * Objective, its panel needs bundled sibling data (squads/members for
+ * pickers, linkable targets for the link dialog, custom fields) alongside the
+ * entity itself — mirroring fetchRoadmapItem's pattern of bundling what the
+ * panel needs in one fetch rather than the client making several round trips.
+ */
+async function fetchTask(id: string, workspaceId: string) {
+  const prisma = getPrisma();
+  const task = await prisma.task.findFirst({
+    where: { id, workspaceId },
+    include: {
+      squad: { select: { id: true, name: true, color: true } },
+      links: true,
+      parentTask: { select: { id: true, title: true } },
+      subtasks: {
+        orderBy: { sortOrder: "asc" },
+        include: {
+          squad: { select: { id: true, name: true, color: true } },
+          links: true,
+          _count: { select: { subtasks: true } },
+        },
+      },
+    },
+  });
+  if (!task) return null;
+
+  const [rawSquads, rawMembers, fieldDefs, [resolvedTask, ...resolvedSubtasks]] = await Promise.all([
+    prisma.squad.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" } }),
+    prisma.workspaceMember.findMany({
+      where: { workspaceId },
+      include: { user: { select: { id: true, email: true, name: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.customFieldDefinition.findMany({
+      where: { workspaceId, objectType: "TASK" },
+      orderBy: { order: "asc" },
+    }),
+    resolveTaskAssignees(workspaceId, [task, ...task.subtasks]),
+  ]);
+
+  // Batch-resolve titles for every link on this task and its subtasks.
+  const allLinks = [...task.links, ...task.subtasks.flatMap((s) => s.links)];
+  const linksByType = new Map<string, string[]>();
+  for (const link of allLinks) {
+    const ids = linksByType.get(link.linkedType) ?? [];
+    ids.push(link.linkedId);
+    linksByType.set(link.linkedType, ids);
+  }
+  const titleById = new Map<string, string>();
+  await Promise.all(
+    Array.from(linksByType.entries()).map(async ([linkedType, ids]) => {
+      // DECISION (ReviewRequest) has no flat `title` column — its title lives
+      // on the current revision, so it can't go through the generic
+      // model-lookup dispatch below.
+      if (linkedType === "DECISION") {
+        const rows = await prisma.reviewRequest.findMany({
+          where: { id: { in: ids }, workspaceId },
+          select: { id: true, currentRevision: { select: { title: true } } },
+        });
+        for (const row of rows) titleById.set(`DECISION:${row.id}`, row.currentRevision?.title ?? "Untitled decision");
+        return;
+      }
+      const modelName = LINK_TARGET_MODEL[linkedType as keyof typeof LINK_TARGET_MODEL];
+      if (!modelName) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows: { id: string; title: string }[] = await (prisma as any)[modelName].findMany({
+        where: { id: { in: ids } },
+        select: { id: true, title: true },
+      });
+      for (const row of rows) titleById.set(`${linkedType}:${row.id}`, row.title);
+    })
+  );
+  const resolveLinks = (links: typeof task.links) =>
+    links.map((l) => ({
+      id: l.id,
+      linkedType: l.linkedType,
+      linkedId: l.linkedId,
+      linkedTitle: titleById.get(`${l.linkedType}:${l.linkedId}`) ?? "(deleted)",
+    }));
+
+  // Candidate pools for the "link to another item" dialog — same shape used
+  // by LinkTaskDialog's `linkableTargets` prop.
+  const [opps, sols, roadmapItems, objectives, keyResults, docs, experiments, feedbackItems, decisionRequests] =
+    await Promise.all([
+      prisma.opportunity.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.solution.findMany({ where: { opportunity: { workspaceId } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.roadmapItem.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.objective.findMany({ where: { cycle: { workspaceId } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.keyResult.findMany({ where: { objective: { cycle: { workspaceId } } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.doc.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.experiment.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.feedbackItem.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.reviewRequest.findMany({ where: { workspaceId, gateType: "TRACKED_DECISION" }, select: { id: true, currentRevision: { select: { title: true } } }, orderBy: { createdAt: "asc" } }),
+    ]);
+  const decisions = decisionRequests.map((r) => ({ id: r.id, title: r.currentRevision?.title ?? "Untitled decision" }));
+  const linkableTargets = {
+    OPPORTUNITY: opps,
+    SOLUTION: sols,
+    ROADMAP_ITEM: roadmapItems,
+    OBJECTIVE: objectives,
+    KEY_RESULT: keyResults,
+    DOC: docs,
+    EXPERIMENT: experiments,
+    FEEDBACK_ITEM: feedbackItems,
+    DECISION: decisions,
+  };
+
+  const fieldValues =
+    fieldDefs.length > 0
+      ? await prisma.customFieldValue.findMany({
+          where: { fieldId: { in: fieldDefs.map((f) => f.id) }, objectId: id },
+        })
+      : [];
+  const valueByFieldId = new Map(fieldValues.map((v) => [v.fieldId, v.value]));
+  const customFields = fieldDefs.map((f) => ({
+    id: f.id,
+    name: f.name,
+    fieldType: f.fieldType,
+    objectType: "TASK" as const,
+    options: f.options,
+    required: f.required,
+    order: f.order,
+    currentValue: valueByFieldId.get(f.id) ?? null,
+  }));
+
+  return {
+    ...resolvedTask,
+    links: resolveLinks(task.links),
+    subtasks: task.subtasks.map((s, i) => ({ ...resolvedSubtasks[i], links: resolveLinks(s.links) })),
+    squads: rawSquads,
+    members: rawMembers.map((m) => ({
+      id: m.id,
+      userId: m.userId,
+      role: m.role,
+      email: m.user.email,
+      name: m.user.name,
+    })),
+    linkableTargets,
+    customFields,
+  };
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -377,7 +535,12 @@ export type EntityDetail =
   | { type: "assumption"; data: NonNullable<Awaited<ReturnType<typeof fetchAssumption>>> }
   | { type: "experiment"; data: NonNullable<Awaited<ReturnType<typeof fetchExperiment>>> }
   | { type: "roadmapItem"; data: NonNullable<Awaited<ReturnType<typeof fetchRoadmapItem>>> }
-  | { type: "feedback"; data: NonNullable<Awaited<ReturnType<typeof fetchFeedback>>> };
+  | { type: "feedback"; data: NonNullable<Awaited<ReturnType<typeof fetchFeedback>>> }
+  | { type: "task"; data: NonNullable<Awaited<ReturnType<typeof fetchTask>>> };
+
+/** The shape TaskDetail's client-side fetch receives — exported so the
+ * component doesn't have to re-derive it from the fetcher's return type. */
+export type TaskDetailData = NonNullable<Awaited<ReturnType<typeof fetchTask>>>;
 
 /**
  * Fetch one entity's detail, scoped to `workspaceId`. Returns null if the
@@ -419,6 +582,10 @@ export async function getEntityDetail(
     }
     case "feedback": {
       const data = await fetchFeedback(id, workspaceId);
+      return data ? { type, data } : null;
+    }
+    case "task": {
+      const data = await fetchTask(id, workspaceId);
       return data ? { type, data } : null;
     }
   }
