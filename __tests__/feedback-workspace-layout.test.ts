@@ -28,7 +28,10 @@ describe("Feedback workspace layout", () => {
     expect(createDialog).toContain('aria-label={variant === "toolbar" ? "New Feedback" : undefined}');
     expect(createDialog).toContain('variant === "toolbar" && "hidden sm:inline"');
     expect(dataGrid).toContain("const observer = new MutationObserver(onStoreChange)");
-    expect(dataGrid).toContain("if (!toolbarPortalId) return () => {}");
+    // The body-wide observer must stay guarded so it is never installed for a
+    // toolbar that will not render. The guard now also covers `toolbar={false}`
+    // callers, which have no toolbar to portal anywhere.
+    expect(dataGrid).toContain("if (!toolbar || !toolbarPortalId) return () => {}");
     expect(dataGrid).toContain("return () => observer.disconnect()");
     expect(grid).toContain('placeholder: "Search feedback"');
     expect(grid).toContain('searchDisplay="popover"');
