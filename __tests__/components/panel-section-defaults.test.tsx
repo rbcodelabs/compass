@@ -46,8 +46,8 @@ vi.mock("@/components/panels/launch-tier-picker", () => ({ LaunchTierPicker: () 
 vi.mock("@/components/panels/positioning-brief-row", () => ({
   PositioningBriefRow: () => null,
 }));
-vi.mock("@/components/panels/roadmap-delivery-tasks", () => ({
-  RoadmapDeliveryTasks: () => null,
+vi.mock("@/components/tasks/linked-tasks-section", () => ({
+  LinkedTasksSection: () => null,
 }));
 
 import { SolutionPanel } from "@/components/panels/solution-panel";
@@ -70,6 +70,9 @@ const solutionData = {
   roadmapItems: [{ id: "ri-1", title: "Ship guided setup", horizon: "NOW" }],
   artifacts: [{ id: "art-1" }],
   availableArtifacts: [],
+  deliveryTasks: [],
+  linkableTasks: [],
+  members: [],
 };
 
 const roadmapItemData = {

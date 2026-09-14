@@ -26,6 +26,8 @@ import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 import { ScoreBadge } from "@/components/discovery/score-badge";
 import { toScoreSummary } from "@/lib/score-summary";
+import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
+import type { MemberData } from "@/lib/types";
 
 type OpportunityData = {
   id: string;
@@ -47,6 +49,9 @@ type OpportunityData = {
   solutions: Array<{ id: string; title: string; status: string }>;
   evidence: EvidenceListItem[];
   feedback: LinkedFeedbackItem[];
+  deliveryTasks: LinkedTaskData[];
+  linkableTasks: Array<{ id: string; title: string }>;
+  members: MemberData[];
   /** Null when this opportunity has never been scored. */
   score: { normalizedScore: number; modelVersion: number } | null;
   /** Null when the workspace has no active scoring model — render no score UI. */
@@ -211,6 +216,20 @@ export function OpportunityPanel({
           />
           <EvidenceList evidence={data.evidence} revalidatePathStr={fullPageHref} />
         </div>
+      </Section>
+
+      <Section label="Delivery tasks" count={data.deliveryTasks.length}>
+        <LinkedTasksSection
+          linkedType="OPPORTUNITY"
+          linkedId={data.id}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          revalidatePathStr={fullPageHref}
+          tasks={data.deliveryTasks}
+          linkableTasks={data.linkableTasks}
+          members={data.members}
+          onChanged={refresh}
+        />
       </Section>
       <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={data.pmInterviews} />
       <Discussion targetType="OPPORTUNITY" targetId={opportunityId} />
