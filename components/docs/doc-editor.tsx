@@ -599,7 +599,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             )}
             Linked tasks
             {linkedTasksBundle.deliveryTasks.length > 0 && !tasksOpen && (
-              <span className="text-slate-300 font-normal">
+              <span className="font-normal">
                 ({linkedTasksBundle.deliveryTasks.length})
               </span>
             )}
