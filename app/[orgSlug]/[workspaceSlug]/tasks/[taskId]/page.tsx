@@ -21,6 +21,7 @@ import type {
   CustomFieldType,
   CustomFieldValue,
 } from "@/lib/types";
+import { taskPriorityLabel, taskStatusLabel } from "@/lib/task-meta";
 import { normalizeWorkspaceRole } from "@/lib/roles";
 import { getWorkspace } from "@/lib/workspace";
 import { resolveTaskAssignees, taskLinkScope } from "@/lib/task-assignment";
@@ -255,11 +256,11 @@ export default async function TaskDetailPage({ params }: Props) {
             <div className="grid grid-cols-2 gap-4 max-w-md">
               <div>
                 <p className="text-xs text-muted-foreground">Status</p>
-                <p className="font-medium">{task.status}</p>
+                <p className="font-medium">{taskStatusLabel(task.status)}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Priority</p>
-                <p className="font-medium">{task.priority}</p>
+                <p className="font-medium">{taskPriorityLabel(task.priority)}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Iteration</p>

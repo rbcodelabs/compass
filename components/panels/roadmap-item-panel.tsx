@@ -19,10 +19,15 @@ import { LaunchTierPicker } from "./launch-tier-picker";
 import { LaunchChecklist, type LaunchChecklistItemData } from "./launch-checklist";
 import { PositioningBriefRow } from "./positioning-brief-row";
 import { RoadmapDeliveryTasks, type RoadmapDeliveryTaskData } from "./roadmap-delivery-tasks";
-import type { MemberData } from "@/lib/types";
+import type { ItemStatus, MemberData } from "@/lib/types";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 import { Discussion } from "@/components/comments/discussion";
 import { usePanelContext } from "./panel-context";
+
+const ITEM_STATUS_LABELS: Record<ItemStatus, string> = {
+  ACTIVE: "Active",
+  ARCHIVED: "Archived",
+};
 
 type RoadmapItemData = {
   id: string;
@@ -135,7 +140,7 @@ export function RoadmapItemPanel({
       />
 
       <div className="flex flex-col gap-3">
-        <Field label="Status">{data.status}</Field>
+        <Field label="Status">{ITEM_STATUS_LABELS[data.status as ItemStatus] ?? data.status}</Field>
         {data.squad && <Field label="Squad">{data.squad.name}</Field>}
         <Field label="Votes">{data._count.votes}</Field>
         {data.isPrivate && <Field label="Visibility">Private (hidden from public roadmap)</Field>}

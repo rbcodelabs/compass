@@ -8,9 +8,10 @@ import {
   UNASSIGNED_ASSIGNEE_LABEL,
   canonicalAssigneeFilterValue,
 } from "@/lib/task-assignee-display";
+import { TASK_PRIORITIES, TASK_PRIORITY_LABELS } from "@/lib/task-meta";
 import { assigneeValue, useTaskAssignees } from "./task-assignee-picker";
 
-const PRIORITIES: TaskPriority[] = ["URGENT", "HIGH", "MEDIUM", "LOW"];
+const PRIORITIES: TaskPriority[] = [...TASK_PRIORITIES];
 
 type TasksFiltersProps = {
   squads: SquadData[];
@@ -79,7 +80,7 @@ export function TasksFilters({ squads, members }: TasksFiltersProps) {
           onValueChange: (value) => setFilter("priority", value),
           options: PRIORITIES.map((priority) => ({
             value: priority,
-            label: priority.charAt(0) + priority.slice(1).toLowerCase(),
+            label: TASK_PRIORITY_LABELS[priority],
           })),
         },
       ]}

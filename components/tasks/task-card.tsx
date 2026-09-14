@@ -14,6 +14,7 @@ import { cancelTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import { EditTaskDialog } from "./edit-task-dialog";
 import { TaskLinksBadge } from "./task-links-badge";
 import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
+import { TASK_PRIORITY_LABELS } from "@/lib/task-meta";
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
 import type { MemberData } from "@/lib/types";
 
@@ -121,7 +122,7 @@ export function TaskCard({ task, revalidatePathStr, orgSlug, workspaceSlug, memb
       >
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <StatusBadge status={PRIORITY_STATUS[task.priority]}>{task.priority}</StatusBadge>
+            <StatusBadge status={PRIORITY_STATUS[task.priority]}>{TASK_PRIORITY_LABELS[task.priority]}</StatusBadge>
             {task.squad && (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                 <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: task.squad.color }} />

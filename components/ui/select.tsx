@@ -6,7 +6,124 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+type SelectItemLabels = Record<string, string>
+
+/**
+ * Flattens a `SelectItem`'s children to the text React would render, or returns
+ * `null` if the label is richer than that (an icon, a badge, a nested element).
+ *
+ * Only text labels are auto-derived. A rich label cannot be reduced to a stable
+ * string, and a call site that wants one on the trigger should pass `items` or
+ * the `<SelectValue>{fn}</SelectValue>` formatter explicitly.
+ */
+function labelText(node: React.ReactNode): string | null {
+  if (node == null || typeof node === "boolean") return ""
+  if (typeof node === "string") return node
+  if (typeof node === "number") return String(node)
+  if (Array.isArray(node)) {
+    let text = ""
+    for (const part of node) {
+      const partText = labelText(part as React.ReactNode)
+      if (partText === null) return null
+      text += partText
+    }
+    return text
+  }
+  return null
+}
+
+/**
+ * Walks a subtree collecting `<SelectItem value>` -> label pairs.
+ *
+ * Recurses through `SelectContent`, `SelectGroup`, fragments and arrays
+ * produced by `.map()`, so items are found wherever a call site nests them.
+ * Items are matched by referential identity against the local `SelectItem`
+ * wrapper — every call site imports it from this module, so identity holds.
+ */
+function collectSelectItemLabels(
+  children: React.ReactNode,
+  into: SelectItemLabels,
+): void {
+  React.Children.forEach(children, (child) => {
+    if (!React.isValidElement(child)) return
+    const props = child.props as {
+      value?: unknown
+      children?: React.ReactNode
+    }
+
+    if (child.type === SelectItem) {
+      // A null/undefined-valued item is Base UI's placeholder channel
+      // (`hasNullItemLabel`): giving it a label in `items` makes Base UI treat
+      // that label as the placeholder. Skip them so placeholder behaviour and
+      // the `data-placeholder` styling hook stay exactly as they are today.
+      if (props.value != null) {
+        const text = labelText(props.children)
+        if (text !== null) into[String(props.value)] = text
+      }
+      // A SelectItem's children *are* the label — nothing further to collect.
+      return
+    }
+
+    collectSelectItemLabels(props.children, into)
+  })
+}
+
+/**
+ * `Select` — Base UI's `Select.Root` with Radix-compatible `<SelectValue />`.
+ *
+ * Base UI's `<Select.Value>` is **not** Radix's. Radix renders the selected
+ * item's rendered text; Base UI, per its docs, "renders the raw value of the
+ * selected item" and only resolves a human label when `Select.Root` is handed
+ * an `items` prop (a value -> label record, consumed by `resolveSelectedLabel`).
+ *
+ * Every call site in this app is written in Radix/shadcn idiom —
+ * `<SelectItem value="ADMIN">Admin</SelectItem>` next to a bare
+ * `<SelectValue />` — so the *option list* read correctly while the *closed
+ * trigger* rendered the raw constant: `ADMIN`, `IN_PROGRESS`, `URGENT`, or a
+ * bare UUID for entity pickers. It looked intermittent because Base UI can
+ * recover a label from an item that has already mounted once the popup has been
+ * opened, but a fresh page load always showed the raw value.
+ *
+ * Rather than require ~24 call sites to each remember `items`, this wrapper
+ * derives it from the children it was already given. An explicitly passed
+ * `items` always wins, so call sites whose selectable values do not appear in
+ * the children (async-loaded options, grouped data) keep full control —
+ * see `components/scoring-models/workspace-scoring-panel.tsx`. The
+ * `<SelectValue>{(value) => …}</SelectValue>` formatter form also still wins,
+ * because Base UI prefers `Value`'s children over the resolved label — see
+ * `components/decisions/decision-follow-through.tsx`.
+ */
+function Select<Value, Multiple extends boolean | undefined = false>({
+  items,
+  children,
+  ...props
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
+  // Walking `children` produces a fresh object every render, and every other
+  // input to Base UI's internal store is memoized — so an unstable `items`
+  // identity would be the one thing re-broadcasting store state on each parent
+  // render. It does not loop (subscribers select primitives and bail out), but
+  // it is pointless work. Serializing the pairs gives a value-equal dependency,
+  // so the object handed to Base UI only changes when a label actually does.
+  // An empty result means "no text labels found" (async options, rich labels):
+  // pass `undefined`, not `{}`, so Base UI's default path is untouched.
+  let signature = ""
+  if (items === undefined) {
+    const collected: SelectItemLabels = {}
+    collectSelectItemLabels(children, collected)
+    if (Object.keys(collected).length > 0) signature = JSON.stringify(collected)
+  }
+
+  const derived = React.useMemo(
+    () => (signature ? (JSON.parse(signature) as SelectItemLabels) : undefined),
+    [signature]
+  )
+
+  return (
+    <SelectPrimitive.Root {...props} items={items ?? derived}>
+      {children}
+    </SelectPrimitive.Root>
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (
