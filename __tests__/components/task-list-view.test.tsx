@@ -5,6 +5,7 @@ import "@testing-library/jest-dom/vitest";
 
 import { TaskListView } from "@/components/tasks/task-list-view";
 import type { TaskCardData } from "@/components/tasks/task-card";
+import { expectEveryGridCellClipped } from "../helpers/grid-cells";
 
 function task(overrides: Partial<TaskCardData> & Pick<TaskCardData, "id" | "title">): TaskCardData {
   return {
@@ -184,5 +185,28 @@ describe("TaskListView hierarchy", () => {
 
     expect(screen.queryByTestId("grid-pagination")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Columns/i })).not.toBeInTheDocument();
+  });
+
+  // Regression: reported against the PR preview. Under `table-fixed` the 9rem
+  // Assignee column is a hard box and TableCell is `whitespace-nowrap`, so an
+  // assignee name wider than 9rem escaped the cell and painted over the Squad
+  // column's value.
+  it("clips an over-long assignee instead of painting it over the next column", () => {
+    const view = renderList([
+      task({
+        id: "t1",
+        title: "Ship the data grid",
+        ownerName: "Sample Workspace Admin",
+        squad: { id: "s1", name: "Core Product", color: "#3b82f6" },
+      }),
+    ]);
+
+    const assignee = within(view.container).getByTestId("grid-cell-assignee");
+    expect(assignee).toHaveTextContent("Sample Workspace Admin");
+    expect(assignee.className).toMatch(/(?:^|\s)overflow-hidden(?:\s|$)/);
+
+    // Not just Assignee: every column carries the guarantee, including any
+    // added later.
+    expectEveryGridCellClipped(view.container);
   });
 });

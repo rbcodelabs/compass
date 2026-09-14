@@ -23,6 +23,7 @@ import type {
   GridActionResult,
   GridColumnDef,
 } from "@/components/data-grid/types";
+import { expectEveryGridCellClipped } from "../helpers/grid-cells";
 
 afterEach(cleanup);
 
@@ -1012,5 +1013,88 @@ describe("DataGrid rowClassName", () => {
     expect(rows[0].className).not.toMatch(/bg-surface-inset/);
     expect(rows[1].className).toMatch(/bg-surface-inset\/50/);
     expect(rows[1]).toHaveAttribute("data-row-id", "r2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Column overflow
+// ---------------------------------------------------------------------------
+// `table-fixed` (the grid's own choice) plus `whitespace-nowrap` (the shared
+// TableCell's) makes every declared column width a hard box that content cannot
+// wrap out of. Nothing in a column definition is required to clip, so before
+// this the grid let one long value paint straight over the next column — which
+// is how the Tasks Assignee column overlapped Squad on the preview.
+describe("DataGrid column overflow", () => {
+  it("clips every body cell by default, so no column can paint over the next", () => {
+    const { container } = renderGrid({
+      rows: [
+        {
+          id: "r1",
+          title: "A title far wider than the twenty rem this column declares",
+          status: "OPEN",
+          votes: 12,
+        },
+      ],
+    });
+
+    expectEveryGridCellClipped(container);
+    // The ellipsis is what makes the clip legible rather than a hard cut.
+    expect(screen.getByTestId("grid-cell-title").className).toMatch(
+      /(?:^|\s)text-ellipsis(?:\s|$)/,
+    );
+  });
+
+  it("lets a column opt out with overflow: visible", () => {
+    const columns = makeColumns(noopSave).map((column) =>
+      column.id === "action"
+        ? { ...column, meta: { ...column.meta, overflow: "visible" as const } }
+        : column,
+    );
+
+    renderGrid({ columns });
+
+    expect(screen.getAllByTestId("grid-cell-action")[0].className).not.toMatch(
+      /(?:^|\s)overflow-hidden(?:\s|$)/,
+    );
+    // The opt-out is per column, not a grid-wide switch.
+    expect(screen.getAllByTestId("grid-cell-title")[0].className).toMatch(
+      /(?:^|\s)overflow-hidden(?:\s|$)/,
+    );
+  });
+
+  it("leaves the selection checkbox cell unclipped", () => {
+    // The checkbox's `after:-inset-x-3` hit target extends outside its box into
+    // a cell with `pr-0`; clipping it would shrink a real pointer target.
+    renderGrid({
+      selection: { selectedIds: [], onChange: () => {} },
+    });
+
+    expect(screen.getAllByTestId("grid-cell-__select")[0].className).not.toMatch(
+      /(?:^|\s)overflow-hidden(?:\s|$)/,
+    );
+  });
+
+  it("leaves the stacked mobile card unclipped", () => {
+    setViewport(true);
+    renderGrid({
+      renderMobileRow: (row: Row) => <div data-testid="mobile-card">{row.title}</div>,
+    });
+
+    expect(screen.getAllByTestId("grid-cell-mobile")[0].className).not.toMatch(
+      /(?:^|\s)overflow-hidden(?:\s|$)/,
+    );
+  });
+
+  it("clips the header label without clipping the sort button's focus ring", () => {
+    renderGrid();
+
+    // The sort Button carries `-mx-2`, cancelling the `<th>`'s own padding, so
+    // its focus ring sits flush against the header's padding box. Clipping the
+    // `<th>` would cut that ring off; the label truncates instead.
+    const head = screen.getByTestId("grid-head-title");
+    expect(head.className).not.toMatch(/(?:^|\s)overflow-hidden(?:\s|$)/);
+    expect(
+      head.querySelector('[data-testid="grid-head-label"]')?.className,
+    ).toMatch(/(?:^|\s)truncate(?:\s|$)/);
   });
 });

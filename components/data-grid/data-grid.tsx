@@ -56,6 +56,30 @@ import {
 /** Synthetic id of the injected selection column. */
 export const SELECTION_COLUMN_ID = "__select";
 
+/**
+ * The grid's default cell-overflow guard, opted out of per column with
+ * `meta.overflow: "visible"`.
+ *
+ * `table-fixed` and `whitespace-nowrap` are the *grid's* choices, so containing
+ * their consequence is the grid's job rather than every column author's: a
+ * declared width is a hard box, content cannot wrap out of it, and anything
+ * wider that nothing clips escapes and paints over the next column. Requiring
+ * each column to remember `truncate` made that a latent bug in every column
+ * that forgot and in every column added later.
+ *
+ * It lands on the `<td>` rather than on an inner wrapper on purpose. Overflow
+ * clips to the padding box, and the cell already carries `p-2`, so 8px of slack
+ * sits between the clip edge and any content — enough for the `ring-3` focus
+ * rings used throughout, which a zero-padding inner wrapper would cut off.
+ * A `<td>` is a block container, so `text-overflow` applies to its own line
+ * boxes and inline cell content ellipsizes without any inner element at all.
+ *
+ * Not added to `components/ui/table.tsx`'s TableCell: that primitive is shared
+ * with auto-layout tables, where a wide cell widens its column instead of
+ * overlapping the next one and clipping would only lose content.
+ */
+const CELL_CLIP_CLASS = "overflow-hidden text-ellipsis";
+
 export type DataGridProps<TRow extends GridRowData> = {
   /** Namespace for persisted column preferences: `compass:grid:{gridId}:v1`. */
   gridId: string;
@@ -807,6 +831,12 @@ export function DataGrid<TRow extends GridRowData>({
 
                     if (columnId === SELECTION_COLUMN_ID) {
                       return (
+                        // Deliberately not clipped: TableCell drops its right
+                        // padding for a checkbox cell, and the Checkbox extends
+                        // its pointer target 12px past its own box with
+                        // `after:-inset-x-3`. Clipping here would shrink a real
+                        // hit area to buy nothing — the cell holds a fixed-size
+                        // control, never text.
                         <TableCell
                           key={columnId}
                           data-testid={`grid-cell-${columnId}`}
@@ -843,6 +873,11 @@ export function DataGrid<TRow extends GridRowData>({
                           meta.edit && state?.error ? true : undefined
                         }
                         className={cn(
+                          // Before `cellClassName` so a column can still
+                          // override the pair through its own classes — the
+                          // Feedback grid's `whitespace-normal` already relies
+                          // on exactly that merge order.
+                          meta.overflow !== "visible" && CELL_CLIP_CLASS,
                           meta.align === "end" && "text-right",
                           meta.cellClassName,
                         )}

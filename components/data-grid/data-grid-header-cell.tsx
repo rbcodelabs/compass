@@ -122,7 +122,13 @@ export function DataGridHeaderCell({
           variant="ghost"
           size="xs"
           className={cn(
-            "-mx-2 h-6 font-medium text-text-subtle",
+            // `max-w-full` keeps the button inside the column under
+            // `table-fixed`, so a long header label truncates below instead of
+            // overflowing into the next header. The clip is on the label rather
+            // than the `<th>`: `-mx-2` cancels the header's own padding, so the
+            // button's `ring-3` focus ring sits flush against the cell's
+            // padding box and clipping the `<th>` would cut it off.
+            "-mx-2 h-6 max-w-full font-medium text-text-subtle",
             align === "end" && "ml-auto",
           )}
           onClick={() => onSort?.(sortKey as string)}
@@ -134,7 +140,9 @@ export function DataGridHeaderCell({
                 : `Sort by ${labelText}`
           }
         >
-          {label}
+          <span data-testid="grid-head-label" className="truncate">
+            {label}
+          </span>
           <SortIcon
             aria-hidden
             className={cn(
@@ -144,7 +152,12 @@ export function DataGridHeaderCell({
           />
         </Button>
       ) : (
-        <span className={cn("block", align === "end" && "text-right")}>{label}</span>
+        <span
+          data-testid="grid-head-label"
+          className={cn("block truncate", align === "end" && "text-right")}
+        >
+          {label}
+        </span>
       )}
     </TableHead>
   );

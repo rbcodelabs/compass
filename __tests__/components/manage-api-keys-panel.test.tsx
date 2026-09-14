@@ -12,6 +12,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/actions", () => ({
 }));
 
 import { ManageApiKeysPanel, type ApiKeyRow } from "@/components/settings/manage-api-keys-panel";
+import { expectEveryGridCellClipped } from "../helpers/grid-cells";
 
 function key(overrides: Partial<ApiKeyRow> & Pick<ApiKeyRow, "id" | "name">): ApiKeyRow {
   return {
@@ -124,5 +125,19 @@ describe("ManageApiKeysPanel", () => {
     // Natural mode must not claim flex height: this panel sits on a normally
     // scrolling settings page, not in a clipping content area.
     expect(grid.className).not.toMatch(/(?:^|\s)flex-1(?:\s|$)/);
+  });
+
+  // Same class of defect as the Tasks Assignee regression. The Revoke button
+  // lives in the last column, so a leak here would paint a key name over a
+  // destructive control.
+  it("clips an over-long key name instead of painting it over the next column", () => {
+    const view = renderPanel([
+      key({ id: "k1", name: "Claude Desktop — Sample Workspace Admin laptop key" }),
+    ]);
+
+    const name = within(view.container).getByTestId("grid-cell-name");
+    expect(name.className).toMatch(/(?:^|\s)overflow-hidden(?:\s|$)/);
+
+    expectEveryGridCellClipped(view.container);
   });
 });

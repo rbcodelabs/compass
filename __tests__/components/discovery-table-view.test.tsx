@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import "@testing-library/jest-dom/vitest";
 
 import { DiscoveryTableView, type DiscoveryTableOpportunity } from "@/components/discovery/discovery-table-view";
+import { expectEveryGridCellClipped } from "../helpers/grid-cells";
 
 const openPanel = vi.fn();
 
@@ -186,5 +187,26 @@ describe("DiscoveryTableView", () => {
       expect(head.className).toMatch(/(?:^|\s)top-0(?:\s|$)/);
       expect(head.className).toMatch(/(?:^|\s)bg-surface-panel(?:\s|$)/);
     }
+  });
+
+  // Same class of defect as the Tasks Assignee regression: Customer segment is
+  // a 10rem hard box rendering a bare server string with nothing to clip it.
+  it("clips an over-long customer segment instead of painting it over Evidence", () => {
+    const { container } = render(
+      <DiscoveryTableView
+        opportunities={[
+          {
+            ...opportunities[0],
+            customerSegment: "Enterprise platform teams in regulated industries",
+          },
+        ]}
+      />,
+    );
+
+    const segment = within(container).getAllByTestId("grid-cell-segment")[0];
+    expect(segment).toHaveTextContent("Enterprise platform teams in regulated industries");
+    expect(segment.className).toMatch(/(?:^|\s)overflow-hidden(?:\s|$)/);
+
+    expectEveryGridCellClipped(container);
   });
 });

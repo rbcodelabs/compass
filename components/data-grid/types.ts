@@ -90,6 +90,20 @@ export type GridColumnMeta<TRow extends GridRowData> = {
   /** Fixed `<col>` width, e.g. `"8rem"`. Identical across SSR and hydrated frames. */
   width?: string;
   align?: GridAlign;
+  /**
+   * How a cell handles content wider than its column.
+   *
+   *  - `"clip"` (default) — the cell clips at its own padding box and
+   *    ellipsizes. Required because the grid renders `table-fixed` and the
+   *    shared TableCell is `whitespace-nowrap`: a declared width is a hard box
+   *    and unwrappable content that nothing clips escapes it and paints over
+   *    the next column.
+   *  - `"visible"` — opt out, for a cell that must paint outside its box.
+   *    Overlay UI does *not* need this: Select, DropdownMenu and Tooltip all
+   *    render through a portal on `document.body`, so they are not descendants
+   *    of the cell and cannot be clipped by it.
+   */
+  overflow?: "clip" | "visible";
   headerClassName?: string;
   cellClassName?: string;
   /** Inline editing for this column. */
