@@ -405,8 +405,15 @@ export const TOOL_GATES: Record<string, Gate> = {
 export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Object.fromEntries([
   ["get_pm_interview", "READ"],
   ["update_experiment", "WRITE"],
-  // Research tools landed separately; retain fail-closed agent access until reviewed.
-  ...["generate_research_guide", "create_research_study", "list_research_studies", "get_research_study", "update_research_study", "activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
+  // Research tools reviewed 2026-09-13. Reads return only publicMetadata()
+  // (id, workspaceId, name, goal, studyType, guide, targetMinutes, appUrl,
+  // status, timestamps, sessionCount) — no transcripts, participant
+  // identities, credentials or storage paths. Authoring mutations are
+  // ordinary workspace writes. Participant-link issuance and study
+  // activation stay DENY: they mint or return live participant access.
+  ...["list_research_studies", "get_research_study"].map(name => [name, "READ"]),
+  ...["generate_research_guide", "create_research_study", "update_research_study"].map(name => [name, "WRITE"]),
+  ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
     "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_docs", "get_doc", "list_doc_versions", "get_doc_version", "list_doc_comments", "get_doc_comment", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "list_top_opportunities",
   ].map(name => [name, "READ"]),

@@ -103,6 +103,49 @@ describe("apply_recorded_decision service-actor access", () => {
   })
 })
 
+describe("research study agent policy", () => {
+  // Reviewed 2026-09-13: reads return only publicMetadata() — no transcripts,
+  // participant identities or credentials — and authoring is an ordinary
+  // workspace write. Link issuance and activation mint or expose live
+  // participant access, so they stay human-only. Locks that boundary.
+  it.each(["list_research_studies", "get_research_study"])("%s is classified as an agent read", (tool) => {
+    expect(AGENT_TOOL_POLICY[tool]).toBe("READ")
+  })
+  it.each(["generate_research_guide", "create_research_study", "update_research_study"])("%s is classified as an agent write", (tool) => {
+    expect(AGENT_TOOL_POLICY[tool]).toBe("WRITE")
+  })
+  it.each(["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"])("%s stays human-only", (tool) => {
+    expect(AGENT_TOOL_POLICY[tool]).toBe("DENY")
+  })
+
+  it("lets an agent identity reach the workspace gate for list_research_studies", async () => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    try {
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent" })
+      mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }])
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      await expect(applyToolGate("list_research_studies", { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+      // READ policy widens the grant filter; it does not bypass workspace scoping.
+      expect(mockPrisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith({ where: { agentId: "agent", revokedAt: null, access: { in: ["READ", "WRITE"] } }, select: { workspaceId: true } })
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it("list_research_studies still denies an agent without a grant on the workspace", async () => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    try {
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent" })
+      mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate("list_research_studies", { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1" })).rejects.toThrow(/not found or access denied/)
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it("issue_research_link still requires a human identity", async () => {
+    await expect(applyToolGate("issue_research_link", { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1", studyId: "study-1" }))
+      .rejects.toThrow("Tool requires a human identity: issue_research_link")
+  })
+})
+
 describe("TOOL_GATES completeness", () => {
   it("classifies every registered tool for agent access", () => {
     expect(Object.keys(registeredTools).filter(name => !AGENT_TOOL_POLICY[name])).toEqual([])
