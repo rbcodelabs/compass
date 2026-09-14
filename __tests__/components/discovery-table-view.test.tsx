@@ -79,4 +79,20 @@ describe("DiscoveryTableView", () => {
     expect(openPanel).toHaveBeenNthCalledWith(1, "opportunity", "opp-1");
     expect(openPanel).toHaveBeenNthCalledWith(2, "solution", "sol-1");
   });
+
+  // Regression: the wrapper around the table used a bare, unbounded div, so
+  // inside WorkspacePage's `md:overflow-hidden` content area it inherited
+  // clipping instead of scrolling — rows and the table's own horizontal
+  // scrollbar past the fold were unreachable ("the table doesn't scroll"
+  // bug). The wrapper must be the scroll viewport itself: bounded height
+  // (`min-h-0 flex-1`) and `overflow-y-auto`, never a bare `overflow-hidden`.
+  it("makes its own wrapper the scroll viewport instead of clipping overflow", () => {
+    render(<DiscoveryTableView opportunities={opportunities} />);
+
+    const scrollContainer = screen.getByTestId("discovery-table-scroll");
+    expect(scrollContainer.className).not.toMatch(/(?:^|\s)overflow-hidden(?:\s|$)/);
+    expect(scrollContainer.className).toMatch(/(?:^|\s)overflow-y-auto(?:\s|$)/);
+    expect(scrollContainer.className).toMatch(/(?:^|\s)min-h-0(?:\s|$)/);
+    expect(scrollContainer.className).toMatch(/(?:^|\s)flex-1(?:\s|$)/);
+  });
 });

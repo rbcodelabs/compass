@@ -61,7 +61,15 @@ export function TaskListView({ tasks, orgSlug, workspaceSlug, members }: Props) 
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border">
+    // `min-h-0` + `overflow-y-auto` (not `overflow-hidden`) make this div the
+    // actual scroll viewport inside `WorkspacePage`'s `md:overflow-hidden`
+    // content area — see the matching fix/comment in discovery-table-view.tsx.
+    // `overflow-hidden` here silently clipped rows and the table's own
+    // horizontal scrollbar past the fold with no way to reach them.
+    <div
+      data-testid="task-list-scroll"
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded-xl border border-border"
+    >
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/40 text-xs text-muted-foreground hover:bg-muted/40">
