@@ -553,7 +553,8 @@ export function DataGrid<TRow extends GridRowData>({
       data-testid="data-grid"
       data-height={height}
       // A custom property rather than a second style channel on the shared
-      // `Table` primitive, whose `style` prop lands on the `<table>` element.
+      // `Table` primitive, whose `style` prop lands on the table element
+      // itself rather than on the scrolling container that needs the cap.
       style={
         maxHeight
           ? ({ "--data-grid-max-h": maxHeight } as React.CSSProperties)

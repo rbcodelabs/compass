@@ -1,13 +1,14 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useCallback, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
 import { createApiKey, revokeApiKey } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions"
 import { ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
+import { DataGrid, type GridColumnDef } from "@/components/data-grid"
 
 export type ApiKeyRow = {
   id: string
@@ -56,22 +57,86 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
     })
   }
 
-  function handleRevoke(keyId: string) {
-    setError(null)
-    startTransition(async () => {
-      try {
-        await revokeApiKey(orgSlug, workspaceSlug, keyId)
-        setKeys((prev) =>
-          prev.map((k) => (k.id === keyId ? { ...k, revokedAt: new Date() } : k))
-        )
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to revoke key")
-      }
-    })
-  }
+  // `revokeApiKey` throws rather than returning a result object, so this is
+  // deliberately NOT wired through the grid's inline-edit contract (whose
+  // `save` must resolve, never reject) — it stays a plain cell button.
+  const handleRevoke = useCallback(
+    (keyId: string) => {
+      setError(null)
+      startTransition(async () => {
+        try {
+          await revokeApiKey(orgSlug, workspaceSlug, keyId)
+          setKeys((prev) =>
+            prev.map((k) => (k.id === keyId ? { ...k, revokedAt: new Date() } : k))
+          )
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Failed to revoke key")
+        }
+      })
+    },
+    [orgSlug, workspaceSlug],
+  )
 
   const activeKeys = keys.filter((k) => !k.revokedAt)
   const revokedKeys = keys.filter((k) => k.revokedAt)
+
+  // Columns stay in this file rather than a sibling `*-columns` module:
+  // `scripts/check-ui-colors.mjs` keys its baseline on `file::class`, and this
+  // file carries a dozen baselined raw-palette classes. Relocating any of them
+  // would start a new file at a baseline of zero and fail the gate.
+  const columns = useMemo<GridColumnDef<ApiKeyRow>[]>(
+    () => [
+      {
+        id: "name",
+        header: "Name",
+        // No width — absorbs the remainder under `table-fixed`.
+        meta: { label: "Name", hideable: false, cellClassName: "font-medium text-text-primary" },
+        cell: ({ row }) => <span className="truncate">{row.original.name}</span>,
+      },
+      {
+        id: "prefix",
+        header: "Prefix",
+        meta: { label: "Prefix", width: "10rem", cellClassName: "font-mono text-text-subtle" },
+        cell: ({ row }) => `cmp_${row.original.keyPrefix}…`,
+      },
+      {
+        id: "created",
+        header: "Created",
+        meta: { label: "Created", width: "8rem", cellClassName: "text-text-subtle" },
+        // Pre-existing: an unlocalised `toLocaleDateString()` can differ
+        // between the server and the browser. Unchanged by this migration —
+        // the call still runs during render, just from a cell renderer.
+        cell: ({ row }) => row.original.createdAt.toLocaleDateString(),
+      },
+      {
+        id: "lastUsed",
+        header: "Last used",
+        meta: { label: "Last used", width: "8rem", cellClassName: "text-text-subtle" },
+        cell: ({ row }) =>
+          row.original.lastUsedAt ? row.original.lastUsedAt.toLocaleDateString() : "Never",
+      },
+      {
+        id: "actions",
+        // Empty visible header with a named label, matching the `sr-only`
+        // "Actions" span this replaces. `hideable: false` pins it last.
+        header: "",
+        meta: { label: "Actions", hideable: false, width: "7rem", align: "end" },
+        cell: ({ row }) => (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => handleRevoke(row.original.id)}
+            disabled={isPending}
+            className="text-destructive hover:text-destructive"
+          >
+            Revoke
+          </Button>
+        ),
+      },
+    ],
+    [handleRevoke, isPending],
+  )
 
   return (
     <div className="flex flex-col gap-4">
@@ -130,54 +195,32 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
         </div>
       )}
 
-      {/* Active keys */}
+      {/* Active keys. `natural` height: this panel lives on a normally
+          scrolling settings page, not inside a clipping content area. */}
       {activeKeys.length > 0 && (
-        <div className="rounded-md border border-border overflow-hidden">
-          <Table>
-            <TableHeader className="bg-surface-app">
-              <TableRow className="hover:bg-surface-app">
-                <TableHead className="px-3 py-2 text-xs text-text-subtle">Name</TableHead>
-                <TableHead className="px-3 py-2 text-xs text-text-subtle">Prefix</TableHead>
-                <TableHead className="px-3 py-2 text-xs text-text-subtle">Created</TableHead>
-                <TableHead className="px-3 py-2 text-xs text-text-subtle">Last used</TableHead>
-                <TableHead className="px-3 py-2"><span className="sr-only">Actions</span></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {activeKeys.map((k) => (
-                <TableRow key={k.id} className="bg-surface-panel">
-                  <TableCell className="px-3 py-2 font-medium text-text-primary">{k.name}</TableCell>
-                  <TableCell className="px-3 py-2 font-mono text-text-subtle">cmp_{k.keyPrefix}…</TableCell>
-                  <TableCell className="px-3 py-2 text-text-subtle">
-                    {k.createdAt.toLocaleDateString()}
-                  </TableCell>
-                  <TableCell className="px-3 py-2 text-text-subtle">
-                    {k.lastUsedAt ? k.lastUsedAt.toLocaleDateString() : "Never"}
-                  </TableCell>
-                  <TableCell className="px-3 py-2 text-right">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRevoke(k.id)}
-                      disabled={isPending}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      Revoke
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <DataGrid<ApiKeyRow>
+          gridId="settings-api-keys"
+          columns={columns}
+          rows={activeKeys}
+          getRowId={(row) => row.id}
+          caption="Active API keys"
+          height="natural"
+          maxHeight="20rem"
+          pagination={false}
+          toolbar={false}
+          className="overflow-hidden rounded-md border border-border bg-surface-panel"
+        />
       )}
 
       {activeKeys.length === 0 && !newKey && (
         <p className="text-sm text-muted-foreground">No API keys yet. Generate one above.</p>
       )}
 
-      {/* Revoked keys */}
+      {/* Revoked keys. Deliberately NOT migrated to DataGrid: this list has no
+          header row by design, and the grid always renders a `<thead>` outside
+          mobile mode. Converting it would add a header, a caption and a second
+          persisted column-preference record to a collapsed three-column
+          archive — a regression dressed as standardization. */}
       {revokedKeys.length > 0 && (
         <Collapsible className="group text-sm">
           <CollapsibleTrigger
