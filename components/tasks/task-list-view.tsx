@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TaskLinksBadge } from "./task-links-badge";
 import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
+import { TASK_PRIORITY_LABELS, TASK_STATUS_LABELS } from "@/lib/task-meta";
 import type { TaskCardData } from "./task-card";
 import type { MemberData } from "@/lib/types";
 
@@ -110,10 +111,10 @@ export function TaskListView({ tasks, orgSlug, workspaceSlug, members }: Props) 
                   )}
                 </TableCell>
                 <TableCell className="px-3 py-2">
-                  <Badge variant="outline">{task.priority}</Badge>
+                  <Badge variant="outline">{TASK_PRIORITY_LABELS[task.priority]}</Badge>
                 </TableCell>
                 <TableCell className="px-3 py-2">
-                  <Badge variant="secondary">{task.status}</Badge>
+                  <Badge variant="secondary">{TASK_STATUS_LABELS[task.status]}</Badge>
                 </TableCell>
                 <TableCell className="px-3 py-2 text-muted-foreground">
                   {task.dueDate ? (

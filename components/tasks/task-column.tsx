@@ -5,16 +5,20 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { TaskCard, type TaskCardData } from "./task-card";
 import { AddTaskForm } from "./add-task-form";
 import type { TaskStatus, MemberData } from "@/lib/types";
+import { TASK_STATUS_LABELS } from "@/lib/task-meta";
 import { BoardColumn, EmptyState } from "@/components/patterns";
 
+// Labels come from `lib/task-meta.ts` so board columns, list rows and the task
+// detail page cannot drift apart; the accent and empty-state copy are
+// board-only and stay here.
 export const STATUS_CONFIG: Record<TaskStatus, { label: string; accentClass: string; emptyText: string }> = {
-  BACKLOG: { label: "Backlog", accentClass: "bg-slate-400", emptyText: "Nothing in the backlog." },
-  TODO: { label: "To Do", accentClass: "bg-sky-500", emptyText: "Nothing queued up yet." },
-  IN_PROGRESS: { label: "In Progress", accentClass: "bg-blue-500", emptyText: "Nothing in progress." },
-  BLOCKED: { label: "Blocked", accentClass: "bg-red-500", emptyText: "Nothing blocked." },
-  IN_REVIEW: { label: "In Review", accentClass: "bg-amber-500", emptyText: "Nothing in review." },
-  DONE: { label: "Done", accentClass: "bg-emerald-500", emptyText: "Nothing done yet." },
-  CANCELLED: { label: "Cancelled", accentClass: "bg-slate-300", emptyText: "Nothing cancelled." },
+  BACKLOG: { label: TASK_STATUS_LABELS.BACKLOG, accentClass: "bg-slate-400", emptyText: "Nothing in the backlog." },
+  TODO: { label: TASK_STATUS_LABELS.TODO, accentClass: "bg-sky-500", emptyText: "Nothing queued up yet." },
+  IN_PROGRESS: { label: TASK_STATUS_LABELS.IN_PROGRESS, accentClass: "bg-blue-500", emptyText: "Nothing in progress." },
+  BLOCKED: { label: TASK_STATUS_LABELS.BLOCKED, accentClass: "bg-red-500", emptyText: "Nothing blocked." },
+  IN_REVIEW: { label: TASK_STATUS_LABELS.IN_REVIEW, accentClass: "bg-amber-500", emptyText: "Nothing in review." },
+  DONE: { label: TASK_STATUS_LABELS.DONE, accentClass: "bg-emerald-500", emptyText: "Nothing done yet." },
+  CANCELLED: { label: TASK_STATUS_LABELS.CANCELLED, accentClass: "bg-slate-300", emptyText: "Nothing cancelled." },
 };
 
 type Props = {

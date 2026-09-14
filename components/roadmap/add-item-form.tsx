@@ -15,7 +15,8 @@ import {
 } from "@/components/ui/combobox";
 import { addRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
-import type { Horizon } from "@/lib/types";
+import { EXPERIMENT_STATUS_BADGE } from "@/lib/discovery";
+import type { ExperimentStatus, Horizon } from "@/lib/types";
 
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
 type AvailableSolution = { id: string; title: string; opportunityTitle: string };
@@ -221,7 +222,9 @@ export function AddItemForm({
                 label: exp.title,
                 render: (
                   <>
-                    <span className="text-muted-foreground text-xs mr-1">{exp.status} ·</span>
+                    <span className="text-muted-foreground text-xs mr-1">
+                      {EXPERIMENT_STATUS_BADGE[exp.status as ExperimentStatus]?.label ?? exp.status} ·
+                    </span>
                     {exp.title}
                   </>
                 ),

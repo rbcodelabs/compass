@@ -24,8 +24,9 @@ import type { TaskAssignee } from "@/lib/task-assignment";
 import { updateTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import type { TaskCardData } from "./task-card";
 import type { TaskPriority, MemberData } from "@/lib/types";
+import { TASK_PRIORITIES, TASK_PRIORITY_LABELS } from "@/lib/task-meta";
 
-const PRIORITIES: TaskPriority[] = ["URGENT", "HIGH", "MEDIUM", "LOW"];
+const PRIORITIES: TaskPriority[] = [...TASK_PRIORITIES];
 
 function toDateInputValue(iso: string | null): string {
   if (!iso) return "";
@@ -146,7 +147,7 @@ export function EditTaskDialog({ task, open, onOpenChange, revalidatePathStr, me
                 <SelectContent>
                   {PRIORITIES.map((p) => (
                     <SelectItem key={p} value={p}>
-                      {p}
+                      {TASK_PRIORITY_LABELS[p]}
                     </SelectItem>
                   ))}
                 </SelectContent>

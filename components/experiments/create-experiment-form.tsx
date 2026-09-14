@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, useTransition } from "react"
+import { useMemo, useRef, useState, useTransition } from "react"
 import { PlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -42,6 +42,17 @@ export function CreateExperimentForm({
   const [squadId, setSquadId] = useState<string | null>(null)
   const [assumptionId, setAssumptionId] = useState<string | null>(prefillAssumptionId)
   const formRef = useRef<HTMLFormElement>(null)
+
+  // This squad option renders a colour dot alongside the name, so `Select`
+  // cannot auto-derive a text label from the children (see components/ui/select.tsx).
+  // Without `items`, Base UI's <SelectValue> would show the raw squad UUID.
+  const squadItems = useMemo(
+    () => ({
+      __none__: "No squad",
+      ...Object.fromEntries(squads.map((s) => [s.id, s.name])),
+    }),
+    [squads]
+  )
 
   function handleSubmit(formData: FormData) {
     const title = formData.get("title") as string
@@ -189,6 +200,7 @@ export function CreateExperimentForm({
             value={squadId ?? "__none__"}
             onValueChange={(v) => setSquadId(v === "__none__" ? null : v)}
             disabled={isPending}
+            items={squadItems}
           >
             <SelectTrigger id="exp-squad">
               <SelectValue placeholder="No squad" />

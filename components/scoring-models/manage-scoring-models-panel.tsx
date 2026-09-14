@@ -27,7 +27,17 @@ import {
   rebaseMinValuesForFormula,
   type MetricConfigIssue,
 } from "@/lib/scoring";
-import type { ScoringModelData, ScoringFormulaType, MetricDirection } from "@/lib/types";
+import type {
+  ScoringModelData,
+  ScoringFormulaType,
+  ScoringModelStatus,
+  MetricDirection,
+} from "@/lib/types";
+
+const MODEL_STATUS_LABELS: Record<ScoringModelStatus, string> = {
+  ACTIVE: "Active",
+  ARCHIVED: "Archived",
+};
 
 const FORMULA_TYPE_LABELS: Record<ScoringFormulaType, string> = {
   WEIGHTED_SUM: "Weighted Sum",
@@ -559,7 +569,7 @@ function ScoringModelRow({
           )}
           <span className="text-sm font-medium">{model.name}</span>
           <Badge variant={model.status === "ACTIVE" ? "outline" : "secondary"}>
-            {model.status}
+            {MODEL_STATUS_LABELS[model.status] ?? model.status}
           </Badge>
           <Badge variant="secondary">{FORMULA_TYPE_LABELS[model.formulaType]}</Badge>
           <span className="text-xs text-muted-foreground">v{model.version}</span>

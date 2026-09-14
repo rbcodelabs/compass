@@ -2,6 +2,7 @@
 
 import { useUrlState } from "@/hooks/use-url-state";
 import type { MemberData, TaskPriority } from "@/lib/types";
+import { TASK_PRIORITIES, TASK_PRIORITY_LABELS } from "@/lib/task-meta";
 import { assigneeValue, useTaskAssignees } from "./task-assignee-picker";
 
 interface AssigneeProps {
@@ -49,7 +50,7 @@ export function AssigneeFilterBar({ members }: AssigneeProps) {
   );
 }
 
-const PRIORITIES: TaskPriority[] = ["URGENT", "HIGH", "MEDIUM", "LOW"];
+const PRIORITIES: TaskPriority[] = [...TASK_PRIORITIES];
 
 /** Filter pill bar by priority, same identical pattern as SquadFilterBar/AssigneeFilterBar. */
 export function PriorityFilterBar() {
@@ -81,7 +82,7 @@ export function PriorityFilterBar() {
               : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
           }`}
         >
-          {priority}
+          {TASK_PRIORITY_LABELS[priority]}
         </button>
       ))}
     </div>

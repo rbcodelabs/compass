@@ -14,6 +14,7 @@ import { EditTaskDialog } from "./edit-task-dialog";
 import { moveTaskStatus } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import { STATUS_CONFIG } from "./task-column";
 import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
+import { TASK_PRIORITY_LABELS } from "@/lib/task-meta";
 import type { TaskCardData } from "./task-card";
 import type { TaskStatus, SquadData, MemberData } from "@/lib/types";
 
@@ -79,7 +80,7 @@ export function TaskHeader({ task: initialTask, workspaceId, squads, members, re
         </Select>
 
         <span className="inline-flex items-center rounded-full bg-surface-inset text-text-secondary px-2.5 py-0.5 text-xs font-medium border border-border-default">
-          {task.priority}
+          {TASK_PRIORITY_LABELS[task.priority]}
         </span>
 
         {squads.length > 0 && (

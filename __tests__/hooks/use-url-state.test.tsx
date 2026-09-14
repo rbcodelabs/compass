@@ -188,14 +188,15 @@ describe("AssigneeFilterBar on useUrlState", () => {
 describe("PriorityFilterBar on useUrlState", () => {
   it("sets and toggles ?priority", () => {
     render(<PriorityFilterBar />);
-    fireEvent.click(screen.getByRole("button", { name: "URGENT" }));
+    // The pill is labelled "Urgent" but the param it writes stays the raw enum.
+    fireEvent.click(screen.getByRole("button", { name: "Urgent" }));
     expect(lastPush()).toBe("/acme/web/tasks?priority=URGENT");
 
     cleanup();
     push.mockClear();
     currentSearch = "priority=HIGH&assignee=u1";
     render(<PriorityFilterBar />);
-    fireEvent.click(screen.getByRole("button", { name: "HIGH" }));
+    fireEvent.click(screen.getByRole("button", { name: "High" }));
     expect(lastPush()).toBe("/acme/web/tasks?assignee=u1");
   });
 });
