@@ -95,6 +95,12 @@ export function buildFeedbackColumns({
         sortable: true,
         // Free-text search lives in `q`; the header sorts by title.
         sortKey: "title",
+        // No width — absorbs the remainder under `table-fixed` — with an 18rem
+        // floor so it cannot collapse against the other columns' 44rem. This
+        // grid drops to stacked cards below `md`, where the grid skips the
+        // table `min-width` entirely, so the floor only governs the band
+        // between `md` and a container wide enough for the full 62rem.
+        minWidth: "18rem",
         // `components/ui/table.tsx`'s TableCell is `whitespace-nowrap`, which
         // silently defeats `line-clamp-1` — the description renders as one
         // unwrapped line that gets sliced off at the cell edge with no
