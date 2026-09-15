@@ -117,7 +117,9 @@ test.describe("Roadmap sidebar delivery tasks", () => {
     await page.keyboard.type("Dev User");
     await page.keyboard.press("Enter");
     await panel.getByRole("button", { name: "Add task", exact: true }).click();
-    await expect(list.getByRole("link", { name: new RegExp(addedTitle) })).toBeVisible({ timeout: 15_000 });
+    // Delivery-task rows are buttons that open the shared task panel now, not
+    // links to /tasks/<id> — same click target, same row, same evidence.
+    await expect(list.getByRole("button", { name: new RegExp(addedTitle) })).toBeVisible({ timeout: 15_000 });
     await expect(card.getByLabel("Delivery status: Blocked")).toBeVisible();
 
     await panel.getByRole("button", { name: "Link existing" }).click();
@@ -126,16 +128,21 @@ test.describe("Roadmap sidebar delivery tasks", () => {
     await page.keyboard.type(seeded.existingTaskTitle);
     await page.keyboard.press("Enter");
     await page.getByRole("dialog").getByRole("button", { name: "Link task" }).click();
-    await expect(list.getByRole("link", { name: new RegExp(seeded.existingTaskTitle) })).toBeVisible({ timeout: 15_000 });
+    await expect(list.getByRole("button", { name: new RegExp(seeded.existingTaskTitle) })).toBeVisible({ timeout: 15_000 });
 
     await page.reload();
     await page.waitForLoadState("networkidle");
     const reloadedPanel = page.locator('[data-slot="sheet-content"]');
-    await expect(reloadedPanel.getByRole("link", { name: new RegExp(addedTitle) })).toBeVisible({ timeout: 15_000 });
-    await expect(reloadedPanel.getByRole("link", { name: new RegExp(seeded.existingTaskTitle) })).toBeVisible();
+    await expect(reloadedPanel.getByRole("button", { name: new RegExp(addedTitle) })).toBeVisible({ timeout: 15_000 });
+    await expect(reloadedPanel.getByRole("button", { name: new RegExp(seeded.existingTaskTitle) })).toBeVisible();
 
-    await reloadedPanel.getByRole("link", { name: new RegExp(addedTitle) }).click();
+    // Navigating from the sidebar row now swaps the panel to that task's own
+    // detail; "Open full page" still reaches the /tasks/<id> route.
+    await reloadedPanel.getByRole("button", { name: new RegExp(addedTitle) }).click();
+    await expect(page).toHaveURL(/detail=task/, { timeout: 15_000 });
+    await expect(reloadedPanel.getByRole("button", { name: addedTitle })).toBeVisible({ timeout: 15_000 });
+    await reloadedPanel.getByRole("link", { name: "Open full page" }).click();
     await page.waitForURL(new RegExp(`/tasks/[0-9a-f-]{36}$`), { timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: addedTitle })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("button", { name: addedTitle })).toBeVisible({ timeout: 15_000 });
   });
 });
