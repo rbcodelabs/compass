@@ -71,7 +71,12 @@ Manage a task's children from its detail page's **Subtasks** tab.
 
 ## Linking to the Rest of Compass
 
-A task can link to any number of other Compass objects — Opportunities, Solutions, Roadmap Items, Objectives, Key Results, Docs, Experiments, and Feedback Items — from its detail page's **Links** tab. Links are many-to-many with no cap: one task can be linked to both a Solution and a Doc, and one Opportunity can have many tasks pointing at it. This is how delivery work stays traceable back to the discovery and planning context that motivated it.
+A task can link to any number of other Compass objects — Opportunities, Solutions, Roadmap Items, Objectives, Key Results, Docs, Experiments, and Feedback Items. Links are many-to-many with no cap: one task can be linked to both a Solution and a Doc, and one Opportunity can have many tasks pointing at it. This is how delivery work stays traceable back to the discovery and planning context that motivated it.
+
+Linking works from either side:
+
+- **From the task** — its detail page's **Links** tab links to (or unlinks from) any of those object types.
+- **From the object** — an Opportunity, Solution, Experiment, Objective, Key Result, Feedback Item, or Doc's own detail panel has a **Delivery tasks** section where you can create a new task inline (title, optional assignee) or link an existing unlinked task, without leaving the panel or navigating to the Tasks board first. A Roadmap Item's sidebar had this first; it now works identically everywhere else a task can point.
 
 A task's owning **Squad** is not part of this link system — it's a first-class field on the task itself (same as Opportunities and Roadmap Items), so squad-based board filtering stays a simple, exact match.
 

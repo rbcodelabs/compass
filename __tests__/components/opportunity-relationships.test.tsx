@@ -19,6 +19,12 @@ vi.mock("@/components/discovery/evidence-list", () => ({ EvidenceList: () => nul
 vi.mock("@/components/discovery/add-solution-form", () => ({ AddSolutionForm: () => null }));
 vi.mock("@/components/discovery/add-evidence-dialog", () => ({ AddEvidenceDialog: () => null }));
 vi.mock("@/components/decisions/request-decision-link", () => ({ RequestDecisionLink: () => null }));
+// LinkedTasksSection pulls in the real "use server" tasks actions module,
+// which imports next-auth's `@/auth` — a real dependency this jsdom-environment
+// component test has no business loading (same reasoning as every other real
+// child component mocked above). Without this, next-auth's ESM `next/server`
+// import fails to resolve under Vitest's jsdom transform.
+vi.mock("@/components/tasks/linked-tasks-section", () => ({ LinkedTasksSection: () => null }));
 
 const opportunity = {
   id: "opp", title: "Understand launch needs", description: null, customerSegment: null,
@@ -44,7 +50,7 @@ describe("opportunity relationships", () => {
     detail.data = { ...opportunity, workspaceId: "ws", solutions: [], evidence: [], feedback: [
       { id: "fb", title: "Make launch stages optional for discovery teams with long planning cycles", type: "IDEA", status: "UNDER_REVIEW" },
       { id: "fb2", title: "Second signal", type: "BUG", status: "PLANNED" },
-    ] };
+    ], deliveryTasks: [], linkableTasks: [], members: [] };
     render(<OpportunityPanel opportunityId="opp" orgSlug="org" workspaceSlug="ws" />);
     expect(screen.getByText(/Linked feedback/)).toHaveTextContent("2");
     fireEvent.click(screen.getByRole("button", { name: /Under review.*Make launch stages/i }));
@@ -54,7 +60,7 @@ describe("opportunity relationships", () => {
   });
 
   it("shows explicit empty feedback and KR states", () => {
-    detail.data = { ...opportunity, linkedKeyResult: null, workspaceId: "ws", solutions: [], evidence: [], feedback: [] };
+    detail.data = { ...opportunity, linkedKeyResult: null, workspaceId: "ws", solutions: [], evidence: [], feedback: [], deliveryTasks: [], linkableTasks: [], members: [] };
     render(<OpportunityPanel opportunityId="opp" orgSlug="org" workspaceSlug="ws" />);
     expect(screen.getByText("No feedback linked.")).toBeVisible();
     expect(screen.getByText("No key result linked.")).toBeVisible();
