@@ -47,7 +47,7 @@ Click **Add task** at the bottom of any column (or **Add subtask** on a task's d
 
 ## Discussion
 
-Open a task from the board or list to find **Discussion** below its detail tabs. Existing comments, including comments added through the API, appear here. Discussion remains available while you switch between Overview, Subtasks, Links, and Details.
+Open a task to find **Discussion** at the bottom of its detail panel — the same panel used for every other Compass item, opened via a click from the board or list, or as a full page at the task's own URL. Existing comments, including comments added through the API, appear here.
 
 Add comments and replies, edit or delete your own comments, and resolve or reopen threads using the same [shared Discussion](/help/14-detail-panel) available on other Compass items. Workspace and organization administrators can moderate discussions. Subtasks have their own discussions on their detail pages.
 
@@ -67,11 +67,11 @@ clear or replace it. Assignee filters support both kinds of identity.
 
 Tasks can nest: a task with no parent and its own children behaves as an **Epic**, and a task with a parent is a **Subtask**. There's no separate "Epic" type to set — the label is just how the UI describes the shape of the `parentTaskId` tree, so a task's role can never drift out of sync with its actual position in the hierarchy.
 
-Manage a task's children from its detail page's **Subtasks** tab.
+Manage a task's children from the **Subtasks** section of its detail panel.
 
 ## Linking to the Rest of Compass
 
-A task can link to any number of other Compass objects — Opportunities, Solutions, Roadmap Items, Objectives, Key Results, Docs, Experiments, and Feedback Items — from its detail page's **Links** tab. Links are many-to-many with no cap: one task can be linked to both a Solution and a Doc, and one Opportunity can have many tasks pointing at it. This is how delivery work stays traceable back to the discovery and planning context that motivated it.
+A task can link to any number of other Compass objects — Opportunities, Solutions, Roadmap Items, Objectives, Key Results, Docs, Experiments, Decisions, and Feedback Items — from the **Links** section of its detail panel. Links are many-to-many with no cap: one task can be linked to both a Solution and a Doc, and one Opportunity can have many tasks pointing at it. This is how delivery work stays traceable back to the discovery and planning context that motivated it.
 
 A task's owning **Squad** is not part of this link system — it's a first-class field on the task itself (same as Opportunities and Roadmap Items), so squad-based board filtering stays a simple, exact match.
 
@@ -81,4 +81,4 @@ Use **Filters** at the top of the page to filter the board or list by **Squad**,
 
 ## Custom Fields
 
-Like other Compass entities, Tasks support workspace-defined custom fields (Settings → Custom Fields → Task). Add fields like "Component" or "T-shirt size" without a schema change; they render on a task's detail page under the **Details** tab.
+Like other Compass entities, Tasks support workspace-defined custom fields (Settings → Custom Fields → Task). Add fields like "Component" or "T-shirt size" without a schema change; they render in the **Details** section of a task's detail panel.

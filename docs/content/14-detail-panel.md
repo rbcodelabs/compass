@@ -8,11 +8,11 @@ section: "Core Features"
 
 # Detail panel
 
-Every card in Compass — an Objective, Key Result, Opportunity, Solution, Assumption, Experiment, Roadmap item, or piece of Feedback — opens a **detail panel** when you click its title. The panel slides in from the right, over whatever screen you're on, so you can look at (and edit) something without losing your place. It's the same panel everywhere: on the boards, on the OKRs page, and on [Canvas](/help/12-canvas) (where you click a node).
+Every card in Compass — an Objective, Key Result, Opportunity, Solution, Assumption, Experiment, Roadmap item, Task, or piece of Feedback — opens a **detail panel** when you click its title. The panel slides in from the right, over whatever screen you're on, so you can look at (and edit) something without losing your place. It's the same panel everywhere: on the boards, on the OKRs page, on the [Tasks](/help/13-tasks) board and list, and on [Canvas](/help/12-canvas) (where you click a node).
 
 ## Opening it
 
-- **Click a card's title** on any board or list — OKRs, Discovery, Experiments, Roadmap, or Feedback.
+- **Click a card's title** on any board or list — OKRs, Discovery, Experiments, Roadmap, Tasks, or Feedback.
 - **Click a node** on Canvas.
 - Press **Escape**, click the **✕**, or click outside the panel to close it.
 
@@ -29,11 +29,14 @@ Each panel shows the essentials for that item — its status, key fields, and th
 | **Assumption** | Status, risk level, its Solution, and experiments |
 | **Experiment** | Status, kill condition, the assumption it tests, and results |
 | **Roadmap item** | Horizon, votes, and everything it's linked to |
+| **Task** | Status, priority, assignee, owner, squad, subtasks, and everything it's linked to |
 | **Feedback** | Type, status, votes, linked Opportunity, and attachments |
+
+See [Tasks](/help/13-tasks) for what's specific to Task's fields — Epics/Subtasks, Owner, and Iteration.
 
 ## Discuss work in context
 
-Every one of these eight panels includes a shared **Discussion**, as does the [Task detail page](/help/13-tasks). Use it for working notes, questions, and follow-up that should stay attached to the item.
+Every one of these nine panels includes a shared **Discussion**. Use it for working notes, questions, and follow-up that should stay attached to the item.
 
 ![Shared Discussion in a Roadmap item panel](/screenshots/docs/shared-discussion-desktop.png)
 
@@ -55,7 +58,7 @@ A comment records conversation; it does not approve work, authorize a release, o
 
 Solutions have one additional, specialized surface: **Current Plan**. Plan updates remain separate from ordinary Discussion comments so the current proposal can stay pinned and retain its Approve/Reject workflow without duplicating conversation.
 
-Shared Discussion covers the eight detail panels above and Task detail pages. A follow-up release will bring the same model to Docs, Artifacts, Research Studies, and tracked Decision reviews; their existing specialized experiences remain unchanged for now.
+Shared Discussion covers the nine detail panels above. A follow-up release will bring the same model to Docs, Artifacts, Research Studies, and tracked Decision reviews; their existing specialized experiences remain unchanged for now.
 
 ## Jump between related items
 

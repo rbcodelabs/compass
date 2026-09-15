@@ -88,13 +88,20 @@ test.describe("Tasks assignee filter", () => {
       const unassignedRow = page.locator("tbody tr").filter({ hasText: unassignedTitle });
       await expect(unassignedRow.getByText("Unassigned", { exact: true })).toBeVisible({ timeout: 10_000 });
 
-      // ── 7. And so does the task detail header ───────────────────────────────
+      // ── 7. And so does the task detail ──────────────────────────────────────
+      // The row title opens the shared detail panel instead of navigating; the
+      // panel's Assignee field must still state the empty slot outright rather
+      // than render a blank control.
       await page.goto(`${base}/tasks?view=list`);
       await page.waitForLoadState("networkidle");
-      await page.getByRole("link", { name: unassignedTitle }).click();
-      await page.waitForURL(/\/tasks\/[0-9a-f-]{36}$/, { timeout: 15_000 });
-      await page.waitForLoadState("networkidle");
-      await expect(page.getByText("Assignee: Unassigned")).toBeVisible({ timeout: 15_000 });
+      await page.getByRole("button", { name: unassignedTitle }).click();
+      await expect(page).toHaveURL(/detail=task/, { timeout: 15_000 });
+      const panel = page.locator('[data-slot="sheet-content"]');
+      await expect(panel).toBeVisible({ timeout: 15_000 });
+      await expect(panel.getByText("Assignee", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(panel.getByRole("combobox", { name: "Assignee" })).toContainText("Unassigned", {
+        timeout: 15_000,
+      });
     }
   );
 });

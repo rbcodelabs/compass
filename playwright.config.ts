@@ -70,6 +70,10 @@ export default defineConfig({
         PORT: String(FUNCTIONAL_PORT),
         COMPASS_RESEARCH_CAPTURE_ENABLED: "1",
         COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED: "1",
+        // tasks-agent-assignment.spec.ts needs agent assignment live: without
+        // this, eligibleTaskAssignees() (lib/task-assignment.ts) returns people
+        // only, no agent option ever renders, and the spec hangs to timeout.
+        COMPASS_AGENTS_ENABLED: "1",
         // Deterministic test-only key; production must provide its own secret.
         SSO_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
       },
