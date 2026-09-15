@@ -102,8 +102,8 @@ async function createValidatedSolution(page: Page, base: string, title: string) 
   await expect(panel).toBeVisible();
   await panel.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
   // A plain click here is deliberate: it regression-tests the Select popup's
-  // z-[70] (select.tsx). Before that fix the panel's z-[60] sheet painted over
-  // the listbox and swallowed the click.
+  // popup layer (select.tsx). Before that fix the panel layer's sheet painted
+  // over the listbox and swallowed the click.
   await page.getByRole("option", { name: "Validated" }).click();
 
   // The panel updates its own state in place from the PATCH response — no

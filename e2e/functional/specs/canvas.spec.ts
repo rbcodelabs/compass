@@ -147,7 +147,7 @@ test.describe("Canvas", () => {
     await solutionPanel.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
     // Note the panel's label is "In delivery" (lowercase d — see the STATUS map
     // in solution-panel.tsx). A plain click is deliberate: it regression-tests
-    // the Select popup's z-[70] (select.tsx), without which the panel's z-[60]
+    // the Select popup layer (select.tsx), without which the panel layer's
     // sheet painted over the listbox and swallowed the click.
     await page.getByRole("option", { name: "In delivery" }).click();
     await expect(
