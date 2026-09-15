@@ -90,12 +90,17 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
         id: "name",
         header: "Name",
         // No width — absorbs the remainder under `table-fixed`, with a
-        // `minWidth` floor so it cannot collapse when the other columns
-        // (33rem) out-sum the container. 12rem rather than the 18rem the
-        // Tasks/Discovery titles use: key names are short self-chosen labels,
-        // and this grid sits inside a narrow settings card, so a tighter floor
-        // keeps the whole 45rem table reachable with less scrolling.
-        meta: { label: "Name", hideable: false, minWidth: "12rem", cellClassName: "font-medium text-text-primary" },
+        // `minWidth` floor so it cannot collapse when the other columns (33rem
+        // = 528px) out-sum the container.
+        //
+        // 8rem, well under the 18rem the Tasks/Discovery titles get, because
+        // this grid lives in a settings card rather than a full-page layout:
+        // measured at 1280x800 that card is 660px wide, leaving Name 132px. A
+        // larger floor would put a horizontal scrollbar inside the card at a
+        // normal desktop width. 8rem (128px) preserves what Name already
+        // renders at while still giving it a floor on a phone, and key names
+        // are short self-chosen labels ("Claude Desktop"), not prose.
+        meta: { label: "Name", hideable: false, minWidth: "8rem", cellClassName: "font-medium text-text-primary" },
         cell: ({ row }) => <span className="truncate">{row.original.name}</span>,
       },
       {
