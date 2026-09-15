@@ -2,13 +2,21 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createElement } from "react";
+import { createElement, type FunctionComponent } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const root = process.cwd();
 const source = (path: string) => readFileSync(join(root, path), "utf8");
+
+/**
+ * eslint's `react/no-children-prop` requires children to be passed as a
+ * `createElement` argument, but TS's `createElement` overloads require
+ * `children` *inside* the props object when the component declares it
+ * required. Narrowing a provider to its non-children props satisfies both.
+ */
+type ProviderShell = FunctionComponent<{ orgSlug: string; workspaceSlug: string }>;
 
 afterEach(cleanup);
 
@@ -75,16 +83,16 @@ describe("Roadmap dashboard workspace layout", () => {
     const { PanelProvider } = await import("@/components/panels/panel-context");
     const { NativeTimeline } = await import("@/components/roadmap/native-timeline/native-timeline");
     const { container } = render(
-      createElement(PanelProvider, {
-        orgSlug: "rbcodelabs",
-        workspaceSlug: "compass",
-        children: createElement(NativeTimeline, {
+      createElement(
+        PanelProvider as unknown as ProviderShell,
+        { orgSlug: "rbcodelabs", workspaceSlug: "compass" },
+        createElement(NativeTimeline, {
           items: [],
           squads: [],
           workspaceId: "workspace-1",
           unscheduledItems: [],
         }),
-      }),
+      ),
     );
 
     // The header actually rendered inside the timeline's own output, not just
@@ -108,16 +116,16 @@ describe("Roadmap dashboard workspace layout", () => {
     const { RoadmapBoard } = await import("@/components/roadmap/roadmap-board");
 
     const { container } = render(
-      createElement(PanelProvider, {
-        orgSlug: "rbcodelabs",
-        workspaceSlug: "compass",
-        children: createElement(RoadmapBoard, {
+      createElement(
+        PanelProvider as unknown as ProviderShell,
+        { orgSlug: "rbcodelabs", workspaceSlug: "compass" },
+        createElement(RoadmapBoard, {
           initialItems: [],
           workspaceId: "workspace-1",
           orgSlug: "rbcodelabs",
           workspaceSlug: "compass",
         }),
-      }),
+      ),
     );
 
     const boardRegion = screen.getByRole("region", { name: "Roadmap board" });
