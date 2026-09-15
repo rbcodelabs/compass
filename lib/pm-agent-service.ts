@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { getMcpActor, McpAuthzError, assertWorkspaceMember, type McpActor } from "@/lib/mcp-authz"
-import { assertInterviewToolInput, parseProcessingState, processingStatus, type ProcessingState } from "@/lib/pm-agent-processing"
+import { assertInterviewToolInput, assertPmInterviewKind, parseProcessingState, processingStatus, type ProcessingState } from "@/lib/pm-agent-processing"
 import { PM_INTERVIEW_ALLOWED_FIELDS, parsePmInterviewTargetType } from "@/lib/pm-interview-contracts"
 import { withToolTransaction } from "@/lib/mcp-tool-db"
 import { ok } from "@/lib/mcp-output"
@@ -53,6 +53,9 @@ async function scopedInterview(actor: McpActor, tx: AppTransactionClient = getPr
   const conversation = await tx.agentConversation.findFirst({ where: { id: actor.scopeConversationId, userId: actor.userId, workspaceId: actor.scopeWorkspaceId } })
   const state = parseProcessingState(conversation?.interviewProcessingJson)
   if (!conversation || !state || !["RUNNING", "SUCCEEDED"].includes(state.status) || state.claimId !== actor.scopeClaimId || !state.deadline || state.deadline <= Date.now()) throw new McpAuthzError("Interview processing attempt expired")
+  // Sole resolver for every PM-scoped path (gateInterviewTool, withInterviewMutation,
+  // getPmInterviewTool), so a future handoff kind cannot reach PM target/field logic.
+  assertPmInterviewKind(state)
   const interview = await tx.pMInterview.findFirst({ where: { id: state.interviewId, agentConversationId: conversation.id, workspaceId: actor.scopeWorkspaceId, initiatingUserId: actor.userId } })
   if (!interview) throw new McpAuthzError("Interview not found or access denied")
   return { conversation, state, interview }
