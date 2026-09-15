@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { activateResearchStudy, archiveResearchStudy, closeResearchStudy, regenerateResearchLink, revokeResearchLinks, updateResearchStudy } from "../../actions"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { hashResearchToken } from "@/lib/research"
-import { researchParticipantUrl } from "@/lib/compass-url"
+import { CompassUrlNotConfiguredError, researchParticipantUrl } from "@/lib/compass-url"
 import { reconcileAbandonedResearchSessions } from "@/lib/research-session"
 import { ResearchAttachmentLink } from "@/components/research/research-attachment-link"
 import { StudySettings } from "@/components/research/study-settings"
@@ -82,7 +82,17 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
     },
     select: { id: true },
   }) : null
-  const shareUrl = token && displayedToken ? researchParticipantUrl(token) : null
+  // A *missing* production URL config must not crash this page render —
+  // degrade to "no link to show" instead, matching the MCP tool handlers'
+  // behavior. An unsafe *configured* origin is still surfaced as an error.
+  const shareUrl = token && displayedToken ? (() => {
+    try {
+      return researchParticipantUrl(token)
+    } catch (error) {
+      if (error instanceof CompassUrlNotConfiguredError) return null
+      throw error
+    }
+  })() : null
   const regenerate = regenerateResearchLink.bind(null, orgSlug, workspaceSlug, study.id)
   const revoke = revokeResearchLinks.bind(null, orgSlug, workspaceSlug, study.id)
   const update = updateResearchStudy.bind(null, orgSlug, workspaceSlug, study.id)

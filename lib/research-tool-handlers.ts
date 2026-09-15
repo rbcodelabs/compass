@@ -1,6 +1,6 @@
 import { getMcpActor, isServiceActor, McpAuthzError } from "@/lib/mcp-authz"
 import { ok, fail, type ToolResult } from "@/lib/mcp-output"
-import { researchParticipantUrl } from "@/lib/compass-url"
+import { CompassUrlNotConfiguredError, researchParticipantUrl } from "@/lib/compass-url"
 import * as studies from "@/lib/research-study-service"
 import type { ResearchStudyType } from "@/lib/research"
 
@@ -12,9 +12,27 @@ async function invoke(operation: (actor: studies.ResearchStudyActor) => Promise<
   try { return await operation({ userId: actor.userId, service: isServiceActor(actor), source: "MCP" }) }
   catch (error) { return fail(error instanceof studies.ResearchStudyError ? error.message : "Research operation failed; no internal details are exposed. Refresh the study before retrying a mutation.") }
 }
+/**
+ * The study/link mutation itself always succeeds in the database regardless of
+ * whether a human-facing participant URL can be built, so a *missing* URL
+ * config degrades to `null` here rather than failing the whole MCP tool call —
+ * mirroring `buildReviewUrl` in lib/decision-tool-handlers.ts. An unsafe
+ * *configured* origin is a different, more serious failure and still aborts
+ * the call (see lib/compass-url.ts's CompassUrlNotConfiguredError).
+ */
+function safeParticipantUrl(token: string): string | null {
+  try {
+    return researchParticipantUrl(token)
+  } catch (error) {
+    if (error instanceof CompassUrlNotConfiguredError) return null
+    throw error
+  }
+}
 function mutation(message: string, result: { id: string; token?: string; status?: string }) {
-  const data = { id: result.id, ...(result.status ? { status: result.status } : {}), ...(result.token ? { participantUrl: researchParticipantUrl(result.token) } : {}) }
-  return ok(`${message}\nID: ${result.id}${result.token ? `\nParticipant link (shown only now): ${data.participantUrl}` : ""}`, data)
+  const participantUrl = result.token ? safeParticipantUrl(result.token) : null
+  const data = { id: result.id, ...(result.status ? { status: result.status } : {}), ...(result.token ? { participantUrl } : {}) }
+  const participantUrlLine = participantUrl ?? "unavailable (production URL not configured)"
+  return ok(`${message}\nID: ${result.id}${result.token ? `\nParticipant link (shown only now): ${participantUrlLine}` : ""}`, data)
 }
 export async function generateResearchGuideTool(input: Scope & { studyType: ResearchStudyType; goal: string; appUrl?: string; targetMinutes: number }) {
   const deadline = Date.now() + 45_000
