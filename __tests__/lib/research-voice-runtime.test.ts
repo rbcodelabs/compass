@@ -342,6 +342,18 @@ describe("authoritative research voice runtime", () => {
     }))
   })
 
+  it("aborts before any sandbox is created when the production callback URL cannot be trusted, rather than degrading gracefully", async () => {
+    vi.stubEnv("VERCEL_ENV", "production")
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "")
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "compass-rbcodelabs-team.vercel.app")
+    const create = vi.fn()
+    await expect(launchResearchVoiceSandbox({
+      createSandbox: create, callId: "call-1", providerCallId: "provider-1",
+      workerToken: "token", leaseExpiresAt: new Date(Date.now() + 60_000), openAIApiKey: "key",
+    })).rejects.toThrow(/NEXT_PUBLIC_APP_URL/i)
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it("rejects callback origins with credentials or non-default production ports", async () => {
     vi.stubEnv("VERCEL_ENV", "production")
     for (const baseUrl of ["https://user:pass@compass.example", "https://compass.example:8443"]) {
