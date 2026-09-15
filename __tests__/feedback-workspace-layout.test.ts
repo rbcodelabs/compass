@@ -39,5 +39,10 @@ describe("Feedback workspace layout", () => {
     expect(grid).toContain('{ value: "IDEA", label: "Ideas" }');
     expect(grid).toContain('{ value: "BUG", label: "Bugs" }');
     expect(grid).toContain("onClearFilters={() => applyPatch({ status: null, type: null })}");
+    // The page puts this grid inside `WorkspacePage`'s `md:overflow-hidden`
+    // content area, so `height="fill"` is a property of the *layout*, not just
+    // of the grid — see __tests__/components/feedback-grid.test.tsx for the
+    // rendered-DOM half of this invariant.
+    expect(grid).toContain('height="fill"');
   });
 });
