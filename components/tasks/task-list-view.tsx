@@ -114,6 +114,14 @@ export function TaskListView({
   // Every column except Title carries an explicit width. Under `table-fixed`
   // those are authoritative and Title absorbs whatever remains, which is the
   // same shape the Feedback grid uses.
+  //
+  // Title declares a `minWidth` because "whatever remains" is negative once the
+  // other columns (50rem) out-sum the container — at 390px that collapsed Title
+  // to invisible. 18rem is the floor: Title is the row's identity and its only
+  // link out, and subtask rows indent by `depth * 20px`, so a tighter floor
+  // eats the text on nested rows. It matches the `min-w-72` the pre-grid
+  // Discovery table shipped, and the grid folds it into the table's `min-width`
+  // so narrow viewports scroll instead of squeezing.
   const columns = useMemo<GridColumnDef<TaskGridRow>[]>(
     () => [
       {
@@ -121,7 +129,7 @@ export function TaskListView({
         header: "Title",
         // `hideable: false` pins Title first and keeps it out of the column
         // menu — a row with no title is not a useful view.
-        meta: { label: "Title", hideable: false },
+        meta: { label: "Title", hideable: false, minWidth: "18rem" },
         cell: ({ row }) => {
           const { task, depth } = row.original;
           return (

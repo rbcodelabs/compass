@@ -76,8 +76,11 @@ const GRID_DEMO_COLUMNS: GridColumnDef<GridDemoRow>[] = [
     id: "opportunity",
     header: "Opportunity",
     accessorKey: "opportunity",
-    // No width: absorbs the remainder under `table-fixed`.
-    meta: { label: "Opportunity", sortable: true, hideable: false },
+    // No width: absorbs the remainder under `table-fixed`, floored by
+    // `minWidth` so it cannot collapse when the container is narrower than the
+    // other columns. 16rem matches the fixed Opportunity column in
+    // GRID_WIDE_COLUMNS below, so the two demo grids read the same.
+    meta: { label: "Opportunity", sortable: true, hideable: false, minWidth: "16rem" },
     cell: ({ row }) => <span className="truncate font-medium text-text-primary">{row.original.opportunity}</span>,
   },
   {

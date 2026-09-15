@@ -80,6 +80,16 @@ export const SELECTION_COLUMN_ID = "__select";
  */
 const CELL_CLIP_CLASS = "overflow-hidden text-ellipsis";
 
+/**
+ * Floor for a flexible column (one with no `meta.width`) that declares no
+ * `meta.minWidth` of its own.
+ *
+ * Every column is reserved *something* in the table's `min-width` so a column
+ * added later cannot silently reintroduce the zero-width collapse that
+ * reservation exists to prevent.
+ */
+export const DEFAULT_MIN_WIDTH = "8rem";
+
 export type DataGridProps<TRow extends GridRowData> = {
   /** Namespace for persisted column preferences: `compass:grid:{gridId}:v1`. */
   gridId: string;
@@ -498,6 +508,56 @@ export function DataGrid<TRow extends GridRowData>({
   // layout exists to avoid.
   const columnCount = mobileMode ? 1 : visibleColumns.length;
 
+  /*
+    Why the table needs an explicit `min-width` at all.
+
+    `components/ui/table.tsx` renders the table element as `w-full`, and this
+    grid adds `table-fixed`. Under `table-layout: fixed` it NEVER overflows its
+    container on its own: when the `<colgroup>` widths sum to more than the
+    available width, browsers scale every column down proportionally, and a
+    column with no declared width gets `container − Σ(declared)` — which goes
+    NEGATIVE once the fixed columns out-sum the container, clamping the column
+    to zero. So the flexible first column (Tasks "Title", Discovery "Item")
+    silently collapsed to invisible at phone widths while the fixed columns
+    were crushed, and the `overflow-x-auto` wrapper never had anything to
+    scroll. Reported against this PR's preview at 390px.
+
+    Reserving the sum here is what converts that shortfall into real horizontal
+    scrolling: `width: 100%` still wins whenever the container is wider, and
+    below the sum the table simply stops shrinking and overflows the wrapper.
+
+    Flexible columns are reserved as `count × max(floor)`, not `Σ(floor)`,
+    because fixed layout splits the leftover space EQUALLY among the columns
+    that declared no width. Reserving only the sum would let a grid with two
+    unequal floors hand the smaller-floored column an equal — and therefore
+    too-small — share. For the single flexible column every current grid has,
+    the two formulas are identical.
+  */
+  const tableMinWidth = React.useMemo(() => {
+    if (mobileMode) return undefined;
+
+    const fixed: string[] = [];
+    const flexible: string[] = [];
+    for (const column of visibleColumns) {
+      const { width, minWidth } = metaOf(column);
+      if (width) fixed.push(width);
+      else flexible.push(minWidth ?? DEFAULT_MIN_WIDTH);
+    }
+
+    const parts = [...fixed];
+    if (flexible.length > 0) {
+      // `max()` and `calc()` keep this unit-agnostic: no parsing of "18rem",
+      // and a column may declare its floor in any CSS length.
+      parts.push(
+        flexible.length === 1
+          ? flexible[0]
+          : `${flexible.length} * max(${flexible.join(", ")})`,
+      );
+    }
+    if (parts.length === 0) return undefined;
+    return `calc(${parts.join(" + ")})`;
+  }, [mobileMode, visibleColumns]);
+
   // ── Column drag reorder ───────────────────────────────────────────────────
   const sensors = useSensors(
     // A small distance threshold lets a plain click reach the sort button
@@ -694,6 +754,9 @@ export function DataGrid<TRow extends GridRowData>({
         */}
         <Table
           className="table-fixed"
+          // `undefined` in mobile mode, where the single `colSpan` card must
+          // fill the viewport rather than force the desktop sum into scroll.
+          style={tableMinWidth ? { minWidth: tableMinWidth } : undefined}
           containerClassName={cn(
             "isolate",
             fill && "min-h-0 flex-1 overflow-y-auto",
@@ -714,6 +777,12 @@ export function DataGrid<TRow extends GridRowData>({
                     // Widths are static per column id, so they are identical in
                     // the pre-hydration frame and the frame after stored column
                     // preferences load. Only presence and order can flick.
+                    //
+                    // `meta.minWidth` is deliberately NOT emitted here. A
+                    // `min-width` on a `<col>` is not honoured under fixed
+                    // layout, and giving a flexible column a `width` would stop
+                    // it absorbing the slack at wide viewports. Its floor is
+                    // enforced by the table's `min-width` instead.
                     style={width ? { width } : undefined}
                   />
                 );

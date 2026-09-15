@@ -114,7 +114,13 @@ export function DiscoveryTableView({ opportunities }: { opportunities: Discovery
         header: "Item",
         // No width — this column absorbs the remainder under `table-fixed`.
         // `hideable: false` pins it first and keeps it out of the column menu.
-        meta: { label: "Item", hideable: false },
+        //
+        // `minWidth` restores the `min-w-72` this table carried before it moved
+        // to the grid: without a floor "the remainder" goes negative once the
+        // other columns (44rem) out-sum the container and the title collapses.
+        // The cell also leads with a 24px expand chevron plus a 6px gap, so
+        // 18rem leaves ~258px for the opportunity title itself.
+        meta: { label: "Item", hideable: false, minWidth: "18rem" },
         cell: ({ row }) => {
           const data = row.original;
           if (data.kind === "solution") {

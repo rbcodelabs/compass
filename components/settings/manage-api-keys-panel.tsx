@@ -89,8 +89,13 @@ export function ManageApiKeysPanel({ orgSlug, workspaceSlug, initialKeys }: Prop
       {
         id: "name",
         header: "Name",
-        // No width — absorbs the remainder under `table-fixed`.
-        meta: { label: "Name", hideable: false, cellClassName: "font-medium text-text-primary" },
+        // No width — absorbs the remainder under `table-fixed`, with a
+        // `minWidth` floor so it cannot collapse when the other columns
+        // (33rem) out-sum the container. 12rem rather than the 18rem the
+        // Tasks/Discovery titles use: key names are short self-chosen labels,
+        // and this grid sits inside a narrow settings card, so a tighter floor
+        // keeps the whole 45rem table reachable with less scrolling.
+        meta: { label: "Name", hideable: false, minWidth: "12rem", cellClassName: "font-medium text-text-primary" },
         cell: ({ row }) => <span className="truncate">{row.original.name}</span>,
       },
       {

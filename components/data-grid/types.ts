@@ -87,8 +87,27 @@ export type GridColumnMeta<TRow extends GridRowData> = {
   sortable?: boolean;
   /** `false` means the column can be neither hidden nor reordered. */
   hideable?: boolean;
-  /** Fixed `<col>` width, e.g. `"8rem"`. Identical across SSR and hydrated frames. */
+  /**
+   * Fixed `<col>` width, e.g. `"8rem"`. Identical across SSR and hydrated frames.
+   *
+   * Under `table-fixed` this is also the column's *minimum*: the grid reserves
+   * it in the table's `min-width` (see `tableMinWidth` in `data-grid.tsx`), so
+   * once the table is at least that wide the column renders at exactly `width`
+   * and can never be squeezed below it. A column therefore never declares both
+   * `width` and `minWidth` — the pair would be inert.
+   */
   width?: string;
+  /**
+   * Floor for a *flexible* column — one that deliberately omits `width` so it
+   * absorbs the leftover space at wide viewports.
+   *
+   * Without it, "the leftover" goes negative the moment the fixed columns
+   * out-sum the container and the column collapses to zero width. Declaring a
+   * floor keeps the column readable and, because the grid folds it into the
+   * table's `min-width`, turns the shortfall into horizontal scrolling instead
+   * of crushed columns.
+   */
+  minWidth?: string;
   align?: GridAlign;
   /**
    * How a cell handles content wider than its column.

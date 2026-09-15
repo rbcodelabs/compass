@@ -13,7 +13,7 @@ import {
 } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import { DataGrid } from "@/components/data-grid/data-grid";
+import { DataGrid, DEFAULT_MIN_WIDTH } from "@/components/data-grid/data-grid";
 import {
   gridPreferencesKey,
   reconcilePreferences,
@@ -1096,5 +1096,130 @@ describe("DataGrid column overflow", () => {
     expect(
       head.querySelector('[data-testid="grid-head-label"]')?.className,
     ).toMatch(/(?:^|\s)truncate(?:\s|$)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Minimum column widths
+// ---------------------------------------------------------------------------
+function tableEl(view: ReturnType<typeof renderGrid>) {
+  const node = view.container.querySelector('[data-slot="table"]');
+  if (!node) throw new Error("table not found");
+  return node as HTMLTableElement;
+}
+
+/**
+ * Regression class this guards: columns crushed to unreadable — and the
+ * flexible first column all the way to zero — instead of the table overflowing
+ * into a horizontal scrollbar.
+ *
+ * The grid renders `table-fixed` on a `w-full` table. Fixed layout never lets a
+ * table overflow on its own: when the `<colgroup>` out-sums the container the
+ * browser scales every column down, and a column with no declared width is
+ * handed `container − Σ(declared)`, which clamps to zero once that goes
+ * negative. Reported against PR #224's preview: at 390px the Tasks title
+ * column was invisible.
+ *
+ * These assert the *reservation* — the table's `min-width` — because that is
+ * the mechanism that converts the shortfall into scrolling. Note that a
+ * `scrollWidth > clientWidth` check does NOT cover this: crushed cells still
+ * overflow their own boxes, so that assertion passes while the bug is live.
+ * It is why this shipped. Real painted widths are verified in a browser at
+ * 320/390/1280; jsdom performs no layout.
+ */
+describe("DataGrid minimum column widths", () => {
+  const FIXED: GridColumnDef<Row>[] = [
+    { id: "title", header: "Title", accessorKey: "title", meta: { label: "Title", minWidth: "18rem" } },
+    { id: "status", header: "Status", accessorKey: "status", meta: { label: "Status", width: "10rem" } },
+    { id: "votes", header: "Votes", accessorKey: "votes", meta: { label: "Votes", width: "6rem" } },
+  ];
+
+  const FIXED_VIEW = () => renderGrid({ columns: FIXED });
+
+  it("reserves every column's minimum as the table's min-width", () => {
+    // 10rem + 6rem fixed, plus the flexible column's declared 18rem floor.
+    expect(tableEl(FIXED_VIEW())).toHaveStyle({
+      minWidth: "calc(10rem + 6rem + 18rem)",
+    });
+  });
+
+  it("gives the flexible column a floor, so it can never resolve to zero", () => {
+    const el = tableEl(FIXED_VIEW());
+
+    // The specific failure Rick hit: no reservation at all, so the flexible
+    // column resolves to `container − Σ(declared)` and clamps to zero.
+    expect(el.style.minWidth).not.toBe("");
+    // ...and the near miss: reserving only the fixed columns, which leaves the
+    // flexible one contributing nothing and collapsing just the same.
+    expect(el).not.toHaveStyle({ minWidth: "calc(10rem + 6rem)" });
+    // 18rem of the 34rem reservation is the flexible column's own.
+    expect(el).toHaveStyle({ minWidth: "calc(10rem + 6rem + 18rem)" });
+  });
+
+  it("falls back to a default floor for a flexible column that declares none", () => {
+    const view = renderGrid({
+      columns: [
+        { id: "title", header: "Title", accessorKey: "title", meta: { label: "Title" } },
+        { id: "status", header: "Status", accessorKey: "status", meta: { label: "Status", width: "10rem" } },
+      ],
+    });
+    expect(tableEl(view)).toHaveStyle({
+      minWidth: `calc(10rem + ${DEFAULT_MIN_WIDTH})`,
+    });
+  });
+
+  it("reserves count x max for several flexible columns, because fixed layout splits the leftover equally", () => {
+    const view = renderGrid({
+      columns: [
+        { id: "title", header: "Title", accessorKey: "title", meta: { label: "Title", minWidth: "18rem" } },
+        { id: "status", header: "Status", accessorKey: "status", meta: { label: "Status", minWidth: "10rem" } },
+        { id: "votes", header: "Votes", accessorKey: "votes", meta: { label: "Votes", width: "6rem" } },
+      ],
+    });
+    // Σ(18 + 10) would hand the 10rem column an equal — and so too small —
+    // share of a 28rem leftover.
+    expect(tableEl(view)).toHaveStyle({
+      minWidth: "calc(6rem + 2 * max(18rem, 10rem))",
+    });
+  });
+
+  it("drops a hidden column from the reservation", async () => {
+    const view = FIXED_VIEW();
+    expect(tableEl(view)).toHaveStyle({ minWidth: "calc(10rem + 6rem + 18rem)" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Columns" }));
+    await screen.findByTestId("grid-column-toggle-votes");
+    fireEvent.click(screen.getByTestId("grid-column-toggle-votes"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("grid-head-votes")).not.toBeInTheDocument(),
+    );
+
+    // Reserving a hidden column's width would scroll the grid for space it is
+    // no longer painting.
+    expect(tableEl(view)).toHaveStyle({ minWidth: "calc(10rem + 18rem)" });
+  });
+
+  it("reserves nothing in mobile mode, where one card fills the viewport", () => {
+    setViewport(true);
+    const view = renderGrid({
+      columns: FIXED,
+      renderMobileRow: (row: Row) => <div data-testid="mobile-card">{row.title}</div>,
+    });
+
+    // The stacked-card path renders a single unstyled <col>; forcing the
+    // desktop sum here would reintroduce exactly the horizontal scroll that
+    // layout exists to avoid.
+    expect(screen.getAllByTestId("mobile-card").length).toBeGreaterThan(0);
+    expect(tableEl(view).style.minWidth).toBe("");
+  });
+
+  it("keeps the flexible column free of a <col> width so it still absorbs slack", () => {
+    const view = renderGrid({ columns: FIXED });
+    const cols = view.container.querySelectorAll("colgroup col");
+
+    expect(cols).toHaveLength(3);
+    // A width here would pin the column at its floor at every viewport.
+    expect((cols[0] as HTMLElement).style.width).toBe("");
+    expect((cols[1] as HTMLElement).style.width).toBe("10rem");
   });
 });
