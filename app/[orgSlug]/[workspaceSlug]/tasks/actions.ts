@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
-import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, validateTaskLink, validateTaskReferences, type TaskAssignee } from "@/lib/task-assignment";
+import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, validateTaskLink, validateTaskReferences, type AssignmentInput, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
 
 async function requireTaskWorkspace(workspaceId: string) {
@@ -221,4 +221,81 @@ export async function unlinkTask(linkId: string, revalidatePathStr: string) {
   await prisma.taskLink.delete({ where: { id: linkId } });
 
   revalidatePath(revalidatePathStr);
+}
+
+// ─── Add / Link Task from a linked entity's perspective ────────────────────
+// Mirrors addTask/linkTask above, but scoped by the *linked entity* (an
+// Opportunity, Solution, Roadmap Item, Objective, Key Result, Doc,
+// Experiment, or Feedback Item) rather than an existing task. Backs
+// components/tasks/linked-tasks-section.tsx, the inline "add/link a delivery
+// task" affordance shared across every TaskLink-eligible detail panel — see
+// lib/linked-tasks.ts for the matching read side.
+
+async function requireLinkedEntityWorkspace(
+  orgSlug: string,
+  workspaceSlug: string,
+  linkedType: TaskLinkedType,
+  linkedId: string
+) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
+  if (!workspace) throw new Error("Not found");
+  await validateTaskLink(workspace.id, linkedType, linkedId);
+  return workspace;
+}
+
+export async function addLinkedTask(
+  orgSlug: string,
+  workspaceSlug: string,
+  linkedType: TaskLinkedType,
+  linkedId: string,
+  data: { title: string } & AssignmentInput,
+  revalidatePathStr: string
+) {
+  const workspace = await requireLinkedEntityWorkspace(orgSlug, workspaceSlug, linkedType, linkedId);
+  const title = data.title.trim();
+  if (!title) throw new Error("Title is required");
+  const assignment = await assignmentUpdate(workspace.id, data);
+  const lastTask = await getPrisma().task.findFirst({
+    where: { workspaceId: workspace.id, status: "TODO" },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  const task = await getPrisma().task.create({
+    data: {
+      workspaceId: workspace.id,
+      title,
+      status: "TODO",
+      priority: "MEDIUM",
+      ...assignment,
+      sortOrder: lastTask ? lastTask.sortOrder + 1 : 0,
+      links: { create: { linkedType, linkedId } },
+    },
+  });
+  revalidatePath(revalidatePathStr);
+  return task;
+}
+
+export async function linkExistingTask(
+  orgSlug: string,
+  workspaceSlug: string,
+  linkedType: TaskLinkedType,
+  linkedId: string,
+  taskId: string,
+  revalidatePathStr: string
+) {
+  const workspace = await requireLinkedEntityWorkspace(orgSlug, workspaceSlug, linkedType, linkedId);
+  const task = await getPrisma().task.findFirst({
+    where: { id: taskId, workspaceId: workspace.id, status: { not: "CANCELLED" } },
+    select: { id: true },
+  });
+  if (!task) throw new Error("Not found");
+  const link = await getPrisma().taskLink.upsert({
+    where: { taskId_linkedType_linkedId: { taskId, linkedType, linkedId } },
+    create: { taskId, linkedType, linkedId },
+    update: {},
+  });
+  revalidatePath(revalidatePathStr);
+  return link;
 }

@@ -2,19 +2,19 @@
 
 import { useState, useTransition } from "react";
 import { LinkIcon, PlusIcon } from "lucide-react";
-import { addRoadmapDeliveryTask, linkRoadmapDeliveryTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/roadmap-delivery-actions";
+import { addLinkedTask, linkExistingTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { Combobox, ComboboxContent, ComboboxTrigger, ComboboxValue } from "@/components/ui/combobox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { usePanelContext } from "./panel-context";
-import type { MemberData, TaskPriority, TaskStatus } from "@/lib/types";
+import { usePanelContext, type EntityPanelType } from "@/components/panels/panel-context";
+import type { MemberData, TaskLinkedType, TaskPriority, TaskStatus } from "@/lib/types";
 import { TaskAssigneePicker } from "@/components/tasks/task-assignee-picker";
 import type { ResolvedTaskAssignee, TaskAssignee } from "@/lib/task-assignment";
 
-export type RoadmapDeliveryTaskData = {
+export type LinkedTaskData = {
   id: string;
   title: string;
   status: TaskStatus;
@@ -35,17 +35,43 @@ const STATUS: Record<TaskStatus, { label: string; variant: "neutral" | "info" | 
   CANCELLED: { label: "Cancelled", variant: "neutral" },
 };
 
+// Maps a TaskLink target type to the entity-detail panel type it corresponds
+// to, so a change here live-refreshes any other open panel on the same
+// entity (see usePanelContext/notifyEntityMutated). DOC is intentionally
+// absent — a Doc is a full page, not a side panel, so there's nothing to
+// notify; its own page just re-fetches via `onChanged`. DECISION isn't a
+// linkable target this section ever renders for.
+const NOTIFY_TYPE: Partial<Record<TaskLinkedType, EntityPanelType>> = {
+  OPPORTUNITY: "opportunity",
+  SOLUTION: "solution",
+  ROADMAP_ITEM: "roadmapItem",
+  OBJECTIVE: "objective",
+  KEY_RESULT: "keyResult",
+  EXPERIMENT: "experiment",
+  FEEDBACK_ITEM: "feedback",
+};
+
 type Props = {
-  roadmapItemId: string;
+  linkedType: TaskLinkedType;
+  linkedId: string;
   orgSlug: string;
   workspaceSlug: string;
-  tasks: RoadmapDeliveryTaskData[];
+  revalidatePathStr: string;
+  tasks: LinkedTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
   onChanged: () => Promise<void>;
 };
 
-export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, tasks, linkableTasks, members, onChanged }: Props) {
+/**
+ * The "Delivery tasks" section rendered on every TaskLink-eligible detail
+ * surface (Opportunity, Solution, Roadmap Item, Objective, Key Result, Doc,
+ * Experiment, Feedback Item panels). Originally roadmap-item-only
+ * (roadmap-delivery-tasks.tsx); generalized so every linkable object type
+ * gets the same inline "add a task" / "link an existing task" affordance
+ * without duplicating the form and dialog markup.
+ */
+export function LinkedTasksSection({ linkedType, linkedId, orgSlug, workspaceSlug, revalidatePathStr, tasks, linkableTasks, members, onChanged }: Props) {
   const { notifyEntityMutated, openPanel } = usePanelContext();
   const [addOpen, setAddOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -55,7 +81,10 @@ export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, ta
   const [isPending, startTransition] = useTransition();
 
   function finishMutation() {
-    return onChanged().then(() => notifyEntityMutated("roadmapItem", roadmapItemId));
+    return onChanged().then(() => {
+      const notifyType = NOTIFY_TYPE[linkedType];
+      if (notifyType) notifyEntityMutated(notifyType, linkedId);
+    });
   }
 
   function handleAdd(event: React.FormEvent<HTMLFormElement>) {
@@ -66,7 +95,7 @@ export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, ta
     setError(null);
     startTransition(async () => {
       try {
-        await addRoadmapDeliveryTask(orgSlug, workspaceSlug, roadmapItemId, { title, assignee });
+        await addLinkedTask(orgSlug, workspaceSlug, linkedType, linkedId, { title, assignee }, revalidatePathStr);
         await finishMutation();
         form.reset();
         setAssignee(null);
@@ -83,7 +112,7 @@ export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, ta
     setError(null);
     startTransition(async () => {
       try {
-        await linkRoadmapDeliveryTask(orgSlug, workspaceSlug, roadmapItemId, linkTaskId);
+        await linkExistingTask(orgSlug, workspaceSlug, linkedType, linkedId, linkTaskId, revalidatePathStr);
         await finishMutation();
         setLinkTaskId(null);
         setLinkOpen(false);
@@ -93,9 +122,11 @@ export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, ta
     });
   }
 
-  const memberName = (task: RoadmapDeliveryTaskData) => {
+  const memberName = (task: LinkedTaskData) => {
     const member = task.assigneeUserId ? members.find((candidate) => candidate.userId === task.assigneeUserId) : null;
-    return task.assignee ? `${task.assignee.type === "AGENT" ? "Agent: " : ""}${task.assignee.displayName}${task.assignee.available ? "" : " (unavailable)"}` : member?.name || member?.email || (task.assigneeUserId || task.assigneeAgentId ? "Unavailable assignee" : task.ownerName);
+    return task.assignee
+      ? `${task.assignee.type === "AGENT" ? "Agent: " : ""}${task.assignee.displayName}${task.assignee.available ? "" : " (unavailable)"}`
+      : member?.name || member?.email || (task.assigneeUserId || task.assigneeAgentId ? "Unavailable assignee" : task.ownerName);
   };
 
   return (
@@ -129,8 +160,8 @@ export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, ta
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       {addOpen ? (
         <form onSubmit={handleAdd} className="flex flex-col gap-2 rounded-lg border p-2.5">
-          <Label htmlFor={`roadmap-task-title-${roadmapItemId}`}>Task title</Label>
-          <Input id={`roadmap-task-title-${roadmapItemId}`} name="title" placeholder="What needs doing?" autoFocus required disabled={isPending} />
+          <Label htmlFor={`linked-task-title-${linkedId}`}>Task title</Label>
+          <Input id={`linked-task-title-${linkedId}`} name="title" placeholder="What needs doing?" autoFocus required disabled={isPending} />
           {members.length > 0 && (
             <TaskAssigneePicker members={members} value={assignee} onChange={setAssignee} disabled={isPending} />
           )}
@@ -148,9 +179,9 @@ export function RoadmapDeliveryTasks({ roadmapItemId, orgSlug, workspaceSlug, ta
           <form onSubmit={handleLink} className="flex flex-col gap-4">
             <DialogHeader><DialogTitle>Link existing task</DialogTitle></DialogHeader>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor={`roadmap-link-task-${roadmapItemId}`}>Task</Label>
+              <Label htmlFor={`linked-task-link-${linkedId}`}>Task</Label>
               <Combobox items={linkableTasks.map((task) => ({ value: task.id, label: task.title }))} value={linkTaskId} onValueChange={setLinkTaskId} disabled={isPending}>
-                <ComboboxTrigger id={`roadmap-link-task-${roadmapItemId}`}><ComboboxValue placeholder="Select a task…" /></ComboboxTrigger><ComboboxContent />
+                <ComboboxTrigger id={`linked-task-link-${linkedId}`}><ComboboxValue placeholder="Select a task…" /></ComboboxTrigger><ComboboxContent />
               </Combobox>
             </div>
             <DialogFooter><Button type="submit" size="sm" disabled={isPending || !linkTaskId}>{isPending ? "Linking…" : "Link task"}</Button></DialogFooter>

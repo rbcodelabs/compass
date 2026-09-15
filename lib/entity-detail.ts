@@ -29,6 +29,7 @@
  */
 import getPrisma from "@/lib/db";
 import { isPmInterviewEnabled } from "@/lib/research-feature";
+import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
 
 export const ENTITY_TYPES = [
@@ -79,8 +80,8 @@ export function entityScopeWhere(type: EntityType, id: string, workspaceId: stri
 // `workspaceId`, else null. findFirst (not findUnique) so we can add the
 // relation-based workspace filter to the where clause.
 
-function fetchObjective(id: string, workspaceId: string) {
-  return getPrisma().objective.findFirst({
+async function fetchObjective(id: string, workspaceId: string) {
+  const item = await getPrisma().objective.findFirst({
     where: { id, cycle: { workspaceId } },
     include: {
       cycle: { select: { id: true, title: true, startDate: true, endDate: true } },
@@ -104,10 +105,12 @@ function fetchObjective(id: string, workspaceId: string) {
       },
     },
   });
+  if (!item) return null;
+  return { ...item, ...(await fetchLinkedTasksBundle(workspaceId, "OBJECTIVE", id)) };
 }
 
-function fetchKeyResult(id: string, workspaceId: string) {
-  return getPrisma().keyResult.findFirst({
+async function fetchKeyResult(id: string, workspaceId: string) {
+  const item = await getPrisma().keyResult.findFirst({
     where: { id, objective: { cycle: { workspaceId } } },
     include: {
       objective: { select: { id: true, title: true, cycleId: true } },
@@ -131,6 +134,8 @@ function fetchKeyResult(id: string, workspaceId: string) {
       },
     },
   });
+  if (!item) return null;
+  return { ...item, ...(await fetchLinkedTasksBundle(workspaceId, "KEY_RESULT", id)) };
 }
 
 async function pmInterviewHistory(workspaceId: string, targetType: string, targetId: string) {
@@ -180,7 +185,12 @@ async function fetchOpportunity(id: string, workspaceId: string) {
       roadmapItems: { select: { id: true, title: true, horizon: true } },
     },
   });
-  return item ? { ...item, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews: await pmInterviewHistory(workspaceId, "OPPORTUNITY", id) } : null
+  if (!item) return null;
+  const [pmInterviews, linkedTasks] = await Promise.all([
+    pmInterviewHistory(workspaceId, "OPPORTUNITY", id),
+    fetchLinkedTasksBundle(workspaceId, "OPPORTUNITY", id),
+  ]);
+  return { ...item, ...linkedTasks, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews };
 }
 
 async function fetchSolution(id: string, workspaceId: string) {
@@ -210,12 +220,14 @@ async function fetchSolution(id: string, workspaceId: string) {
     },
   });
   if (!solution) return null
-  const [links, availableArtifacts] = await Promise.all([
+  const [links, availableArtifacts, pmInterviews, linkedTasks] = await Promise.all([
     prisma.artifactLink.findMany({ where: { workspaceId, linkedType: "SOLUTION", linkedId: id }, select: { artifactId: true } }),
     prisma.artifact.findMany({ where: { workspaceId, status: "ACTIVE" }, select: { id: true, title: true, sourceType: true }, orderBy: { title: "asc" } }),
+    pmInterviewHistory(workspaceId, "SOLUTION", id),
+    fetchLinkedTasksBundle(workspaceId, "SOLUTION", id),
   ])
   const linkedIds = new Set(links.map((link) => link.artifactId))
-  return { ...solution, artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews: await pmInterviewHistory(workspaceId, "SOLUTION", id) }
+  return { ...solution, ...linkedTasks, artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews }
 }
 
 async function fetchAssumption(id: string, workspaceId: string) {
@@ -256,7 +268,12 @@ async function fetchExperiment(id: string, workspaceId: string) {
       roadmapItems: { select: { id: true, title: true, horizon: true } },
     },
   });
-  return item ? { ...item, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews: await pmInterviewHistory(workspaceId, "EXPERIMENT", id) } : null
+  if (!item) return null;
+  const [pmInterviews, linkedTasks] = await Promise.all([
+    pmInterviewHistory(workspaceId, "EXPERIMENT", id),
+    fetchLinkedTasksBundle(workspaceId, "EXPERIMENT", id),
+  ]);
+  return { ...item, ...linkedTasks, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews };
 }
 
 async function fetchRoadmapItem(id: string, workspaceId: string) {
@@ -279,79 +296,11 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
   });
   if (!item) return null;
 
-  const [deliveryTasks, linkableTasks, members] = await Promise.all([
-    prisma.task.findMany({
-      where: {
-        workspaceId,
-        status: { not: "CANCELLED" },
-        links: { some: { linkedType: "ROADMAP_ITEM", linkedId: id } },
-      },
-      select: {
-        id: true,
-        title: true,
-        status: true,
-        priority: true,
-        assigneeUserId: true,
-        assigneeAgentId: true,
-        ownerName: true,
-        sortOrder: true,
-        createdAt: true,
-      },
-      orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
-    }),
-    prisma.task.findMany({
-      where: {
-        workspaceId,
-        status: { not: "CANCELLED" },
-        links: { none: { linkedType: "ROADMAP_ITEM", linkedId: id } },
-      },
-      select: { id: true, title: true },
-      orderBy: [{ title: "asc" }, { id: "asc" }],
-    }),
-    prisma.workspaceMember.findMany({
-      where: { workspaceId },
-      select: {
-        id: true,
-        userId: true,
-        role: true,
-        user: { select: { email: true, name: true } },
-      },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    }),
-  ]);
-
-  const precedence: Record<string, number> = {
-    BLOCKED: 0,
-    IN_REVIEW: 1,
-    IN_PROGRESS: 2,
-    DONE: 3,
-    TODO: 4,
-    BACKLOG: 5,
-  };
-  deliveryTasks.sort(
-    (a, b) =>
-      (precedence[a.status] ?? 99) - (precedence[b.status] ?? 99) ||
-      a.sortOrder - b.sortOrder ||
-      a.createdAt.getTime() - b.createdAt.getTime() ||
-      a.id.localeCompare(b.id)
-  );
-
-  return {
-    ...item,
-    deliveryTasks: await resolveTaskAssignees(workspaceId, deliveryTasks),
-    linkableTasks,
-    members: members.map((member) => ({
-      id: member.id,
-      userId: member.userId,
-      role: member.role,
-      email: member.user.email,
-      name: member.user.name,
-    })),
-  };
+  return { ...item, ...(await fetchLinkedTasksBundle(workspaceId, "ROADMAP_ITEM", id)) };
 }
 
-function fetchFeedback(id: string, workspaceId: string) {
-  return getPrisma().feedbackItem.findFirst({
+async function fetchFeedback(id: string, workspaceId: string) {
+  const item = await getPrisma().feedbackItem.findFirst({
     where: { id, workspaceId },
     include: {
       opportunity: { select: { id: true, title: true } },
@@ -361,6 +310,8 @@ function fetchFeedback(id: string, workspaceId: string) {
       _count: { select: { votes: true } },
     },
   });
+  if (!item) return null;
+  return { ...item, ...(await fetchLinkedTasksBundle(workspaceId, "FEEDBACK_ITEM", id)) };
 }
 
 // The candidate pools for TaskDetail's "link to another item" picker — same

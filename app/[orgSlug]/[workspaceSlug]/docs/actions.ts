@@ -11,6 +11,8 @@ import {
   deleteDocCommentCore,
 } from "@/lib/doc-comments";
 import { getArtifactStorage } from "@/lib/artifact-storage";
+import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
+import { validateTaskLink } from "@/lib/task-assignment";
 import {
   archiveArtifact as archiveArtifactCore,
   createExternalArtifact,
@@ -253,6 +255,25 @@ export async function restoreDocVersion(versionId: string, revalidatePathStr: st
 
   revalidatePath(revalidatePathStr);
   return restored;
+}
+
+/**
+ * Re-fetch a doc's linked-tasks bundle after the LinkedTasksSection (see
+ * components/tasks/linked-tasks-section.tsx) adds or links a delivery task.
+ * The doc page is a server component (not SWR-backed like the panels), so
+ * DocEditor keeps its own local copy of this bundle and calls back here to
+ * refresh it, the same way it already manages comments/versions locally.
+ */
+export async function getDocLinkedTasks(workspaceId: string, docId: string) {
+  await requireWorkspaceMember(workspaceId);
+  // Confirm the doc actually belongs to this workspace before reading its
+  // bundle — same existence/scope check the write path (requireLinkedEntityWorkspace
+  // in tasks/actions.ts, via validateTaskLink) already enforces. Not currently
+  // exploitable (requireWorkspaceMember still gates by caller-supplied
+  // workspaceId), but this keeps the read path's validation discipline
+  // consistent with the write path's.
+  await validateTaskLink(workspaceId, "DOC", docId);
+  return fetchLinkedTasksBundle(workspaceId, "DOC", docId);
 }
 
 export async function deleteDoc(docId: string, revalidatePathStr: string) {

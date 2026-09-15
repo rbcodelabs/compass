@@ -15,6 +15,8 @@ import {
   type RelationItem,
   type EditContext,
 } from "./panel-parts";
+import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
+import type { MemberData } from "@/lib/types";
 
 type ObjectiveData = {
   id: string;
@@ -40,6 +42,9 @@ type ObjectiveData = {
       cycle: { id: string; title: string; status: string };
     };
   } | null;
+  deliveryTasks: LinkedTaskData[];
+  linkableTasks: Array<{ id: string; title: string }>;
+  members: MemberData[];
 };
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -60,7 +65,7 @@ export function ObjectivePanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error, mutate } = useEntityDetail<ObjectiveData>(
+  const { data, error, mutate, refresh } = useEntityDetail<ObjectiveData>(
     "objective",
     id,
     orgSlug,
@@ -135,6 +140,20 @@ export function ObjectivePanel({
 
       <Section label="Supports">
         <RelationList items={parentItems} empty="No higher-level Key Result." />
+      </Section>
+
+      <Section label="Delivery tasks" count={data.deliveryTasks.length}>
+        <LinkedTasksSection
+          linkedType="OBJECTIVE"
+          linkedId={data.id}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          revalidatePathStr={data.cycle ? `/${orgSlug}/${workspaceSlug}/okrs/${data.cycle.id}` : `/${orgSlug}/${workspaceSlug}/okrs`}
+          tasks={data.deliveryTasks}
+          linkableTasks={data.linkableTasks}
+          members={data.members}
+          onChanged={refresh}
+        />
       </Section>
       <Discussion targetType="OBJECTIVE" targetId={id} />
     </PanelContainer>
