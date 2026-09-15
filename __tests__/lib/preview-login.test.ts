@@ -125,11 +125,15 @@ describe("ensureSampleWorkspace", () => {
     });
   });
 
-  it("is idempotent: a second call skips creation and reseeding entirely", async () => {
-    const { client, raw } = fixture();
+  it("second call skips creation but tops the seed up against the existing workspace", async () => {
+    const { client, raw, tx } = fixture();
     await ensureSampleWorkspace(client);
     vi.mocked(applyPreviewScenario).mockClear();
     raw.$transaction.mockClear();
+    // The first call above legitimately created everything; clear those too so
+    // the assertions below describe the SECOND call only.
+    tx.organization.create.mockClear();
+    tx.workspace.create.mockClear();
 
     // Second call finds the org already present.
     raw.organization.findUnique.mockResolvedValue({ id: "org-1", slug: "preview-sample" });
@@ -139,10 +143,26 @@ describe("ensureSampleWorkspace", () => {
       .mockResolvedValueOnce({ id: "user-2", email: "preview-viewer@preview.invalid" });
 
     const result = await ensureSampleWorkspace(client);
-    expect(raw.$transaction).not.toHaveBeenCalled();
-    expect(applyPreviewScenario).not.toHaveBeenCalled();
+
+    // Creation must not repeat — the org, users and workspace already exist.
+    expect(tx.organization.create).not.toHaveBeenCalled();
+    expect(tx.workspace.create).not.toHaveBeenCalled();
+
+    // Seeding MUST repeat. The sample org is created once, by whichever
+    // deployment a human logged into first, and then reused across every
+    // branch preview sharing the schema. Skipping the seed here is what made
+    // fixtures added later permanently invisible on an existing preview.
+    // Every seed-screenshots.ts builder guards on existence, so this is a
+    // no-op once a fixture is present.
+    expect(applyPreviewScenario).toHaveBeenCalledTimes(1);
+    expect(applyPreviewScenario).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ workspaceId: "workspace-1", scenario: "full-data" })
+    );
+
     expect(result.ownerUserId).toBe("user-1");
     expect(result.viewerUserId).toBe("user-2");
+    expect(result.workspaceId).toBe("workspace-1");
   });
 
   it("recovers from a concurrent creation race instead of surfacing a duplicate-org error", async () => {
