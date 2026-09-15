@@ -90,7 +90,9 @@ test.describe("Linked tasks — Opportunity panel", () => {
     await page.keyboard.type("Dev User");
     await page.keyboard.press("Enter");
     await panel.getByRole("button", { name: "Add task", exact: true }).click();
-    await expect(list.getByRole("link", { name: new RegExp(addedTitle) })).toBeVisible({ timeout: 15_000 });
+    // Delivery-task rows are buttons that open the shared task panel now, not
+    // links to /tasks/<id> — same click target, same row, same evidence.
+    await expect(list.getByRole("button", { name: new RegExp(addedTitle) })).toBeVisible({ timeout: 15_000 });
     await expect(panel.getByText("No active delivery tasks are linked yet.")).not.toBeVisible();
 
     // ── 4. Link the pre-seeded existing task ──────────────────────────────
@@ -100,18 +102,25 @@ test.describe("Linked tasks — Opportunity panel", () => {
     await page.keyboard.type(linkable.title);
     await page.keyboard.press("Enter");
     await page.getByRole("dialog").getByRole("button", { name: "Link task" }).click();
-    await expect(list.getByRole("link", { name: new RegExp(linkable.title) })).toBeVisible({ timeout: 15_000 });
+    await expect(list.getByRole("button", { name: new RegExp(linkable.title) })).toBeVisible({ timeout: 15_000 });
 
     // ── 5. Both survive a reload (server-fetched, not just optimistic UI) ─
     await page.reload();
     await page.waitForLoadState("networkidle");
     const reloadedPanel = page.locator('[data-slot="sheet-content"]');
-    await expect(reloadedPanel.getByRole("link", { name: new RegExp(addedTitle) })).toBeVisible({ timeout: 15_000 });
-    await expect(reloadedPanel.getByRole("link", { name: new RegExp(linkable.title) })).toBeVisible();
+    await expect(reloadedPanel.getByRole("button", { name: new RegExp(addedTitle) })).toBeVisible({ timeout: 15_000 });
+    await expect(reloadedPanel.getByRole("button", { name: new RegExp(linkable.title) })).toBeVisible();
 
     // ── 6. The list row is a real navigation, not dead text ───────────────
-    await reloadedPanel.getByRole("link", { name: new RegExp(addedTitle) }).click();
+    // The row now swaps the panel to that task's own detail; "Open full page"
+    // still reaches the /tasks/<id> route, so both hops stay covered.
+    await reloadedPanel.getByRole("button", { name: new RegExp(addedTitle) }).click();
+    await expect(page).toHaveURL(/detail=task/, { timeout: 15_000 });
+    await expect(reloadedPanel.getByRole("button", { name: addedTitle })).toBeVisible({ timeout: 15_000 });
+    await reloadedPanel.getByRole("link", { name: "Open full page" }).click();
     await page.waitForURL(new RegExp(`/tasks/[0-9a-f-]{36}$`), { timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: addedTitle })).toBeVisible({ timeout: 15_000 });
+    // The shared detail renders its title as an inline-editable control, not a
+    // heading — same as every other entity panel.
+    await expect(page.getByRole("button", { name: addedTitle })).toBeVisible({ timeout: 15_000 });
   });
 });
