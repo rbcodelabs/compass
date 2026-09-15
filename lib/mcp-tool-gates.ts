@@ -135,6 +135,14 @@ export const TOOL_GATES: Record<string, Gate> = {
   issue_research_link: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
   rotate_research_link: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
   revoke_research_links: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  // Transcript reads are study-scoped exactly like the tools above; the session
+  // is then resolved inside that study by the service, so sessionId alone can
+  // never reach another study's turns.
+  list_research_sessions: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  get_research_session: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  // Synthesis history and storage are study-scoped on exactly the same terms.
+  list_research_syntheses: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  generate_research_synthesis: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
   add_comment: assertCommentTarget,
   list_comments: assertCommentTarget,
   get_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
@@ -411,8 +419,26 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   // identities, credentials or storage paths. Authoring mutations are
   // ordinary workspace writes. Participant-link issuance and study
   // activation stay DENY: they mint or return live participant access.
-  ...["list_research_studies", "get_research_study"].map(name => [name, "READ"]),
-  ...["generate_research_guide", "create_research_study", "update_research_study"].map(name => [name, "WRITE"]),
+  // Transcript reads added 2026-09-14 for ADR-0012 step 3. They return ordered
+  // ResearchTurn text plus an allowlisted session projection (id, studyId,
+  // modality, status, timestamps, endedReason, turnCount, hasSummary) built
+  // field-by-field in lib/research-study-service.ts — never participant names or
+  // emails, resume/participant token material, audioUrl, voice-lease or
+  // active-request state, and never the raw overloaded `summary` column. They
+  // resolve through findMemberStudy, which excludes PM_INTERVIEW studies, so
+  // they cannot read a PM interview (that stays owner-scoped via
+  // get_pm_interview). Reading saved transcripts is an ordinary member read, so
+  // READ rather than DENY; the participant-link tools above remain human-only
+  // because they mint live access.
+  // ADR-0012 step 4. list_research_syntheses returns only CROSS_SESSION rows,
+  // so it never exposes the generation lease's claim ids or deadlines — an
+  // ordinary member read. generate_research_synthesis writes a research
+  // artifact, not discovery state: the row is already leased and idempotent,
+  // every citation is re-validated against saved transcripts before storage,
+  // and it cannot create Evidence. That is the same authority as
+  // update_research_study, hence WRITE rather than DENY.
+  ...["list_research_studies", "get_research_study", "list_research_sessions", "get_research_session", "list_research_syntheses"].map(name => [name, "READ"]),
+  ...["generate_research_guide", "create_research_study", "update_research_study", "generate_research_synthesis"].map(name => [name, "WRITE"]),
   ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
     "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_docs", "get_doc", "list_doc_versions", "get_doc_version", "list_doc_comments", "get_doc_comment", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "list_top_opportunities",

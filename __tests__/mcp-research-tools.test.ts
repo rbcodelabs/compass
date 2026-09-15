@@ -5,11 +5,16 @@ vi.mock("@/lib/research-study-service", () => ({
   listResearchStudies: m.service, getResearchStudy: m.service, activateResearchStudy: m.service,
   closeResearchStudy: m.service, archiveResearchStudy: m.service, issueResearchLink: m.service,
   regenerateResearchLink: m.service, revokeResearchLinks: m.service,
+  listResearchSessions: m.service, getResearchSession: m.service, listResearchSyntheses: m.service,
   ResearchStudyError: class ResearchStudyError extends Error {},
 }))
+// ADR-0012 step 4 added generate_research_synthesis, whose handler reaches the
+// analysis service rather than the study service. Mocked so the exhaustive
+// public-research-credential denial below keeps covering every adapter.
+vi.mock("@/lib/research-analysis-service", () => ({ storeAgentStudySynthesis: m.service, ResearchAnalysisError: class ResearchAnalysisError extends Error {} }))
 import * as handlers from "@/lib/research-tool-handlers"
 import { runWithMcpActor } from "@/lib/mcp-authz"
-const input = { workspaceId: "workspace", studyId: "study", name: "Study", goal: "Goal", guide: ["Question"], studyType: "CUSTOMER_INTERVIEW" as const, appUrl: "", targetMinutes: 15 }
+const input = { workspaceId: "workspace", studyId: "study", sessionId: "session", name: "Study", goal: "Goal", guide: ["Question"], studyType: "CUSTOMER_INTERVIEW" as const, appUrl: "", targetMinutes: 15, synthesis: {} }
 beforeEach(() => { vi.clearAllMocks(); m.service.mockResolvedValue({ id: "study" }) })
 describe("research MCP adapters", () => {
   it("denies every tool to a public research credential before calling services", async () => {
