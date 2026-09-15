@@ -34,6 +34,21 @@ describe("research MCP adapters", () => {
     expect(JSON.stringify(result)).not.toContain("private")
     expect(result.structuredContent.ok).toBe(false)
   })
+  it("degrades to a missing participant link instead of failing the mutation when the production URL is misconfigured", async () => {
+    m.service.mockResolvedValue({ id: "study", token: "secret-token" })
+    delete process.env.NEXT_PUBLIC_APP_URL
+    process.env.VERCEL_ENV = "production"
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = "compass-rbcodelabs-team.vercel.app"
+    try {
+      const result = await runWithMcpActor({ userId: "member" }, () => handlers.issueResearchLinkTool(input))
+      expect(result.structuredContent).toMatchObject({ ok: true, data: { participantUrl: null } })
+      expect(result.content[0].text).not.toContain("vercel.app")
+    } finally {
+      delete process.env.VERCEL_ENV
+      delete process.env.VERCEL_PROJECT_PRODUCTION_URL
+    }
+  })
+
   it("limits guide generation to a 45-second invocation", async () => {
     const start = Date.now()
     await runWithMcpActor({ userId: "member" }, () => handlers.generateResearchGuideTool(input))

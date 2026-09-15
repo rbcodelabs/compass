@@ -88,4 +88,19 @@ describe("feedbackItemUrl deployment origins", () => {
     Object.assign(process.env, values)
     expect(url).toThrow(/HTTPS|invalid/i)
   })
+
+  // Proven-live production bug: NEXT_PUBLIC_APP_URL resolved empty in production
+  // while VERCEL_PROJECT_PRODUCTION_URL (the .vercel.app deployment-protection
+  // host) was set. The old code silently fell back to that host instead of
+  // failing loud. A link built on that host routes a human into Vercel's SSO
+  // wall instead of Compass's own /login.
+  it.each([
+    ["missing entirely", {}],
+    ["set to an empty string", { NEXT_PUBLIC_APP_URL: "" }],
+  ])("refuses to fall back to the Vercel deployment host in production when NEXT_PUBLIC_APP_URL is %s", (_name, values) => {
+    process.env.VERCEL_ENV = "production"
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = "compass-rbcodelabs-team.vercel.app"
+    Object.assign(process.env, values)
+    expect(url).toThrow(/NEXT_PUBLIC_APP_URL/i)
+  })
 })
