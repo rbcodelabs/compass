@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/rbcodelabs/compass/tasks",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+import { PanelProvider } from "@/components/panels/panel-context";
 import { TaskListView } from "@/components/tasks/task-list-view";
 import type { TaskCardData } from "@/components/tasks/task-card";
 
@@ -28,12 +35,14 @@ function task(overrides: Partial<TaskCardData> & Pick<TaskCardData, "id" | "titl
 
 function renderList(tasks: TaskCardData[]) {
   return render(
-    <TaskListView
-      tasks={tasks}
-      orgSlug="rbcodelabs"
-      workspaceSlug="compass"
-      members={[]}
-    />
+    <PanelProvider orgSlug="rbcodelabs" workspaceSlug="compass">
+      <TaskListView
+        tasks={tasks}
+        orgSlug="rbcodelabs"
+        workspaceSlug="compass"
+        members={[]}
+      />
+    </PanelProvider>
   );
 }
 
@@ -61,7 +70,7 @@ describe("TaskListView hierarchy", () => {
     ]);
 
     expect(screen.queryByText("No tasks match the current filters.")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
+    expect(screen.getAllByRole("button").map((btn) => btn.textContent)).toEqual([
       "First child",
       "Second child",
       "Third child",
@@ -77,19 +86,19 @@ describe("TaskListView hierarchy", () => {
       task({ id: "child-1", title: "First child", parentTaskId: "parent", sortOrder: 1 }),
     ]);
 
-    const links = screen.getAllByRole("link");
-    expect(links.map((link) => link.textContent)).toEqual([
+    const rows = screen.getAllByRole("button");
+    expect(rows.map((btn) => btn.textContent)).toEqual([
       "First root",
       "First child",
       "Second child",
       "Second root",
     ]);
 
-    expect(within(links[0].closest("td")!).getByRole("link")).toHaveTextContent("First root");
-    expect(links[0].closest("td")).toHaveStyle({ paddingLeft: "12px" });
-    expect(links[1].closest("td")).toHaveStyle({ paddingLeft: "32px" });
-    expect(links[2].closest("td")).toHaveStyle({ paddingLeft: "32px" });
-    expect(links[3].closest("td")).toHaveStyle({ paddingLeft: "12px" });
+    expect(within(rows[0].closest("td")!).getByRole("button")).toHaveTextContent("First root");
+    expect(rows[0].closest("td")).toHaveStyle({ paddingLeft: "12px" });
+    expect(rows[1].closest("td")).toHaveStyle({ paddingLeft: "32px" });
+    expect(rows[2].closest("td")).toHaveStyle({ paddingLeft: "32px" });
+    expect(rows[3].closest("td")).toHaveStyle({ paddingLeft: "12px" });
   });
 
   // Regression: the wrapper around the table used `overflow-hidden`, which

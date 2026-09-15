@@ -124,9 +124,16 @@ function ComboboxContent({
         // The Positioner is the portal's fixed-position root, so this value
         // alone decides whether the list paints above or below other overlays.
         // At z-50 every Combobox opened inside an entity detail panel (panel
-        // layer, 60) rendered *underneath* the sheet: visible in the DOM and
-        // keyboard-reachable, but swallowing mouse clicks. Same constraint and
-        // same fix as select.tsx.
+        // layer, 60) — the task/linked-task assignee pickers, InlineAssigneeField,
+        // SquadPicker — rendered with correct ARIA state but *underneath* the
+        // sheet: present in the DOM and keyboard-reachable, yet mouse-dead,
+        // because the panel content beneath intercepted the clicks.
+        //
+        // #228 fixed this at z-[70] to match Select's value at the time. 80,
+        // not 70, because the ladder now puts dialogs on 70 — and a Combobox
+        // is opened from inside dialogs too ("Link existing task"), so at 70
+        // it would collide with the dialog that contains it. Same rung as
+        // select.tsx.
         className="isolate z-[80]"
       >
         <ComboboxPrimitive.Popup

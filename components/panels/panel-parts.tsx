@@ -367,6 +367,7 @@ export function EditableText({
   multiline,
   placeholder,
   className,
+  type = "text",
 }: {
   value: string | null;
   field: string;
@@ -374,6 +375,10 @@ export function EditableText({
   multiline?: boolean;
   placeholder?: string;
   className?: string;
+  /** "number" renders a numeric input and sends a parsed number (or null) to
+   * the server instead of a raw string — used by task story points. The
+   * other 8 panels never pass this, so they're unaffected. */
+  type?: "text" | "number";
 }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -388,8 +393,22 @@ export function EditableText({
 
   const commit = async () => {
     setEditing(false);
-    const next = (ref.current?.value ?? "").trim();
-    if (next === (value ?? "").trim()) return; // unchanged
+    const raw = (ref.current?.value ?? "").trim();
+    if (raw === (value ?? "").trim()) return; // unchanged
+
+    let next: string | number | null;
+    if (type === "number") {
+      if (raw.length === 0) {
+        next = null;
+      } else {
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed)) return; // invalid — drop back to display mode, nothing to save
+        next = parsed;
+      }
+    } else {
+      next = raw.length > 0 ? raw : null;
+    }
+
     setSaving(true);
     try {
       const res = await patchEntityField(
@@ -398,7 +417,7 @@ export function EditableText({
         edit.orgSlug,
         edit.workspaceSlug,
         field,
-        next.length > 0 ? next : null
+        next
       );
       edit.onSaved(res.data);
     } catch {
@@ -431,6 +450,7 @@ export function EditableText({
     ) : (
       <input
         {...shared}
+        type={type === "number" ? "number" : "text"}
         ref={ref as React.RefObject<HTMLInputElement>}
         onKeyDown={(e) => {
           if (e.key === "Enter") void commit();

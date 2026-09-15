@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import Link from "next/link";
 import { LinkIcon, PlusIcon } from "lucide-react";
 import { addLinkedTask, linkExistingTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import { Button } from "@/components/ui/button";
@@ -73,7 +72,7 @@ type Props = {
  * without duplicating the form and dialog markup.
  */
 export function LinkedTasksSection({ linkedType, linkedId, orgSlug, workspaceSlug, revalidatePathStr, tasks, linkableTasks, members, onChanged }: Props) {
-  const { notifyEntityMutated } = usePanelContext();
+  const { notifyEntityMutated, openPanel } = usePanelContext();
   const [addOpen, setAddOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkTaskId, setLinkTaskId] = useState<string | null>(null);
@@ -140,14 +139,18 @@ export function LinkedTasksSection({ linkedType, linkedId, orgSlug, workspaceSlu
             const assignee = memberName(task);
             return (
               <li key={task.id}>
-                <Link href={`/${orgSlug}/${workspaceSlug}/tasks/${task.id}`} className="block rounded-lg border p-2.5 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                <button
+                  type="button"
+                  onClick={() => openPanel("task", task.id)}
+                  className="block w-full rounded-lg border p-2.5 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                >
                   <span className="block truncate text-sm font-medium">{task.title}</span>
                   <span className="mt-1 flex flex-wrap items-center gap-1.5">
                     <StatusBadge status={STATUS[task.status].variant}>{STATUS[task.status].label}</StatusBadge>
                     <span className="text-[11px] capitalize text-muted-foreground">{(task.priority ?? "MEDIUM").toLowerCase()}</span>
                     {assignee && <span className="max-w-32 truncate text-[11px] text-muted-foreground">{assignee}</span>}
                   </span>
-                </Link>
+                </button>
               </li>
             );
           })}

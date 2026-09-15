@@ -11,7 +11,13 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
   addTask: vi.fn(),
   getTaskAssigneeOptions: vi.fn().mockResolvedValue([]),
 }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/rbcodelabs/compass/tasks",
+  useSearchParams: () => new URLSearchParams(),
+}));
 
+import { PanelProvider } from "@/components/panels/panel-context";
 import { TaskBoard } from "@/components/tasks/task-board";
 import { taskBoardFilterKey } from "@/lib/task-filters";
 import type { TaskCardData } from "@/components/tasks/task-card";
@@ -51,14 +57,16 @@ type Filters = { squad?: string | null; assignee?: string | null; priority?: str
  */
 function Page({ tasks, filters = {} }: { tasks: TaskCardData[]; filters?: Filters }) {
   return (
-    <TaskBoard
-      key={taskBoardFilterKey(filters)}
-      initialTasks={tasks}
-      workspaceId="ws-1"
-      orgSlug="rbcodelabs"
-      workspaceSlug="compass"
-      members={[]}
-    />
+    <PanelProvider orgSlug="rbcodelabs" workspaceSlug="compass">
+      <TaskBoard
+        key={taskBoardFilterKey(filters)}
+        initialTasks={tasks}
+        workspaceId="ws-1"
+        orgSlug="rbcodelabs"
+        workspaceSlug="compass"
+        members={[]}
+      />
+    </PanelProvider>
   );
 }
 

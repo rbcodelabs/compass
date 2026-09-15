@@ -15,6 +15,7 @@ const models = {
   solution: { findFirst: vi.fn(), update: vi.fn() },
   feedbackItem: { findFirst: vi.fn(), update: vi.fn() },
   roadmapItem: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+  task: { findFirst: vi.fn(), update: vi.fn() },
 };
 
 const database = {
@@ -26,7 +27,13 @@ const database = {
 
 vi.mock("@/lib/db", () => ({ default: () => database }));
 
+// assignmentUpdate has its own dedicated unit tests in task-assignment.test.ts
+// (workspace-membership / agent-grant validation). Here we only need to know
+// updateTaskField's "assignee" case delegates to it and applies the result.
+vi.mock("@/lib/task-assignment", () => ({ assignmentUpdate: vi.fn() }));
+
 import { updateEntityField, EDIT_CONFIG, TITLE_MAX_LENGTH } from "@/lib/entity-mutations";
+import { assignmentUpdate } from "@/lib/task-assignment";
 
 const WS = "ws-1";
 
@@ -117,6 +124,168 @@ describe("updateEntityField — validation", () => {
     const r = await updateEntityField("opportunity", "e1", WS, "workspaceId", "other-ws");
     expect(r).toEqual({ ok: false, status: 400, error: 'Field "workspaceId" is not editable' });
     expect(models.opportunity.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateEntityField — task branch (task-specific field allowlist)", () => {
+  it("rejects an empty task title", async () => {
+    const r = await updateEntityField("task", "e1", WS, "title", "  ");
+    expect(r).toEqual({ ok: false, status: 400, error: "Title is required" });
+    expect(models.task.update).not.toHaveBeenCalled();
+  });
+
+  it("saves a valid task title, setting updatedAt", async () => {
+    const r = await updateEntityField("task", "e1", WS, "title", "  New title  ");
+    expect(r).toEqual({ ok: true });
+    const arg = models.task.update.mock.calls[0][0];
+    expect(arg.where).toEqual({ id: "e1" });
+    expect(arg.data.title).toBe("New title");
+    expect(arg.data.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("normalizes an empty task description to null", async () => {
+    await updateEntityField("task", "e1", WS, "description", "   ");
+    expect(models.task.update.mock.calls[0][0].data.description).toBeNull();
+  });
+
+  it("rejects an invalid task status", async () => {
+    const r = await updateEntityField("task", "e1", WS, "status", "BOGUS");
+    expect(r).toEqual({ ok: false, status: 400, error: "Invalid status" });
+    expect(models.task.update).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid task status", async () => {
+    const r = await updateEntityField("task", "e1", WS, "status", "IN_REVIEW");
+    expect(r).toEqual({ ok: true });
+    expect(models.task.update.mock.calls[0][0].data.status).toBe("IN_REVIEW");
+  });
+
+  it("rejects an invalid task priority", async () => {
+    const r = await updateEntityField("task", "e1", WS, "priority", "SUPER_URGENT");
+    expect(r).toEqual({ ok: false, status: 400, error: "Invalid priority" });
+    expect(models.task.update).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid task priority", async () => {
+    const r = await updateEntityField("task", "e1", WS, "priority", "URGENT");
+    expect(r).toEqual({ ok: true });
+    expect(models.task.update.mock.calls[0][0].data.priority).toBe("URGENT");
+  });
+
+  it("accepts a null assigneeUserId (unassign)", async () => {
+    const r = await updateEntityField("task", "e1", WS, "assigneeUserId", null);
+    expect(r).toEqual({ ok: true });
+    expect(models.task.update.mock.calls[0][0].data.assigneeUserId).toBeNull();
+  });
+
+  it("rejects a non-string, non-null assigneeUserId", async () => {
+    const r = await updateEntityField("task", "e1", WS, "assigneeUserId", 42);
+    expect(r.ok).toBe(false);
+    expect(models.task.update).not.toHaveBeenCalled();
+  });
+
+  it("normalizes an empty ownerName to null", async () => {
+    await updateEntityField("task", "e1", WS, "ownerName", "   ");
+    expect(models.task.update.mock.calls[0][0].data.ownerName).toBeNull();
+  });
+
+  it("accepts a numeric storyPoints value", async () => {
+    const r = await updateEntityField("task", "e1", WS, "storyPoints", 3.5);
+    expect(r).toEqual({ ok: true });
+    expect(models.task.update.mock.calls[0][0].data.storyPoints).toBe(3.5);
+  });
+
+  it("accepts a null storyPoints (clear)", async () => {
+    const r = await updateEntityField("task", "e1", WS, "storyPoints", null);
+    expect(r).toEqual({ ok: true });
+    expect(models.task.update.mock.calls[0][0].data.storyPoints).toBeNull();
+  });
+
+  it("rejects a non-numeric storyPoints value", async () => {
+    const r = await updateEntityField("task", "e1", WS, "storyPoints", "three");
+    expect(r.ok).toBe(false);
+    expect(models.task.update).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid ISO dueDate string, coercing to a Date", async () => {
+    const r = await updateEntityField("task", "e1", WS, "dueDate", "2026-01-15");
+    expect(r).toEqual({ ok: true });
+    expect(models.task.update.mock.calls[0][0].data.dueDate).toBeInstanceOf(Date);
+  });
+
+  it("accepts a null dueDate (clear)", async () => {
+    const r = await updateEntityField("task", "e1", WS, "dueDate", null);
+    expect(r).toEqual({ ok: true });
+    expect(models.task.update.mock.calls[0][0].data.dueDate).toBeNull();
+  });
+
+  it("rejects an unparsable dueDate string", async () => {
+    const r = await updateEntityField("task", "e1", WS, "dueDate", "not-a-date");
+    expect(r.ok).toBe(false);
+    expect(models.task.update).not.toHaveBeenCalled();
+  });
+
+  it("normalizes an empty iteration to null", async () => {
+    await updateEntityField("task", "e1", WS, "iteration", "");
+    expect(models.task.update.mock.calls[0][0].data.iteration).toBeNull();
+  });
+
+  it("accepts a null squadId (unassign)", async () => {
+    const r = await updateEntityField("task", "e1", WS, "squadId", null);
+    expect(r).toEqual({ ok: true });
+    expect(models.task.update.mock.calls[0][0].data.squadId).toBeNull();
+  });
+
+  it("rejects an entirely unknown task field", async () => {
+    const r = await updateEntityField("task", "e1", WS, "workspaceId", "other-ws");
+    expect(r).toEqual({ ok: false, status: 400, error: 'Field "workspaceId" is not editable' });
+    expect(models.task.update).not.toHaveBeenCalled();
+  });
+
+  it("404s and never updates when the task isn't in the workspace", async () => {
+    models.task.findFirst.mockResolvedValue(null);
+    const r = await updateEntityField("task", "e1", WS, "title", "New");
+    expect(r).toEqual({ ok: false, status: 404, error: "Not found" });
+    expect(models.task.update).not.toHaveBeenCalled();
+  });
+
+  it("scopes the task existence check directly by workspaceId (task is workspace-owned, not parent-chain)", async () => {
+    await updateEntityField("task", "t-1", WS, "title", "New");
+    expect(models.task.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "t-1", workspaceId: WS } })
+    );
+  });
+});
+
+describe("updateEntityField — task assignee (USER/AGENT union)", () => {
+  it("delegates to assignmentUpdate and writes the columns it returns", async () => {
+    vi.mocked(assignmentUpdate).mockResolvedValue({ assigneeUserId: null, assigneeAgentId: "agent-1" });
+    const r = await updateEntityField("task", "e1", WS, "assignee", { type: "AGENT", id: "agent-1" });
+    expect(r).toEqual({ ok: true });
+    expect(assignmentUpdate).toHaveBeenCalledWith(WS, { assignee: { type: "AGENT", id: "agent-1" } });
+    expect(models.task.update.mock.calls[0][0].data.assigneeAgentId).toBe("agent-1");
+    expect(models.task.update.mock.calls[0][0].data.assigneeUserId).toBeNull();
+  });
+
+  it("accepts a null assignee (unassign) via the union field", async () => {
+    vi.mocked(assignmentUpdate).mockResolvedValue({ assigneeUserId: null, assigneeAgentId: null });
+    const r = await updateEntityField("task", "e1", WS, "assignee", null);
+    expect(r).toEqual({ ok: true });
+    expect(assignmentUpdate).toHaveBeenCalledWith(WS, { assignee: null });
+  });
+
+  it("surfaces assignmentUpdate's validation error as a 400 and never writes", async () => {
+    vi.mocked(assignmentUpdate).mockRejectedValue(new Error("Assignee is not in this workspace"));
+    const r = await updateEntityField("task", "e1", WS, "assignee", { type: "USER", id: "outsider" });
+    expect(r).toEqual({ ok: false, status: 400, error: "Assignee is not in this workspace" });
+    expect(models.task.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed assignee value without calling assignmentUpdate", async () => {
+    const r = await updateEntityField("task", "e1", WS, "assignee", { type: "BOGUS", id: "x" });
+    expect(r).toEqual({ ok: false, status: 400, error: "Invalid assignee" });
+    expect(assignmentUpdate).not.toHaveBeenCalled();
+    expect(models.task.update).not.toHaveBeenCalled();
   });
 });
 

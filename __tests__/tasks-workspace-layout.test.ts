@@ -2,10 +2,18 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createElement } from "react";
+import { createElement, type FunctionComponent } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PanelProvider } from "@/components/panels/panel-context";
+/**
+ * eslint's `react/no-children-prop` requires children to be passed as a
+ * `createElement` argument, but TS's `createElement` overloads require
+ * `children` *inside* the props object when the component declares it
+ * required. Narrowing a provider to its non-children props satisfies both.
+ */
+type ProviderShell = FunctionComponent<{ orgSlug: string; workspaceSlug: string }>;
 import type { TaskCardData } from "@/components/tasks/task-card";
 import type { MemberData } from "@/lib/types";
 
@@ -26,6 +34,10 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({}),
+  // PanelProvider (wrapped around TaskBoard below) reads the router and URL.
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/rbcodelabs/compass/tasks",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 function makeTask(overrides: Partial<TaskCardData> = {}): TaskCardData {
@@ -57,34 +69,39 @@ const members: MemberData[] = [
 ];
 
 describe("Tasks dashboard workspace layout", () => {
-  it("keeps long assignee labels inside the edit dialog and wraps menu choices", async () => {
-    const { EditTaskDialog } = await import("@/components/tasks/edit-task-dialog");
+  it("keeps long assignee labels inside the inline field and wraps menu choices", async () => {
+    const { InlineAssigneeField } = await import("@/components/tasks/inline-assignee-field");
     render(
-      createElement(EditTaskDialog, {
-        task: makeTask(),
-        open: true,
-        onOpenChange: vi.fn(),
-        revalidatePathStr: "/rbcodelabs/compass/tasks",
+      createElement(InlineAssigneeField, {
+        assigneeUserId: null,
+        assigneeAgentId: null,
+        current: null,
+        ownerName: null,
         members,
-        onSaved: vi.fn(),
+        edit: {
+          type: "task" as const,
+          id: "task-1",
+          orgSlug: "rbcodelabs",
+          workspaceSlug: "compass",
+          onSaved: vi.fn(),
+        },
       }),
     );
 
-    // Dialog content renders through a portal, outside RTL's own container.
-    const form = document.querySelector("form")!;
-    expect(form).not.toBeNull();
-    expect(form.className).toContain("flex min-w-0 flex-col gap-4");
-
-    // The assignee picker actually rendered inside the dialog and wraps its
-    // long labels rather than overflowing.
-    const trigger = screen.getByLabelText("Assignee").closest("div")!.querySelector('[data-slot="combobox-trigger"]')!;
+    // The inline field stacks the picker above the freeform owner-name input
+    // and must not let either overflow its column.
+    const trigger = screen.getByLabelText("Assignee");
     expect(trigger.className).toContain("w-full min-w-0 [&>[data-slot=combobox-value]]:block");
-    const value = trigger.querySelector('[data-slot="combobox-value"]')!;
+    expect(trigger.closest("div")!.className).toContain("flex min-w-0 flex-col gap-1");
+
+    const value = trigger.querySelector(String.raw`[data-slot="combobox-value"]`)!;
     expect(value.className).toContain("min-w-0 truncate");
 
+    // The assignee picker actually rendered and wraps its long labels rather
+    // than overflowing.
     fireEvent.click(trigger);
     const popup = await screen.findByPlaceholderText("Search people and agents…");
-    const content = popup.closest('[data-slot="combobox-content"]')!;
+    const content = popup.closest(String.raw`[data-slot="combobox-content"]`)!;
     expect(content.className).toContain("[&_[data-slot=combobox-item]>span:first-child]:whitespace-normal");
     expect(content.className).toContain("[&_[data-slot=combobox-item]>span:first-child]:[overflow-wrap:anywhere]");
     expect(await screen.findByRole("option", { name: /Ada Lovelace/ })).toBeInTheDocument();
@@ -96,13 +113,19 @@ describe("Tasks dashboard workspace layout", () => {
 
     const { TaskBoard } = await import("@/components/tasks/task-board");
     const { container } = render(
-      createElement(TaskBoard, {
-        initialTasks: [],
-        workspaceId: "workspace-1",
-        orgSlug: "rbcodelabs",
-        workspaceSlug: "compass",
-        members: [],
-      }),
+      // TaskBoard subscribes to panel mutations (subscribeEntityMutated), so it
+      // needs a PanelProvider the same way the other board tests do.
+      createElement(
+        PanelProvider as ProviderShell,
+        { orgSlug: "rbcodelabs", workspaceSlug: "compass" },
+        createElement(TaskBoard, {
+          initialTasks: [],
+          workspaceId: "workspace-1",
+          orgSlug: "rbcodelabs",
+          workspaceSlug: "compass",
+          members: [],
+        }),
+      ),
     );
 
     const boardRegion = screen.getByRole("region", { name: "Task board" });

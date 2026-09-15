@@ -8,7 +8,14 @@ test.describe("Task shared Discussion", () => {
     const title = "Review the onboarding handoff";
     await page.getByLabel("Title").fill(title);
     await todo.getByRole("button", { name: "Add Task", exact: true }).click();
-    await todo.getByRole("link", { name: title }).click();
+    // The card title now opens the shared slide-over panel, which mounts the
+    // same TaskDetail (Discussion included); "Open full page" is the hop to the
+    // /tasks/<id> route the rest of this spec reloads against.
+    const panel = page.locator('[data-slot="sheet-content"]');
+    await todo.getByRole("button", { name: title }).click();
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    await expect(panel.getByRole("region", { name: "Discussion" }).getByText("No comments yet.")).toBeVisible({ timeout: 15_000 });
+    await panel.getByRole("link", { name: "Open full page" }).click();
     await page.waitForURL(/\/tasks\/[0-9a-f-]{36}$/);
     const targetId = new URL(page.url()).pathname.split("/").at(-1)!;
     const discussion = page.getByRole("region", { name: "Discussion" });
@@ -38,9 +45,12 @@ test.describe("Task shared Discussion", () => {
     await discussion.getByRole("button", { name: "Post reply" }).click();
     await expect(discussion.getByText("Reviewed. Ready for the next step.")).toBeVisible();
 
-    await page.getByRole("tab", { name: /Links/ }).click();
+    // The Overview/Links tabs are gone: the detail's other sections and the
+    // Discussion are stacked on one surface, so assert they coexist rather than
+    // switching between them.
+    await expect(page.getByText("Story points")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add link" })).toBeVisible();
     await expect(discussion).toBeVisible();
-    await page.getByRole("tab", { name: "Overview" }).click();
     await page.reload();
     await expect(discussion.getByText("The support checklist is ready for review.")).toBeVisible();
     await expect(discussion.getByText("Reviewed. Ready for the next step.")).toBeVisible();
@@ -50,7 +60,8 @@ test.describe("Task shared Discussion", () => {
       ["mobile", { width: 390, height: 844 }],
     ] as const) {
       await page.setViewportSize(viewport);
-      await page.getByRole("heading", { name: title }).scrollIntoViewIfNeeded();
+      // The title is an inline-editable control now, not a heading.
+      await page.getByRole("button", { name: title }).scrollIntoViewIfNeeded();
       await expect(discussion.getByLabel("Add comment")).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath(`task-discussion-${name}.png`), fullPage: true });
       // Scroll the workspace container to include its bottom-nav safe padding.

@@ -18,6 +18,7 @@ import { SolutionPanel } from "./solution-panel";
 import { AssumptionPanel } from "./assumption-panel";
 import { RoadmapItemPanel } from "./roadmap-item-panel";
 import { FeedbackPanel } from "./feedback-panel";
+import { TaskDetail } from "@/components/tasks/task-detail";
 
 const PANEL_TITLES: Record<string, string> = {
   objective: "Objective",
@@ -28,6 +29,7 @@ const PANEL_TITLES: Record<string, string> = {
   experiment: "Experiment",
   roadmapItem: "Roadmap Item",
   feedback: "Feedback",
+  task: "Task",
   "discovery-rail": "Discovery",
 };
 
@@ -96,6 +98,9 @@ export function PanelShell() {
           )}
           {panel?.type === "roadmapItem" && <RoadmapItemPanel id={panel.id} {...common} />}
           {panel?.type === "feedback" && <FeedbackPanel id={panel.id} {...common} />}
+          {panel?.type === "task" && (
+            <TaskDetail taskId={panel.id} variant="panel" {...common} />
+          )}
           {panel?.type === "discovery-rail" && (
             <DiscoveryRailPanel activeOpportunityId={panel.id} {...common} />
           )}

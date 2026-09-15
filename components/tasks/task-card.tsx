@@ -1,8 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useState, useTransition } from "react";
-import Link from "next/link";
+import { useTransition } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, CalendarDays, Layers } from "lucide-react";
@@ -11,7 +10,7 @@ import { StatusBadge } from "@/components/patterns/status-badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
 import { cancelTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
-import { EditTaskDialog } from "./edit-task-dialog";
+import { usePanelContext } from "@/components/panels/panel-context";
 import { TaskLinksBadge } from "./task-links-badge";
 import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
 import { TASK_PRIORITY_LABELS } from "@/lib/task-meta";
@@ -58,12 +57,11 @@ type Props = {
   workspaceSlug: string;
   members: MemberData[];
   onCancel: (taskId: string) => void;
-  onUpdate?: (task: TaskCardData) => void;
 };
 
-export function TaskCard({ task, revalidatePathStr, orgSlug, workspaceSlug, members, onCancel, onUpdate }: Props) {
+export function TaskCard({ task, revalidatePathStr, members, onCancel }: Props) {
   const [, startCancelTransition] = useTransition();
-  const [editOpen, setEditOpen] = useState(false);
+  const { openPanel } = usePanelContext();
 
   const {
     attributes,
@@ -90,7 +88,6 @@ export function TaskCard({ task, revalidatePathStr, orgSlug, workspaceSlug, memb
 
   const assignee = taskAssigneeDisplay(task, members);
   const dueLabel = formatDueDate(task.dueDate);
-  const detailHref = `/${orgSlug}/${workspaceSlug}/tasks/${task.id}`;
 
   return (
     <div ref={setNodeRef} style={style} className="touch-none group">
@@ -109,12 +106,20 @@ export function TaskCard({ task, revalidatePathStr, orgSlug, workspaceSlug, memb
             <GripVertical className="size-3.5" />
           </button>
         }
-        title={<Link href={detailHref} className="hover:underline underline-offset-2">{task.title}</Link>}
+        title={
+          <button
+            type="button"
+            onClick={() => openPanel("task", task.id)}
+            className="text-left hover:underline underline-offset-2"
+          >
+            {task.title}
+          </button>
+        }
         description={task.description}
         actions={
           <CardMenu
             items={[
-              { label: "Edit", onClick: () => setEditOpen(true) },
+              { label: "Edit", onClick: () => openPanel("task", task.id) },
               { label: "Cancel", onClick: () => handleCancel(), destructive: true },
             ]}
           />
@@ -157,15 +162,6 @@ export function TaskCard({ task, revalidatePathStr, orgSlug, workspaceSlug, memb
           <TaskLinksBadge count={task.links.length} className="self-start" />
         </div>
       </EntityCard>
-
-      <EditTaskDialog
-        task={task}
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        revalidatePathStr={revalidatePathStr}
-        members={members}
-        onSaved={(updated) => onUpdate?.(updated)}
-      />
     </div>
   );
 }
