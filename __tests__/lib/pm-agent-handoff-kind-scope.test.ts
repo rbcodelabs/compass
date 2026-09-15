@@ -50,8 +50,20 @@ const updatePayloadHash = createHash("sha256").update(JSON.stringify(Object.entr
 
 /** A live production row: written before `kind` existed, so it has no `kind` key. */
 const legacyRunning: ProcessingState = { status: "RUNNING", claimId: CLAIM_ID, interviewId: INTERVIEW_ID, deadline: Date.now() + 240_000, targetUrl: "/acme/product/opportunities/opportunity-1" }
-/** A state belonging to a kind this module must not serve. */
-const foreignKind = { ...legacyRunning, kind: "RESEARCH_SYNTHESIS" } as unknown as ProcessingState
+/**
+ * A state belonging to a kind the PM leaves must not serve.
+ *
+ * Until ADR-0012 step 4 this was `RESEARCH_SYNTHESIS`, cast through `unknown`
+ * because the union had one member. That kind is now real and has its own
+ * dispatch branch, so it no longer exercises the *guard* — it exercises the new
+ * branch, which is covered in __tests__/lib/research-synthesis-scope.test.ts.
+ * An unrecognized third kind takes its place here, keeping the original subject
+ * of this file (the PM leaves refuse anything that is not a PM interview)
+ * testable ahead of the next consumer, exactly as before.
+ */
+const foreignKind = { ...legacyRunning, kind: "SOME_FUTURE_KIND" } as unknown as ProcessingState
+/** The real second kind, which must reach its own gate rather than PM logic. */
+const researchKind = { ...legacyRunning, kind: "RESEARCH_SYNTHESIS", interviewId: undefined, studyId: "study-1" } as ProcessingState
 
 beforeEach(() => {
   installPrisma()
@@ -78,10 +90,17 @@ describe("gateInterviewTool", () => {
     await expect(gateInterviewTool(actor, "get_pm_interview", { interviewId: "another-interview" })).rejects.toThrow(/Interview not found or access denied/)
   })
 
-  it("refuses a state belonging to another handoff kind", async () => {
+  it("refuses a state belonging to an unrecognized handoff kind", async () => {
     stub.state = foreignKind
-    await expect(gateInterviewTool(actor, "get_pm_interview", { interviewId: INTERVIEW_ID })).rejects.toThrow(/not a PM interview handoff/)
-    await expect(gateInterviewTool(actor, "update_opportunity", updateArgs)).rejects.toThrow(/not a PM interview handoff/)
+    await expect(gateInterviewTool(actor, "get_pm_interview", { interviewId: INTERVIEW_ID })).rejects.toThrow(/Unsupported handoff kind/)
+    await expect(gateInterviewTool(actor, "update_opportunity", updateArgs)).rejects.toThrow(/Unsupported handoff kind/)
+  })
+
+  it("routes the research kind to its own gate instead of PM target logic", async () => {
+    stub.state = researchKind
+    await expect(gateInterviewTool(actor, "get_pm_interview", { interviewId: INTERVIEW_ID })).rejects.toThrow(/outside this research synthesis/)
+    await expect(gateInterviewTool(actor, "update_opportunity", updateArgs)).rejects.toThrow(/outside this research synthesis/)
+    await expect(gateInterviewTool(actor, "get_research_session", { studyId: "study-1", sessionId: "session-1" })).resolves.toBeUndefined()
   })
 })
 
@@ -94,11 +113,21 @@ describe("withInterviewMutation", () => {
     expect((result as { structuredContent: { ok: boolean; message: string } }).structuredContent).toMatchObject({ ok: true, message: "Item already updated" })
   })
 
-  it("refuses a state belonging to another handoff kind before running the handler", async () => {
+  it("refuses a state belonging to an unrecognized handoff kind before running the handler", async () => {
     stub.state = { ...foreignKind, status: "SUCCEEDED", receipt: { changedFields: ["title"], targetUrl: "/acme/product/opportunities/opportunity-1", payloadHash: updatePayloadHash } }
     const handler = vi.fn()
-    await expect(runWithMcpActor(actor, () => withInterviewMutation("update_opportunity", updateArgs, handler))).rejects.toThrow(/not a PM interview handoff/)
+    await expect(runWithMcpActor(actor, () => withInterviewMutation("update_opportunity", updateArgs, handler))).rejects.toThrow(/Unsupported handoff kind/)
     expect(handler).not.toHaveBeenCalled()
+  })
+
+  it("passes the research kind straight through without the PM receipt machinery", async () => {
+    // ADR-0012 step 4: RESEARCH_SYNTHESIS has no target, no field allowlist and
+    // no receipt diff, and gateInterviewTool has already bound the call to its
+    // study — so no PM receipt may be written and no PM state may be read.
+    stub.state = researchKind
+    const handler = vi.fn(async () => "handled")
+    await expect(runWithMcpActor(actor, () => withInterviewMutation("generate_research_synthesis", { studyId: "study-1" }, handler))).resolves.toBe("handled")
+    expect(handler).toHaveBeenCalledTimes(1)
   })
 })
 

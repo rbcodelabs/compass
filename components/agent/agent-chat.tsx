@@ -41,7 +41,10 @@ type Props = {
 type StreamPhase = "idle" | "booting" | "running"
 type Processing = {
   status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "INTERRUPTED"
-  interviewId: string
+  /** Absent from an older server response, which only ever meant PM_INTERVIEW. */
+  kind?: "PM_INTERVIEW" | "RESEARCH_SYNTHESIS"
+  interviewId?: string
+  targetUrl?: string | null
   canContinue?: boolean
   receipt: { changedFields: string[]; targetUrl: string; before?: Record<string, unknown>; after?: Record<string, unknown> } | null
 }
@@ -98,8 +101,15 @@ export function AgentChat({
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
   }, [messages, streamingText, liveToolSteps, phase])
 
-  const send = useCallback(async (handoff = false, retry = false) => {
-    const text = handoff ? "Use my saved interview to update the item." : input.trim()
+  // `handoffKind` is passed in rather than read from `processing` because the
+  // auto-dispatch below fires from the same tick as its `setProcessing`, so this
+  // closure would still see the previous value. Optimistic text only: the server
+  // replaces a claimed turn's message with the registered per-kind instruction
+  // (lib/agent-handoff-kinds.ts).
+  const send = useCallback(async (handoff = false, retry = false, handoffKind?: Processing["kind"]) => {
+    const text = handoff
+      ? handoffKind === "RESEARCH_SYNTHESIS" ? "Synthesize my saved research for this study." : "Use my saved interview to update the item."
+      : input.trim()
     if (!text || sending.current) return
     sending.current = true
     const controller = new AbortController()
@@ -241,7 +251,7 @@ export function AgentChat({
         setProcessingLoading(false)
         if (state.status === "PENDING" && !started.current.has(activeConversationId!)) {
           started.current.add(activeConversationId!)
-          void sendRef.current(true)
+          void sendRef.current(true, false, state.kind)
         }
         if (state.status === "PENDING" || state.status === "RUNNING") timer = setTimeout(() => void refreshProcessing(), 2000)
       } catch (caught) {
@@ -306,12 +316,27 @@ export function AgentChat({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4 sm:p-6">
-            {processing && <section aria-live="polite" className="space-y-2 rounded-lg border p-4 text-sm">
-              <p className="font-medium">{processing.receipt ? (processing.receipt.changedFields.length ? "Item updated" : "No changes saved") : processing.status === "RUNNING" || processing.status === "PENDING" ? "Updating your item…" : "The update did not finish"}</p>
-              {processing.receipt ? <><dl className="space-y-3">{processing.receipt.changedFields.map(field => <div key={field}><dt className="font-medium">{field}</dt>{processing.receipt?.before && processing.receipt?.after && <dd className="grid gap-2 sm:grid-cols-2"><div><span className="text-text-subtle">Before</span><p className="whitespace-pre-wrap">{String(processing.receipt.before[field] ?? "empty")}</p></div><div><span className="text-text-subtle">After</span><p className="whitespace-pre-wrap">{String(processing.receipt.after[field] ?? "empty")}</p></div></dd>}</div>)}</dl><Link className="underline" href={processing.receipt.targetUrl}>Open updated item</Link></> : <p>Your transcript is saved. {processing.status === "RUNNING" ? "An update is already running; no additional request is needed." : "Follow the agent’s progress here."}</p>}
-              <Link className="block underline" href={`${basePath}/capture/pm/${processing.interviewId}`}>View saved interview</Link>
-              {!processing.receipt && (processing.status === "FAILED" || processing.status === "INTERRUPTED") && <Button disabled={isStreaming} onClick={() => void send(true, true)}>Retry update</Button>}
-            </section>}
+            {processing && (processing.kind === "RESEARCH_SYNTHESIS"
+              // ADR-0012 step 4. This handoff has no target item and no field
+              // receipt — its durable artifact is the ResearchSynthesis snapshot
+              // on the study page, so the PM panel's copy and links do not apply.
+              ? <section aria-live="polite" className="space-y-2 rounded-lg border p-4 text-sm">
+                {/* "Turn finished" rather than "Synthesis stored": the claim is
+                    marked SUCCEEDED whenever the turn completes without throwing,
+                    which does not by itself prove the agent called the storage
+                    tool or that its citations passed validation. The study page
+                    is the authority on whether a snapshot exists. */}
+                <p className="font-medium">{processing.status === "SUCCEEDED" ? "Synthesis turn finished" : processing.status === "RUNNING" || processing.status === "PENDING" ? "Synthesizing your saved research…" : "The synthesis did not finish"}</p>
+                <p>Your saved research is unchanged. {processing.status === "SUCCEEDED" ? "Check the study page for the stored snapshot, and read the agent’s reply above for what it found." : "Follow the agent’s progress here."}</p>
+                {processing.targetUrl && <Link className="block underline" href={processing.targetUrl}>View study and synthesis history</Link>}
+                {(processing.status === "FAILED" || processing.status === "INTERRUPTED") && <Button disabled={isStreaming} onClick={() => void send(true, true, processing.kind)}>Retry synthesis</Button>}
+              </section>
+              : <section aria-live="polite" className="space-y-2 rounded-lg border p-4 text-sm">
+                <p className="font-medium">{processing.receipt ? (processing.receipt.changedFields.length ? "Item updated" : "No changes saved") : processing.status === "RUNNING" || processing.status === "PENDING" ? "Updating your item…" : "The update did not finish"}</p>
+                {processing.receipt ? <><dl className="space-y-3">{processing.receipt.changedFields.map(field => <div key={field}><dt className="font-medium">{field}</dt>{processing.receipt?.before && processing.receipt?.after && <dd className="grid gap-2 sm:grid-cols-2"><div><span className="text-text-subtle">Before</span><p className="whitespace-pre-wrap">{String(processing.receipt.before[field] ?? "empty")}</p></div><div><span className="text-text-subtle">After</span><p className="whitespace-pre-wrap">{String(processing.receipt.after[field] ?? "empty")}</p></div></dd>}</div>)}</dl><Link className="underline" href={processing.receipt.targetUrl}>Open updated item</Link></> : <p>Your transcript is saved. {processing.status === "RUNNING" ? "An update is already running; no additional request is needed." : "Follow the agent’s progress here."}</p>}
+                <Link className="block underline" href={`${basePath}/capture/pm/${processing.interviewId}`}>View saved interview</Link>
+                {!processing.receipt && (processing.status === "FAILED" || processing.status === "INTERRUPTED") && <Button disabled={isStreaming} onClick={() => void send(true, true)}>Retry update</Button>}
+              </section>)}
             {messages.length === 0 && !isStreaming && !processing && !processingLoading && (
               <div className="flex flex-col items-center gap-3 py-16 text-center">
                 <div className="flex size-12 items-center justify-center rounded-full bg-surface-interactive text-text-secondary">

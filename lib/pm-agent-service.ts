@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto"
 import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { getMcpActor, McpAuthzError, assertWorkspaceMember, type McpActor } from "@/lib/mcp-authz"
-import { assertInterviewToolInput, assertPmInterviewKind, parseProcessingState, processingStatus, type ProcessingState } from "@/lib/pm-agent-processing"
+import { assertInterviewToolInput, assertPmInterviewKind, handoffKind, parseProcessingState, processingStatus, type ProcessingState } from "@/lib/pm-agent-processing"
+import { assertResearchSynthesisToolInput } from "@/lib/research-handoff-scope"
 import { PM_INTERVIEW_ALLOWED_FIELDS, parsePmInterviewTargetType } from "@/lib/pm-interview-contracts"
 import { withToolTransaction } from "@/lib/mcp-tool-db"
 import { ok } from "@/lib/mcp-output"
@@ -46,19 +47,44 @@ export async function finishInterviewProcessing(conversationId: string, claimId:
   await prisma.agentConversation.updateMany({ where: { id: conversationId, interviewProcessingJson: conversation!.interviewProcessingJson }, data: { interviewProcessingJson: JSON.stringify({ ...state, status: successful ? "SUCCEEDED" : "FAILED", ...(receipt ? { receipt } : {}) }), updatedAt: new Date() } })
 }
 
-async function scopedInterview(actor: McpActor, tx: AppTransactionClient = getPrisma()) {
+/**
+ * Narrows to the PM kind and fails to compile if the union grows again, so a
+ * third handoff domain cannot inherit PM target/field logic by omission.
+ */
+function assertExhaustiveKind(kind: "PM_INTERVIEW"): asserts kind is "PM_INTERVIEW" {
+  if (kind !== "PM_INTERVIEW") throw new McpAuthzError(`Unsupported handoff kind: ${String(kind)}`)
+}
+
+/**
+ * The kind-agnostic half of scope resolution: credential shape, workspace
+ * membership, conversation ownership, and the claim/deadline fence. Every
+ * handoff kind passes through here identically; only what happens afterwards
+ * differs. Extracted unchanged from `scopedInterview` at ADR-0012 step 4.
+ */
+async function scopedHandoff(actor: McpActor, tx: AppTransactionClient = getPrisma()) {
   if (actor.purpose !== "AGENT_TURN" || !actor.userId || !actor.scopeWorkspaceId || !actor.scopeConversationId || !actor.scopeClaimId) throw new McpAuthzError("Interview processing credential required")
   const member = await tx.workspaceMember.findFirst({ where: { workspaceId: actor.scopeWorkspaceId, userId: actor.userId }, select: { id: true } })
   if (!member) throw new McpAuthzError("Interview not found or access denied")
   const conversation = await tx.agentConversation.findFirst({ where: { id: actor.scopeConversationId, userId: actor.userId, workspaceId: actor.scopeWorkspaceId } })
   const state = parseProcessingState(conversation?.interviewProcessingJson)
   if (!conversation || !state || !["RUNNING", "SUCCEEDED"].includes(state.status) || state.claimId !== actor.scopeClaimId || !state.deadline || state.deadline <= Date.now()) throw new McpAuthzError("Interview processing attempt expired")
+  // userId/workspaceId are returned narrowed rather than re-asserted downstream,
+  // so the non-null guarantee established above stays local to where it is proven.
+  return { conversation, state, userId: actor.userId, workspaceId: actor.scopeWorkspaceId }
+}
+
+/** The PM-only leaf: kind guard plus the interview the claim is bound to. */
+async function pmInterviewFor(resolved: Awaited<ReturnType<typeof scopedHandoff>>, tx: AppTransactionClient) {
   // Sole resolver for every PM-scoped path (gateInterviewTool, withInterviewMutation,
-  // getPmInterviewTool), so a future handoff kind cannot reach PM target/field logic.
-  assertPmInterviewKind(state)
-  const interview = await tx.pMInterview.findFirst({ where: { id: state.interviewId, agentConversationId: conversation.id, workspaceId: actor.scopeWorkspaceId, initiatingUserId: actor.userId } })
+  // getPmInterviewTool), so another handoff kind cannot reach PM target/field logic.
+  assertPmInterviewKind(resolved.state)
+  const interview = await tx.pMInterview.findFirst({ where: { id: resolved.state.interviewId, agentConversationId: resolved.conversation.id, workspaceId: resolved.workspaceId, initiatingUserId: resolved.userId } })
   if (!interview) throw new McpAuthzError("Interview not found or access denied")
-  return { conversation, state, interview }
+  return { ...resolved, interview }
+}
+
+async function scopedInterview(actor: McpActor, tx: AppTransactionClient = getPrisma()) {
+  return pmInterviewFor(await scopedHandoff(actor, tx), tx)
 }
 
 export async function gateInterviewTool(actor: McpActor, tool: string, args: Record<string, unknown>) {
@@ -66,7 +92,14 @@ export async function gateInterviewTool(actor: McpActor, tool: string, args: Rec
     if (tool === "get_pm_interview") await ownerInterview(actor, String(args.interviewId))
     return
   }
-  const { interview } = await scopedInterview(actor)
+  const prisma = getPrisma()
+  const resolved = await scopedHandoff(actor, prisma)
+  // Per-kind leaves. `assertExhaustiveKind` makes a third kind added to the
+  // union a compile error here rather than a silent fallthrough into PM logic.
+  const kind = handoffKind(resolved.state)
+  if (kind === "RESEARCH_SYNTHESIS") return assertResearchSynthesisToolInput(resolved.state, tool, args)
+  assertExhaustiveKind(kind)
+  const { interview } = await pmInterviewFor(resolved, prisma)
   if (tool === "get_pm_interview") {
     if (args.interviewId !== interview.id) throw new McpAuthzError("Interview not found or access denied")
     return
@@ -119,6 +152,16 @@ export async function getPmInterviewTool({ interviewId, offset = 0 }: { intervie
 export async function withInterviewMutation<T>(tool: string, args: Record<string, unknown>, handler: () => Promise<T>): Promise<T | ReturnType<typeof ok>> {
   const actor = getMcpActor()
   if (!actor.scopeConversationId || tool === "get_pm_interview") return handler()
+  // Resolve the claim before opening a transaction so a non-PM kind never has
+  // one held open around its handler. The PM branch re-resolves inside the
+  // transaction, so its optimistic receipt fence is unchanged.
+  const kind = handoffKind((await scopedHandoff(actor)).state)
+  // RESEARCH_SYNTHESIS has no target, no field allowlist and no receipt diff:
+  // `gateInterviewTool` has already bound the call to its study, and the durable
+  // artifact is the leased ResearchSynthesis row, not a product mutation. So the
+  // PM receipt machinery must not run — the handler executes untouched.
+  if (kind === "RESEARCH_SYNTHESIS") return handler()
+  assertExhaustiveKind(kind)
   return getPrisma().$transaction(async tx => {
     const { conversation, state, interview } = await scopedInterview(actor, tx)
     assertInterviewToolInput(interview.targetType, interview.targetId, tool, args)

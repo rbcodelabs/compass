@@ -532,13 +532,114 @@ export async function seedDocs(exec: SqlExec, schema: string, workspaceId: strin
   );
 }
 
+// ─── Research study + completed interviews ──────────────────────────────────────
+
+/**
+ * A closed customer-interview study with completed, transcript-bearing sessions.
+ *
+ * Added for ADR-0012 step 4: synthesis now runs through the core agent, and
+ * "Generate synthesis" is unreviewable by hand without saved COMPLETED sessions
+ * to synthesize — an empty study renders an empty state, not the flow. The
+ * transcripts deliberately echo this fixture's own opportunities (OST staleness,
+ * relinking, onboarding) so a generated synthesis lands next to related discovery
+ * work instead of floating free.
+ *
+ * Quotes are what the synthesis grounding check validates against: every quote a
+ * synthesis cites must be a verbatim substring of a saved turn, so this content
+ * is the evidence base for that check, not decoration.
+ */
+const RESEARCH_STUDY_DEF = {
+  name: "Discovery habits: why trees go stale",
+  goal: "Understand why teams stop maintaining their opportunity tree after the first few weeks.",
+  guide: [
+    "Walk me through the last time you updated your opportunity tree.",
+    "What made you stop, if you did?",
+    "How do you decide an opportunity is no longer worth keeping?",
+    "What would make keeping it current feel worth the effort?",
+  ],
+  sessions: [
+    [
+      ["INTERVIEWER", "Walk me through the last time you updated your opportunity tree."],
+      ["PARTICIPANT", "Honestly it was probably six weeks ago. We set it up during a planning offsite and it looked great that week."],
+      ["INTERVIEWER", "What happened after that week?"],
+      ["PARTICIPANT", "Nothing happened to it, that's the problem. The work moved into tickets and the tree just sat there getting more wrong every sprint."],
+      ["INTERVIEWER", "What made you stop?"],
+      ["PARTICIPANT", "There was no moment where updating it was the obvious next step. It was always a separate chore I'd do later, and later never came."],
+      ["INTERVIEWER", "What would make keeping it current feel worth the effort?"],
+      ["PARTICIPANT", "If it updated itself when we closed tickets I'd trust it. Right now I can't show it to my VP because I know half of it is stale."],
+    ],
+    [
+      ["INTERVIEWER", "Walk me through the last time you updated your opportunity tree."],
+      ["PARTICIPANT", "Last Tuesday actually. But I only touched the one branch we're actively working on."],
+      ["INTERVIEWER", "What about the rest of it?"],
+      ["PARTICIPANT", "The rest is archaeology. There are opportunities in there from a strategy we abandoned in the spring and nobody wants to be the one to delete someone else's idea."],
+      ["INTERVIEWER", "How do you decide an opportunity is no longer worth keeping?"],
+      ["PARTICIPANT", "That's the thing, we never decided. There's no signal that says this one is dead. So it just accumulates and the tree gets harder to read every month."],
+      ["INTERVIEWER", "What would make that easier?"],
+      ["PARTICIPANT", "Show me which ones nobody has touched in a quarter and let me bulk archive them. I'd do that in two minutes if you asked me directly."],
+    ],
+    [
+      ["INTERVIEWER", "Tell me about getting started with the tree."],
+      ["PARTICIPANT", "Setup was the hardest part. I had a spreadsheet of research and no idea which column was an opportunity versus a solution."],
+      ["INTERVIEWER", "How did you resolve that?"],
+      ["PARTICIPANT", "I guessed. I put feature ideas in as opportunities, which I now know is wrong, and that poisoned the whole tree for a month."],
+      ["INTERVIEWER", "What made you stop maintaining it?"],
+      ["PARTICIPANT", "Once I realised the structure was wrong I'd have had to redo all of it, and redoing it felt worse than abandoning it."],
+      ["INTERVIEWER", "What would have helped?"],
+      ["PARTICIPANT", "Catching it early. If something had told me on day one that these look like solutions, not opportunities, I'd have fixed four items instead of forty."],
+    ],
+  ],
+} as const;
+
+export async function seedResearchStudy(exec: SqlExec, schema: string, workspaceId: string): Promise<void> {
+  const existing = await one(
+    exec,
+    `SELECT id FROM "${schema}".research_studies WHERE workspace_id = $1 AND name = $2`,
+    [workspaceId, RESEARCH_STUDY_DEF.name]
+  );
+  if (existing) return;
+
+  const guide = JSON.stringify(
+    RESEARCH_STUDY_DEF.guide.map((text, index) => ({ id: String(index + 1), text }))
+  );
+  const study = await one(
+    exec,
+    `INSERT INTO "${schema}".research_studies
+       (workspace_id, name, goal, study_type, guide, target_minutes, status, source)
+     VALUES ($1,$2,$3,'CUSTOMER_INTERVIEW',$4,20,'ACTIVE','UI') RETURNING id`,
+    [workspaceId, RESEARCH_STUDY_DEF.name, RESEARCH_STUDY_DEF.goal, guide]
+  );
+  const studyId = study!.id as string;
+
+  for (const turns of RESEARCH_STUDY_DEF.sessions) {
+    const session = await one(
+      exec,
+      `INSERT INTO "${schema}".research_sessions
+         (study_id, modality, status, started_at, last_active_at, completed_at, ended_reason, next_sequence)
+       VALUES ($1,'CHAT','COMPLETED', now(), now(), now(), 'PARTICIPANT_COMPLETED', $2) RETURNING id`,
+      [studyId, turns.length + 1]
+    );
+    const sessionId = session!.id as string;
+    // Sequence is 1-based and uniquely indexed per session; insert in order so the
+    // saved transcript reads the way the conversation happened.
+    for (const [index, [role, content]] of turns.entries()) {
+      await one(
+        exec,
+        `INSERT INTO "${schema}".research_turns (session_id, role, content, sequence)
+         VALUES ($1,$2,$3,$4) RETURNING id`,
+        [sessionId, role, content, index + 1]
+      );
+    }
+  }
+}
+
 // ─── Orchestration ───────────────────────────────────────────────────────────────
 
 /**
  * Seeds the full realistic demo dataset (squads, an active OKR cycle,
  * opportunities/solutions/assumptions, experiments, roadmap items, feedback,
- * tasks, and a doc) into an existing workspace. Idempotent — safe to call
- * repeatedly against the same workspace.
+ * tasks, a doc, and a completed research study) into an existing workspace.
+ * Idempotent — safe to call repeatedly against the same workspace.
  */
 export async function seedFullDemoData(
   exec: SqlExec,
@@ -555,6 +656,7 @@ export async function seedFullDemoData(
   await seedFeedback(exec, schema, workspaceId);
   await seedTasksAndLinks(exec, schema, workspaceId, squads, solutionIds, oppIds);
   await seedDocs(exec, schema, workspaceId);
+  await seedResearchStudy(exec, schema, workspaceId);
 }
 
 // ─── CLI entrypoint (unchanged behaviour — screenshot demo data) ─────────────────
