@@ -108,8 +108,13 @@ describe("research study agent policy", () => {
   // participant identities or credentials — and authoring is an ordinary
   // workspace write. Link issuance and activation mint or expose live
   // participant access, so they stay human-only. Locks that boundary.
-  it.each(["list_research_studies", "get_research_study"])("%s is classified as an agent read", (tool) => {
+  it.each(["list_research_studies", "get_research_study", "list_research_sessions", "get_research_session"])("%s is classified as an agent read", (tool) => {
     expect(AGENT_TOOL_POLICY[tool]).toBe("READ")
+  })
+  // ADR-0012 step 3: transcript reads are study-scoped like every other
+  // study tool, so they cannot be pointed at a study in another workspace.
+  it.each(["list_research_sessions", "get_research_session"])("%s is gated on the declared workspace owning the study", (tool) => {
+    expect(TOOL_GATES[tool]).toBeDefined()
   })
   it.each(["generate_research_guide", "create_research_study", "update_research_study"])("%s is classified as an agent write", (tool) => {
     expect(AGENT_TOOL_POLICY[tool]).toBe("WRITE")
@@ -167,10 +172,15 @@ describe("TOOL_GATES completeness", () => {
 })
 
 describe("applyToolGate", () => {
-  it.each(["get_research_study", "update_research_study", "activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"])("%s rejects a study outside the declared workspace", async tool => {
+  it.each(["get_research_study", "update_research_study", "activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links", "list_research_sessions", "get_research_session"])("%s rejects a study outside the declared workspace", async tool => {
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "declared" })
     mockPrisma.researchStudy.findUnique.mockResolvedValue({ workspaceId: "foreign" })
-    await expect(applyToolGate(tool, MEMBER, { workspaceId: "declared", studyId: "study" })).rejects.toThrow(/does not belong to workspace declared/)
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "declared", studyId: "study", sessionId: "session" })).rejects.toThrow(/does not belong to workspace declared/)
+  })
+  it.each(["list_research_sessions", "get_research_session"])("%s denies a non-member of the declared workspace", async tool => {
+    mockPrisma.researchStudy.findUnique.mockResolvedValue({ workspaceId: "declared" })
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "declared", studyId: "study", sessionId: "session" })).rejects.toThrow(/not found or access denied/)
   })
   it("gives public research credentials no internal workspace tools", () => {
     expect([...RESEARCH_TOOL_ALLOWLIST]).toEqual([])
