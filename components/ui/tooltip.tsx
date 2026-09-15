@@ -45,7 +45,11 @@ function TooltipContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
-        className="isolate z-50"
+        // Popup layer (80) — see the stacking-layer ladder in app/globals.css.
+        // ScoreBadge renders a Tooltip inside the opportunity detail panel
+        // (panel layer, 60), and tooltips also have to clear the dialog layer
+        // (70) to stay readable over a dialog.
+        className="isolate z-[80]"
       >
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"

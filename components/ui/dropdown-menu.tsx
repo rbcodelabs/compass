@@ -33,7 +33,12 @@ function DropdownMenuContent({
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
-        className="isolate z-50 outline-none"
+        // Popup layer (80) — see the stacking-layer ladder in app/globals.css.
+        // CardMenu wraps this menu and is rendered inside entity detail panels
+        // (discovery/assumption-item.tsx, via solution-assumptions.tsx), so at
+        // z-50 the menu paints under the panel layer (60) and its items refuse
+        // mouse clicks.
+        className="isolate z-[80] outline-none"
         align={align}
         alignOffset={alignOffset}
         side={side}

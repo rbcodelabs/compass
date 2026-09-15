@@ -60,7 +60,7 @@ test.describe("Discovery → Roadmap", () => {
       // STATUS map in solution-panel.tsx), unlike the old card's "In Delivery".
       await panel.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
       // A plain click here is deliberate: it regression-tests the Select
-      // popup's z-[70] (select.tsx). Before that fix the panel's z-[60] sheet
+      // popup layer (select.tsx). Before that fix the panel layer's sheet
       // painted over the listbox and swallowed the click.
       await page.getByRole("option", { name: "In delivery" }).click();
 

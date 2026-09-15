@@ -207,6 +207,37 @@ html.dark:has(.workspace-theme-scope) {
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* ── Stacking layers ──────────────────────────────────────────────────────
+   Canonical z-index ladder. Enforced by scripts/check-ui-layers.mjs
+   (`pnpm ui:layers`); change the ladder there and here together.
+
+   Portalled overlays mount to <body>, so a popup's z-index is compared
+   against every other overlay in the document — NOT against the element
+   that opened it. A popup therefore has to clear the highest surface it
+   can ever be opened from, not just the page behind it. Getting this
+   wrong is invisible in isolation and only shows up when the component
+   is used inside a raised surface: the popup still renders and is still
+   keyboard-reachable, but it paints underneath and refuses mouse clicks.
+
+     10–40  in-flow app chrome — sidebar, sticky headers, bottom nav.
+            Not portalled; plain `z-10`…`z-40` is fine here.
+     50     base overlay surfaces — sheet backdrop and sheet content.
+     60     entity detail side panels (components/panels/panel-shell.tsx
+            raises its SheetContent to sit above app chrome).
+     70     dialogs and alert dialogs, backdrop and content. Must clear
+            the panel layer: panels host dialogs (linked-tasks-section
+            "Link existing task", discovery/add-evidence-dialog), and a
+            dialog opened from a panel has to cover the panel it came from.
+     80     transient popup positioners — select, combobox, dropdown menu,
+            tooltip. Above every surface, because any of them can be opened
+            from inside any surface, and a transient popup is always
+            dismissed before the user can interact with what it covers.
+
+   Only the positioner (the portal's fixed-position root) needs a ladder
+   value. Those roots carry `isolate`, so any z-index *inside* a popup is
+   scoped to that popup's own stacking context and is compared only
+   against its siblings there. ───────────────────────────────────────── */
+
 /* ── Base styles ──────────────────────────────────────────────────────── */
 body {
   background: var(--background);

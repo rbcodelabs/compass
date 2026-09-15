@@ -70,6 +70,10 @@ export function PanelShell() {
     <Sheet open={hydrated && panel !== null} onOpenChange={(open) => { if (!open) closePanel(); }}>
       <SheetContent
         side="right"
+        // z-[60] is the panel layer — see the stacking-layer ladder in
+        // app/globals.css. Overlays opened from inside this panel (dialogs at
+        // 70, popups at 80) are laddered above it; anything portalled at 50
+        // would paint underneath and refuse mouse clicks.
         className="w-full sm:max-w-md flex flex-col gap-0 p-0 z-[60]"
         showCloseButton
       >

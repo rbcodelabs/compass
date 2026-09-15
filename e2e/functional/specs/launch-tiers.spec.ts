@@ -81,10 +81,11 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
       const firstStatus = panel.getByRole("combobox").filter({ hasText: "Pending" }).first();
       await expect(firstStatus).toBeEnabled({ timeout: 10_000 });
       await firstStatus.click();
-      // This used to need keyboard activation: the panel's z-[60] sheet painted
+      // This used to need keyboard activation: the panel layer's sheet painted
       // over base-ui's portaled listbox, so a pointer click was intercepted by
-      // the overlay. Fixed by raising the Select popup to z-[70] (select.tsx);
-      // a plain click now works and guards against that regressing.
+      // the overlay. Fixed by moving the Select positioner to the popup layer
+      // (select.tsx); a plain click now works and guards against that
+      // regressing.
       await page.getByRole("option", { name: "Done" }).click();
 
       await expect(panel.getByText(/1\/2 done/)).toBeVisible({ timeout: 15_000 });

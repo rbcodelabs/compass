@@ -120,7 +120,14 @@ function ComboboxContent({
         align={align}
         alignOffset={alignOffset}
         anchor={anchor}
-        className="isolate z-50"
+        // Popup layer (80) — see the stacking-layer ladder in app/globals.css.
+        // The Positioner is the portal's fixed-position root, so this value
+        // alone decides whether the list paints above or below other overlays.
+        // At z-50 every Combobox opened inside an entity detail panel (panel
+        // layer, 60) rendered *underneath* the sheet: visible in the DOM and
+        // keyboard-reachable, but swallowing mouse clicks. Same constraint and
+        // same fix as select.tsx.
+        className="isolate z-[80]"
       >
         <ComboboxPrimitive.Popup
           data-slot="combobox-content"

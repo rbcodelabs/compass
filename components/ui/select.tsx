@@ -195,15 +195,15 @@ function SelectContent({
         align={align}
         alignOffset={alignOffset}
         alignItemWithTrigger={alignItemWithTrigger}
-        // z-[70], not z-50: the Positioner is the portal's fixed-position root,
-        // so this value alone decides whether the listbox paints above or below
-        // other overlays. Entity detail panels raise their SheetContent to
-        // z-[60] (panel-shell.tsx), which left every in-panel Select's options
-        // rendering *underneath* the sheet — visible, but swallowing mouse
-        // clicks, so a status could only be changed by keyboard. 70 keeps the
-        // transient popup layer above the panel layer (nothing else in the app
-        // goes above 60).
-        className="isolate z-[70]"
+        // Popup layer (80) — see the stacking-layer ladder in app/globals.css.
+        // The Positioner is the portal's fixed-position root, so this value
+        // alone decides whether the listbox paints above or below other
+        // overlays. At z-50 every in-panel Select's options rendered
+        // *underneath* the panel sheet (panel layer, 60) — visible, but
+        // swallowing mouse clicks, so a status could only be changed by
+        // keyboard. 80 keeps the transient popup layer above every surface,
+        // including the dialog layer (70) that Selects are also opened from.
+        className="isolate z-[80]"
       >
         <SelectPrimitive.Popup
           data-slot="select-content"
