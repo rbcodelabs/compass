@@ -14,7 +14,14 @@ const references = z.array(z.string().min(1).max(100)).min(1).max(100)
 const finding = z.object({ text, evidenceTurnIds: references }).strict()
 const summarySchema = z.object({ summary: text, evidenceTurnIds: references }).strict()
 const coverageSchema = z.object({ coverage: z.array(z.object({ guideItemId: z.string(), covered: z.boolean(), evidenceTurnIds: z.array(z.string()).max(100) }).strict()).max(100) }).strict()
-const synthesisSchema = z.object({
+/**
+ * Exported so `generate_research_synthesis` can declare it as the tool's own
+ * `inputSchema` (ADR-0012 step 4): the agent is told the contract by the tool
+ * definition rather than by prose, and there is exactly one definition of the
+ * shape. `parseAnalysisResult` re-runs it server-side anyway, together with the
+ * quote-grounding checks that a JSON schema cannot express.
+ */
+export const synthesisSchema = z.object({
   summary: text,
   themes: z.array(z.object({ title: text, description: text, surprising: z.boolean(), quotes: z.array(z.object({ sessionId: z.string(), turnId: z.string(), text }).strict()).min(1).max(5) }).strict()).max(10),
   patterns: z.array(finding).max(20),

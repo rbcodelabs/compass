@@ -90,11 +90,37 @@ describe("parseProcessingState kind validation", () => {
 })
 
 describe("HandoffKind union", () => {
-  it("is a one-member union today, so a future kind forces every dispatch site to be revisited", () => {
-    // Deliberate: ADR-0012 adds RESEARCH_SYNTHESIS in a later PR. Typing the
-    // registry as Record<HandoffKind, ...> is what makes that a compile error
-    // rather than a silent fallthrough.
-    const only: HandoffKind = "PM_INTERVIEW"
-    expect(HANDOFF_KINDS).toEqual([only])
+  // Was a one-member assertion until ADR-0012 step 4 added RESEARCH_SYNTHESIS.
+  // That widening is the forcing function #227 built the registry for: typing it
+  // as Record<HandoffKind, ...> turned every unhandled dispatch site into a
+  // compile error instead of a silent fallthrough into PM-interview logic. This
+  // test is updated rather than deleted so a *third* kind hits the same wall.
+  it("is exactly the two shipped kinds, so a further kind forces every dispatch site to be revisited", () => {
+    const kinds: HandoffKind[] = ["PM_INTERVIEW", "RESEARCH_SYNTHESIS"]
+    expect([...HANDOFF_KINDS]).toEqual(kinds)
+  })
+
+  it("keeps PM_INTERVIEW first so absence of a kind and the legacy default stay aligned", () => {
+    expect(HANDOFF_KINDS[0]).toBe("PM_INTERVIEW")
+    expect(handoffKind({ status: "PENDING" })).toBe("PM_INTERVIEW")
+  })
+
+  it("accepts an explicit RESEARCH_SYNTHESIS blob carrying its study binding", () => {
+    const parsed = parseProcessingState(JSON.stringify({ status: "PENDING", kind: "RESEARCH_SYNTHESIS", studyId: "study-1", targetUrl: "/acme/product/capture/studies/study-1" }))
+    expect(parsed).toMatchObject({ kind: "RESEARCH_SYNTHESIS", studyId: "study-1" })
+    expect(handoffKind(parsed!)).toBe("RESEARCH_SYNTHESIS")
+  })
+
+  it("gives RESEARCH_SYNTHESIS its own instruction and failure message, naming the bound study", () => {
+    const state: ProcessingState = { status: "RUNNING", kind: "RESEARCH_SYNTHESIS", studyId: "study-42", claimId: "claim-1", deadline: 1 }
+    const instruction = HANDOFF_POLICIES.RESEARCH_SYNTHESIS.instruction(state)
+    expect(instruction).toContain("study-42")
+    // The agent performs the synthesis itself; the tool only validates and stores.
+    expect(instruction).toContain("generate_research_synthesis")
+    expect(instruction).toContain("nextOffset")
+    expect(instruction).toContain("untrusted")
+    expect(instruction).toContain("verbatim")
+    expect(instruction).not.toBe(HANDOFF_POLICIES.PM_INTERVIEW.instruction(state))
+    expect(HANDOFF_POLICIES.RESEARCH_SYNTHESIS.failureMessage).not.toBe(LEGACY_PM_FAILURE)
   })
 })

@@ -5,7 +5,7 @@ import getPrisma from "@/lib/db"
 import { createResearchToken, normalizeResearchAppUrl, parseResearchGuide, type ResearchStudyType } from "@/lib/research"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { runResearchInterviewAgent } from "@/lib/research-agent"
-import { readSessionAnalysis } from "@/lib/research-analysis"
+import { readSessionAnalysis, readStudySynthesis } from "@/lib/research-analysis"
 
 export class ResearchStudyError extends Error {}
 
@@ -388,6 +388,54 @@ export async function getResearchSession(
   })
   // Spreads the allowlisted projection's own return value, never the database row.
   return { ...publicSession(session), turns: turns.slice(0, PAGE_SIZE), nextOffset: turns.length > PAGE_SIZE ? offset + PAGE_SIZE : null }
+}
+
+/**
+ * Versioned synthesis history (ADR-0012 step 4).
+ *
+ * EXPOSURE DECISION — `CROSS_SESSION` rows only.
+ *
+ * `ResearchSynthesis.content` is overloaded by the generation lease. While a row
+ * is `PENDING` its `content` is the *claim blob*: `{version, sourceFingerprint,
+ * claimId, deadline}`. The `FAILED` transition only rewrites `kind` and
+ * `updatedAt`, so a FAILED row's `content` is that same claim blob forever.
+ * Neither is a synthesis, and both would hand a model the lease's internal
+ * identifiers and timing — so neither row's content is returned.
+ *
+ * Nor are the rows themselves. The only thing their existence conveys is "a
+ * generation is running / failed", and a separate read is the wrong place to
+ * learn that: it is stale the moment it returns, whereas
+ * `generate_research_synthesis` answers the same question race-free by either
+ * taking the lease or returning "Synthesis already in progress". Exposing a
+ * second, weaker signal would invite the agent to branch on the stale one.
+ *
+ * Content is re-validated on the way out through `readStudySynthesis`, the same
+ * hardened reader the UI uses, because persisted analysis is still untrusted. A
+ * row that does not parse is returned with `content: null` rather than dropped,
+ * so the history's shape and counts stay honest.
+ */
+export async function listResearchSyntheses(
+  scope: ResearchWorkspaceScope,
+  actor: ResearchStudyActor,
+  studyId: string,
+  { offset = 0 }: { offset?: number } = {},
+) {
+  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
+  const { prisma, study } = await findMemberStudy(scope, actor, studyId)
+  assertOffset(offset)
+  const rows = await prisma.researchSynthesis.findMany({
+    where: { studyId: study.id, kind: "CROSS_SESSION" },
+    select: { id: true, content: true, sessionCount: true, model: true, promptVersion: true, createdAt: true },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: offset, take: PAGE_SIZE + 1,
+  })
+  const page = rows.slice(0, PAGE_SIZE)
+  return {
+    studyId: study.id,
+    items: page.map(row => ({ id: row.id, sessionCount: row.sessionCount, model: row.model, promptVersion: row.promptVersion, createdAt: row.createdAt, content: readStudySynthesis(row.content) })),
+    count: page.length,
+    nextOffset: rows.length > PAGE_SIZE ? offset + PAGE_SIZE : null,
+  }
 }
 
 const cursorSchema = z.object({ version: z.literal(1), workspaceId: z.string().uuid(), status: z.enum(["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]).nullable(), createdAt: z.string().datetime(), id: z.string().uuid() }).strict()
