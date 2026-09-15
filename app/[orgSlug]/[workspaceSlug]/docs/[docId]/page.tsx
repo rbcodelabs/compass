@@ -4,6 +4,7 @@ import getPrisma from "@/lib/db";
 import { DocEditor } from "@/components/docs/doc-editor";
 import { DocDecisionAction } from "@/components/docs/doc-decision-action";
 import { listDocDecisions } from "@/lib/tracked-decisions";
+import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 
 type Props = {
   params: Promise<{
@@ -83,12 +84,18 @@ export default async function DocPage({ params }: Props) {
 
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/docs/${docId}`;
 
+  const linkedTasks = await fetchLinkedTasksBundle(workspace.id, "DOC", doc.id);
+
   return (
     <DocEditor
       doc={doc}
       versions={versions}
       comments={comments}
       revalidatePathStr={revalidatePathStr}
+      orgSlug={orgSlug}
+      workspaceSlug={workspaceSlug}
+      workspaceId={workspace.id}
+      linkedTasks={linkedTasks}
       decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
     />
   );

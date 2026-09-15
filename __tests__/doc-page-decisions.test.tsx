@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), lookup: vi.fn(), workspace: vi.fn(), doc: vi.fn(), versions: vi.fn(), comments: vi.fn() }))
 vi.mock("@/auth", () => ({ auth: mocks.auth }))
 vi.mock("next/navigation", () => ({ redirect: () => { throw Error("redirect") }, notFound: () => { throw Error("not found") } }))
-vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findFirst: mocks.workspace }, doc: { findFirst: mocks.doc }, docVersion: { findMany: mocks.versions }, docComment: { findMany: mocks.comments } }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findFirst: mocks.workspace }, doc: { findFirst: mocks.doc }, docVersion: { findMany: mocks.versions }, docComment: { findMany: mocks.comments }, task: { findMany: vi.fn().mockResolvedValue([]) }, workspaceMember: { findMany: vi.fn().mockResolvedValue([]) } }) }))
 vi.mock("@/lib/tracked-decisions", () => ({ listDocDecisions: mocks.lookup }))
 vi.mock("@/components/docs/doc-editor", () => ({ DocEditor: () => null }))
 vi.mock("@/components/docs/doc-decision-action", () => ({ DocDecisionAction: () => null }))

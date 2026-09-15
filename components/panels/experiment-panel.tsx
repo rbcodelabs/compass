@@ -4,13 +4,15 @@ import { RequestDecisionLink } from "@/components/decisions/request-decision-lin
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ExternalLinkIcon } from "lucide-react";
 import { EditableText, StatusSelect, type EditContext } from "./panel-parts";
 import { MarkdownContent } from "@/components/markdown-content";
+import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
+import type { MemberData } from "@/lib/types";
 
 type ExperimentData = {
   id: string;
@@ -27,6 +29,9 @@ type ExperimentData = {
   endDate: string | null;
   assumption: { id: string; title: string; riskLevel: string } | null;
   results: Array<{ id: string; note: string; createdAt: string }>;
+  deliveryTasks: LinkedTaskData[];
+  linkableTasks: Array<{ id: string; title: string }>;
+  members: MemberData[];
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -89,10 +94,11 @@ export function ExperimentPanel({
   const [data, setData] = useState<ExperimentData | null>(null);
   const [error, setError] = useState(false);
 
-  useEffect(() => {
-    setData(null);
-    setError(false);
-    fetch(
+  // Refetch without clearing current data — same shape as panel-parts'
+  // useEntityDetail, kept local here since this panel predates that hook and
+  // has its own manual fetch effect below.
+  const refresh = useCallback(() => {
+    return fetch(
       `/api/panels/entity/experiment/${experimentId}?orgSlug=${orgSlug}&workspaceSlug=${workspaceSlug}`
     )
       .then((r) => {
@@ -102,6 +108,12 @@ export function ExperimentPanel({
       .then((res) => setData(res.data))
       .catch(() => setError(true));
   }, [experimentId, orgSlug, workspaceSlug]);
+
+  useEffect(() => {
+    setData(null);
+    setError(false);
+    refresh();
+  }, [refresh]);
 
   const fullPageHref = `/${orgSlug}/${workspaceSlug}/experiments/${experimentId}`;
 
@@ -267,6 +279,29 @@ export function ExperimentPanel({
           </div>
         )}
       </div>
+      <Separator />
+
+      {/* Delivery tasks */}
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Delivery Tasks{" "}
+          {data.deliveryTasks.length > 0 && (
+            <span className="normal-case font-normal">({data.deliveryTasks.length})</span>
+          )}
+        </p>
+        <LinkedTasksSection
+          linkedType="EXPERIMENT"
+          linkedId={data.id}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          revalidatePathStr={fullPageHref}
+          tasks={data.deliveryTasks}
+          linkableTasks={data.linkableTasks}
+          members={data.members}
+          onChanged={refresh}
+        />
+      </div>
+
       <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={data.pmInterviews} />
       <Discussion targetType="EXPERIMENT" targetId={experimentId} />
     </div>

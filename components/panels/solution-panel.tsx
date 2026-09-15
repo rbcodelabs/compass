@@ -32,7 +32,7 @@ import { SolutionArtifacts, type SolutionArtifact } from "./solution-artifacts";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { requestBuildingInvestmentAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions";
 import { useRouter } from "next/navigation";
-import type { SolutionComment, Horizon } from "@/lib/types";
+import type { SolutionComment, Horizon, MemberData } from "@/lib/types";
 import {
   SOLUTION_STATUS,
   SOLUTION_STATUS_ORDER,
@@ -41,6 +41,7 @@ import {
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
+import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 
 type SolutionData = {
   id: string;
@@ -56,6 +57,9 @@ type SolutionData = {
   roadmapItems: Array<{ id: string; title: string; horizon: string }>;
   artifacts: SolutionArtifact[];
   availableArtifacts: SolutionArtifact[];
+  deliveryTasks: LinkedTaskData[];
+  linkableTasks: Array<{ id: string; title: string }>;
+  members: MemberData[];
 };
 
 // Presentation lives in lib/solution-status.ts — see the note there on the
@@ -234,6 +238,20 @@ export function SolutionPanel({
           />
         </Section>
       )}
+
+      <Section {...SECTION} label="Delivery tasks" count={data.deliveryTasks.length}>
+        <LinkedTasksSection
+          linkedType="SOLUTION"
+          linkedId={data.id}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          revalidatePathStr={revalidatePathStr}
+          tasks={data.deliveryTasks}
+          linkableTasks={data.linkableTasks}
+          members={data.members}
+          onChanged={refresh}
+        />
+      </Section>
       <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={data.pmInterviews} />
       <Discussion targetType="SOLUTION" targetId={id} />
     </PanelContainer>

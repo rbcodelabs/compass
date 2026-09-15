@@ -22,6 +22,8 @@ import {
   FEEDBACK_TYPE_OPTIONS,
 } from "@/lib/feedback-meta";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
+import type { MemberData } from "@/lib/types";
 
 type FeedbackData = {
   id: string;
@@ -40,6 +42,9 @@ type FeedbackData = {
     fileSize: number;
   }>;
   _count: { votes: number };
+  deliveryTasks: LinkedTaskData[];
+  linkableTasks: Array<{ id: string; title: string }>;
+  members: MemberData[];
 };
 
 // Labels and tones come from lib/feedback-meta, the single source shared with
@@ -60,7 +65,7 @@ export function FeedbackPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error, mutate } = useEntityDetail<FeedbackData>(
+  const { data, error, mutate, refresh } = useEntityDetail<FeedbackData>(
     "feedback",
     id,
     orgSlug,
@@ -141,6 +146,20 @@ export function FeedbackPanel({
             ))}
           </div>
         )}
+      </Section>
+
+      <Section label="Delivery tasks" count={data.deliveryTasks.length}>
+        <LinkedTasksSection
+          linkedType="FEEDBACK_ITEM"
+          linkedId={data.id}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          revalidatePathStr={`/${orgSlug}/${workspaceSlug}/feedback`}
+          tasks={data.deliveryTasks}
+          linkableTasks={data.linkableTasks}
+          members={data.members}
+          onChanged={refresh}
+        />
       </Section>
       <Discussion targetType="FEEDBACK_ITEM" targetId={id} />
     </PanelContainer>

@@ -13,6 +13,8 @@ import {
   type RelationItem,
   type EditContext,
 } from "./panel-parts";
+import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
+import type { MemberData } from "@/lib/types";
 
 type KeyResultData = {
   id: string;
@@ -32,6 +34,9 @@ type KeyResultData = {
     squad: { id: string; name: string; color: string } | null;
     keyResults: Array<{ current: number; target: number }>;
   }>;
+  deliveryTasks: LinkedTaskData[];
+  linkableTasks: Array<{ id: string; title: string }>;
+  members: MemberData[];
 };
 
 export function KeyResultPanel({
@@ -43,7 +48,7 @@ export function KeyResultPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error, mutate } = useEntityDetail<KeyResultData>(
+  const { data, error, mutate, refresh } = useEntityDetail<KeyResultData>(
     "keyResult",
     id,
     orgSlug,
@@ -138,6 +143,20 @@ export function KeyResultPanel({
 
       <Section label="Roadmap" count={data.roadmapItems.length}>
         <RelationList items={roadmapItems} empty="Not on the roadmap." />
+      </Section>
+
+      <Section label="Delivery tasks" count={data.deliveryTasks.length}>
+        <LinkedTasksSection
+          linkedType="KEY_RESULT"
+          linkedId={data.id}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          revalidatePathStr={data.objective ? `/${orgSlug}/${workspaceSlug}/okrs/${data.objective.cycleId}` : `/${orgSlug}/${workspaceSlug}/okrs`}
+          tasks={data.deliveryTasks}
+          linkableTasks={data.linkableTasks}
+          members={data.members}
+          onChanged={refresh}
+        />
       </Section>
       <Discussion targetType="KEY_RESULT" targetId={id} />
     </PanelContainer>

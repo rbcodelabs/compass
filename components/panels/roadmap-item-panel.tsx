@@ -18,7 +18,7 @@ import { HORIZON_META, SETTABLE_HORIZONS } from "@/lib/roadmap";
 import { LaunchTierPicker } from "./launch-tier-picker";
 import { LaunchChecklist, type LaunchChecklistItemData } from "./launch-checklist";
 import { PositioningBriefRow } from "./positioning-brief-row";
-import { RoadmapDeliveryTasks, type RoadmapDeliveryTaskData } from "./roadmap-delivery-tasks";
+import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { ItemStatus, MemberData } from "@/lib/types";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 import { Discussion } from "@/components/comments/discussion";
@@ -48,7 +48,7 @@ type RoadmapItemData = {
   feedback: { id: string; title: string } | null;
   launchChecklist: { id: string; tier: string; items: LaunchChecklistItemData[] } | null;
   positioningBrief: { id: string; title: string } | null;
-  deliveryTasks: RoadmapDeliveryTaskData[];
+  deliveryTasks: LinkedTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
   _count: { votes: number };
@@ -180,10 +180,12 @@ export function RoadmapItemPanel({
       </Section>
 
       <Section {...SECTION} defaultOpen label="Delivery tasks" count={data.deliveryTasks.length}>
-        <RoadmapDeliveryTasks
-          roadmapItemId={id}
+        <LinkedTasksSection
+          linkedType="ROADMAP_ITEM"
+          linkedId={id}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
+          revalidatePathStr={roadmapPath}
           tasks={data.deliveryTasks}
           linkableTasks={data.linkableTasks}
           members={data.members}

@@ -1,30 +1,67 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
 
-const root = process.cwd();
-const source = (path: string) => readFileSync(join(root, path), "utf8");
+import { createElement as h } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
 
-describe.each([
-  ["Experiments", "components/experiments/experiments-filters.tsx"],
-  ["Discovery", "components/discovery/discovery-filters.tsx"],
-])("%s faceted filters", (_name, path) => {
-  it("adapts squads to the shared filter menu", () => {
-    const adapter = source(path);
+const { push, searchParams } = vi.hoisted(() => ({
+  push: vi.fn(),
+  searchParams: { current: new URLSearchParams() },
+}));
 
-    expect(adapter).toContain('label: "Squad"');
-    expect(adapter).toContain("color: squad.color");
-    expect(adapter).toContain('params.set("squad", value)');
-    expect(adapter).toContain("onClearAll={clearAll}");
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/acme/core/discovery",
+  useRouter: () => ({ push }),
+  useSearchParams: () => searchParams.current,
+}));
+
+import { ExperimentsFilters } from "@/components/experiments/experiments-filters";
+import { DiscoveryFilters } from "@/components/discovery/discovery-filters";
+import type { SquadData } from "@/lib/types";
+
+afterEach(cleanup);
+
+const squads: SquadData[] = [{ id: "sq1", name: "Squad One", color: "#112233" }];
+
+const CASES = [
+  { name: "Experiments", Component: ExperimentsFilters },
+  { name: "Discovery", Component: DiscoveryFilters },
+] as const;
+
+describe.each(CASES)("$name faceted filters", ({ Component }) => {
+  beforeEach(() => {
+    push.mockClear();
+    searchParams.current = new URLSearchParams();
   });
 
-  it("clears squad atomically while preserving unrelated query parameters", () => {
-    const adapter = source(path);
-    const clearAll = adapter.slice(adapter.indexOf("function clearAll"), adapter.indexOf("if (squads.length"));
+  function openMenu(query = "") {
+    searchParams.current = new URLSearchParams(query);
+    render(h(Component, { squads }));
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  }
 
-    expect(clearAll).toContain("new URLSearchParams(searchParams.toString())");
-    expect(clearAll).toContain('params.delete("squad")');
-    expect(clearAll.match(/router\.push/g)).toHaveLength(1);
-    expect(clearAll).not.toContain('params.delete("assumptionId")');
+  it("adapts squads to the shared filter menu", async () => {
+    openMenu();
+
+    // The squad facet is offered with its real name and color, and
+    // selecting it writes the squad id onto the URL.
+    const option = await screen.findByRole("menuitemradio", { name: "Squad One" });
+    const swatch = option.querySelector("span[style]");
+    expect(swatch).toHaveStyle({ backgroundColor: "#112233" });
+
+    fireEvent.click(option);
+    expect(push).toHaveBeenCalledWith("/acme/core/discovery?squad=sq1");
+  });
+
+  it("clears squad atomically while preserving unrelated query parameters", async () => {
+    openMenu("squad=sq1&assumptionId=abc123");
+
+    const clearAll = await screen.findByRole("menuitem", { name: "Clear all" });
+    fireEvent.click(clearAll);
+
+    // Exactly one navigation, squad gone, the unrelated param untouched.
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(push).toHaveBeenCalledWith("/acme/core/discovery?assumptionId=abc123");
   });
 });

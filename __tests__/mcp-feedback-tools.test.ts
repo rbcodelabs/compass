@@ -223,6 +223,32 @@ describe("createFeedback", () => {
     })
   })
 
+  it("degrades to a null url instead of failing the create when the production URL is misconfigured", async () => {
+    delete process.env.NEXT_PUBLIC_APP_URL
+    process.env.VERCEL_ENV = "production"
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = "compass-rbcodelabs-team.vercel.app"
+    try {
+      mockWorkspace.findUnique.mockResolvedValueOnce(workspaceContext)
+      mockFeedbackItem.create.mockResolvedValueOnce({
+        id: FEED_ID,
+        title: "Dark mode support",
+        type: "IDEA",
+        status: "OPEN",
+      })
+
+      const result = await createFeedback({ workspaceId: WS_ID, title: "Dark mode support" })
+
+      expect(result.structuredContent.ok).toBe(true)
+      expect(result.structuredContent.data).toMatchObject({ id: FEED_ID, url: null })
+      expect(result.content[0].text).toContain("Feedback item created")
+      expect(result.content[0].text).not.toContain("URL: null")
+      expect(result.content[0].text).not.toContain("vercel.app")
+    } finally {
+      delete process.env.VERCEL_ENV
+      delete process.env.VERCEL_PROJECT_PRODUCTION_URL
+    }
+  })
+
   it("passes through an explicit type of BUG", async () => {
     mockWorkspace.findUnique.mockResolvedValueOnce(workspaceContext)
     mockFeedbackItem.create.mockResolvedValueOnce({

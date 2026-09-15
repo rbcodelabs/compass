@@ -17,6 +17,8 @@ import {
   BookmarkPlus,
   MessageSquarePlus,
   MessageSquare,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -25,8 +27,11 @@ import {
   addDocComment,
   resolveDocComment,
   deleteDocComment,
+  getDocLinkedTasks,
 } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
 import { DocProperties, type DocMetadata } from "@/components/docs/doc-properties";
+import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
+import type { MemberData } from "@/lib/types";
 import {
   DocVersionHistoryPanel,
   type DocVersionListItem,
@@ -55,6 +60,14 @@ interface DocEditorProps {
   versions: DocVersionListItem[];
   comments: DocCommentItem[];
   revalidatePathStr: string;
+  orgSlug: string;
+  workspaceSlug: string;
+  workspaceId: string;
+  linkedTasks: {
+    deliveryTasks: LinkedTaskData[];
+    linkableTasks: Array<{ id: string; title: string }>;
+    members: MemberData[];
+  };
   decisionAction?: React.ReactNode;
 }
 
@@ -93,7 +106,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, decisionAction }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -102,6 +115,18 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const [historyOpen, setHistoryOpen] = useState(false);
   const [showSaveVersionInput, setShowSaveVersionInput] = useState(false);
   const [isSavingVersion, setIsSavingVersion] = useState(false);
+
+  // ── Linked tasks state ──────────────────────────────────────────────────────
+  // Doc's page is a server component, not SWR-backed like the panels, so we
+  // keep our own copy of the bundle and refetch it explicitly after a
+  // mutation — the same pattern already used below for comments/versions.
+  const [linkedTasksBundle, setLinkedTasksBundle] = useState(linkedTasks);
+  const [tasksOpen, setTasksOpen] = useState(false);
+
+  async function refreshLinkedTasks() {
+    const bundle = await getDocLinkedTasks(workspaceId, doc.id);
+    setLinkedTasksBundle(bundle);
+  }
 
   // ── Inline comments state ──────────────────────────────────────────────────
   const [comments, setComments] = useState<DocCommentItem[]>(initialComments);
@@ -558,6 +583,45 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           initialMetadata={(doc.metadata as DocMetadata | null) ?? null}
           revalidatePathStr={revalidatePathStr}
         />
+
+        {/* Linked tasks — same collapsible affordance as Properties above:
+            reference/action material you open on demand rather than
+            consuming editor space until asked for. */}
+        <div className="mb-4">
+          <button
+            onClick={() => setTasksOpen((v) => !v)}
+            className="flex items-center gap-1.5 text-xs font-medium text-text-subtle hover:text-text-secondary transition-colors"
+          >
+            {tasksOpen ? (
+              <ChevronDown className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5" />
+            )}
+            Linked tasks
+            {linkedTasksBundle.deliveryTasks.length > 0 && !tasksOpen && (
+              <span className="font-normal">
+                ({linkedTasksBundle.deliveryTasks.length})
+              </span>
+            )}
+          </button>
+
+          {tasksOpen && (
+            <div className="mt-2 ml-0.5">
+              <LinkedTasksSection
+                linkedType="DOC"
+                linkedId={doc.id}
+                orgSlug={orgSlug}
+                workspaceSlug={workspaceSlug}
+                revalidatePathStr={revalidatePathStr}
+                tasks={linkedTasksBundle.deliveryTasks}
+                linkableTasks={linkedTasksBundle.linkableTasks}
+                members={linkedTasksBundle.members}
+                onChanged={refreshLinkedTasks}
+              />
+            </div>
+          )}
+        </div>
+
         <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
       </div>
 

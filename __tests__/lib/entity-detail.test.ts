@@ -165,7 +165,42 @@ describe("getEntityDetail — return shape", () => {
     const row = { id: ID, title: "An opportunity" };
     models.opportunity.findFirst.mockResolvedValue(row);
     const result = await getEntityDetail("opportunity", ID, WS);
-    expect(result).toEqual({ type: "opportunity", data: { ...row, pmInterviewEnabled: true, pmInterviews: [] } });
+    expect(result).toEqual({
+      type: "opportunity",
+      data: { ...row, pmInterviewEnabled: true, pmInterviews: [], deliveryTasks: [], linkableTasks: [], members: [] },
+    });
+  });
+
+  it("also loads the delivery-tasks bundle for solution, experiment, objective, key result, and feedback", async () => {
+    const cases: Array<{
+      type: EntityType;
+      model: Exclude<keyof typeof models, "task" | "workspaceMember" | "reviewRequest" | "decisionApplication" | "artifact" | "artifactLink">;
+      linkedType: string;
+    }> = [
+      { type: "solution", model: "solution", linkedType: "SOLUTION" },
+      { type: "experiment", model: "experiment", linkedType: "EXPERIMENT" },
+      { type: "objective", model: "objective", linkedType: "OBJECTIVE" },
+      { type: "keyResult", model: "keyResult", linkedType: "KEY_RESULT" },
+      { type: "feedback", model: "feedbackItem", linkedType: "FEEDBACK_ITEM" },
+    ];
+    for (const { type, model, linkedType } of cases) {
+      vi.clearAllMocks();
+      models.task.findMany.mockResolvedValue([]);
+      models.workspaceMember.findMany.mockResolvedValue([]);
+      models.artifactLink.findMany.mockResolvedValue([]);
+      models.artifact.findMany.mockResolvedValue([]);
+      models[model].findFirst.mockResolvedValue({ id: ID });
+
+      const result = await getEntityDetail(type, ID, WS);
+
+      expect(result).toEqual({
+        type,
+        data: expect.objectContaining({ deliveryTasks: [], linkableTasks: [], members: [] }),
+      });
+      expect(models.task.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        where: expect.objectContaining({ links: { some: { linkedType, linkedId: ID } } }),
+      }));
+    }
   });
 
   it("returns null when the entity isn't in the workspace (findFirst miss)", async () => {

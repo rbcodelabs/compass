@@ -16,7 +16,7 @@ import {
   uploadInlineFeedbackAttachments,
   verifyCompletedFeedbackUpload,
 } from "@/lib/feedback-attachments"
-import { feedbackItemUrl } from "@/lib/compass-url"
+import { CompassUrlNotConfiguredError, feedbackItemUrl } from "@/lib/compass-url"
 import { FEEDBACK_STATUSES, type FeedbackStatus } from "@/lib/feedback-meta"
 
 const feedbackCursorSchema = z.object({
@@ -34,12 +34,31 @@ type FeedbackWorkspace = {
   organization: { slug: string }
 }
 
-function canonicalFeedbackUrl(workspace: FeedbackWorkspace, feedbackId: string): string {
-  return feedbackItemUrl({
-    orgSlug: workspace.organization.slug,
-    workspaceSlug: workspace.slug,
-    feedbackId,
-  })
+/**
+ * The FeedbackItem is always created/updated in the database regardless of
+ * whether a human-facing link can be built, so a *missing* URL config
+ * degrades to `null` here rather than failing the whole MCP tool call —
+ * mirroring `buildReviewUrl` in lib/decision-tool-handlers.ts. An unsafe
+ * *configured* origin (bad protocol, credentials, malformed URL) is a
+ * different and more serious failure: it still aborts the mutation, matching
+ * the pre-existing "feedback mutation safety" contract below.
+ */
+function canonicalFeedbackUrl(workspace: FeedbackWorkspace, feedbackId: string): string | null {
+  try {
+    return feedbackItemUrl({
+      orgSlug: workspace.organization.slug,
+      workspaceSlug: workspace.slug,
+      feedbackId,
+    })
+  } catch (error) {
+    if (error instanceof CompassUrlNotConfiguredError) return null
+    throw error
+  }
+}
+
+/** Appends a `URL:` line to a tool's human-readable message when a link is available. */
+function withUrlLine(text: string, url: string | null): string {
+  return url ? `${text}\nURL: ${url}` : text
 }
 
 const MAX_FEEDBACK_ATTACHMENTS = 5
@@ -52,16 +71,15 @@ function isSerializationConflict(error: unknown): boolean {
 function createdFeedbackResult(
   item: Record<string, unknown> & { id: string; title: string; type: string; status: string },
   attachments: FeedbackAttachmentMetadata[],
-  url: string,
+  url: string | null,
 ) {
-  return ok([
+  return ok(withUrlLine([
     "**Feedback item created**",
     `ID: ${item.id}`,
     `Title: ${item.title}`,
     `Type: ${item.type}`,
     `Status: ${item.status}`,
-    `URL: ${url}`,
-  ].join("\n"), { ...item, attachments, url })
+  ].join("\n"), url), { ...item, attachments, url })
 }
 
 /**
@@ -171,7 +189,7 @@ export async function getFeedbackItem({ feedbackId }: { feedbackId: string }) {
     item.opportunityId ? `**Opportunity ID:** ${item.opportunityId}` : null,
     item.opportunity ? `**Linked Opportunity:** ${item.opportunity.title} [${item.opportunity.status}] (ID: ${item.opportunity.id})` : null,
     ...item.attachments.map((a) => `Attachments: ${a.filename} (${a.url})`),
-    `URL: ${url}`,
+    url ? `URL: ${url}` : null,
     `**Created:** ${item.createdAt.toISOString()}`,
     `**Updated:** ${item.updatedAt.toISOString()}`,
   ].filter(Boolean)
@@ -296,7 +314,7 @@ export async function listFeedback({
   const lines = withUrls.map(({ item, url }) =>
     `• [${item.type}] **${item.title}** [${item.status}] 👍 ${item.voteCount}\n` +
     `  ID: ${item.id}\n` +
-    `  URL: ${url}\n` +
+    (url ? `  URL: ${url}\n` : "") +
     (item.description ? `  ${item.description.slice(0, 100)}${item.description.length > 100 ? "…" : ""}\n` : "") +
     (item.opportunity ? `  → Linked opportunity: ${item.opportunity.title}\n` : "") +
     (item.submitterName ? `  Submitted by: ${item.submitterName}` : "")
@@ -375,7 +393,7 @@ export async function updateFeedback({
     select: { id: true, title: true, description: true },
   })
   return ok(
-    [`**Feedback updated**`, `ID: ${feedbackId}`, `Title: ${item.title}`, `URL: ${url}`].join("\n"),
+    withUrlLine([`**Feedback updated**`, `ID: ${feedbackId}`, `Title: ${item.title}`].join("\n"), url),
     { ...item, url },
   )
 }
@@ -413,7 +431,7 @@ export async function updateFeedbackStatus({
     `${oldStatus} → ${status}`,
     note ? `Note: ${note}` : null,
     `ID: ${feedbackId}`,
-    `URL: ${url}`,
+    url ? `URL: ${url}` : null,
   ].filter(Boolean)
   return ok(lines.join("\n"), {
     id: feedbackId,
@@ -460,11 +478,10 @@ export async function linkFeedbackToOpportunity({
     // The sibling status/type handlers already do this; this one was missed.
     data: { opportunityId, updatedAt: new Date() },
   })
-  return ok([
+  return ok(withUrlLine([
     `Linked feedback '${feedback.title}' to opportunity '${opportunity.title}'.`,
     `ID: ${feedback.id}`,
-    `URL: ${url}`,
-  ].join("\n"), {
+  ].join("\n"), url), {
     id: feedback.id,
     title: feedback.title,
     workspaceId: feedback.workspaceId,
@@ -504,9 +521,8 @@ export async function updateFeedbackType({
     `**Type updated** for "${existing.title}"`,
     `${oldType} → ${type}`,
     `ID: ${existing.id}`,
-    `URL: ${url}`,
   ]
-  return ok(lines.join("\n"), {
+  return ok(withUrlLine(lines.join("\n"), url), {
     id: existing.id,
     title: existing.title,
     oldType,
@@ -542,16 +558,15 @@ export async function prepareFeedbackAttachmentUploadTool(input: {
 
 function attachmentResultText(input: {
   attachment: { id: string; filename: string; url: string }
-  feedbackUrl: string
+  feedbackUrl: string | null
   alreadyAttached?: boolean
 }): string {
-  return [
+  return withUrlLine([
     input.alreadyAttached ? "**Attachment already attached**" : "**Feedback attachment added**",
     `ID: ${input.attachment.id}`,
     `Filename: ${input.attachment.filename}`,
     `Attachment URL: ${input.attachment.url}`,
-    `URL: ${input.feedbackUrl}`,
-  ].join("\n")
+  ].join("\n"), input.feedbackUrl)
 }
 
 export async function addFeedbackAttachment({
