@@ -6,7 +6,7 @@ vi.mock("mcp-handler", () => ({ createMcpHandler: (setup: (server: { registerToo
 vi.mock("@/lib/mcp-auth", () => ({ validateMcpAuth: vi.fn() }))
 await import("@/app/api/mcp/route")
 import { applyToolGate, RESEARCH_TOOL_ALLOWLIST } from "@/lib/mcp-tool-gates"
-const names = ["generate_research_guide", "create_research_study", "list_research_studies", "get_research_study", "update_research_study", "activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"]
+const names = ["generate_research_guide", "create_research_study", "list_research_studies", "get_research_study", "update_research_study", "activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links", "list_research_sessions", "get_research_session"]
 describe("research tool registration", () => {
   it.each(names)("registers %s with declared output and denies participant research credentials", async name => {
     expect(tools[name]?.outputSchema).toBeDefined()
@@ -22,5 +22,16 @@ describe("research tool registration", () => {
     expect(list.limit.safeParse(101).success).toBe(false)
     expect(list.cursor.safeParse("x".repeat(1025)).success).toBe(false)
     expect(Object.keys(tools.get_research_study.inputSchema)).toEqual(["workspaceId", "studyId"])
+  })
+  it("bounds transcript reads to a study-scoped, paged input surface", () => {
+    const list = tools.list_research_sessions.inputSchema
+    expect(Object.keys(list).sort()).toEqual(["offset", "status", "studyId", "workspaceId"])
+    expect(list.status.safeParse("NOT_A_STATUS").success).toBe(false)
+    expect(list.offset.safeParse(-1).success).toBe(false)
+    expect(list.offset.safeParse(1.5).success).toBe(false)
+    const get = tools.get_research_session.inputSchema
+    expect(Object.keys(get).sort()).toEqual(["offset", "sessionId", "studyId", "workspaceId"])
+    expect(get.sessionId.safeParse("not-a-uuid").success).toBe(false)
+    expect(get.offset.safeParse(-1).success).toBe(false)
   })
 })
