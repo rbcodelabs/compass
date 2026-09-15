@@ -116,12 +116,19 @@ export function TaskListView({
   // same shape the Feedback grid uses.
   //
   // Title declares a `minWidth` because "whatever remains" is negative once the
-  // other columns (50rem) out-sum the container — at 390px that collapsed Title
-  // to invisible. 18rem is the floor: Title is the row's identity and its only
-  // link out, and subtask rows indent by `depth * 20px`, so a tighter floor
-  // eats the text on nested rows. It matches the `min-w-72` the pre-grid
-  // Discovery table shipped, and the grid folds it into the table's `min-width`
-  // so narrow viewports scroll instead of squeezing.
+  // other columns (50rem) out-sum the container — measured at 390px, Title
+  // painted 0px wide and the column was simply gone. The grid folds this floor
+  // into the table's `min-width`, so a narrow viewport scrolls instead of
+  // squeezing.
+  //
+  // 14rem rather than the 18rem Discovery and Feedback use, and the number is
+  // load-bearing: Tasks carries the heaviest fixed set of any grid (50rem =
+  // 800px), and a 1280px laptop — the narrowest common desktop — leaves this
+  // grid a 1026px container, so 226px of headroom. A floor above that would
+  // put a horizontal scrollbar on the Tasks page at 1280 where none existed
+  // before, trading one regression for another. 14rem (224px) is the largest
+  // round value that still fits, and it is comfortably readable even on
+  // subtask rows, which lose `depth * 20px` to indentation.
   const columns = useMemo<GridColumnDef<TaskGridRow>[]>(
     () => [
       {
@@ -129,7 +136,7 @@ export function TaskListView({
         header: "Title",
         // `hideable: false` pins Title first and keeps it out of the column
         // menu — a row with no title is not a useful view.
-        meta: { label: "Title", hideable: false, minWidth: "18rem" },
+        meta: { label: "Title", hideable: false, minWidth: "14rem" },
         cell: ({ row }) => {
           const { task, depth } = row.original;
           return (
