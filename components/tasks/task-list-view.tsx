@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
-import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { DataGrid, type GridColumnDef } from "@/components/data-grid";
+import { usePanelContext } from "@/components/panels/panel-context";
 import { TaskLinksBadge } from "./task-links-badge";
 import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
 import { TASK_PRIORITY_LABELS, TASK_STATUS_LABELS } from "@/lib/task-meta";
@@ -13,22 +13,15 @@ import type { MemberData } from "@/lib/types";
 
 type Props = {
   tasks: TaskCardData[];
+  /**
+   * Accepted but unused, and deliberately still part of the contract: the
+   * Tasks page passes both, and a title now opens the shared detail panel
+   * rather than navigating to `/{org}/{workspace}/tasks/{id}`, so neither slug
+   * is needed to render a row.
+   */
   orgSlug: string;
   workspaceSlug: string;
   members: MemberData[];
-  /**
-   * `"fill"` for the full-page list view, which lives inside `WorkspacePage`'s
-   * `md:overflow-hidden` content area and must own its own scrolling.
-   * `"natural"` for the subtasks panel, which sits in a normally-scrolling
-   * column where a `flex-1` child would be inert at best.
-   */
-  height?: "fill" | "natural";
-  /**
-   * Namespace for persisted column preferences. The two call sites get their
-   * own so they cannot silently share column state if the column menu is ever
-   * turned on for one of them.
-   */
-  gridId?: string;
 };
 
 /**
@@ -88,14 +81,53 @@ function flattenByHierarchy(tasks: TaskCardData[]): { task: TaskCardData; depth:
   return result;
 }
 
-export function TaskListView({
-  tasks,
-  orgSlug,
-  workspaceSlug,
-  members,
-  height = "fill",
-  gridId = "task-list",
-}: Props) {
+export function TaskListView({ tasks: initialTasks, members }: Props) {
+  const { openPanel, subscribeEntityMutated } = usePanelContext();
+  const [tasks, setTasks] = useState(initialTasks);
+
+  /*
+    `openPanel` is NOT referentially stable — it is a `useCallback` over
+    `[router, pathname, searchParams]`, and `useSearchParams()` hands back a
+    fresh object on plenty of renders. Reading it through a ref keeps it out of
+    the column memo's dependency list entirely.
+
+    This is the same hazard the `TaskGridRow` comment above describes for
+    `members`, and it bites harder here: a column definition whose identity
+    changes makes `table.FlexRender` unmount and remount every cell subtree in
+    the table, so every title button would be destroyed and rebuilt on any
+    render that produced a new `searchParams` — including the one caused by
+    opening a panel.
+  */
+  const openPanelRef = useRef(openPanel);
+  // Synced in an effect, not during render: writing a ref while rendering is a
+  // React-compiler lint error, and the value is only ever read from a click
+  // handler — which cannot run before the commit that updates it.
+  useEffect(() => {
+    openPanelRef.current = openPanel;
+  }, [openPanel]);
+
+  // Re-sync when the server hands down a fresh list (e.g. a filter change).
+  useEffect(() => {
+    setTasks(initialTasks);
+  }, [initialTasks]);
+
+  /*
+    The panel (PanelShell) is a layout sibling of this list, not a child, so an
+    edit made there reaches this table's own local state via the
+    notify/subscribe escape hatch — same pattern TaskBoard.handleUpdate uses.
+
+    Safe as an effect dependency: `subscribeEntityMutated` is
+    `useCallback(..., [])` over a `listenersRef`, so it never changes identity
+    and this never tears down and re-subscribes.
+  */
+  useEffect(() => {
+    return subscribeEntityMutated("task", (_id, patch) => {
+      const updated = patch?.task;
+      if (!updated) return;
+      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    });
+  }, [subscribeEntityMutated]);
+
   const rows = useMemo<TaskGridRow[]>(
     () =>
       flattenByHierarchy(tasks).map(({ task, depth }) => ({
@@ -148,12 +180,13 @@ export function TaskListView({
               className="truncate"
               style={{ paddingLeft: `${depth * 20}px` }}
             >
-              <Link
-                href={`/${orgSlug}/${workspaceSlug}/tasks/${task.id}`}
-                className="font-medium hover:underline underline-offset-2"
+              <button
+                type="button"
+                onClick={() => openPanelRef.current("task", task.id)}
+                className="max-w-full truncate text-left font-medium hover:underline underline-offset-2"
               >
                 {task.title}
-              </Link>
+              </button>
             </div>
           );
         },
@@ -226,9 +259,11 @@ export function TaskListView({
         cell: ({ row }) => <TaskLinksBadge count={row.original.task.links.length} />,
       },
     ],
-    // Both are plain strings, so the column definitions are referentially
-    // stable for the lifetime of a workspace view and cells update in place.
-    [orgSlug, workspaceSlug],
+    // Empty on purpose: every cell reads `openPanel` through a ref, and nothing
+    // else here closes over a changing value, so the definitions stay
+    // referentially stable for the lifetime of the view and cells update in
+    // place rather than remounting.
+    [],
   );
 
   // The "nothing at all" case stays an early return rather than the grid's
@@ -242,13 +277,12 @@ export function TaskListView({
     // scroll viewport is the grid's own `table-container`, so the border stays
     // put while rows and the sticky header move inside it.
     <DataGrid<TaskGridRow>
-      gridId={gridId}
+      gridId="task-list"
       columns={columns}
       rows={rows}
       getRowId={(row) => row.rowKey}
       caption="Tasks"
-      height={height}
-      maxHeight={height === "natural" ? "24rem" : undefined}
+      height="fill"
       pagination={false}
       toolbar={false}
       className="overflow-hidden rounded-xl border border-border bg-surface-panel"

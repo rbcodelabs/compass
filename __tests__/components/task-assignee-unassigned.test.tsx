@@ -12,10 +12,15 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
   getTaskAssigneeOptions: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/actions", () => ({ assignSquad: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/rbcodelabs/compass/tasks",
+  useSearchParams: () => new URLSearchParams(),
+}));
 
+import { PanelProvider } from "@/components/panels/panel-context";
 import { TaskBoard } from "@/components/tasks/task-board";
 import { TaskListView } from "@/components/tasks/task-list-view";
-import { TaskHeader } from "@/components/tasks/task-header";
 import type { TaskCardData } from "@/components/tasks/task-card";
 
 function task(overrides: Partial<TaskCardData> = {}): TaskCardData {
@@ -42,22 +47,24 @@ function task(overrides: Partial<TaskCardData> = {}): TaskCardData {
   };
 }
 
+// The "detail" surface (formerly TaskHeader, a read-only label matching
+// taskAssigneeDisplay) is gone — TaskDetail's assignee slot is now always an
+// editable TaskAssigneePicker, not a passive label, so "Unassigned" /
+// "Unavailable assignee" copy no longer applies there the same way. Card and
+// list are still passive labels driven by taskAssigneeDisplay, so they keep
+// this coverage.
 const surfaces = {
   card: (t: TaskCardData) =>
     render(
-      <TaskBoard initialTasks={[t]} workspaceId="ws-1" orgSlug="rbcodelabs" workspaceSlug="compass" members={[]} />
+      <PanelProvider orgSlug="rbcodelabs" workspaceSlug="compass">
+        <TaskBoard initialTasks={[t]} workspaceId="ws-1" orgSlug="rbcodelabs" workspaceSlug="compass" members={[]} />
+      </PanelProvider>
     ),
   list: (t: TaskCardData) =>
-    render(<TaskListView tasks={[t]} orgSlug="rbcodelabs" workspaceSlug="compass" members={[]} />),
-  detail: (t: TaskCardData) =>
     render(
-      <TaskHeader
-        task={t}
-        workspaceId="ws-1"
-        squads={[]}
-        members={[]}
-        revalidatePathStr="/rbcodelabs/compass/tasks/t-1"
-      />
+      <PanelProvider orgSlug="rbcodelabs" workspaceSlug="compass">
+        <TaskListView tasks={[t]} orgSlug="rbcodelabs" workspaceSlug="compass" members={[]} />
+      </PanelProvider>
     ),
 };
 

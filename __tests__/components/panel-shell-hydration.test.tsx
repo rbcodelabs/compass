@@ -29,6 +29,7 @@ vi.mock("@/components/panels/solution-panel", () => ({ SolutionPanel: () => null
 vi.mock("@/components/panels/assumption-panel", () => ({ AssumptionPanel: () => null }));
 vi.mock("@/components/panels/roadmap-item-panel", () => ({ RoadmapItemPanel: () => null }));
 vi.mock("@/components/panels/feedback-panel", () => ({ FeedbackPanel: () => null }));
+vi.mock("@/components/tasks/task-detail", () => ({ TaskDetail: () => null }));
 
 import { PanelShell } from "@/components/panels/panel-shell";
 

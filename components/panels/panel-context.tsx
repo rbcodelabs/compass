@@ -3,12 +3,14 @@
 import React, { createContext, useContext, useCallback, useMemo, useRef } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type { Horizon } from "@/lib/types";
+import type { TaskCardData } from "@/components/tasks/task-card";
 
 /**
- * The eight OST/roadmap entity types a detail panel can show. These match
- * lib/entity-detail.ts's EntityType and the Canvas node type strings exactly,
- * so a Canvas node (or any card) can call openPanel(node.type, node.id)
- * directly.
+ * The nine OST/roadmap/delivery entity types a detail panel can show. These
+ * match lib/entity-detail.ts's EntityType and the Canvas node type strings
+ * exactly, so a Canvas node (or any card) can call openPanel(node.type,
+ * node.id) directly. "task" is the exception — it has no Canvas node, but
+ * reuses the same panel machinery for its board/list/roadmap click targets.
  */
 export const PANEL_ENTITY_TYPES = [
   "objective",
@@ -19,6 +21,7 @@ export const PANEL_ENTITY_TYPES = [
   "experiment",
   "roadmapItem",
   "feedback",
+  "task",
 ] as const;
 
 export type EntityPanelType = (typeof PANEL_ENTITY_TYPES)[number];
@@ -55,8 +58,11 @@ function decodePanel(raw: string | null): PanelState {
 
 /** The subset of an entity's fields a mutation notification can carry. Kept
  * narrow on purpose — this isn't a general data-sync channel, just enough for
- * a listener to apply the one change it cares about optimistically. */
-export type EntityMutationPatch = { horizon?: Horizon; updatedAt?: string };
+ * a listener to apply the one change it cares about optimistically. `task`
+ * carries the full card-shaped data because TaskBoard/TaskListView need to
+ * patch their own local rows (they're panel siblings, not children) after any
+ * of the ~9 editable fields changes in the panel. */
+export type EntityMutationPatch = { horizon?: Horizon; updatedAt?: string; task?: TaskCardData };
 
 type EntityMutationListener = (id: string, patch?: EntityMutationPatch) => void;
 

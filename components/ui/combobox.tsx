@@ -120,7 +120,18 @@ function ComboboxContent({
         align={align}
         alignOffset={alignOffset}
         anchor={anchor}
-        className="isolate z-50"
+        // z-[70], not z-50: matches SelectContent's Positioner (see
+        // components/ui/select.tsx) for the same reason — the Positioner is
+        // the portal's fixed-position root, so this value alone decides
+        // whether the popup paints above or below other overlays. Entity
+        // detail panels raise their SheetContent to z-[60] (panel-shell.tsx),
+        // which left in-panel Comboboxes (InlineAssigneeField, SquadPicker)
+        // rendering with correct ARIA state but *underneath* the sheet —
+        // present in the DOM, but invisible and swallowing no clicks (the
+        // panel content beneath intercepted them instead). 70 keeps this
+        // transient popup layer above the panel layer, consistent with
+        // Select everywhere else in the app.
+        className="isolate z-[70]"
       >
         <ComboboxPrimitive.Popup
           data-slot="combobox-content"

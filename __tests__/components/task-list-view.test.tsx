@@ -1,8 +1,22 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
+// A module-scoped spy, not a fresh `vi.fn()` per `useRouter()` call: opening a
+// panel is a `router.push`, and a per-call mock cannot be asserted against
+// after the fact.
+const push = vi.fn();
+const replace = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push, replace }),
+  usePathname: () => "/rbcodelabs/compass/tasks",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+import { PanelProvider, usePanelContext } from "@/components/panels/panel-context";
 import { TaskListView } from "@/components/tasks/task-list-view";
 import type { TaskCardData } from "@/components/tasks/task-card";
 import { expectEveryGridCellClipped } from "../helpers/grid-cells";
@@ -27,15 +41,16 @@ function task(overrides: Partial<TaskCardData> & Pick<TaskCardData, "id" | "titl
   };
 }
 
-function renderList(tasks: TaskCardData[], props: { height?: "fill" | "natural" } = {}) {
+function renderList(tasks: TaskCardData[]) {
   return render(
-    <TaskListView
-      tasks={tasks}
-      orgSlug="rbcodelabs"
-      workspaceSlug="compass"
-      members={[]}
-      {...props}
-    />
+    <PanelProvider orgSlug="rbcodelabs" workspaceSlug="compass">
+      <TaskListView
+        tasks={tasks}
+        orgSlug="rbcodelabs"
+        workspaceSlug="compass"
+        members={[]}
+      />
+    </PanelProvider>
   );
 }
 
@@ -46,8 +61,24 @@ function viewport(view: ReturnType<typeof renderList>) {
   return node as HTMLElement;
 }
 
+/**
+ * Title buttons in row order.
+ *
+ * Scoped to the title cells rather than a bare `getAllByRole("button")`: the
+ * grid's header cells render a real `<Button>` for any sortable column, so a
+ * page-wide button query would silently start picking up chrome the day a
+ * Tasks column gains `sortable`.
+ */
+function titleButtons(): HTMLElement[] {
+  return screen
+    .getAllByTestId("grid-cell-title")
+    .map((cell) => within(cell).getByRole("button"));
+}
+
 // The grid reads `matchMedia` through `useIsMobile`; jsdom does not ship one.
 beforeEach(() => {
+  push.mockClear();
+  replace.mockClear();
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     configurable: true,
@@ -88,7 +119,7 @@ describe("TaskListView hierarchy", () => {
     ]);
 
     expect(screen.queryByText("No tasks match the current filters.")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
+    expect(titleButtons().map((btn) => btn.textContent)).toEqual([
       "First child",
       "Second child",
       "Third child",
@@ -104,25 +135,26 @@ describe("TaskListView hierarchy", () => {
       task({ id: "child-1", title: "First child", parentTaskId: "parent", sortOrder: 1 }),
     ]);
 
-    const links = screen.getAllByRole("link");
-    expect(links.map((link) => link.textContent)).toEqual([
+    const titles = titleButtons();
+    expect(titles.map((btn) => btn.textContent)).toEqual([
       "First root",
       "First child",
       "Second child",
       "Second root",
     ]);
 
-    expect(within(links[0].closest("td")!).getByRole("link")).toHaveTextContent("First root");
+    expect(within(titles[0].closest("td")!).getByRole("button")).toHaveTextContent("First root");
 
     // Depth is encoded on an inner element rather than the cell's own padding:
     // the grid's TableCell takes a className, never a style. The invariant the
     // original assertion protected is unchanged — nesting is visually encoded
-    // and proportional to depth — only the element carrying it moved.
-    expect(links[0].closest("div[data-depth]")).toHaveStyle({ paddingLeft: "0px" });
-    expect(links[1].closest("div[data-depth]")).toHaveStyle({ paddingLeft: "20px" });
-    expect(links[2].closest("div[data-depth]")).toHaveStyle({ paddingLeft: "20px" });
-    expect(links[3].closest("div[data-depth]")).toHaveStyle({ paddingLeft: "0px" });
-    expect(links[1].closest("div[data-depth]")).toHaveAttribute("data-depth", "1");
+    // and proportional to depth — only the element carrying it moved, so the
+    // values are `depth * 20` rather than the old table's `12 + depth * 20`.
+    expect(titles[0].closest("div[data-depth]")).toHaveStyle({ paddingLeft: "0px" });
+    expect(titles[1].closest("div[data-depth]")).toHaveStyle({ paddingLeft: "20px" });
+    expect(titles[2].closest("div[data-depth]")).toHaveStyle({ paddingLeft: "20px" });
+    expect(titles[3].closest("div[data-depth]")).toHaveStyle({ paddingLeft: "0px" });
+    expect(titles[1].closest("div[data-depth]")).toHaveAttribute("data-depth", "1");
   });
 
   // Regression: the wrapper around the table used `overflow-hidden`, which
@@ -133,10 +165,11 @@ describe("TaskListView hierarchy", () => {
   // `overflow-y-auto`, never a bare `overflow-hidden`.
   //
   // The viewport has since moved OFF the page-level wrapper this view used to
-  // render and ONTO the grid's own `table-container`, because that div is
-  // already a scroll container (`overflow-x: auto` computes `overflow-y` to
-  // `auto`) and is therefore where a sticky `<th>` resolves. A wrapper outside
-  // it would scroll the header away with the rows.
+  // render (the old `data-testid="task-list-scroll"` div) and ONTO the grid's
+  // own `table-container`, because that div is already a scroll container
+  // (`overflow-x: auto` computes `overflow-y` to `auto`) and is therefore
+  // where a sticky `<th>` resolves. A wrapper outside it would scroll the
+  // header away with the rows.
   it("makes the grid's own table-container the scroll viewport in fill mode", () => {
     const view = renderList([task({ id: "only", title: "Only task" })]);
 
@@ -162,22 +195,6 @@ describe("TaskListView hierarchy", () => {
       expect(head.className).toMatch(/(?:^|\s)top-0(?:\s|$)/);
       expect(head.className).toMatch(/(?:^|\s)bg-surface-panel(?:\s|$)/);
     }
-  });
-
-  // The subtasks panel renders the same component in a normally-scrolling
-  // column. `flex-1`/`min-h-0` there is inert at best and collapses the grid
-  // at worst, so the mode must actually change the shape.
-  it("does not claim flex height in natural mode", () => {
-    const view = renderList([task({ id: "only", title: "Only task" })], { height: "natural" });
-
-    const scrollContainer = viewport(view);
-    expect(scrollContainer.className).not.toMatch(/(?:^|\s)flex-1(?:\s|$)/);
-    expect(scrollContainer.className).not.toMatch(/(?:^|\s)min-h-0(?:\s|$)/);
-    // Still bounded, or the header would have nothing to stick to.
-    expect(scrollContainer.className).toMatch(/max-h-\(--data-grid-max-h\)/);
-    expect(screen.getByTestId("data-grid")).toHaveStyle({
-      "--data-grid-max-h": "24rem",
-    });
   });
 
   it("renders no pagination footer or column menu for an unpaginated list", () => {
@@ -208,5 +225,171 @@ describe("TaskListView hierarchy", () => {
     // Not just Assignee: every column carries the guarantee, including any
     // added later.
     expectEveryGridCellClipped(view.container);
+  });
+});
+
+/**
+ * PR #228 moved tasks out of a dedicated `/tasks/{id}` page and into the shared
+ * inline-editable detail panel. These hold the grid to that behaviour: a title
+ * opens the panel, and an edit made in the panel reaches the grid.
+ */
+describe("TaskListView detail panel integration", () => {
+  afterEach(() => cleanup());
+
+  it("opens the shared detail panel instead of navigating to a task page", () => {
+    renderList([task({ id: "t1", title: "Ship the data grid" })]);
+
+    const title = titleButtons()[0];
+    // A button, not a link: the old `<Link href="/{org}/{ws}/tasks/{id}">`
+    // navigated away from the list.
+    expect(title.tagName).toBe("BUTTON");
+    expect(screen.queryByRole("link", { name: "Ship the data grid" })).not.toBeInTheDocument();
+
+    fireEvent.click(title);
+
+    // `openPanel` pushes `?detail=task:{id}`, preserving other params.
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(push).toHaveBeenCalledWith("/rbcodelabs/compass/tasks?detail=task%3At1", {
+      scroll: false,
+    });
+  });
+
+  /*
+    The panel is a layout sibling of this grid, not a child, so an edit there
+    reaches the rows only through `notifyEntityMutated`. Without the
+    subscription the row silently shows stale content until a manual refresh.
+  */
+  it("updates the matching row when the panel reports a mutation", () => {
+    function Harness() {
+      const { notifyEntityMutated } = usePanelContext();
+      return (
+        <>
+          <button
+            type="button"
+            data-testid="fire-mutation"
+            onClick={() =>
+              notifyEntityMutated("task", "t1", {
+                task: task({ id: "t1", title: "Renamed in the panel", priority: "URGENT" }),
+              })
+            }
+          />
+          <TaskListView
+            tasks={[task({ id: "t1", title: "Original title" }), task({ id: "t2", title: "Untouched", sortOrder: 2 })]}
+            orgSlug="rbcodelabs"
+            workspaceSlug="compass"
+            members={[]}
+          />
+        </>
+      );
+    }
+
+    render(
+      <PanelProvider orgSlug="rbcodelabs" workspaceSlug="compass">
+        <Harness />
+      </PanelProvider>,
+    );
+
+    expect(titleButtons().map((b) => b.textContent)).toEqual(["Original title", "Untouched"]);
+
+    fireEvent.click(screen.getByTestId("fire-mutation"));
+
+    // The edited row picks up both the new title and the new priority...
+    expect(titleButtons().map((b) => b.textContent)).toEqual([
+      "Renamed in the panel",
+      "Untouched",
+    ]);
+    expect(screen.getByText("Urgent")).toBeVisible();
+    // ...and the untouched row is not disturbed.
+    expect(screen.getAllByTestId("grid-row")).toHaveLength(2);
+  });
+
+  /*
+    The churn hazard, exercised at its real trigger.
+
+    `openPanel` is a `useCallback` over `[router, pathname, searchParams]` and
+    `useSearchParams()` returns a fresh object, so `openPanel`'s identity
+    changes whenever the PROVIDER re-renders. If a cell closes over it directly
+    and the column memo depends on it, the column definitions churn and
+    `table.FlexRender` tears down and rebuilds every cell subtree.
+
+    The trigger has to be a re-render ABOVE the provider. A `setTasks` inside
+    TaskListView does NOT qualify — the grid is a child of the provider, so its
+    own state updates never re-render the provider and `openPanel` keeps its
+    identity no matter how the columns are memoised. An earlier version of this
+    test used the mutation path and passed against both the safe and the unsafe
+    implementation; it proved nothing.
+  */
+  it("does not remount cells when a provider re-render changes openPanel's identity", () => {
+    function Harness() {
+      const [, force] = useState(0);
+      return (
+        <>
+          <button type="button" data-testid="force-provider" onClick={() => force((n) => n + 1)} />
+          <PanelProvider orgSlug="rbcodelabs" workspaceSlug="compass">
+            <TaskListView
+              tasks={[task({ id: "t1", title: "Original" })]}
+              orgSlug="rbcodelabs"
+              workspaceSlug="compass"
+              members={[]}
+            />
+          </PanelProvider>
+        </>
+      );
+    }
+
+    render(<Harness />);
+
+    const cellBefore = screen.getByTestId("grid-cell-title");
+    const rowBefore = screen.getByTestId("grid-row");
+    const buttonBefore = titleButtons()[0];
+
+    fireEvent.click(screen.getByTestId("force-provider"));
+
+    // The very same DOM nodes: updated in place, never torn down.
+    expect(screen.getByTestId("grid-row")).toBe(rowBefore);
+    expect(screen.getByTestId("grid-cell-title")).toBe(cellBefore);
+    expect(titleButtons()[0]).toBe(buttonBefore);
+  });
+
+  it("keeps row and cell identity stable across a panel mutation", () => {
+    function Harness() {
+      const { notifyEntityMutated } = usePanelContext();
+      return (
+        <>
+          <button
+            type="button"
+            data-testid="fire-mutation"
+            onClick={() =>
+              notifyEntityMutated("task", "t1", {
+                task: task({ id: "t1", title: "Renamed" }),
+              })
+            }
+          />
+          <TaskListView
+            tasks={[task({ id: "t1", title: "Original" })]}
+            orgSlug="rbcodelabs"
+            workspaceSlug="compass"
+            members={[]}
+          />
+        </>
+      );
+    }
+
+    render(
+      <PanelProvider orgSlug="rbcodelabs" workspaceSlug="compass">
+        <Harness />
+      </PanelProvider>,
+    );
+
+    const cellBefore = screen.getByTestId("grid-cell-title");
+    const rowBefore = screen.getByTestId("grid-row");
+
+    fireEvent.click(screen.getByTestId("fire-mutation"));
+
+    // Same DOM nodes, new content — the row is patched, not replaced, so no
+    // flash of stale content and no scroll-position loss.
+    expect(screen.getByTestId("grid-cell-title")).toBe(cellBefore);
+    expect(screen.getByTestId("grid-row")).toBe(rowBefore);
+    expect(cellBefore).toHaveTextContent("Renamed");
   });
 });

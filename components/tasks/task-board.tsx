@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useCallback } from "react";
+import { useState, useTransition, useCallback, useEffect } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -23,6 +23,7 @@ import { TaskColumn } from "./task-column";
 import { TaskCard, type TaskCardData } from "./task-card";
 import type { TaskStatus, MemberData } from "@/lib/types";
 import { Board } from "@/components/patterns/board";
+import { usePanelContext } from "@/components/panels/panel-context";
 
 type ColumnMap = Record<TaskStatus, TaskCardData[]>;
 
@@ -64,6 +65,7 @@ function findStatus(columns: ColumnMap, taskId: string): TaskStatus | null {
  */
 export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, members }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/tasks`;
+  const { subscribeEntityMutated } = usePanelContext();
 
   const [columns, setColumns] = useState<ColumnMap>(() => buildColumnMap(initialTasks));
   const [activeTask, setActiveTask] = useState<TaskCardData | null>(null);
@@ -193,12 +195,29 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
     setColumns((prev) => ({ ...prev, [task.status]: [...prev[task.status], task] }));
   }
 
+  // Status-move-safe: a panel edit can change the task's status (unlike the
+  // old EditTaskDialog, which never touched status), so this removes the
+  // task from every column and re-adds it to the one matching its current
+  // status rather than assuming it's still in the same column.
   const handleUpdate = useCallback((updated: TaskCardData) => {
-    setColumns((prev) => ({
-      ...prev,
-      [updated.status]: prev[updated.status].map((t) => (t.id === updated.id ? updated : t)),
-    }));
+    setColumns((prev) => {
+      const next = {} as ColumnMap;
+      for (const status of ALL_STATUSES) {
+        next[status] = prev[status].filter((t) => t.id !== updated.id);
+      }
+      next[updated.status] = [...next[updated.status], updated];
+      return next;
+    });
   }, []);
+
+  // The panel (PanelShell) renders as a layout sibling of TaskBoard, not a
+  // child, so edits made there reach this board's own local column state via
+  // the notify/subscribe escape hatch — same pattern RoadmapBoard uses.
+  useEffect(() => {
+    return subscribeEntityMutated("task", (_id, patch) => {
+      if (patch?.task) handleUpdate(patch.task);
+    });
+  }, [subscribeEntityMutated, handleUpdate]);
 
   const cancelledCount = columns.CANCELLED.length;
 
@@ -241,7 +260,6 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
                 members={members}
                 onTaskAdded={handleTaskAdded}
                 onCancel={handleCancel}
-                onUpdate={handleUpdate}
               />
             ))}
           </div>
