@@ -1,10 +1,41 @@
+/**
+ * Handoff domains that can drive a claimed agent turn.
+ *
+ * One member today, deliberately. ADR-0012 adds `RESEARCH_SYNTHESIS` in a later
+ * PR; because the policy registry and every dispatch site are typed as
+ * `Record<HandoffKind, ...>`, widening this union turns each unhandled site into
+ * a compile error rather than a silent fallthrough into PM-interview logic.
+ */
+export const HANDOFF_KINDS = ["PM_INTERVIEW"] as const
+export type HandoffKind = (typeof HANDOFF_KINDS)[number]
+
+/**
+ * Carried inside the conversation's `interview_processing_json` blob. The column
+ * keeps its PM-era name and is reused by a second domain rather than renamed —
+ * a rename would cost a DSQL DDL migration for cosmetic benefit (ADR-0012).
+ */
 export type ProcessingState = {
   status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "INTERRUPTED"
+  /** Absent on every row written before ADR-0012 and therefore means `PM_INTERVIEW`. */
+  kind?: HandoffKind
   deadline?: number
   claimId?: string
   interviewId?: string
   targetUrl?: string
   receipt?: { changedFields: string[]; targetUrl: string; payloadHash?: string; before?: Record<string, unknown>; after?: Record<string, unknown> }
+}
+
+/**
+ * Migrations 050/051 are applied in production, so live rows predate `kind`.
+ * Absence must keep meaning `PM_INTERVIEW` indefinitely — there is no backfill.
+ */
+export function handoffKind(state: ProcessingState): HandoffKind {
+  return state.kind ?? "PM_INTERVIEW"
+}
+
+/** Guards the PM-only target/field logic against a state from another domain. */
+export function assertPmInterviewKind(state: ProcessingState) {
+  if (handoffKind(state) !== "PM_INTERVIEW") throw new Error("This conversation is not a PM interview handoff")
 }
 
 export function processingStatus(state: ProcessingState, now = Date.now()) {
@@ -27,6 +58,8 @@ export function parseProcessingState(raw: string | null | undefined): Processing
   if (!raw) return null
   const state = JSON.parse(raw) as ProcessingState
   if (!["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "INTERRUPTED"].includes(state.status)) throw new Error("Invalid interview processing state")
+  // Absent `kind` is the legacy shape and stays valid; anything present must be known.
+  if (state.kind !== undefined && !(HANDOFF_KINDS as readonly unknown[]).includes(state.kind)) throw new Error("Unsupported interview processing kind")
   return state
 }
 import { PM_INTERVIEW_ALLOWED_FIELDS, type PmInterviewTargetType } from "@/lib/pm-interview-contracts"
