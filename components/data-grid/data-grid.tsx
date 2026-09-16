@@ -34,7 +34,10 @@ import type { FacetedFilterGroup } from "@/components/patterns/faceted-filter-me
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
-import { DataGridHeaderCell } from "./data-grid-header-cell";
+import {
+  DataGridHeaderCell,
+  STICKY_HEADER_CELL_CLASS,
+} from "./data-grid-header-cell";
 import { DataGridPagination } from "./data-grid-pagination";
 import { DataGridToolbar } from "./data-grid-toolbar";
 import { EditableCell } from "./editable-cell";
@@ -53,6 +56,40 @@ import {
 /** Synthetic id of the injected selection column. */
 export const SELECTION_COLUMN_ID = "__select";
 
+/**
+ * The grid's default cell-overflow guard, opted out of per column with
+ * `meta.overflow: "visible"`.
+ *
+ * `table-fixed` and `whitespace-nowrap` are the *grid's* choices, so containing
+ * their consequence is the grid's job rather than every column author's: a
+ * declared width is a hard box, content cannot wrap out of it, and anything
+ * wider that nothing clips escapes and paints over the next column. Requiring
+ * each column to remember `truncate` made that a latent bug in every column
+ * that forgot and in every column added later.
+ *
+ * It lands on the `<td>` rather than on an inner wrapper on purpose. Overflow
+ * clips to the padding box, and the cell already carries `p-2`, so 8px of slack
+ * sits between the clip edge and any content — enough for the `ring-3` focus
+ * rings used throughout, which a zero-padding inner wrapper would cut off.
+ * A `<td>` is a block container, so `text-overflow` applies to its own line
+ * boxes and inline cell content ellipsizes without any inner element at all.
+ *
+ * Not added to `components/ui/table.tsx`'s TableCell: that primitive is shared
+ * with auto-layout tables, where a wide cell widens its column instead of
+ * overlapping the next one and clipping would only lose content.
+ */
+const CELL_CLIP_CLASS = "overflow-hidden text-ellipsis";
+
+/**
+ * Floor for a flexible column (one with no `meta.width`) that declares no
+ * `meta.minWidth` of its own.
+ *
+ * Every column is reserved *something* in the table's `min-width` so a column
+ * added later cannot silently reintroduce the zero-width collapse that
+ * reservation exists to prevent.
+ */
+export const DEFAULT_MIN_WIDTH = "8rem";
+
 export type DataGridProps<TRow extends GridRowData> = {
   /** Namespace for persisted column preferences: `compass:grid:{gridId}:v1`. */
   gridId: string;
@@ -61,11 +98,15 @@ export type DataGridProps<TRow extends GridRowData> = {
   rows: readonly TRow[];
   getRowId: (row: TRow) => string;
 
-  /** Server-reported total across all pages. */
-  total: number;
-  /** 1-based. */
-  page: number;
-  pageSize: number;
+  /**
+   * Server-reported total across all pages. Defaults to `rows.length`, which is
+   * the correct value for an unpaginated grid (`pagination={false}`).
+   */
+  total?: number;
+  /** 1-based. Defaults to 1. */
+  page?: number;
+  /** Defaults to `rows.length` (floored at 1, so an empty page is still valid). */
+  pageSize?: number;
   pageSizes?: readonly number[];
   onPageChange?: (page: number) => void;
   onPageSizeChange?: (size: number) => void;
@@ -107,6 +148,41 @@ export type DataGridProps<TRow extends GridRowData> = {
   /** Opt-in. If this is never passed, the selection code path stays dark. */
   selection?: GridSelection<TRow>;
 
+  /**
+   * How the grid claims vertical space.
+   *
+   *  - `"fill"`    — the grid IS the scroll viewport and consumes the height its
+   *                  parent gives it. For a full-page view inside
+   *                  `WorkspacePage`'s `md:overflow-hidden` content area, where
+   *                  nothing else will ever scroll.
+   *  - `"natural"` — the grid grows to fit its content, optionally capped by
+   *                  `maxHeight`, and the page scrolls around it. For small
+   *                  in-page tables (settings panels, detail-panel sub-lists).
+   *
+   * A two-value union rather than a boolean: `fill={false}` reads as "don't
+   * fill" rather than "grow naturally", and the two failure modes are
+   * different. Defaults to `"natural"`, the only safe value for an unknown
+   * container — `"fill"` in an unbounded parent collapses to zero height.
+   */
+  height?: "fill" | "natural";
+  /**
+   * Caps the scroll viewport. Only meaningful with `height="natural"`; a CSS
+   * length such as `"20rem"`. Without it a natural grid has no bounded height,
+   * so its header has nothing to stick to.
+   */
+  maxHeight?: string;
+
+  /** `false` hides the pagination footer entirely. Default `true`. */
+  pagination?: boolean;
+  /**
+   * `false` hides the toolbar — search, filters and the Columns menu — and
+   * skips installing the portal-host observer. Default `true`.
+   */
+  toolbar?: boolean;
+
+  /** Extra classes for a body `<tr>`. Receives the merged row and its state. */
+  rowClassName?: (row: TRow, state: GridRowState<TRow>) => string | undefined;
+
   emptyState?: React.ReactNode;
   className?: string;
 };
@@ -133,9 +209,9 @@ export function DataGrid<TRow extends GridRowData>({
   columns,
   rows,
   getRowId,
-  total,
-  page,
-  pageSize,
+  total: totalProp,
+  page = 1,
+  pageSize: pageSizeProp,
   pageSizes,
   onPageChange,
   onPageSizeChange,
@@ -153,19 +229,33 @@ export function DataGrid<TRow extends GridRowData>({
   rowMatchesFilters,
   onRefresh,
   selection,
+  height = "natural",
+  maxHeight,
+  pagination = true,
+  toolbar = true,
+  rowClassName,
   emptyState,
   className,
 }: DataGridProps<TRow>) {
   const isMobile = useIsMobile();
   const mobileMode = isMobile && Boolean(renderMobileRow);
+
+  // An unpaginated grid still needs coherent page math for the live region and
+  // the (hidden) footer. Defaulting here rather than at five call sites also
+  // contains the degenerate `rows.length === 0` case in one place.
+  const total = totalProp ?? rows.length;
+  const pageSize = pageSizeProp ?? Math.max(1, rows.length);
+
   const subscribeToToolbarHost = React.useCallback(
     (onStoreChange: () => void) => {
-      if (!toolbarPortalId) return () => {};
+      // Without the `toolbar` guard this observes every DOM mutation in the app
+      // on behalf of a toolbar that will never render.
+      if (!toolbar || !toolbarPortalId) return () => {};
       const observer = new MutationObserver(onStoreChange);
       observer.observe(document.body, { childList: true, subtree: true });
       return () => observer.disconnect();
     },
-    [toolbarPortalId],
+    [toolbar, toolbarPortalId],
   );
   const getToolbarHost = React.useCallback(
     () => (toolbarPortalId ? document.getElementById(toolbarPortalId) : null),
@@ -418,6 +508,56 @@ export function DataGrid<TRow extends GridRowData>({
   // layout exists to avoid.
   const columnCount = mobileMode ? 1 : visibleColumns.length;
 
+  /*
+    Why the table needs an explicit `min-width` at all.
+
+    `components/ui/table.tsx` renders the table element as `w-full`, and this
+    grid adds `table-fixed`. Under `table-layout: fixed` it NEVER overflows its
+    container on its own: when the `<colgroup>` widths sum to more than the
+    available width, browsers scale every column down proportionally, and a
+    column with no declared width gets `container − Σ(declared)` — which goes
+    NEGATIVE once the fixed columns out-sum the container, clamping the column
+    to zero. So the flexible first column (Tasks "Title", Discovery "Item")
+    silently collapsed to invisible at phone widths while the fixed columns
+    were crushed, and the `overflow-x-auto` wrapper never had anything to
+    scroll. Reported against this PR's preview at 390px.
+
+    Reserving the sum here is what converts that shortfall into real horizontal
+    scrolling: `width: 100%` still wins whenever the container is wider, and
+    below the sum the table simply stops shrinking and overflows the wrapper.
+
+    Flexible columns are reserved as `count × max(floor)`, not `Σ(floor)`,
+    because fixed layout splits the leftover space EQUALLY among the columns
+    that declared no width. Reserving only the sum would let a grid with two
+    unequal floors hand the smaller-floored column an equal — and therefore
+    too-small — share. For the single flexible column every current grid has,
+    the two formulas are identical.
+  */
+  const tableMinWidth = React.useMemo(() => {
+    if (mobileMode) return undefined;
+
+    const fixed: string[] = [];
+    const flexible: string[] = [];
+    for (const column of visibleColumns) {
+      const { width, minWidth } = metaOf(column);
+      if (width) fixed.push(width);
+      else flexible.push(minWidth ?? DEFAULT_MIN_WIDTH);
+    }
+
+    const parts = [...fixed];
+    if (flexible.length > 0) {
+      // `max()` and `calc()` keep this unit-agnostic: no parsing of "18rem",
+      // and a column may declare its floor in any CSS length.
+      parts.push(
+        flexible.length === 1
+          ? flexible[0]
+          : `${flexible.length} * max(${flexible.join(", ")})`,
+      );
+    }
+    if (parts.length === 0) return undefined;
+    return `calc(${parts.join(" + ")})`;
+  }, [mobileMode, visibleColumns]);
+
   // ── Column drag reorder ───────────────────────────────────────────────────
   const sensors = useSensors(
     // A small distance threshold lets a plain click reach the sort button
@@ -489,14 +629,28 @@ export function DataGrid<TRow extends GridRowData>({
 
   const bodyRows = table.getRowModel().rows;
 
+  const fill = height === "fill";
+
   return (
-    <div className={cn("flex flex-col gap-3", className)} data-testid="data-grid">
+    <div
+      className={cn("flex flex-col gap-3", fill && "min-h-0 flex-1", className)}
+      data-testid="data-grid"
+      data-height={height}
+      // A custom property rather than a second style channel on the shared
+      // `Table` primitive, whose `style` prop lands on the table element
+      // itself rather than on the scrolling container that needs the cap.
+      style={
+        maxHeight
+          ? ({ "--data-grid-max-h": maxHeight } as React.CSSProperties)
+          : undefined
+      }
+    >
       <div aria-live="polite" className="sr-only" data-testid="grid-live-region">
         {liveMessage}
       </div>
 
-      {(() => {
-        const toolbar = (
+      {toolbar && (() => {
+        const toolbarNode = (
           <DataGridToolbar
             leading={toolbarLeading}
             searchDisplay={searchDisplay}
@@ -512,17 +666,19 @@ export function DataGrid<TRow extends GridRowData>({
           />
         );
         return toolbarPortal
-          ? createPortal(toolbar, toolbarPortal)
+          ? createPortal(toolbarNode, toolbarPortal)
           : toolbarPortalId
             ? null
-            : toolbar;
+            : toolbarNode;
       })()}
 
       {errorMessages.length > 0 && (
         <div
           role="alert"
           data-testid="grid-error-strip"
-          className="flex items-start gap-2 rounded-lg border border-status-danger-surface bg-status-danger-surface px-3 py-2 text-xs text-status-danger"
+          // `shrink-0`: in fill mode this is a flex sibling of a `flex-1`
+          // scroll viewport and would otherwise be compressed away.
+          className="flex shrink-0 items-start gap-2 rounded-lg border border-status-danger-surface bg-status-danger-surface px-3 py-2 text-xs text-status-danger"
         >
           <div className="flex-1 space-y-0.5">
             {errorMessages.map((message) => (
@@ -545,7 +701,7 @@ export function DataGrid<TRow extends GridRowData>({
       {staleCount > 0 && (
         <div
           data-testid="grid-stale-strip"
-          className="flex items-center gap-2 rounded-lg border border-status-warning-surface bg-status-warning-surface px-3 py-2 text-xs text-status-warning"
+          className="flex shrink-0 items-center gap-2 rounded-lg border border-status-warning-surface bg-status-warning-surface px-3 py-2 text-xs text-status-warning"
         >
           <span className="flex-1">
             {staleCount} item{staleCount === 1 ? "" : "s"} no longer match
@@ -580,7 +736,33 @@ export function DataGrid<TRow extends GridRowData>({
           authoritative, columns without one share the remainder, and cell
           content clips via its own `truncate` / `line-clamp-*`.
         */}
-        <Table className="table-fixed">
+        {/*
+          The scroll viewport is `table-container` itself, never an outer div.
+          `overflow-x: auto` already makes that wrapper a scroll container on
+          BOTH axes, so it is the nearest scrolling ancestor and therefore the
+          box a sticky `<th>` resolves against — a bounded, scrolling wrapper
+          placed outside it takes the sticky header away with the content.
+
+          `overflow-y-auto` rather than `overflow-auto` on purpose: it leaves
+          the primitive's literal `overflow-x-auto` in place instead of relying
+          on class-merge order to replace it, so the horizontal behaviour the
+          `table-fixed` comment below describes is provably unchanged.
+
+          `isolate` gives the grid its own stacking context so the sticky header
+          (z-20 locally) can never compete with `WorkspacePage`'s own
+          `sticky top-0 z-20` header in the root stacking context.
+        */}
+        <Table
+          className="table-fixed"
+          // `undefined` in mobile mode, where the single `colSpan` card must
+          // fill the viewport rather than force the desktop sum into scroll.
+          style={tableMinWidth ? { minWidth: tableMinWidth } : undefined}
+          containerClassName={cn(
+            "isolate",
+            fill && "min-h-0 flex-1 overflow-y-auto",
+            !fill && maxHeight && "max-h-(--data-grid-max-h) overflow-y-auto",
+          )}
+        >
           <TableCaption className="sr-only">{caption}</TableCaption>
           <colgroup>
             {mobileMode ? (
@@ -595,6 +777,12 @@ export function DataGrid<TRow extends GridRowData>({
                     // Widths are static per column id, so they are identical in
                     // the pre-hydration frame and the frame after stored column
                     // preferences load. Only presence and order can flick.
+                    //
+                    // `meta.minWidth` is deliberately NOT emitted here. A
+                    // `min-width` on a `<col>` is not honoured under fixed
+                    // layout, and giving a flexible column a `width` would stop
+                    // it absorbing the slack at wide viewports. Its floor is
+                    // enforced by the table's `min-width` instead.
                     style={width ? { width } : undefined}
                   />
                 );
@@ -618,6 +806,7 @@ export function DataGrid<TRow extends GridRowData>({
                           key={id}
                           data-testid={`grid-head-${id}`}
                           data-col={id}
+                          className={STICKY_HEADER_CELL_CLASS}
                         >
                           <span className="sr-only">Select</span>
                         </TableHead>
@@ -677,9 +866,18 @@ export function DataGrid<TRow extends GridRowData>({
                 "data-state": state?.selected ? ("selected" as const) : undefined,
               };
 
+              const extraRowClass = rowClassName?.(
+                row,
+                state as GridRowState<TRow>,
+              );
+
               if (mobileMode) {
                 return (
-                  <TableRow key={id} {...rowProps} className="align-top">
+                  <TableRow
+                    key={id}
+                    {...rowProps}
+                    className={cn("align-top", extraRowClass)}
+                  >
                     <TableCell
                       colSpan={columnCount}
                       data-testid="grid-cell-mobile"
@@ -695,13 +893,19 @@ export function DataGrid<TRow extends GridRowData>({
               const cellsByColumn = tableRow.getVisibleCellsByColumnId();
 
               return (
-                <TableRow key={id} {...rowProps}>
+                <TableRow key={id} {...rowProps} className={extraRowClass}>
                   {visibleColumns.map((column) => {
                     const columnId = column.id as string;
                     const meta = metaOf(column);
 
                     if (columnId === SELECTION_COLUMN_ID) {
                       return (
+                        // Deliberately not clipped: TableCell drops its right
+                        // padding for a checkbox cell, and the Checkbox extends
+                        // its pointer target 12px past its own box with
+                        // `after:-inset-x-3`. Clipping here would shrink a real
+                        // hit area to buy nothing — the cell holds a fixed-size
+                        // control, never text.
                         <TableCell
                           key={columnId}
                           data-testid={`grid-cell-${columnId}`}
@@ -738,6 +942,11 @@ export function DataGrid<TRow extends GridRowData>({
                           meta.edit && state?.error ? true : undefined
                         }
                         className={cn(
+                          // Before `cellClassName` so a column can still
+                          // override the pair through its own classes — the
+                          // Feedback grid's `whitespace-normal` already relies
+                          // on exactly that merge order.
+                          meta.overflow !== "visible" && CELL_CLIP_CLASS,
                           meta.align === "end" && "text-right",
                           meta.cellClassName,
                         )}
@@ -771,15 +980,17 @@ export function DataGrid<TRow extends GridRowData>({
         </Table>
       </DndContext>
 
-      <DataGridPagination
-        page={page}
-        pageCount={pageCount}
-        pageSize={pageSize}
-        pageSizes={pageSizes}
-        total={total}
-        onPageChange={onPageChange}
-        onPageSizeChange={onPageSizeChange}
-      />
+      {pagination && (
+        <DataGridPagination
+          page={page}
+          pageCount={pageCount}
+          pageSize={pageSize}
+          pageSizes={pageSizes}
+          total={total}
+          onPageChange={onPageChange}
+          onPageSizeChange={onPageSizeChange}
+        />
+      )}
     </div>
   );
 }

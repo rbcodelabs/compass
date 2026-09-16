@@ -4,11 +4,27 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+/**
+ * `containerClassName` styles the `table-container` wrapper, not the `<table>`.
+ *
+ * It exists because that wrapper is already a scroll container (`overflow-x:
+ * auto` computes `overflow-y` to `auto` too), which makes it the nearest
+ * scrolling ancestor — and therefore the element a `position: sticky` header
+ * resolves against. A caller that wants a sticky header has to put the bounded
+ * height and the vertical scroll on *this* div; an `overflow-y-auto` wrapper
+ * placed outside it scrolls the sticky cell away with the rest of the table.
+ *
+ * Purely additive: omitting it leaves the wrapper exactly as it was.
+ */
+function Table({
+  className,
+  containerClassName,
+  ...props
+}: React.ComponentProps<"table"> & { containerClassName?: string }) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className={cn("relative w-full overflow-x-auto", containerClassName)}
     >
       <table
         data-slot="table"

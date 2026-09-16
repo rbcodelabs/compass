@@ -1,6 +1,7 @@
 export { DataGrid, SELECTION_COLUMN_ID, type DataGridProps } from "./data-grid";
 export {
   DataGridHeaderCell,
+  STICKY_HEADER_CELL_CLASS,
   type DataGridHeaderCellProps,
 } from "./data-grid-header-cell";
 export {

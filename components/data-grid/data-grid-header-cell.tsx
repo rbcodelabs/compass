@@ -10,6 +10,30 @@ import { TableHead } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import type { GridAlign, GridSortDirection } from "./types";
 
+/**
+ * Sticky-header styling, shared by every `<th>` the grid renders (including the
+ * injected selection column, which is built in `data-grid.tsx`).
+ *
+ * Three details are load-bearing:
+ *
+ *  1. Sticky goes on the `<th>`, not on `<thead>` — per-cell sticky is the
+ *     universally supported form.
+ *  2. The background must be on the cell. Tailwind's preflight sets
+ *     `border-collapse: collapse`, under which a `<tr>`/`<thead>` background
+ *     does not reliably paint behind a sticky cell and body rows show through.
+ *     `bg-surface-panel` resolves to `--card`, which is defined in both light
+ *     and dark mode, so no `dark:` variant is needed.
+ *  3. The underline is an inset box-shadow, NOT `border-b`. Collapsed borders
+ *     belong to the table grid rather than the cell, so they do not travel with
+ *     a sticky element — the rule would detach and scroll away while the header
+ *     text stayed put. A shadow paints inside the cell's own box.
+ *
+ * `z-20` is scoped by the `isolate` on the scroll container, so it cannot
+ * compete with page chrome in the root stacking context.
+ */
+export const STICKY_HEADER_CELL_CLASS =
+  "sticky top-0 z-20 bg-surface-panel shadow-[inset_0_-1px_0_var(--border-default)]";
+
 export type DataGridHeaderCellProps = {
   columnId: string;
   label: ReactNode;
@@ -80,8 +104,13 @@ export function DataGridHeaderCell({
       aria-sort={sortable ? ariaSort : undefined}
       className={cn(
         "text-xs font-medium text-text-subtle",
+        STICKY_HEADER_CELL_CLASS,
         align === "end" && "text-right",
-        isDragging && "opacity-60",
+        // dnd-kit transforms this cell in place during a column drag. A
+        // transform creates a containing block for descendants and browsers
+        // disagree about transformed sticky elements, so the cell drops back to
+        // `static` for the duration of the drag and returns to sticky after.
+        isDragging && "static opacity-60",
         movable && "touch-none",
         className,
       )}
@@ -93,7 +122,13 @@ export function DataGridHeaderCell({
           variant="ghost"
           size="xs"
           className={cn(
-            "-mx-2 h-6 font-medium text-text-subtle",
+            // `max-w-full` keeps the button inside the column under
+            // `table-fixed`, so a long header label truncates below instead of
+            // overflowing into the next header. The clip is on the label rather
+            // than the `<th>`: `-mx-2` cancels the header's own padding, so the
+            // button's `ring-3` focus ring sits flush against the cell's
+            // padding box and clipping the `<th>` would cut it off.
+            "-mx-2 h-6 max-w-full font-medium text-text-subtle",
             align === "end" && "ml-auto",
           )}
           onClick={() => onSort?.(sortKey as string)}
@@ -105,7 +140,9 @@ export function DataGridHeaderCell({
                 : `Sort by ${labelText}`
           }
         >
-          {label}
+          <span data-testid="grid-head-label" className="truncate">
+            {label}
+          </span>
           <SortIcon
             aria-hidden
             className={cn(
@@ -115,7 +152,12 @@ export function DataGridHeaderCell({
           />
         </Button>
       ) : (
-        <span className={cn("block", align === "end" && "text-right")}>{label}</span>
+        <span
+          data-testid="grid-head-label"
+          className={cn("block truncate", align === "end" && "text-right")}
+        >
+          {label}
+        </span>
       )}
     </TableHead>
   );
