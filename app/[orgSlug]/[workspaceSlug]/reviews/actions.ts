@@ -6,10 +6,22 @@ import getPrisma from "@/lib/db"
 import { recordDecision } from "@/lib/decision-service"
 import { isOrgAdminRole } from "@/lib/roles"
 import { queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator } from "@/lib/release-authorization"
-import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh, prepareBuildingInvestmentReview } from "@/lib/building-investment"
 import { createTrackedDecisionRequest, reviseTrackedDecisionRequest, recordDecisionNoAction, type TrackedSubjectType } from "@/lib/tracked-decisions"
 import { createDecisionFollowUpTask } from "@/lib/decision-followthrough"
 import type { TaskAssignee } from "@/lib/task-assignment"
+
+/**
+ * Gates whose designs were retired but whose historical rows still exist. They
+ * render read-only for audit and can never be decided again: NOW commitment and
+ * native policy activation were retired in f5d7510, and the Building-investment
+ * gate — whose approvals nothing downstream ever read — with it.
+ */
+const RETIRED_GATE_TYPES = new Set([
+  "NOW_COMMITMENT",
+  "NOW_POLICY_ACTIVATION",
+  "BUILDING_INVESTMENT",
+  "BUILDING_INVESTMENT_REVOCATION",
+])
 
 async function requireWorkspaceMember(workspaceId: string) {
   const session = await auth()
@@ -25,16 +37,6 @@ async function requireWorkspaceMember(workspaceId: string) {
   })
   if (!workspace || (workspace.members.length === 0 && !isOrgAdminRole(workspace.organization.members[0]?.role))) throw new Error("Workspace not found")
   return session.user.id
-}
-
-export async function requestBuildingInvestmentAction(_workspaceId: string, solutionId: string) {
-  const prisma = getPrisma()
-  const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, opportunity: { select: { workspaceId: true } } } })
-  if (!solution) throw new Error("Solution not found")
-  const userId = await requireWorkspaceMember(solution.opportunity.workspaceId)
-  const revision = await prepareBuildingInvestmentReview(solutionId, { requestedById: userId })
-  revalidatePath("/", "layout")
-  return { requestId: revision.requestId, revisionId: revision.id }
 }
 
 export async function createTrackedDecisionAction(input: {
@@ -65,14 +67,8 @@ export async function decideReviewAction(input: {
   const prisma = getPrisma()
   const revision = await prisma.reviewRevision.findUnique({ where: { id: input.revisionId }, include: { request: true } })
   if (!revision) throw new Error("Review revision not found")
-  if (revision.request.gateType === "NOW_COMMITMENT" || revision.request.gateType === "NOW_POLICY_ACTIVATION") throw new Error("This legacy review is read-only.")
+  if (RETIRED_GATE_TYPES.has(revision.request.gateType)) throw new Error("This legacy review is read-only.")
   const userId = await requireWorkspaceMember(revision.request.workspaceId)
-  const freshness = revision.request.gateType === "BUILDING_INVESTMENT"
-    ? await ensureBuildingInvestmentRevisionFresh(revision.id)
-    : revision.request.gateType === "BUILDING_INVESTMENT_REVOCATION"
-      ? await ensureBuildingInvestmentRevocationRevisionFresh(revision.id)
-      : { stale: false }
-  if (freshness.stale) throw new Error("This review is stale. Prepare a new immutable revision before deciding.")
   const decision = await recordDecision({
     actor: { kind: "USER", userId },
     revisionId: input.revisionId,
@@ -86,12 +82,6 @@ export async function decideReviewAction(input: {
     return
   }
   const selected = await prisma.reviewOption.findUnique({ where: { id: input.optionId } })
-  if (selected?.continuationKey === "AUTHORIZE_BUILDING_INVESTMENT" && selected.outcomeClass === "APPROVE") {
-    await applyBuildingInvestmentDecision(revision.request.subjectId, decision.id)
-  }
-  if (selected?.continuationKey === "REVOKE_BUILDING_INVESTMENT" && selected.outcomeClass === "APPROVE") {
-    await applyBuildingInvestmentRevocationDecision(revision.request.subjectId, decision.id)
-  }
   if (selected?.continuationKey === "DISPATCH_RELEASE_RUN" && selected.outcomeClass === "APPROVE") {
     if (!revision.sourceFingerprint) throw new Error("Release review is missing its immutable source fingerprint")
     const dispatch = await queueAuthorizedRelease(

@@ -28,9 +28,9 @@ agent still runs with your own workspace permissions and the workspace's enabled
   chosen outcome was an approval. Outcomes of **Request changes** or **Reject**
   do not show it.
 
-Release authorization, building investment, and legacy system decision records
-share the same decided banner but do not offer this action. It applies to
-ordinary tracked Decisions only.
+Release authorization and legacy system decision records share the same decided
+banner but do not offer this action. It applies to ordinary tracked Decisions
+only.
 
 ## What happens when you use it
 

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockPrepareBuilding, mockApplyBuilding, mockPrepareRelease, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision, mockApplyTracked, mockFindWorkspace, mockFindArtifacts } = vi.hoisted(() => ({
-  mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(),
+const { mockPrepareRelease, mockQueueRelease, mockFindRequest, mockListRequests, mockFindDecision, mockApplyTracked, mockFindWorkspace, mockFindArtifacts } = vi.hoisted(() => ({
   mockPrepareRelease: vi.fn(),
   mockQueueRelease: vi.fn(),
   mockFindRequest: vi.fn(),
@@ -18,7 +17,6 @@ vi.mock("@/lib/release-authorization", () => ({
 }))
 
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ kind: "USER", userId: "user-1" }) }))
-vi.mock("@/lib/building-investment", () => ({ prepareBuildingInvestmentReview: mockPrepareBuilding, applyBuildingInvestmentDecision: mockApplyBuilding }))
 vi.mock("@/lib/tracked-decisions", () => ({ applyTrackedDecision: mockApplyTracked }))
 vi.mock("@/lib/db", () => ({
   default: () => ({
@@ -29,17 +27,10 @@ vi.mock("@/lib/db", () => ({
   }),
 }))
 
-import { applyRecordedDecision, getReviewRequest, listReviewRequests, requestBuildingInvestment, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, getReviewRequest, listReviewRequests, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 
 describe("decision MCP handlers", () => {
   beforeEach(() => { vi.resetAllMocks() })
-
-  it("prepares a Building investment review without taking the decision", async () => {
-    mockPrepareBuilding.mockResolvedValue({ requestId: "request-1", id: "revision-1", fingerprint: "abc" })
-    const result = await requestBuildingInvestment({ solutionId: "solution-1" })
-    expect(result.structuredContent.ok).toBe(true)
-    expect(mockPrepareBuilding).toHaveBeenCalledWith("solution-1", { requestedById: "user-1" })
-  })
 
   it("prepares an exact release authorization scope for human review", async () => {
     const scope = {
@@ -75,12 +66,13 @@ describe("decision MCP handlers", () => {
     expect(mockListRequests).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "workspace-1", state: "PENDING" } }))
   })
 
-  it("applies an approved Building investment decision", async () => {
+  // The Building-investment gate is retired: its rows survive for audit, but
+  // there is no applicator left to mint a fresh receipt against one.
+  it("refuses to apply a retired Building investment decision", async () => {
     mockFindDecision.mockResolvedValue({ id: "decision-1", revision: { request: { gateType: "BUILDING_INVESTMENT", subjectId: "solution-1" } } })
-    mockApplyBuilding.mockResolvedValue({ id: "receipt-1", receiptKey: "building:1", status: "APPLIED" })
     const result = await applyRecordedDecision({ decisionId: "decision-1" })
-    expect(result.structuredContent.ok).toBe(true)
-    expect(mockApplyBuilding).toHaveBeenCalledWith("solution-1", "decision-1")
+    expect(result.structuredContent.ok).toBe(false)
+    expect(result.content[0].text).toContain("does not have an applicator")
   })
 
   // Tracking-only decisions (the ordinary workspace Decisions queue, created via
@@ -94,9 +86,8 @@ describe("decision MCP handlers", () => {
     const result = await applyRecordedDecision({ decisionId: "decision-1" })
     expect(result.structuredContent.ok).toBe(true)
     expect(mockApplyTracked).toHaveBeenCalledWith("decision-1")
-    // No BUILDING_INVESTMENT / RELEASE_AUTHORIZATION applicator should ever
-    // run for a tracking-only decision.
-    expect(mockApplyBuilding).not.toHaveBeenCalled()
+    // No RELEASE_AUTHORIZATION applicator should ever run for a tracking-only
+    // decision.
     expect(mockQueueRelease).not.toHaveBeenCalled()
   })
 
@@ -170,15 +161,6 @@ describe("decision review deep links", () => {
     expect(mockFindWorkspace).toHaveBeenCalledTimes(1)
   })
 
-  it("resolves the workspace through the review request when the caller only knows a solution", async () => {
-    mockPrepareBuilding.mockResolvedValue({ requestId: "request-1", id: "revision-1", fingerprint: "abc" })
-    mockFindRequest.mockResolvedValue({ workspaceId: "workspace-1" })
-
-    const result = await requestBuildingInvestment({ solutionId: "solution-1" })
-
-    expect(result.content[0].text).toContain("URL: https://compass.rbcodelabs.com/rbcodelabs/compass/reviews/request-1")
-  })
-
   it("uses the declared scope workspace for a release authorization review", async () => {
     mockPrepareRelease.mockResolvedValue({ status: "READY", releaseRunId: "run-1", requestId: "request-1", revisionId: "revision-1" })
 
@@ -209,10 +191,14 @@ describe("decision review deep links", () => {
     // failure would be a lie that makes the agent retry an already-durable gate.
     process.env.VERCEL_ENV = "production"
     process.env.NEXT_PUBLIC_APP_URL = "http://evil.example.com"
-    mockPrepareBuilding.mockResolvedValue({ requestId: "request-1", id: "revision-1", fingerprint: "abc" })
-    mockFindRequest.mockResolvedValue({ workspaceId: "workspace-1" })
+    mockPrepareRelease.mockResolvedValue({ status: "READY", releaseRunId: "run-1", requestId: "request-1", revisionId: "revision-1" })
 
-    const result = await requestBuildingInvestment({ solutionId: "solution-1" })
+    const result = await requestReleaseAuthorization({
+      workspaceId: "workspace-1", provider: "GITHUB", repositoryOwner: "rbcodelabs",
+      repositoryName: "compass", pullRequestNumber: 42, baseRef: "main",
+      headSha: "a".repeat(40), targetEnvironment: "PRODUCTION",
+      releasePolicyId: "release-policy-v1", taskIds: ["task-1"],
+    })
 
     expect(result.structuredContent.ok).toBe(true)
     expect(result.content[0].text).toContain("request-1")

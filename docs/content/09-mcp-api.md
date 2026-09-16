@@ -259,8 +259,6 @@ human admin chooses an option, via the review URL above.
   every outcome resolves to `NO_ACTION`. Applying only records a durable
   receipt confirming the decision was carried out; it never mutates product
   state.
-- **`BUILDING_INVESTMENT`** / **`BUILDING_INVESTMENT_REVOCATION`**: authorizes
-  or revokes delivery investment in a Solution.
 - **`RELEASE_AUTHORIZATION`**: validates the authoritative provider snapshot
   outside the database transaction, then a short transaction binds the
   unchanged snapshot and human decision to a durable dispatch row. Compass
@@ -473,9 +471,8 @@ forget.
 
 **Mutating a child record does not mark its parent as updated.** A Solution is not
 reported as recently updated when its plan is approved or rejected, when a comment
-is added or resolved on it, when evidence is attached to it, or when a
-Building-investment decision is recorded against it. The same holds for an
-Opportunity gaining a Solution, a Solution gaining an Assumption, an Experiment
+is added or resolved on it, or when evidence is attached to it. The same holds
+for an Opportunity gaining a Solution, a Solution gaining an Assumption, an Experiment
 gaining a result, and a Key Result gaining a check-in.
 
 Agents should therefore **not conclude that a period was quiet from a recency

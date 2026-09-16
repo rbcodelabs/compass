@@ -319,11 +319,10 @@ export async function getTrackedDecision(workspaceId: string, requestId: string)
  * queue created via `createTrackedDecisionRequest`/`request_decision`).
  * Every option on this gate has `continuationKey: "NO_ACTION"` — Compass
  * Decisions are tracking-only here, so "applying" never mutates product
- * state. It only records a durable `DecisionApplication` receipt, exactly
- * mirroring the idempotent create-or-replay pattern in
- * `applyBuildingInvestmentDecision` (lib/building-investment.ts): a stable
- * `receiptKey` makes repeat calls (or a race between two callers) return the
- * same row instead of creating a second one or re-deriving anything.
+ * state. It only records a durable `DecisionApplication` receipt using an
+ * idempotent create-or-replay pattern: a stable `receiptKey` makes repeat
+ * calls (or a race between two callers) return the same row instead of
+ * creating a second one or re-deriving anything.
  */
 export async function applyTrackedDecision(decisionId: string) {
   const prisma = getPrisma()
@@ -338,10 +337,9 @@ export async function applyTrackedDecision(decisionId: string) {
         return replay
       }
       // A single relation path (decision.revision.request) is the sole
-      // source of truth here — unlike applyBuildingInvestmentDecision, there
-      // is no separate target entity (e.g. a Solution) to cross-check a
-      // second request reference against, since a tracked decision applies
-      // to nothing but itself.
+      // source of truth here: there is no separate target entity (e.g. a
+      // Solution) to cross-check a second request reference against, since a
+      // tracked decision applies to nothing but itself.
       const decision = await tx.decisionRecord.findUnique({
         where: { id: decisionId },
         include: { revision: { include: { request: true, options: { select: { id: true } } } }, option: true },
