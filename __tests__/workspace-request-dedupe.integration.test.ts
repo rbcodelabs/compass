@@ -104,19 +104,22 @@ const total = () => [...counts.values()].reduce((a, b) => a + b, 0)
 const sql: string[] = []
 const selects = () => sql.filter((text) => /^\s*SELECT/i.test(text))
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- pg's query() and
+   connect() each carry several overloads (string vs config object, callback
+   vs promise). Faithfully re-declaring all of them just to proxy a call and
+   record its SQL text would add noise without adding safety; the casts are
+   confined to this one test-only instrumentation helper. */
 function instrumentPool(target: Pool) {
   const record = (arg: unknown) => {
     const text = typeof arg === "string" ? arg : (arg as { text?: string })?.text
     if (text) sql.push(text)
   }
   const originalQuery = target.query.bind(target)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pg's query() has 6 overloads; re-declaring them to proxy one call adds nothing.
   target.query = ((...args: any[]) => {
     record(args[0])
     return (originalQuery as any)(...args)
   }) as typeof target.query
   const originalConnect = target.connect.bind(target)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same reason as above, for connect()'s callback/promise overloads.
   target.connect = (async (...args: any[]) => {
     const client = await (originalConnect as any)(...args)
     // `connect()` also has a callback form, in which case it resolves to
@@ -133,6 +136,7 @@ function instrumentPool(target: Pool) {
     return client
   }) as typeof target.connect
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // Observed counts, asserted as exact integers so the performance claim is a
 // test result rather than a paragraph.
