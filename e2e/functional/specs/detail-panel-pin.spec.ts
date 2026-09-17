@@ -256,9 +256,14 @@ test.describe("Detail panel pin mode", () => {
     const aside = page.locator(ASIDE);
     await expect(aside).toBeVisible();
 
-    // Reveal the horizon Select. No mutation happens until the form is
-    // submitted, which this test deliberately does not do.
-    await aside.getByRole("button", { name: /Promote to Roadmap/i }).click();
+    // Drive the Solution header's status dropdown, not "Promote to Roadmap".
+    // The panel only renders the promote control once a Solution is VALIDATED
+    // or IN_DELIVERY (`canPromote` in components/panels/solution-panel.tsx),
+    // and this fixture is a freshly created Solution, which defaults to IDEA —
+    // so that button never appeared and the test timed out before it reached
+    // the Select it exists to guard. The status dropdown is rendered for every
+    // status and is the same portalled Select primitive, so it exercises the
+    // stacking behaviour this test is actually about.
     const trigger = aside.getByRole("combobox").first();
     await expect(trigger).toBeVisible();
     await trigger.click();
@@ -266,11 +271,11 @@ test.describe("Detail panel pin mode", () => {
     // The popup is portalled to <body>, so its z-index is compared against
     // every other overlay in the document — not against the aside it came
     // from. A real click, not a keyboard selection, is the whole point.
-    const option = page.getByRole("option", { name: "Later" });
+    const option = page.getByRole("option", { name: "Validated" });
     await expect(option).toBeVisible();
     await option.click();
 
-    await expect(trigger).toContainText("Later");
+    await expect(trigger).toContainText("Validated");
   });
 
   // ── AC8 ───────────────────────────────────────────────────────────────────
