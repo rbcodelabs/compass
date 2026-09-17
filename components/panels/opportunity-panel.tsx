@@ -214,7 +214,12 @@ export function OpportunityPanel({
             revalidatePathStr={fullPageHref}
             onMutated={refresh}
           />
-          <EvidenceList evidence={data.evidence} revalidatePathStr={fullPageHref} />
+          <EvidenceList
+            evidence={data.evidence}
+            revalidatePathStr={fullPageHref}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+          />
         </div>
       </Section>
 

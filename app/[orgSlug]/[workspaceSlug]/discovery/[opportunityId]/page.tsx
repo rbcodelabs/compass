@@ -17,6 +17,7 @@ import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 import { isPmInterviewEnabled } from "@/lib/research-feature";
+import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveWorkspaceScoringModel, toOpportunityScoreData } from "@/lib/scoring-model";
 import type {
   OpportunityStatus,
@@ -139,10 +140,14 @@ export default async function OpportunityDetailPage({ params, searchParams }: Pr
     select: { id: true, disposition: true, generationState: true, agentConversationId: true, createdAt: true },
   }) : [];
 
-  const evidence = await prisma.evidence.findMany({
+  const evidenceRows = await prisma.evidence.findMany({
     where: { opportunityId },
     orderBy: { createdAt: "desc" },
   });
+  // ADR-0012 step 6a: a promoted row carries its cited research turns here so
+  // the Evidence tab can show the citation. No extra query when none was
+  // promoted (lib/evidence-provenance.ts).
+  const evidence = withEvidenceProvenance(evidenceRows, await loadEvidenceProvenance(evidenceRows));
 
   const squads: SquadData[] = rawSquads.map((s) => ({
     id: s.id,
@@ -362,6 +367,8 @@ export default async function OpportunityDetailPage({ params, searchParams }: Pr
                 confidence: e.confidence as EvidenceConfidence,
               }))}
               revalidatePathStr={detailPath}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
             />
           </TabsContent>
 
