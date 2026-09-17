@@ -84,7 +84,13 @@ function SetRow({
     setError(null);
     startTransition(async () => {
       try {
-        await deleteSharedFieldOptionSet(orgSlug, workspaceSlug, set.id);
+        // The delete guard reports "N fields use this" as a returned value —
+        // a thrown message would be redacted by Next.js in a production build.
+        const result = await deleteSharedFieldOptionSet(orgSlug, workspaceSlug, set.id);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
         router.refresh();
       } catch (caught) {
         setError(errorMessage(caught));

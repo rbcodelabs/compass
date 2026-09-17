@@ -120,32 +120,45 @@ describe("updateSharedFieldOptionSet", () => {
 });
 
 describe("deleteSharedFieldOptionSet", () => {
+  // Being referenced is an expected outcome, not an exception. It is RETURNED
+  // rather than thrown because Next.js redacts thrown server-action messages in
+  // production builds — a thrown guard reaches the user as "An error occurred in
+  // the Server Components render", which defeats the whole point of naming the
+  // count. Verified against the live preview build, not inferred.
   it("blocks the delete while field definitions still reference the set", async () => {
     mockCustomFieldDefinition.count.mockResolvedValue(3);
 
-    await expect(deleteSharedFieldOptionSet("org", "ws", "set-1")).rejects.toThrow(
-      "3 fields use this — detach them first"
-    );
+    await expect(deleteSharedFieldOptionSet("org", "ws", "set-1")).resolves.toEqual({
+      ok: false,
+      error: "3 fields use this — detach them first",
+    });
     expect(mockSharedFieldOptionSet.delete).not.toHaveBeenCalled();
   });
 
   it("uses the singular form for exactly one referencing field", async () => {
     mockCustomFieldDefinition.count.mockResolvedValue(1);
-    await expect(deleteSharedFieldOptionSet("org", "ws", "set-1")).rejects.toThrow(
-      "1 field uses this — detach it first"
-    );
+    await expect(deleteSharedFieldOptionSet("org", "ws", "set-1")).resolves.toEqual({
+      ok: false,
+      error: "1 field uses this — detach it first",
+    });
   });
 
   it("deletes when nothing references the set", async () => {
     mockCustomFieldDefinition.count.mockResolvedValue(0);
-    await deleteSharedFieldOptionSet("org", "ws", "set-1");
+    await expect(deleteSharedFieldOptionSet("org", "ws", "set-1")).resolves.toEqual({ ok: true });
     expect(mockSharedFieldOptionSet.delete).toHaveBeenCalledWith({ where: { id: "set-1" } });
   });
 
   it("never cascades a null into referencing field definitions", async () => {
     mockCustomFieldDefinition.count.mockResolvedValue(2);
-    await expect(deleteSharedFieldOptionSet("org", "ws", "set-1")).rejects.toThrow();
+    await deleteSharedFieldOptionSet("org", "ws", "set-1");
     expect(mockCustomFieldDefinition.update).not.toHaveBeenCalled();
+    expect(mockSharedFieldOptionSet.delete).not.toHaveBeenCalled();
+  });
+
+  it("still throws for a set outside this workspace — that is not a user-facing outcome", async () => {
+    mockSharedFieldOptionSet.findFirst.mockResolvedValue(null);
+    await expect(deleteSharedFieldOptionSet("org", "ws", "set-9")).rejects.toThrow(/not found/i);
   });
 });
 

@@ -341,18 +341,26 @@ export async function updateSharedFieldOptionSet(
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }
 
+export type DeleteSharedFieldOptionSetResult = { ok: true } | { ok: false; error: string };
+
 /**
  * Deleting a set that fields still point at is blocked outright rather than
  * cascading sharedOptionSetId to NULL. A cascade would silently leave those
  * fields with an empty picklist while their stored CustomFieldValues still
  * referenced options nobody can see any more; an explicit detach (which copies
  * the options down first) is the only supported way to break the link.
+ *
+ * "Still referenced" is an expected outcome, so it comes back as a value rather
+ * than a thrown Error: Next.js replaces a thrown server-action message with a
+ * generic "An error occurred in the Server Components render" in production
+ * builds, which would strip exactly the field count this guard exists to show.
+ * Genuine faults (a set outside this workspace) still throw.
  */
 export async function deleteSharedFieldOptionSet(
   orgSlug: string,
   workspaceSlug: string,
   setId: string
-) {
+): Promise<DeleteSharedFieldOptionSetResult> {
   const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
   await requireSharedOptionSet(prisma, workspaceId, setId);
 
@@ -360,16 +368,19 @@ export async function deleteSharedFieldOptionSet(
     where: { workspaceId, sharedOptionSetId: setId },
   });
   if (references > 0) {
-    throw new Error(
-      references === 1
-        ? "1 field uses this — detach it first"
-        : `${references} fields use this — detach them first`
-    );
+    return {
+      ok: false,
+      error:
+        references === 1
+          ? "1 field uses this — detach it first"
+          : `${references} fields use this — detach them first`,
+    };
   }
 
   await prisma.sharedFieldOptionSet.delete({ where: { id: setId } });
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  return { ok: true };
 }
 
 // ─── Field Definitions ────────────────────────────────────────────────────────
