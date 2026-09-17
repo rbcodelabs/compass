@@ -1,6 +1,5 @@
-import { notFound, redirect } from "next/navigation";
-import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
+import { requireWorkspaceContext } from "@/lib/workspace";
 import { DiscoveryShell } from "@/components/discovery/discovery-shell";
 import type { DiscoveryRailOpportunity } from "@/components/discovery/discovery-rail";
 import type { OpportunityStatus, SquadData } from "@/lib/types";
@@ -11,21 +10,20 @@ interface DiscoveryLayoutProps {
 }
 
 export default async function DiscoveryLayout({ children, params }: DiscoveryLayoutProps) {
-  const session = await auth();
-  if (!session) redirect("/login");
-
   const { orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
 
-  const workspace = await prisma.workspace.findFirst({
-    where: {
-      slug: workspaceSlug,
-      organization: { slug: orgSlug },
-    },
-    select: { id: true },
-  });
-
-  if (!workspace) notFound();
+  // Resolves from the request memo — the parent workspace layout already
+  // asked for this exact context, so this costs no additional statements.
+  //
+  // Note this lookup previously omitted the `members: { some: { userId } }`
+  // predicate and leaned on the parent workspace layout having already
+  // enforced membership. The shared resolver always applies it. That is a
+  // tightening, not a behavior change: a nested layout cannot render unless
+  // its parent returned, the parent resolves the same slugs membership-scoped
+  // and calls notFound(), and there are no parallel/intercepting routes or
+  // default.tsx files under app/ that could bypass it.
+  const { workspace } = await requireWorkspaceContext(orgSlug, workspaceSlug);
 
   const [rawOpportunities, rawSquads] = await Promise.all([
     prisma.opportunity.findMany({

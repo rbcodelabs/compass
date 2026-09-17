@@ -1,6 +1,5 @@
-import { auth } from "@/auth";
-import { redirect, notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
+import { requireWorkspaceContext } from "@/lib/workspace";
 import { DocTreeSidebar, type DocTreeItem } from "@/components/docs/doc-tree-sidebar";
 import { DocsMobileDrawer } from "@/components/docs/docs-mobile-drawer";
 import { ArtifactNav } from "@/components/docs/artifact-nav";
@@ -43,22 +42,12 @@ export default async function DocsLayout({
   children,
   params,
 }: DocsLayoutProps) {
-  const session = await auth();
-  if (!session?.user?.id) redirect("/login");
-
   const { orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
 
-  const workspace = await prisma.workspace.findFirst({
-    where: {
-      slug: workspaceSlug,
-      organization: { slug: orgSlug },
-      members: { some: { userId: session.user.id } },
-    },
-    select: { id: true },
-  });
-
-  if (!workspace) notFound();
+  // Resolves from the request memo — the parent workspace layout already
+  // asked for this exact context, so this costs no additional statements.
+  const { workspace } = await requireWorkspaceContext(orgSlug, workspaceSlug);
 
   const [rawDocs, artifacts] = await Promise.all([prisma.doc.findMany({
     where: { workspaceId: workspace.id },

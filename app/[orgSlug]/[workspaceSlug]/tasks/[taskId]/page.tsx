@@ -1,10 +1,9 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeftIcon } from "lucide-react";
-import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { TaskDetail } from "@/components/tasks/task-detail";
-import { getWorkspace } from "@/lib/workspace";
+import { getWorkspaceContext, requireWorkspaceContext } from "@/lib/workspace";
 
 export async function generateMetadata({
   params,
@@ -12,10 +11,13 @@ export async function generateMetadata({
   params: Promise<{ orgSlug: string; workspaceSlug: string; taskId: string }>;
 }) {
   const { taskId, orgSlug, workspaceSlug } = await params;
-  const session = await auth();
-  if (!session?.user?.id) return { title: "Task" };
-  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
-  if (!workspace) return { title: "Task" };
+  // Uses the raw resolver, not requireWorkspaceContext: metadata degrades to a
+  // fallback title rather than redirecting or 404ing. The page component below
+  // asks for the same context and gets it from the request memo — this file is
+  // why the control flow lives in the callers instead of inside the cache.
+  const ctx = await getWorkspaceContext(orgSlug, workspaceSlug);
+  if (ctx.status !== "ok") return { title: "Task" };
+  const workspace = ctx.workspace;
   const prisma = getPrisma();
   const task = await prisma.task.findFirst({ where: { id: taskId, workspaceId: workspace.id }, select: { title: true } });
   return { title: task?.title ?? "Task" };
@@ -33,14 +35,10 @@ type Props = {
 // the same panel data source the sidebar uses — this route no longer
 // duplicates that Prisma work.
 export default async function TaskDetailPage({ params }: Props) {
-  const session = await auth();
-  if (!session?.user?.id) redirect("/login");
-
   const { orgSlug, workspaceSlug, taskId } = await params;
   const prisma = getPrisma();
 
-  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
-  if (!workspace) notFound();
+  const { workspace } = await requireWorkspaceContext(orgSlug, workspaceSlug);
 
   const task = await prisma.task.findFirst({
     where: { id: taskId, workspaceId: workspace.id },
