@@ -8,6 +8,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
 import { useUrlState } from "@/hooks/use-url-state";
 import { RoadmapViewToggle } from "./roadmap-view-toggle";
 import type { TimelineZoom } from "./native-timeline/timeline-model";
+import { CUSTOM_FIELD_FILTER_PARAMS } from "@/lib/custom-field-filter-menu";
+import type { CustomFieldFilterGroup } from "@/lib/custom-field-filter";
 import type { SquadData } from "@/lib/types";
 
 type TimelineControls = {
@@ -35,9 +37,22 @@ function IconAction({ label, children, onClick, disabled = false }: { label: str
   );
 }
 
-export function RoadmapHeader({ squads, timeline }: { squads: SquadData[]; timeline?: TimelineControls }) {
+export function RoadmapHeader({ squads, timeline, customFieldGroups = [], activeCustomFieldId = null }: {
+  squads: SquadData[];
+  timeline?: TimelineControls;
+  /** Picklist fields on Roadmap Item that have options to filter by. */
+  customFieldGroups?: CustomFieldFilterGroup[];
+  /** The field the active filter resolved to on this page, if any. */
+  activeCustomFieldId?: string | null;
+}) {
   const { params, set } = useUrlState();
   const squad = params.get("squad");
+  const activeFieldValue = params.get("fieldValue");
+  // One tag filter at a time: selecting a value in a second field replaces the
+  // first, and "All" clears both halves of the pair together.
+  const setCustomField = (fieldId: string, value: string | null) =>
+    set({ field: value ? fieldId : null, fieldValue: value });
+  const anyFilter = Boolean(squad) || Boolean(activeCustomFieldId && activeFieldValue);
   const optionsTooltipId = useId();
   const [optionsTooltipOpen, setOptionsTooltipOpen] = useState(false);
   return (
@@ -55,7 +70,7 @@ export function RoadmapHeader({ squads, timeline }: { squads: SquadData[]; timel
             <Tooltip onOpenChange={setOptionsTooltipOpen}>
               <TooltipTrigger aria-describedby={optionsTooltipOpen ? optionsTooltipId : undefined} render={<DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="View options" className="relative ml-auto size-11 md:ml-0 md:size-9" />} />}>
                 <SlidersHorizontal />
-                {squad && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />}
+                {anyFilter && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />}
               </TooltipTrigger>
               <TooltipContent id={optionsTooltipId} role="tooltip" side="bottom">View options</TooltipContent>
             </Tooltip>
@@ -67,6 +82,24 @@ export function RoadmapHeader({ squads, timeline }: { squads: SquadData[]; timel
                   {squads.map((option) => <DropdownMenuRadioItem key={option.id} value={option.id}><span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />{option.name}</DropdownMenuRadioItem>)}
                 </DropdownMenuRadioGroup>
               </DropdownMenuGroup>
+              {customFieldGroups.map((group) => (
+                <DropdownMenuGroup key={group.fieldId}>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>{group.label}</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={group.fieldId === activeCustomFieldId ? (activeFieldValue ?? "__all__") : "__all__"}
+                    onValueChange={(value) => setCustomField(group.fieldId, value === "__all__" ? null : value)}
+                  >
+                    <DropdownMenuRadioItem value="__all__">All</DropdownMenuRadioItem>
+                    {group.options.map((option) => (
+                      <DropdownMenuRadioItem key={option.value} value={option.value}>
+                        {option.color && <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />}
+                        {option.label}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuGroup>
+              ))}
               {timeline && <DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>Timeline scale</DropdownMenuLabel>
@@ -75,7 +108,7 @@ export function RoadmapHeader({ squads, timeline }: { squads: SquadData[]; timel
                   <DropdownMenuRadioItem value="quarter">Quarter</DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
               </DropdownMenuGroup>}
-              {squad && <><DropdownMenuSeparator /><DropdownMenuItem className="min-h-11 md:min-h-0" onClick={() => set({ squad: null })}>Clear filters</DropdownMenuItem></>}
+              {anyFilter && <><DropdownMenuSeparator /><DropdownMenuItem className="min-h-11 md:min-h-0" onClick={() => set({ squad: null, ...Object.fromEntries(CUSTOM_FIELD_FILTER_PARAMS.map((name) => [name, null])) })}>Clear filters</DropdownMenuItem></>}
             </DropdownMenuContent>
           </DropdownMenu>
           {timeline && <IconAction label="Reload timeline" disabled={timeline.saving} onClick={() => window.location.reload()}><RotateCw /></IconAction>}

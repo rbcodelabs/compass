@@ -16,6 +16,12 @@ import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-dat
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { revokeMemberAgentGrants, deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
+import {
+  normalizeSelectOptions,
+  parseSelectOptions,
+  supportsSharedOptionSet,
+  type SelectOptionInput,
+} from "@/lib/shared-field-options";
 import type {
   CustomFieldType,
   CustomFieldObjectType,
@@ -257,6 +263,115 @@ export async function removeWorkspaceMember(
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }
 
+// ─── Shared Field Option Sets ─────────────────────────────────────────────────
+
+/**
+ * Loads a shared option set and proves it belongs to this workspace. There is
+ * no database-level FK (relationMode = "prisma" on DSQL), so every reference to
+ * a set id from a request has to be validated here or a caller could point a
+ * field at another workspace's picklist.
+ */
+async function requireSharedOptionSet(
+  prisma: ReturnType<typeof getPrisma>,
+  workspaceId: string,
+  setId: string
+) {
+  const set = await prisma.sharedFieldOptionSet.findFirst({
+    where: { id: setId, workspaceId },
+    select: { id: true, name: true, options: true },
+  });
+  if (!set) throw new Error("Shared option set not found");
+  return set;
+}
+
+export async function createSharedFieldOptionSet(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: { name: string; options: SelectOptionInput[] }
+) {
+  const session = await auth();
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  const name = input.name.trim();
+  if (!name) throw new Error("A name is required for a shared option set");
+
+  await prisma.sharedFieldOptionSet.create({
+    data: {
+      workspaceId,
+      name,
+      options: normalizeSelectOptions(input.options) as unknown as Prisma.InputJsonValue,
+      createdById: session?.user?.id ?? null,
+      updatedById: session?.user?.id ?? null,
+      source: "UI",
+      // No @updatedAt on DSQL — stamped explicitly on every write.
+      updatedAt: new Date(),
+    },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
+
+export async function updateSharedFieldOptionSet(
+  orgSlug: string,
+  workspaceSlug: string,
+  setId: string,
+  input: { name?: string; options?: SelectOptionInput[] }
+) {
+  const session = await auth();
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+  await requireSharedOptionSet(prisma, workspaceId, setId);
+
+  const name = input.name?.trim();
+  if (input.name !== undefined && !name) {
+    throw new Error("A name is required for a shared option set");
+  }
+
+  await prisma.sharedFieldOptionSet.update({
+    where: { id: setId },
+    data: {
+      ...(name !== undefined && { name }),
+      ...(input.options !== undefined && {
+        options: normalizeSelectOptions(input.options) as unknown as Prisma.InputJsonValue,
+      }),
+      updatedById: session?.user?.id ?? null,
+      updatedAt: new Date(),
+    },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
+
+/**
+ * Deleting a set that fields still point at is blocked outright rather than
+ * cascading sharedOptionSetId to NULL. A cascade would silently leave those
+ * fields with an empty picklist while their stored CustomFieldValues still
+ * referenced options nobody can see any more; an explicit detach (which copies
+ * the options down first) is the only supported way to break the link.
+ */
+export async function deleteSharedFieldOptionSet(
+  orgSlug: string,
+  workspaceSlug: string,
+  setId: string
+) {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+  await requireSharedOptionSet(prisma, workspaceId, setId);
+
+  const references = await prisma.customFieldDefinition.count({
+    where: { workspaceId, sharedOptionSetId: setId },
+  });
+  if (references > 0) {
+    throw new Error(
+      references === 1
+        ? "1 field uses this — detach it first"
+        : `${references} fields use this — detach them first`
+    );
+  }
+
+  await prisma.sharedFieldOptionSet.delete({ where: { id: setId } });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
+
 // ─── Field Definitions ────────────────────────────────────────────────────────
 
 export async function createFieldDefinition(
@@ -268,9 +383,17 @@ export async function createFieldDefinition(
     fieldType: CustomFieldType;
     options?: SelectOption[];
     required?: boolean;
+    sharedOptionSetId?: string | null;
   }
 ) {
   const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  if (input.sharedOptionSetId) {
+    if (!supportsSharedOptionSet(input.fieldType)) {
+      throw new Error("Only a SELECT or MULTI_SELECT field can use a shared option set");
+    }
+    await requireSharedOptionSet(prisma, workspaceId, input.sharedOptionSetId);
+  }
 
   // Determine next order index
   const count = await prisma.customFieldDefinition.count({
@@ -283,9 +406,14 @@ export async function createFieldDefinition(
       objectType: input.objectType,
       name: input.name,
       fieldType: input.fieldType,
-      options: input.options
-        ? (input.options as unknown as Prisma.InputJsonValue)
-        : Prisma.DbNull,
+      // A field never holds both a local list and a shared link — the shared
+      // set is the single source of truth once attached.
+      options: input.sharedOptionSetId
+        ? Prisma.DbNull
+        : input.options
+          ? (input.options as unknown as Prisma.InputJsonValue)
+          : Prisma.DbNull,
+      sharedOptionSetId: input.sharedOptionSetId ?? null,
       required: input.required ?? false,
       order: count,
     },
@@ -316,9 +444,39 @@ export async function updateFieldDefinition(
     name?: string;
     options?: SelectOption[];
     required?: boolean;
+    /** Pass a set id to attach, `null` to detach, omit to leave the link alone. */
+    sharedOptionSetId?: string | null;
   }
 ) {
-  const { prisma } = await resolveWorkspace(orgSlug, workspaceSlug);
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  let linkData: Prisma.CustomFieldDefinitionUpdateInput | Record<string, unknown> = {};
+  if (input.sharedOptionSetId !== undefined) {
+    const field = await prisma.customFieldDefinition.findFirst({
+      where: { id: fieldId, workspaceId },
+      include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
+    });
+    if (!field) throw new Error("Field not found");
+
+    if (input.sharedOptionSetId) {
+      if (!supportsSharedOptionSet(field.fieldType)) {
+        throw new Error("Only a SELECT or MULTI_SELECT field can use a shared option set");
+      }
+      await requireSharedOptionSet(prisma, workspaceId, input.sharedOptionSetId);
+      // Attaching discards the stale local copy so the two can never disagree.
+      linkData = { sharedOptionSetId: input.sharedOptionSetId, options: Prisma.DbNull };
+    } else {
+      // Detaching copies the set's *current* options down as this field's new
+      // local list. Never reset to empty: the stored CustomFieldValues hold
+      // option value strings, and wiping the list would orphan every tag.
+      linkData = {
+        sharedOptionSetId: null,
+        options: parseSelectOptions(
+          field.sharedOptionSet?.options
+        ) as unknown as Prisma.InputJsonValue,
+      };
+    }
+  }
 
   await prisma.customFieldDefinition.update({
     where: { id: fieldId },
@@ -330,6 +488,7 @@ export async function updateFieldDefinition(
           : Prisma.DbNull,
       }),
       ...(input.required !== undefined && { required: input.required }),
+      ...linkData,
     },
   });
 
@@ -544,6 +703,8 @@ export async function deleteWorkspace(
     });
   }
   await prisma.customFieldDefinition.deleteMany({ where: { workspaceId } });
+  // Shared option sets can only go once nothing references them any more.
+  await prisma.sharedFieldOptionSet.deleteMany({ where: { workspaceId } });
 
   // ── Step 9: Null Experiment.assumptionId before deleting Assumptions ─────────
   if (experimentIds.length > 0) {

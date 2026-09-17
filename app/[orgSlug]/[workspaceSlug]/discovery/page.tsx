@@ -16,6 +16,12 @@ import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { loadCustomFieldDefinitions } from "@/lib/custom-field-definitions";
+import {
+  buildCustomFieldFilterGroups,
+  parseCustomFieldFilterParams,
+  resolveCustomFieldFilter,
+} from "@/lib/custom-field-filter";
 
 export const metadata = {
   title: "Discovery",
@@ -23,7 +29,14 @@ export const metadata = {
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string; view?: string; groupBy?: string; sort?: string }>;
+  searchParams: Promise<{
+    squad?: string;
+    view?: string;
+    groupBy?: string;
+    sort?: string;
+    field?: string;
+    fieldValue?: string;
+  }>;
 };
 
 const ACTIVE_STATUSES: OpportunityStatus[] = [
@@ -43,6 +56,8 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     view: requestedView,
     groupBy: requestedGroupBy,
     sort: requestedSort,
+    field: fieldParam,
+    fieldValue: fieldValueParam,
   } = await searchParams;
   const view: DiscoveryView = requestedView === "table" ? "table" : "board";
   const groupBy: DiscoveryGroupBy = requestedGroupBy === "opportunity" ? "opportunity" : "status";
@@ -59,6 +74,30 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
 
   if (!workspace) notFound();
 
+  // Discovery renders Opportunities *and* their Solutions, so both object
+  // types contribute filter facets and either can own the active filter.
+  const [discoveryFieldDefs, customFieldFilter] = await Promise.all([
+    loadCustomFieldDefinitions(prisma, {
+      workspaceId: workspace.id,
+      objectTypes: ["OPPORTUNITY", "SOLUTION"],
+    }),
+    resolveCustomFieldFilter(prisma, {
+      workspaceId: workspace.id,
+      objectTypes: ["OPPORTUNITY", "SOLUTION"],
+      filter: parseCustomFieldFilterParams({ field: fieldParam, fieldValue: fieldValueParam }),
+    }),
+  ]);
+  const customFieldGroups = buildCustomFieldFilterGroups(discoveryFieldDefs);
+  const opportunityIdFilter =
+    customFieldFilter?.objectType === "OPPORTUNITY"
+      ? { id: { in: customFieldFilter.objectIds } }
+      : {};
+  // A Solution-level tag narrows which solutions render inside each lane; the
+  // Opportunities themselves are untouched, matching how Solutions are nested
+  // rather than listed on their own route.
+  const solutionIdFilter =
+    customFieldFilter?.objectType === "SOLUTION" ? new Set(customFieldFilter.objectIds) : null;
+
   const [rawSquads, opportunities, archivedOpportunities, evidenceSourceCounts, scoringModel] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
@@ -69,6 +108,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         workspaceId: workspace.id,
         status: { in: ACTIVE_STATUSES },
         ...(squadFilter ? { squadId: squadFilter } : {}),
+        ...opportunityIdFilter,
       },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       select: {
@@ -98,6 +138,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         workspaceId: workspace.id,
         status: "ARCHIVED",
         ...(squadFilter ? { squadId: squadFilter } : {}),
+        ...opportunityIdFilter,
       },
       orderBy: { updatedAt: "desc" },
       select: {
@@ -122,6 +163,11 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   ]);
 
   const hasActiveScoringModel = scoringModel !== null;
+
+  /** Drops solutions that do not carry the active Solution-level tag. */
+  function visibleSolutions<T extends { id: string }>(solutions: T[]): T[] {
+    return solutionIdFilter ? solutions.filter((solution) => solutionIdFilter.has(solution.id)) : solutions;
+  }
 
   const sourceCountByOpportunity = new Map<string, number>();
   for (const row of evidenceSourceCounts) {
@@ -183,7 +229,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         sortOrder: opportunity.sortOrder,
         squad: opportunity.squadId ? (squadMap.get(opportunity.squadId) ?? null) : null,
         evidenceCount: opportunity._count.evidence,
-        solutions: opportunity.solutions.map((solution) => ({
+        solutions: visibleSolutions(opportunity.solutions).map((solution) => ({
           id: solution.id,
           title: solution.title,
           status: solution.status as SolutionStatus,
@@ -197,11 +243,14 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   // Lanes are exactly the Opportunities shown on today's board — same
   // ACTIVE_STATUSES + squad filter, same order — mapped into the shape
   // SolutionSwimlaneBoard needs instead of bucketed by Opportunity status.
-  const swimlaneOpportunities: SwimlaneOpportunity[] = opportunities.map((opportunity) => ({
+  const swimlaneOpportunities: SwimlaneOpportunity[] = opportunities
+    // A Solution-level tag hides lanes with nothing left to show.
+    .filter((opportunity) => !solutionIdFilter || visibleSolutions(opportunity.solutions).length > 0)
+    .map((opportunity) => ({
     id: opportunity.id,
     title: opportunity.title,
     squad: opportunity.squadId ? (squadMap.get(opportunity.squadId) ?? null) : null,
-    solutions: opportunity.solutions.map((solution) => ({
+    solutions: visibleSolutions(opportunity.solutions).map((solution) => ({
       id: solution.id,
       title: solution.title,
       description: solution.description,
@@ -223,7 +272,11 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
             {view === "board" && groupBy === "status" && hasActiveScoringModel && (
               <DiscoverySortToggle sort={sort} />
             )}
-            <DiscoveryFilters squads={squads} />
+            <DiscoveryFilters
+              squads={squads}
+              customFieldGroups={customFieldGroups}
+              activeCustomFieldId={customFieldFilter?.fieldId ?? null}
+            />
           </div>
         </Suspense>
       )}

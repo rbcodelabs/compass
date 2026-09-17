@@ -83,6 +83,7 @@ const mockPrisma = {
   feedbackVote: mockFeedbackVote,
   feedbackAttachment: mockFeedbackAttachment,
   customFieldDefinition: mockCustomFieldDefinition,
+  sharedFieldOptionSet: { deleteMany: vi.fn() },
   customFieldValue: mockCustomFieldValue,
   evidence: mockEvidence,
   opportunity: mockOpportunity,

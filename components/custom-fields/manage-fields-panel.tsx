@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { PlusIcon, TrashIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,11 +16,14 @@ import {
 import {
   createFieldDefinition,
   deleteFieldDefinition,
+  updateFieldDefinition,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
+import { optionsFromCommaList, supportsSharedOptionSet } from "@/lib/shared-field-options";
 import type {
   CustomFieldDefinitionData,
   CustomFieldObjectType,
   CustomFieldType,
+  SharedFieldOptionSetData,
 } from "@/lib/types";
 
 const FIELD_TYPE_LABELS: Record<CustomFieldType, string> = {
@@ -44,54 +48,67 @@ const OBJECT_TYPE_LABELS: Record<CustomFieldObjectType, string> = {
 
 const OBJECT_TYPES = Object.keys(OBJECT_TYPE_LABELS) as CustomFieldObjectType[];
 
+/** Sentinel for "keep this field's own local options" in the shared-set picker. */
+const LOCAL_OPTIONS = "__local__";
+
 interface Props {
   orgSlug: string;
   workspaceSlug: string;
   initialFields: CustomFieldDefinitionData[];
+  sharedOptionSets: SharedFieldOptionSetData[];
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Something went wrong";
 }
 
 function AddFieldForm({
   objectType,
   orgSlug,
   workspaceSlug,
+  sharedOptionSets,
   onAdded,
 }: {
   objectType: CustomFieldObjectType;
   orgSlug: string;
   workspaceSlug: string;
+  sharedOptionSets: SharedFieldOptionSetData[];
   onAdded: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [fieldType, setFieldType] = useState<CustomFieldType>("TEXT");
   const [selectOptions, setSelectOptions] = useState("");
+  const [optionSource, setOptionSource] = useState<string>(LOCAL_OPTIONS);
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const nameRef = useRef<HTMLInputElement>(null);
+
+  const isPicklist = supportsSharedOptionSet(fieldType);
+  const usesSharedSet = isPicklist && optionSource !== LOCAL_OPTIONS;
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const name = nameRef.current?.value.trim() ?? "";
     if (!name) return;
-
-    const options =
-      fieldType === "SELECT" || fieldType === "MULTI_SELECT"
-        ? selectOptions
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-            .map((s) => ({ label: s, value: s.toLowerCase().replace(/\s+/g, "_") }))
-        : undefined;
+    setError(null);
 
     startTransition(async () => {
-      await createFieldDefinition(orgSlug, workspaceSlug, {
-        objectType,
-        name,
-        fieldType,
-        options,
-      });
-      setOpen(false);
-      setFieldType("TEXT");
-      setSelectOptions("");
-      onAdded();
+      try {
+        await createFieldDefinition(orgSlug, workspaceSlug, {
+          objectType,
+          name,
+          fieldType,
+          options: isPicklist && !usesSharedSet ? optionsFromCommaList(selectOptions) : undefined,
+          sharedOptionSetId: usesSharedSet ? optionSource : null,
+        });
+        setOpen(false);
+        setFieldType("TEXT");
+        setSelectOptions("");
+        setOptionSource(LOCAL_OPTIONS);
+        onAdded();
+      } catch (caught) {
+        setError(errorMessage(caught));
+      }
     });
   }
 
@@ -147,16 +164,46 @@ function AddFieldForm({
         </div>
       </div>
 
-      {(fieldType === "SELECT" || fieldType === "MULTI_SELECT") && (
+      {isPicklist && sharedOptionSets.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <Label>Options (comma-separated)</Label>
+          <Label htmlFor={`field-option-source-${objectType}`}>Options come from</Label>
+          <Select
+            value={optionSource}
+            onValueChange={(value) => setOptionSource(value ?? LOCAL_OPTIONS)}
+            disabled={isPending}
+          >
+            <SelectTrigger id={`field-option-source-${objectType}`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={LOCAL_OPTIONS}>This field only</SelectItem>
+              {sharedOptionSets.map((set) => (
+                <SelectItem key={set.id} value={set.id}>
+                  Shared: {set.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {isPicklist && !usesSharedSet && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`field-options-${objectType}`}>Options (comma-separated)</Label>
           <Input
+            id={`field-options-${objectType}`}
             placeholder="e.g. Low, Medium, High"
             value={selectOptions}
             onChange={(e) => setSelectOptions(e.target.value)}
             disabled={isPending}
           />
         </div>
+      )}
+
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
       )}
 
       <div className="flex items-center gap-2">
@@ -168,7 +215,10 @@ function AddFieldForm({
           variant="ghost"
           size="sm"
           disabled={isPending}
-          onClick={() => setOpen(false)}
+          onClick={() => {
+            setOpen(false);
+            setError(null);
+          }}
         >
           Cancel
         </Button>
@@ -177,7 +227,76 @@ function AddFieldForm({
   );
 }
 
-export function ManageFieldsPanel({ orgSlug, workspaceSlug, initialFields }: Props) {
+function OptionSourcePicker({
+  orgSlug,
+  workspaceSlug,
+  field,
+  sharedOptionSets,
+}: {
+  orgSlug: string;
+  workspaceSlug: string;
+  field: CustomFieldDefinitionData;
+  sharedOptionSets: SharedFieldOptionSetData[];
+}) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  function change(next: string | null) {
+    setError(null);
+    startTransition(async () => {
+      try {
+        await updateFieldDefinition(orgSlug, workspaceSlug, field.id, {
+          // Detaching copies the set's current options down — the server action
+          // owns that so no picklist is ever emptied by switching source here.
+          sharedOptionSetId: !next || next === LOCAL_OPTIONS ? null : next,
+        });
+        router.refresh();
+      } catch (caught) {
+        setError(errorMessage(caught));
+      }
+    });
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Select
+        value={field.sharedOptionSetId ?? LOCAL_OPTIONS}
+        onValueChange={change}
+        disabled={isPending}
+      >
+        <SelectTrigger
+          size="sm"
+          className="w-[190px]"
+          aria-label={`Option source for ${field.name}`}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={LOCAL_OPTIONS}>This field only</SelectItem>
+          {sharedOptionSets.map((set) => (
+            <SelectItem key={set.id} value={set.id}>
+              Shared: {set.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function ManageFieldsPanel({
+  orgSlug,
+  workspaceSlug,
+  initialFields,
+  sharedOptionSets,
+}: Props) {
+  const router = useRouter();
   const [fields, setFields] = useState(initialFields);
   const [isPending, startTransition] = useTransition();
 
@@ -193,6 +312,7 @@ export function ManageFieldsPanel({ orgSlug, workspaceSlug, initialFields }: Pro
     startTransition(async () => {
       await deleteFieldDefinition(orgSlug, workspaceSlug, fieldId);
       setFields((prev) => prev.filter((f) => f.id !== fieldId));
+      router.refresh();
     });
   }
 
@@ -214,23 +334,38 @@ export function ManageFieldsPanel({ orgSlug, workspaceSlug, initialFields }: Pro
                       i > 0 ? "border-t border-border" : ""
                     }`}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex min-w-0 flex-wrap items-center gap-3">
                       <span className="text-sm font-medium">{field.name}</span>
                       <span className="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground">
                         {FIELD_TYPE_LABELS[field.fieldType]}
                       </span>
                       {field.required && (
-                        <span className="text-xs text-red-500">required</span>
+                        <span className="text-xs text-destructive">required</span>
+                      )}
+                      {field.sharedOptionSetName && (
+                        <span className="text-xs text-muted-foreground">
+                          shared list: {field.sharedOptionSetName}
+                        </span>
                       )}
                     </div>
-                    <button
-                      onClick={() => handleDelete(field.id)}
-                      disabled={isPending}
-                      className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                      aria-label={`Delete ${field.name}`}
-                    >
-                      <TrashIcon className="size-4" />
-                    </button>
+                    <div className="flex shrink-0 items-center gap-3">
+                      {supportsSharedOptionSet(field.fieldType) && sharedOptionSets.length > 0 && (
+                        <OptionSourcePicker
+                          orgSlug={orgSlug}
+                          workspaceSlug={workspaceSlug}
+                          field={field}
+                          sharedOptionSets={sharedOptionSets}
+                        />
+                      )}
+                      <button
+                        onClick={() => handleDelete(field.id)}
+                        disabled={isPending}
+                        className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                        aria-label={`Delete ${field.name}`}
+                      >
+                        <TrashIcon className="size-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -240,7 +375,8 @@ export function ManageFieldsPanel({ orgSlug, workspaceSlug, initialFields }: Pro
               objectType={ot}
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
-              onAdded={() => {}}
+              sharedOptionSets={sharedOptionSets}
+              onAdded={() => router.refresh()}
             />
           </div>
         </section>

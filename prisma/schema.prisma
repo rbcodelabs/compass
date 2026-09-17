@@ -165,6 +165,7 @@ model Workspace {
   experiments          Experiment[]
   roadmapItems         RoadmapItem[]
   customFieldDefs      CustomFieldDefinition[]
+  sharedFieldOptionSets SharedFieldOptionSet[]
   squads               Squad[]
   feedback             FeedbackItem[]
   docs                 Doc[]
@@ -1433,6 +1434,41 @@ model Squad {
 
 // ─── Custom Fields ────────────────────────────────────────────────────────────
 
+// ─── Shared Field Option Sets ────────────────────────────────────────────────
+// Generalizes CustomFieldDefinition.options so multiple field definitions —
+// across different objectTypes — can share one editable picklist instead of
+// each holding an independent copy. Not specific to "Product Area": any
+// workspace can create any number of named sets for any SELECT/MULTI_SELECT
+// use case. ADR context: Products/Compass/Brainstorm — Product Area Shared
+// Custom Field Options — 2026-09-16.md.
+
+model SharedFieldOptionSet {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  /// Admin-facing label for pickers when attaching a field to this set,
+  /// e.g. "Product Area". Purely descriptive — not a controlled vocabulary
+  /// of set "kinds"; a workspace can create as many sets as it wants.
+  name        String   @db.VarChar(255)
+  /// Same shape as CustomFieldDefinition.options: JSON array of
+  /// { label: string; value: string; color?: string }. This is the single
+  /// source of truth for every CustomFieldDefinition that references this
+  /// set via sharedOptionSetId.
+  options     Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  /// No @updatedAt — DSQL has no ON UPDATE triggers. Set explicitly in app code.
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  workspace   Workspace               @relation(fields: [workspaceId], references: [id])
+  fields      CustomFieldDefinition[]
+  createdById String?                 @map("created_by_id") @db.Uuid
+  updatedById String?                 @map("updated_by_id") @db.Uuid
+  /// One of: UI | MCP
+  source      String                  @default("UI") @map("source") @db.VarChar(20)
+
+  @@unique([workspaceId, name])
+  @@map("shared_field_option_sets")
+}
+
 model CustomFieldDefinition {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
@@ -1441,14 +1477,27 @@ model CustomFieldDefinition {
   name        String   @db.VarChar(255)
   /// One of: TEXT | NUMBER | DATE | SELECT | MULTI_SELECT | URL | BOOLEAN
   fieldType   String   @map("field_type") @db.VarChar(50)
-  /// For SELECT / MULTI_SELECT: JSON array of { label: string; value: string; color?: string }
+  /// For SELECT / MULTI_SELECT: JSON array of { label: string; value: string; color?: string }.
+  /// Ignored when sharedOptionSetId is set (kept nullable rather than dropped,
+  /// so existing/unreferenced definitions are completely unaffected). App code
+  /// nulls this out when a definition adopts a shared set, so there is never a
+  /// live definition with both a local options array and a sharedOptionSetId
+  /// disagreeing with each other. On detach the set's current options are
+  /// copied back down here — see lib/shared-field-options.ts.
   options     Json?
+  /// Optional link to a SharedFieldOptionSet. Only valid when fieldType is
+  /// SELECT or MULTI_SELECT — enforced in application code (see
+  /// app/[orgSlug]/[workspaceSlug]/settings/actions.ts), not a DB constraint.
+  /// When set, this field's effective options are sharedOptionSet.options,
+  /// not the local `options` column above.
+  sharedOptionSetId String? @map("shared_option_set_id") @db.Uuid
   required    Boolean  @default(false)
   order       Int      @default(0)
   createdAt   DateTime @default(now()) @map("created_at")
 
-  workspace   Workspace          @relation(fields: [workspaceId], references: [id])
-  values      CustomFieldValue[]
+  workspace       Workspace             @relation(fields: [workspaceId], references: [id])
+  sharedOptionSet SharedFieldOptionSet? @relation(fields: [sharedOptionSetId], references: [id])
+  values          CustomFieldValue[]
   createdById String?            @map("created_by_id") @db.Uuid
   updatedById String?            @map("updated_by_id") @db.Uuid
   source      String             @default("UI") @map("source") @db.VarChar(20)

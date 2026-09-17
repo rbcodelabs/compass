@@ -85,7 +85,8 @@ describe("Roadmap faceted filters", () => {
     it("mounts RoadmapHeader with squads instead of the retired toolbar/SquadFilterBar", () => {
       const page = source("app/[orgSlug]/[workspaceSlug]/roadmap/page.tsx");
 
-      expect(page).toContain("<RoadmapHeader squads={squads} />");
+      // Mounted with `squads`; extra props (e.g. custom-field filter facets) are allowed.
+      expect(page).toMatch(/<RoadmapHeader\b[^>]*\bsquads=\{squads\}/s);
       expect(page).not.toContain("toolbar={");
       expect(page).not.toContain("SquadFilterBar");
     });

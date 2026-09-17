@@ -33,7 +33,41 @@ describe("Roadmap compact header", () => {
     expect(await screen.findByRole("menuitemradio", { name: "Alpha" })).toBeChecked();
     expect(screen.queryByRole("menuitemradio", { name: "Quarter" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: "Clear filters" }));
-    expect(url.set).toHaveBeenCalledWith({ squad: null });
+    expect(url.set).toHaveBeenCalledWith({ squad: null, field: null, fieldValue: null });
+  });
+
+  it("offers a radio group per filterable custom field and writes both filter params together", async () => {
+    const customFieldGroups = [
+      {
+        fieldId: "field-area",
+        label: "Product Area",
+        objectType: "ROADMAP_ITEM" as const,
+        options: [
+          { value: "payments", label: "Payments", color: "#abc" },
+          { value: "billing", label: "Billing", color: null },
+        ],
+      },
+    ];
+    render(<RoadmapHeader squads={squads} customFieldGroups={customFieldGroups} activeCustomFieldId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "View options" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Payments" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Payments" }));
+    expect(url.set).toHaveBeenCalledWith({ field: "field-area", fieldValue: "payments" });
+  });
+
+  it("clears both filter params when the custom-field group is set back to All", async () => {
+    const customFieldGroups = [
+      {
+        fieldId: "field-area",
+        label: "Product Area",
+        objectType: "ROADMAP_ITEM" as const,
+        options: [{ value: "payments", label: "Payments", color: null }],
+      },
+    ];
+    render(<RoadmapHeader squads={squads} customFieldGroups={customFieldGroups} activeCustomFieldId="field-area" />);
+    fireEvent.click(screen.getByRole("button", { name: "View options" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "All" }));
+    expect(url.set).toHaveBeenCalledWith({ field: null, fieldValue: null });
   });
 
   it("forwards navigation and scale without changing squad or save state", async () => {

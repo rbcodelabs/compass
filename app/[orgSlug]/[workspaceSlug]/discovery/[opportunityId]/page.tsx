@@ -10,6 +10,7 @@ import { OpportunityHeader } from "@/components/discovery/opportunity-header";
 import { LinkedFeedback } from "@/components/discovery/linked-feedback";
 import { OSTTreeView } from "@/components/discovery/ost-tree-view";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
+import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 import { ScoringPanel } from "@/components/discovery/scoring-panel";
 import { EvidenceList } from "@/components/discovery/evidence-list";
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
@@ -174,6 +175,7 @@ export default async function OpportunityDetailPage({ params, searchParams }: Pr
   const fieldDefs = await prisma.customFieldDefinition.findMany({
     where: { workspaceId: workspace.id, objectType: "OPPORTUNITY" },
     orderBy: { order: "asc" },
+    include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
   });
 
   const fieldValues = fieldDefs.length > 0
@@ -189,13 +191,8 @@ export default async function OpportunityDetailPage({ params, searchParams }: Pr
 
   const customFields: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }> =
     fieldDefs.map((f) => ({
-      id: f.id,
-      name: f.name,
-      fieldType: f.fieldType as CustomFieldType,
+      ...toCustomFieldDefinitionData(f),
       objectType: "OPPORTUNITY" as const,
-      options: f.options as CustomFieldDefinitionData["options"],
-      required: f.required,
-      order: f.order,
       currentValue: (valueByFieldId.get(f.id) ?? null) as CustomFieldValue,
     }));
 

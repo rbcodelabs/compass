@@ -27,6 +27,15 @@ export function taskBoardFilterKey(filters: {
   squad?: string | null;
   assignee?: string | null;
   priority?: string | null;
+  /** Custom-field tag filter: the resolved field id and the selected option value. */
+  field?: string | null;
+  fieldValue?: string | null;
 }): string {
-  return [filters.squad ?? "", filters.assignee ?? "", filters.priority ?? ""].join("|");
+  return [
+    filters.squad ?? "",
+    filters.assignee ?? "",
+    filters.priority ?? "",
+    filters.field ?? "",
+    filters.fieldValue ?? "",
+  ].join("|");
 }

@@ -78,12 +78,34 @@ export interface SelectOption {
   color?: string
 }
 
+/** A workspace-level picklist that many CustomFieldDefinitions can share. */
+export interface SharedFieldOptionSetData {
+  id: string
+  name: string
+  options: SelectOption[]
+  /** How many CustomFieldDefinitions currently point at this set. */
+  fieldCount: number
+  /** The fields using it, for the settings UI and the delete guard message. */
+  usedBy: Array<{ id: string; name: string; objectType: CustomFieldObjectType }>
+  updatedAt: string
+}
+
 export interface CustomFieldDefinitionData {
   id: string
   name: string
   fieldType: CustomFieldType
   objectType: CustomFieldObjectType
+  /**
+   * The field's *effective* options — the shared set's list when
+   * sharedOptionSetId is set, the field's own local list otherwise. Always
+   * resolved at the read boundary (lib/custom-field-definitions.ts) so no
+   * rendering code has to know which source it came from.
+   */
   options: SelectOption[] | null
+  /** Non-null when this field's picklist is owned by a shared option set. */
+  sharedOptionSetId: string | null
+  /** Display name of that set, for settings UI badges. */
+  sharedOptionSetName: string | null
   required: boolean
   order: number
 }

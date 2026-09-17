@@ -15,6 +15,12 @@ import { buildTaskCards } from "@/lib/task-read-model";
 import { getWorkspace } from "@/lib/workspace";
 import { taskBoardFilterKey } from "@/lib/task-filters";
 import { parseAssigneeFilter, resolveTaskAssignees, taskLinkScope } from "@/lib/task-assignment";
+import { loadCustomFieldDefinitions } from "@/lib/custom-field-definitions";
+import {
+  buildCustomFieldFilterGroups,
+  parseCustomFieldFilterParams,
+  resolveCustomFieldFilter,
+} from "@/lib/custom-field-filter";
 
 export const metadata = {
   title: "Tasks",
@@ -22,7 +28,14 @@ export const metadata = {
 
 interface TasksPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string; assignee?: string; priority?: string; view?: string }>;
+  searchParams: Promise<{
+    squad?: string;
+    assignee?: string;
+    priority?: string;
+    view?: string;
+    field?: string;
+    fieldValue?: string;
+  }>;
 }
 
 export default async function TasksPage({ params, searchParams }: TasksPageProps) {
@@ -30,12 +43,32 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   if (!session?.user?.id) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const { squad: squadFilter, assignee: assigneeFilter, priority: priorityFilter, view: viewParam } = await searchParams;
+  const {
+    squad: squadFilter,
+    assignee: assigneeFilter,
+    priority: priorityFilter,
+    view: viewParam,
+    field: fieldParam,
+    fieldValue: fieldValueParam,
+  } = await searchParams;
   const view = viewParam === "list" ? "list" : "board";
   const prisma = getPrisma();
 
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) notFound();
+
+  // Custom-field tag filter. `null` means "no filter applied" (including a
+  // filter carried over from another page with no counterpart here); an empty
+  // id list means the filter applied and nothing matched.
+  const [taskFieldDefs, customFieldFilter] = await Promise.all([
+    loadCustomFieldDefinitions(prisma, { workspaceId: workspace.id, objectTypes: ["TASK"] }),
+    resolveCustomFieldFilter(prisma, {
+      workspaceId: workspace.id,
+      objectTypes: ["TASK"],
+      filter: parseCustomFieldFilterParams({ field: fieldParam, fieldValue: fieldValueParam }),
+    }),
+  ]);
+  const customFieldGroups = buildCustomFieldFilterGroups(taskFieldDefs);
 
   const [rawSquads, rawTasks, rawMembers] = await Promise.all([
     prisma.squad.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "asc" } }),
@@ -45,6 +78,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
         ...(squadFilter ? { squadId: squadFilter } : {}),
         ...parseAssigneeFilter(assigneeFilter),
         ...(priorityFilter ? { priority: priorityFilter } : {}),
+        ...(customFieldFilter ? { id: { in: customFieldFilter.objectIds } } : {}),
       },
       orderBy: [{ status: "asc" }, { sortOrder: "asc" }],
       select: {
@@ -125,7 +159,12 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
       actions={(
         <Suspense>
-          <TasksFilters squads={squads} members={members} />
+          <TasksFilters
+            squads={squads}
+            members={members}
+            customFieldGroups={customFieldGroups}
+            activeCustomFieldId={customFieldFilter?.fieldId ?? null}
+          />
           <TasksViewToggle view={view} />
         </Suspense>
       )}
@@ -142,7 +181,13 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
             the client should drop its optimistic state and show server truth.
           */}
           <TaskBoard
-            key={taskBoardFilterKey({ squad: squadFilter, assignee: assigneeFilter, priority: priorityFilter })}
+            key={taskBoardFilterKey({
+              squad: squadFilter,
+              assignee: assigneeFilter,
+              priority: priorityFilter,
+              field: customFieldFilter?.fieldId,
+              fieldValue: fieldValueParam,
+            })}
             initialTasks={tasks}
             workspaceId={workspace.id}
             orgSlug={orgSlug}

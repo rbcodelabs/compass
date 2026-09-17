@@ -90,8 +90,20 @@ describe("taskBoardFilterKey", () => {
       taskBoardFilterKey({ squad: "x" }),
       taskBoardFilterKey({ assignee: "x" }),
       taskBoardFilterKey({ priority: "x" }),
+      taskBoardFilterKey({ field: "x" }),
+      taskBoardFilterKey({ fieldValue: "x" }),
     ]);
-    expect(keys.size).toBe(3);
+    expect(keys.size).toBe(5);
+  });
+
+  it("changes when the custom-field tag filter changes, so the board resyncs", () => {
+    expect(taskBoardFilterKey({ field: "f1", fieldValue: "payments" })).not.toBe(
+      taskBoardFilterKey({ field: "f1", fieldValue: "billing" })
+    );
+    expect(taskBoardFilterKey({ field: "f1", fieldValue: "payments" })).toBe(
+      taskBoardFilterKey({ field: "f1", fieldValue: "payments" })
+    );
+    expect(taskBoardFilterKey({})).toBe(taskBoardFilterKey({ field: null, fieldValue: null }));
   });
 });
 

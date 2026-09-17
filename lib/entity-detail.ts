@@ -31,6 +31,7 @@ import getPrisma from "@/lib/db";
 import { isPmInterviewEnabled } from "@/lib/research-feature";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
+import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 
 export const ENTITY_TYPES = [
   "objective",
@@ -364,6 +365,7 @@ async function fetchTask(id: string, workspaceId: string) {
     prisma.customFieldDefinition.findMany({
       where: { workspaceId, objectType: "TASK" },
       orderBy: { order: "asc" },
+      include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
     }),
     resolveTaskAssignees(workspaceId, [task, ...task.subtasks]),
   ]);
@@ -443,13 +445,8 @@ async function fetchTask(id: string, workspaceId: string) {
       : [];
   const valueByFieldId = new Map(fieldValues.map((v) => [v.fieldId, v.value]));
   const customFields = fieldDefs.map((f) => ({
-    id: f.id,
-    name: f.name,
-    fieldType: f.fieldType,
+    ...toCustomFieldDefinitionData(f),
     objectType: "TASK" as const,
-    options: f.options,
-    required: f.required,
-    order: f.order,
     currentValue: valueByFieldId.get(f.id) ?? null,
   }));
 

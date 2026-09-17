@@ -113,6 +113,9 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     });
   }
   await prisma.customFieldDefinition.deleteMany({ where: { workspaceId } });
+  // Shared option sets last: the delete guard only blocks while definitions
+  // still reference them, and those are gone by this point.
+  await prisma.sharedFieldOptionSet.deleteMany({ where: { workspaceId } });
 
   // 8. Evidence (Restrict on workspace; SetNull toward opp/solution/assumption).
   await prisma.evidence.deleteMany({ where: { workspaceId } });

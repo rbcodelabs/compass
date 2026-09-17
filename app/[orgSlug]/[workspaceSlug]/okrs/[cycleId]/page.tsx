@@ -19,6 +19,7 @@ import type {
   SquadData,
 } from "@/lib/types";
 import { PageHeader, StatusBadge } from "@/components/patterns";
+import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 
 export const metadata = {
   title: "OKR Cycle",
@@ -130,6 +131,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
   const objFieldDefs = await prisma.customFieldDefinition.findMany({
     where: { workspaceId: workspace.id, objectType: "OBJECTIVE" },
     orderBy: { order: "asc" },
+    include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
   });
 
   const objFieldValues =
@@ -155,13 +157,8 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
     const valMap = objValuesByObjectiveId.get(obj.id) ?? new Map();
     const customFields: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }> =
       objFieldDefs.map((f) => ({
-        id: f.id,
-        name: f.name,
-        fieldType: f.fieldType as CustomFieldType,
+        ...toCustomFieldDefinitionData(f),
         objectType: "OBJECTIVE" as const,
-        options: f.options as CustomFieldDefinitionData["options"],
-        required: f.required,
-        order: f.order,
         currentValue: (valMap.get(f.id) ?? null) as CustomFieldValue,
       }));
 
