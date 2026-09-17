@@ -115,10 +115,13 @@ describe("dialog backdrop inside an entity detail panel", () => {
       </Sheet>
     );
 
+    // One scrim per surface, not two per dialog. The Sheet keeps its own
+    // single backdrop on the surface layer (50) and the dialog adds exactly
+    // one on the dialog layer (70). Measured in-browser, that composites to
+    // 10% darkening over the panel (the Sheet's scrim is beneath the opaque
+    // panel surface) and 19% over the page behind it — correct depth, not a
+    // doubled scrim. A second dialog-overlay here would mean real doubling.
     expect(document.querySelectorAll('[data-slot="dialog-overlay"]')).toHaveLength(1);
-    // The Sheet keeps its own single backdrop on the surface layer (50); the
-    // panel content at 60 is opaque and covers it, so the two scrims never
-    // overlap on screen.
     expect(document.querySelectorAll('[data-slot="sheet-overlay"]')).toHaveLength(1);
   });
 

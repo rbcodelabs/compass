@@ -45,8 +45,16 @@ function DialogOverlay({
   //     Sheet responsible for scrimming a surface it does not own;
   //   - it is a documented Base UI prop, not a reach into `data-nested-dialog-
   //     open` internals plus a `:has()` selector.
-  // It does not double-darken: the Sheet's own backdrop sits at 50, under the
-  // opaque panel content at 60, so the two scrims never overlap on screen.
+  // Measured effect on the doubled scrim, dialog-open, both at bg-black/10:
+  //   over the panel          10%  (the Sheet's scrim is at 50, beneath the
+  //                                 opaque panel surface at 60, so only this
+  //                                 backdrop paints there)
+  //   over the page behind it 19%  (1 - 0.9*0.9 — both scrims composite)
+  // So the page behind goes from 10% to 19% while the panel goes from 0% to
+  // 10%. That reads as correct depth rather than a doubled scrim, and is why
+  // the Sheet's backdrop is left alone instead of being suppressed while a
+  // child dialog is open — suppressing it would flicker the page brightness
+  // on every dialog open/close for a 9-point tint difference.
   // `forceRender` only overrides the *nested* suppression — the backdrop is
   // still `hidden` while the dialog is closed.
   forceRender = true,
