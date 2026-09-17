@@ -87,6 +87,56 @@ export function resolveEffectiveOptions(field: {
 }
 
 /**
+ * The option values a stored CustomFieldValue actually carries.
+ *
+ * SELECT stores a bare string and MULTI_SELECT a JSON array, so both are
+ * flattened to one list the picker can treat uniformly. Non-string members are
+ * dropped rather than stringified: `custom_field_values.value` is an untyped
+ * Json column, a field's type can be changed after values exist, and coercing
+ * `42` into the option value `"42"` would invent a selection the picklist never
+ * offered. Duplicates collapse because one object cannot carry an option twice.
+ */
+export function toStoredOptionValues(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? [value] : []
+  const seen = new Set<string>()
+  for (const entry of raw) {
+    if (typeof entry !== "string" || entry === "") continue
+    seen.add(entry)
+  }
+  return [...seen]
+}
+
+/** An option offered by the picker; `stale` marks one only a stored value proves existed. */
+export type PickerOption = SelectOption & { stale?: true }
+
+/**
+ * Everything the value picker must be able to show: the field's effective
+ * options, followed by a synthetic entry for each stored value none of them
+ * match.
+ *
+ * Those synthetic entries are not cosmetic. The picker reports its whole
+ * selection on every change, so a stored value absent from the list would be
+ * silently dropped the next time the user touched any *other* option — the same
+ * class of quiet data loss as the free-text editor this replaces. Keeping them
+ * in the list is what lets a value survive until someone deliberately removes
+ * it. Their label is the raw stored value, because no better one exists.
+ */
+export function pickerOptions(
+  options: readonly SelectOption[] | null | undefined,
+  stored: readonly string[]
+): PickerOption[] {
+  const known = options ?? []
+  const offered = new Set(known.map((option) => option.value))
+  const stale: PickerOption[] = []
+  for (const value of stored) {
+    if (offered.has(value)) continue
+    offered.add(value)
+    stale.push({ label: value, value, stale: true })
+  }
+  return [...known, ...stale]
+}
+
+/**
  * Does a stored CustomFieldValue carry `wanted`?
  *
  * MULTI_SELECT stores a JSON array of option values, SELECT stores a bare
