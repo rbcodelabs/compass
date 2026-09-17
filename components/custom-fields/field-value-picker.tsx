@@ -46,7 +46,7 @@ export function FieldOptionBadge({
       className={cn(
         "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
         option.stale
-          ? "border border-dashed border-border text-muted-foreground"
+          ? "border border-dashed border-border text-muted-foreground italic"
           : "bg-muted",
         className
       )}
@@ -72,7 +72,16 @@ function toItem(option: PickerOption): ComboboxItemData {
             style={{ backgroundColor: option.color }}
           />
         )}
-        <span className="truncate">{option.label}</span>
+        {/*
+          A stale entry is muted and italic, not just suffixed. The commonest
+          stale value is the *label* of a real option, typed into the free-text
+          editor this replaces — so the list routinely shows "ZZ Beta" directly
+          above a stale "ZZ Beta", and a small grey suffix is not enough to tell
+          which one is the option and which one is the mistake.
+        */}
+        <span className={cn("truncate", option.stale && "text-muted-foreground italic")}>
+          {option.label}
+        </span>
         {option.stale && (
           <span className="shrink-0 text-xs text-muted-foreground">· {STALE_HINT}</span>
         )}
