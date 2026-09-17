@@ -14,7 +14,9 @@ vi.mock("@/lib/research-study-service", () => ({
 vi.mock("@/lib/research-analysis-service", () => ({ storeAgentStudySynthesis: m.service, ResearchAnalysisError: class ResearchAnalysisError extends Error {} }))
 import * as handlers from "@/lib/research-tool-handlers"
 import { runWithMcpActor } from "@/lib/mcp-authz"
-const input = { workspaceId: "workspace", studyId: "study", sessionId: "session", name: "Study", goal: "Goal", guide: ["Question"], studyType: "CUSTOMER_INTERVIEW" as const, appUrl: "", targetMinutes: 15, synthesis: {} }
+// researchSynthesisId/findingIndex are ADR-0012 step 5's
+// promote_research_finding_to_evidence, which this exhaustive sweep also covers.
+const input = { workspaceId: "workspace", studyId: "study", sessionId: "session", name: "Study", goal: "Goal", guide: ["Question"], studyType: "CUSTOMER_INTERVIEW" as const, appUrl: "", targetMinutes: 15, synthesis: {}, researchSynthesisId: "synthesis", findingIndex: 0 }
 beforeEach(() => { vi.clearAllMocks(); m.service.mockResolvedValue({ id: "study" }) })
 describe("research MCP adapters", () => {
   it("denies every tool to a public research credential before calling services", async () => {

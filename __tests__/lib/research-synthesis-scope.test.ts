@@ -78,6 +78,65 @@ describe("RESEARCH_SYNTHESIS scoped allowlist", () => {
   })
 })
 
+/**
+ * ADR-0012 step 5's boundary, stated separately from the bulk denial list below
+ * because it is the one this ADR's whole authority design rests on.
+ *
+ * `promote_research_finding_to_evidence` is the tool a claimed synthesis turn
+ * would most plausibly be "helpfully" granted — it is research-domain, it is
+ * study-scoped, and every argument it takes is already visible to the claim. It
+ * must still be denied: ADR-0002 invariant 6 requires human review before a
+ * finding becomes Evidence, and the review gate IS this denial. A future
+ * contributor who adds it to the allowlist removes the review step with nothing
+ * else left to catch it, so the omission is asserted directly.
+ */
+describe("promotion is not reachable under a RESEARCH_SYNTHESIS claim (ADR-0012 step 5)", () => {
+  const PROMOTE = "promote_research_finding_to_evidence"
+  const validArgs = { workspaceId: WORKSPACE_ID, researchSynthesisId: "synthesis-1", findingIndex: 0, opportunityId: "opportunity-1" }
+
+  it("is absent from the closed allowlist", () => {
+    expect(RESEARCH_SYNTHESIS_TOOLS.has(PROMOTE)).toBe(false)
+  })
+
+  it("is denied by gateInterviewTool with ordinary arguments", async () => {
+    await expect(gateInterviewTool(actor, PROMOTE, validArgs)).rejects.toThrow(/outside this research synthesis/)
+  })
+
+  it("is denied before any per-tool gate or handler runs, through applyToolGate", async () => {
+    await expect(applyToolGate(PROMOTE, actor, validArgs)).rejects.toThrow(/outside this research synthesis/)
+  })
+
+  it("stays denied when the caller smuggles in the bound studyId", async () => {
+    // Every allowlisted tool is admitted by matching the claim's studyId, so the
+    // obvious bypass is to present one. Membership of the set is checked first.
+    await expect(gateInterviewTool(actor, PROMOTE, { ...validArgs, studyId: STUDY_ID })).rejects.toThrow(/outside this research synthesis/)
+  })
+
+  it.each([
+    ["solution target", { workspaceId: WORKSPACE_ID, researchSynthesisId: "synthesis-1", findingIndex: 0, solutionId: "solution-1" }],
+    ["assumption target", { workspaceId: WORKSPACE_ID, researchSynthesisId: "synthesis-1", findingIndex: 0, assumptionId: "assumption-1" }],
+    ["no target at all", { workspaceId: WORKSPACE_ID, researchSynthesisId: "synthesis-1", findingIndex: 0 }],
+    ["unexpected extra arguments", { ...validArgs, studyId: STUDY_ID, sessionId: "session-1", synthesis: {}, confidence: "high" }],
+    ["empty arguments", {}],
+  ])("stays denied with %s", async (_label, args) => {
+    await expect(gateInterviewTool(actor, PROMOTE, args as Record<string, unknown>)).rejects.toThrow(/outside this research synthesis/)
+  })
+
+  it("is denied even after the claim has succeeded, so a finished turn cannot promote its own output", async () => {
+    // scopedHandoff admits SUCCEEDED as well as RUNNING; the allowlist, not the
+    // lifecycle, is what keeps promotion out of the scoped phase entirely.
+    state.status = "SUCCEEDED"
+    installPrisma()
+    await expect(gateInterviewTool(actor, PROMOTE, validArgs)).rejects.toThrow(/outside this research synthesis/)
+  })
+
+  it("is reachable in an ordinary unscoped turn, which is where ADR-0012 puts it", async () => {
+    // The denial above must be a property of the CLAIM, not of the tool being
+    // broken: the same call under the researcher's own credential is admitted.
+    await expect(applyToolGate(PROMOTE, { userId: USER_ID, purpose: "USER" }, validArgs)).resolves.toBeUndefined()
+  })
+})
+
 describe("RESEARCH_SYNTHESIS cannot mutate discovery state", () => {
   // ADR-0012: "It must not write discovery state: no Evidence, opportunity,
   // solution, assumption, experiment, feedback, or roadmap mutation."
@@ -107,6 +166,8 @@ describe("RESEARCH_SYNTHESIS cannot mutate discovery state", () => {
     // The PM handoff's own tools are a different domain's authority entirely.
     ["get_pm_interview", { interviewId: "interview-1" }],
     ["list_research_studies", { workspaceId: WORKSPACE_ID }],
+    // ADR-0012 step 5, also covered in detail in its own describe block above.
+    ["promote_research_finding_to_evidence", { workspaceId: WORKSPACE_ID, researchSynthesisId: "synthesis-1", findingIndex: 0, opportunityId: "opportunity-1" }],
   ] as const
 
   it.each(DENIED)("denies %s under a RESEARCH_SYNTHESIS claim", async (tool, args) => {
@@ -144,7 +205,7 @@ describe("end-to-end through applyToolGate, the way register() calls it", () => 
     await expect(applyToolGate(tool, actor, { workspaceId: WORKSPACE_ID, studyId: STUDY_ID, sessionId: "session-1", synthesis: {} })).resolves.toBeUndefined()
   })
 
-  it.each(["add_evidence", "update_opportunity", "create_task", "promote_to_roadmap", "issue_research_link", "add_to_roadmap", "create_feedback", "request_decision"])(
+  it.each(["add_evidence", "promote_research_finding_to_evidence", "update_opportunity", "create_task", "promote_to_roadmap", "issue_research_link", "add_to_roadmap", "create_feedback", "request_decision"])(
     "denies %s before any per-tool gate or handler runs",
     async tool => {
       await expect(applyToolGate(tool, actor, { workspaceId: WORKSPACE_ID, studyId: STUDY_ID, opportunityId: "opportunity-1", solutionId: "solution-1", feedbackId: "feedback-1", title: "x", subjectType: "WORKSPACE", subjectId: WORKSPACE_ID })).rejects.toThrow(/outside this research synthesis/)

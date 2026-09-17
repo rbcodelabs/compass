@@ -334,6 +334,9 @@ model ResearchTurn {
   attachments ResearchAttachment[]
 
   participantVoiceEvent ResearchParticipantVoiceEvent?
+  /// Promoted Evidence citing this turn (ADR-0012 step 5). No foreign key backs
+  /// this, so deleting a turn silently orphans these rows — see the model.
+  evidenceSources       EvidenceResearchSource[]
 
   @@unique([sessionId, sequence], map: "idx_research_turns_session_sequence")
   @@map("research_turns")
@@ -377,6 +380,8 @@ model ResearchAttachment {
   study          ResearchStudy   @relation(fields: [studyId], references: [id])
   session        ResearchSession @relation(fields: [sessionId], references: [id])
   turn           ResearchTurn?   @relation(fields: [turnId], references: [id])
+  /// Back-relation for the reserved EvidenceResearchSource.researchAttachmentId.
+  evidenceSources EvidenceResearchSource[]
 
   @@unique([sessionId, idempotencyKey], map: "idx_research_attachments_session_key")
   @@index([sessionId, createdAt], map: "idx_research_attachments_session_created")
@@ -530,6 +535,8 @@ model ResearchSynthesis {
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @default(now()) @map("updated_at")
   study         ResearchStudy @relation(fields: [studyId], references: [id])
+  /// Everything this synthesis proposed and a researcher then promoted.
+  promotedEvidence Evidence[]
 
   @@index([studyId, createdAt])
   @@map("research_syntheses")
@@ -1839,12 +1846,61 @@ model Evidence {
   assumptionId  String?      @map("assumption_id") @db.Uuid
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @default(now()) @map("updated_at")
-  workspace     Workspace    @relation(fields: [workspaceId], references: [id])
-  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
-  solution      Solution?    @relation(fields: [solutionId], references: [id])
-  assumption    Assumption?  @relation(fields: [assumptionId], references: [id])
 
+  /// ADR-0012 step 5 provenance. Which ResearchSynthesis proposed this evidence;
+  /// null for everything add_evidence creates and for every pre-052 row.
+  researchSynthesisId String? @map("research_synthesis_id") @db.Uuid
+  /// Deterministic idempotency key: researchFindingKey(synthesisId, finding) in
+  /// lib/research-evidence-promotion.ts. Unique per workspace (see @@unique
+  /// below), so re-promoting one finding converges on one row.
+  findingKey          String? @map("finding_key") @db.Char(64)
+
+  workspace         Workspace              @relation(fields: [workspaceId], references: [id])
+  opportunity       Opportunity?           @relation(fields: [opportunityId], references: [id])
+  solution          Solution?              @relation(fields: [solutionId], references: [id])
+  assumption        Assumption?            @relation(fields: [assumptionId], references: [id])
+  researchSynthesis ResearchSynthesis?     @relation(fields: [researchSynthesisId], references: [id])
+  researchSources   EvidenceResearchSource[]
+
+  /// Workspace-scoped rather than global on purpose: a global unique would let a
+  /// write in one workspace fail because of a row in another that the caller
+  /// cannot see. NULLs are distinct, so unpromoted rows are unconstrained.
+  @@unique([workspaceId, findingKey], map: "idx_evidence_workspace_finding_key")
+  @@index([researchSynthesisId], map: "idx_evidence_research_synthesis")
   @@map("evidence")
+}
+
+/// The exact saved sources behind one promoted finding (ADR-0012 step 5).
+///
+/// A separate table rather than a column on Evidence because one finding
+/// legitimately cites several quotes across several sessions.
+///
+/// REFERENTIAL INTEGRITY IS THE SERVICE LAYER'S JOB. Aurora DSQL has no foreign
+/// keys and `relationMode = "prisma"` means the relations below are join hints,
+/// not constraints — nothing in the database stops evidenceId or researchTurnId
+/// from dangling. Every row here is written by promoteResearchFindingToEvidence
+/// in lib/research-evidence-promotion.ts, in the same transaction as its Evidence
+/// row, and only after each cited turn has been re-resolved inside the cited
+/// synthesis's own study and re-checked verbatim against the saved turn text.
+/// Deletion behaviour is likewise application-owned (ADR-0012, "Provenance rot").
+model EvidenceResearchSource {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  evidenceId           String    @map("evidence_id") @db.Uuid
+  researchTurnId       String    @map("research_turn_id") @db.Uuid
+  /// Reserved by ADR-0012 for findings that cite an attachment as well as a
+  /// turn. Nothing writes it yet: synthesis quotes reference turns only, and
+  /// lib/research-analysis.ts explicitly refuses to infer attachment contents. A
+  /// future writer must validate it belongs to the cited turn before setting it.
+  researchAttachmentId String?   @map("research_attachment_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  evidence           Evidence            @relation(fields: [evidenceId], references: [id])
+  researchTurn       ResearchTurn        @relation(fields: [researchTurnId], references: [id])
+  researchAttachment ResearchAttachment? @relation(fields: [researchAttachmentId], references: [id])
+
+  @@unique([evidenceId, researchTurnId], map: "idx_evidence_research_sources_evidence_turn")
+  @@index([researchTurnId], map: "idx_evidence_research_sources_turn")
+  @@map("evidence_research_sources")
 }
 
 model RoadmapVote {
