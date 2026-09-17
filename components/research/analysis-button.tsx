@@ -8,7 +8,12 @@ const subscribeToHydration = () => () => {}
 const clientReady = () => true
 const serverReady = () => false
 
-export function AnalysisButton({ studyId, sessionId, kind, children, regenerate }: { studyId: string; sessionId?: string; kind: "summary" | "coverage" | "synthesis"; children: ReactNode; regenerate?: boolean }) {
+/**
+ * Per-session summary and coverage only. ADR-0012 step 6 removed the route's
+ * `synthesis` variant, so the type no longer admits a kind the server would
+ * reject; cross-session synthesis goes through `SynthesisHandoffButton` below.
+ */
+export function AnalysisButton({ studyId, sessionId, kind, children, regenerate }: { studyId: string; sessionId: string; kind: "summary" | "coverage"; children: ReactNode; regenerate?: boolean }) {
   const router = useRouter()
   // Server HTML must not offer an action before its client handler can run.
   const hydrated = useSyncExternalStore(subscribeToHydration, clientReady, serverReady)

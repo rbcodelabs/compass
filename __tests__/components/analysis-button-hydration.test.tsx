@@ -13,7 +13,7 @@ afterEach(async () => { if (root) await act(() => root?.unmount()); root = undef
 it("does not advertise a usable analysis action before hydration attaches its handler", async () => {
   const fetch = vi.fn().mockResolvedValue(Response.json({ ok: true }))
   vi.stubGlobal("fetch", fetch)
-  const element = <AnalysisButton studyId="study" kind="synthesis">Generate synthesis</AnalysisButton>
+  const element = <AnalysisButton studyId="study" sessionId="session" kind="summary">Generate summary</AnalysisButton>
   const container = document.createElement("div")
   container.innerHTML = renderToString(element)
   document.body.append(container)
@@ -37,7 +37,7 @@ it("keeps pending protection and an actionable error after hydration", async () 
   let resolve!: (response: Response) => void
   const fetch = vi.fn(() => new Promise<Response>(done => { resolve = done }))
   vi.stubGlobal("fetch", fetch)
-  const element = <AnalysisButton studyId="study" kind="synthesis">Generate synthesis</AnalysisButton>
+  const element = <AnalysisButton studyId="study" sessionId="session" kind="summary">Generate summary</AnalysisButton>
   const container = document.createElement("div")
   container.innerHTML = renderToString(element)
   document.body.append(container)
@@ -52,6 +52,6 @@ it("keeps pending protection and an actionable error after hydration", async () 
   await act(async () => { resolve(Response.json({ error: "Please retry" }, { status: 503 })) })
   expect(container.querySelector('[role="alert"]')?.textContent).toBe("Please retry")
   expect(button.disabled).toBe(false)
-  expect(button.textContent).toBe("Generate synthesis")
+  expect(button.textContent).toBe("Generate summary")
   expect(refresh).not.toHaveBeenCalled()
 })

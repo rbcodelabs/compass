@@ -17,9 +17,9 @@ describe("research analysis controls", () => {
   it("posts only identifiers and refreshes persisted results", async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ result: {} }) })
     vi.stubGlobal("fetch", fetcher)
-    render(<AnalysisButton studyId="study" kind="synthesis">Generate synthesis</AnalysisButton>)
-    fireEvent.click(screen.getByRole("button", { name: "Generate synthesis" }))
+    render(<AnalysisButton studyId="study" sessionId="session" kind="coverage" regenerate>Recheck guide coverage</AnalysisButton>)
+    fireEvent.click(screen.getByRole("button", { name: "Recheck guide coverage" }))
     await waitFor(() => expect(refresh).toHaveBeenCalled())
-    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ studyId: "study", kind: "synthesis" })
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ studyId: "study", sessionId: "session", kind: "coverage", regenerate: true })
   })
 })
