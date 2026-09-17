@@ -8,7 +8,6 @@
 import pg from "pg";
 import { createHash } from "node:crypto";
 import { orgNameForToken } from "./run-token";
-import { buildingInvestmentSourceFingerprint } from "../../../lib/building-investment";
 import {
   GUIDED_UX_SCREENSHOT_STUDY,
   GUIDED_UX_SCREENSHOT_TOKEN,
@@ -252,86 +251,6 @@ export async function seedE2E(
       'Agreed — the evidence should travel with the roadmap item.', 'OPEN',
       $4, 'Dev User', 'HUMAN', 'UI', '2026-09-01 13:05:00', '2026-09-01 13:05:00')
   `, [ws.id, candidateId, discussionRoot.id, user.id]);
-
-  // Reset only this seeded authority chain so interrupted/retried runs remain
-  // deterministic after the candidate has been admitted by a prior run.
-  const priorRequests = await pool.query<{ id: string }>(`
-    SELECT id FROM "${S}".review_requests
-    WHERE workspace_id = $1 AND gate_type IN ('BUILDING_INVESTMENT', 'NOW_COMMITMENT')
-      AND ((subject_type = 'SOLUTION' AND subject_id = $2)
-        OR (subject_type = 'ROADMAP_ITEM' AND subject_id = $3))
-  `, [ws.id, solutionId, candidateId]);
-  const priorRequestIds = priorRequests.rows.map(({ id }) => id);
-  if (priorRequestIds.length > 0) {
-    await pool.query(`DELETE FROM "${S}".portfolio_capacity_reservations WHERE roadmap_item_id = $1`, [candidateId]);
-    await pool.query(`DELETE FROM "${S}".decision_applications WHERE decision_id IN (SELECT id FROM "${S}".decision_records WHERE request_id = ANY($1::uuid[]))`, [priorRequestIds]);
-    await pool.query(`DELETE FROM "${S}".decision_records WHERE request_id = ANY($1::uuid[])`, [priorRequestIds]);
-    await pool.query(`UPDATE "${S}".review_requests SET current_revision_id = NULL WHERE id = ANY($1::uuid[])`, [priorRequestIds]);
-    await pool.query(`DELETE FROM "${S}".review_options WHERE revision_id IN (SELECT id FROM "${S}".review_revisions WHERE request_id = ANY($1::uuid[]))`, [priorRequestIds]);
-    await pool.query(`DELETE FROM "${S}".review_revisions WHERE request_id = ANY($1::uuid[])`, [priorRequestIds]);
-    await pool.query(`DELETE FROM "${S}".review_requests WHERE id = ANY($1::uuid[])`, [priorRequestIds]);
-  }
-
-  const { rows: [investmentRequest] } = await pool.query<{ id: string }>(`
-    INSERT INTO "${S}".review_requests
-      (id, workspace_id, gate_type, subject_type, subject_id, state,
-       revision_count, decision_cycle, requested_by_id, created_at, updated_at)
-    VALUES (gen_random_uuid(), $1, 'BUILDING_INVESTMENT', 'SOLUTION', $2,
-            'DECIDED', 1, 1, $3, NOW(), NOW())
-    RETURNING id
-  `, [ws.id, solutionId, user.id]);
-  const { rows: [investmentSolution] } = await pool.query<{
-    id: string; title: string; description: string | null; status: string; updated_at_utc: string;
-    opportunity_id: string; opportunity_title: string; workspace_id: string;
-  }>(`
-    SELECT s.id, s.title, s.description, s.status,
-           to_char(s.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at_utc,
-           o.id AS opportunity_id, o.title AS opportunity_title, o.workspace_id
-    FROM "${S}".solutions s JOIN "${S}".opportunities o ON o.id = s.opportunity_id
-    WHERE s.id = $1
-  `, [solutionId]);
-  const investmentSourceFingerprint = buildingInvestmentSourceFingerprint({
-    id: investmentSolution.id, title: investmentSolution.title, description: investmentSolution.description,
-    status: investmentSolution.status, updatedAt: new Date(investmentSolution.updated_at_utc),
-    opportunity: { id: investmentSolution.opportunity_id, title: investmentSolution.opportunity_title, workspaceId: investmentSolution.workspace_id },
-  });
-  const investmentFingerprint = createHash("sha256")
-    .update(`${investmentRequest.id}:1:1:${investmentSourceFingerprint}`)
-    .digest("hex");
-  const { rows: [investmentRevision] } = await pool.query<{ id: string }>(`
-    INSERT INTO "${S}".review_revisions
-      (id, request_id, revision_number, fingerprint, source_fingerprint, title, summary,
-       packet_json, required_role, created_at)
-    VALUES (gen_random_uuid(), $1, 1, $2, $3, 'Authorize E2E Building investment',
-            'Seeded applied investment authority for the functional NOW gate.',
-            $4, 'ADMIN', NOW())
-    RETURNING id
-  `, [investmentRequest.id, investmentFingerprint, investmentSourceFingerprint, JSON.stringify({ solutionId, outcome: "APPROVE_BUILDING" })]);
-  await pool.query(`UPDATE "${S}".review_requests SET current_revision_id = $2 WHERE id = $1`, [investmentRequest.id, investmentRevision.id]);
-  const { rows: [investmentOption] } = await pool.query<{ id: string }>(`
-    INSERT INTO "${S}".review_options
-      (id, revision_id, action_key, label, outcome_class, continuation_key, sort_order, created_at)
-    VALUES (gen_random_uuid(), $1, 'APPROVE_BUILDING', 'Approve Building investment',
-            'APPROVE', 'AUTHORIZE_BUILDING_INVESTMENT', 0, NOW())
-    RETURNING id
-  `, [investmentRevision.id]);
-  const { rows: [investmentDecision] } = await pool.query<{ id: string; decided_at_utc: string }>(`
-    INSERT INTO "${S}".decision_records
-      (id, workspace_id, request_id, revision_id, option_id, fingerprint,
-       actor_user_id, actor_role, rationale, idempotency_key, decided_at)
-    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'ADMIN',
-            'Seeded E2E Building investment authority', $7,
-            TIMESTAMP '2026-08-31 12:00:00.000')
-    RETURNING id, to_char(decided_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS decided_at_utc
-  `, [ws.id, investmentRequest.id, investmentRevision.id, investmentOption.id, investmentFingerprint, user.id, `e2e-building:${solutionId}`]);
-  await pool.query(`
-    INSERT INTO "${S}".decision_applications
-      (id, decision_id, continuation_key, target_type, target_id, status,
-       receipt_key, attempt_count, applied_at, created_at, updated_at)
-    VALUES (gen_random_uuid(), $1, 'AUTHORIZE_BUILDING_INVESTMENT', 'SOLUTION',
-            $2, 'APPLIED', $3, 1, NOW(), NOW(), NOW())
-    RETURNING id
-  `, [investmentDecision.id, solutionId, `e2e-building-authority:${solutionId}`]);
 
   // ── Baseline opportunity ──────────────────────────────────────────────────
   await pool.query(`

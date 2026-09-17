@@ -4,7 +4,6 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { decideReviewAction } from "../actions"
 import { canDecideReview, isOrgAdminRole } from "@/lib/roles"
-import { ensureBuildingInvestmentRevisionFresh, ensureBuildingInvestmentRevocationRevisionFresh } from "@/lib/building-investment"
 import { DecisionActions } from "@/components/decisions/decision-actions"
 import { DecisionDetailsGrid, DecisionLongForm, DecisionSummary } from "@/components/decisions/decision-long-form"
 import { DecisionSources, parseTrackedDecisionPacket } from "@/components/decisions/decision-sources"
@@ -39,11 +38,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
   })
   if (!request?.currentRevision || (request.workspace.members.length === 0 && !isOrgAdminRole(request.workspace.organization.members[0]?.role))) notFound()
   const revision = request.currentRevision
-  const freshness = request.gateType === "BUILDING_INVESTMENT"
-      ? await ensureBuildingInvestmentRevisionFresh(revision.id)
-      : request.gateType === "BUILDING_INVESTMENT_REVOCATION"
-        ? await ensureBuildingInvestmentRevocationRevisionFresh(revision.id)
-      : { stale: Boolean(revision.supersededAt) }
+  const freshness = { stale: Boolean(revision.supersededAt) }
   const packet = parsePacket(revision.packetJson) as {
     roadmapItem?: { title?: string; solutionId?: string | null; opportunityId?: string | null; squadId?: string | null }
     policyVersion?: string
@@ -71,7 +66,10 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
   const isPolicyActivation = request.gateType === "NOW_POLICY_ACTIVATION"
   const isTracked = request.gateType === "TRACKED_DECISION"
   const trackedPacket = isTracked ? parseTrackedDecisionPacket(revision.packetJson) : null
-  const isRetired = request.gateType === "NOW_COMMITMENT" || isPolicyActivation
+  // The Building-investment gate is retired alongside NOW commitment and native
+  // policy activation. Historical rows still render read-only for audit; no new
+  // investment review can be created and none can be decided.
+  const isRetired = request.gateType === "NOW_COMMITMENT" || isPolicyActivation || isInvestment
   const canDecide = canDecideReview(request.workspace.members[0]?.role, request.workspace.organization.members[0]?.role)
   const canEditArtifacts = request.workspace.members.length > 0
   const artifacts = isTracked ? await getDecisionArtifacts(request.workspaceId, requestId) : []
@@ -101,7 +99,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
   return (
     <main className="mx-auto w-full min-w-0 max-w-3xl space-y-6 overflow-x-hidden p-4 sm:p-6">
       <div>
-        <p className="text-sm text-muted-foreground">{isTracked ? "Decision" : isRelease ? "Legacy system decision · Release authorization" : isRevocation ? "Legacy system decision · Building investment revocation" : isInvestment ? "Building investment review" : isPolicyActivation ? "Legacy system decision · Native policy activation" : "Legacy system decision · NOW commitment"}</p>
+        <p className="text-sm text-muted-foreground">{isTracked ? "Decision" : isRelease ? "Legacy system decision · Release authorization" : isRevocation ? "Legacy system decision · Building investment revocation" : isInvestment ? "Legacy system decision · Building investment" : isPolicyActivation ? "Legacy system decision · Native policy activation" : "Legacy system decision · NOW commitment"}</p>
         <h1 className="break-words [overflow-wrap:anywhere] text-2xl font-semibold">{revision.title}</h1>
         <DecisionSummary tracked={isTracked} summary={revision.summary} />
       </div>
@@ -149,7 +147,6 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
           <strong>This review is stale and cannot be decided.</strong>
           <p className="text-muted-foreground">Material inputs changed after this packet was published. Prepare a new immutable revision before deciding.</p>
           {request.gateType === "NOW_COMMITMENT" && <a className="font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/roadmap?detail=roadmapItem:${request.subjectId}`}>Return to Roadmap Item</a>}
-          {isInvestment && packet.solution?.opportunityId && <a className="font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/discovery/${packet.solution.opportunityId}`}>Return to Solution</a>}
           {isPolicyActivation && <a className="font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/roadmap`}>Return to Roadmap</a>}
         </section>
       ) : decided ? (

@@ -36,10 +36,6 @@ vi.mock("@/components/panels/solution-artifacts", () => ({ SolutionArtifacts: ()
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({
   promoteToRoadmap: vi.fn(),
 }));
-vi.mock("@/app/[orgSlug]/[workspaceSlug]/reviews/actions", () => ({
-  requestBuildingInvestmentAction: vi.fn(),
-}));
-
 // Roadmap item panel children
 vi.mock("@/components/panels/launch-checklist", () => ({ LaunchChecklist: () => null }));
 vi.mock("@/components/panels/launch-tier-picker", () => ({ LaunchTierPicker: () => null }));
@@ -52,6 +48,7 @@ vi.mock("@/components/tasks/linked-tasks-section", () => ({
 
 import { SolutionPanel } from "@/components/panels/solution-panel";
 import { RoadmapItemPanel } from "@/components/panels/roadmap-item-panel";
+import { Section } from "@/components/panels/panel-parts";
 
 const solutionData = {
   id: "sol-1",
@@ -147,15 +144,19 @@ describe("per-panel-type section defaults", () => {
   });
 
   it("leaves untouched panels non-collapsible", async () => {
-    mockFetch("solution", solutionData);
-    render(<SolutionPanel id="sol-1" orgSlug="acme" workspaceSlug="product" />);
+    // A Section rendered without the per-panel collapsible defaults stands in
+    // for the five panels (Objective, Key Result, Assumption, Experiment,
+    // Feedback) that were never part of the disclosure change and must keep
+    // rendering fully expanded with no trigger.
+    render(
+      <Section label="Untouched section">
+        <p>Always visible</p>
+      </Section>
+    );
 
-    // Investment decision is deliberately not part of the disclosure change,
-    // standing in for the five panels (Objective, Key Result, Assumption,
-    // Experiment, Feedback) that must keep rendering fully expanded.
-    await screen.findByText(/Investment decision/);
+    await screen.findByText(/Always visible/);
     expect(
-      screen.queryByRole("button", { name: /Investment decision/ })
+      screen.queryByRole("button", { name: /Untouched section/ })
     ).toBeNull();
   });
 });

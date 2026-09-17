@@ -140,7 +140,7 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
-import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, reconsiderBuildingInvestment, requestBuildingInvestment, requestBuildingInvestmentRevocation, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
 import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
 
@@ -1792,39 +1792,6 @@ const _handler = createMcpHandler(
     // ════════════════════════════════════════════════════════════════
     // ROADMAP
     // ════════════════════════════════════════════════════════════════
-
-    register(
-      "request_building_investment",
-      {
-        title: "Request Building Investment",
-        description: "Prepares an immutable human-admin review of Building investment in an exact Solution. This does not take the decision.",
-        inputSchema: { solutionId: z.string().uuid().describe("UUID of the Solution") },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      requestBuildingInvestment,
-    )
-
-    register(
-      "reconsider_building_investment",
-      {
-        title: "Reconsider Building Investment",
-        description: "Starts an explicit new decision cycle after a rejected or changes-requested Building investment decision. Approved investments require a separate revocation.",
-        inputSchema: { solutionId: z.string().uuid(), expectedTerminalDecisionId: z.string().uuid(), reason: z.string().min(1) },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      reconsiderBuildingInvestment,
-    )
-
-    register(
-      "request_building_investment_revocation",
-      {
-        title: "Request Building Investment Revocation",
-        description: "Prepares an immutable human-admin correction review for an exact applied Building investment authority.",
-        inputSchema: { solutionId: z.string().uuid(), authorityDecisionId: z.string().uuid() },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      requestBuildingInvestmentRevocation,
-    )
 
     register(
       "request_decision",

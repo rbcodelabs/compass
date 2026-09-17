@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockAuth, mockPrepareBuilding, mockApplyBuilding, mockFreshBuilding, mockRecord, mockQueueRelease } = vi.hoisted(() => ({
-  mockAuth: vi.fn(), mockPrepareBuilding: vi.fn(), mockApplyBuilding: vi.fn(), mockFreshBuilding: vi.fn(), mockRecord: vi.fn(), mockQueueRelease: vi.fn(),
+const { mockAuth, mockRecord, mockQueueRelease } = vi.hoisted(() => ({
+  mockAuth: vi.fn(), mockRecord: vi.fn(), mockQueueRelease: vi.fn(),
 }))
 const prisma = {
   workspace: { findFirst: vi.fn() },
@@ -12,27 +12,18 @@ const prisma = {
 vi.mock("@/auth", () => ({ auth: mockAuth }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 vi.mock("@/lib/decision-service", () => ({ recordDecision: mockRecord }))
-vi.mock("@/lib/building-investment", () => ({ prepareBuildingInvestmentReview: mockPrepareBuilding, applyBuildingInvestmentDecision: mockApplyBuilding, ensureBuildingInvestmentRevisionFresh: mockFreshBuilding }))
 vi.mock("@/lib/release-authorization", () => ({
   queueAuthorizedRelease: mockQueueRelease,
   unconfiguredReleaseSourceRevalidator: { revalidate: vi.fn() },
 }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
-import { decideReviewAction, requestBuildingInvestmentAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
+import { decideReviewAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
 
 describe("review actions ownership", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockAuth.mockResolvedValue({ user: { id: "user-1" } })
-    mockFreshBuilding.mockResolvedValue({ stale: false })
-  })
-
-  it("authorizes Building preparation against the Solution's canonical workspace", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", opportunity: { workspaceId: "ws-2" } })
-    prisma.workspace.findFirst.mockResolvedValue(null)
-    await expect(requestBuildingInvestmentAction("ws-1", "solution-1")).rejects.toThrow("Workspace not found")
-    expect(mockPrepareBuilding).not.toHaveBeenCalled()
   })
 
   it("authorizes a decision against the revision request workspace", async () => {
@@ -44,7 +35,12 @@ describe("review actions ownership", () => {
     expect(mockRecord).not.toHaveBeenCalled()
   })
 
-  it.each(["NOW_COMMITMENT", "NOW_POLICY_ACTIVATION"])("rejects retired %s reviews before auth or mutation", async (gateType) => {
+  it.each([
+    "NOW_COMMITMENT",
+    "NOW_POLICY_ACTIVATION",
+    "BUILDING_INVESTMENT",
+    "BUILDING_INVESTMENT_REVOCATION",
+  ])("rejects retired %s reviews before auth or mutation", async (gateType) => {
     prisma.reviewRevision.findUnique.mockResolvedValue({ id: "rev-legacy", request: { workspaceId: "ws-1", subjectId: "item-1", gateType } })
     await expect(decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-legacy", fingerprint: "fp", optionId: "option-1" })).rejects.toThrow("read-only")
     expect(prisma.workspace.findFirst).not.toHaveBeenCalled()
@@ -71,14 +67,5 @@ describe("review actions ownership", () => {
       "source-fp",
       expect.objectContaining({ revalidate: expect.any(Function) }),
     )
-  })
-
-  it("applies an approved Building decision after the human record is committed", async () => {
-    prisma.reviewRevision.findUnique.mockResolvedValue({ id: "rev-1", request: { workspaceId: "ws-2", subjectId: "solution-1", gateType: "BUILDING_INVESTMENT" } })
-    prisma.workspace.findFirst.mockResolvedValue({ id: "ws-2", members: [{ id: "member-1" }], organization: { members: [] } })
-    prisma.reviewOption.findUnique.mockResolvedValue({ outcomeClass: "APPROVE", continuationKey: "AUTHORIZE_BUILDING_INVESTMENT" })
-    mockRecord.mockResolvedValue({ id: "decision-1" })
-    await decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "fp", optionId: "option-1" })
-    expect(mockApplyBuilding).toHaveBeenCalledWith("solution-1", "decision-1")
   })
 })

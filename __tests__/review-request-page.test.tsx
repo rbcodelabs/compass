@@ -2,11 +2,10 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const { auth, findFirst, findArtifacts, linkedArtifacts, ensureBuildingInvestmentRevisionFresh, findTaskLinks, eligibleAssignees } = vi.hoisted(() => ({
+const { auth, findFirst, findArtifacts, linkedArtifacts, findTaskLinks, eligibleAssignees } = vi.hoisted(() => ({
   auth: vi.fn(),
   findFirst: vi.fn(),
   findArtifacts: vi.fn(), linkedArtifacts: vi.fn(),
-  ensureBuildingInvestmentRevisionFresh: vi.fn(),
   // Direction B: the decided branch now loads follow-through data.
   findTaskLinks: vi.fn(), eligibleAssignees: vi.fn(),
 }))
@@ -16,10 +15,6 @@ vi.mock("@/lib/db", () => ({ default: () => ({ reviewRequest: { findFirst }, art
 vi.mock("@/lib/artifacts", () => ({ getDecisionArtifacts: linkedArtifacts }))
 vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: eligibleAssignees }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({ linkArtifactDecision: vi.fn(), unlinkArtifactDecision: vi.fn() }))
-vi.mock("@/lib/building-investment", () => ({
-  ensureBuildingInvestmentRevisionFresh,
-  ensureBuildingInvestmentRevocationRevisionFresh: vi.fn(),
-}))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/reviews/actions", () => ({ decideReviewAction: vi.fn() }))
 vi.mock("next/navigation", () => ({
   notFound: vi.fn(() => { throw new Error("NEXT_NOT_FOUND") }),
@@ -66,19 +61,19 @@ describe("review request page eyebrow", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
-    ensureBuildingInvestmentRevisionFresh.mockResolvedValue({ stale: false })
     findTaskLinks.mockResolvedValue([])
     eligibleAssignees.mockResolvedValue([])
     findArtifacts.mockResolvedValue([{ id: "new", title: "New prototype" }])
     linkedArtifacts.mockResolvedValue([{ id: "linked", title: "Existing prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }])
   })
 
-  it("preserves the Building investment review label", async () => {
+  it("renders a historical Building investment review as a read-only legacy record", async () => {
     findFirst.mockResolvedValue(reviewRequest("BUILDING_INVESTMENT"))
 
     render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
 
-    expect(screen.getByText("Building investment review")).toBeDefined()
+    expect(screen.getByText("Legacy system decision · Building investment")).toBeDefined()
+    expect(screen.getByText("This legacy review is read-only.")).toBeDefined()
   })
 
   it("uses the tracked decision label for tracked decisions", async () => {
@@ -117,7 +112,6 @@ describe("review request page — \"Send to agent\" on a decided banner", () => 
   beforeEach(() => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
-    ensureBuildingInvestmentRevisionFresh.mockResolvedValue({ stale: false })
     findTaskLinks.mockResolvedValue([])
     eligibleAssignees.mockResolvedValue([])
     findArtifacts.mockResolvedValue([])

@@ -3,7 +3,6 @@ import { getDecisionArtifacts } from "@/lib/artifacts"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
-import { applyBuildingInvestmentDecision, applyBuildingInvestmentRevocationDecision, prepareBuildingInvestmentReview, prepareBuildingInvestmentRevocationReview, startNewBuildingInvestmentDecisionCycle } from "@/lib/building-investment"
 import { applyTrackedDecision, createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, recordDecisionNoAction, TrackedDecisionError, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
 import { reviewRequestUrl } from "@/lib/compass-url"
 
@@ -41,18 +40,6 @@ function buildReviewUrl(slugs: WorkspaceSlugs | null, requestId: string): string
 
 async function reviewUrlByWorkspace(workspaceId: string, requestId: string): Promise<string | null> {
   return buildReviewUrl(await workspaceSlugs(workspaceId), requestId)
-}
-
-async function reviewUrlByRequest(requestId: string): Promise<string | null> {
-  try {
-    const request = await getPrisma().reviewRequest.findUnique({
-      where: { id: requestId },
-      select: { workspaceId: true },
-    })
-    return request ? await reviewUrlByWorkspace(request.workspaceId, requestId) : null
-  } catch {
-    return null
-  }
 }
 
 /** Appends a `URL:` line to a tool's human-readable message when a link is available. */
@@ -191,47 +178,6 @@ export async function closeDecisionNoAction({ workspaceId, requestId, reason }: 
 }
 
 
-export async function requestBuildingInvestment({ solutionId }: { solutionId: string }) {
-  const actor = getMcpActor()
-  try {
-    const revision = await prepareBuildingInvestmentReview(solutionId, { requestedById: actor.userId })
-    const reviewUrl = await reviewUrlByRequest(revision.requestId)
-    return ok(
-      withUrlLine(`Building investment review prepared.\nID: ${revision.requestId}\nRevision ID: ${revision.id}\nFingerprint: ${revision.fingerprint}`, reviewUrl),
-      { ...revision, reviewUrl },
-    )
-  } catch (error) {
-    return fail(error instanceof Error ? error.message : "Could not prepare Building investment review.")
-  }
-}
-
-export async function reconsiderBuildingInvestment({ solutionId, expectedTerminalDecisionId, reason }: { solutionId: string; expectedTerminalDecisionId: string; reason: string }) {
-  const actor = getMcpActor()
-  try {
-    const revision = await startNewBuildingInvestmentDecisionCycle(solutionId, { expectedTerminalDecisionId, reason, actorUserId: actor.userId })
-    const reviewUrl = await reviewUrlByRequest(revision.requestId)
-    return ok(
-      withUrlLine(`Building investment review reopened.\nID: ${revision.requestId}\nRevision ID: ${revision.id}`, reviewUrl),
-      { ...revision, reviewUrl },
-    )
-  } catch (error) {
-    return fail(error instanceof Error ? error.message : "Could not reconsider Building investment.")
-  }
-}
-
-export async function requestBuildingInvestmentRevocation({ solutionId, authorityDecisionId }: { solutionId: string; authorityDecisionId: string }) {
-  const actor = getMcpActor()
-  try {
-    const revision = await prepareBuildingInvestmentRevocationReview(solutionId, authorityDecisionId, { requestedById: actor.userId })
-    const reviewUrl = await reviewUrlByRequest(revision.requestId)
-    return ok(
-      withUrlLine(`Building investment revocation review prepared.\nID: ${revision.requestId}\nRevision ID: ${revision.id}`, reviewUrl),
-      { ...revision, reviewUrl },
-    )
-  } catch (error) { return fail(error instanceof Error ? error.message : "Could not prepare Building investment revocation.") }
-}
-
-
 export async function requestReleaseAuthorization(scope: ReleaseScope) {
   const actor = getMcpActor()
   try {
@@ -287,14 +233,6 @@ export async function applyRecordedDecision({ decisionId }: { decisionId: string
   try {
     if (decision.revision.request.gateType === "TRACKED_DECISION") {
       const receipt = await applyTrackedDecision(decision.id)
-      return ok(`Decision applied.\nID: ${receipt.id}\nReceipt: ${receipt.receiptKey}\nStatus: ${receipt.status}`, receipt)
-    }
-    if (decision.revision.request.gateType === "BUILDING_INVESTMENT") {
-      const receipt = await applyBuildingInvestmentDecision(decision.revision.request.subjectId, decision.id)
-      return ok(`Decision applied.\nID: ${receipt.id}\nReceipt: ${receipt.receiptKey}\nStatus: ${receipt.status}`, receipt)
-    }
-    if (decision.revision.request.gateType === "BUILDING_INVESTMENT_REVOCATION") {
-      const receipt = await applyBuildingInvestmentRevocationDecision(decision.revision.request.subjectId, decision.id)
       return ok(`Decision applied.\nID: ${receipt.id}\nReceipt: ${receipt.receiptKey}\nStatus: ${receipt.status}`, receipt)
     }
     if (decision.revision.request.gateType === "RELEASE_AUTHORIZATION" && decision.revision.sourceFingerprint) {
