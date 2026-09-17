@@ -2,6 +2,16 @@
 
 Compass uses Tailwind CSS 4 and Base UI-backed primitives. This document defines the product-level visual vocabulary built on that foundation. The system is intentionally repository-native: tokens live in `app/globals.css`, primitives live in `components/ui`, and the living reference is available at `/ui`.
 
+## Design language — "Studio Quiet"
+
+Warm paper, near-black ink, and exactly one accent (`--primary`). Depth comes
+from tone plus a 1px hairline, not from drop shadows: `--shadow-card` is `none`
+and resting surfaces pair `bg-surface-*` with `border-border-default`. Only
+overlay-level surfaces (`--shadow-panel`, popovers, modals, drag states) carry a
+real shadow. Navigation chrome is paper-toned, one tonal step off the app
+canvas, rather than an inverted dark rail. Token values are authored in `oklch`
+in `app/globals.css`; keep hex out of the token block.
+
 ## Principles
 
 - Express intent with semantic roles. Prefer `bg-surface-panel` and `text-text-subtle` to literal palette utilities.
@@ -51,7 +61,8 @@ The authenticated desktop shell uses the shadcn `Sidebar` primitive in icon-coll
 - `text-secondary`: supporting body copy
 - `text-subtle`: metadata, hints, and low-emphasis labels
 - `text-disabled`: unavailable controls or content
-- `text-inverse`: content on dark product surfaces
+- `text-inverse`: content on dark product surfaces. Navigation is no longer one
+  of them — use the `sidebar-foreground` role for navigation chrome.
 
 ### Borders and focus
 
@@ -78,7 +89,8 @@ Use status roles for meaning, not decoration. Never rely on color alone: pair th
 
 - Control heights: `--control-height-sm`, `--control-height-md`, and `--control-height-lg`
 - Responsive page gutters: `--space-page-x` and `--space-page-y`
-- Elevation: `--shadow-card` and `--shadow-panel`
+- Elevation: `--shadow-card` (none at rest — pair the surface with a hairline)
+  and `--shadow-panel` (overlay-level surfaces only)
 - Radius scale: Tailwind `rounded-sm` through `rounded-xl`, derived from `--radius`
 
 Existing primitives currently encode matching control heights directly. New product patterns should consume these conventions, and primitives can move to the custom properties when touched by later migrations.

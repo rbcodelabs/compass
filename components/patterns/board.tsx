@@ -38,7 +38,20 @@ export function BoardColumn({ title, count, description, accent, actions, childr
         </div>
         {description && <div className="mt-1 text-xs text-text-subtle">{description}</div>}
       </header>
-      <div id={bodyId} ref={bodyRef} className={cn("space-y-3 md:max-h-[65vh] md:overflow-y-auto md:overscroll-contain", bodyClassName)}>{children || emptyState}</div>
+      {/*
+        overscroll-Y-contain, not overscroll-contain: the intent is only to stop VERTICAL
+        scroll chaining (so hitting the end of a column doesn't scroll the page). The
+        unaxed version also contains the horizontal axis, which broke trackpad
+        side-scrolling whenever the cursor sat over a column — the wheel event was
+        swallowed here instead of chaining up to the Board's overflow-x-auto.
+
+        -mx-3/px-3 (matching the header above) pulls this scroll box out to the column's
+        edges and pads the content back in, so a card's shadow and focus/drag ring have
+        room to render instead of being sliced off at the scroll boundary. Note
+        overflow-y:auto computes overflow-x to auto as well, so this box clips
+        horizontally whether or not we ask it to.
+      */}
+      <div id={bodyId} ref={bodyRef} className={cn("space-y-3 md:-mx-3 md:max-h-[65vh] md:overflow-y-auto md:overscroll-y-contain md:px-3", bodyClassName)}>{children || emptyState}</div>
       {footer && <div className="mt-3 shrink-0">{footer}</div>}
     </section>
   );

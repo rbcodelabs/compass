@@ -204,7 +204,7 @@ User-facing docs live in `docs/content/` (rendered at `/help/[slug]`).
 - **Data fetching**: use async server components. Call `getPrisma()` from `lib/db.ts` — never import `PrismaClient` directly.
 - **Client components**: add `"use client"` only when the component needs browser APIs, event handlers, or React hooks. Data fetching belongs in the server layer.
 - **Scripts**: TypeScript/Node.js only. Node v22.6+ runs `.ts` files natively with a `#!/usr/bin/env node` shebang — no compilation step. No Python scripts.
-- **Styling**: Tailwind utility classes. Dark sidebar uses `slate-950`/`slate-900` backgrounds; light main content uses `slate-50`. Follow existing patterns in `components/`.
+- **Styling**: Tailwind utility classes driven by the semantic tokens in `app/globals.css` — see `docs/design/ui-system.md`. Navigation chrome (sidebar, mobile header, bottom nav) is paper-toned via the `sidebar-*` roles; do not reintroduce `slate-950`/`slate-900`/`slate-50` literals. Follow existing patterns in `components/`.
 
 ## Tracking
 

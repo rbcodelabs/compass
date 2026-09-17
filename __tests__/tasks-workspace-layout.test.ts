@@ -137,11 +137,23 @@ describe("Tasks dashboard workspace layout", () => {
     expect(track.className).toContain("px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3");
 
     const column = container.querySelector('[data-task-column="TODO"]')!;
-    expect(column.className).toContain('min-w-[280px] flex-1 overflow-hidden md:h-full');
+    expect(column.className).toContain('min-w-[280px] flex-1 md:h-full');
+    // The column must NOT clip its own overflow: a card's drag shadow and focus
+    // ring render outside the card box and were being sliced off at the column
+    // edge. The board is still the sole horizontal scroller — the column simply
+    // no longer establishes a clipping box to achieve that.
+    expect(column.className).not.toContain("overflow-hidden");
 
     const columnBody = container.querySelector("#task-column-TODO")!;
     expect(columnBody.className).toContain("md:max-h-none");
     expect(columnBody.className).toContain("md:overflow-y-auto");
+    // Vertical containment only. The unaxed `overscroll-contain` also contains the
+    // horizontal axis, which swallowed trackpad side-scrolling whenever the cursor
+    // was over a column instead of chaining up to the board's overflow-x-auto.
+    // Verified by CDP wheel dispatch: unaxed => board scrollLeft moved 0px;
+    // y-axis-only => moved 760px.
+    expect(columnBody.className).toContain("md:overscroll-y-contain");
+    expect(columnBody.className).not.toContain("md:overscroll-contain");
 
     vi.doUnmock("@/components/tasks/task-card");
     vi.doUnmock("@/components/tasks/add-task-form");

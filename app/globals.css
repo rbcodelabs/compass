@@ -2,93 +2,103 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ── Design tokens ────────────────────────────────────────────────────── */
+/* ── Design tokens — "Studio Quiet" ───────────────────────────────────────
+   Warm paper, near-black ink, ONE accent. Depth comes from tone plus a 1px
+   hairline, not from drop shadows; only overlay-level surfaces keep a real
+   shadow (--shadow-panel). Every value below is an exact oklch conversion of
+   the palette hex noted in its comment — converted, not eyeballed, and
+   verified to round-trip back to the same hex. ───────────────────────── */
 :root {
   /* Backgrounds */
-  --background: oklch(0.984 0.003 264.5);        /* slate-50 */
-  --foreground: oklch(0.129 0.042 264.1);         /* slate-900 */
+  --background: oklch(0.982 0.0041 91.4);         /* paper   #FAF9F6 */
+  --foreground: oklch(0.1805 0.0064 55.9);        /* ink     #14110F */
 
   /* Cards / surfaces */
-  --card:             oklch(1 0 0);               /* white */
-  --card-foreground:  oklch(0.129 0.042 264.1);
+  --card:             oklch(1 0 0);               /* surface #FFFFFF */
+  --card-foreground:  oklch(0.1805 0.0064 55.9);
 
   /* Popovers */
   --popover:            oklch(1 0 0);
-  --popover-foreground: oklch(0.129 0.042 264.1);
+  --popover-foreground: oklch(0.1805 0.0064 55.9);
 
-  /* Primary — Indigo-600 */
-  --primary:            oklch(0.511 0.254 276.9);
+  /* Primary — the one accent, #5B3DF5 */
+  --primary:            oklch(0.5225 0.2549 280.3);
+  --primary-hover:      oklch(0.4718 0.2474 278.3); /* accent-hover #4A2EE0 */
   --primary-foreground: oklch(1 0 0);
 
-  /* Secondary — Slate-100 */
-  --secondary:            oklch(0.961 0.011 264.7);
-  --secondary-foreground: oklch(0.194 0.035 264.2);
+  /* Secondary — inset paper */
+  --secondary:            oklch(0.9613 0.007 88.6);  /* inset #F4F2ED */
+  --secondary-foreground: var(--foreground);
 
-  /* Muted — Slate-100 */
-  --muted:            oklch(0.961 0.011 264.7);
-  --muted-foreground: oklch(0.547 0.015 264.4);   /* slate-500 */
+  /* Muted — inset paper */
+  --muted:            oklch(0.9613 0.007 88.6);      /* inset #F4F2ED */
+  --muted-foreground: oklch(0.5261 0.0151 82.4);     /* ink-subtle #6F6A61 */
 
-  /* Accent */
-  --accent:            oklch(0.961 0.011 264.7);
-  --accent-foreground: oklch(0.194 0.035 264.2);
+  /* Accent — the shadcn hover/selected *surface* role, not the brand accent.
+     The brand accent is --primary; keeping these separate is what stops the
+     one accent from spreading across every hover state. */
+  --accent:            oklch(0.9613 0.007 88.6);     /* inset #F4F2ED */
+  --accent-foreground: var(--foreground);
 
   /* Destructive */
-  --destructive:            oklch(0.577 0.245 27.3);
+  --destructive:            oklch(0.478 0.157 29.1); /* danger #A32C22 */
   --destructive-foreground: oklch(1 0 0);
 
   /* Borders & inputs */
-  --border: oklch(0.906 0.009 264.5);   /* slate-200 */
-  --input:  oklch(0.906 0.009 264.5);
-  --ring:   oklch(0.511 0.254 276.9);   /* indigo-600 */
+  --border: oklch(0.9135 0.0087 84.6);   /* border #E5E2DC */
+  --input:  oklch(0.9135 0.0087 84.6);
+  --ring:   oklch(0.5225 0.2549 280.3);  /* accent #5B3DF5 */
 
   /* Radius scale */
-  --radius: 0.625rem;
+  --radius: 0.5rem;
 
   /* Compass semantic surfaces */
   --surface-app: var(--background);
-  --surface-navigation: oklch(0.194 0.035 264.2);
-  --surface-navigation-active: oklch(0.269 0.033 264.7);
+  --surface-navigation: oklch(0.9613 0.007 88.6);        /* inset  #F4F2ED */
+  --surface-navigation-active: oklch(0.9374 0.0099 87.5);/* sunken #EDEAE3 */
   --surface-panel: var(--card);
   --surface-card: var(--card);
   --surface-inset: var(--muted);
-  --surface-overlay: oklch(0.129 0.042 264.1 / 0.28);
+  --surface-overlay: oklch(0.1805 0.0064 55.9 / 0.32);
   --surface-interactive: var(--accent);
-  --surface-interactive-hover: oklch(0.929 0.013 255.5);
+  --surface-interactive-hover: oklch(0.9374 0.0099 87.5);/* sunken #EDEAE3 */
 
-  /* shadcn Sidebar roles, mapped to the Compass navigation surface. */
+  /* shadcn Sidebar roles, mapped to the Compass navigation surface.
+     Navigation is paper-toned now, so its foreground is ink — NOT
+     --text-inverse, which still means "text that sits on a dark surface". */
   --sidebar: var(--surface-navigation);
-  --sidebar-foreground: var(--text-inverse);
+  --sidebar-foreground: var(--text-primary);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: var(--surface-navigation-active);
-  --sidebar-accent-foreground: var(--text-inverse);
-  --sidebar-border: oklch(1 0 0 / 0.1);
+  --sidebar-accent-foreground: var(--text-primary);
+  --sidebar-border: var(--border-default);
   --sidebar-ring: var(--ring);
 
   /* Compass semantic text */
   --text-primary: var(--foreground);
-  --text-secondary: oklch(0.372 0.034 259.7);
-  --text-subtle: var(--muted-foreground);
-  --text-disabled: oklch(0.704 0.015 286.1);
-  --text-inverse: oklch(0.984 0.003 264.5);
+  --text-secondary: oklch(0.4557 0.0129 76.5);   /* ink-secondary #5B564F */
+  --text-subtle: var(--muted-foreground);        /* ink-subtle    #6F6A61 */
+  --text-disabled: oklch(0.6955 0.0178 79.3);    /* ink-disabled  #A39C91 */
+  --text-inverse: oklch(0.982 0.0041 91.4);      /* paper         #FAF9F6 */
 
   /* Compass semantic borders */
   --border-default: var(--border);
-  --border-strong: oklch(0.704 0.022 261.3);
+  --border-strong: oklch(0.8215 0.0149 84.6);    /* border-strong #C9C4BA */
   --border-interactive: var(--primary);
   --border-focus: var(--ring);
 
   /* Semantic status roles. Status foregrounds meet contrast on their soft surfaces. */
-  --status-neutral: oklch(0.446 0.03 256.8);
-  --status-neutral-surface: oklch(0.961 0.011 264.7);
-  --status-info: oklch(0.488 0.217 264.4);
-  --status-info-surface: oklch(0.932 0.032 255.6);
-  --status-success: oklch(0.448 0.119 151.3);
-  --status-success-surface: oklch(0.962 0.044 156.7);
-  --status-warning: oklch(0.473 0.137 46.2);
-  --status-warning-surface: oklch(0.962 0.059 95.6);
-  --status-danger: var(--destructive);
-  --status-danger-surface: oklch(0.936 0.032 17.7);
+  --status-neutral: oklch(0.4557 0.0129 76.5);         /* #5B564F */
+  --status-neutral-surface: oklch(0.9468 0.0086 84.6); /* #F0EDE7 */
+  --status-info: oklch(0.4583 0.0941 251);             /* #2B5A8A */
+  --status-info-surface: oklch(0.9474 0.0135 241);     /* #E6EFF6 */
+  --status-success: oklch(0.4794 0.078 161.1);         /* #2F6B4F */
+  --status-success-surface: oklch(0.9474 0.0116 153.7);/* #E8F0EA */
+  --status-warning: oklch(0.5084 0.1033 71.2);         /* #8A5A10 */
+  --status-warning-surface: oklch(0.9506 0.0253 86.9); /* #F6EEDC */
+  --status-danger: var(--destructive);                 /* #A32C22 */
+  --status-danger-surface: oklch(0.9451 0.0169 31.1);  /* #F8E9E6 */
 
   /* Product density and elevation conventions */
   --control-height-sm: 1.75rem;
@@ -96,49 +106,63 @@
   --control-height-lg: 2.25rem;
   --space-page-x: clamp(1rem, 2.5vw, 2rem);
   --space-page-y: clamp(1.25rem, 3vw, 2rem);
-  --shadow-card: 0 1px 2px oklch(0.129 0.042 264.1 / 0.06), 0 1px 3px oklch(0.129 0.042 264.1 / 0.08);
-  --shadow-panel: 0 8px 24px oklch(0.129 0.042 264.1 / 0.12);
+  /* Resting surfaces get their depth from the 1px hairline every consumer of
+     --shadow-card already pairs with it, so the card shadow itself is none. */
+  --shadow-card: none;
+  --shadow-panel: 0 8px 24px oklch(0.1805 0.0064 55.9 / 0.12);
 }
 
+/* Dark "Studio Quiet" — warm charcoal, not blue-slate. Same rules: one
+   accent, hairline over shadow, tone for depth. */
 html.dark:has(.workspace-theme-scope) {
-  --background: oklch(0.145 0.018 264.2);
-  --foreground: oklch(0.93 0.008 264.5);
-  --card: oklch(0.19 0.022 264.2);
+  --background: oklch(0.183 0.0026 67.7);     /* paper   #131211 */
+  --foreground: oklch(0.9556 0.0057 84.6);    /* ink     #F2F0EC */
+  --card: oklch(0.2181 0.0041 84.6);          /* surface #1B1A18 */
   --card-foreground: var(--foreground);
-  --popover: oklch(0.205 0.025 264.2);
+  --popover: oklch(0.2485 0.0024 67.7);       /* inset   #222120 */
   --popover-foreground: var(--foreground);
-  --secondary: oklch(0.245 0.024 264.3);
-  --secondary-foreground: oklch(0.91 0.01 264.5);
-  --muted: oklch(0.235 0.021 264.3);
-  --muted-foreground: oklch(0.7 0.016 264.4);
-  --accent: oklch(0.265 0.027 264.3);
-  --accent-foreground: oklch(0.94 0.008 264.5);
-  --border: oklch(0.31 0.024 264.2);
-  --input: oklch(0.31 0.024 264.2);
-  --surface-navigation: oklch(0.115 0.018 264.2);
-  --surface-navigation-active: oklch(0.225 0.028 264.3);
-  --surface-interactive-hover: oklch(0.3 0.027 264.3);
-  --surface-overlay: oklch(0.05 0.01 264.1 / 0.68);
-  --text-secondary: oklch(0.78 0.015 264.4);
-  --text-disabled: oklch(0.54 0.015 264.4);
-  --border-strong: oklch(0.45 0.025 264.3);
-  --status-neutral: oklch(0.77 0.025 256.8);
-  --status-neutral-surface: oklch(0.27 0.025 264.7);
-  --status-info: oklch(0.72 0.14 264.4);
-  --status-info-surface: oklch(0.25 0.06 264.4);
-  --status-success: oklch(0.72 0.13 151.3);
-  --status-success-surface: oklch(0.25 0.05 151.3);
-  --status-warning: oklch(0.79 0.14 80);
-  --status-warning-surface: oklch(0.27 0.055 80);
-  --status-danger: oklch(0.72 0.18 27.3);
-  --status-danger-surface: oklch(0.25 0.065 27.3);
-  --shadow-card: 0 1px 2px oklch(0.04 0.01 264.1 / 0.3);
-  --shadow-panel: 0 10px 30px oklch(0.04 0.01 264.1 / 0.5);
+  --primary: oklch(0.654 0.1944 286.5);       /* accent  #8B77FF */
+  --primary-hover: oklch(0.7207 0.1554 289.1);/* #A392FF */
+  /* The dark accent is light enough that white-on-accent fails; ink does not. */
+  --primary-foreground: oklch(0.183 0.0026 67.7);
+  --secondary: oklch(0.2485 0.0024 67.7);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.2485 0.0024 67.7);
+  --muted-foreground: oklch(0.6423 0.0163 80.7); /* ink-subtle #928C82 */
+  --accent: oklch(0.2941 0.0061 78.2);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.7 0.16 29);
+  --destructive-foreground: oklch(0.183 0.0026 67.7);
+  --border: oklch(0.2941 0.0061 78.2);        /* border #2E2C29 */
+  --input: oklch(0.2941 0.0061 78.2);
+  --ring: oklch(0.654 0.1944 286.5);
+  /* Navigation sits one tonal step off paper, same as light mode — there it
+     is a step darker, here a step lighter. */
+  --surface-navigation: oklch(0.2181 0.0041 84.6);
+  --surface-navigation-active: oklch(0.2485 0.0024 67.7);
+  --surface-interactive-hover: oklch(0.2941 0.0061 78.2);
+  --surface-overlay: oklch(0.1 0.002 67.7 / 0.7);
+  --text-secondary: oklch(0.7683 0.0138 82.4); /* ink-secondary #B8B3AA */
+  --text-disabled: oklch(0.4844 0.0127 76.5);  /* #635E57 */
+  --border-strong: oklch(0.3989 0.0106 84.6);  /* #4A4741 */
+  /* Status hues match the light ramp, re-lit for a dark surface. */
+  --status-neutral: oklch(0.7683 0.0138 82.4);
+  --status-neutral-surface: oklch(0.2941 0.0061 78.2);
+  --status-info: oklch(0.72 0.11 251);
+  --status-info-surface: oklch(0.28 0.045 251);
+  --status-success: oklch(0.73 0.1 161.1);
+  --status-success-surface: oklch(0.28 0.04 161.1);
+  --status-warning: oklch(0.79 0.12 71.2);
+  --status-warning-surface: oklch(0.29 0.05 71.2);
+  --status-danger: var(--destructive);
+  --status-danger-surface: oklch(0.28 0.06 29);
+  --shadow-card: none;
+  --shadow-panel: 0 10px 30px oklch(0.08 0.002 67.7 / 0.55);
 }
 
 @theme inline {
   /* Fonts */
-  --font-sans: var(--font-jakarta);
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
 
   /* Colors */
@@ -149,6 +173,7 @@ html.dark:has(.workspace-theme-scope) {
   --color-popover:            var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary:            var(--primary);
+  --color-primary-hover:      var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary:            var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -242,10 +267,10 @@ html.dark:has(.workspace-theme-scope) {
 body {
   background: var(--background);
   color: var(--foreground);
-  /* --font-sans (not --font-jakarta directly) so a workspace's custom font
+  /* --font-sans (not --font-inter directly) so a workspace's custom font
      branding — which overrides --font-sans at :root, see
      components/branding/workspace-theme-style.tsx — actually takes effect.
-     Defaults to --font-jakarta via the @theme inline mapping above, so this
+     Defaults to --font-inter via the @theme inline mapping above, so this
      is a no-op for unbranded workspaces. */
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -271,8 +296,8 @@ body {
 .ProseMirror code { @apply font-mono text-sm bg-muted rounded px-1; }
 .ProseMirror pre { @apply bg-muted rounded-md p-4 mb-3 overflow-x-auto; }
 .ProseMirror pre code { @apply bg-transparent p-0; }
-.ProseMirror img { @apply max-w-full rounded-lg shadow-sm my-3; }
-.ProseMirror a { @apply text-blue-600 underline hover:text-blue-800; }
+.ProseMirror img { @apply max-w-full rounded-lg border border-border-default my-3; }
+.ProseMirror a { @apply text-primary underline hover:text-primary-hover; }
 .ProseMirror hr { @apply border-border my-4; }
 .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
@@ -318,22 +343,26 @@ body {
   border-bottom-color: var(--status-info);
 }
 
-/* ── Docs prose content (/help) ──────────────────────────────────────── */
-.docs-content h1 { @apply text-3xl font-bold mb-4 mt-8 text-slate-900; }
-.docs-content h2 { @apply text-xl font-semibold mb-3 mt-7 text-slate-800 border-b border-slate-200 pb-2; }
-.docs-content h3 { @apply text-base font-semibold mb-2 mt-5 text-slate-700; }
-.docs-content p  { @apply mb-4 leading-relaxed text-slate-700; }
-.docs-content ul { @apply list-disc pl-5 mb-4 space-y-1 text-slate-700; }
-.docs-content ol { @apply list-decimal pl-5 mb-4 space-y-1 text-slate-700; }
+/* ── Docs prose content (/help) ────────────────────────────────────────
+   Expressed in semantic tokens, like .ProseMirror above, so docs prose picks
+   up the design language instead of pinning its own slate/indigo ramp. The
+   code-block treatment now matches .ProseMirror pre (quiet inset surface plus
+   a hairline) rather than an inverted slate-900 slab. */
+.docs-content h1 { @apply text-3xl font-bold mb-4 mt-8 text-text-primary; }
+.docs-content h2 { @apply text-xl font-semibold mb-3 mt-7 text-text-primary border-b border-border-default pb-2; }
+.docs-content h3 { @apply text-base font-semibold mb-2 mt-5 text-text-primary; }
+.docs-content p  { @apply mb-4 leading-relaxed text-text-secondary; }
+.docs-content ul { @apply list-disc pl-5 mb-4 space-y-1 text-text-secondary; }
+.docs-content ol { @apply list-decimal pl-5 mb-4 space-y-1 text-text-secondary; }
 .docs-content li { @apply leading-relaxed; }
-.docs-content strong { @apply font-semibold text-slate-900; }
-.docs-content code { @apply font-mono text-sm bg-slate-100 rounded px-1.5 py-0.5 text-slate-800; }
-.docs-content pre  { @apply bg-slate-900 text-slate-100 rounded-xl p-5 mb-4 overflow-x-auto text-sm; }
+.docs-content strong { @apply font-semibold text-text-primary; }
+.docs-content code { @apply font-mono text-sm bg-surface-inset rounded px-1.5 py-0.5 text-text-primary; }
+.docs-content pre  { @apply bg-surface-inset text-text-primary border border-border-default rounded-xl p-5 mb-4 overflow-x-auto text-sm; }
 .docs-content pre code { @apply bg-transparent p-0 text-inherit; }
-.docs-content img  { @apply w-full rounded-xl shadow-md border border-slate-200/50 my-6; }
-.docs-content blockquote { @apply border-l-4 border-indigo-300 pl-5 py-1 bg-indigo-50/50 rounded-r-lg italic text-slate-600 my-4; }
-.docs-content a    { @apply text-indigo-600 underline underline-offset-2 hover:text-indigo-800; }
-.docs-content hr   { @apply border-slate-200 my-8; }
+.docs-content img  { @apply w-full rounded-xl border border-border-default my-6; }
+.docs-content blockquote { @apply border-l-4 border-border-interactive pl-5 py-1 bg-surface-inset rounded-r-lg italic text-text-secondary my-4; }
+.docs-content a    { @apply text-primary underline underline-offset-2 hover:text-primary-hover; }
+.docs-content hr   { @apply border-border-default my-8; }
 .docs-content table { @apply w-full text-sm border-collapse mb-4; }
-.docs-content th { @apply text-left font-semibold text-slate-700 border-b border-slate-200 pb-2 pr-4; }
-.docs-content td { @apply text-slate-700 border-b border-slate-100 py-2 pr-4; }
+.docs-content th { @apply text-left font-semibold text-text-primary border-b border-border-strong pb-2 pr-4; }
+.docs-content td { @apply text-text-secondary border-b border-border-default py-2 pr-4; }
