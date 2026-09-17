@@ -205,6 +205,7 @@ import {
   revokeApiKey,
   updatePortalSettings,
   updateWorkspaceBranding,
+  updateWorkspaceLimits,
   deleteWorkspace,
   addWorkspaceMember,
   updateWorkspaceMemberRole,
@@ -779,6 +780,68 @@ describe("updateWorkspaceBranding", () => {
     await expect(
       updateWorkspaceBranding("org", "ws", { primaryHex: "#4f3df2" })
     ).rejects.toThrow("Workspace not found");
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+});
+
+// ─── updateWorkspaceLimits ──────────────────────────────────────────────────
+
+describe("updateWorkspaceLimits", () => {
+  it("persists a NOW limit", async () => {
+    await updateWorkspaceLimits("org", "ws", { nowLimit: 4 });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.nowLimit).toBe(4);
+  });
+
+  it("persists a NEXT limit", async () => {
+    await updateWorkspaceLimits("org", "ws", { nextLimit: 10 });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.nextLimit).toBe(10);
+  });
+
+  it("allows 0 as a valid limit", async () => {
+    await updateWorkspaceLimits("org", "ws", { nowLimit: 0 });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.nowLimit).toBe(0);
+  });
+
+  it("clears a limit when explicitly set to null", async () => {
+    await updateWorkspaceLimits("org", "ws", { nowLimit: null });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.nowLimit).toBeNull();
+  });
+
+  it("omits fields that are undefined rather than overwriting with null", async () => {
+    await updateWorkspaceLimits("org", "ws", { nowLimit: 5 });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.nextLimit).toBeUndefined();
+  });
+
+  it("revalidates both settings and roadmap paths", async () => {
+    await updateWorkspaceLimits("org", "ws", { nowLimit: 4 });
+    expect(revalidatePath).toHaveBeenCalledWith("/org/ws/settings");
+    expect(revalidatePath).toHaveBeenCalledWith("/org/ws/roadmap");
+  });
+
+  it("rejects a negative NOW limit and does not write to the DB", async () => {
+    await expect(
+      updateWorkspaceLimits("org", "ws", { nowLimit: -1 })
+    ).rejects.toThrow(/nowLimit/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-integer NEXT limit and does not write to the DB", async () => {
+    await expect(
+      updateWorkspaceLimits("org", "ws", { nextLimit: 2.5 })
+    ).rejects.toThrow(/nextLimit/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null as never);
+    await expect(
+      updateWorkspaceLimits("org", "ws", { nowLimit: 4 })
+    ).rejects.toThrow("Unauthorized");
     expect(mockWorkspace.update).not.toHaveBeenCalled();
   });
 });

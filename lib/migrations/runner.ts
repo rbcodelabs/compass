@@ -272,6 +272,10 @@ const MIGRATIONS = [
     name: "053_shared_field_option_sets",
     filePath: path.join(process.cwd(), "prisma/migrations/053_shared_field_option_sets/migration.sql"),
   },
+  {
+    name: "054_workspace_wip_limits",
+    filePath: path.join(process.cwd(), "prisma/migrations/054_workspace_wip_limits/migration.sql"),
+  },
 ];
 
 const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "decision_evidence_refs", "now_policy_application_evidence", "now_gate_evaluations", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"] as const;
