@@ -133,7 +133,7 @@ describe("Experiments and Discovery board layout", () => {
         expect(page).toContain('contentClassName="p-0 sm:p-0 md:p-0"');
       }
       // Mounted with `squads`; extra props (e.g. custom-field filter facets) are allowed.
-      expect(page).toMatch(new RegExp(`<${filters}\\b[^>]*\\bsquads=\\{squads\\}`, "s"));
+      expect(page).toMatch(new RegExp(`<${filters}\\b[^>]*\\bsquads=\\{squads\\}`));
       expect(page).not.toContain("PageHeader");
       expect(page).not.toContain("SquadFilterBar");
       expect(page).not.toContain('className="overflow-x-auto min-w-0"');
