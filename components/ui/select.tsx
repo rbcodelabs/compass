@@ -203,6 +203,15 @@ function SelectContent({
         // swallowing mouse clicks, so a status could only be changed by
         // keyboard. 80 keeps the transient popup layer above every surface,
         // including the dialog layer (70) that Selects are also opened from.
+        //
+        // The detail panel now has a second mode: pinned, where it is an
+        // in-flow <aside> with z-auto rather than a z-60 Sheet (see
+        // components/panels/panel-shell.tsx). That mode raises no stacking
+        // context for this popup to clear, so it is strictly easier than the
+        // overlay case this value was chosen for — 80 covers both, and the
+        // value must not be lowered on the strength of the pinned case alone.
+        // e2e/functional/specs/detail-panel-pin.spec.ts pins a Select inside a
+        // pinned panel and asserts it is still clickable.
         className="isolate z-[80]"
       >
         <SelectPrimitive.Popup

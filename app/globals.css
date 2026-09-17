@@ -256,6 +256,48 @@ body {
   border-color: var(--border);
 }
 
+/* ── Pinned detail panel ──────────────────────────────────────────────────
+   See components/panels/panel-shell.tsx and lib/panel-pin.ts. */
+
+/* While a resize gesture is in flight the pointer is captured by a 1px handle
+   but travels anywhere on the page. Without a document-wide lock the cursor
+   flickers through every hover target it crosses and the drag selects text
+   behind it. `!important` on the descendant rule is the point: it has to beat
+   every element's own cursor, including inputs and links. */
+html[data-panel-resizing] {
+  cursor: col-resize;
+  user-select: none;
+}
+html[data-panel-resizing] * {
+  cursor: col-resize !important;
+}
+
+/* The third and last width clamp — see PANEL_MIN_MAIN in lib/panel-pin.ts.
+   The other two are JS (persistence, and the drag gesture). This one guards
+   *window resize*, where no JS runs at all: shrink the window with a wide
+   panel pinned and the upper bound falls with it, so main content keeps its
+   floor without waiting for a resize handler.
+
+   --sidebar-width is set by SidebarProvider and inherits down to the aside.
+   When the sidebar is collapsed to icons the real gap is narrower than that
+   value, so this bound is conservative there (the panel could legally be a
+   little wider than it allows). Conservative is the correct direction: the
+   failure it prevents is the sidebar's non-shrinking gap being squeezed until
+   the fixed sidebar overlaps main content. */
+.panel-pinned-surface {
+  --panel-w-min: 320px;
+  --panel-w-max: 720px;
+  --panel-main-min: 480px;
+  width: clamp(
+    var(--panel-w-min),
+    var(--panel-w, 448px),
+    max(
+      var(--panel-w-min),
+      min(var(--panel-w-max), 100vw - var(--sidebar-width, 0px) - var(--panel-main-min))
+    )
+  );
+}
+
 /* ── Tiptap / ProseMirror editor prose styles ────────────────────────── */
 .ProseMirror {
   outline: none;

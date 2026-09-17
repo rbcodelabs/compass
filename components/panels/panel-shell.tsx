@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
+import { PanelRightClose, Pin, PinOff } from "lucide-react";
 
 import {
   Sheet,
@@ -8,6 +10,19 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import {
+  DEFAULT_PANEL_PIN,
+  PANEL_MIN_MAIN,
+  PANEL_PIN_MEDIA_QUERY,
+  PANEL_WIDTH_MAX,
+  PANEL_WIDTH_MIN,
+  clampPanelWidth,
+  panelPinCookieString,
+  type PanelPin,
+} from "@/lib/panel-pin";
+import { PANEL_WIDTH_PROPERTY, PanelResizeHandle } from "./panel-resize-handle";
 import { usePanelContext } from "./panel-context";
 import { ExperimentPanel } from "./experiment-panel";
 import { OpportunityPanel } from "./opportunity-panel";
@@ -40,16 +55,49 @@ const PANEL_TITLES: Record<string, string> = {
  */
 const HYDRATION_DEADLINE_MS = 200;
 
-export function PanelShell() {
+export interface PanelShellProps {
+  /**
+   * Pin state read from the request cookie by the layout. Seeding this on the
+   * server is the entire reason the preference is a cookie: it makes the very
+   * first painted frame already correct for a pinned user, instead of showing
+   * a modal overlay and swapping it for a column after hydration.
+   *
+   * Defaults to unpinned, which is also what an absent cookie parses to — so
+   * a caller that has not been wired up yet gets exactly today's behaviour.
+   */
+  initialPin?: PanelPin;
+}
+
+export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps = {}) {
   const { panel, closePanel, orgSlug, workspaceSlug } = usePanelContext();
   const [hydrated, setHydrated] = useState(false);
+  const [pinned, setPinned] = useState(initialPin.pinned);
+  const [width, setWidth] = useState(() => clampPanelWidth(initialPin.width));
+  const asideRef = useRef<HTMLElement | null>(null);
   const common = { orgSlug, workspaceSlug };
+
+  // Seeded with `pinned`, not `false` — see the `serverSnapshot` note in
+  // hooks/use-media-query.ts. A pinned user's server render and hydration
+  // render both produce the pinned column, so there is no overlay to flash.
+  // The guess is only safe because the aside is *also* CSS-gated below.
+  const viewportAllowsPin = useMediaQuery(PANEL_PIN_MEDIA_QUERY, pinned);
+
+  // The preference is the user's; the suspension is the environment's. A
+  // narrow viewport demotes to overlay but deliberately does NOT rewrite the
+  // cookie, so widening the window restores the pinned layout with no
+  // re-click.
+  const isPinnedMode = pinned && viewportAllowsPin;
 
   // A deep link is already present during SSR. Opening Base UI's modal Sheet
   // before hydration completes applies aria-hidden to the server-rendered
   // workspace tree before React compares it, producing a hydration mismatch.
   // Keep the controlled Sheet closed for the identical server/first-client
   // render, then honor the URL immediately after hydration.
+  //
+  // This gate is deliberately applied to the OVERLAY branch only. A pinned
+  // panel is not a modal: it sets no aria-hidden on anything, so it can honour
+  // a deep link on the first paint, and gating it would reintroduce exactly
+  // the flash the server-seeded pin state exists to prevent.
   useEffect(() => {
     // Parent layout effects can run while a streamed page Suspense subtree is
     // still hydrating. Wait for the document load boundary and the browser's
@@ -93,6 +141,171 @@ export function PanelShell() {
     };
   }, []);
 
+  const persist = useCallback((next: PanelPin) => {
+    // Written from event handlers only — never in render and never in a mount
+    // effect, so the server-seeded value is the only thing that decides the
+    // first paint and a client write can never race hydration.
+    document.cookie = panelPinCookieString("detail", next);
+  }, []);
+
+  const togglePinned = useCallback(() => {
+    // Computed outside the state updater on purpose: an updater must stay
+    // pure, and StrictMode double-invokes it in development.
+    const next = !pinned;
+    setPinned(next);
+    persist({ pinned: next, width });
+  }, [persist, pinned, width]);
+
+  const commitWidth = useCallback(
+    (next: number) => {
+      const clamped = clampPanelWidth(next);
+      setWidth(clamped);
+      persist({ pinned: true, width: clamped });
+      // Some widgets measure their container once and cache it — the roadmap
+      // Gantt is the one that actually does. A commit is rare (once per
+      // gesture, or per keyboard step), so this is cheap insurance against a
+      // resized panel leaving a stale-width chart beside it.
+      window.dispatchEvent(new Event("resize"));
+    },
+    [persist],
+  );
+
+  /**
+   * The gesture's upper bound, measured from the live layout rather than
+   * assumed: whatever room main content has beyond PANEL_MIN_MAIN is room the
+   * panel may take. Measuring it also means the bound already accounts for the
+   * sidebar's current width, whether it is expanded or collapsed to icons,
+   * without this component knowing anything about the sidebar.
+   *
+   * Main content is found by its `data-slot`, not by `previousElementSibling`.
+   * The aside is rendered immediately after SidebarInset today, but that is a
+   * layout detail two files away; if anything is ever inserted between them,
+   * a sibling lookup would silently start measuring the wrong element and
+   * clamp every drag to the minimum, with nothing to catch it.
+   */
+  const resolveMaxWidth = useCallback(() => {
+    const main = asideRef.current?.parentElement?.querySelector(
+      '[data-slot="sidebar-inset"]',
+    );
+    // Unmeasurable falls back to the absolute maximum rather than to the
+    // current width. Freezing the gesture is the worse failure — the panel
+    // would silently refuse to grow — and the CSS clamp still protects main
+    // content either way.
+    if (!(main instanceof HTMLElement)) return PANEL_WIDTH_MAX;
+    const slack = main.getBoundingClientRect().width - PANEL_MIN_MAIN;
+    return Math.max(PANEL_WIDTH_MIN, width + slack);
+  }, [width]);
+
+  // In pinned mode there is no dialog and no focus trap, so Esc has to be
+  // handled here. React's synthetic bubbling scopes this to events that
+  // originated inside the aside — a user typing Esc in a main-content field
+  // must not close a column they deliberately docked. Deliberately no
+  // stopPropagation: Base UI's Select and Popover already swallow Esc at their
+  // own popup, so "Esc closes the select, second Esc closes the panel" falls
+  // out for free.
+  const handleAsideKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") closePanel();
+  };
+
+  const title = panel ? PANEL_TITLES[panel.type] ?? panel.type : "";
+
+  const body = (
+    <>
+      {panel?.type === "objective" && <ObjectivePanel id={panel.id} {...common} />}
+      {panel?.type === "keyResult" && <KeyResultPanel id={panel.id} {...common} />}
+      {panel?.type === "opportunity" && (
+        <OpportunityPanel opportunityId={panel.id} {...common} />
+      )}
+      {panel?.type === "solution" && <SolutionPanel id={panel.id} {...common} />}
+      {panel?.type === "assumption" && <AssumptionPanel id={panel.id} {...common} />}
+      {panel?.type === "experiment" && (
+        <ExperimentPanel experimentId={panel.id} {...common} />
+      )}
+      {panel?.type === "roadmapItem" && <RoadmapItemPanel id={panel.id} {...common} />}
+      {panel?.type === "feedback" && <FeedbackPanel id={panel.id} {...common} />}
+      {panel?.type === "task" && (
+        <TaskDetail taskId={panel.id} variant="panel" {...common} />
+      )}
+      {panel?.type === "discovery-rail" && (
+        <DiscoveryRailPanel activeOpportunityId={panel.id} {...common} />
+      )}
+    </>
+  );
+
+  const pinToggle = (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      onClick={togglePinned}
+      // "Pin panel" / "Unpin panel" avoid the strings Comment, Reply, Resolve,
+      // Restore and Show resolved, all of which existing specs match on with
+      // getByRole("button", { name }) inside this panel.
+      aria-label={pinned ? "Unpin panel" : "Pin panel"}
+      title={pinned ? "Unpin panel" : "Pin panel"}
+      aria-pressed={pinned}
+      data-slot="panel-pin-toggle"
+    >
+      {pinned ? <PinOff aria-hidden /> : <Pin aria-hidden />}
+    </Button>
+  );
+
+  if (isPinnedMode) {
+    if (!panel) return null;
+
+    return (
+      <aside
+        ref={asideRef}
+        data-slot="pinned-panel"
+        data-panel-id="detail"
+        onKeyDown={handleAsideKeyDown}
+        // `hidden lg:flex` is the CSS gate, and `lg` is 1024px — the same
+        // number as PANEL_PIN_MIN_VIEWPORT, by construction. This is what makes
+        // seeding the media query with the pin preference safe: if the guess is
+        // wrong, this paints nothing at all rather than painting a pinned panel
+        // on a viewport too narrow to hold one.
+        //
+        // `shrink-0` keeps the aside from being squeezed, but on its own it is
+        // not enough: the sidebar's invisible gap element has no shrink-0, so
+        // an over-wide aside would shrink *that* instead and let the fixed
+        // sidebar overlap main content. The width clamp and the 1024px gate are
+        // what actually prevent it.
+        className="panel-pinned-surface relative hidden shrink-0 min-h-0 flex-col overflow-hidden border-l border-border-default bg-surface-panel lg:flex print:hidden"
+        // React diffs this against the *previous props*, not against the DOM,
+        // so a re-render mid-drag (when the DOM property has raced ahead) sees
+        // no change and performs no write. That is what lets the drag be
+        // imperative and still survive a parent re-render.
+        style={{ [PANEL_WIDTH_PROPERTY]: `${width}px` } as CSSProperties}
+      >
+        <PanelResizeHandle
+          width={width}
+          surfaceRef={asideRef}
+          resolveMaxWidth={resolveMaxWidth}
+          onCommit={commitWidth}
+        />
+
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b px-5 py-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            {title}
+          </h2>
+          <div className="flex items-center gap-1">
+            {pinToggle}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={closePanel}
+              aria-label="Close panel"
+              title="Close panel"
+            >
+              <PanelRightClose aria-hidden />
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto pt-4">{body}</div>
+      </aside>
+    );
+  }
+
   return (
     <Sheet open={hydrated && panel !== null} onOpenChange={(open) => { if (!open) closePanel(); }}>
       <SheetContent
@@ -101,35 +314,27 @@ export function PanelShell() {
         // app/globals.css. Overlays opened from inside this panel (dialogs at
         // 70, popups at 80) are laddered above it; anything portalled at 50
         // would paint underneath and refuse mouse clicks.
+        //
+        // Note: never pass `data-slot` here. SheetContent spreads {...props}
+        // last, so it would silently replace `sheet-content` — the attribute
+        // ~21 functional specs locate this panel by.
         className="w-full sm:max-w-md flex flex-col gap-0 p-0 z-[60]"
         showCloseButton
       >
         <SheetHeader className="px-5 pt-5 pb-3 shrink-0 border-b">
-          <SheetTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            {panel ? PANEL_TITLES[panel.type] ?? panel.type : ""}
-          </SheetTitle>
+          <div className="flex items-center justify-between gap-2 pr-8">
+            <SheetTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+              {title}
+            </SheetTitle>
+            {/* The only discoverable way to pin *from* the overlay. Hidden
+                below lg because pinning is suspended there anyway — offering a
+                control that visibly does nothing is worse than not offering
+                it. */}
+            <div className="hidden lg:flex items-center">{pinToggle}</div>
+          </div>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto pt-4">
-          {panel?.type === "objective" && <ObjectivePanel id={panel.id} {...common} />}
-          {panel?.type === "keyResult" && <KeyResultPanel id={panel.id} {...common} />}
-          {panel?.type === "opportunity" && (
-            <OpportunityPanel opportunityId={panel.id} {...common} />
-          )}
-          {panel?.type === "solution" && <SolutionPanel id={panel.id} {...common} />}
-          {panel?.type === "assumption" && <AssumptionPanel id={panel.id} {...common} />}
-          {panel?.type === "experiment" && (
-            <ExperimentPanel experimentId={panel.id} {...common} />
-          )}
-          {panel?.type === "roadmapItem" && <RoadmapItemPanel id={panel.id} {...common} />}
-          {panel?.type === "feedback" && <FeedbackPanel id={panel.id} {...common} />}
-          {panel?.type === "task" && (
-            <TaskDetail taskId={panel.id} variant="panel" {...common} />
-          )}
-          {panel?.type === "discovery-rail" && (
-            <DiscoveryRailPanel activeOpportunityId={panel.id} {...common} />
-          )}
-        </div>
+        <div className="flex-1 overflow-y-auto pt-4">{body}</div>
       </SheetContent>
     </Sheet>
   );
