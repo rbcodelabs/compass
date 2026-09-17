@@ -8,6 +8,10 @@ export function Board({ children, label = "Board", className }: { children: Reac
 type BoardColumnProps = Omit<ComponentProps<"section">, "title"> & {
   title: ReactNode;
   count?: number;
+  // Purely visual/advisory WIP limit — see docs/decisions/0005/0006
+  // (Superseded). When set, the count badge reads "count/limit" and swaps to
+  // a warning tone once count exceeds limit. Never affects behavior.
+  limit?: number | null;
   description?: ReactNode;
   accent?: "neutral" | "info" | "success" | "warning" | "danger";
   actions?: ReactNode;
@@ -18,8 +22,10 @@ type BoardColumnProps = Omit<ComponentProps<"section">, "title"> & {
   bodyId?: string;
 };
 
-export function BoardColumn({ title, count, description, accent, actions, children, emptyState, footer, className, bodyClassName, bodyRef, bodyId, ...props }: BoardColumnProps) {
+export function BoardColumn({ title, count, limit, description, accent, actions, children, emptyState, footer, className, bodyClassName, bodyRef, bodyId, ...props }: BoardColumnProps) {
   const accents = { neutral: "bg-status-neutral", info: "bg-status-info", success: "bg-status-success", warning: "bg-status-warning", danger: "bg-status-danger" };
+  const overLimit = typeof count === "number" && typeof limit === "number" && count > limit;
+  const badgeLabel = typeof limit === "number" ? `${count}/${limit}` : String(count);
   return (
     <section className={cn("flex w-72 shrink-0 snap-start flex-col rounded-xl border border-border-default bg-surface-inset p-3", className)} {...props}>
       {/*
@@ -33,7 +39,17 @@ export function BoardColumn({ title, count, description, accent, actions, childr
         <div className="flex items-center gap-2">
           {accent && <span aria-hidden className={cn("h-4 w-1 rounded-full", accents[accent])} />}
           <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">{title}</h3>
-          {typeof count === "number" && <span aria-label={`${count} items`} className="rounded-full bg-surface-panel px-1.5 py-0.5 text-xs text-text-subtle">{count}</span>}
+          {typeof count === "number" && (
+            <span
+              aria-label={typeof limit === "number" ? `${count} of ${limit} items` : `${count} items`}
+              className={cn(
+                "rounded-full px-1.5 py-0.5 text-xs",
+                overLimit ? "bg-status-warning-surface text-status-warning" : "bg-surface-panel text-text-subtle"
+              )}
+            >
+              {badgeLabel}
+            </span>
+          )}
           {actions}
         </div>
         {description && <div className="mt-1 text-xs text-text-subtle">{description}</div>}

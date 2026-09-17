@@ -311,6 +311,8 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
               availableExperiments={availableExperiments}
               unscheduledItems={unscheduledItems}
               squads={squads}
+              nowLimit={workspace.nowLimit}
+              nextLimit={workspace.nextLimit}
             />
           </div>
         </div>

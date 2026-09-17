@@ -9,6 +9,7 @@ import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
 import { ManageMembersPanel } from "@/components/settings/manage-members-panel";
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
+import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { DeleteWorkspacePanel } from "@/components/settings/delete-workspace-panel";
 import { WorkspaceScoringPanel } from "@/components/scoring-models/workspace-scoring-panel";
@@ -51,6 +52,8 @@ export default async function SettingsPage({ params }: Props) {
       name: true,
       feedbackEnabled: true,
       roadmapPublic: true,
+      nowLimit: true,
+      nextLimit: true,
       portalAuthRequired: true,
       ssoEnabled: true,
       ssoSecretEncrypted: true,
@@ -238,6 +241,15 @@ export default async function SettingsPage({ params }: Props) {
       {canManageCapabilityPacks && <SettingsSection title="Agent capability packs" description="Install validated skills-only packs for the in-app agent. Packs add instructions, never tools or credentials.">
         <CapabilityPacksPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} initialPacks={capabilityPacks} />
       </SettingsSection>}
+
+      <SettingsSection title="Delivery limits" description="Optional WIP limits for the NOW and NEXT roadmap columns.">
+        <DeliveryLimitsPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          nowLimit={workspace.nowLimit ?? null}
+          nextLimit={workspace.nextLimit ?? null}
+        />
+      </SettingsSection>
 
       <SettingsSection title="Portal" description="Control which parts of this workspace are publicly accessible without login.">
         <PortalSettingsPanel

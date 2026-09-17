@@ -25,6 +25,12 @@ Open a Roadmap item's detail panel to discuss it with the team. Shared Discussio
 - **Later** — Directional bets you're exploring but haven't committed to yet. Items here are placeholders for things that are likely important but whose timing and scope aren't settled.
 - **Shipped** — A visible board column of its own (styled with a purple accent, like Now/Next/Later), used to keep a record of completed work. Drag a card into Shipped, or promote it there directly, to mark it delivered without deleting it — so stakeholders can still see what's shipped and trace it back to the opportunity and solution behind it.
 
+## WIP Limits (Now / Next)
+
+Optionally set a WIP (work-in-progress) limit for the Now and Next columns in **Settings → Delivery limits**. Once set, the column header shows `count/limit` instead of a bare count, and the badge switches to a warning color when the count goes over the limit.
+
+This is purely visual — it's a signal to help the team notice when a column is getting crowded, not a rule the app enforces. Going over the limit never blocks adding a new item or promoting a solution into Now or Next, and there's no confirmation step to override. Leave a limit blank for no limit (the default).
+
 ## Creating Roadmap Items
 
 Click **+ Add Item** in any horizon column. A roadmap item has:
