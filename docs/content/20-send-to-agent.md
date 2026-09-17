@@ -78,3 +78,12 @@ already have.
 
 Reopening an existing conversation never prefills the message box or restores a
 chip, even if that conversation originally started from an approval.
+
+## Viewing Compass inside Geode
+
+If Compass is open inside Geode's Web Viewer, **Send to agent** becomes a small
+menu instead of a single button: **Built-in cloud agent** (everything above,
+unchanged) and **Geode**, which hands the same context to a local Geode Agent
+Threads runtime instead of Compass's own in-app agent. Outside Geode — i.e. every
+normal browser — nothing changes; the single-button behavior above is exactly
+what you see.
