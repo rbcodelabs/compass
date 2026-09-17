@@ -51,7 +51,7 @@ export function TaskColumn({
   const { setNodeRef, isOver } = useDroppable({ id: `column-${status}`, data: { status } });
 
   return (
-    <BoardColumn data-task-column={status} title={label} count={tasks.length} accent={accent} className="min-w-[280px] flex-1 overflow-hidden md:h-full" bodyRef={setNodeRef} bodyId={`task-column-${status}`} bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`} footer={<AddTaskForm workspaceId={workspaceId} status={status} revalidatePathStr={revalidatePathStr} members={members} onAdd={onTaskAdded} />}>
+    <BoardColumn data-task-column={status} title={label} count={tasks.length} accent={accent} className="min-w-[280px] flex-1 md:h-full" bodyRef={setNodeRef} bodyId={`task-column-${status}`} bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`} footer={<AddTaskForm workspaceId={workspaceId} status={status} revalidatePathStr={revalidatePathStr} members={members} onAdd={onTaskAdded} />}>
         <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
           {tasks.length === 0 ? (
             <EmptyState compact title={emptyText} className={isOver ? "border-border-interactive" : undefined} />
