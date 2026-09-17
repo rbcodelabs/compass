@@ -9,6 +9,7 @@ import { ResultItem } from "@/components/experiments/result-item"
 import { LogResultForm } from "@/components/experiments/log-result-form"
 import { ConcludePanel } from "@/components/experiments/conclude-panel"
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel"
+import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions"
 import { SquadPicker } from "@/components/squads/squad-picker"
 import { startExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
 import { ChevronLeftIcon } from "lucide-react"
@@ -107,6 +108,7 @@ export default async function ExperimentDetailPage({
   const fieldDefs = await prisma.customFieldDefinition.findMany({
     where: { workspaceId: workspace.id, objectType: "EXPERIMENT" },
     orderBy: { order: "asc" },
+    include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
   })
   const fieldValues = fieldDefs.length > 0
     ? await prisma.customFieldValue.findMany({
@@ -116,13 +118,8 @@ export default async function ExperimentDetailPage({
   const valueByFieldId = new Map(fieldValues.map((v) => [v.fieldId, v.value]))
   const customFields: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }> =
     fieldDefs.map((f) => ({
-      id: f.id,
-      name: f.name,
-      fieldType: f.fieldType as CustomFieldType,
+      ...toCustomFieldDefinitionData(f),
       objectType: "EXPERIMENT" as const,
-      options: f.options as CustomFieldDefinitionData["options"],
-      required: f.required,
-      order: f.order,
       currentValue: (valueByFieldId.get(f.id) ?? null) as CustomFieldValue,
     }))
 

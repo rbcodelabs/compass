@@ -178,7 +178,8 @@ describe("Roadmap dashboard workspace layout", () => {
     it("uses a roadmap-scoped responsive header and distinct content regions", () => {
       const page = source("app/[orgSlug]/[workspaceSlug]/roadmap/page.tsx");
 
-      expect(page).toContain("<RoadmapHeader squads={squads} />");
+      // Mounted with `squads`; extra props (e.g. custom-field filter facets) are allowed.
+      expect(page).toMatch(/<RoadmapHeader\b[^>]*\bsquads=\{squads\}/);
       expect(page).not.toContain("<WorkspacePage");
       expect(page).not.toContain("toolbar={");
       expect(page).not.toContain("Drag items between horizons");

@@ -15,6 +15,7 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { RoadmapHeader } from "../roadmap-header";
+import type { CustomFieldFilterGroup } from "@/lib/custom-field-filter";
 import { GripVertical } from "lucide-react";
 import { createTimelineLaneKey, packTimelineIntervals } from "@/lib/roadmap-timeline/lane-packing";
 import { HORIZON_META, HORIZON_ORDER } from "@/lib/roadmap";
@@ -61,7 +62,11 @@ type NativeItemLayout = {
   overlapCount: number;
 };
 
-export function NativeTimeline(props: TimelineEngineProps & { headerSquads?: TimelineEngineProps["squads"] }) {
+export function NativeTimeline(props: TimelineEngineProps & {
+  headerSquads?: TimelineEngineProps["squads"];
+  customFieldGroups?: CustomFieldFilterGroup[];
+  activeCustomFieldId?: string | null;
+}) {
   const controller = useTimelineController({
     initialItems: props.items,
     initialUnscheduled: props.unscheduledItems,
@@ -243,7 +248,7 @@ export function NativeTimeline(props: TimelineEngineProps & { headerSquads?: Tim
 
   return (
     <div className="flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0">
-      <RoadmapHeader squads={props.headerSquads ?? props.squads} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: controller.jumpToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0 }} />
+      <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: controller.jumpToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0 }} />
       <div data-slot="workspace-content" className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:px-4 md:py-3">
         <DndContext
           sensors={sensors}
