@@ -157,9 +157,10 @@ describe("RoadmapItem custom fields", () => {
     render(<RoadmapItemPanel id="ri-1" orgSlug="rbcodelabs" workspaceSlug="compass" />);
 
     const row = fieldRow("Release Stage");
-    fireEvent.click(within(row).getByText("Empty"));
-    fireEvent.change(within(row).getByRole("combobox"), { target: { value: "zz_beta" } });
-    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    fireEvent.click(within(row).getByLabelText("Release Stage"));
+    // Picked by its label; stored as its slug. The pairing the old free-text
+    // editor could not enforce.
+    fireEvent.click(await screen.findByRole("option", { name: "ZZ Beta" }));
 
     await waitFor(() =>
       expect(upsertFieldValue).toHaveBeenCalledWith(
@@ -172,20 +173,60 @@ describe("RoadmapItem custom fields", () => {
     await waitFor(() => expect(refresh).toHaveBeenCalled());
   });
 
-  it("clears the value back to null when the selection is emptied", async () => {
+  it("offers the shared option set's list, not the field's own empty column", async () => {
+    // Product Area borrows set-1. Its options reach the panel already resolved
+    // by the read boundary, so the picker must simply render what it is given.
+    detail.data = roadmapItem([{ ...productArea, objectType: "ROADMAP_ITEM", currentValue: null }]);
+    render(<RoadmapItemPanel id="ri-1" orgSlug="rbcodelabs" workspaceSlug="compass" />);
+
+    fireEvent.click(within(fieldRow("Product Area")).getByLabelText("Product Area"));
+
+    expect(await screen.findByRole("option", { name: "ZZ Alpha" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "ZZ Beta" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("option", { name: "ZZ Beta" }));
+    await waitFor(() =>
+      expect(upsertFieldValue).toHaveBeenCalledWith(
+        "ri-1",
+        "field-area",
+        ["zz_beta"],
+        "/rbcodelabs/compass/roadmap"
+      )
+    );
+  });
+
+  it("clears the value back to null from the row itself", async () => {
     detail.data = roadmapItem([{ ...releaseStage, objectType: "ROADMAP_ITEM", currentValue: "zz_beta" }]);
     render(<RoadmapItemPanel id="ri-1" orgSlug="rbcodelabs" workspaceSlug="compass" />);
 
     const row = fieldRow("Release Stage");
-    fireEvent.click(within(row).getByText("ZZ Beta"));
-    fireEvent.change(within(row).getByRole("combobox"), { target: { value: "" } });
-    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Clear Release Stage" }));
 
     await waitFor(() =>
       expect(upsertFieldValue).toHaveBeenCalledWith(
         "ri-1",
         "field-stage",
         null,
+        "/rbcodelabs/compass/roadmap"
+      )
+    );
+  });
+
+  it("clears a multi-select field to empty", async () => {
+    detail.data = roadmapItem([
+      { ...productArea, objectType: "ROADMAP_ITEM", currentValue: ["zz_alpha", "zz_beta"] },
+    ]);
+    render(<RoadmapItemPanel id="ri-1" orgSlug="rbcodelabs" workspaceSlug="compass" />);
+
+    fireEvent.click(
+      within(fieldRow("Product Area")).getByRole("button", { name: "Clear Product Area" })
+    );
+
+    await waitFor(() =>
+      expect(upsertFieldValue).toHaveBeenCalledWith(
+        "ri-1",
+        "field-area",
+        [],
         "/rbcodelabs/compass/roadmap"
       )
     );
@@ -213,9 +254,8 @@ describe("Solution custom fields", () => {
     render(<SolutionPanel id="sol-1" orgSlug="rbcodelabs" workspaceSlug="compass" />);
 
     const row = fieldRow("Release Stage");
-    fireEvent.click(within(row).getByText("Empty"));
-    fireEvent.change(within(row).getByRole("combobox"), { target: { value: "zz_alpha" } });
-    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    fireEvent.click(within(row).getByLabelText("Release Stage"));
+    fireEvent.click(await screen.findByRole("option", { name: "ZZ Alpha" }));
 
     await waitFor(() =>
       expect(upsertFieldValue).toHaveBeenCalledWith(

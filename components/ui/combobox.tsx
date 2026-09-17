@@ -44,6 +44,63 @@ function Combobox({ items, value, onValueChange, disabled, open, onOpenChange, c
   )
 }
 
+type ComboboxMultipleProps = {
+  items: ComboboxItemData[]
+  /** Selected option values, in the order they should be displayed. */
+  values: readonly string[]
+  onValuesChange?: (values: string[]) => void
+  disabled?: boolean
+  /** Controlled open state — use with a triggerless, anchored ComboboxContent. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  children: React.ReactNode
+}
+
+/**
+ * The multi-selection form of `Combobox`, sharing its trigger, content and item
+ * parts so a multi-value picker looks and filters exactly like a single-value
+ * one — checked items simply accumulate instead of replacing each other.
+ *
+ * Callers work in option values; Base UI works in item objects. Mapping between
+ * them here is what keeps `isItemEqualToValue` (and the referential identity it
+ * would otherwise depend on) out of every call site. Any value with no matching
+ * item is dropped from the selection, so callers that must preserve unknown
+ * values are responsible for passing items that cover them.
+ */
+function ComboboxMultiple({
+  items,
+  values,
+  onValuesChange,
+  disabled,
+  open,
+  onOpenChange,
+  children,
+}: ComboboxMultipleProps) {
+  const selectedItems = React.useMemo(
+    () =>
+      values
+        .map((value) => items.find((item) => item.value === value))
+        .filter((item): item is ComboboxItemData => item !== undefined),
+    [items, values]
+  )
+
+  return (
+    <ComboboxPrimitive.Root<ComboboxItemData, true>
+      items={items}
+      multiple
+      value={selectedItems}
+      isItemEqualToValue={(item, value) => item?.value === value?.value}
+      onValueChange={(next) => onValuesChange?.(next.map((item) => item.value))}
+      disabled={disabled}
+      open={open}
+      onOpenChange={onOpenChange ? (nextOpen) => onOpenChange(nextOpen) : undefined}
+      autoHighlight
+    >
+      {children}
+    </ComboboxPrimitive.Root>
+  )
+}
+
 function ComboboxTrigger({
   className,
   size = "default",
@@ -191,4 +248,11 @@ function ComboboxItem({ className, children, ...props }: ComboboxPrimitive.Item.
   )
 }
 
-export { Combobox, ComboboxContent, ComboboxItem, ComboboxTrigger, ComboboxValue }
+export {
+  Combobox,
+  ComboboxContent,
+  ComboboxItem,
+  ComboboxMultiple,
+  ComboboxTrigger,
+  ComboboxValue,
+}
