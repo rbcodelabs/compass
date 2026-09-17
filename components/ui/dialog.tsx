@@ -25,11 +25,37 @@ function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
 
 function DialogOverlay({
   className,
+  // Base UI suppresses a *nested* dialog's backdrop by default
+  // (`enabled: forceRender || !nested` in DialogBackdrop) so a stacked-dialog
+  // treatment can keep the parent visible behind the child. Entity detail
+  // panels are built on Sheet, which is itself a Base UI Dialog, so every
+  // dialog opened from inside a panel ("Link existing task", "Add evidence",
+  // "Add solution") counts as nested — and shipped with no scrim at all. The
+  // panel behind an open modal was neither dimmed nor pointer-blocked; a
+  // production hit-test over the panel returned panel content, not a scrim.
+  //
+  // Forcing the dialog's own backdrop is the right fix rather than raising the
+  // Sheet's backdrop while a child dialog is open, because:
+  //   - the dialog owns its scrim, so the fix lives with the thing whose
+  //     modality is being asserted, and works from any surface — not just from
+  //     a Sheet that happens to know a child is open;
+  //   - it lands exactly on the dialog rung (70) of the ladder in
+  //     app/globals.css, already above the panel rung (60). Raising the Sheet
+  //     backdrop would need a new rung between 60 and 70 and would make the
+  //     Sheet responsible for scrimming a surface it does not own;
+  //   - it is a documented Base UI prop, not a reach into `data-nested-dialog-
+  //     open` internals plus a `:has()` selector.
+  // It does not double-darken: the Sheet's own backdrop sits at 50, under the
+  // opaque panel content at 60, so the two scrims never overlap on screen.
+  // `forceRender` only overrides the *nested* suppression — the backdrop is
+  // still `hidden` while the dialog is closed.
+  forceRender = true,
   ...props
 }: DialogPrimitive.Backdrop.Props) {
   return (
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
+      forceRender={forceRender}
       className={cn(
         // Dialog layer (70) — see the stacking-layer ladder in app/globals.css.
         // Backdrop and content share the layer; content wins on DOM order.

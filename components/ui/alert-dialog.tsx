@@ -24,11 +24,17 @@ function AlertDialogPortal({ ...props }: AlertDialogPrimitive.Portal.Props) {
 
 function AlertDialogOverlay({
   className,
+  // Kept in step with dialog.tsx: `AlertDialog.Backdrop` *is* `DialogBackdrop`,
+  // so a confirm prompt opened from inside an entity detail panel is nested and
+  // has its backdrop suppressed by default too. See the full rationale on
+  // DialogOverlay in components/ui/dialog.tsx.
+  forceRender = true,
   ...props
 }: AlertDialogPrimitive.Backdrop.Props) {
   return (
     <AlertDialogPrimitive.Backdrop
       data-slot="alert-dialog-overlay"
+      forceRender={forceRender}
       className={cn(
         // Dialog layer (70) — see the stacking-layer ladder in app/globals.css.
         // Kept in step with dialog.tsx so a confirm prompt never paints under
