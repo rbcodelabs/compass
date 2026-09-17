@@ -247,7 +247,9 @@ test.describe("Detail panel pin mode", () => {
     await sheet.getByRole("button", { name: "Add Solution" }).click();
     await expect(sheet.getByText(solutionTitle)).toBeVisible({ timeout: 20_000 });
 
-    await sheet.getByRole("button", { name: solutionTitle, exact: true }).click();
+    // Not `exact` — the solution row's accessible name is prefixed with its
+    // status badge ("Idea Pin E2E Select Sol …"), so an exact match never hits.
+    await sheet.getByRole("button", { name: solutionTitle }).click();
     await expect(page).toHaveURL(/detail=solution/);
 
     await page.getByRole("button", { name: "Pin panel" }).click();
