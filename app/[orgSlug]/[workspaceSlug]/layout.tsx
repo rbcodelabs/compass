@@ -10,6 +10,7 @@ import { PanelShell } from "@/components/panels/panel-shell"
 import { WorkspaceThemeStyle } from "@/components/branding/workspace-theme-style"
 import { resolveWorkspaceBranding } from "@/lib/branding"
 import { cookies } from "next/headers"
+import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
@@ -47,6 +48,12 @@ export default async function WorkspaceLayout({
   const isOrgAdmin = orgMembership?.role === "OWNER" || orgMembership?.role === "ADMIN"
   const cookieStore = await cookies()
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false"
+  // Read beside sidebar_state, for the same reason: the detail panel's layout
+  // has to be correct in the first painted frame, not corrected after
+  // hydration. An absent or corrupt cookie parses to unpinned.
+  const initialPanelPin = parsePanelPin(
+    cookieStore.get(panelPinCookieName("detail"))?.value
+  )
   const researchCaptureEnabled = isResearchCaptureEnabled()
 
   return (
@@ -92,13 +99,19 @@ export default async function WorkspaceLayout({
             <SidebarInset className="min-w-0 overflow-y-auto bg-surface-app pb-16 md:pb-0">
               {children}
             </SidebarInset>
+
+            {/* Sits here, immediately after SidebarInset and inside
+                SidebarProvider, because SidebarProvider renders a plain flex
+                row — that is what makes a pinned panel a real third column
+                beside main content rather than something floating over it. A
+                no-op for overlay mode, which portals out of the tree either
+                way. */}
+            <PanelShell initialPin={initialPanelPin} />
           </SidebarProvider>
         </TooltipProvider>
 
         {/* Mobile bottom nav — shown on small screens only */}
         <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} researchCaptureEnabled={researchCaptureEnabled} />
-
-        <PanelShell />
         </PanelProvider>
         </div>
       </ThemeProvider>

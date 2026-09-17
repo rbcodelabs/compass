@@ -8,6 +8,7 @@ import { MobileHeader } from "@/components/mobile-header";
 import { PanelProvider } from "@/components/panels/panel-context";
 import { PanelShell } from "@/components/panels/panel-shell";
 import { cookies } from "next/headers";
+import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -59,6 +60,10 @@ export default async function OrgSettingsLayout({
   }
   const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
+  // Same server-seeded read as the workspace layout — see the note there.
+  const initialPanelPin = parsePanelPin(
+    cookieStore.get(panelPinCookieName("detail"))?.value
+  );
 
   return (
     // MobileHeader calls usePanelContext() unconditionally, so it needs a
@@ -101,12 +106,14 @@ export default async function OrgSettingsLayout({
           <SidebarInset className="min-w-0 overflow-y-auto bg-surface-app pb-16 md:pb-0">
             {children}
           </SidebarInset>
+
+          {/* Inside SidebarProvider, after SidebarInset — see the note in the
+              workspace layout. */}
+          <PanelShell initialPin={initialPanelPin} />
         </SidebarProvider>
       </TooltipProvider>
 
       <BottomNav orgSlug={orgSlug} workspaceSlug={anchorWorkspace.slug} />
-
-      <PanelShell />
     </PanelProvider>
   );
 }
