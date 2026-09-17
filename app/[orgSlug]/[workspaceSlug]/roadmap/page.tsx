@@ -10,6 +10,12 @@ import type { Horizon, SquadData, TaskStatus } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import type { UnscheduledItem } from "@/components/roadmap/unscheduled-items-panel";
 import { deriveRoadmapDeliveryStatus } from "@/lib/roadmap-delivery-status";
+import { loadCustomFieldDefinitions } from "@/lib/custom-field-definitions";
+import {
+  buildCustomFieldFilterGroups,
+  parseCustomFieldFilterParams,
+  resolveCustomFieldFilter,
+} from "@/lib/custom-field-filter";
 
 export const metadata = {
   title: "Roadmap",
@@ -17,7 +23,7 @@ export const metadata = {
 
 interface RoadmapPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string; view?: string }>;
+  searchParams: Promise<{ squad?: string; view?: string; field?: string; fieldValue?: string }>;
 }
 
 export default async function RoadmapPage({ params, searchParams }: RoadmapPageProps) {
@@ -25,7 +31,12 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const { squad: squadFilter, view: viewParam } = await searchParams;
+  const {
+    squad: squadFilter,
+    view: viewParam,
+    field: fieldParam,
+    fieldValue: fieldValueParam,
+  } = await searchParams;
   const view = viewParam === "timeline" ? "timeline" : "board";
   const prisma = getPrisma();
 
@@ -38,6 +49,19 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
 
   if (!workspace) notFound();
 
+  const [roadmapFieldDefs, customFieldFilter] = await Promise.all([
+    loadCustomFieldDefinitions(prisma, {
+      workspaceId: workspace.id,
+      objectTypes: ["ROADMAP_ITEM"],
+    }),
+    resolveCustomFieldFilter(prisma, {
+      workspaceId: workspace.id,
+      objectTypes: ["ROADMAP_ITEM"],
+      filter: parseCustomFieldFilterParams({ field: fieldParam, fieldValue: fieldValueParam }),
+    }),
+  ]);
+  const customFieldGroups = buildCustomFieldFilterGroups(roadmapFieldDefs);
+
   const [rawSquads, items, rawKRs, rawSolutions, rawOpportunities, rawExperiments, unscheduledSolutions, unscheduledBugs] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
@@ -48,6 +72,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
         workspaceId: workspace.id,
         status: "ACTIVE",
         ...(squadFilter ? { squadId: squadFilter } : {}),
+        ...(customFieldFilter ? { id: { in: customFieldFilter.objectIds } } : {}),
       },
       orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }],
       include: {
@@ -244,17 +269,30 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
           <NativeTimeline
             // A filter change is a new dataset; ordinary refreshes must
             // preserve in-flight mutation fences and optimistic edits.
-            key={JSON.stringify([workspace.id, squadFilter || null])}
+            key={JSON.stringify([
+              workspace.id,
+              squadFilter || null,
+              customFieldFilter?.fieldId ?? null,
+              fieldValueParam || null,
+            ])}
             items={cardItems}
             squads={squadFilter ? squads.filter((squad) => squad.id === squadFilter) : squads}
             headerSquads={squads}
+            customFieldGroups={customFieldGroups}
+            activeCustomFieldId={customFieldFilter?.fieldId ?? null}
             workspaceId={workspace.id}
             unscheduledItems={unscheduledItems}
           />
         </Suspense>
       ) : (
         <div className="flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0">
-          <Suspense><RoadmapHeader squads={squads} /></Suspense>
+          <Suspense>
+            <RoadmapHeader
+              squads={squads}
+              customFieldGroups={customFieldGroups}
+              activeCustomFieldId={customFieldFilter?.fieldId ?? null}
+            />
+          </Suspense>
           <div data-slot="workspace-content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
             <RoadmapBoard
               initialItems={cardItems}

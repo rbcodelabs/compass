@@ -153,7 +153,8 @@ describe("Tasks dashboard workspace layout", () => {
       const page = source("app/[orgSlug]/[workspaceSlug]/tasks/page.tsx");
 
       expect(page).toContain("<WorkspacePage");
-      expect(page).toContain("<TasksFilters squads={squads} members={members} />");
+      // Mounted with `squads` and `members`; extra props are allowed.
+      expect(page).toMatch(/<TasksFilters\b[^>]*\bsquads=\{squads\}[^>]*\bmembers=\{members\}/);
       expect(page).toContain("<TasksViewToggle view={view} />");
       expect(page).toContain('contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}');
       expect(page).not.toContain("PageHeader");

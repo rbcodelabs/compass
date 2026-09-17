@@ -2,6 +2,9 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-panel";
+import { SharedOptionSetsPanel } from "@/components/custom-fields/shared-option-sets-panel";
+import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
+import { parseSelectOptions } from "@/lib/shared-field-options";
 import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
 import { ManageMembersPanel } from "@/components/settings/manage-members-panel";
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
@@ -13,7 +16,7 @@ import type { ApiKeyRow } from "@/components/settings/manage-api-keys-panel";
 import type {
   CustomFieldDefinitionData,
   CustomFieldObjectType,
-  CustomFieldType,
+  SharedFieldOptionSetData,
   SquadData,
   MemberData,
 } from "@/lib/types";
@@ -62,10 +65,21 @@ export default async function SettingsPage({ params }: Props) {
 
   if (!workspace) redirect("/dashboard");
 
-  const [rawFields, rawSquads, rawApiKeys, rawMembers, rawScoringModels, scoringConfig, rawCapabilityPacks] = await Promise.all([
+  const [rawFields, rawSharedOptionSets, rawSquads, rawApiKeys, rawMembers, rawScoringModels, scoringConfig, rawCapabilityPacks] = await Promise.all([
     prisma.customFieldDefinition.findMany({
       where: { workspaceId: workspace.id },
       orderBy: [{ objectType: "asc" }, { order: "asc" }],
+      include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
+    }),
+    prisma.sharedFieldOptionSet.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: { name: "asc" },
+      include: {
+        fields: {
+          select: { id: true, name: true, objectType: true },
+          orderBy: [{ objectType: "asc" }, { order: "asc" }],
+        },
+      },
     }),
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
@@ -98,14 +112,19 @@ export default async function SettingsPage({ params }: Props) {
     }),
   ]);
 
-  const fields: CustomFieldDefinitionData[] = rawFields.map((f) => ({
-    id: f.id,
-    name: f.name,
-    fieldType: f.fieldType as CustomFieldType,
-    objectType: f.objectType as CustomFieldObjectType,
-    options: f.options as CustomFieldDefinitionData["options"],
-    required: f.required,
-    order: f.order,
+  const fields: CustomFieldDefinitionData[] = rawFields.map(toCustomFieldDefinitionData);
+
+  const sharedOptionSets: SharedFieldOptionSetData[] = rawSharedOptionSets.map((set) => ({
+    id: set.id,
+    name: set.name,
+    options: parseSelectOptions(set.options),
+    fieldCount: set.fields.length,
+    usedBy: set.fields.map((field) => ({
+      id: field.id,
+      name: field.name,
+      objectType: field.objectType as CustomFieldObjectType,
+    })),
+    updatedAt: set.updatedAt.toISOString(),
   }));
 
   const squads: SquadData[] = rawSquads.map((s) => ({
@@ -177,11 +196,20 @@ export default async function SettingsPage({ params }: Props) {
         />
       </SettingsSection>
 
-      <SettingsSection title="Custom Fields" description="Add fields to any object type. Click any field value on a record to edit it.">
+      <SettingsSection title="Shared option sets" description="One editable picklist that any select or multi-select field can borrow — across different object types. Edit the list here and every field using it updates at once.">
+        <SharedOptionSetsPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          sets={sharedOptionSets}
+        />
+      </SettingsSection>
+
+      <SettingsSection title="Custom Fields" description="Add fields to any object type. Click any field value on a record to edit it. Select fields can draw their options from a shared option set instead of keeping their own list.">
         <ManageFieldsPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           initialFields={fields}
+          sharedOptionSets={sharedOptionSets}
         />
       </SettingsSection>
 

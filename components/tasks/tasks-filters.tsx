@@ -9,6 +9,12 @@ import {
   canonicalAssigneeFilterValue,
 } from "@/lib/task-assignee-display";
 import { TASK_PRIORITIES, TASK_PRIORITY_LABELS } from "@/lib/task-meta";
+import {
+  CUSTOM_FIELD_FILTER_PARAMS,
+  applyCustomFieldFilterParams,
+  customFieldFacetedGroups,
+} from "@/lib/custom-field-filter-menu";
+import type { CustomFieldFilterGroup } from "@/lib/custom-field-filter";
 import { assigneeValue, useTaskAssignees } from "./task-assignee-picker";
 
 const PRIORITIES: TaskPriority[] = [...TASK_PRIORITIES];
@@ -16,14 +22,26 @@ const PRIORITIES: TaskPriority[] = [...TASK_PRIORITIES];
 type TasksFiltersProps = {
   squads: SquadData[];
   members: MemberData[];
+  customFieldGroups?: CustomFieldFilterGroup[];
+  activeCustomFieldId?: string | null;
 };
 
-export function TasksFilters({ squads, members }: TasksFiltersProps) {
+export function TasksFilters({
+  squads,
+  members,
+  customFieldGroups = [],
+  activeCustomFieldId = null,
+}: TasksFiltersProps) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { options } = useTaskAssignees(members);
   const selected = searchParams.get("assignee");
+
+  function push(params: URLSearchParams) {
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }
 
   function setFilter(key: "squad" | "assignee" | "priority", value: string | null) {
     const params = new URLSearchParams(searchParams.toString());
@@ -32,8 +50,13 @@ export function TasksFilters({ squads, members }: TasksFiltersProps) {
     } else {
       params.delete(key);
     }
-    const query = params.toString();
-    router.push(query ? `${pathname}?${query}` : pathname);
+    push(params);
+  }
+
+  function setCustomField(fieldId: string, value: string | null) {
+    const params = new URLSearchParams(searchParams.toString());
+    applyCustomFieldFilterParams(params, fieldId, value);
+    push(params);
   }
 
   function clearAll() {
@@ -41,8 +64,8 @@ export function TasksFilters({ squads, members }: TasksFiltersProps) {
     params.delete("squad");
     params.delete("assignee");
     params.delete("priority");
-    const query = params.toString();
-    router.push(query ? `${pathname}?${query}` : pathname);
+    for (const name of CUSTOM_FIELD_FILTER_PARAMS) params.delete(name);
+    push(params);
   }
 
   return (
@@ -83,6 +106,12 @@ export function TasksFilters({ squads, members }: TasksFiltersProps) {
             label: TASK_PRIORITY_LABELS[priority],
           })),
         },
+        ...customFieldFacetedGroups({
+          groups: customFieldGroups,
+          activeFieldId: activeCustomFieldId,
+          activeValue: searchParams.get("fieldValue"),
+          onChange: setCustomField,
+        }),
       ]}
     />
   );

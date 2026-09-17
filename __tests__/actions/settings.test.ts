@@ -130,6 +130,7 @@ const mockPrisma = {
   roadmapItem: mockRoadmapItem,
   customFieldDefinition: mockCustomFieldDefinition,
   customFieldValue: mockCustomFieldValue,
+  sharedFieldOptionSet: { deleteMany: vi.fn() },
   apiKey: mockApiKey,
   organization: mockOrganization,
   organizationMember: mockOrganizationMember,

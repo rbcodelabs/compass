@@ -32,6 +32,19 @@ import { isPmInterviewEnabled } from "@/lib/research-feature";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
+import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
+
+/**
+ * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
+ * its research provenance here, so every panel inherits one projection rather
+ * than each re-deriving it. Rows that were never promoted pass through
+ * untouched and cost no extra query at all (see lib/evidence-provenance.ts).
+ */
+async function resolveEvidenceProvenance<
+  T extends { id: string; workspaceId: string; researchSynthesisId: string | null },
+>(evidence: T[]) {
+  return withEvidenceProvenance(evidence, await loadEvidenceProvenance(evidence));
+}
 
 /**
  * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
@@ -384,6 +397,7 @@ async function fetchTask(id: string, workspaceId: string) {
     prisma.customFieldDefinition.findMany({
       where: { workspaceId, objectType: "TASK" },
       orderBy: { order: "asc" },
+      include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
     }),
     resolveTaskAssignees(workspaceId, [task, ...task.subtasks]),
   ]);
@@ -463,13 +477,8 @@ async function fetchTask(id: string, workspaceId: string) {
       : [];
   const valueByFieldId = new Map(fieldValues.map((v) => [v.fieldId, v.value]));
   const customFields = fieldDefs.map((f) => ({
-    id: f.id,
-    name: f.name,
-    fieldType: f.fieldType,
+    ...toCustomFieldDefinitionData(f),
     objectType: "TASK" as const,
-    options: f.options,
-    required: f.required,
-    order: f.order,
     currentValue: valueByFieldId.get(f.id) ?? null,
   }));
 
