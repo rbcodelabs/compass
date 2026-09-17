@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit",
     "ui:colors": "node scripts/check-ui-colors.mjs",
     "ui:primitives": "node scripts/check-ui-primitives.mjs",
+    "ui:layers": "node scripts/check-ui-layers.mjs",
     "ui:colors:baseline": "node scripts/check-ui-colors.mjs --write-baseline",
     "postinstall": "prisma generate",
     "test": "vitest run",

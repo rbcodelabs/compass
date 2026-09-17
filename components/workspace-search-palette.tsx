@@ -125,8 +125,12 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
           showCloseButton={false}
-          overlayClassName="z-[70]"
-          className="top-[18vh] z-[80] block max-h-[70vh] max-w-xl translate-y-0 overflow-hidden p-0"
+          // No z-index override: DialogContent already sits on the dialog
+          // layer (70), which clears the entity detail panel layer (60).
+          // This used to carry a local z-[70]/z-[80] pair, which is what
+          // first broke the "nothing goes above 60" assumption that
+          // select.tsx was written against.
+          className="top-[18vh] block max-h-[70vh] max-w-xl translate-y-0 overflow-hidden p-0"
           initialFocus={inputRef}
           finalFocus={triggerRef}
         >

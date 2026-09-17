@@ -120,18 +120,21 @@ function ComboboxContent({
         align={align}
         alignOffset={alignOffset}
         anchor={anchor}
-        // z-[70], not z-50: matches SelectContent's Positioner (see
-        // components/ui/select.tsx) for the same reason — the Positioner is
-        // the portal's fixed-position root, so this value alone decides
-        // whether the popup paints above or below other overlays. Entity
-        // detail panels raise their SheetContent to z-[60] (panel-shell.tsx),
-        // which left in-panel Comboboxes (InlineAssigneeField, SquadPicker)
-        // rendering with correct ARIA state but *underneath* the sheet —
-        // present in the DOM, but invisible and swallowing no clicks (the
-        // panel content beneath intercepted them instead). 70 keeps this
-        // transient popup layer above the panel layer, consistent with
-        // Select everywhere else in the app.
-        className="isolate z-[70]"
+        // Popup layer (80) — see the stacking-layer ladder in app/globals.css.
+        // The Positioner is the portal's fixed-position root, so this value
+        // alone decides whether the list paints above or below other overlays.
+        // At z-50 every Combobox opened inside an entity detail panel (panel
+        // layer, 60) — the task/linked-task assignee pickers, InlineAssigneeField,
+        // SquadPicker — rendered with correct ARIA state but *underneath* the
+        // sheet: present in the DOM and keyboard-reachable, yet mouse-dead,
+        // because the panel content beneath intercepted the clicks.
+        //
+        // #228 fixed this at z-[70] to match Select's value at the time. 80,
+        // not 70, because the ladder now puts dialogs on 70 — and a Combobox
+        // is opened from inside dialogs too ("Link existing task"), so at 70
+        // it would collide with the dialog that contains it. Same rung as
+        // select.tsx.
+        className="isolate z-[80]"
       >
         <ComboboxPrimitive.Popup
           data-slot="combobox-content"

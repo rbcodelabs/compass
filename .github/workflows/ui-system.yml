@@ -23,6 +23,7 @@ jobs:
       - run: pnpm build
       - run: pnpm ui:colors
       - run: pnpm ui:primitives
+      - run: pnpm ui:layers
 
   authenticated-roadmap:
     needs: checks
