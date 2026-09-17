@@ -25,11 +25,45 @@ function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
 
 function DialogOverlay({
   className,
+  // Base UI suppresses a *nested* dialog's backdrop by default
+  // (`enabled: forceRender || !nested` in DialogBackdrop) so a stacked-dialog
+  // treatment can keep the parent visible behind the child. Entity detail
+  // panels are built on Sheet, which is itself a Base UI Dialog, so every
+  // dialog opened from inside a panel ("Link existing task", "Add evidence",
+  // "Add solution") counts as nested — and shipped with no scrim at all. The
+  // panel behind an open modal was neither dimmed nor pointer-blocked; a
+  // production hit-test over the panel returned panel content, not a scrim.
+  //
+  // Forcing the dialog's own backdrop is the right fix rather than raising the
+  // Sheet's backdrop while a child dialog is open, because:
+  //   - the dialog owns its scrim, so the fix lives with the thing whose
+  //     modality is being asserted, and works from any surface — not just from
+  //     a Sheet that happens to know a child is open;
+  //   - it lands exactly on the dialog rung (70) of the ladder in
+  //     app/globals.css, already above the panel rung (60). Raising the Sheet
+  //     backdrop would need a new rung between 60 and 70 and would make the
+  //     Sheet responsible for scrimming a surface it does not own;
+  //   - it is a documented Base UI prop, not a reach into `data-nested-dialog-
+  //     open` internals plus a `:has()` selector.
+  // Measured effect on the doubled scrim, dialog-open, both at bg-black/10:
+  //   over the panel          10%  (the Sheet's scrim is at 50, beneath the
+  //                                 opaque panel surface at 60, so only this
+  //                                 backdrop paints there)
+  //   over the page behind it 19%  (1 - 0.9*0.9 — both scrims composite)
+  // So the page behind goes from 10% to 19% while the panel goes from 0% to
+  // 10%. That reads as correct depth rather than a doubled scrim, and is why
+  // the Sheet's backdrop is left alone instead of being suppressed while a
+  // child dialog is open — suppressing it would flicker the page brightness
+  // on every dialog open/close for a 9-point tint difference.
+  // `forceRender` only overrides the *nested* suppression — the backdrop is
+  // still `hidden` while the dialog is closed.
+  forceRender = true,
   ...props
 }: DialogPrimitive.Backdrop.Props) {
   return (
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
+      forceRender={forceRender}
       className={cn(
         // Dialog layer (70) — see the stacking-layer ladder in app/globals.css.
         // Backdrop and content share the layer; content wins on DOM order.
