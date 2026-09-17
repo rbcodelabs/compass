@@ -22,6 +22,7 @@ import {
   parseCustomFieldFilterParams,
   resolveCustomFieldFilter,
 } from "@/lib/custom-field-filter";
+import { solutionSwimlaneKey } from "@/lib/discovery-filters";
 
 export const metadata = {
   title: "Discovery",
@@ -285,10 +286,11 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         <DiscoveryTableView opportunities={tableOpportunities} />
       ) : groupBy === "opportunity" ? (
         <SolutionSwimlaneBoard
-          key={opportunities
-            .map((o) => o.id)
-            .concat(opportunities.flatMap((o) => o.solutions.map((s) => s.id)))
-            .join(",")}
+          // Keyed on what is rendered, not on the pre-filter query: a
+          // Solution-level tag leaves the opportunity rows untouched by design,
+          // so keying off `opportunities` never changed and surviving lanes went
+          // on showing their untagged solutions.
+          key={solutionSwimlaneKey(swimlaneOpportunities)}
           opportunities={swimlaneOpportunities}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}

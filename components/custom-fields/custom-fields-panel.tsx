@@ -17,6 +17,14 @@ interface Props {
   objectId: string;
   revalidatePathStr: string;
   fields: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }>;
+  /**
+   * Called after a value is written. Server-rendered hosts don't need it —
+   * `upsertFieldValue`'s own `revalidatePath` re-renders them with fresh props.
+   * A detail panel does: it loads its entity through a client fetch, so nothing
+   * about a server revalidation reaches it and the saved value would keep
+   * displaying as its pre-save one until the panel was reopened.
+   */
+  onSaved?: () => void;
 }
 
 // ─── Individual field editor ──────────────────────────────────────────────────
@@ -25,10 +33,12 @@ function FieldValue({
   field,
   objectId,
   revalidatePathStr,
+  onSaved,
 }: {
   field: CustomFieldDefinitionData & { currentValue: CustomFieldValue };
   objectId: string;
   revalidatePathStr: string;
+  onSaved?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [localVal, setLocalVal] = useState<string>(
@@ -60,6 +70,7 @@ function FieldValue({
     startTransition(async () => {
       await upsertFieldValue(objectId, field.id, value, revalidatePathStr);
       setEditing(false);
+      onSaved?.();
     });
   }
 
@@ -210,6 +221,7 @@ export function CustomFieldsPanel({
   fields,
   objectId,
   revalidatePathStr,
+  onSaved,
 }: Omit<Props, "orgSlug" | "workspaceSlug">) {
   if (fields.length === 0) return null;
 
@@ -221,6 +233,7 @@ export function CustomFieldsPanel({
           field={field}
           objectId={objectId}
           revalidatePathStr={revalidatePathStr}
+          onSaved={onSaved}
         />
       ))}
     </div>

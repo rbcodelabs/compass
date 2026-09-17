@@ -24,6 +24,8 @@ const models = {
   artifactLink: { findMany: vi.fn() },
   artifact: { findMany: vi.fn() },
   feedbackItem: { findFirst: vi.fn() },
+  customFieldDefinition: { findMany: vi.fn() },
+  customFieldValue: { findMany: vi.fn() },
 };
 
 vi.mock("@/lib/db", () => ({ default: () => models }));
@@ -42,7 +44,17 @@ const ID = "ent-1";
 // scopes it to a workspace (this is the IDOR defense — assert it precisely).
 const CASES: Array<{
   type: EntityType;
-  model: Exclude<keyof typeof models, "task" | "workspaceMember" | "reviewRequest" | "decisionApplication" | "artifact" | "artifactLink">;
+  model: Exclude<
+    keyof typeof models,
+    | "task"
+    | "workspaceMember"
+    | "reviewRequest"
+    | "decisionApplication"
+    | "artifact"
+    | "artifactLink"
+    | "customFieldDefinition"
+    | "customFieldValue"
+  >;
   where: Record<string, unknown>;
 }> = [
   { type: "objective", model: "objective", where: { id: ID, cycle: { workspaceId: WS } } },
@@ -70,6 +82,8 @@ beforeEach(() => {
   models.reviewRequest.findFirst.mockResolvedValue(null);
   models.artifactLink.findMany.mockResolvedValue([]);
   models.artifact.findMany.mockResolvedValue([]);
+  models.customFieldDefinition.findMany.mockResolvedValue([]);
+  models.customFieldValue.findMany.mockResolvedValue([]);
 });
 
 describe("isEntityType", () => {
@@ -179,7 +193,17 @@ describe("getEntityDetail — return shape", () => {
   it("also loads the delivery-tasks bundle for solution, experiment, objective, key result, and feedback", async () => {
     const cases: Array<{
       type: EntityType;
-      model: Exclude<keyof typeof models, "task" | "workspaceMember" | "reviewRequest" | "decisionApplication" | "artifact" | "artifactLink">;
+      model: Exclude<
+    keyof typeof models,
+    | "task"
+    | "workspaceMember"
+    | "reviewRequest"
+    | "decisionApplication"
+    | "artifact"
+    | "artifactLink"
+    | "customFieldDefinition"
+    | "customFieldValue"
+  >;
       linkedType: string;
     }> = [
       { type: "solution", model: "solution", linkedType: "SOLUTION" },
@@ -212,6 +236,50 @@ describe("getEntityDetail — return shape", () => {
     models.solution.findFirst.mockResolvedValue(null);
     const result = await getEntityDetail("solution", ID, WS);
     expect(result).toBeNull();
+  });
+
+  // RoadmapItem and Solution have no detail route, so their panels are the only
+  // place their tags can be edited — which means the detail payload is the only
+  // thing that can carry them. Without this the workspace's shipped
+  // ROADMAP_ITEM/SOLUTION tag filters have nothing to match against.
+  it.each([
+    { type: "roadmapItem" as const, model: "roadmapItem" as const, objectType: "ROADMAP_ITEM" },
+    { type: "solution" as const, model: "solution" as const, objectType: "SOLUTION" },
+  ])("loads $objectType custom fields with their current values", async ({ type, model, objectType }) => {
+    models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
+    models.customFieldDefinition.findMany.mockResolvedValue([
+      {
+        id: "field-area",
+        name: "Product Area",
+        fieldType: "MULTI_SELECT",
+        objectType,
+        options: [{ label: "ZZ Alpha", value: "zz_alpha" }],
+        sharedOptionSetId: null,
+        required: false,
+        order: 0,
+        sharedOptionSet: null,
+      },
+    ]);
+    models.customFieldValue.findMany.mockResolvedValue([
+      { fieldId: "field-area", value: ["zz_alpha"] },
+    ]);
+
+    const result = await getEntityDetail(type, ID, WS);
+
+    expect(models.customFieldDefinition.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { workspaceId: WS, objectType } })
+    );
+    expect(models.customFieldValue.findMany).toHaveBeenCalledWith({
+      where: { fieldId: { in: ["field-area"] }, objectId: ID },
+    });
+    expect(result).toMatchObject({
+      type,
+      data: {
+        customFields: [
+          expect.objectContaining({ id: "field-area", name: "Product Area", currentValue: ["zz_alpha"] }),
+        ],
+      },
+    });
   });
 
   it("dispatches each type to only its own model", async () => {

@@ -22,6 +22,8 @@ import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/link
 import type { ItemStatus, MemberData } from "@/lib/types";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 import { Discussion } from "@/components/comments/discussion";
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
+import type { CustomFieldWithValue } from "@/lib/custom-field-definitions";
 import { usePanelContext } from "./panel-context";
 
 const ITEM_STATUS_LABELS: Record<ItemStatus, string> = {
@@ -51,6 +53,7 @@ type RoadmapItemData = {
   deliveryTasks: LinkedTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
+  customFields: CustomFieldWithValue[];
   _count: { votes: number };
 };
 
@@ -146,6 +149,19 @@ export function RoadmapItemPanel({
         {data.isPrivate && <Field label="Visibility">Private (hidden from public roadmap)</Field>}
       </div>
 
+      {/* A roadmap item has no detail route, so this panel is where its
+          workspace tags get set — and the only thing that can make the
+          roadmap's ROADMAP_ITEM tag filter return a row. */}
+      {data.customFields.length > 0 && (
+        <Section {...SECTION} defaultOpen label="Details">
+          <CustomFieldsPanel
+            fields={data.customFields}
+            objectId={id}
+            revalidatePathStr={roadmapPath}
+            onSaved={refresh}
+          />
+        </Section>
+      )}
 
       <Section {...SECTION} defaultOpen label="Launch">
         <div className="flex flex-col gap-4">

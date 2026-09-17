@@ -363,7 +363,7 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
 
       {data.customFields.length > 0 && (
         <Section label="Details">
-          <CustomFieldsPanel fields={data.customFields} objectId={taskId} revalidatePathStr={detailPath} />
+          <CustomFieldsPanel fields={data.customFields} objectId={taskId} revalidatePathStr={detailPath} onSaved={refresh} />
         </Section>
       )}
 
