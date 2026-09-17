@@ -27,6 +27,10 @@ type Props = {
   availableSolutions?: AvailableSolution[];
   availableOpportunities?: AvailableOpportunity[];
   availableExperiments?: AvailableExperiment[];
+  // Purely visual/advisory WIP limit for this column — only ever passed for
+  // NOW/NEXT. See docs/decisions/0005/0006 (Superseded); never wire this
+  // into any blocking behavior.
+  limit?: number | null;
 };
 
 export function RoadmapColumn({
@@ -43,6 +47,7 @@ export function RoadmapColumn({
   availableSolutions,
   availableOpportunities,
   availableExperiments,
+  limit,
 }: Props) {
   const { label, emptyText } = HORIZON_META[horizon];
   const accent = ({ NOW: "success", NEXT: "info", LATER: "neutral", LAUNCHING: "warning", LAUNCHED: "success", SHIPPED: "success" } as const)[horizon];
@@ -57,6 +62,7 @@ export function RoadmapColumn({
     <BoardColumn
       title={label}
       count={items.length}
+      limit={limit}
       accent={accent}
       className="min-w-[280px] flex-1 overflow-hidden md:h-full"
       bodyRef={setNodeRef}

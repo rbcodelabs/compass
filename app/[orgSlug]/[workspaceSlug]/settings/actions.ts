@@ -1005,3 +1005,39 @@ export async function updateWorkspaceBranding(
   revalidatePath(`/${orgSlug}/${workspaceSlug}`, "layout");
   revalidatePath(`/portal/${orgSlug}/${workspaceSlug}`, "layout");
 }
+
+// ─── Roadmap WIP Limits ────────────────────────────────────────────────────────
+
+/**
+ * Updates the workspace's NOW/NEXT roadmap WIP limits. `undefined` leaves a
+ * field untouched; explicit `null` clears it back to "no limit". Purely
+ * advisory display settings — see docs/decisions/0005 and 0006 (both
+ * Superseded) for why this must never grow into enforcement.
+ */
+export async function updateWorkspaceLimits(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: {
+    nowLimit?: number | null;
+    nextLimit?: number | null;
+  }
+) {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  for (const [field, value] of Object.entries(input) as [keyof typeof input, number | null | undefined][]) {
+    if (value !== undefined && value !== null && (!Number.isInteger(value) || value < 0)) {
+      throw new Error(`Invalid ${field} — must be a non-negative whole number or empty`);
+    }
+  }
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: {
+      ...(input.nowLimit !== undefined && { nowLimit: input.nowLimit }),
+      ...(input.nextLimit !== undefined && { nextLimit: input.nextLimit }),
+    },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/roadmap`);
+}
