@@ -378,7 +378,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
                 autoFocus
                 defaultValue={icon}
                 placeholder="Paste emoji…"
-                className="w-32 text-sm border border-border-default rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400"
+                className="w-32 text-sm border border-border-default rounded px-2 py-1 outline-none focus:ring-1 focus:ring-ring/50"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleSaveIcon(e.currentTarget.value);
                   if (e.key === "Escape") setShowIconInput(false);
@@ -396,7 +396,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           onChange={(e) => setTitle(e.target.value)}
           onBlur={handleSaveTitle}
           placeholder="Untitled"
-          className="flex-1 min-w-0 text-2xl font-bold text-text-primary bg-transparent border-none outline-none placeholder:text-slate-300"
+          className="flex-1 min-w-0 text-2xl font-bold text-text-primary bg-transparent border-none outline-none placeholder:text-text-disabled"
         />
       </div>
 
@@ -704,7 +704,7 @@ function ToolbarButton({
       className={cn(
         "w-7 h-7 shrink-0 flex items-center justify-center rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
         isActive
-          ? "bg-indigo-100 text-indigo-700"
+          ? "bg-primary/10 text-primary"
           : "text-text-secondary hover:bg-surface-inset hover:text-text-primary"
       )}
     >

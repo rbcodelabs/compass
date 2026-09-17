@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
-import { getUserWorkspaces, requireWorkspaceContext } from "@/lib/workspace"
+import { getUserWorkspaces } from "@/lib/workspace"
+import { requireWorkspaceContext } from "@/lib/workspace-context"
 import { getSessionUser } from "@/lib/session"
 import { Sidebar } from "@/components/sidebar"
 import { BottomNav } from "@/components/bottom-nav"

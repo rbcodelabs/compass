@@ -1,5 +1,5 @@
 import getPrisma from "@/lib/db";
-import { requireWorkspaceContext } from "@/lib/workspace";
+import { requireWorkspaceContext } from "@/lib/workspace-context";
 import { DiscoveryShell } from "@/components/discovery/discovery-shell";
 import type { DiscoveryRailOpportunity } from "@/components/discovery/discovery-rail";
 import type { OpportunityStatus, SquadData } from "@/lib/types";

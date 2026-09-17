@@ -117,7 +117,7 @@ export function KeyResultPanel({
         <div className="flex items-center gap-2">
           <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
             <div
-              className="h-full rounded-full bg-indigo-500 transition-all"
+              className="h-full rounded-full bg-primary transition-all"
               style={{ width: `${pct !== null ? Math.min(pct, 100) : 0}%` }}
             />
           </div>

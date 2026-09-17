@@ -252,7 +252,8 @@ describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
 
   /** The same render, through the shared resolver. */
   async function dedupedRenderSequence() {
-    const { requireWorkspaceContext, getUserWorkspaces } = await import("@/lib/workspace")
+    const { requireWorkspaceContext } = await import("@/lib/workspace-context")
+    const { getUserWorkspaces } = await import("@/lib/workspace")
     const { getSessionUser } = await import("@/lib/session")
     const user = await getSessionUser()
     if (!user) throw new Error("expected a session")
@@ -289,7 +290,7 @@ describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
 
   it("keys the memo by arguments", async () => {
     await inRequestScope(async () => {
-      const { getWorkspaceContext } = await import("@/lib/workspace")
+      const { getWorkspaceContext } = await import("@/lib/workspace-context")
       await getWorkspaceContext(ORG_SLUG, WS_SLUG)
       await getWorkspaceContext(ORG_SLUG, "some-other-workspace")
     })
@@ -297,7 +298,7 @@ describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
   })
 
   it("does NOT persist across request scopes", async () => {
-    const { getWorkspaceContext } = await import("@/lib/workspace")
+    const { getWorkspaceContext } = await import("@/lib/workspace-context")
     await inRequestScope(() => getWorkspaceContext(ORG_SLUG, WS_SLUG))
     await inRequestScope(() => getWorkspaceContext(ORG_SLUG, WS_SLUG))
     // If this ever reads 1, someone has hoisted the memo to module scope and
@@ -309,7 +310,7 @@ describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
   it("keeps redirect/notFound control flow outside the cache", async () => {
     authState.userId = ids.outsider
     await inRequestScope(async () => {
-      const { requireWorkspaceContext } = await import("@/lib/workspace")
+      const { requireWorkspaceContext } = await import("@/lib/workspace-context")
       for (let i = 0; i < 3; i++) {
         // Every caller gets its own throw...
         await expect(requireWorkspaceContext(ORG_SLUG, WS_SLUG)).rejects.toThrow()
@@ -322,7 +323,7 @@ describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
   it("denies a non-member (the discovery/ membership tightening)", async () => {
     authState.userId = ids.outsider
     const ctx = await inRequestScope(async () => {
-      const { getWorkspaceContext } = await import("@/lib/workspace")
+      const { getWorkspaceContext } = await import("@/lib/workspace-context")
       return getWorkspaceContext(ORG_SLUG, WS_SLUG)
     })
     expect(ctx.status).toBe("not-found")
@@ -331,7 +332,7 @@ describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
   it("returns unauthenticated without touching the database", async () => {
     authState.userId = null
     const ctx = await inRequestScope(async () => {
-      const { getWorkspaceContext } = await import("@/lib/workspace")
+      const { getWorkspaceContext } = await import("@/lib/workspace-context")
       return getWorkspaceContext(ORG_SLUG, WS_SLUG)
     })
     expect(ctx.status).toBe("unauthenticated")
@@ -340,7 +341,7 @@ describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
 
   it("never selects SSO secret material into the shared context", async () => {
     const ctx = await inRequestScope(async () => {
-      const { getWorkspaceContext } = await import("@/lib/workspace")
+      const { getWorkspaceContext } = await import("@/lib/workspace-context")
       return getWorkspaceContext(ORG_SLUG, WS_SLUG)
     })
     expect(ctx.status).toBe("ok")
@@ -355,7 +356,7 @@ describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
       data: { role: "owner" },
     })
     const ctx = await inRequestScope(async () => {
-      const { getWorkspaceContext } = await import("@/lib/workspace")
+      const { getWorkspaceContext } = await import("@/lib/workspace-context")
       return getWorkspaceContext(ORG_SLUG, WS_SLUG)
     })
     expect(ctx.status === "ok" && ctx.isOrgAdmin).toBe(true)

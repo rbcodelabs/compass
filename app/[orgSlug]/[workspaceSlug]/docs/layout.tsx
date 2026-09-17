@@ -1,5 +1,5 @@
 import getPrisma from "@/lib/db";
-import { requireWorkspaceContext } from "@/lib/workspace";
+import { requireWorkspaceContext } from "@/lib/workspace-context";
 import { DocTreeSidebar, type DocTreeItem } from "@/components/docs/doc-tree-sidebar";
 import { DocsMobileDrawer } from "@/components/docs/docs-mobile-drawer";
 import { ArtifactNav } from "@/components/docs/artifact-nav";

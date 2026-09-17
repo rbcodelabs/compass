@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ChevronLeftIcon } from "lucide-react";
 import getPrisma from "@/lib/db";
 import { TaskDetail } from "@/components/tasks/task-detail";
-import { getWorkspaceContext, requireWorkspaceContext } from "@/lib/workspace";
+import { getWorkspaceContext, requireWorkspaceContext } from "@/lib/workspace-context";
 
 export async function generateMetadata({
   params,

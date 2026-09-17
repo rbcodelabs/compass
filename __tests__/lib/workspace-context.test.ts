@@ -35,12 +35,7 @@ const redirect = vi.hoisted(() => vi.fn((url: string) => { throw new Error(`NEXT
 const notFound = vi.hoisted(() => vi.fn(() => { throw new Error("NEXT_NOT_FOUND") }))
 vi.mock("next/navigation", () => ({ redirect, notFound }))
 
-import {
-  getWorkspaceContext,
-  requireWorkspaceContext,
-  requireWorkspaceContextOrThrow,
-  WORKSPACE_SUMMARY_SELECT,
-} from "@/lib/workspace"
+import { getWorkspaceContext, requireWorkspaceContext, requireWorkspaceContextOrThrow, WORKSPACE_SUMMARY_SELECT } from "@/lib/workspace-context"
 
 const WORKSPACE = {
   id: "ws-1",
