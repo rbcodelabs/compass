@@ -39,6 +39,34 @@ export type AgentHandoffContext = {
   sourceUrl: string
 }
 
+/**
+ * The "Send to agent" hand-off payload posted across the Geode bridge
+ * (`window.__geode.postEvent("agent.handoff", payload)`, see
+ * components/agent/send-to-agent-picker.tsx). Mirrors `AgentHandoffContext`
+ * verbatim plus the identifying fields Geode needs to open its own thread —
+ * these field names are the authoritative cross-repo contract for this
+ * integration (Compass Task cd908f23-f96d-4b16-b32a-6fc9a98baa56 / Geode
+ * Solution 17be677b-ea4b-4325-9f72-d8a3a526f69d); do not rename casually.
+ */
+export type GeodeAgentHandoffPayload = {
+  entityType: AgentHandoffEntityType
+  entityId: string
+  orgSlug: string
+  workspaceSlug: string
+  label: string
+  summary: string
+  suggestedInstruction: string
+  promptBlock: string
+  /**
+   * Absolute URL. `AgentHandoffContext.sourceUrl` (and the API route below)
+   * are workspace-relative, matching every other consumer of this resolver —
+   * but Geode is a separate app on its own origin and can't resolve a
+   * relative path against itself, so the client resolves it against
+   * `window.location.origin` before renaming it into this field.
+   */
+  url: string
+}
+
 // A tracked decision's `context` field can be up to 20,000 chars — truncate
 // what we fold into the prompt so a single hand-off can't blow out per-turn
 // token/cost, and point back to the source page for the full text instead.

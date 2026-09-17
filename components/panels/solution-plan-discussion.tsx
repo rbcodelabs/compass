@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import { useRef, useState, useTransition } from "react";
-import Link from "next/link";
 import { CheckIcon, PlusIcon, SparklesIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { SendToAgentPicker } from "@/components/agent/send-to-agent-picker";
 import {
   addSolutionComment,
   approveSolutionPlan,
@@ -185,19 +185,20 @@ export function SolutionPlanDiscussion({
               <XIcon />
               Reject
             </Button>
-            {/* Styled as a button but genuinely a link: it navigates, so it
-                keeps the implicit link role. Routing it through Base UI's
-                Button instead would either warn about a non-native button
-                element or, with nativeButton={false}, stamp role="button"
-                over the anchor and misreport a navigation as an action. */}
+            {/* Styled as a button but genuinely a link (or, inside Geode, a
+                menu trigger) — see SendToAgentPicker's own doc comment for
+                why it isn't routed through Base UI's Button. */}
             {currentPlan.planStatus === "APPROVED" && (
-              <Link
-                href={`/${orgSlug}/${workspaceSlug}/agent?entityType=solutionPlan&entityId=${currentPlan.id}`}
+              <SendToAgentPicker
+                orgSlug={orgSlug}
+                workspaceSlug={workspaceSlug}
+                entityType="solutionPlan"
+                entityId={currentPlan.id}
                 className={buttonVariants({ size: "xs", variant: "outline" })}
               >
                 <SparklesIcon />
                 Send to agent
-              </Link>
+              </SendToAgentPicker>
             )}
           </div>
         </div>
