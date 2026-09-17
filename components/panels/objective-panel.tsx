@@ -89,7 +89,7 @@ export function ObjectivePanel({
       type: "keyResult",
       id: kr.id,
       title: kr.title,
-      badge: pct !== null ? { label: `${pct}%`, className: "bg-indigo-100 text-indigo-700" } : undefined,
+      badge: pct !== null ? { label: `${pct}%`, className: "bg-primary/10 text-primary" } : undefined,
     };
   });
   const parentItems: RelationItem[] = data.parentKeyResult

@@ -28,7 +28,7 @@ export function AssigneeFilterBar({ members }: AssigneeProps) {
       <button
         onClick={() => setFilter(null)}
         className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
-          !activeAssignee ? "bg-slate-800 text-white shadow-sm" : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
+          !activeAssignee ? "bg-foreground text-background shadow-sm" : "bg-surface-inset text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
         }`}
       >
         All
@@ -39,8 +39,8 @@ export function AssigneeFilterBar({ members }: AssigneeProps) {
           onClick={() => setFilter(assigneeValue(member) === selected ? null : assigneeValue(member))}
           className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
             selected === assigneeValue(member)
-              ? "bg-slate-800 text-white shadow-sm"
-              : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
+              ? "bg-foreground text-background shadow-sm"
+              : "bg-surface-inset text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
           }`}
         >
           {member.type === "AGENT" ? "Agent: " : ""}{member.displayName}
@@ -67,7 +67,7 @@ export function PriorityFilterBar() {
       <button
         onClick={() => setFilter(null)}
         className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
-          !activePriority ? "bg-slate-800 text-white shadow-sm" : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
+          !activePriority ? "bg-foreground text-background shadow-sm" : "bg-surface-inset text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
         }`}
       >
         All
@@ -78,8 +78,8 @@ export function PriorityFilterBar() {
           onClick={() => setFilter(priority === activePriority ? null : priority)}
           className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
             activePriority === priority
-              ? "bg-slate-800 text-white shadow-sm"
-              : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
+              ? "bg-foreground text-background shadow-sm"
+              : "bg-surface-inset text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
           }`}
         >
           {TASK_PRIORITY_LABELS[priority]}
