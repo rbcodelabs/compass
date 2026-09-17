@@ -13,12 +13,12 @@ export default function HelpLayout({ children }: { children: React.ReactNode }) 
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Top bar */}
       <header className="bg-slate-950 text-white border-b border-slate-800/50 shrink-0">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center gap-3">
           <Link href="/help" className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-            <div className="w-6 h-6 rounded-md bg-indigo-500 flex items-center justify-center shrink-0">
+            <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center shrink-0">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"

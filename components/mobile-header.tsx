@@ -56,12 +56,12 @@ export function MobileHeader({
 
   return (
     <header
-      className="flex md:hidden items-center justify-between h-14 px-4 bg-slate-950 border-b border-slate-800/50 shrink-0 sticky top-0 z-30"
+      className="flex md:hidden items-center justify-between h-14 px-4 bg-sidebar border-b border-sidebar-border shrink-0 sticky top-0 z-30"
       style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
       {/* Logo + workspace name */}
       <div className="flex items-center gap-2.5 min-w-0">
-        <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0 shadow-sm">
+        <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 24 24"
@@ -77,7 +77,7 @@ export function MobileHeader({
             <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
           </svg>
         </div>
-        <span className="text-sm font-semibold text-white truncate max-w-[140px]">
+        <span className="text-sm font-semibold text-sidebar-foreground truncate max-w-[140px]">
           {workspaceName}
         </span>
       </div>
@@ -87,7 +87,7 @@ export function MobileHeader({
         {discoveryDetailMatch && (
           <button
             onClick={() => openPanel("discovery-rail", discoveryDetailMatch[1])}
-            className="flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors"
+            className="flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 text-text-subtle hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
             aria-label="Browse opportunities"
           >
             <Lightbulb className="w-3.5 h-3.5" aria-hidden="true" />
@@ -99,8 +99,8 @@ export function MobileHeader({
           className={cn(
             "flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 transition-colors",
             pathname.startsWith(`${base}/docs`)
-              ? "bg-primary/20 text-primary"
-              : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+              ? "bg-primary/10 text-primary"
+              : "text-text-subtle hover:bg-sidebar-accent hover:text-sidebar-foreground"
           )}
           aria-label="Docs"
         >
@@ -109,63 +109,60 @@ export function MobileHeader({
         </Link>
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors"
+            className="flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 text-text-subtle hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
             aria-label="Account"
           >
             <CircleUser className="w-3.5 h-3.5" aria-hidden="true" />
             <span className="text-[10px] font-medium leading-none">Account</span>
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="bg-slate-900 text-slate-200 ring-slate-700 min-w-[220px]">
+          <DropdownMenuContent className="min-w-[220px]">
             <div className="flex items-center gap-2.5 px-1.5 py-1.5">
               <Avatar className="w-7 h-7 shrink-0">
                 {userImage && <AvatarImage src={userImage} alt={userName} />}
-                <AvatarFallback className="text-[10px] font-semibold bg-slate-700 text-slate-200">
+                <AvatarFallback className="text-[10px] font-semibold bg-surface-inset text-text-primary">
                   {getInitials(userName || "?")}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-100 truncate">{userName}</p>
-                <p className="text-xs text-slate-500 truncate">{userEmail}</p>
+                <p className="text-sm font-medium text-text-primary truncate">{userName}</p>
+                <p className="text-xs text-text-subtle truncate">{userEmail}</p>
               </div>
             </div>
-            <DropdownMenuSeparator className="bg-slate-700" />
-            <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="p-0 cursor-pointer">
               <Link
                 href={`${base}/settings`}
                 className="flex w-full items-center gap-2 px-1.5 py-1"
               >
-                <Settings className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                <Settings className="w-3.5 h-3.5 shrink-0 text-text-subtle" aria-hidden="true" />
                 Settings
               </Link>
             </DropdownMenuItem>
             {isOrgAdmin && (
-              <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+              <DropdownMenuItem className="p-0 cursor-pointer">
                 <Link
                   href={`/${orgSlug}/settings`}
                   className="flex w-full items-center gap-2 px-1.5 py-1"
                 >
-                  <Building2 className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                  <Building2 className="w-3.5 h-3.5 shrink-0 text-text-subtle" aria-hidden="true" />
                   Org Settings
                 </Link>
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+            <DropdownMenuItem className="p-0 cursor-pointer">
               <Link
                 href="/help"
                 className="flex w-full items-center gap-2 px-1.5 py-1"
               >
-                <HelpCircle className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+                <HelpCircle className="w-3.5 h-3.5 shrink-0 text-text-subtle" aria-hidden="true" />
                 Help
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem
-              className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer"
-              closeOnClick={false}
-            >
+            <DropdownMenuItem className="p-0 cursor-pointer" closeOnClick={false}>
               <SendCompassFeedbackDialog />
             </DropdownMenuItem>
-            <DropdownMenuSeparator className="bg-slate-700" />
-            <DropdownMenuItem className="p-0 hover:bg-slate-800 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="p-0 cursor-pointer">
               <Link href="/settings/agents" className="flex w-full items-center px-1.5 py-1">My agents</Link>
             </DropdownMenuItem>
             <DropdownMenuItem className="cursor-pointer p-0">

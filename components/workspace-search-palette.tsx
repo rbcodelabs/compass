@@ -114,13 +114,13 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
       <SidebarMenuButton
         ref={triggerRef}
         tooltip="Search"
-        className="h-9 rounded-lg text-text-inverse/60 hover:bg-surface-navigation-active hover:text-text-inverse"
+        className="h-9 rounded-lg text-text-secondary"
         aria-label="Search workspace"
         onClick={() => setOpen(true)}
       >
-        <Search className="text-text-inverse/40" aria-hidden="true" />
+        <Search className="text-text-subtle" aria-hidden="true" />
         <span>Search</span>
-        <kbd className="ml-auto text-[10px] text-text-inverse/35 group-data-[collapsible=icon]:hidden">⌘K</kbd>
+        <kbd className="ml-auto text-[10px] text-text-disabled group-data-[collapsible=icon]:hidden">⌘K</kbd>
       </SidebarMenuButton>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent

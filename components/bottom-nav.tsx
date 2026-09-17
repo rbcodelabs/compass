@@ -32,7 +32,7 @@ export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = tru
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden bg-slate-950 border-t border-slate-800/50"
+      className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden bg-sidebar border-t border-sidebar-border"
       aria-label="Primary navigation"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
@@ -46,7 +46,9 @@ export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = tru
             href={href}
             className={cn(
               "relative flex flex-1 flex-col items-center justify-center gap-1 py-2.5 min-w-0 min-h-[56px] transition-colors duration-150",
-              isActive ? "text-primary" : "text-slate-500 hover:text-slate-300 active:text-slate-200"
+              isActive
+                ? "text-primary"
+                : "text-text-subtle hover:text-text-primary active:text-text-primary"
             )}
             aria-current={isActive ? "page" : undefined}
           >
@@ -59,14 +61,14 @@ export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = tru
             <Icon
               className={cn(
                 "w-5 h-5 shrink-0",
-                isActive ? "text-primary" : "text-slate-500"
+                isActive ? "text-primary" : "text-text-subtle"
               )}
               aria-hidden="true"
             />
             <span
               className={cn(
                 "text-[10px] font-medium leading-none",
-                isActive ? "text-primary" : "text-slate-500"
+                isActive ? "text-primary" : "text-text-subtle"
               )}
             >
               {label}
