@@ -7,7 +7,7 @@
 // __tests__/components/solution-plan-discussion.test.tsx and
 // __tests__/review-request-page.test.tsx, which assert those hrefs directly
 // and must keep passing unmodified.
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -29,11 +29,22 @@ function jsonResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   return { ok, status, json: async () => body } as Response
 }
 
-afterEach(() => {
+afterEach(async () => {
   cleanup()
   delete (window as { __geode?: unknown }).__geode
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  // Opening/closing the Base UI DropdownMenu in the "bridge present" tests
+  // below schedules Immediate-priority work in React's scheduler (a
+  // setImmediate-based macrotask, since jsdom doesn't wire up a working
+  // MessageChannel). If that hasn't run by the time vitest tears down this
+  // file's jsdom environment, it fires later — with `window` already
+  // undefined — crashing whatever unrelated test file happens to run next in
+  // the same worker (observed in CI as a "window is not defined" exception
+  // "originating" in a completely unconnected file). Give the event loop one
+  // real turn here, while `window` still exists, so anything queued drains
+  // inside this file instead of leaking past it.
+  await new Promise((resolve) => setImmediate(resolve))
 })
 
 describe("SendToAgentPicker — bridge absent (default)", () => {
@@ -98,6 +109,22 @@ describe("SendToAgentPicker — bridge present", () => {
     return trigger
   }
 
+  // Base UI's Popup runs an exit animation/transition before actually
+  // unmounting a closed menu from the DOM (data-closed:animate-out, etc.).
+  // Leaving a test's menu open (or mid-close) when the test function returns
+  // means the outer afterEach's cleanup() unmounts it interrupted — which can
+  // leave floating-ui positioning/animation-completion work scheduled against
+  // a jsdom `window` that no longer exists once vitest tears down this file's
+  // environment, surfacing as an unrelated-looking "window is not defined"
+  // crash in whatever test file runs next in the same worker. Every test that
+  // opens the menu closes it and waits for it to fully leave the DOM before
+  // finishing, so cleanup() never has to unmount an open/closing popup.
+  async function closeMenuAndWait() {
+    if (!screen.queryByRole("menu")) return
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+  }
+
   it("renders both menu options instead of a plain link", async () => {
     render(
       <SendToAgentPicker orgSlug="acme" workspaceSlug="product" entityType="solutionPlan" entityId="plan-1">
@@ -107,6 +134,7 @@ describe("SendToAgentPicker — bridge present", () => {
     openMenu()
     expect(await screen.findByRole("menuitem", { name: /built-in cloud agent/i })).toBeInTheDocument()
     expect(await screen.findByRole("menuitem", { name: "Geode" })).toBeInTheDocument()
+    await closeMenuAndWait()
   })
 
   it("\"Built-in cloud agent\" is still a real link to the built-in hand-off route — no fetch, no postEvent", async () => {
@@ -125,6 +153,7 @@ describe("SendToAgentPicker — bridge present", () => {
     expect(builtIn).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1")
     expect(fetchMock).not.toHaveBeenCalled()
     expect(window.__geode?.postEvent).not.toHaveBeenCalled()
+    await closeMenuAndWait()
   })
 
   it("\"Geode\" fetches hand-off context and posts the bridge event exactly once with an absolute sourceUrl", async () => {
@@ -164,6 +193,7 @@ describe("SendToAgentPicker — bridge present", () => {
       // contract (Task cd908f23 comment, 2026-09-17) uses that name.
       sourceUrl: `${window.location.origin}${HANDOFF_RESPONSE.sourceUrl}`,
     })
+    await closeMenuAndWait()
   })
 
   it("does not call postEvent when the hand-off context fetch rejects", async () => {
@@ -184,6 +214,7 @@ describe("SendToAgentPicker — bridge present", () => {
     const postEvent = window.__geode?.postEvent as ReturnType<typeof vi.fn>
     expect(postEvent).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalled()
+    await closeMenuAndWait()
   })
 
   it("does not call postEvent when the hand-off context request returns a non-2xx status", async () => {
@@ -204,6 +235,7 @@ describe("SendToAgentPicker — bridge present", () => {
     const postEvent = window.__geode?.postEvent as ReturnType<typeof vi.fn>
     expect(postEvent).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalled()
+    await closeMenuAndWait()
   })
 
   it("does not call postEvent when the resolved payload is still oversized after server-side truncation", async () => {
@@ -230,5 +262,6 @@ describe("SendToAgentPicker — bridge present", () => {
     const postEvent = window.__geode?.postEvent as ReturnType<typeof vi.fn>
     expect(postEvent).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("over Geode's"))
+    await closeMenuAndWait()
   })
 })
