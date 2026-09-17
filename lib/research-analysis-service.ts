@@ -65,10 +65,10 @@ export async function generateSessionAnalysis({ studyId, sessionId, kind, userId
  * Everything the lease needs, read and validated *before* a PENDING row exists.
  *
  * Split out at ADR-0012 step 4 so the agent-authored path can reuse the claim /
- * validate / store machinery without reusing the retired standalone pipeline.
- * Callers that must fail before claiming — the legacy path assembles its prompt
- * here, and `buildAnalysisPrompt` refuses an oversized source — do that between
- * this call and `withSynthesisLease`, exactly as the single function used to.
+ * validate / store machinery without reusing the standalone pipeline that step 6
+ * then retired. Any check that must fail *before* a PENDING row exists belongs
+ * between this call and `withSynthesisLease` — `storeAgentStudySynthesis` puts
+ * its document-size ceiling there for exactly that reason.
  */
 export type LoadedSynthesisSource = { study: Awaited<ReturnType<typeof studyAccess>>; sessionCount: number; source: AnalysisSource }
 
@@ -86,16 +86,18 @@ export async function loadSynthesisSource(studyId: string, userId: string): Prom
  * The retry-safe `ResearchSynthesis` lease (`PENDING` → `CROSS_SESSION` |
  * `FAILED`) that ADR-0012 requires be preserved rather than replaced.
  *
- * `produce` returns the raw analysis JSON. The legacy path returns a model's
- * output; the MCP tool returns the core agent's own document. Either way it is
- * untrusted until `parseAnalysisResult` has validated it against `source` —
- * which is rebuilt from saved rows here, never supplied by the producer.
+ * `produce` returns the raw analysis JSON. Since ADR-0012 step 6 retired the
+ * standalone pipeline the only producer is the MCP tool, which hands back the
+ * core agent's own document — still untrusted until `parseAnalysisResult` has
+ * validated it against `source`, which is rebuilt from saved rows here and
+ * never supplied by the producer.
  *
- * `surfaceFailureDetail` exists because the two producers differ in what a
- * failure means. A model's error text may carry provider detail, so the legacy
- * path keeps its fixed wording. The agent path's failures are this module's own
+ * `surfaceFailureDetail` stays opt-in rather than becoming the only behaviour.
+ * It is safe for the agent path because those failures are this module's own
  * validation messages about a document the agent itself wrote, so surfacing
  * them is what lets the agent correct its citations instead of retrying blind.
+ * A producer that can throw provider or infrastructure text — which the retired
+ * one could — must not get that treatment, so the default stays fixed wording.
  */
 export async function withSynthesisLease(
   { study, sessionCount, source }: LoadedSynthesisSource,
@@ -142,14 +144,6 @@ export async function withSynthesisLease(
   }
 }
 
-export async function generateStudySynthesis(studyId: string, userId: string) {
-  const loaded = await loadSynthesisSource(studyId, userId)
-  // Assembled before the claim, as before: an oversized source must fail without
-  // leaving a PENDING row or bumping the study's optimistic `updatedAt`.
-  const prompt = buildAnalysisPrompt("synthesis", loaded.source)
-  return withSynthesisLease(loaded, (source, deadline) => analysisResponse("synthesis", prompt, source, deadline))
-}
-
 /**
  * ADR-0012 step 4. The core agent has already done the reasoning, using the
  * step-3 transcript tools and its workspace's capability-pack methodology; this
@@ -168,14 +162,17 @@ export async function storeAgentStudySynthesis(studyId: string, userId: string, 
   return withSynthesisLease(loaded, async () => raw, { surfaceFailureDetail: true })
 }
 
-async function analysisResponse(kind: "summary" | "coverage" | "synthesis", prompt: string, source: AnalysisSource, deadline: number) {
+/**
+ * The bounded per-session producer. ADR-0012 step 4 moved cross-session
+ * synthesis to the core agent and step 6 removed the legacy producer that
+ * reached this with `"synthesis"`, so only summary and coverage remain.
+ */
+async function analysisResponse(kind: "summary" | "coverage", prompt: string, source: AnalysisSource, deadline: number) {
   assertAnalysisDeadline(deadline)
   if (process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1" && process.env.E2E_ISOLATED_DATABASE === "1") {
-    const evidence = source.sessions.flatMap(session => session.turns.filter(turn => turn.role === "PARTICIPANT" && turn.content.trim()).map(turn => ({ sessionId: session.id, ...turn })))
-    const first = evidence[0]
-    if (kind === "summary") return JSON.stringify({ summary: "Test analysis: participant described their experience.", evidenceTurnIds: [first.id] })
     if (kind === "coverage") return JSON.stringify({ coverage: source.guide.map(item => ({ guideItemId: item.id, covered: false, evidenceTurnIds: [] })) })
-    return JSON.stringify({ summary: "Test synthesis from saved sessions.", themes: [{ title: "Saved participant evidence", description: "A fixture finding.", surprising: false, quotes: [{ sessionId: first.sessionId, turnId: first.id, text: first.content }] }], patterns: [], jobs: [], recommendations: [] })
+    const first = source.sessions.flatMap(session => session.turns.filter(turn => turn.role === "PARTICIPANT" && turn.content.trim()))[0]
+    return JSON.stringify({ summary: "Test analysis: participant described their experience.", evidenceTurnIds: [first.id] })
   }
   return runResearchAnalysisAgent(prompt, deadline)
 }
