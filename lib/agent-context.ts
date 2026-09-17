@@ -58,19 +58,35 @@ export type GeodeAgentHandoffPayload = {
   suggestedInstruction: string
   promptBlock: string
   /**
-   * Absolute URL. `AgentHandoffContext.sourceUrl` (and the API route below)
-   * are workspace-relative, matching every other consumer of this resolver —
-   * but Geode is a separate app on its own origin and can't resolve a
-   * relative path against itself, so the client resolves it against
-   * `window.location.origin` before renaming it into this field.
+   * Same key name as `AgentHandoffContext.sourceUrl` — the Geode receiver's
+   * contract is pinned to `sourceUrl` (see Compass Task cd908f23 comment from
+   * the receiver team, 2026-09-17), not `url`. Sent as an **absolute** URL
+   * (the receiver absolutizes against its own Web Viewer frame origin if
+   * given a relative one, but accepts absolute too — sending absolute here
+   * is strictly more correct since Compass already knows its own origin and
+   * Geode doesn't have to guess it).
    */
-  url: string
+  sourceUrl: string
 }
 
 // A tracked decision's `context` field can be up to 20,000 chars — truncate
 // what we fold into the prompt so a single hand-off can't blow out per-turn
 // token/cost, and point back to the source page for the full text instead.
 const DECISION_CONTEXT_MAX_CHARS = 4000
+
+// Geode's bridge (`normalizeWebViewerEvent`) enforces a hard
+// MAX_PAYLOAD_JSON_LENGTH = 8192 bytes and silently drops anything over it —
+// there is no error, just a dead button (see Task cd908f23 comment from the
+// receiver team, 2026-09-17). `promptBlock` is the only unbounded field in
+// this payload (an approved Solution plan body has no length cap elsewhere),
+// so the /api/agent/handoff-context route truncates it to this budget before
+// it ever reaches the client. Mirrors DECISION_CONTEXT_MAX_CHARS for
+// consistency — the decision path already caps its own context input at the
+// same 4000 chars, so capping the *output* promptBlock at the same size
+// keeps both entity types under a predictable, comparable budget, well
+// inside Geode's 8192-byte ceiling even after JSON-encoding overhead and the
+// other payload fields.
+export const GEODE_HANDOFF_PROMPT_BLOCK_MAX_CHARS = 4000
 
 type ResolveInput = {
   workspaceId: string

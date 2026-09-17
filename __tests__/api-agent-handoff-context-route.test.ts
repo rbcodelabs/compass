@@ -19,6 +19,7 @@ vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 const mockResolveAgentHandoffContext = vi.fn()
 vi.mock("@/lib/agent-context", () => ({
   resolveAgentHandoffContext: (...args: unknown[]) => mockResolveAgentHandoffContext(...args),
+  GEODE_HANDOFF_PROMPT_BLOCK_MAX_CHARS: 4000,
 }))
 
 import { GET } from "@/app/api/agent/handoff-context/route"
@@ -113,5 +114,28 @@ describe("GET /api/agent/handoff-context", () => {
       entityType: "solutionPlan",
       entityId: "plan-1",
     })
+  })
+
+  it("truncates an oversized promptBlock before it reaches the client, with a pointer back to sourceUrl", async () => {
+    // Regression for the Geode receiver team's finding (Task cd908f23 comment,
+    // 2026-09-17): Geode's bridge silently drops any payload over 8192 chars,
+    // and an approved solution plan's promptBlock has no cap of its own. This
+    // route is the Geode-only seam that must cap it — resolveAgentHandoffContext
+    // itself stays untruncated for the in-app built-in-agent path.
+    const longPromptBlock = "A".repeat(5000)
+    mockResolveAgentHandoffContext.mockResolvedValue({ ...HANDOFF, promptBlock: longPromptBlock })
+    const response = await GET(req(VALID_QUERY))
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.promptBlock.length).toBeLessThan(longPromptBlock.length)
+    expect(body.promptBlock.startsWith("A".repeat(4000))).toBe(true)
+    expect(body.promptBlock).toContain(`Truncated — full text at ${HANDOFF.sourceUrl}`)
+  })
+
+  it("leaves a promptBlock under the cap untouched", async () => {
+    const response = await GET(req(VALID_QUERY))
+    const body = await response.json()
+    expect(body.promptBlock).toBe(HANDOFF.promptBlock)
+    expect(body.promptBlock).not.toContain("Truncated")
   })
 })

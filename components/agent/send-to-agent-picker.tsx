@@ -37,6 +37,17 @@ function hasGeodeBridge(): boolean {
   return typeof window !== "undefined" && typeof window.__geode?.postEvent === "function"
 }
 
+// Geode's bridge (`normalizeWebViewerEvent`) enforces this exact cap and
+// silently drops anything over it — no error, just a dead button (Task
+// cd908f23 comment from the receiver team, 2026-09-17). The API route
+// already truncates `promptBlock` to a safe budget before it reaches us
+// (see GEODE_HANDOFF_PROMPT_BLOCK_MAX_CHARS in lib/agent-context.ts), but
+// label/summary/suggestedInstruction have no hard cap of their own and could
+// in theory combine with an already-maxed promptBlock to still exceed this,
+// so this is an independent second check on the fully-assembled payload
+// right before it's posted.
+const GEODE_MAX_PAYLOAD_JSON_LENGTH = 8192
+
 type HandoffContextResponse = {
   entityType: string
   entityId: string
@@ -110,11 +121,25 @@ export function SendToAgentPicker({ orgSlug, workspaceSlug, entityType, entityId
       summary: data.summary,
       suggestedInstruction: data.suggestedInstruction,
       promptBlock: data.promptBlock,
-      // sourceUrl is workspace-relative (matches AgentHandoffContext); Geode
-      // is a separate app on its own origin and can't resolve a relative
-      // path against itself, so it's made absolute and renamed here.
-      url: new URL(data.sourceUrl, window.location.origin).toString(),
+      // The API route's sourceUrl is workspace-relative; sending it absolute
+      // is strictly more correct (Compass already knows its own origin) even
+      // though the receiver would also absolutize a relative one itself.
+      // Key stays `sourceUrl` — the receiver's pinned contract (Task cd908f23
+      // comment, 2026-09-17) uses that name, not `url`.
+      sourceUrl: new URL(data.sourceUrl, window.location.origin).toString(),
     }
+
+    const payloadSize = JSON.stringify(payload).length
+    if (payloadSize > GEODE_MAX_PAYLOAD_JSON_LENGTH) {
+      // Geode's bridge would silently drop this (see the constant's doc
+      // comment) — indistinguishable from nothing happening at all. Warn
+      // loudly here instead of firing an event we know will vanish.
+      console.warn(
+        `[send-to-agent-picker] hand-off payload JSON is ${payloadSize} chars, over Geode's ${GEODE_MAX_PAYLOAD_JSON_LENGTH}-char limit even after server-side truncation; not posting (entityType=${data.entityType}, entityId=${data.entityId})`
+      )
+      return
+    }
+
     window.__geode.postEvent("agent.handoff", payload)
   }
 

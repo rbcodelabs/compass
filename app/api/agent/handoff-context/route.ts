@@ -11,12 +11,26 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
-import { resolveAgentHandoffContext, type AgentHandoffEntityType } from "@/lib/agent-context"
+import {
+  resolveAgentHandoffContext,
+  GEODE_HANDOFF_PROMPT_BLOCK_MAX_CHARS,
+  type AgentHandoffEntityType,
+} from "@/lib/agent-context"
 
 const VALID_ENTITY_TYPES: readonly AgentHandoffEntityType[] = ["solutionPlan", "decision"]
 
 function isValidEntityType(value: string): value is AgentHandoffEntityType {
   return (VALID_ENTITY_TYPES as readonly string[]).includes(value)
+}
+
+// Cap the promptBlock we hand to the Geode bridge specifically — the
+// resolver's own `promptBlock` (used by the built-in in-app agent's own
+// prompt-fold) is intentionally left untruncated in lib/agent-context.ts;
+// this route is the Geode-only seam, so the cap belongs here. See
+// GEODE_HANDOFF_PROMPT_BLOCK_MAX_CHARS's doc comment for why.
+function truncatePromptBlockForGeode(promptBlock: string, sourceUrl: string): string {
+  if (promptBlock.length <= GEODE_HANDOFF_PROMPT_BLOCK_MAX_CHARS) return promptBlock
+  return `${promptBlock.slice(0, GEODE_HANDOFF_PROMPT_BLOCK_MAX_CHARS)}\n\n(Truncated — full text at ${sourceUrl}.)`
 }
 
 export async function GET(request: Request) {
@@ -61,7 +75,7 @@ export async function GET(request: Request) {
     label: handoff.label,
     summary: handoff.summary,
     suggestedInstruction: handoff.suggestedInstruction,
-    promptBlock: handoff.promptBlock,
+    promptBlock: truncatePromptBlockForGeode(handoff.promptBlock, handoff.sourceUrl),
     sourceUrl: handoff.sourceUrl,
   })
 }

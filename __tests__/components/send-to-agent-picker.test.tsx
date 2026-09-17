@@ -127,7 +127,7 @@ describe("SendToAgentPicker — bridge present", () => {
     expect(window.__geode?.postEvent).not.toHaveBeenCalled()
   })
 
-  it("\"Geode\" fetches hand-off context and posts the bridge event exactly once with an absolute url", async () => {
+  it("\"Geode\" fetches hand-off context and posts the bridge event exactly once with an absolute sourceUrl", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(HANDOFF_RESPONSE))
     vi.stubGlobal("fetch", fetchMock)
     render(
@@ -160,7 +160,9 @@ describe("SendToAgentPicker — bridge present", () => {
       summary: HANDOFF_RESPONSE.summary,
       suggestedInstruction: HANDOFF_RESPONSE.suggestedInstruction,
       promptBlock: HANDOFF_RESPONSE.promptBlock,
-      url: `${window.location.origin}${HANDOFF_RESPONSE.sourceUrl}`,
+      // Key stays `sourceUrl` (not `url`) — the Geode receiver's pinned
+      // contract (Task cd908f23 comment, 2026-09-17) uses that name.
+      sourceUrl: `${window.location.origin}${HANDOFF_RESPONSE.sourceUrl}`,
     })
   })
 
@@ -202,5 +204,31 @@ describe("SendToAgentPicker — bridge present", () => {
     const postEvent = window.__geode?.postEvent as ReturnType<typeof vi.fn>
     expect(postEvent).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalled()
+  })
+
+  it("does not call postEvent when the resolved payload is still oversized after server-side truncation", async () => {
+    // The API route truncates promptBlock, but label/summary/suggestedInstruction
+    // have no cap of their own — simulate a still-too-large response (as if
+    // those combined with an already-maxed promptBlock) to prove the picker's
+    // own pre-postEvent size guard catches it independently, rather than
+    // firing an event Geode's bridge would silently drop.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const oversizedResponse = { ...HANDOFF_RESPONSE, promptBlock: "x".repeat(8300) }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(oversizedResponse))
+    vi.stubGlobal("fetch", fetchMock)
+    render(
+      <SendToAgentPicker orgSlug="acme" workspaceSlug="product" entityType="solutionPlan" entityId="plan-1">
+        Send to agent
+      </SendToAgentPicker>
+    )
+    openMenu()
+    const geodeItem = await screen.findByRole("menuitem", { name: "Geode" })
+    await act(async () => {
+      fireEvent.click(geodeItem)
+    })
+
+    const postEvent = window.__geode?.postEvent as ReturnType<typeof vi.fn>
+    expect(postEvent).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("over Geode's"))
   })
 })
