@@ -2052,6 +2052,32 @@ model AgentWorkspaceGrant {
   @@map("agent_workspace_grants")
 }
 
+/// Self-service request for an AgentWorkspaceGrant, raised by the agent owner
+/// (who is already a WorkspaceMember) instead of asking an admin to create
+/// the grant blind. Deliberately no unique constraint on
+/// (agentId, workspaceId) or (..., status): a DENIED decision must not block
+/// a future request for the same agent+workspace. "No duplicate PENDING
+/// request" is enforced in app code (requestAgentAccess), not the database.
+/// Approval upserts the existing AgentWorkspaceGrant row rather than
+/// inventing a second grant pathway — see approveAgentAccessRequest.
+model AgentAccessRequest {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentId           String    @map("agent_id") @db.Uuid
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  /// One of: READ | WRITE, mirroring AgentWorkspaceGrant.access.
+  requestedAccess   String    @map("requested_access") @db.VarChar(10)
+  requestedByUserId String    @map("requested_by_user_id") @db.Uuid
+  /// One of: PENDING | APPROVED | DENIED.
+  status            String    @default("PENDING") @db.VarChar(20)
+  decidedByUserId   String?   @map("decided_by_user_id") @db.Uuid
+  decidedAt         DateTime? @map("decided_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @map("updated_at")
+  @@index([agentId, workspaceId, status])
+  @@index([workspaceId, status])
+  @@map("agent_access_requests")
+}
+
 model AgentToolCall {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   agentId String @map("agent_id") @db.Uuid

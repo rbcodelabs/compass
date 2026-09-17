@@ -5,15 +5,20 @@ const mocks = vi.hoisted(() => ({
   agent: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   apiKey: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   workspaceMember: { findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+  workspace: { findUnique: vi.fn() },
   $transaction: vi.fn(),
-  agentWorkspaceGrant: { upsert: vi.fn(), updateMany: vi.fn() },
+  agentWorkspaceGrant: { upsert: vi.fn(), updateMany: vi.fn(), findFirst: vi.fn() },
+  agentAccessRequest: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
 }));
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/db", () => ({ default: () => mocks }));
 vi.mock("@/lib/permissions", () => ({ resolveWorkspaceAdmin: mocks.admin }));
 vi.mock("@/lib/agent-access", () => ({ agentsEnabled: mocks.enabled }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-import { createAgent, updateAgent, createAgentKey, revokeAgentKey, grantWorkspaceAgent, revokeWorkspaceAgent } from "@/app/settings/agents/actions";
+import {
+  createAgent, updateAgent, createAgentKey, revokeAgentKey, grantWorkspaceAgent, revokeWorkspaceAgent,
+  requestAgentAccess, approveAgentAccessRequest, denyAgentAccessRequest,
+} from "@/app/settings/agents/actions";
 import { validateMcpAuth } from "@/lib/mcp-auth";
 
 beforeEach(() => {
@@ -24,8 +29,12 @@ beforeEach(() => {
   mocks.admin.mockResolvedValue({ prisma: mocks, workspaceId: "workspace" });
   mocks.workspaceMember.findFirst.mockResolvedValue({ id: "member", role: "MEMBER" });
   mocks.workspaceMember.updateMany.mockResolvedValue({ count: 1 });
+  mocks.workspace.findUnique.mockResolvedValue({ slug: "ws", organization: { slug: "org" } });
   mocks.$transaction.mockImplementation((operation) => operation(mocks));
   mocks.apiKey.create.mockResolvedValue({ id: "persisted-key" });
+  mocks.agentWorkspaceGrant.findFirst.mockResolvedValue(null);
+  mocks.agentAccessRequest.findFirst.mockResolvedValue(null);
+  mocks.agentAccessRequest.create.mockResolvedValue({ id: "request", agentId: "agent", workspaceId: "workspace", requestedAccess: "READ", status: "PENDING" });
 });
 
 describe("agent account and workspace management", () => {
@@ -101,5 +110,84 @@ describe("agent account and workspace management", () => {
     mocks.workspaceMember.updateMany.mockResolvedValue({ count: 0 });
     await expect(grantWorkspaceAgent("org", "ws", "agent", "READ")).rejects.toThrow("Membership changed");
     expect(mocks.agentWorkspaceGrant.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("self-service agent access requests", () => {
+  it("lets an agent owner who is a workspace member request access", async () => {
+    const request = await requestAgentAccess("agent", "workspace", "WRITE");
+    expect(mocks.agentAccessRequest.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ agentId: "agent", workspaceId: "workspace", requestedAccess: "WRITE", requestedByUserId: "owner", status: "PENDING" }),
+    });
+    expect(request.id).toBe("request");
+  });
+  it("prevents self-service requests when rollout is disabled", async () => {
+    mocks.enabled.mockReturnValue(false);
+    await expect(requestAgentAccess("agent", "workspace", "READ")).rejects.toThrow("disabled");
+    expect(mocks.agentAccessRequest.create).not.toHaveBeenCalled();
+  });
+  it("rejects a request for an agent the caller does not own", async () => {
+    mocks.agent.findFirst.mockResolvedValue(null);
+    await expect(requestAgentAccess("agent", "workspace", "READ")).rejects.toThrow("Agent not found");
+    expect(mocks.agentAccessRequest.create).not.toHaveBeenCalled();
+  });
+  it("rejects a request for a suspended agent", async () => {
+    mocks.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "owner", status: "SUSPENDED" });
+    await expect(requestAgentAccess("agent", "workspace", "READ")).rejects.toThrow("suspended");
+    expect(mocks.agentAccessRequest.create).not.toHaveBeenCalled();
+  });
+  it("rejects a request from a non-member of the workspace", async () => {
+    mocks.workspaceMember.findFirst.mockResolvedValue(null);
+    await expect(requestAgentAccess("agent", "workspace", "READ")).rejects.toThrow("member of this workspace");
+    expect(mocks.agentAccessRequest.create).not.toHaveBeenCalled();
+  });
+  it("rejects a duplicate request while one is already pending", async () => {
+    mocks.agentAccessRequest.findFirst.mockResolvedValue({ id: "existing" });
+    await expect(requestAgentAccess("agent", "workspace", "READ")).rejects.toThrow("already pending");
+    expect(mocks.agentAccessRequest.create).not.toHaveBeenCalled();
+  });
+  it("rejects a request when the agent already has active access", async () => {
+    mocks.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" });
+    await expect(requestAgentAccess("agent", "workspace", "READ")).rejects.toThrow("already has access");
+    expect(mocks.agentAccessRequest.create).not.toHaveBeenCalled();
+  });
+  it("approving a request upserts the grant through the same path grantWorkspaceAgent uses, and marks it decided", async () => {
+    mocks.agentAccessRequest.findFirst.mockResolvedValue({ id: "request", agentId: "agent", workspaceId: "workspace", requestedAccess: "WRITE", status: "PENDING" });
+    await approveAgentAccessRequest("request");
+    expect(mocks.agentWorkspaceGrant.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { agentId_workspaceId: { agentId: "agent", workspaceId: "workspace" } },
+      update: expect.objectContaining({ access: "WRITE", grantedByUserId: "owner", revokedAt: null }),
+    }));
+    expect(mocks.agentAccessRequest.update).toHaveBeenCalledWith({
+      where: { id: "request" },
+      data: expect.objectContaining({ status: "APPROVED", decidedByUserId: "owner" }),
+    });
+  });
+  it("denying a request marks it decided without touching the grant", async () => {
+    mocks.agentAccessRequest.findFirst.mockResolvedValue({ id: "request", agentId: "agent", workspaceId: "workspace", requestedAccess: "READ", status: "PENDING" });
+    await denyAgentAccessRequest("request");
+    expect(mocks.agentWorkspaceGrant.upsert).not.toHaveBeenCalled();
+    expect(mocks.agentAccessRequest.update).toHaveBeenCalledWith({
+      where: { id: "request" },
+      data: expect.objectContaining({ status: "DENIED", decidedByUserId: "owner" }),
+    });
+  });
+  it("allows denial while rollout is disabled", async () => {
+    mocks.enabled.mockReturnValue(false);
+    mocks.agentAccessRequest.findFirst.mockResolvedValue({ id: "request", agentId: "agent", workspaceId: "workspace", requestedAccess: "READ", status: "PENDING" });
+    await expect(denyAgentAccessRequest("request")).resolves.toBeUndefined();
+  });
+  it("requires workspace admin authority to approve or deny", async () => {
+    mocks.agentAccessRequest.findFirst.mockResolvedValue({ id: "request", agentId: "agent", workspaceId: "workspace", requestedAccess: "READ", status: "PENDING" });
+    mocks.admin.mockRejectedValue(new Error("Forbidden"));
+    await expect(approveAgentAccessRequest("request")).rejects.toThrow("Forbidden");
+    await expect(denyAgentAccessRequest("request")).rejects.toThrow("Forbidden");
+    expect(mocks.agentWorkspaceGrant.upsert).not.toHaveBeenCalled();
+    expect(mocks.agentAccessRequest.update).not.toHaveBeenCalled();
+  });
+  it("treats an already-decided or unknown request as not found", async () => {
+    mocks.agentAccessRequest.findFirst.mockResolvedValue(null);
+    await expect(approveAgentAccessRequest("request")).rejects.toThrow("Request not found");
+    await expect(denyAgentAccessRequest("request")).rejects.toThrow("Request not found");
   });
 });

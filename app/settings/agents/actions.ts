@@ -59,11 +59,10 @@ export async function revokeAgentKey(id: string) {
   await prisma.apiKey.update({ where: { id }, data: { revokedAt: new Date() } });
   revalidatePath("/settings/agents");
 }
-export async function grantWorkspaceAgent(orgSlug: string, workspaceSlug: string, agentId: string, access: "READ" | "WRITE") {
-  const { userId } = await account();
-  requireEnabled();
-  if (access !== "READ" && access !== "WRITE") throw new Error("Invalid access");
-  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+// Shared by grantWorkspaceAgent (admin, direct) and approveAgentAccessRequest
+// (admin, approving a self-serve AgentAccessRequest) so there is exactly one
+// place that upserts an AgentWorkspaceGrant — never a second grant pathway.
+async function applyWorkspaceGrant(prisma: ReturnType<typeof getPrisma>, workspaceId: string, agentId: string, access: "READ" | "WRITE", grantedByUserId: string) {
   const agent = await prisma.agent.findFirst({ where: { id: agentId, status: "ACTIVE" } });
   if (!agent) throw new Error("Agent not found");
   await prisma.$transaction(async (tx) => {
@@ -75,15 +74,75 @@ export async function grantWorkspaceAgent(orgSlug: string, workspaceSlug: string
     // by the role read before waiting for PostgreSQL's row lock.
     const locked = await tx.workspaceMember.updateMany({ where: { id: member.id, role: member.role }, data: { role: member.role } });
     if (locked.count !== 1) throw new Error("Membership changed; retry the operation");
-    const data = { access, grantedByUserId: userId, revokedAt: null, updatedAt: new Date() };
+    const data = { access, grantedByUserId, revokedAt: null, updatedAt: new Date() };
     await tx.agentWorkspaceGrant.upsert({ where: { agentId_workspaceId: { agentId, workspaceId } }, create: { agentId, workspaceId, ...data }, update: data });
   });
+}
+export async function grantWorkspaceAgent(orgSlug: string, workspaceSlug: string, agentId: string, access: "READ" | "WRITE") {
+  const { userId } = await account();
+  requireEnabled();
+  if (access !== "READ" && access !== "WRITE") throw new Error("Invalid access");
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+  await applyWorkspaceGrant(prisma, workspaceId, agentId, access, userId);
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
   revalidatePath("/settings/agents");
 }
 export async function revokeWorkspaceAgent(orgSlug: string, workspaceSlug: string, agentId: string) {
   const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
   await prisma.agentWorkspaceGrant.updateMany({ where: { workspaceId, agentId, revokedAt: null }, data: { revokedAt: new Date(), updatedAt: new Date() } });
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  revalidatePath("/settings/agents");
+}
+
+// ─── Self-service access requests (Compass solution 538d6df0) ──────────────
+// The agent owner — already an ordinary WorkspaceMember — asks for access
+// instead of an admin creating the AgentWorkspaceGrant blind from workspace
+// settings. Approve/deny live here (not in the workspace settings actions
+// file) because they share `account()`/`requireEnabled()`/`applyWorkspaceGrant`
+// with the rest of this module's agent-account operations.
+
+export async function requestAgentAccess(agentId: string, workspaceId: string, access: "READ" | "WRITE") {
+  const { prisma, userId } = await account();
+  requireEnabled();
+  if (access !== "READ" && access !== "WRITE") throw new Error("Invalid access");
+  const agent = await prisma.agent.findFirst({ where: { id: agentId, ownerUserId: userId } });
+  if (!agent) throw new Error("Agent not found");
+  if (agent.status !== "ACTIVE") throw new Error("Agent is suspended");
+  const member = await prisma.workspaceMember.findFirst({ where: { workspaceId, userId }, select: { id: true } });
+  if (!member) throw new Error("You must be a member of this workspace to request access");
+  const activeGrant = await prisma.agentWorkspaceGrant.findFirst({ where: { agentId, workspaceId, revokedAt: null }, select: { id: true } });
+  if (activeGrant) throw new Error("This agent already has access to this workspace");
+  const pending = await prisma.agentAccessRequest.findFirst({ where: { agentId, workspaceId, status: "PENDING" }, select: { id: true } });
+  if (pending) throw new Error("A request for this workspace is already pending");
+  const request = await prisma.agentAccessRequest.create({ data: { agentId, workspaceId, requestedAccess: access, requestedByUserId: userId, status: "PENDING", updatedAt: new Date() } });
+  revalidatePath("/settings/agents");
+  return request;
+}
+
+async function resolvePendingRequestWorkspace(prisma: ReturnType<typeof getPrisma>, requestId: string) {
+  const request = await prisma.agentAccessRequest.findFirst({ where: { id: requestId, status: "PENDING" } });
+  if (!request) throw new Error("Request not found");
+  const workspace = await prisma.workspace.findUnique({ where: { id: request.workspaceId }, select: { slug: true, organization: { select: { slug: true } } } });
+  if (!workspace) throw new Error("Workspace not found");
+  return { request, orgSlug: workspace.organization.slug, workspaceSlug: workspace.slug };
+}
+
+export async function approveAgentAccessRequest(requestId: string) {
+  const { prisma: accountPrisma, userId } = await account();
+  requireEnabled();
+  const { request, orgSlug, workspaceSlug } = await resolvePendingRequestWorkspace(accountPrisma, requestId);
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+  await applyWorkspaceGrant(prisma, workspaceId, request.agentId, request.requestedAccess as "READ" | "WRITE", userId);
+  await prisma.agentAccessRequest.update({ where: { id: requestId }, data: { status: "APPROVED", decidedByUserId: userId, decidedAt: new Date(), updatedAt: new Date() } });
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  revalidatePath("/settings/agents");
+}
+
+export async function denyAgentAccessRequest(requestId: string) {
+  const { prisma: accountPrisma, userId } = await account();
+  const { orgSlug, workspaceSlug } = await resolvePendingRequestWorkspace(accountPrisma, requestId);
+  const { prisma } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+  await prisma.agentAccessRequest.update({ where: { id: requestId }, data: { status: "DENIED", decidedByUserId: userId, decidedAt: new Date(), updatedAt: new Date() } });
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
   revalidatePath("/settings/agents");
 }

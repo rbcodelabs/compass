@@ -3,13 +3,23 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createAgent, updateAgent, createAgentKey, revokeAgentKey } from "@/app/settings/agents/actions";
+import { createAgent, updateAgent, createAgentKey, revokeAgentKey, requestAgentAccess } from "@/app/settings/agents/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SettingsSection } from "@/components/patterns/settings-section";
 
-type AgentRow = { id: string; name: string; description: string | null; status: string; keys: { id: string; name: string; keyPrefix: string; revokedAt: Date | null; expiresAt: Date | null }[]; grants: { id: string; name: string; href: string; access: string; revoked: boolean }[] };
+type AgentRow = {
+  id: string; name: string; description: string | null; status: string;
+  keys: { id: string; name: string; keyPrefix: string; revokedAt: Date | null; expiresAt: Date | null }[];
+  grants: { id: string; name: string; href: string; access: string; revoked: boolean }[];
+  // Workspaces the signed-in user belongs to where this agent has no active
+  // grant and no outstanding PENDING request — eligible for a fresh request.
+  requestable: { id: string; name: string }[];
+  // Outstanding PENDING requests for this agent, awaiting admin decision.
+  pending: { id: string; workspaceId: string; name: string; access: string }[];
+};
 
 function AgentCard({ agent, enabled }: { agent: AgentRow; enabled: boolean }) {
   const router = useRouter();
@@ -19,14 +29,32 @@ function AgentCard({ agent, enabled }: { agent: AgentRow; enabled: boolean }) {
   const [expiry, setExpiry] = useState("");
   const [secret, setSecret] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [requestWorkspaceId, setRequestWorkspaceId] = useState("");
+  const [requestAccessLevel, setRequestAccessLevel] = useState<"READ" | "WRITE">("READ");
   const [pending, start] = useTransition();
   function run(action: () => Promise<unknown>) { setError(null); start(async () => { try { await action(); router.refresh(); } catch (e) { setError(e instanceof Error ? e.message : "Operation failed"); } }); }
+  const canRequest = enabled && agent.status === "ACTIVE";
   return <SettingsSection title={agent.name} description={`${agent.status === "ACTIVE" ? "Active" : "Suspended"} · ${agent.id}`}>
     <div className="space-y-4">
       {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
       <div className="space-y-2"><Label htmlFor={`name-${agent.id}`}>Agent name</Label><Input id={`name-${agent.id}`} value={name} maxLength={120} onChange={(e) => setName(e.target.value)} disabled={pending || !enabled} /><Label htmlFor={`description-${agent.id}`}>Description</Label><Input id={`description-${agent.id}`} value={description} maxLength={2000} onChange={(e) => setDescription(e.target.value)} disabled={pending || !enabled} /></div>
       <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={pending || !enabled || !name.trim()} onClick={() => run(() => updateAgent(agent.id, { name, description, status: agent.status as "ACTIVE" | "SUSPENDED" }))}>Save agent</Button><Button variant="outline" disabled={pending || (!enabled && agent.status !== "ACTIVE")} onClick={() => run(() => updateAgent(agent.id, { name: agent.name, description: agent.description ?? "", status: agent.status === "ACTIVE" ? "SUSPENDED" : "ACTIVE" }))}>{agent.status === "ACTIVE" ? "Suspend" : "Reactivate"}</Button></div>
       <div><h3 className="text-sm font-medium">Workspace access</h3>{!agent.grants.length && <p className="text-sm text-text-muted">Ask a workspace administrator to enable this agent in workspace settings.</p>}<ul className="space-y-1 text-sm">{agent.grants.map((g) => <li key={g.id}><Link href={g.href} className="underline">{g.name}</Link> · {g.revoked ? "Revoked" : g.access === "WRITE" ? "Read and write" : "Read only"}</li>)}</ul></div>
+      <div className="space-y-2">
+        <h3 className="text-sm font-medium">Request workspace access</h3>
+        {agent.pending.map((p) => <p key={p.id} className="text-sm text-text-muted">{p.name} · Requested {p.access === "WRITE" ? "read and write" : "read only"} — pending approval</p>)}
+        {!agent.requestable.length ? (!agent.pending.length && <p className="text-sm text-text-muted">No other workspaces available to request.</p>) : <div className="flex min-w-0 flex-col gap-2">
+          <Select value={requestWorkspaceId} onValueChange={(v) => setRequestWorkspaceId(v ?? "")} disabled={pending || !canRequest}>
+            <SelectTrigger aria-label={`Workspace to request access to for ${agent.name}`} className="max-w-full"><SelectValue placeholder="Choose a workspace" /></SelectTrigger>
+            <SelectContent>{agent.requestable.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
+          </Select>
+          <Select value={requestAccessLevel} onValueChange={(v) => setRequestAccessLevel(v as "READ" | "WRITE")} disabled={pending || !canRequest}>
+            <SelectTrigger aria-label={`Requested access level for ${agent.name}`}><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="READ">Read only</SelectItem><SelectItem value="WRITE">Read and write</SelectItem></SelectContent>
+          </Select>
+          <Button disabled={pending || !canRequest || !requestWorkspaceId} onClick={() => run(async () => { await requestAgentAccess(agent.id, requestWorkspaceId, requestAccessLevel); setRequestWorkspaceId(""); })}>Request access</Button>
+        </div>}
+      </div>
       <div className="space-y-2"><h3 className="text-sm font-medium">Agent keys</h3><p className="text-xs text-text-muted">To rotate, generate a replacement, update your client, then revoke the old key.</p>{agent.keys.map((k) => <div key={k.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border-default p-2 text-sm"><span>{k.name} · cmp_{k.keyPrefix}…<span className="block text-xs text-text-muted">{k.revokedAt ? "Revoked" : k.expiresAt ? `Expires ${k.expiresAt.toISOString()}` : "No expiry"}</span></span>{!k.revokedAt && <Button variant="outline" size="sm" disabled={pending} onClick={() => run(() => revokeAgentKey(k.id))}>Revoke {k.name}</Button>}</div>)}</div>
       {enabled && agent.status === "ACTIVE" && <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); run(async () => { const key = await createAgentKey(agent.id, { name: keyName, expiresAt: expiry ? new Date(expiry).toISOString() : undefined }); setSecret(key.rawKey); setKeyName(""); }); }}><Label htmlFor={`key-${agent.id}`}>Key name</Label><Input id={`key-${agent.id}`} value={keyName} onChange={(e) => setKeyName(e.target.value)} required maxLength={120} disabled={pending} /><Label htmlFor={`expiry-${agent.id}`}>Optional expiry</Label><Input id={`expiry-${agent.id}`} type="datetime-local" value={expiry} onChange={(e) => setExpiry(e.target.value)} disabled={pending} /><Button type="submit" disabled={pending || !keyName.trim()}>Generate agent key</Button></form>}
       {secret && <div role="status" className="space-y-2 rounded-md border border-border-default bg-surface-subtle p-3"><p className="text-sm">Copy this key now. It will not be shown again.</p><code className="block break-all text-xs">{secret}</code><Button variant="outline" size="sm" onClick={() => setSecret(null)}>Hide key</Button></div>}
