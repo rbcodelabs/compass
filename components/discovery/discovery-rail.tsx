@@ -213,13 +213,13 @@ function RailRow({
       className={cn(
         "relative flex items-start gap-1.5 rounded-lg px-2 py-1.5 text-xs transition-colors",
         isActive
-          ? "bg-indigo-50 text-indigo-900"
+          ? "bg-primary/10 text-primary"
           : "text-text-secondary hover:bg-surface-inset hover:text-text-primary"
       )}
     >
       {isActive && (
         <span
-          className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-indigo-500"
+          className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary"
           aria-hidden="true"
         />
       )}
@@ -233,7 +233,7 @@ function RailRow({
       <span className="line-clamp-2 flex-1">{opportunity.title}</span>
       {opportunity.linkedKeyResultId && (
         <TrendingUp
-          className="mt-0.5 size-3 shrink-0 text-indigo-500"
+          className="mt-0.5 size-3 shrink-0 text-primary"
           aria-label="Linked to a key result"
         />
       )}

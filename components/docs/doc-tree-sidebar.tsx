@@ -153,7 +153,7 @@ function DocTreeNode({
         className={cn(
           "group flex items-center gap-1 rounded-md py-1 px-2 text-sm transition-colors",
           isActive
-            ? "bg-indigo-50 text-indigo-700 font-medium"
+            ? "bg-primary/10 text-primary font-medium"
             : "text-text-secondary hover:bg-surface-inset"
         )}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
@@ -186,7 +186,7 @@ function DocTreeNode({
             <FileText
               className={cn(
                 "w-3.5 h-3.5 shrink-0",
-                isActive ? "text-indigo-500" : "text-text-subtle"
+                isActive ? "text-primary" : "text-text-subtle"
               )}
             />
           )}
@@ -198,7 +198,7 @@ function DocTreeNode({
           onClick={handleAddChild}
           disabled={isPending}
           className={cn(
-            "shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-slate-200 transition-opacity",
+            "shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-surface-interactive-hover transition-opacity",
             isHovered ? "opacity-100" : "opacity-0"
           )}
           title="Add child page"
