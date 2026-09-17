@@ -16,6 +16,7 @@ import {
   parseCustomFieldFilterParams,
   resolveCustomFieldFilter,
 } from "@/lib/custom-field-filter";
+import { roadmapBoardFilterKey } from "@/lib/roadmap-filters";
 
 export const metadata = {
   title: "Roadmap",
@@ -246,6 +247,17 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     deliveryStatus: deriveRoadmapDeliveryStatus(taskStatusesByRoadmapItem.get(item.id) ?? []),
   }));
 
+  // A filter change is a new dataset; ordinary refreshes must preserve
+  // in-flight mutation fences and optimistic edits. Both views seed their own
+  // client state once, so both need this — the Board shipped without it and
+  // went on painting pre-filter columns while the URL said otherwise.
+  const filterKey = roadmapBoardFilterKey({
+    workspaceId: workspace.id,
+    squad: squadFilter,
+    field: customFieldFilter?.fieldId ?? null,
+    fieldValue: fieldValueParam,
+  });
+
   const unscheduledItems: UnscheduledItem[] = [
     ...unscheduledSolutions.map((sol) => ({
       kind: "solution" as const,
@@ -267,14 +279,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       {view === "timeline" ? (
         <Suspense>
           <NativeTimeline
-            // A filter change is a new dataset; ordinary refreshes must
-            // preserve in-flight mutation fences and optimistic edits.
-            key={JSON.stringify([
-              workspace.id,
-              squadFilter || null,
-              customFieldFilter?.fieldId ?? null,
-              fieldValueParam || null,
-            ])}
+            key={filterKey}
             items={cardItems}
             squads={squadFilter ? squads.filter((squad) => squad.id === squadFilter) : squads}
             headerSquads={squads}
@@ -295,6 +300,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
           </Suspense>
           <div data-slot="workspace-content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
             <RoadmapBoard
+              key={filterKey}
               initialItems={cardItems}
               workspaceId={workspace.id}
               orgSlug={orgSlug}
