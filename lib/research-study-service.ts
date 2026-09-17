@@ -5,8 +5,13 @@ import getPrisma from "@/lib/db"
 import { createResearchToken, normalizeResearchAppUrl, parseResearchGuide, type ResearchStudyType } from "@/lib/research"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { runResearchInterviewAgent } from "@/lib/research-agent"
+import { readSessionAnalysis } from "@/lib/research-analysis"
 
 export class ResearchStudyError extends Error {}
+
+/** Lifecycle states a ResearchSession row can hold (schema: VarChar(20)). */
+export const RESEARCH_SESSION_STATUSES = ["PENDING", "IN_PROGRESS", "COMPLETED", "ABANDONED", "EXPIRED"] as const
+export type ResearchSessionStatus = (typeof RESEARCH_SESSION_STATUSES)[number]
 
 export type ResearchStudyActor = { userId: string | null; service?: boolean; source?: "UI" | "MCP" }
 export type ResearchWorkspaceScope = { workspaceId: string } | { orgSlug: string; workspaceSlug: string }
@@ -287,6 +292,102 @@ function publicMetadata(study: StudyMetadata) {
 export async function getResearchStudy(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
   if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   return publicMetadata((await findMemberStudy(scope, actor, studyId)).study)
+}
+
+/**
+ * Transcript reads (ADR-0012 step 3).
+ *
+ * `ResearchSession` stores participant identity (`participantName`,
+ * `participantEmail`), credential material (`resumeTokenHash`,
+ * `participantTokenId`), a raw media pointer (`audioUrl`) and voice/request
+ * operational state (`voiceLease*`, `activeRequest*`, `nextSequence`). None of
+ * it may ever reach a model, so the projection is enforced twice and
+ * independently:
+ *
+ *   1. `sessionSelect` never loads those columns from the database, and
+ *   2. `publicSession()` rebuilds its result field by field — it never spreads a
+ *      row — so widening the select (or adding a column to the model) cannot
+ *      leak by default. This is the control the tests assert against.
+ *
+ * `summary` is the one selected column that is deliberately NOT returned. It is
+ * overloaded: it holds either a legacy plaintext summary or the JSON envelope
+ * written by lib/research-analysis.ts, which during generation also carries
+ * analysis-lease internals (claim ids, deadlines, failure markers). Returning it
+ * raw would expose that machinery and would let a stale or in-flight claim read
+ * as a finished summary, so it is reduced to a `hasSummary` boolean through the
+ * existing hardened parser. Exposing synthesis content is ADR-0012 step 4's job.
+ */
+const sessionSelect = {
+  id: true, studyId: true, modality: true, status: true, startedAt: true, completedAt: true,
+  lastActiveAt: true, endedReason: true, createdAt: true, summary: true, _count: { select: { turns: true } },
+} satisfies Prisma.ResearchSessionSelect
+type SessionMetadata = Prisma.ResearchSessionGetPayload<{ select: typeof sessionSelect }>
+function publicSession(session: SessionMetadata) {
+  return {
+    id: session.id, studyId: session.studyId, modality: session.modality, status: session.status,
+    startedAt: session.startedAt, completedAt: session.completedAt, lastActiveAt: session.lastActiveAt,
+    endedReason: session.endedReason, createdAt: session.createdAt,
+    turnCount: session._count.turns,
+    hasSummary: Boolean(readSessionAnalysis(session.summary).summary),
+  }
+}
+
+/** Ordered participant/interviewer text — the point of the tool, and safe. */
+const turnSelect = { id: true, role: true, content: true, sequence: true } satisfies Prisma.ResearchTurnSelect
+
+const PAGE_SIZE = 20
+/** Bounded here as well as in the tool's zod schema; the service is also called directly. */
+function assertOffset(offset: number) {
+  if (!Number.isInteger(offset) || offset < 0 || offset > 1_000_000) throw new ResearchStudyError("Offset must be a whole number between 0 and 1,000,000")
+}
+
+/**
+ * Sessions page in creation order so that a session starting mid-read appends
+ * to the end instead of shifting every subsequent offset page.
+ */
+export async function listResearchSessions(
+  scope: ResearchWorkspaceScope,
+  actor: ResearchStudyActor,
+  studyId: string,
+  { status, offset = 0 }: { status?: ResearchSessionStatus; offset?: number } = {},
+) {
+  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
+  // findMemberStudy enforces workspace membership AND excludes PM_INTERVIEW
+  // studies, which reuse these tables but have their own owner-scoped
+  // authorization path (ADR-0011). Resolving through it is what stops these
+  // tools becoming a PM-interview transcript backdoor.
+  const { prisma, study } = await findMemberStudy(scope, actor, studyId)
+  assertOffset(offset)
+  const sessions = await prisma.researchSession.findMany({
+    where: { studyId: study.id, ...(status ? { status } : {}) },
+    select: sessionSelect,
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    skip: offset, take: PAGE_SIZE + 1,
+  })
+  const page = sessions.slice(0, PAGE_SIZE)
+  return { studyId: study.id, items: page.map(publicSession), count: page.length, nextOffset: sessions.length > PAGE_SIZE ? offset + PAGE_SIZE : null }
+}
+
+export async function getResearchSession(
+  scope: ResearchWorkspaceScope,
+  actor: ResearchStudyActor,
+  studyId: string,
+  sessionId: string,
+  { offset = 0 }: { offset?: number } = {},
+) {
+  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
+  const { prisma, study } = await findMemberStudy(scope, actor, studyId)
+  assertOffset(offset)
+  // Scoped to the already-authorized study, so a session id from another study
+  // (including a PM interview's) resolves to nothing rather than to its turns.
+  const session = await prisma.researchSession.findFirst({ where: { id: sessionId, studyId: study.id }, select: sessionSelect })
+  if (!session) throw new ResearchStudyError("Session not found")
+  const turns = await prisma.researchTurn.findMany({
+    where: { sessionId: session.id }, select: turnSelect,
+    orderBy: { sequence: "asc" }, skip: offset, take: PAGE_SIZE + 1,
+  })
+  // Spreads the allowlisted projection's own return value, never the database row.
+  return { ...publicSession(session), turns: turns.slice(0, PAGE_SIZE), nextOffset: turns.length > PAGE_SIZE ? offset + PAGE_SIZE : null }
 }
 
 const cursorSchema = z.object({ version: z.literal(1), workspaceId: z.string().uuid(), status: z.enum(["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]).nullable(), createdAt: z.string().datetime(), id: z.string().uuid() }).strict()

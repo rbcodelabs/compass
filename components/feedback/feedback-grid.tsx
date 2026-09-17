@@ -237,63 +237,73 @@ export function FeedbackGrid({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <DataGrid<FeedbackRow>
-        gridId="feedback"
-        columns={columns}
-        rows={items}
-        getRowId={(row) => row.id}
-        total={total}
-        page={query.page}
-        pageSize={query.per}
-        pageSizes={FEEDBACK_PAGE_SIZES}
-        onPageChange={(page) => applyPatch({ page })}
-        onPageSizeChange={(per) => applyPatch({ per })}
-        sort={query.sort ? { key: query.sort, dir: query.dir } : null}
-        // Direction is the caller's job: `serializeFeedbackQuery` flips the
-        // active column and uses each other column's natural first direction.
-        onSortChange={(sortKey) => applyPatch({ sort: sortKey })}
-        caption="Customer feedback, sortable and filterable. Use the column headers to sort and the Filters menu to narrow the list."
-        toolbarPortalId="feedback-header-toolbar"
-        searchDisplay="popover"
-        search={{
-          value: query.q ?? "",
-          onChange: (value) => applyPatch({ q: value || null }),
-          placeholder: "Search feedback",
-          label: "Search feedback",
-        }}
-        filters={[
-          {
-            id: "type",
-            label: "Type",
-            value: query.type,
-            allLabel: "All",
-            options: [...FEEDBACK_TYPE_FILTER_OPTIONS],
-            onValueChange: (value) => applyPatch({ type: value }),
-          },
-          {
-            id: "status",
-            label: "Status",
-            values: query.status,
-            options: FEEDBACK_STATUSES.map((status) => ({
-              value: status,
-              label: FEEDBACK_STATUS_META[status].label,
-            })),
-            onValuesChange: (values) => applyPatch({ status: values }),
-          },
-        ]}
-        onClearFilters={() => applyPatch({ status: null, type: null })}
-        renderMobileRow={renderMobileRow}
-        rowMatchesFilters={rowMatchesFilters}
-        onRefresh={() => router.refresh()}
-        emptyState={
-          <EmptyState
-            compact
-            title="No feedback matches these filters"
-            description="Try clearing the search or the Filters menu."
-          />
-        }
-      />
-    </div>
+    // Rendered straight into `WorkspacePage`'s content area, which is
+    // `md:overflow-hidden`. `height="fill"` is what makes that survivable: the
+    // grid stops growing to fit its rows and instead claims the height the
+    // content area offers, turning its own `table-container` into the scroll
+    // viewport. Left at the default `"natural"` the grid overflowed a clipped
+    // parent — measured at 1280x800 with 20 rows, the last row's bottom landed
+    // at 1209px and the pagination footer's at 1262px with zero user-scrollable
+    // ancestors anywhere between the grid and `<html>`, so neither could be
+    // reached by wheel, scrollbar or keyboard. No wrapper element here: the
+    // DataGrid root already renders `flex flex-col gap-3`, and an unbounded
+    // wrapper between it and the content area would swallow the fill.
+    <DataGrid<FeedbackRow>
+      gridId="feedback"
+      height="fill"
+      columns={columns}
+      rows={items}
+      getRowId={(row) => row.id}
+      total={total}
+      page={query.page}
+      pageSize={query.per}
+      pageSizes={FEEDBACK_PAGE_SIZES}
+      onPageChange={(page) => applyPatch({ page })}
+      onPageSizeChange={(per) => applyPatch({ per })}
+      sort={query.sort ? { key: query.sort, dir: query.dir } : null}
+      // Direction is the caller's job: `serializeFeedbackQuery` flips the
+      // active column and uses each other column's natural first direction.
+      onSortChange={(sortKey) => applyPatch({ sort: sortKey })}
+      caption="Customer feedback, sortable and filterable. Use the column headers to sort and the Filters menu to narrow the list."
+      toolbarPortalId="feedback-header-toolbar"
+      searchDisplay="popover"
+      search={{
+        value: query.q ?? "",
+        onChange: (value) => applyPatch({ q: value || null }),
+        placeholder: "Search feedback",
+        label: "Search feedback",
+      }}
+      filters={[
+        {
+          id: "type",
+          label: "Type",
+          value: query.type,
+          allLabel: "All",
+          options: [...FEEDBACK_TYPE_FILTER_OPTIONS],
+          onValueChange: (value) => applyPatch({ type: value }),
+        },
+        {
+          id: "status",
+          label: "Status",
+          values: query.status,
+          options: FEEDBACK_STATUSES.map((status) => ({
+            value: status,
+            label: FEEDBACK_STATUS_META[status].label,
+          })),
+          onValuesChange: (values) => applyPatch({ status: values }),
+        },
+      ]}
+      onClearFilters={() => applyPatch({ status: null, type: null })}
+      renderMobileRow={renderMobileRow}
+      rowMatchesFilters={rowMatchesFilters}
+      onRefresh={() => router.refresh()}
+      emptyState={
+        <EmptyState
+          compact
+          title="No feedback matches these filters"
+          description="Try clearing the search or the Filters menu."
+        />
+      }
+    />
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -31,6 +32,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AppShell, Board, BoardColumn, ConfirmDialog, DetailPanel, DetailPanelSection, EmptyState, EntityCard, FilterBar, FormField, LoadingState, MetricBadge, PageHeader, PageSection, SettingsSection, StatusBadge, Toolbar } from "@/components/patterns";
+import { DataGrid, type GridColumnDef, type GridSort } from "@/components/data-grid";
 
 const surfaceTokens = [
   ["App", "bg-surface-app"], ["Navigation", "bg-surface-navigation"],
@@ -46,6 +48,194 @@ const statuses = [
   ["Warning", "bg-status-warning-surface text-status-warning", AlertTriangle],
   ["Danger", "bg-status-danger-surface text-status-danger", AlertTriangle],
 ] as const;
+
+// ─── Data grid demo fixtures ───────────────────────────────────────────────
+// Entirely self-contained: no server actions, no data fetching, no router and
+// no panel context, so the registry route stays renderable on its own.
+
+type GridDemoRow = { id: string; opportunity: string; squad: string; stage: string; signals: number };
+
+const GRID_SQUADS = ["Growth", "Platform", "Activation", "Retention"] as const;
+const GRID_STAGES = ["Exploring", "Validating", "Testing", "Learned"] as const;
+
+/** 48 rows — enough to outgrow any bounded viewport and exercise the sticky header. */
+const GRID_DEMO_ROWS: GridDemoRow[] = Array.from({ length: 48 }, (_, index) => ({
+  id: `row-${index + 1}`,
+  opportunity: `${["Reduce", "Clarify", "Shorten", "Explain", "Simplify"][index % 5]} ${["setup uncertainty", "the first-run path", "time to first plan", "experiment results", "the invite flow"][index % 5]} #${index + 1}`,
+  squad: GRID_SQUADS[index % GRID_SQUADS.length],
+  stage: GRID_STAGES[index % GRID_STAGES.length],
+  signals: ((index * 7) % 23) + 1,
+}));
+
+// Declared at module scope so their identity never changes. A column
+// definition rebuilt mid-interaction makes FlexRender remount the cell's whole
+// subtree, which drops focus — the same reason the product grids keep their
+// varying state on the row rather than in the cell closure.
+const GRID_DEMO_COLUMNS: GridColumnDef<GridDemoRow>[] = [
+  {
+    id: "opportunity",
+    header: "Opportunity",
+    accessorKey: "opportunity",
+    // No width: absorbs the remainder under `table-fixed`, floored by
+    // `minWidth` so it cannot collapse when the container is narrower than the
+    // other columns. 16rem matches the fixed Opportunity column in
+    // GRID_WIDE_COLUMNS below, so the two demo grids read the same.
+    meta: { label: "Opportunity", sortable: true, hideable: false, minWidth: "16rem" },
+    cell: ({ row }) => <span className="truncate font-medium text-text-primary">{row.original.opportunity}</span>,
+  },
+  {
+    id: "squad",
+    header: "Squad",
+    accessorKey: "squad",
+    meta: { label: "Squad", sortable: true, width: "9rem" },
+  },
+  {
+    id: "stage",
+    header: "Stage",
+    accessorKey: "stage",
+    meta: { label: "Stage", sortable: true, width: "9rem" },
+    cell: ({ row }) => <StatusBadge status={row.original.stage === "Learned" ? "success" : "info"}>{row.original.stage}</StatusBadge>,
+  },
+  {
+    id: "signals",
+    header: "Signals",
+    accessorKey: "signals",
+    meta: { label: "Signals", sortable: true, width: "7rem", align: "end" },
+  },
+];
+
+/** Ten fixed-width columns, deliberately wider than the example card. */
+const GRID_WIDE_COLUMNS: GridColumnDef<GridDemoRow>[] = [
+  { id: "opportunity", header: "Opportunity", accessorKey: "opportunity", meta: { label: "Opportunity", width: "16rem", hideable: false } },
+  ...Array.from({ length: 9 }, (_, index): GridColumnDef<GridDemoRow> => ({
+    id: `metric-${index}`,
+    header: `Week ${index + 1}`,
+    meta: { label: `Week ${index + 1}`, width: "8rem", align: "end" },
+    cell: ({ row }) => <span className="text-text-subtle">{((row.original.signals * (index + 3)) % 97) + 3}</span>,
+  })),
+];
+
+function DataGridExamples() {
+  // ── Sortable + paginated + searchable ──
+  const [sort, setSort] = useState<GridSort>({ key: "signals", dir: "desc" });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
+  const [query, setQuery] = useState("");
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const matched = needle
+      ? GRID_DEMO_ROWS.filter((row) => row.opportunity.toLowerCase().includes(needle))
+      : GRID_DEMO_ROWS;
+    if (!sort) return matched;
+    const direction = sort.dir === "asc" ? 1 : -1;
+    return [...matched].sort((a, b) => {
+      const left = a[sort.key as keyof GridDemoRow];
+      const right = b[sort.key as keyof GridDemoRow];
+      if (typeof left === "number" && typeof right === "number") return (left - right) * direction;
+      return String(left).localeCompare(String(right)) * direction;
+    });
+  }, [query, sort]);
+
+  const pageRows = useMemo(
+    () => filtered.slice((page - 1) * pageSize, page * pageSize),
+    [filtered, page, pageSize],
+  );
+
+  return (
+    <div className="space-y-4">
+      <Example title="Sortable, searchable, paginated">
+        <p className="mb-3 text-sm text-text-secondary">
+          The grid owns no engine of its own: it reports a sort <em>key</em> and lets the caller decide
+          direction, and it pages against a caller-supplied total. In the product these are URL state and a
+          SQL query; here they are local state over a fixed array.
+        </p>
+        <DataGrid<GridDemoRow>
+          gridId="registry-grid-basic"
+          columns={GRID_DEMO_COLUMNS}
+          rows={pageRows}
+          getRowId={(row) => row.id}
+          caption="Example opportunities, sortable and paginated"
+          total={filtered.length}
+          page={page}
+          pageSize={pageSize}
+          pageSizes={[5, 10, 25]}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+          sort={sort}
+          onSortChange={(key) =>
+            setSort((current) =>
+              current && current.key === key
+                ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
+                : { key, dir: "asc" },
+            )
+          }
+          search={{ value: query, onChange: (next) => { setQuery(next); setPage(1); }, placeholder: "Search opportunities" }}
+          emptyState={<EmptyState compact title="No matches" description="Nothing matches that search." />}
+        />
+      </Example>
+
+      <Example title="Sticky header and vertical scroll">
+        <p className="mb-3 text-sm text-text-secondary">
+          48 rows in a bounded viewport. The scroll container is the grid&apos;s own
+          <code className="mx-1 rounded bg-surface-inset px-1.5 py-0.5 font-mono text-xs">table-container</code>
+          — which is what makes a sticky header possible at all, since that div is the nearest scrolling
+          ancestor and therefore the box the header resolves against. Scroll the list: the header stays.
+        </p>
+        <DataGrid<GridDemoRow>
+          gridId="registry-grid-sticky"
+          columns={GRID_DEMO_COLUMNS}
+          rows={GRID_DEMO_ROWS}
+          getRowId={(row) => row.id}
+          caption="Example opportunities with a sticky header"
+          height="natural"
+          maxHeight="18rem"
+          pagination={false}
+          toolbar={false}
+          className="overflow-hidden rounded-xl border border-border-default bg-surface-panel"
+        />
+      </Example>
+
+      <Example title="Horizontal scroll">
+        <p className="mb-3 text-sm text-text-secondary">
+          Ten fixed-width columns in a narrower card. The table keeps
+          <code className="mx-1 rounded bg-surface-inset px-1.5 py-0.5 font-mono text-xs">table-layout: fixed</code>
+          so declared widths stay authoritative and a long cell can never silently widen the table; overflow
+          becomes a scrollbar on the container instead of pushing the page sideways.
+        </p>
+        <DataGrid<GridDemoRow>
+          gridId="registry-grid-wide"
+          columns={GRID_WIDE_COLUMNS}
+          rows={GRID_DEMO_ROWS.slice(0, 6)}
+          getRowId={(row) => row.id}
+          caption="Example opportunities with more columns than fit"
+          height="natural"
+          pagination={false}
+          toolbar={false}
+          className="overflow-hidden rounded-xl border border-border-default bg-surface-panel"
+        />
+      </Example>
+
+      <Example title="Customizable columns">
+        <p className="mb-3 text-sm text-text-secondary">
+          The toolbar&apos;s <strong>Columns</strong> menu hides and reorders columns, and the same reordering is
+          available from the keyboard through its Move up / Move down items rather than only by dragging a
+          header. Choices persist per <code className="mx-1 rounded bg-surface-inset px-1.5 py-0.5 font-mono text-xs">gridId</code>.
+          A column marked <code className="mx-1 rounded bg-surface-inset px-1.5 py-0.5 font-mono text-xs">hideable: false</code>
+          — here, Opportunity — is pinned to its declared index and left out of the menu.
+        </p>
+        <DataGrid<GridDemoRow>
+          gridId="registry-grid-columns"
+          columns={GRID_DEMO_COLUMNS}
+          rows={GRID_DEMO_ROWS.slice(0, 5)}
+          getRowId={(row) => row.id}
+          caption="Example opportunities with a configurable column set"
+          pagination={false}
+        />
+      </Example>
+    </div>
+  );
+}
 
 function Section({ id, title, description, children }: { id: string; title: string; description: string; children: React.ReactNode }) {
   return (
@@ -80,7 +270,7 @@ export function UIRegistry() {
               <p className="mt-3 max-w-2xl text-base leading-7 text-text-secondary">A repository-native reference for semantic tokens, typography, controls, interaction states, and responsive behavior.</p>
             </div>
             <nav aria-label="Registry sections" className="flex flex-wrap gap-2 text-sm">
-              {[["Tokens", "tokens"], ["Type", "typography"], ["Controls", "controls"], ["Patterns", "patterns"], ["Overlays", "overlays"], ["Responsive", "responsive"]].map(([label, id]) => <a key={id} className="rounded-lg px-2.5 py-1.5 text-text-subtle hover:bg-surface-interactive hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus" href={`#${id}`}>{label}</a>)}
+              {[["Tokens", "tokens"], ["Type", "typography"], ["Controls", "controls"], ["Patterns", "patterns"], ["Data grid", "data-grid"], ["Overlays", "overlays"], ["Responsive", "responsive"]].map(([label, id]) => <a key={id} className="rounded-lg px-2.5 py-1.5 text-text-subtle hover:bg-surface-interactive hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus" href={`#${id}`}>{label}</a>)}
             </nav>
           </header>
 
@@ -122,6 +312,10 @@ export function UIRegistry() {
                 <div className="grid gap-4 lg:grid-cols-2"><Example title="Form field and settings section"><SettingsSection title="Workspace defaults" description="Applied to new opportunities."><FormField id="registry-pattern-name" label="Default owner" description="The teammate responsible for new work."><Input id="registry-pattern-name" placeholder="Choose an owner" /></FormField></SettingsSection></Example><Example title="Detail panel and loading"><div className="h-80 overflow-hidden rounded-xl border border-border-default"><DetailPanel eyebrow="Opportunity" title="Reduce setup uncertainty" description="Customer onboarding"><DetailPanelSection title="Summary"><p className="text-sm text-text-secondary">Help teams reach their first useful plan with less ambiguity.</p></DetailPanelSection><DetailPanelSection title="Activity"><LoadingState rows={2} label="Loading activity" /></DetailPanelSection></DetailPanel></div></Example></div>
                 <Example title="Confirmation pattern"><ConfirmDialog trigger={<Button variant="destructive"><Trash2 />Delete opportunity</Button>} title="Delete opportunity?" description="This permanently removes the opportunity and its links." confirmLabel="Delete" destructive onConfirm={() => undefined} /></Example>
               </div>
+            </Section>
+
+            <Section id="data-grid" title="Data grid" description="The shared table composition: one scroll viewport on both axes, a sticky header, and opt-in sorting, search, pagination and column customization. Dark mode is scoped to workspace routes, so this page renders light only — verify the grid's dark appearance on a real workspace view.">
+              <DataGridExamples />
             </Section>
 
             <Section id="overlays" title="Overlays" description="Triggers are fully keyboard accessible; dialogs and sheets manage focus through Base UI.">

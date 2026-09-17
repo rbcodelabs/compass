@@ -13,7 +13,7 @@ import {
 } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import { DataGrid } from "@/components/data-grid/data-grid";
+import { DataGrid, DEFAULT_MIN_WIDTH } from "@/components/data-grid/data-grid";
 import {
   gridPreferencesKey,
   reconcilePreferences,
@@ -23,6 +23,7 @@ import type {
   GridActionResult,
   GridColumnDef,
 } from "@/components/data-grid/types";
+import { expectEveryGridCellClipped } from "../helpers/grid-cells";
 
 afterEach(cleanup);
 
@@ -863,5 +864,362 @@ describe("DataGrid selection (opt-in)", () => {
     fireEvent.click(screen.getByLabelText("Select Dark mode"));
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(new Set(onChange.mock.calls[0][0])).toEqual(new Set(["r1", "r2"]));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scroll viewport, sticky header and height modes
+// ---------------------------------------------------------------------------
+function container(view: ReturnType<typeof renderGrid>) {
+  const node = view.container.querySelector('[data-slot="table-container"]');
+  if (!node) throw new Error("table-container not found");
+  return node as HTMLElement;
+}
+
+describe("DataGrid scroll viewport", () => {
+  // Regression class this guards: a grid that renders inside a clipping
+  // ancestor and owns no scroll viewport of its own silently hides every row
+  // past the fold. PR #219 patched that per page with an outer
+  // `overflow-y-auto` wrapper — which cannot work with a sticky header,
+  // because `overflow-x: auto` already makes `table-container` the nearest
+  // scrolling ancestor and a sticky `<th>` therefore resolves against THAT
+  // box, not the outer wrapper. The viewport has to be the container itself.
+  it("puts the vertical scroll on table-container, not on an outer wrapper", () => {
+    const view = renderGrid({ height: "fill" });
+    const node = container(view);
+
+    expect(node.className).toMatch(/(?:^|\s)overflow-y-auto(?:\s|$)/);
+    expect(node.className).toMatch(/(?:^|\s)min-h-0(?:\s|$)/);
+    expect(node.className).toMatch(/(?:^|\s)flex-1(?:\s|$)/);
+    // The horizontal behaviour the `table-fixed` layout depends on survives
+    // verbatim rather than via class-merge order.
+    expect(node.className).toMatch(/(?:^|\s)overflow-x-auto(?:\s|$)/);
+    expect(node.className).not.toMatch(/(?:^|\s)overflow-hidden(?:\s|$)/);
+  });
+
+  it("claims the parent's height only in fill mode", () => {
+    const fill = renderGrid({ height: "fill" });
+    expect(screen.getByTestId("data-grid").className).toMatch(
+      /(?:^|\s)flex-1(?:\s|$)/,
+    );
+    expect(screen.getByTestId("data-grid")).toHaveAttribute(
+      "data-height",
+      "fill",
+    );
+    fill.unmount();
+
+    // The default. A `flex-1 min-h-0` grid dropped into an unbounded parent
+    // collapses to zero height, so `natural` has to be what you get for free.
+    const natural = renderGrid();
+    const root = screen.getByTestId("data-grid");
+    expect(root).toHaveAttribute("data-height", "natural");
+    expect(root.className).not.toMatch(/(?:^|\s)flex-1(?:\s|$)/);
+    expect(root.className).not.toMatch(/(?:^|\s)min-h-0(?:\s|$)/);
+    expect(container(natural).className).not.toMatch(
+      /(?:^|\s)overflow-y-auto(?:\s|$)/,
+    );
+  });
+
+  it("bounds a natural grid with maxHeight so its header has something to stick to", () => {
+    const view = renderGrid({ height: "natural", maxHeight: "20rem" });
+
+    expect(screen.getByTestId("data-grid")).toHaveStyle({
+      "--data-grid-max-h": "20rem",
+    });
+    expect(container(view).className).toMatch(/max-h-\(--data-grid-max-h\)/);
+    expect(container(view).className).toMatch(
+      /(?:^|\s)overflow-y-auto(?:\s|$)/,
+    );
+  });
+
+  it("sticks every header cell to the top of the viewport with an opaque background", () => {
+    renderGrid({
+      height: "fill",
+      selection: { selectedIds: [], onChange: vi.fn() },
+    });
+
+    const heads = screen.getAllByRole("columnheader");
+    expect(heads.length).toBeGreaterThan(1);
+    for (const head of heads) {
+      expect(head.className).toMatch(/(?:^|\s)sticky(?:\s|$)/);
+      expect(head.className).toMatch(/(?:^|\s)top-0(?:\s|$)/);
+      // Without an opaque cell background, body rows scroll through the
+      // header: under `border-collapse: collapse` a <tr>/<thead> background
+      // does not reliably paint behind a sticky cell.
+      expect(head.className).toMatch(/(?:^|\s)bg-surface-panel(?:\s|$)/);
+      // The underline must be an inset shadow. A collapsed `border-b` belongs
+      // to the table grid rather than the cell and scrolls away on its own.
+      expect(head.className).toMatch(/shadow-\[inset_0_-1px_0_/);
+    }
+  });
+});
+
+describe("DataGrid chrome opt-outs", () => {
+  it("hides the pagination footer when pagination is false", () => {
+    renderGrid({ pagination: false });
+    expect(screen.queryByTestId("grid-pagination")).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Pagination" })).toBeNull();
+    // Rows still render — the opt-out is chrome-only.
+    expect(screen.getAllByTestId("grid-row")).toHaveLength(2);
+  });
+
+  it("hides the toolbar and its Columns menu when toolbar is false", () => {
+    renderGrid({ toolbar: false });
+    expect(
+      screen.queryByRole("button", { name: /Columns/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader")).toHaveLength(4);
+  });
+
+  it("does not install a body-wide MutationObserver for a toolbar that will never render", () => {
+    const observe = vi.spyOn(MutationObserver.prototype, "observe");
+    renderGrid({ toolbar: false, toolbarPortalId: "nonexistent-host" });
+    expect(observe).not.toHaveBeenCalled();
+    observe.mockRestore();
+  });
+
+  it("derives page math from rows.length when total/page/pageSize are omitted", () => {
+    renderGrid({ total: undefined, page: undefined, pageSize: undefined });
+    expect(screen.getByTestId("grid-pagination-summary")).toHaveTextContent(
+      "1–2 of 2 results",
+    );
+    expect(screen.getByTestId("grid-page-indicator")).toHaveTextContent(
+      "Page 1 of 1",
+    );
+  });
+
+  it("survives an empty unpaginated page without a zero pageSize", () => {
+    renderGrid({
+      rows: [],
+      total: undefined,
+      page: undefined,
+      pageSize: undefined,
+    });
+    expect(screen.getByTestId("grid-empty-row")).toBeInTheDocument();
+    expect(screen.getByTestId("grid-page-indicator")).toHaveTextContent(
+      "Page 1 of 1",
+    );
+  });
+});
+
+describe("DataGrid rowClassName", () => {
+  it("applies caller classes per row without losing the grid's own row hooks", () => {
+    renderGrid({
+      rowClassName: (row: Row) =>
+        row.id === "r2" ? "bg-surface-inset/50" : undefined,
+    });
+
+    const rows = screen.getAllByTestId("grid-row");
+    expect(rows[0].className).not.toMatch(/bg-surface-inset/);
+    expect(rows[1].className).toMatch(/bg-surface-inset\/50/);
+    expect(rows[1]).toHaveAttribute("data-row-id", "r2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Column overflow
+// ---------------------------------------------------------------------------
+// `table-fixed` (the grid's own choice) plus `whitespace-nowrap` (the shared
+// TableCell's) makes every declared column width a hard box that content cannot
+// wrap out of. Nothing in a column definition is required to clip, so before
+// this the grid let one long value paint straight over the next column — which
+// is how the Tasks Assignee column overlapped Squad on the preview.
+describe("DataGrid column overflow", () => {
+  it("clips every body cell by default, so no column can paint over the next", () => {
+    const { container } = renderGrid({
+      rows: [
+        {
+          id: "r1",
+          title: "A title far wider than the twenty rem this column declares",
+          status: "OPEN",
+          votes: 12,
+        },
+      ],
+    });
+
+    expectEveryGridCellClipped(container);
+    // The ellipsis is what makes the clip legible rather than a hard cut.
+    expect(screen.getByTestId("grid-cell-title").className).toMatch(
+      /(?:^|\s)text-ellipsis(?:\s|$)/,
+    );
+  });
+
+  it("lets a column opt out with overflow: visible", () => {
+    const columns = makeColumns(noopSave).map((column) =>
+      column.id === "action"
+        ? { ...column, meta: { ...column.meta, overflow: "visible" as const } }
+        : column,
+    );
+
+    renderGrid({ columns });
+
+    expect(screen.getAllByTestId("grid-cell-action")[0].className).not.toMatch(
+      /(?:^|\s)overflow-hidden(?:\s|$)/,
+    );
+    // The opt-out is per column, not a grid-wide switch.
+    expect(screen.getAllByTestId("grid-cell-title")[0].className).toMatch(
+      /(?:^|\s)overflow-hidden(?:\s|$)/,
+    );
+  });
+
+  it("leaves the selection checkbox cell unclipped", () => {
+    // The checkbox's `after:-inset-x-3` hit target extends outside its box into
+    // a cell with `pr-0`; clipping it would shrink a real pointer target.
+    renderGrid({
+      selection: { selectedIds: [], onChange: () => {} },
+    });
+
+    expect(screen.getAllByTestId("grid-cell-__select")[0].className).not.toMatch(
+      /(?:^|\s)overflow-hidden(?:\s|$)/,
+    );
+  });
+
+  it("leaves the stacked mobile card unclipped", () => {
+    setViewport(true);
+    renderGrid({
+      renderMobileRow: (row: Row) => <div data-testid="mobile-card">{row.title}</div>,
+    });
+
+    expect(screen.getAllByTestId("grid-cell-mobile")[0].className).not.toMatch(
+      /(?:^|\s)overflow-hidden(?:\s|$)/,
+    );
+  });
+
+  it("clips the header label without clipping the sort button's focus ring", () => {
+    renderGrid();
+
+    // The sort Button carries `-mx-2`, cancelling the `<th>`'s own padding, so
+    // its focus ring sits flush against the header's padding box. Clipping the
+    // `<th>` would cut that ring off; the label truncates instead.
+    const head = screen.getByTestId("grid-head-title");
+    expect(head.className).not.toMatch(/(?:^|\s)overflow-hidden(?:\s|$)/);
+    expect(
+      head.querySelector('[data-testid="grid-head-label"]')?.className,
+    ).toMatch(/(?:^|\s)truncate(?:\s|$)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Minimum column widths
+// ---------------------------------------------------------------------------
+function tableEl(view: ReturnType<typeof renderGrid>) {
+  const node = view.container.querySelector('[data-slot="table"]');
+  if (!node) throw new Error("table not found");
+  return node as HTMLTableElement;
+}
+
+/**
+ * Regression class this guards: columns crushed to unreadable — and the
+ * flexible first column all the way to zero — instead of the table overflowing
+ * into a horizontal scrollbar.
+ *
+ * The grid renders `table-fixed` on a `w-full` table. Fixed layout never lets a
+ * table overflow on its own: when the `<colgroup>` out-sums the container the
+ * browser scales every column down, and a column with no declared width is
+ * handed `container − Σ(declared)`, which clamps to zero once that goes
+ * negative. Reported against PR #224's preview: at 390px the Tasks title
+ * column was invisible.
+ *
+ * These assert the *reservation* — the table's `min-width` — because that is
+ * the mechanism that converts the shortfall into scrolling. Note that a
+ * `scrollWidth > clientWidth` check does NOT cover this: crushed cells still
+ * overflow their own boxes, so that assertion passes while the bug is live.
+ * It is why this shipped. Real painted widths are verified in a browser at
+ * 320/390/1280; jsdom performs no layout.
+ */
+describe("DataGrid minimum column widths", () => {
+  const FIXED: GridColumnDef<Row>[] = [
+    { id: "title", header: "Title", accessorKey: "title", meta: { label: "Title", minWidth: "18rem" } },
+    { id: "status", header: "Status", accessorKey: "status", meta: { label: "Status", width: "10rem" } },
+    { id: "votes", header: "Votes", accessorKey: "votes", meta: { label: "Votes", width: "6rem" } },
+  ];
+
+  const FIXED_VIEW = () => renderGrid({ columns: FIXED });
+
+  it("reserves every column's minimum as the table's min-width", () => {
+    // 10rem + 6rem fixed, plus the flexible column's declared 18rem floor.
+    expect(tableEl(FIXED_VIEW())).toHaveStyle({
+      minWidth: "calc(10rem + 6rem + 18rem)",
+    });
+  });
+
+  it("gives the flexible column a floor, so it can never resolve to zero", () => {
+    const el = tableEl(FIXED_VIEW());
+
+    // The specific failure Rick hit: no reservation at all, so the flexible
+    // column resolves to `container − Σ(declared)` and clamps to zero.
+    expect(el.style.minWidth).not.toBe("");
+    // ...and the near miss: reserving only the fixed columns, which leaves the
+    // flexible one contributing nothing and collapsing just the same.
+    expect(el).not.toHaveStyle({ minWidth: "calc(10rem + 6rem)" });
+    // 18rem of the 34rem reservation is the flexible column's own.
+    expect(el).toHaveStyle({ minWidth: "calc(10rem + 6rem + 18rem)" });
+  });
+
+  it("falls back to a default floor for a flexible column that declares none", () => {
+    const view = renderGrid({
+      columns: [
+        { id: "title", header: "Title", accessorKey: "title", meta: { label: "Title" } },
+        { id: "status", header: "Status", accessorKey: "status", meta: { label: "Status", width: "10rem" } },
+      ],
+    });
+    expect(tableEl(view)).toHaveStyle({
+      minWidth: `calc(10rem + ${DEFAULT_MIN_WIDTH})`,
+    });
+  });
+
+  it("reserves count x max for several flexible columns, because fixed layout splits the leftover equally", () => {
+    const view = renderGrid({
+      columns: [
+        { id: "title", header: "Title", accessorKey: "title", meta: { label: "Title", minWidth: "18rem" } },
+        { id: "status", header: "Status", accessorKey: "status", meta: { label: "Status", minWidth: "10rem" } },
+        { id: "votes", header: "Votes", accessorKey: "votes", meta: { label: "Votes", width: "6rem" } },
+      ],
+    });
+    // Σ(18 + 10) would hand the 10rem column an equal — and so too small —
+    // share of a 28rem leftover.
+    expect(tableEl(view)).toHaveStyle({
+      minWidth: "calc(6rem + 2 * max(18rem, 10rem))",
+    });
+  });
+
+  it("drops a hidden column from the reservation", async () => {
+    const view = FIXED_VIEW();
+    expect(tableEl(view)).toHaveStyle({ minWidth: "calc(10rem + 6rem + 18rem)" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Columns" }));
+    await screen.findByTestId("grid-column-toggle-votes");
+    fireEvent.click(screen.getByTestId("grid-column-toggle-votes"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("grid-head-votes")).not.toBeInTheDocument(),
+    );
+
+    // Reserving a hidden column's width would scroll the grid for space it is
+    // no longer painting.
+    expect(tableEl(view)).toHaveStyle({ minWidth: "calc(10rem + 18rem)" });
+  });
+
+  it("reserves nothing in mobile mode, where one card fills the viewport", () => {
+    setViewport(true);
+    const view = renderGrid({
+      columns: FIXED,
+      renderMobileRow: (row: Row) => <div data-testid="mobile-card">{row.title}</div>,
+    });
+
+    // The stacked-card path renders a single unstyled <col>; forcing the
+    // desktop sum here would reintroduce exactly the horizontal scroll that
+    // layout exists to avoid.
+    expect(screen.getAllByTestId("mobile-card").length).toBeGreaterThan(0);
+    expect(tableEl(view).style.minWidth).toBe("");
+  });
+
+  it("keeps the flexible column free of a <col> width so it still absorbs slack", () => {
+    const view = renderGrid({ columns: FIXED });
+    const cols = view.container.querySelectorAll("colgroup col");
+
+    expect(cols).toHaveLength(3);
+    // A width here would pin the column at its floor at every viewport.
+    expect((cols[0] as HTMLElement).style.width).toBe("");
+    expect((cols[1] as HTMLElement).style.width).toBe("10rem");
   });
 });

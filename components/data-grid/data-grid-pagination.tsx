@@ -88,7 +88,9 @@ export function DataGridPagination({
       aria-label="Pagination"
       data-testid="grid-pagination"
       className={cn(
-        "flex flex-col gap-2 border-t border-border-default pt-3 sm:flex-row sm:items-center sm:justify-between",
+        // `shrink-0`: in `height="fill"` mode this is a flex sibling of a
+        // `flex-1` scroll viewport, which would otherwise compress the footer.
+        "flex shrink-0 flex-col gap-2 border-t border-border-default pt-3 sm:flex-row sm:items-center sm:justify-between",
         className,
       )}
     >
