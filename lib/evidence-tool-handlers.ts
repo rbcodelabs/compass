@@ -10,6 +10,7 @@
 
 import getPrisma from "@/lib/db"
 import { ok, fail } from "@/lib/mcp-output"
+import { loadEvidenceProvenance, type EvidenceProvenance } from "@/lib/evidence-provenance"
 import type { EvidenceSourceType, EvidenceConfidence } from "@/lib/types"
 
 type NodeTarget = {
@@ -170,22 +171,52 @@ export async function listEvidence({
     return fail("No evidence found.")
   }
 
+  // ADR-0012 step 6a. Costs nothing when nothing on this node was promoted;
+  // see lib/evidence-provenance.ts for why turn text is referenced, not inlined.
+  const provenance = await loadEvidenceProvenance(items)
+
   const lines = items.map(e =>
     `• **${e.sourceType}** [${e.confidence} confidence]\n` +
     `  ID: ${e.id}\n` +
     `  ${e.excerpt.slice(0, 150)}${e.excerpt.length > 150 ? "…" : ""}\n` +
     (e.sourceUrl ? `  Source: ${e.sourceUrl}\n` : "") +
+    provenanceLines(provenance.get(e.id)) +
     `  Created: ${e.createdAt.toISOString()}`
   )
 
-  const projected = items.map(e => ({
-    id: e.id,
-    sourceType: e.sourceType,
-    excerpt: e.excerpt,
-    confidence: e.confidence,
-    sourceUrl: e.sourceUrl,
-    parent: { type: nodeType, id: nodeId },
-  }))
+  // An explicit allowlist, not a row spread — and `research` is added only for
+  // rows that have it, so a non-promoted row's projection is byte-identical to
+  // the pre-052 shape every existing caller already parses.
+  const projected = items.map(e => {
+    const research = provenance.get(e.id)
+    return {
+      id: e.id,
+      sourceType: e.sourceType,
+      excerpt: e.excerpt,
+      confidence: e.confidence,
+      sourceUrl: e.sourceUrl,
+      parent: { type: nodeType, id: nodeId },
+      ...(research ? { research } : {}),
+    }
+  })
 
-  return ok(lines.join("\n\n"), { items: projected, count: items.length })
+  const message = provenance.size
+    ? `${lines.join("\n\n")}\n\nSource turn text is not included here — call get_research_session with the study and session above to read the saved transcript.`
+    : lines.join("\n\n")
+
+  return ok(message, { items: projected, count: items.length })
+}
+
+/** The provenance block inside one evidence row's text rendering; empty for
+ * every row that was not promoted from a research synthesis. */
+function provenanceLines(research: EvidenceProvenance | undefined) {
+  if (!research) return ""
+  const cited = research.sources.map(source =>
+    source.resolved
+      ? `    - turn ${source.researchTurnId} (study ${source.studyId}, session ${source.sessionId}, #${source.sequence}, ${source.role})`
+      : `    - turn ${source.researchTurnId} — no longer saved`
+  )
+  return `  Research synthesis: ${research.researchSynthesisId}\n` +
+    `  Cites ${research.sources.length} saved turn${research.sources.length === 1 ? "" : "s"}:\n` +
+    (cited.length ? `${cited.join("\n")}\n` : "")
 }

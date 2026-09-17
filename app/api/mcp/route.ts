@@ -2771,7 +2771,10 @@ const _handler = createMcpHandler(
         title: "List Evidence",
         description:
           "Lists all evidence attached to a given opportunity, solution, or assumption. " +
-          "Returns each item's source type, confidence, excerpt, source URL, and creation date.",
+          "Returns each item's source type, confidence, excerpt, source URL, and creation date. " +
+          "Evidence promoted from a research synthesis also carries a `research` block naming that synthesis " +
+          "and the exact saved turns it cites (study, session, turn id and transcript position). " +
+          "The turns' text is deliberately not included — call get_research_session to read the saved transcript.",
         inputSchema: {
           nodeId: z.string().uuid().describe("UUID of the opportunity, solution, or assumption"),
           nodeType: z.enum(["opportunity", "solution", "assumption"]).describe("Type of the node identified by nodeId"),

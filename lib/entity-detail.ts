@@ -30,7 +30,20 @@
 import getPrisma from "@/lib/db";
 import { isPmInterviewEnabled } from "@/lib/research-feature";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
+import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
+
+/**
+ * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
+ * its research provenance here, so every panel inherits one projection rather
+ * than each re-deriving it. Rows that were never promoted pass through
+ * untouched and cost no extra query at all (see lib/evidence-provenance.ts).
+ */
+async function resolveEvidenceProvenance<
+  T extends { id: string; workspaceId: string; researchSynthesisId: string | null },
+>(evidence: T[]) {
+  return withEvidenceProvenance(evidence, await loadEvidenceProvenance(evidence));
+}
 
 export const ENTITY_TYPES = [
   "objective",
@@ -186,11 +199,12 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     },
   });
   if (!item) return null;
-  const [pmInterviews, linkedTasks] = await Promise.all([
+  const [pmInterviews, linkedTasks, evidence] = await Promise.all([
     pmInterviewHistory(workspaceId, "OPPORTUNITY", id),
     fetchLinkedTasksBundle(workspaceId, "OPPORTUNITY", id),
+    resolveEvidenceProvenance(item.evidence),
   ]);
-  return { ...item, ...linkedTasks, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews };
+  return { ...item, evidence, ...linkedTasks, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews };
 }
 
 async function fetchSolution(id: string, workspaceId: string) {
@@ -220,14 +234,15 @@ async function fetchSolution(id: string, workspaceId: string) {
     },
   });
   if (!solution) return null
-  const [links, availableArtifacts, pmInterviews, linkedTasks] = await Promise.all([
+  const [links, availableArtifacts, pmInterviews, linkedTasks, evidence] = await Promise.all([
     prisma.artifactLink.findMany({ where: { workspaceId, linkedType: "SOLUTION", linkedId: id }, select: { artifactId: true } }),
     prisma.artifact.findMany({ where: { workspaceId, status: "ACTIVE" }, select: { id: true, title: true, sourceType: true }, orderBy: { title: "asc" } }),
     pmInterviewHistory(workspaceId, "SOLUTION", id),
     fetchLinkedTasksBundle(workspaceId, "SOLUTION", id),
+    resolveEvidenceProvenance(solution.evidence),
   ])
   const linkedIds = new Set(links.map((link) => link.artifactId))
-  return { ...solution, ...linkedTasks, artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews }
+  return { ...solution, evidence, ...linkedTasks, artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews }
 }
 
 async function fetchAssumption(id: string, workspaceId: string) {
@@ -245,7 +260,12 @@ async function fetchAssumption(id: string, workspaceId: string) {
       evidence: { orderBy: { createdAt: "desc" } },
     },
   });
-  return item ? { ...item, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews: await pmInterviewHistory(workspaceId, "ASSUMPTION", id) } : null
+  if (!item) return null
+  const [pmInterviews, evidence] = await Promise.all([
+    pmInterviewHistory(workspaceId, "ASSUMPTION", id),
+    resolveEvidenceProvenance(item.evidence),
+  ])
+  return { ...item, evidence, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews }
 }
 
 async function fetchExperiment(id: string, workspaceId: string) {

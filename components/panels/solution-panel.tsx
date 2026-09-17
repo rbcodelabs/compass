@@ -176,7 +176,12 @@ export function SolutionPanel({
               revalidatePathStr={revalidatePathStr}
               onMutated={refresh}
             />
-            <EvidenceList evidence={data.evidence} revalidatePathStr={revalidatePathStr} />
+            <EvidenceList
+              evidence={data.evidence}
+              revalidatePathStr={revalidatePathStr}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+            />
           </div>
         </Section>
       )}

@@ -61,6 +61,10 @@ type Props = {
   currentSquadId?: string | null;
   workspaceId?: string;
   evidence?: EvidenceListItem[];
+  /** Required alongside `evidence`: EvidenceList needs them to deep-link a
+   * promoted row's cited research turns (ADR-0012 step 6a). */
+  orgSlug?: string;
+  workspaceSlug?: string;
 };
 
 export function OpportunityOverview({
@@ -72,6 +76,8 @@ export function OpportunityOverview({
   currentSquadId = null,
   workspaceId,
   evidence,
+  orgSlug,
+  workspaceSlug,
 }: Props) {
   const [isPending, startTransition] = useTransition();
 
@@ -196,7 +202,7 @@ export function OpportunityOverview({
       )}
 
       {/* Evidence */}
-      {workspaceId && evidence && (
+      {workspaceId && evidence && orgSlug && workspaceSlug && (
         <>
           <Separator />
           <Field label={`Evidence${evidence.length > 0 ? ` (${evidence.length})` : ""}`}>
@@ -207,7 +213,12 @@ export function OpportunityOverview({
                 nodeId={opportunity.id}
                 revalidatePathStr={revalidatePathStr}
               />
-              <EvidenceList evidence={evidence} revalidatePathStr={revalidatePathStr} />
+              <EvidenceList
+                evidence={evidence}
+                revalidatePathStr={revalidatePathStr}
+                orgSlug={orgSlug}
+                workspaceSlug={workspaceSlug}
+              />
             </div>
           </Field>
         </>
