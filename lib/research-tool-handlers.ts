@@ -3,6 +3,7 @@ import { ok, fail, type ToolResult } from "@/lib/mcp-output"
 import { CompassUrlNotConfiguredError, researchParticipantUrl } from "@/lib/compass-url"
 import * as studies from "@/lib/research-study-service"
 import { ResearchAnalysisError, storeAgentStudySynthesis } from "@/lib/research-analysis-service"
+import { ResearchPromotionError, promoteResearchFindingToEvidence } from "@/lib/research-evidence-promotion"
 import type { ResearchStudyType } from "@/lib/research"
 
 type Scope = { workspaceId: string }
@@ -143,4 +144,51 @@ export async function generateResearchSynthesisTool(input: Study & { synthesis: 
     const result = await storeAgentStudySynthesis(input.studyId, actor.userId, input.synthesis)
     return ok(`Synthesis stored for study ${input.studyId}. Every quote and evidence id was checked against the saved participant transcripts before storing.\n${UNTRUSTED_SYNTHESIS}`, result)
   })
+}
+
+/**
+ * ADR-0012 step 5. Unlike the synthesis tools above this needs no member-identity
+ * check beyond `invoke`'s: `Evidence` has no author column, so there is nothing
+ * to attribute, and the authority this tool carries is exactly `add_evidence`'s.
+ *
+ * The review gate is elsewhere and is structural: this tool is absent from
+ * `RESEARCH_SYNTHESIS_TOOLS`, so `gateInterviewTool` refuses it under a scoped
+ * generation claim before the handler is reached. It is callable only in a
+ * later, unscoped, user-directed turn (ADR-0002 invariant 6, ADR-0012 Phase 2).
+ *
+ * `ResearchPromotionError` messages are surfaced for the same reason
+ * `invokeSynthesis` surfaces grounding failures: they are this codebase's own
+ * statements about a document the caller can reread and correct ("cites a turn
+ * that no longer resolves", "already promoted to different evidence"). Anything
+ * else still collapses to one opaque message.
+ */
+export async function promoteResearchFindingToEvidenceTool(input: Scope & {
+  researchSynthesisId: string
+  findingIndex: number
+  opportunityId?: string
+  solutionId?: string
+  assumptionId?: string
+  confidence?: "high" | "medium" | "low"
+}) {
+  const actor = getMcpActor()
+  if (actor.purpose === "RESEARCH") throw new McpAuthzError("Tool is not available to research interviews")
+  try {
+    const { evidence, sourceTurnIds, findingKey, replayed } = await promoteResearchFindingToEvidence(input)
+    const lead = replayed
+      ? `This finding was already promoted; returning the existing evidence ${evidence.id} rather than creating another.`
+      : `Promoted finding ${input.findingIndex} to evidence ${evidence.id}, citing ${sourceTurnIds.length} saved participant turn(s).`
+    return ok(`${lead}\n${UNTRUSTED_SYNTHESIS}`, {
+      id: evidence.id,
+      findingKey,
+      researchSynthesisId: input.researchSynthesisId,
+      sourceTurnIds,
+      opportunityId: evidence.opportunityId,
+      solutionId: evidence.solutionId,
+      assumptionId: evidence.assumptionId,
+      replayed,
+    })
+  } catch (error) {
+    if (error instanceof ResearchPromotionError) return fail(error.message)
+    return fail("Promoting this finding failed and nothing was written. Reread the synthesis before retrying.")
+  }
 }

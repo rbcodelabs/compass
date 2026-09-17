@@ -115,10 +115,98 @@ describe("PM interview migration (050)", () => {
   });
 
   it("can resume after a timed-out async index wait and verifies the full catalog before receipt", () => {
-    expect(runner).toContain('["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff"].includes(migration.name)');
+    // Tolerant of later migrations joining the resume list, the way the 047
+    // ASYNC_WAIT_MIGRATIONS assertion below already is — 050's membership is
+    // what this guards, not the list's exact length.
+    expect(runner).toMatch(/\["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff"(?:, "[^"]+")*\]\.includes\(migration\.name\)/);
     expect(runner).toContain("to_regclass(format('%I.pm_interviews', $1::text))")
     expect(runner).toContain('if (migration.name === "050_pm_interviews") await assertPmInterviewPostconditions(client, schema)');
     expect(runner.indexOf('if (migration.name === "050_pm_interviews") await assertPmInterviewPostconditions')).toBeLessThan(
+      runner.indexOf('UPDATE "${schema}"._prisma_migrations SET finished_at = CURRENT_TIMESTAMP'),
+    );
+  });
+});
+
+describe("research evidence promotion migration (052)", () => {
+  const migrationName = "052_research_evidence_promotion";
+  const sql = sqlFor(migrationName);
+  const runner = readFileSync(ROUTE, "utf-8");
+
+  it("is registered exactly once, after 051, without adding a third duplicate number", () => {
+    expect(registered.filter((name) => name === migrationName)).toHaveLength(1);
+    expect(registered.indexOf("051_pm_agent_handoff")).toBeLessThan(registered.indexOf(migrationName));
+    // 051 is already used twice (051_pm_agent_handoff, 051_decision_task_bridge).
+    // The runner keys on exact names so duplicates are tolerated, but ADR-0012
+    // says not to add more — 052 must therefore be unique on disk.
+    expect(onDisk.filter((name) => name.startsWith("052_"))).toEqual([migrationName]);
+  });
+
+  it("adds the two nullable Evidence provenance columns and the sources table", () => {
+    expect(sql).toContain("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS research_synthesis_id UUID");
+    expect(sql).toContain("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS finding_key CHAR(64)");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS evidence_research_sources");
+    for (const column of ["evidence_id UUID NOT NULL", "research_turn_id UUID NOT NULL", "research_attachment_id UUID"]) {
+      expect(sql).toContain(column);
+    }
+  });
+
+  it("is DSQL-safe: no foreign keys, no triggers, no NOT NULL or DEFAULT added to an existing table", () => {
+    expect(sql).not.toMatch(/FOREIGN\s+KEY/i);
+    expect(sql).not.toMatch(/REFERENCES\s+/i);
+    expect(sql).not.toMatch(/CREATE\s+TRIGGER/i);
+    // A column added to the already-populated evidence table must stay nullable
+    // and defaultless; anything else rewrites existing rows on DSQL.
+    const evidenceAlters = sql.split(/;\s*\n/).filter((s) => /^ALTER TABLE evidence\b/i.test(s.trim()));
+    expect(evidenceAlters).toHaveLength(2);
+    for (const statement of evidenceAlters) {
+      expect(statement).not.toMatch(/NOT\s+NULL/i);
+      expect(statement).not.toMatch(/DEFAULT/i);
+    }
+  });
+
+  it("is re-runnable: every statement is IF NOT EXISTS", () => {
+    const statements = sql.split(/;\s*\n/).map((s) => s.trim()).filter((s) => /^(?:CREATE|ALTER)\s/i.test(s));
+    expect(statements).toHaveLength(7);
+    for (const statement of statements) {
+      expect(statement, statement.slice(0, 80)).toMatch(/IF NOT EXISTS/i);
+    }
+  });
+
+  it("uses one DDL statement per transaction and creates every index ASYNC", () => {
+    const raw = readFileSync(path.join(MIGRATIONS_DIR, migrationName, "migration.sql"), "utf-8");
+    // No BEGIN/COMMIT at all: each statement is its own implicit transaction,
+    // matching 051_pm_agent_handoff.
+    expect(raw).not.toMatch(/\bBEGIN;/i);
+    expect(raw).not.toMatch(/\bCOMMIT;/i);
+    expect(raw).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?!ASYNC\b)/i);
+    expect(sql.match(/CREATE (?:UNIQUE )?INDEX ASYNC IF NOT EXISTS/g)).toHaveLength(4);
+  });
+
+  it("scopes the idempotency unique index to the workspace, not globally", () => {
+    // A global unique on finding_key would let a write in one workspace fail
+    // because of a row in another that the caller cannot see.
+    expect(sql).toContain("CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_evidence_workspace_finding_key ON evidence (workspace_id, finding_key)");
+    expect(sql).not.toMatch(/UNIQUE\s+INDEX\s+ASYNC\s+IF\s+NOT\s+EXISTS\s+\w+\s+ON\s+evidence\s*\(\s*finding_key\s*\)/i);
+  });
+
+  it("uses index names the Prisma schema maps, so no drift is reported", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    for (const name of [
+      "idx_evidence_workspace_finding_key",
+      "idx_evidence_research_synthesis",
+      "idx_evidence_research_sources_evidence_turn",
+      "idx_evidence_research_sources_turn",
+    ]) {
+      expect(sql).toContain(name);
+      expect(schema).toContain(`map: "${name}"`);
+    }
+  });
+
+  it("waits for its async indexes, can resume a timed-out wait, and verifies the catalog before receipt", () => {
+    expect(runner).toMatch(/ASYNC_WAIT_MIGRATIONS = \[[^\]]*"052_research_evidence_promotion"(?:, "[^"]+")*\]/);
+    expect(runner).toMatch(/\[[^\]]*"052_research_evidence_promotion"(?:, "[^"]+")*\]\.includes\(migration\.name\)/);
+    expect(runner).toContain('if (migration.name === "052_research_evidence_promotion") await assertResearchEvidencePromotionPostconditions(client, schema)');
+    expect(runner.indexOf('if (migration.name === "052_research_evidence_promotion") await assertResearchEvidencePromotionPostconditions')).toBeLessThan(
       runner.indexOf('UPDATE "${schema}"._prisma_migrations SET finished_at = CURRENT_TIMESTAMP'),
     );
   });

@@ -23,6 +23,21 @@ export const RESEARCH_SYNTHESIS_TOOLS = new Set<string>([
   "get_research_session",
   "list_research_syntheses",
   "generate_research_synthesis",
+  // DO NOT ADD `promote_research_finding_to_evidence` HERE.
+  //
+  // It is absent on purpose, and its absence IS the human-review gate that
+  // ADR-0002 invariant 6 requires. A claimed turn that could both generate a
+  // synthesis and promote its own findings would be an unattended agent writing
+  // discovery state on its own authority — the single thing ADR-0012's authority
+  // design exists to prevent. Promotion is meant to be impossible here and
+  // ordinary one turn later, when the researcher continues the conversation as
+  // themselves and the tool runs under their own permissions (ADR-0012 "Phase 2
+  // — unscoped"). Adding it would collapse the two phases into one and silently
+  // remove the review step, with no other control left to catch it.
+  //
+  // If an agent genuinely needs to promote findings, that is an AGENT_TOOL_POLICY
+  // question in lib/mcp-tool-gates.ts (where it is classified WRITE), not a
+  // reason to widen this claim. Covered by __tests__/lib/research-synthesis-scope.test.ts.
 ])
 
 /**
