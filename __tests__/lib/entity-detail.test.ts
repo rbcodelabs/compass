@@ -83,10 +83,15 @@ describe("isEntityType", () => {
   });
 });
 
+// The row stubs below carry `evidence: []` because the opportunity, solution
+// and assumption fetchers `include` that relation and then resolve its research
+// provenance (ADR-0012 step 6a, lib/evidence-provenance.ts). Real Prisma always
+// returns the included relation; a stub that omits it models a query these
+// fetchers never make.
 describe("getEntityDetail — workspace scoping", () => {
   for (const { type, model, where } of CASES) {
     it(`scopes ${type} to the workspace (directly or via parent chain)`, async () => {
-      models[model].findFirst.mockResolvedValue({ id: ID });
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
       await getEntityDetail(type, ID, WS);
       expect(models[model].findFirst).toHaveBeenCalledTimes(1);
       expect(models[model].findFirst).toHaveBeenCalledWith(
@@ -111,7 +116,7 @@ describe("getEntityDetail — workspace scoping", () => {
 
 describe("getEntityDetail — return shape", () => {
   it("only loads linked feedback in the opportunity workspace, newest first with a stable tie break", async () => {
-    models.opportunity.findFirst.mockResolvedValue({ id: ID });
+    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [] });
     await getEntityDetail("opportunity", ID, WS);
     expect(models.opportunity.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({
@@ -162,7 +167,7 @@ describe("getEntityDetail — return shape", () => {
   });
 
   it("wraps a hit as { type, data }", async () => {
-    const row = { id: ID, title: "An opportunity" };
+    const row = { id: ID, title: "An opportunity", evidence: [] };
     models.opportunity.findFirst.mockResolvedValue(row);
     const result = await getEntityDetail("opportunity", ID, WS);
     expect(result).toEqual({
@@ -189,7 +194,7 @@ describe("getEntityDetail — return shape", () => {
       models.workspaceMember.findMany.mockResolvedValue([]);
       models.artifactLink.findMany.mockResolvedValue([]);
       models.artifact.findMany.mockResolvedValue([]);
-      models[model].findFirst.mockResolvedValue({ id: ID });
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
 
       const result = await getEntityDetail(type, ID, WS);
 
@@ -212,7 +217,7 @@ describe("getEntityDetail — return shape", () => {
   it("dispatches each type to only its own model", async () => {
     for (const { type, model } of CASES) {
       vi.clearAllMocks();
-      models[model].findFirst.mockResolvedValue({ id: ID });
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
       const result = await getEntityDetail(type, ID, WS);
       expect(result).toEqual({ type, data: expect.objectContaining({ id: ID }) });
       // no other model was touched

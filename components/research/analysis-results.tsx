@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { AnalysisButton, SynthesisHandoffButton } from "@/components/research/analysis-button"
 import { readSessionAnalysis, readStudySynthesis, type SessionCoverage } from "@/lib/research-analysis"
+import { researchTurnHref } from "@/lib/research-turn-link"
 import type { ResearchGuideItem } from "@/lib/research"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
@@ -25,7 +26,7 @@ export function SynthesisResults({ snapshots, studyId, studyUrl, completedSessio
       const content = readStudySynthesis(snapshot.content)
       const stale = content && (content.guideFingerprint !== currentGuideFingerprint || content.sourceSessionIds.length !== completedSessionIds.length || completedSessionIds.some(id => !content.sourceSessionIds.includes(id)))
       const reference = (id: string) => `${studyUrl}/sessions/${content?.sourceSessionIds.find(sessionId => sessionId === id) ?? id}`
-      const evidence = (ids: string[]) => ids.map((id, i) => <Link key={id} className="ml-2 text-xs underline" href={`${studyUrl}?turnId=${encodeURIComponent(id)}`}>Evidence {i + 1}</Link>)
+      const evidence = (ids: string[]) => ids.map((id, i) => <Link key={id} className="ml-2 text-xs underline" href={researchTurnHref(studyUrl, id)}>Evidence {i + 1}</Link>)
       return <Collapsible key={snapshot.id} defaultOpen={index === 0} className="rounded-lg border p-4"><CollapsibleTrigger className="w-full cursor-pointer text-left text-sm font-medium">{snapshot.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC · {snapshot.sessionCount} sessions{stale ? " · New source data available" : ""}</CollapsibleTrigger><CollapsibleContent>
         {content ? <div className="mt-3 space-y-4 text-sm">
           <div><h3 className="font-semibold">Executive summary</h3><p className="mt-1 whitespace-pre-wrap">{content.summary}</p></div>
