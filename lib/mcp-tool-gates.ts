@@ -143,6 +143,23 @@ export const TOOL_GATES: Record<string, Gate> = {
   // Synthesis history and storage are study-scoped on exactly the same terms.
   list_research_syntheses: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
   generate_research_synthesis: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  // ADR-0012 step 5. Deliberately the SAME gate as add_evidence, because the ADR
+  // is explicit that promotion "is subject to the same authorization as any other
+  // mutation the user could perform". The synthesis itself is not gated here:
+  // assertEntityAccess has no researchSynthesis entity, and the promotion service
+  // pins the cited synthesis to this workspace and refuses a PM-interview study
+  // before reading anything (lib/research-evidence-promotion.ts).
+  //
+  // What keeps ADR-0002 invariant 6 intact is NOT this entry. It is the absence
+  // of this tool from RESEARCH_SYNTHESIS_TOOLS (lib/research-handoff-scope.ts),
+  // enforced by gateInterviewTool, which runs first inside applyToolGate below.
+  promote_research_finding_to_evidence: async (a, x) => {
+    await assertWorkspaceMember(a, x.workspaceId)
+    const targetWs = await assertEvidenceTarget(a, x)
+    if (targetWs !== x.workspaceId) {
+      throw new McpAuthzError("Evidence target does not belong to the declared workspace.")
+    }
+  },
   add_comment: assertCommentTarget,
   list_comments: assertCommentTarget,
   get_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
@@ -429,7 +446,23 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   // and it cannot create Evidence. That is the same authority as
   // update_research_study, hence WRITE rather than DENY.
   ...["list_research_studies", "get_research_study", "list_research_sessions", "get_research_session", "list_research_syntheses"].map(name => [name, "READ"]),
-  ...["generate_research_guide", "create_research_study", "update_research_study", "generate_research_synthesis"].map(name => [name, "WRITE"]),
+  // ADR-0012 step 5. promote_research_finding_to_evidence is WRITE, not DENY.
+  //
+  // DENY was considered and rejected. ADR-0002 invariant 6 ("promotion always
+  // requires human review") is satisfied structurally, by this tool's absence
+  // from RESEARCH_SYNTHESIS_TOOLS: a scoped generation claim is refused it by
+  // gateInterviewTool before this map is consulted at all. This map governs a
+  // different question — whether a workspace's own delegated agent identity,
+  // acting in an ordinary unscoped turn, may perform the write.
+  //
+  // For that question WRITE is the only coherent answer, because add_evidence is
+  // already WRITE. Denying the provenance-carrying tool while permitting the
+  // unattributed one would not prevent a single Evidence row; it would only push
+  // agents onto add_evidence with a re-typed sourceUrl — the exact gap ADR-0002
+  // named and this ADR exists to close. The tool is also strictly narrower than
+  // add_evidence: its excerpt and citations come from a stored, re-grounded
+  // synthesis rather than from free text, and it converges on retry.
+  ...["generate_research_guide", "create_research_study", "update_research_study", "generate_research_synthesis", "promote_research_finding_to_evidence"].map(name => [name, "WRITE"]),
   ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
     "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_docs", "get_doc", "list_doc_versions", "get_doc_version", "list_doc_comments", "get_doc_comment", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "list_top_opportunities",
