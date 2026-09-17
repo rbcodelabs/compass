@@ -46,18 +46,6 @@ async function resolveEvidenceProvenance<
   return withEvidenceProvenance(evidence, await loadEvidenceProvenance(evidence));
 }
 
-/**
- * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
- * its research provenance here, so every panel inherits one projection rather
- * than each re-deriving it. Rows that were never promoted pass through
- * untouched and cost no extra query at all (see lib/evidence-provenance.ts).
- */
-async function resolveEvidenceProvenance<
-  T extends { id: string; workspaceId: string; researchSynthesisId: string | null },
->(evidence: T[]) {
-  return withEvidenceProvenance(evidence, await loadEvidenceProvenance(evidence));
-}
-
 export const ENTITY_TYPES = [
   "objective",
   "keyResult",
