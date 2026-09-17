@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { AnalysisButton } from "@/components/research/analysis-button"
+import { AnalysisButton, SynthesisHandoffButton } from "@/components/research/analysis-button"
 import { readSessionAnalysis, readStudySynthesis, type SessionCoverage } from "@/lib/research-analysis"
 import type { ResearchGuideItem } from "@/lib/research"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -18,8 +18,8 @@ export function SessionAnalysisResults({ studyId, sessionId, status, summary, gu
 
 export function SynthesisResults({ snapshots, studyId, studyUrl, completedSessionIds, currentGuideFingerprint }: { snapshots: Array<{ id: string; content: string; sessionCount: number; createdAt: Date }>; studyId: string; studyUrl: string; completedSessionIds: string[]; currentGuideFingerprint: string }) {
   return <section className="max-w-3xl space-y-4 rounded-xl border bg-surface-panel p-5">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Cross-session synthesis</h2><AnalysisButton studyId={studyId} kind="synthesis">{snapshots.length ? "Regenerate synthesis" : "Generate synthesis"}</AnalysisButton></div>
-    <p className="text-sm text-text-subtle">Findings from saved, completed interviews. Each generation is a separate snapshot; earlier results remain available. Voice source is unverified in this view; browser voice is participant-reported.</p>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Cross-session synthesis</h2><SynthesisHandoffButton studyId={studyId}>{snapshots.length ? "Regenerate synthesis" : "Generate synthesis"}</SynthesisHandoffButton></div>
+    <p className="text-sm text-text-subtle">Findings from saved, completed interviews. Generation opens a Compass agent conversation that reads the saved transcripts and writes back a snapshot; earlier snapshots remain available. Voice source is unverified in this view; browser voice is participant-reported.</p>
     {!snapshots.length && <p className="text-sm text-text-muted">No synthesis yet. Complete an interview, then generate findings.</p>}
     {snapshots.map((snapshot, index) => {
       const content = readStudySynthesis(snapshot.content)
