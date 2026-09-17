@@ -675,7 +675,7 @@ model Solution {
 }
 
 // Artifact links are resolved in application code because ArtifactLink is a
-// deliberately polymorphic link table (SOLUTION is the only MVP target).
+// deliberately polymorphic link table (SOLUTION and REVIEW_REQUEST targets).
 
 model SolutionComment {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -1763,7 +1763,9 @@ model ArtifactLink {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
   artifactId  String   @map("artifact_id") @db.Uuid
-  /// SOLUTION in the MVP.
+  /// One of: SOLUTION | REVIEW_REQUEST. REVIEW_REQUEST links are restricted to
+  /// requests with gateType TRACKED_DECISION and are live supporting material,
+  /// not frozen review evidence -- see ADR-0010 and lib/artifacts.ts.
   linkedType  String   @map("linked_type") @db.VarChar(30)
   linkedId    String   @map("linked_id") @db.Uuid
   createdById String?  @map("created_by_id") @db.Uuid
