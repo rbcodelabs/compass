@@ -57,6 +57,7 @@ export function verifyPreviewLoginAccessCode(submitted: unknown): boolean {
 export interface SampleWorkspace {
   orgSlug: string;
   workspaceSlug: string;
+  workspaceId: string;
   ownerUserId: string;
   viewerUserId: string;
 }
@@ -72,7 +73,7 @@ async function lookupSampleWorkspace(
     prisma.user.findUnique({ where: { email: SAMPLE_VIEWER_EMAIL } }),
   ]);
   if (!workspace || !ownerUser || !viewerUser) return null;
-  return { orgSlug: org.slug, workspaceSlug: workspace.slug, ownerUserId: ownerUser.id, viewerUserId: viewerUser.id };
+  return { orgSlug: org.slug, workspaceSlug: workspace.slug, workspaceId: workspace.id, ownerUserId: ownerUser.id, viewerUserId: viewerUser.id };
 }
 
 async function createSampleWorkspace(prisma: AppPrismaClient): Promise<SampleWorkspace> {
@@ -96,20 +97,46 @@ async function createSampleWorkspace(prisma: AppPrismaClient): Promise<SampleWor
     // land partially applied: either the whole sample org+seed commits, or
     // none of it does.
     await applyPreviewScenario(tx, { schema: getActiveSchema(), workspaceId: workspace.id, scenario: "full-data" });
-    return { orgSlug: org.slug, workspaceSlug: workspace.slug, ownerUserId: ownerUser.id, viewerUserId: viewerUser.id };
+    return { orgSlug: org.slug, workspaceSlug: workspace.slug, workspaceId: workspace.id, ownerUserId: ownerUser.id, viewerUserId: viewerUser.id };
   });
 }
 
 /**
- * Idempotently ensures the fixed sample org/workspace exists and is seeded
- * exactly once. Safe to call on every login: if the org already exists,
- * creation and seeding are skipped entirely — the fixture builders reused
- * from lib/preview-automation/scenarios.ts are not designed to be applied
- * twice against the same workspace.
+ * Re-applies the scenario to an already-created sample workspace.
+ *
+ * `SAMPLE_ORG_SLUG` is a fixed constant and every branch preview shares one
+ * `compass_preview` schema, so the sample org is created once — by whichever
+ * deployment a human happened to log into first — and then reused forever.
+ * Skipping the seed on that path meant any fixture added later could never
+ * appear on an existing preview, regardless of which branch was deployed.
+ * That silently cost a review cycle: ADR-0012 step 4's research fixture was
+ * correct and present in the build, yet invisible in the very preview opened
+ * to walk through it.
+ *
+ * Every builder in seed-screenshots.ts guards on existence, so re-applying is
+ * a no-op once a fixture is present — verified empirically by seeding twice
+ * and diffing row counts across all fourteen seeded tables. A missing fixture
+ * is topped up; existing rows, including anything edited during a review, are
+ * left alone.
+ */
+async function topUpSampleWorkspaceSeed(prisma: AppPrismaClient, workspaceId: string): Promise<void> {
+  await prisma.$transaction((tx: AppTransactionClient) =>
+    applyPreviewScenario(tx, { schema: getActiveSchema(), workspaceId, scenario: "full-data" })
+  );
+}
+
+/**
+ * Idempotently ensures the fixed sample org/workspace exists and is seeded.
+ * Safe to call on every login: creation happens once, and the seed is topped
+ * up on every call so a preview created by an older deployment still gains
+ * fixtures added since.
  */
 export async function ensureSampleWorkspace(prisma: AppPrismaClient): Promise<SampleWorkspace> {
   const existing = await lookupSampleWorkspace(prisma);
-  if (existing) return existing;
+  if (existing) {
+    await topUpSampleWorkspaceSeed(prisma, existing.workspaceId);
+    return existing;
+  }
   try {
     return await createSampleWorkspace(prisma);
   } catch (error) {

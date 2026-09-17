@@ -61,14 +61,49 @@ export async function generateSessionAnalysis({ studyId, sessionId, kind, userId
   }
 }
 
-export async function generateStudySynthesis(studyId: string, userId: string) {
+/**
+ * Everything the lease needs, read and validated *before* a PENDING row exists.
+ *
+ * Split out at ADR-0012 step 4 so the agent-authored path can reuse the claim /
+ * validate / store machinery without reusing the retired standalone pipeline.
+ * Callers that must fail before claiming — the legacy path assembles its prompt
+ * here, and `buildAnalysisPrompt` refuses an oversized source — do that between
+ * this call and `withSynthesisLease`, exactly as the single function used to.
+ */
+export type LoadedSynthesisSource = { study: Awaited<ReturnType<typeof studyAccess>>; sessionCount: number; source: AnalysisSource }
+
+export async function loadSynthesisSource(studyId: string, userId: string): Promise<LoadedSynthesisSource> {
   if (!userId) throw new ResearchAnalysisError("Authentication required", 401)
   const prisma = getPrisma()
   const study = await studyAccess(studyId, userId)
   const sessions = await prisma.researchSession.findMany({ where: { studyId, status: "COMPLETED" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 501, include: { turns: { orderBy: { sequence: "asc" }, take: 2_001 } } })
   const source: AnalysisSource = { goal: study.goal, guide: deserializeResearchGuide(study.guide), sessions: sessions.map(session => ({ id: session.id, modality: session.modality, turns: session.turns.map(({ id, role, content, sequence }) => ({ id, role, content, sequence })) })) }
   assertSourceSize(source)
-  const prompt = buildAnalysisPrompt("synthesis", source)
+  return { study, sessionCount: sessions.length, source }
+}
+
+/**
+ * The retry-safe `ResearchSynthesis` lease (`PENDING` → `CROSS_SESSION` |
+ * `FAILED`) that ADR-0012 requires be preserved rather than replaced.
+ *
+ * `produce` returns the raw analysis JSON. The legacy path returns a model's
+ * output; the MCP tool returns the core agent's own document. Either way it is
+ * untrusted until `parseAnalysisResult` has validated it against `source` —
+ * which is rebuilt from saved rows here, never supplied by the producer.
+ *
+ * `surfaceFailureDetail` exists because the two producers differ in what a
+ * failure means. A model's error text may carry provider detail, so the legacy
+ * path keeps its fixed wording. The agent path's failures are this module's own
+ * validation messages about a document the agent itself wrote, so surfacing
+ * them is what lets the agent correct its citations instead of retrying blind.
+ */
+export async function withSynthesisLease(
+  { study, sessionCount, source }: LoadedSynthesisSource,
+  produce: (source: AnalysisSource, deadline: number) => Promise<string>,
+  { surfaceFailureDetail = false }: { surfaceFailureDetail?: boolean } = {},
+) {
+  const prisma = getPrisma()
+  const studyId = study.id
   const startedAt = Date.now()
   const deadline = startedAt + analysisOperationMs
   const claimContent = JSON.stringify({ version: 1, sourceFingerprint: analysisFingerprint(source), claimId: randomUUID(), deadline })
@@ -78,11 +113,24 @@ export async function generateStudySynthesis(studyId: string, userId: string) {
     // Serialize claims through the existing study row; no unique index or schema change.
     const claim = await tx.researchStudy.updateMany({ where: { id: studyId, updatedAt: study.updatedAt }, data: { updatedAt: new Date(Math.max(Date.now(), study.updatedAt.getTime() + 1)) } })
     if (claim.count !== 1) throw new ResearchAnalysisError("Study changed; refresh before generating", 409)
-    return tx.researchSynthesis.create({ data: { studyId, kind: "PENDING", content: claimContent, sessionCount: sessions.length, promptVersion: "research-analysis-v1", createdAt: new Date(startedAt) } })
+    return tx.researchSynthesis.create({ data: { studyId, kind: "PENDING", content: claimContent, sessionCount, promptVersion: "research-analysis-v1", createdAt: new Date(startedAt) } })
   })
   const pendingWhere = { id: pending.id, studyId, kind: "PENDING", content: claimContent }
   try {
-    const result = parseAnalysisResult("synthesis", await analysisResponse("synthesis", prompt, source, deadline), source)
+    let result
+    try {
+      result = parseAnalysisResult("synthesis", await produce(source, deadline), source)
+    } catch (error) {
+      // Only THIS call's message may ever be surfaced. It is either a hand-written
+      // grounding-check message from lib/research-analysis.ts or a zod issue about
+      // the caller's own document — never provider text and never database detail.
+      // Everything further down (the deadline assertion and both writes) stays on
+      // the fixed wording below, so a Prisma error cannot reach the model.
+      if (surfaceFailureDetail && !(error instanceof ResearchAnalysisError)) {
+        throw new ResearchAnalysisError(error instanceof Error ? error.message : "Synthesis was rejected; nothing was stored.", 422)
+      }
+      throw error
+    }
     assertAnalysisDeadline(deadline)
     const saved = await prisma.researchSynthesis.updateMany({ where: pendingWhere, data: { kind: "CROSS_SESSION", content: JSON.stringify(result), model: "claude-sonnet-5", updatedAt: new Date() } })
     if (saved.count !== 1) throw new ResearchAnalysisError("Synthesis changed; refresh before retrying", 409)
@@ -92,6 +140,32 @@ export async function generateStudySynthesis(studyId: string, userId: string) {
     if (error instanceof ResearchAnalysisError) throw error
     throw new ResearchAnalysisError("Synthesis unavailable; previous results are unchanged. Retry generation.", 502)
   }
+}
+
+export async function generateStudySynthesis(studyId: string, userId: string) {
+  const loaded = await loadSynthesisSource(studyId, userId)
+  // Assembled before the claim, as before: an oversized source must fail without
+  // leaving a PENDING row or bumping the study's optimistic `updatedAt`.
+  const prompt = buildAnalysisPrompt("synthesis", loaded.source)
+  return withSynthesisLease(loaded, (source, deadline) => analysisResponse("synthesis", prompt, source, deadline))
+}
+
+/**
+ * ADR-0012 step 4. The core agent has already done the reasoning, using the
+ * step-3 transcript tools and its workspace's capability-pack methodology; this
+ * only validates and stores. No nested model call — wrapping the retired
+ * pipeline would keep two reasoning stacks, which is the thing being removed.
+ */
+export async function storeAgentStudySynthesis(studyId: string, userId: string, synthesis: unknown) {
+  const raw = JSON.stringify(synthesis)
+  // `synthesisSchema` admits a document far larger than parseAnalysisResult's
+  // 100,000-char ceiling, so check it here — before the lease. Otherwise a
+  // schema-valid but oversized submission would claim a PENDING row and bump the
+  // study's `updatedAt` only to fail, which is the one failure mode the caller
+  // can fix by writing less.
+  if (raw.length > 100_000) throw new ResearchAnalysisError("Synthesis document is too large; shorten the descriptions and quotes and submit again.", 422)
+  const loaded = await loadSynthesisSource(studyId, userId)
+  return withSynthesisLease(loaded, async () => raw, { surfaceFailureDetail: true })
 }
 
 async function analysisResponse(kind: "summary" | "coverage" | "synthesis", prompt: string, source: AnalysisSource, deadline: number) {

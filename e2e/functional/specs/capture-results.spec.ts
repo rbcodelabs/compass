@@ -41,9 +41,24 @@ test("research results: summaries, coverage, synthesis history and paginated evi
   await page.getByRole("link", { name: "Next turns" }).click()
   await expect(page.getByText("Saved planning evidence 1, turn 52.", { exact: true })).toBeVisible()
   await page.goto(studyUrl)
-  await analyze("Generate synthesis")
+  // ADR-0012 step 4: the synthesis BUTTON now opens a linked core-agent
+  // conversation rather than generating inline, so the two stored snapshots this
+  // test's history/evidence/screenshot assertions need are seeded through the
+  // retained /api/research/analysis path directly (that route stays until step 6
+  // retires it, and api-research-analysis.test.ts covers it at unit level).
+  // fetch() from the page keeps the session cookie and same-origin check honest.
+  const seedSynthesis = async () => {
+    const status = await page.evaluate(async id => {
+      const response = await fetch("/api/research/analysis", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "synthesis", studyId: id }) })
+      return response.status
+    }, studyId)
+    expect(status).toBe(200)
+  }
+  await seedSynthesis()
+  await page.reload()
   await expect(page.getByText("Test synthesis from saved sessions.", { exact: true })).toBeVisible()
-  await analyze("Regenerate synthesis")
+  await seedSynthesis()
+  await page.reload()
   await expect(page.locator('[data-slot="collapsible"]')).toHaveCount(2)
   await expect(page.getByText("Test synthesis from saved sessions.", { exact: true }).first()).toBeVisible()
   const evidenceHref = await page.getByRole("link", { name: "View saved evidence" }).first().getAttribute("href")
@@ -67,6 +82,15 @@ test("research results: summaries, coverage, synthesis history and paginated evi
     await page.screenshot({ path: testInfo.outputPath(`research-results-${label}.png`), fullPage: true })
     if (process.env.UPDATE_RESEARCH_RESULTS_SCREENSHOTS === "1") await page.screenshot({ path: `public/screenshots/docs/capture-results-${label}.png`, fullPage: true })
   }
+  // ADR-0012 step 4: "Generate synthesis" hands off into a linked conversation,
+  // matching PM Gather's Finish. Asserted last, because it navigates away.
+  await page.goto(studyUrl)
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const handoff = page.waitForResponse(response => response.url().endsWith("/api/research/synthesis-handoff") && response.request().method() === "POST")
+  await page.getByRole("button", { name: "Regenerate synthesis", exact: true }).click()
+  const handoffResponse = await handoff
+  expect(handoffResponse.status(), await handoffResponse.text()).toBe(200)
+  await expect(page).toHaveURL(new RegExp(`${base}/agent\\?c=[0-9a-f-]{36}$`))
   const denied = await page.goto(`/rbcodelabs/compass/capture/studies/${studyId}/sessions/${sessionId}`)
   expect(denied?.status()).toBe(404)
 })

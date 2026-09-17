@@ -1,12 +1,12 @@
 /**
  * Handoff domains that can drive a claimed agent turn.
  *
- * One member today, deliberately. ADR-0012 adds `RESEARCH_SYNTHESIS` in a later
- * PR; because the policy registry and every dispatch site are typed as
- * `Record<HandoffKind, ...>`, widening this union turns each unhandled site into
- * a compile error rather than a silent fallthrough into PM-interview logic.
+ * `RESEARCH_SYNTHESIS` joined at ADR-0012 step 4. Because the policy registry
+ * and every dispatch site are typed as `Record<HandoffKind, ...>`, widening this
+ * union turns each unhandled site into a compile error rather than a silent
+ * fallthrough into PM-interview logic — that forcing function is the point.
  */
-export const HANDOFF_KINDS = ["PM_INTERVIEW"] as const
+export const HANDOFF_KINDS = ["PM_INTERVIEW", "RESEARCH_SYNTHESIS"] as const
 export type HandoffKind = (typeof HANDOFF_KINDS)[number]
 
 /**
@@ -20,7 +20,10 @@ export type ProcessingState = {
   kind?: HandoffKind
   deadline?: number
   claimId?: string
+  /** `PM_INTERVIEW` only. */
   interviewId?: string
+  /** `RESEARCH_SYNTHESIS` only: the single study this claim is bound to. */
+  studyId?: string
   targetUrl?: string
   receipt?: { changedFields: string[]; targetUrl: string; payloadHash?: string; before?: Record<string, unknown>; after?: Record<string, unknown> }
 }
