@@ -17,6 +17,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { ChevronDownIcon } from "lucide-react"
+import { cn } from "@/lib/utils"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -145,11 +146,23 @@ export function SendToAgentPicker({ orgSlug, workspaceSlug, entityType, entityId
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className={className}>
+      {/* The trigger appends a chevron the call site's className knows nothing
+          about, so it cannot rely on that className to lay it out: the reviews
+          call site passes a plain `inline-block … underline` link style, which
+          dropped the chevron onto its own line under the label. Append the
+          flex layout *after* className so tailwind-merge resolves the display
+          conflict in favour of inline-flex. `gap-1`/`items-center` match what
+          buttonVariants({size:"xs"}) already applies, so the solution-panel
+          call site — which passes exactly that — is visually unchanged. */}
+      <DropdownMenuTrigger className={cn(className, "inline-flex items-center gap-1")}>
         {children}
         <ChevronDownIcon className="size-3" aria-hidden="true" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent>
+      {/* DropdownMenuContent defaults to w-(--anchor-width), i.e. exactly the
+          trigger's width. These triggers are narrower than "Built-in cloud
+          agent", which then wrapped to two lines. Size to content instead;
+          the base min-w-32 still applies as a floor. */}
+      <DropdownMenuContent className="w-auto">
         <DropdownMenuItem className="p-0">
           <Link href={builtInHref} className="flex w-full items-center gap-1.5 px-1.5 py-1">
             Built-in cloud agent
