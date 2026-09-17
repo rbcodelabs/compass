@@ -135,6 +135,11 @@ export const TOOL_GATES: Record<string, Gate> = {
   issue_research_link: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
   rotate_research_link: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
   revoke_research_links: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  // Transcript reads are study-scoped exactly like the tools above; the session
+  // is then resolved inside that study by the service, so sessionId alone can
+  // never reach another study's turns.
+  list_research_sessions: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
+  get_research_session: (a, x) => assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId),
   add_comment: assertCommentTarget,
   list_comments: assertCommentTarget,
   get_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
@@ -411,7 +416,18 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   // identities, credentials or storage paths. Authoring mutations are
   // ordinary workspace writes. Participant-link issuance and study
   // activation stay DENY: they mint or return live participant access.
-  ...["list_research_studies", "get_research_study"].map(name => [name, "READ"]),
+  // Transcript reads added 2026-09-14 for ADR-0012 step 3. They return ordered
+  // ResearchTurn text plus an allowlisted session projection (id, studyId,
+  // modality, status, timestamps, endedReason, turnCount, hasSummary) built
+  // field-by-field in lib/research-study-service.ts — never participant names or
+  // emails, resume/participant token material, audioUrl, voice-lease or
+  // active-request state, and never the raw overloaded `summary` column. They
+  // resolve through findMemberStudy, which excludes PM_INTERVIEW studies, so
+  // they cannot read a PM interview (that stays owner-scoped via
+  // get_pm_interview). Reading saved transcripts is an ordinary member read, so
+  // READ rather than DENY; the participant-link tools above remain human-only
+  // because they mint live access.
+  ...["list_research_studies", "get_research_study", "list_research_sessions", "get_research_session"].map(name => [name, "READ"]),
   ...["generate_research_guide", "create_research_study", "update_research_study"].map(name => [name, "WRITE"]),
   ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[

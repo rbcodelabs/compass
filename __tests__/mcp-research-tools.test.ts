@@ -5,11 +5,12 @@ vi.mock("@/lib/research-study-service", () => ({
   listResearchStudies: m.service, getResearchStudy: m.service, activateResearchStudy: m.service,
   closeResearchStudy: m.service, archiveResearchStudy: m.service, issueResearchLink: m.service,
   regenerateResearchLink: m.service, revokeResearchLinks: m.service,
+  listResearchSessions: m.service, getResearchSession: m.service,
   ResearchStudyError: class ResearchStudyError extends Error {},
 }))
 import * as handlers from "@/lib/research-tool-handlers"
 import { runWithMcpActor } from "@/lib/mcp-authz"
-const input = { workspaceId: "workspace", studyId: "study", name: "Study", goal: "Goal", guide: ["Question"], studyType: "CUSTOMER_INTERVIEW" as const, appUrl: "", targetMinutes: 15 }
+const input = { workspaceId: "workspace", studyId: "study", sessionId: "session", name: "Study", goal: "Goal", guide: ["Question"], studyType: "CUSTOMER_INTERVIEW" as const, appUrl: "", targetMinutes: 15 }
 beforeEach(() => { vi.clearAllMocks(); m.service.mockResolvedValue({ id: "study" }) })
 describe("research MCP adapters", () => {
   it("denies every tool to a public research credential before calling services", async () => {
