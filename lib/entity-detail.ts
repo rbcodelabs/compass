@@ -32,7 +32,7 @@ import { isPmInterviewEnabled } from "@/lib/research-feature";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
-import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
+import { loadCustomFieldsForObject } from "@/lib/custom-field-definitions";
 
 /**
  * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
@@ -235,15 +235,18 @@ async function fetchSolution(id: string, workspaceId: string) {
     },
   });
   if (!solution) return null
-  const [links, availableArtifacts, pmInterviews, linkedTasks, evidence] = await Promise.all([
+  const [links, availableArtifacts, pmInterviews, linkedTasks, evidence, customFields] = await Promise.all([
     prisma.artifactLink.findMany({ where: { workspaceId, linkedType: "SOLUTION", linkedId: id }, select: { artifactId: true } }),
     prisma.artifact.findMany({ where: { workspaceId, status: "ACTIVE" }, select: { id: true, title: true, sourceType: true }, orderBy: { title: "asc" } }),
     pmInterviewHistory(workspaceId, "SOLUTION", id),
     fetchLinkedTasksBundle(workspaceId, "SOLUTION", id),
     resolveEvidenceProvenance(solution.evidence),
+    // A Solution has no detail route — its panel is the only place its tags can
+    // be set, which is what the shipped SOLUTION tag filter reads.
+    loadCustomFieldsForObject(prisma, { workspaceId, objectType: "SOLUTION", objectId: id }),
   ])
   const linkedIds = new Set(links.map((link) => link.artifactId))
-  return { ...solution, evidence, ...linkedTasks, artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews }
+  return { ...solution, evidence, ...linkedTasks, artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews, customFields }
 }
 
 async function fetchAssumption(id: string, workspaceId: string) {
@@ -317,7 +320,14 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
   });
   if (!item) return null;
 
-  return { ...item, ...(await fetchLinkedTasksBundle(workspaceId, "ROADMAP_ITEM", id)) };
+  const [linkedTasks, customFields] = await Promise.all([
+    fetchLinkedTasksBundle(workspaceId, "ROADMAP_ITEM", id),
+    // A RoadmapItem has no detail route — its panel is the only place its tags
+    // can be set, which is what the shipped ROADMAP_ITEM tag filter reads.
+    loadCustomFieldsForObject(prisma, { workspaceId, objectType: "ROADMAP_ITEM", objectId: id }),
+  ]);
+
+  return { ...item, ...linkedTasks, customFields };
 }
 
 async function fetchFeedback(id: string, workspaceId: string) {
@@ -375,18 +385,14 @@ async function fetchTask(id: string, workspaceId: string) {
   });
   if (!task) return null;
 
-  const [rawSquads, rawMembers, fieldDefs, [resolvedTask, ...resolvedSubtasks]] = await Promise.all([
+  const [rawSquads, rawMembers, customFields, [resolvedTask, ...resolvedSubtasks]] = await Promise.all([
     prisma.squad.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" } }),
     prisma.workspaceMember.findMany({
       where: { workspaceId },
       include: { user: { select: { id: true, email: true, name: true } } },
       orderBy: { createdAt: "asc" },
     }),
-    prisma.customFieldDefinition.findMany({
-      where: { workspaceId, objectType: "TASK" },
-      orderBy: { order: "asc" },
-      include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
-    }),
+    loadCustomFieldsForObject(prisma, { workspaceId, objectType: "TASK", objectId: id }),
     resolveTaskAssignees(workspaceId, [task, ...task.subtasks]),
   ]);
 
@@ -456,19 +462,6 @@ async function fetchTask(id: string, workspaceId: string) {
     FEEDBACK_ITEM: feedbackItems,
     DECISION: decisions,
   };
-
-  const fieldValues =
-    fieldDefs.length > 0
-      ? await prisma.customFieldValue.findMany({
-          where: { fieldId: { in: fieldDefs.map((f) => f.id) }, objectId: id },
-        })
-      : [];
-  const valueByFieldId = new Map(fieldValues.map((v) => [v.fieldId, v.value]));
-  const customFields = fieldDefs.map((f) => ({
-    ...toCustomFieldDefinitionData(f),
-    objectType: "TASK" as const,
-    currentValue: valueByFieldId.get(f.id) ?? null,
-  }));
 
   return {
     ...resolvedTask,

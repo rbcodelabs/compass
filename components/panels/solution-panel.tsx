@@ -40,6 +40,8 @@ import { RequestDecisionLink } from "@/components/decisions/request-decision-lin
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
+import type { CustomFieldWithValue } from "@/lib/custom-field-definitions";
 
 type SolutionData = {
   id: string;
@@ -58,6 +60,7 @@ type SolutionData = {
   deliveryTasks: LinkedTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
+  customFields: CustomFieldWithValue[];
 };
 
 // Presentation lives in lib/solution-status.ts — see the note there on the
@@ -143,6 +146,21 @@ export function SolutionPanel({
         placeholder="Add a description…"
         className="text-sm text-foreground/80 leading-relaxed"
       />
+
+      {/* Solutions render as cards nested under their opportunity and have no
+          detail route, so this panel is where their workspace tags get set —
+          and the only thing that can make Discovery's SOLUTION tag filter
+          narrow a lane to anything. */}
+      {data.customFields.length > 0 && (
+        <Section {...SECTION} defaultOpen label="Details">
+          <CustomFieldsPanel
+            fields={data.customFields}
+            objectId={data.id}
+            revalidatePathStr={revalidatePathStr}
+            onSaved={refresh}
+          />
+        </Section>
+      )}
 
       <Section {...SECTION} defaultOpen label="Opportunity" empty={oppItems.length === 0}>
         <RelationList items={oppItems} empty="No parent opportunity." />

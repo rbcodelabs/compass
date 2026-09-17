@@ -45,6 +45,12 @@ vi.mock("@/components/panels/positioning-brief-row", () => ({
 vi.mock("@/components/tasks/linked-tasks-section", () => ({
   LinkedTasksSection: () => null,
 }));
+// Both panels' Details section writes through the settings server actions
+// module, which imports next-auth — a real dependency this jsdom test has no
+// business loading (same boundary as the mocked children above).
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/actions", () => ({
+  upsertFieldValue: vi.fn(),
+}));
 
 import { SolutionPanel } from "@/components/panels/solution-panel";
 import { RoadmapItemPanel } from "@/components/panels/roadmap-item-panel";
@@ -70,6 +76,7 @@ const solutionData = {
   deliveryTasks: [],
   linkableTasks: [],
   members: [],
+  customFields: [],
 };
 
 const roadmapItemData = {
@@ -94,6 +101,7 @@ const roadmapItemData = {
   deliveryTasks: [{ id: "task-1" }],
   linkableTasks: [],
   members: [],
+  customFields: [],
   _count: { votes: 0 },
 };
 
