@@ -132,19 +132,19 @@ describe("assertSharedFieldOptionSetsMigration", () => {
   });
 });
 
-describe("migration 052 registration", () => {
+describe("migration 053 registration", () => {
   it("is registered in the runner manifest under its exact name", async () => {
     const { readFileSync } = await import("node:fs");
     const runner = readFileSync("lib/migrations/runner.ts", "utf8");
-    expect(runner).toContain('name: "052_shared_field_option_sets"');
+    expect(runner).toContain('name: "053_shared_field_option_sets"');
     // Async index DDL in this migration must be waited on before the receipt.
-    expect(runner).toMatch(/ASYNC_WAIT_MIGRATIONS[\s\S]{0,400}052_shared_field_option_sets/);
+    expect(runner).toMatch(/ASYNC_WAIT_MIGRATIONS[\s\S]{0,400}053_shared_field_option_sets/);
   });
 
   it("ships additive DDL only — no drops, no backfill, no FK", async () => {
     const { readFileSync } = await import("node:fs");
     const sql = readFileSync(
-      "prisma/migrations/052_shared_field_option_sets/migration.sql",
+      "prisma/migrations/053_shared_field_option_sets/migration.sql",
       "utf8"
     );
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS shared_field_option_sets/);

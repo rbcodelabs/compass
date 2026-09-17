@@ -1,7 +1,7 @@
 import type { PoolClient } from "pg"
 
 /**
- * Postcondition assertion for migration 052_shared_field_option_sets.
+ * Postcondition assertion for migration 053_shared_field_option_sets.
  *
  * Mirrors assertAgentIdentityMigration / assertPmInterviewPostconditions: the
  * runner only writes a finished receipt once this passes, so a half-applied
@@ -44,7 +44,7 @@ export async function assertSharedFieldOptionSetsMigration(client: PoolClient, s
   const byName = new Map(columns.rows.map((row) => [`${row.table_name}.${row.column_name}`, row]))
   const missing = REQUIRED_COLUMNS.filter((column) => !byName.has(column))
   if (missing.length > 0) {
-    throw new Error(`Migration 052 postcondition failed: missing column(s) ${missing.join(", ")}.`)
+    throw new Error(`Migration 053 postcondition failed: missing column(s) ${missing.join(", ")}.`)
   }
 
   // Additive and opt-in by construction: no backfill runs, so every existing
@@ -52,7 +52,7 @@ export async function assertSharedFieldOptionSetsMigration(client: PoolClient, s
   const optIn = byName.get("custom_field_definitions.shared_option_set_id")!
   if (optIn.is_nullable !== "YES" || optIn.column_default !== null) {
     throw new Error(
-      "Migration 052 postcondition failed: custom_field_definitions.shared_option_set_id must be nullable with no default.",
+      "Migration 053 postcondition failed: custom_field_definitions.shared_option_set_id must be nullable with no default.",
     )
   }
 
@@ -65,7 +65,7 @@ export async function assertSharedFieldOptionSetsMigration(client: PoolClient, s
   )
   if (unhealthy.length > 0) {
     throw new Error(
-      `Migration 052 postcondition failed: index(es) missing or not valid: ${unhealthy.join(", ")}.`,
+      `Migration 053 postcondition failed: index(es) missing or not valid: ${unhealthy.join(", ")}.`,
     )
   }
 }

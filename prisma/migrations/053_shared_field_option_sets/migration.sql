@@ -1,4 +1,4 @@
--- Migration 052: shared field option sets
+-- Migration 053: shared field option sets
 --
 -- Adds the generic "shared select options" primitive so a SELECT/MULTI_SELECT
 -- CustomFieldDefinition can reference a workspace-level named option set
@@ -18,6 +18,11 @@
 --   - Indexes are ASYNC, the only form DSQL supports. The runner rewrites
 --     ASYNC away when DATABASE_URL signals local PostgreSQL.
 --   - Each statement below runs in its own transaction per the runner.
+--
+-- Numbered 053, not 052: ADR-0012 (Accepted) states that the repository
+-- already contains duplicate migration numbers and further duplicates should
+-- be avoided. #234 took 052 for 052_research_evidence_promotion, so this one
+-- continues the sequence rather than adding a fourth duplicate pair.
 --
 -- Index rationale: the unique index on (workspace_id, name) is not an
 -- optimization, it is the uniqueness constraint the Prisma model declares, so
