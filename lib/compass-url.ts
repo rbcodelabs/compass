@@ -1,3 +1,5 @@
+import { entityPath, type EntityLinkInput } from "@/lib/entity-links"
+
 /**
  * Thrown when the deployment origin can't be determined because required
  * config is missing — as opposed to a configured origin being unsafe (bad
@@ -60,18 +62,81 @@ export function researchVoiceWorkerCallbackBaseUrl(): URL {
   return new URL("/api/internal/research/voice", base)
 }
 
+/**
+ * The absolute, human-clickable URL for one entity: the trusted deployment
+ * origin composed with the shared relative path from lib/entity-links.ts.
+ *
+ * Throws exactly what `trustedCompassBaseUrl` throws —
+ * `CompassUrlNotConfiguredError` when the origin is simply absent, a plain
+ * `Error` when a *configured* origin is unsafe. Most callers want
+ * `safeEntityUrl`, which draws that distinction for them.
+ */
+export function entityUrl(input: EntityLinkInput): string {
+  // entityPath percent-encodes every slug/id segment itself; `new URL` parses
+  // that path against the origin without re-decoding it, so the escaping the
+  // in-app hrefs use survives verbatim into the absolute form.
+  return new URL(entityPath(input), trustedCompassBaseUrl()).toString()
+}
+
+/**
+ * Runs a URL builder, degrading a *missing config* failure to `null` while
+ * letting every other failure through.
+ *
+ * This is the whole error contract of this module in one function: an absent
+ * origin is an ordinary deployment state that should cost a caller nothing
+ * more than a missing link, whereas a configured-but-unsafe origin is a
+ * misconfiguration that must abort the operation rather than quietly hand
+ * someone a link to somewhere else (see the class doc above).
+ */
+export function optionalCompassUrl(build: () => string): string | null {
+  try {
+    return build()
+  } catch (error) {
+    if (error instanceof CompassUrlNotConfiguredError) return null
+    throw error
+  }
+}
+
+/**
+ * `entityUrl` for call sites that may not have resolved the workspace's slugs
+ * — an MCP handler reading them off a relation it didn't have to widen, say.
+ * Missing slugs and a missing origin both yield `null`; a link is never
+ * fabricated from a partial identity.
+ */
+export function safeEntityUrl(
+  input:
+    | (Omit<EntityLinkInput, "orgSlug" | "workspaceSlug"> & {
+        orgSlug: string | null | undefined
+        workspaceSlug: string | null | undefined
+      })
+    | null
+    | undefined,
+): string | null {
+  if (!input?.orgSlug || !input.workspaceSlug) return null
+  const { orgSlug, workspaceSlug } = input
+  return optionalCompassUrl(() => entityUrl({ ...input, orgSlug, workspaceSlug }))
+}
+
+/**
+ * Appends a `URL:` line to a tool's human-readable message when a link is
+ * available. One definition shared by every MCP handler — the feedback and
+ * decision modules each used to carry their own copy.
+ */
+export function withUrlLine(text: string, url: string | null): string {
+  return url ? `${text}\nURL: ${url}` : text
+}
+
 export function feedbackItemUrl(input: {
   orgSlug: string
   workspaceSlug: string
   feedbackId: string
 }): string {
-  const base = trustedCompassBaseUrl()
-  const url = new URL(
-    `/${encodeURIComponent(input.orgSlug)}/${encodeURIComponent(input.workspaceSlug)}/feedback`,
-    base,
-  )
-  url.searchParams.set("detail", `feedback:${input.feedbackId}`)
-  return url.toString()
+  return entityUrl({
+    orgSlug: input.orgSlug,
+    workspaceSlug: input.workspaceSlug,
+    type: "feedback",
+    id: input.feedbackId,
+  })
 }
 
 export function reviewRequestUrl(input: {

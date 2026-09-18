@@ -1112,6 +1112,32 @@ describe("promoteFeedbackToRoadmap", () => {
     })
   })
 
+  it("deeplinks to the new roadmap item's panel when the feedback's workspace matches", async () => {
+    mockFeedbackItem.findUnique.mockResolvedValueOnce({
+      id: FEED_ID, title: "Login button broken", type: "BUG",
+      workspaceId: WS_ID, workspace: { slug: "compass", organization: { slug: "rbcodelabs" } },
+    })
+    mockRoadmapItem.findFirst.mockResolvedValueOnce(null)
+    mockRoadmapItem.create.mockResolvedValueOnce({ id: "item-9", title: "Login button broken" })
+
+    const result = await promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NEXT" })
+
+    expect(result.content[0].text).toContain(
+      "URL: https://compass.rbcodelabs.com/rbcodelabs/compass/roadmap?detail=roadmapItem%3Aitem-9"
+    )
+  })
+
+  it("omits the URL line when the feedback carries no workspace slugs", async () => {
+    mockFeedbackItem.findUnique.mockResolvedValueOnce({ id: FEED_ID, title: "Login button broken", type: "BUG" })
+    mockRoadmapItem.findFirst.mockResolvedValueOnce(null)
+    mockRoadmapItem.create.mockResolvedValueOnce({ id: "item-10", title: "Login button broken" })
+
+    const result = await promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NEXT" })
+
+    expect(result.content[0].text).toContain("ID: item-10")
+    expect(result.content[0].text).not.toContain("URL:")
+  })
+
   it("places item after the last item in the horizon", async () => {
     mockFeedbackItem.findUnique.mockResolvedValueOnce({ id: FEED_ID, title: "Crash on save", type: "BUG" })
     mockRoadmapItem.findFirst.mockResolvedValueOnce({ sortOrder: 4 })

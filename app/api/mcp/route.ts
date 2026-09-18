@@ -7,6 +7,8 @@ import { createMcpHandler } from "mcp-handler"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import getPrisma from "@/lib/db"
+import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
+import type { EntityLinkType } from "@/lib/entity-links"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, recencySortSchema } from "@/lib/mcp-recency"
@@ -156,6 +158,33 @@ import {
 // UTC offset, so format in UTC to match how the date was parsed.
 function formatUtcDate(date: Date): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
+}
+
+/**
+ * Deeplinks for the create/promote tools below.
+ *
+ * A bare `ID: <uuid>` is useless to the human an agent is reporting to, so
+ * every tool that mints a panel-addressable entity appends a `URL:` line built
+ * from lib/entity-links.ts — the same path builder the in-app search uses.
+ *
+ * The slugs come off the lookup each handler already performs (widened by one
+ * relation, never a second round trip). Where they can't be resolved the link
+ * is simply omitted: a create must never fail because a link couldn't be
+ * built, and a link must never be guessed from a partial identity.
+ */
+const WORKSPACE_LINK_SELECT = { slug: true, organization: { select: { slug: true } } } as const
+
+type WorkspaceLinkRow = { slug?: string | null; organization?: { slug?: string | null } | null } | null | undefined
+
+function workspaceEntityUrl(
+  workspace: WorkspaceLinkRow,
+  entity: { type: EntityLinkType; id: string; opportunityId?: string | null },
+): string | null {
+  return safeEntityUrl({
+    orgSlug: workspace?.organization?.slug,
+    workspaceSlug: workspace?.slug,
+    ...entity,
+  })
 }
 
 const _handler = createMcpHandler(
@@ -705,7 +734,7 @@ const _handler = createMcpHandler(
       },
       async ({ workspaceId, cycleId, title, description, owner, squadId, parentKeyResultId }) => {
         const prisma = getPrisma()
-        const cycle = await prisma.oKRCycle.findFirst({ where: { id: cycleId, workspaceId }, select: { id: true, title: true } })
+        const cycle = await prisma.oKRCycle.findFirst({ where: { id: cycleId, workspaceId }, select: { id: true, title: true, workspace: { select: WORKSPACE_LINK_SELECT } } })
         if (!cycle) {
           return fail(`OKR cycle "${cycleId}" not found in workspace.`)
         }
@@ -719,7 +748,10 @@ const _handler = createMcpHandler(
           data: { cycleId, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
         })
         return ok(
-          `**Objective created** in cycle "${cycle.title}"\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
+          withUrlLine(
+            `**Objective created** in cycle "${cycle.title}"\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
+            workspaceEntityUrl(cycle.workspace, { type: "objective", id: objective.id }),
+          ),
           {
             id: objective.id,
             title: objective.title,
@@ -778,7 +810,13 @@ const _handler = createMcpHandler(
       },
       async ({ objectiveId, title, target, unit }) => {
         const prisma = getPrisma()
-        const objective = await prisma.objective.findUnique({ where: { id: objectiveId }, select: { id: true, title: true } })
+        // A KeyResult is scoped through objective -> cycle -> workspace (see
+        // entityScopeWhere in lib/entity-detail.ts), so the deeplink's slugs
+        // come down that same chain on the lookup already being made.
+        const objective = await prisma.objective.findUnique({
+          where: { id: objectiveId },
+          select: { id: true, title: true, cycle: { select: { workspace: { select: WORKSPACE_LINK_SELECT } } } },
+        })
         if (!objective) {
           return fail(`Objective "${objectiveId}" not found.`)
         }
@@ -786,7 +824,10 @@ const _handler = createMcpHandler(
           data: { objectiveId, title: title.trim(), target, unit: unit?.trim() },
         })
         return ok(
-          `**Key Result created** on "${objective.title}"\nID: ${keyResult.id}\nTitle: ${keyResult.title}\nTarget: ${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""}\nCurrent: 0`,
+          withUrlLine(
+            `**Key Result created** on "${objective.title}"\nID: ${keyResult.id}\nTitle: ${keyResult.title}\nTarget: ${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""}\nCurrent: 0`,
+            workspaceEntityUrl(objective.cycle?.workspace, { type: "keyResult", id: keyResult.id }),
+          ),
           {
             id: keyResult.id,
             title: keyResult.title,
@@ -1125,7 +1166,7 @@ const _handler = createMcpHandler(
       },
       async ({ workspaceId, title, description, customerSegment, status, keyResultId, squadId }) => {
         const prisma = getPrisma()
-        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
+        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, ...WORKSPACE_LINK_SELECT } })
         if (!workspace) {
           return fail(`Workspace "${workspaceId}" not found.`)
         }
@@ -1141,7 +1182,10 @@ const _handler = createMcpHandler(
           },
         })
         return ok(
-          `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
+          withUrlLine(
+            `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
+            workspaceEntityUrl(workspace, { type: "opportunity", id: opportunity.id }),
+          ),
           {
             id: opportunity.id,
             title: opportunity.title,
@@ -1242,13 +1286,19 @@ const _handler = createMcpHandler(
       },
       async ({ opportunityId, title, description }) => {
         const prisma = getPrisma()
-        const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { id: true, title: true } })
+        const opp = await prisma.opportunity.findUnique({
+          where: { id: opportunityId },
+          select: { id: true, title: true, workspace: { select: WORKSPACE_LINK_SELECT } },
+        })
         if (!opp) {
           return fail(`Opportunity "${opportunityId}" not found.`)
         }
         const solution = await prisma.solution.create({ data: { opportunityId, title: title.trim(), description: description?.trim() } })
         return ok(
-          `**Solution created** for "${opp.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
+          withUrlLine(
+            `**Solution created** for "${opp.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
+            workspaceEntityUrl(opp.workspace, { type: "solution", id: solution.id, opportunityId }),
+          ),
           {
             id: solution.id,
             title: solution.title,
@@ -1305,13 +1355,29 @@ const _handler = createMcpHandler(
       },
       async ({ solutionId, title, description, riskLevel }) => {
         const prisma = getPrisma()
-        const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true } })
+        // Two hops: an Assumption's workspace (and the discovery page its panel
+        // opens on) live up through Solution -> Opportunity.
+        const solution = await prisma.solution.findUnique({
+          where: { id: solutionId },
+          select: {
+            id: true,
+            title: true,
+            opportunity: { select: { id: true, workspace: { select: WORKSPACE_LINK_SELECT } } },
+          },
+        })
         if (!solution) {
           return fail(`Solution "${solutionId}" not found.`)
         }
         const assumption = await prisma.assumption.create({ data: { solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED" } })
         return ok(
-          `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
+          withUrlLine(
+            `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
+            workspaceEntityUrl(solution.opportunity?.workspace, {
+              type: "assumption",
+              id: assumption.id,
+              opportunityId: solution.opportunity?.id,
+            }),
+          ),
           {
             id: assumption.id,
             title: assumption.title,
@@ -1483,7 +1549,7 @@ const _handler = createMcpHandler(
         const prisma = getPrisma()
         const solution = await prisma.solution.findUnique({
           where: { id: solutionId },
-          include: { opportunity: { select: { id: true, title: true, squadId: true } } },
+          include: { opportunity: { select: { id: true, title: true, squadId: true, workspaceId: true, workspace: { select: WORKSPACE_LINK_SELECT } } } },
         })
         if (!solution) {
           return fail(`Solution "${solutionId}" not found.`)
@@ -1504,9 +1570,17 @@ const _handler = createMcpHandler(
             isPrivate: isPrivate ?? false,
           } })
         return ok(
-          `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
-            (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-            `\nLinked Solution: ${solutionId}\nLinked Opportunity: ${solution.opportunity.title}`,
+          withUrlLine(
+            `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
+              (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
+              `\nLinked Solution: ${solutionId}\nLinked Opportunity: ${solution.opportunity.title}`,
+            // The item is created in `workspaceId`, which the solution's own
+            // workspace need not match — only link when they do, rather than
+            // pointing at a roadmap the item isn't on.
+            solution.opportunity.workspaceId === workspaceId
+              ? workspaceEntityUrl(solution.opportunity.workspace, { type: "roadmapItem", id: item.id })
+              : null,
+          ),
           {
             id: item.id,
             title: item.title,
@@ -1678,7 +1752,7 @@ const _handler = createMcpHandler(
       },
       async ({ workspaceId, title, hypothesis, method, killCondition, assumptionId, squadId }) => {
         const prisma = getPrisma()
-        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
+        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, ...WORKSPACE_LINK_SELECT } })
         if (!workspace) {
           return fail(`Workspace "${workspaceId}" not found.`)
         }
@@ -1690,7 +1764,10 @@ const _handler = createMcpHandler(
           data: { workspaceId, title: title.trim(), hypothesis: hypothesis.trim(), method: method.trim(), killCondition: killCondition.trim(), assumptionId: assumptionId ?? null, squadId: squadId ?? null, status: "DESIGNING" },
         })
         return ok(
-          `**Experiment created**\nID: ${experiment.id}\nTitle: ${experiment.title}\nStatus: DESIGNING\nKill Condition: ${experiment.killCondition}`,
+          withUrlLine(
+            `**Experiment created**\nID: ${experiment.id}\nTitle: ${experiment.title}\nStatus: DESIGNING\nKill Condition: ${experiment.killCondition}`,
+            workspaceEntityUrl(workspace, { type: "experiment", id: experiment.id }),
+          ),
           {
             id: experiment.id,
             title: experiment.title,
@@ -2137,7 +2214,7 @@ const _handler = createMcpHandler(
       },
       async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId, startDate, endDate, isPrivate }) => {
         const prisma = getPrisma()
-        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
+        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, ...WORKSPACE_LINK_SELECT } })
         if (!workspace) {
           return fail(`Workspace "${workspaceId}" not found.`)
         }
@@ -2161,14 +2238,17 @@ const _handler = createMcpHandler(
             isPrivate: isPrivate ?? false,
           } })
         return ok(
-          `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
-            (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-            (solutionId ? `\nLinked Solution: ${solutionId}` : "") +
-            (keyResultId ? `\nLinked KR: ${keyResultId}` : "") +
-            (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : "") +
-            (item.startDate || item.endDate
-              ? `\nDates: ${item.startDate ? formatUtcDate(item.startDate) : "?"} – ${item.endDate ? formatUtcDate(item.endDate) : "?"}`
-              : ""),
+          withUrlLine(
+            `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
+              (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
+              (solutionId ? `\nLinked Solution: ${solutionId}` : "") +
+              (keyResultId ? `\nLinked KR: ${keyResultId}` : "") +
+              (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : "") +
+              (item.startDate || item.endDate
+                ? `\nDates: ${item.startDate ? formatUtcDate(item.startDate) : "?"} – ${item.endDate ? formatUtcDate(item.endDate) : "?"}`
+                : ""),
+            workspaceEntityUrl(workspace, { type: "roadmapItem", id: item.id }),
+          ),
           {
             id: item.id,
             title: item.title,
