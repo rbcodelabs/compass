@@ -15,7 +15,7 @@ export type ResearchSessionStatus = (typeof RESEARCH_SESSION_STATUSES)[number]
 
 export type ResearchStudyActor = { userId: string | null; service?: boolean; source?: "UI" | "MCP" }
 export type ResearchWorkspaceScope = { workspaceId: string } | { orgSlug: string; workspaceSlug: string }
-export type ResearchStudyInput = { name: string; goal?: string; studyType?: string; targetMinutes?: number; appUrl?: string; guide?: string[] }
+export type ResearchStudyInput = { name: string; goal?: string; studyType?: string; targetMinutes?: number; appUrl?: string; artifactId?: string; guide?: string[] }
 
 function workspaceWhere(scope: ResearchWorkspaceScope, actor: ResearchStudyActor): Prisma.WorkspaceWhereInput {
   if (!actor.userId && !(actor.service === true && actor.userId === null)) throw new ResearchStudyError("Unauthorized")
@@ -33,6 +33,35 @@ function assertStudyType(value: string): asserts value is ResearchStudyType {
 
 function assertDuration(value: number) {
   if (!SUPPORTED_DURATIONS.includes(value)) throw new ResearchStudyError("Unsupported study duration")
+}
+
+type UsabilityTestTarget = { appUrl: string | null; artifactId: string | null; artifactTitle: string | null }
+
+/**
+ * A USABILITY_TEST study has exactly one target: a live appUrl or a Compass
+ * Artifact (HTML_UPLOAD, ACTIVE, in this workspace). Shared by
+ * createResearchStudy, updateResearchStudy and generateResearchGuide so the
+ * "exactly one" rule and the artifact scoping query live in one place.
+ */
+async function resolveUsabilityTestTarget(
+  prisma: ReturnType<typeof getPrisma>,
+  workspaceId: string,
+  raw: { appUrl?: string; artifactId?: string },
+  options: { production: boolean },
+): Promise<UsabilityTestTarget> {
+  const appUrlValue = String(raw.appUrl ?? "").trim()
+  const artifactIdValue = String(raw.artifactId ?? "").trim()
+  if (appUrlValue && artifactIdValue) throw new ResearchStudyError("Provide either a product URL or an artifact, not both")
+  if (!appUrlValue && !artifactIdValue) throw new ResearchStudyError("Enter a product URL or select an artifact")
+  if (artifactIdValue) {
+    const artifact = await prisma.artifact.findFirst({
+      where: { id: artifactIdValue, workspaceId, status: "ACTIVE", sourceType: "HTML_UPLOAD" },
+      select: { id: true, title: true },
+    })
+    if (!artifact) throw new ResearchStudyError("Artifact not found")
+    return { appUrl: null, artifactId: artifact.id, artifactTitle: artifact.title }
+  }
+  return { appUrl: normalizeResearchAppUrl(appUrlValue, options), artifactId: null, artifactTitle: null }
 }
 
 function validateGuide(input: ResearchStudyInput) {
@@ -60,7 +89,7 @@ async function retryResearchTransaction<T>(operation: () => Promise<T>, attempts
 export async function generateResearchGuide(
   scope: ResearchWorkspaceScope,
   actor: ResearchStudyActor,
-  input: { studyType: ResearchStudyType; goal: string; appUrl: string; targetMinutes: number },
+  input: { studyType: ResearchStudyType; goal: string; appUrl?: string; artifactId?: string; artifactTitle?: string; targetMinutes: number },
   deadline?: number,
 ) {
   if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
@@ -75,12 +104,28 @@ export async function generateResearchGuide(
   if (!goal || goal.length > 5_000) throw new ResearchStudyError("Enter a research goal")
   assertDuration(input.targetMinutes)
   const guided = input.studyType === "USABILITY_TEST"
-  const appUrl = guided ? normalizeResearchAppUrl(input.appUrl, {
-    production: !(process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1"),
-  }) : null
+  // The UI already knows the selected artifact's title (it rendered the
+  // picker from the workspace's artifact list) so it can skip a redundant
+  // re-validation round trip for this ephemeral, non-persisting drafting
+  // call. An artifactId (MCP, or any caller without a title in hand) still
+  // goes through the same scoped lookup createResearchStudy uses.
+  const rawArtifactTitle = String(input.artifactTitle ?? "").trim()
+  let targetLine = ""
+  if (guided) {
+    if (rawArtifactTitle) {
+      targetLine = `Target: an interactive prototype (title: ${rawArtifactTitle})`
+    } else {
+      const target = await resolveUsabilityTestTarget(prisma, workspace.id, { appUrl: input.appUrl, artifactId: input.artifactId }, {
+        production: !(process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1"),
+      })
+      targetLine = target.artifactId
+        ? `Target: an interactive prototype (title: ${target.artifactTitle})`
+        : `Product URL (context only; do not fetch or open it): ${target.appUrl}`
+    }
+  }
   const prompt = guided ? `You are helping a researcher prepare a moderated usability test.
 Research goal: ${goal}
-Product URL (context only; do not fetch or open it): ${appUrl}
+${targetLine}
 Target duration: ${input.targetMinutes} minutes
 
 Write realistic participant goals, not UI instructions. Avoid naming buttons, menus, or page locations. Cover the core journey and relevant edge cases without assuming an implementation. Do not invent product capabilities from the URL. Each task must be distinct, concise, observable, neutral, and possible to attempt in the product. Return only a JSON array of 5 to 8 strings with no markdown or explanation.` : `You are helping a researcher prepare a customer discovery interview.
@@ -117,12 +162,11 @@ export async function createResearchStudy(scope: ResearchWorkspaceScope, actor: 
   assertStudyType(studyType)
   const targetMinutes = Number(input.targetMinutes ?? 15)
   assertDuration(targetMinutes)
-  const rawAppUrl = String(input.appUrl ?? "").trim()
-  const appUrl = studyType === "USABILITY_TEST"
-    ? normalizeResearchAppUrl(rawAppUrl, {
+  const target = studyType === "USABILITY_TEST"
+    ? await resolveUsabilityTestTarget(prisma, workspace.id, { appUrl: input.appUrl, artifactId: input.artifactId }, {
         production: !(process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1"),
       })
-    : null
+    : { appUrl: null, artifactId: null, artifactTitle: null }
   const guide = validateGuide(input)
   if (!name || !goal || guide.length === 0) throw new ResearchStudyError("Name, goal, and at least one question are required")
   if (name.length > 255) throw new ResearchStudyError("Study name must be 255 characters or fewer")
@@ -131,7 +175,7 @@ export async function createResearchStudy(scope: ResearchWorkspaceScope, actor: 
   const studyId = randomUUID()
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
   await prisma.$transaction([
-    prisma.researchStudy.create({ data: { id: studyId, workspaceId: workspace.id, name, goal, studyType, guide: JSON.stringify(guide), targetMinutes, appUrl, status: "ACTIVE", source: actor.source ?? "UI", createdById: actor.userId, updatedById: actor.userId } }),
+    prisma.researchStudy.create({ data: { id: studyId, workspaceId: workspace.id, name, goal, studyType, guide: JSON.stringify(guide), targetMinutes, appUrl: target.appUrl, artifactId: target.artifactId, status: "ACTIVE", source: actor.source ?? "UI", createdById: actor.userId, updatedById: actor.userId } }),
     prisma.researchParticipantToken.create({ data: { studyId, tokenHash, kind: "PRIMARY", expiresAt, createdById: actor.userId } }),
   ])
   return { id: studyId, token }
@@ -146,7 +190,7 @@ async function findMemberStudy(scope: ResearchWorkspaceScope, actor: ResearchStu
     },
     select: {
       id: true, name: true, workspaceId: true, createdAt: true, updatedAt: true, status: true, studyType: true, goal: true, guide: true,
-      targetMinutes: true, appUrl: true, _count: { select: { sessions: true } },
+      targetMinutes: true, appUrl: true, artifactId: true, _count: { select: { sessions: true } },
     },
   })
   if (!study) throw new ResearchStudyError("Study not found")
@@ -162,7 +206,7 @@ export async function updateResearchStudy(scope: ResearchWorkspaceScope, actor: 
   if (!name) throw new ResearchStudyError("Enter a study name")
   if (name.length > 255) throw new ResearchStudyError("Study name must be 255 characters or fewer")
 
-  let protocol: Partial<{ studyType: string; goal: string; guide: string; targetMinutes: number; appUrl: string | null }> = {}
+  let protocol: Partial<{ studyType: string; goal: string; guide: string; targetMinutes: number; appUrl: string | null; artifactId: string | null }> = {}
   if (study._count.sessions === 0) {
     const studyType = String(input.studyType ?? study.studyType)
     assertStudyType(studyType)
@@ -172,15 +216,28 @@ export async function updateResearchStudy(scope: ResearchWorkspaceScope, actor: 
     const targetMinutes = Number(input.targetMinutes ?? study.targetMinutes)
     assertDuration(targetMinutes)
     const guide = input.guide === undefined ? JSON.parse(study.guide) : validateGuide(input)
-    const appUrl = studyType === "USABILITY_TEST" ? normalizeResearchAppUrl(String(input.appUrl ?? study.appUrl ?? ""), {
-      production: !(process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1"),
-    }) : null
+    // Fall back to whichever target the study already carries when the
+    // caller doesn't explicitly touch appUrl/artifactId this update — the
+    // same "resend the current value" contract appUrl already had, extended
+    // to two mutually exclusive fields instead of one.
+    const appUrlFallback = study.artifactId ? undefined : (study.appUrl ?? undefined)
+    const artifactIdFallback = study.artifactId ?? undefined
+    const target = studyType === "USABILITY_TEST"
+      ? await resolveUsabilityTestTarget(prisma, study.workspaceId, {
+          appUrl: input.appUrl !== undefined ? input.appUrl : (input.artifactId !== undefined ? undefined : appUrlFallback),
+          artifactId: input.artifactId !== undefined ? input.artifactId : (input.appUrl !== undefined ? undefined : artifactIdFallback),
+        }, {
+          production: !(process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1"),
+        })
+      : { appUrl: null, artifactId: null, artifactTitle: null }
     protocol = {
       ...(input.studyType === undefined ? {} : { studyType }),
       ...(input.goal === undefined ? {} : { goal }),
       ...(input.guide === undefined ? {} : { guide: JSON.stringify(guide) }),
       ...(input.targetMinutes === undefined ? {} : { targetMinutes }),
-      ...(input.appUrl === undefined && input.studyType === undefined ? {} : { appUrl }),
+      ...(input.appUrl === undefined && input.artifactId === undefined && input.studyType === undefined
+        ? {}
+        : { appUrl: target.appUrl, artifactId: target.artifactId }),
     }
   }
   const now = new Date(Math.max(Date.now(), (study.updatedAt?.getTime() ?? 0) + 1))
@@ -283,10 +340,10 @@ export async function issueResearchLink(scope: ResearchWorkspaceScope, actor: Re
   return { id: study.id, token }
 }
 
-const metadataSelect = { id: true, workspaceId: true, name: true, goal: true, studyType: true, guide: true, targetMinutes: true, appUrl: true, status: true, createdAt: true, updatedAt: true, _count: { select: { sessions: true } } } satisfies Prisma.ResearchStudySelect
+const metadataSelect = { id: true, workspaceId: true, name: true, goal: true, studyType: true, guide: true, targetMinutes: true, appUrl: true, artifactId: true, status: true, createdAt: true, updatedAt: true, _count: { select: { sessions: true } } } satisfies Prisma.ResearchStudySelect
 type StudyMetadata = Prisma.ResearchStudyGetPayload<{ select: typeof metadataSelect }>
 function publicMetadata(study: StudyMetadata) {
-  return { id: study.id, workspaceId: study.workspaceId, name: study.name, goal: study.goal, studyType: study.studyType, guide: JSON.parse(study.guide), targetMinutes: study.targetMinutes, appUrl: study.appUrl, status: study.status, createdAt: study.createdAt, updatedAt: study.updatedAt, sessionCount: study._count.sessions }
+  return { id: study.id, workspaceId: study.workspaceId, name: study.name, goal: study.goal, studyType: study.studyType, guide: JSON.parse(study.guide), targetMinutes: study.targetMinutes, appUrl: study.appUrl, artifactId: study.artifactId, status: study.status, createdAt: study.createdAt, updatedAt: study.updatedAt, sessionCount: study._count.sessions }
 }
 
 export async function getResearchStudy(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
