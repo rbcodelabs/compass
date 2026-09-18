@@ -12,7 +12,7 @@ import { ResearchExperience } from "@/components/research/research-experience"
 afterEach(() => { cleanup(); localStorage.clear() })
 
 describe("guided research participant experience", () => {
-  const props = { token: "study-token", studyType: "USABILITY_TEST" as const, appUrl: "https://example.com/app", studyName: "Navigation test", legacyVoiceEnabled: true }
+  const props = { token: "study-token", studyType: "USABILITY_TEST" as const, appUrl: "https://example.com/app", artifactHtml: null, studyName: "Navigation test", legacyVoiceEnabled: true }
 
   it("keeps guided research on chat when authoritative voice is disabled", () => {
     render(<ResearchExperience {...props} legacyVoiceEnabled={false} />)
@@ -72,5 +72,21 @@ describe("guided research participant experience", () => {
     render(<ResearchExperience {...props} />)
     expect(await screen.findByTestId("chat")).toHaveTextContent("guided-chat")
     expect(screen.queryByRole("button", { name: /Use voice/i })).not.toBeInTheDocument()
+  })
+
+  it("renders a sandboxed prototype pane instead of the live-product iframe when the study targets an artifact", () => {
+    render(<ResearchExperience token="study-token" studyName="Prototype test" studyType="USABILITY_TEST" appUrl={null} artifactHtml="<html><body>Proto</body></html>" legacyVoiceEnabled={false} />)
+    expect(screen.getByText("Prototype")).toBeVisible()
+    expect(screen.getByText(/Interact with the prototype below/i)).toBeVisible()
+    expect(screen.queryByRole("link", { name: /Open product/i })).not.toBeInTheDocument()
+    expect(screen.queryByTitle(/^Live product/)).not.toBeInTheDocument()
+    expect(screen.getByTitle(/Prototype for Prototype test preview/)).toBeInTheDocument()
+    expect(screen.getByTestId("chat")).toHaveTextContent("guided-chat")
+  })
+
+  it("stays on the ungated chat flow when a usability test has neither an appUrl nor artifactHtml", () => {
+    render(<ResearchExperience token="study-token" studyName="Unconfigured test" studyType="USABILITY_TEST" appUrl={null} artifactHtml={null} legacyVoiceEnabled={false} />)
+    expect(screen.getByTestId("chat")).toHaveTextContent("interview-chat")
+    expect(screen.queryByText("Prototype")).not.toBeInTheDocument()
   })
 })
