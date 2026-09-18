@@ -251,9 +251,10 @@ export async function setCustomFieldValue({
 
   const resultValue = clearing ? null : value
   return ok(
-    clearing
+    (clearing
       ? `Cleared "${field.name}" on ${objectType} "${objectId}".`
-      : `Set "${field.name}" on ${objectType} "${objectId}" to ${formatValueForDisplay(resultValue)}.`,
+      : `Set "${field.name}" on ${objectType} "${objectId}" to ${formatValueForDisplay(resultValue)}.`) +
+      `\nID: ${fieldId}`,
     { fieldId, objectId, objectType, fieldType: field.fieldType, value: resultValue }
   )
 }

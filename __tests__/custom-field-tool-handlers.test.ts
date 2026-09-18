@@ -241,6 +241,10 @@ describe("setCustomFieldValue", () => {
       fieldType,
       value,
     })
+    // Repo convention (.claude/pr-guidelines.md "MCP Tools"): every mutation
+    // response includes the entity ID on its own line, formatted exactly
+    // `ID: <uuid>` (plain, no bold).
+    expect(result.content[0].text).toContain("ID: f1")
   })
 
   it("sets a valid SELECT value", async () => {
