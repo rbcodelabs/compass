@@ -30,7 +30,13 @@ function parseVercelOrigin(raw: string): URL {
   return parseTrustedOrigin(hasScheme ? raw : `https://${raw}`, false)
 }
 
-function trustedCompassBaseUrl(): URL {
+/**
+ * The trusted deployment origin. Exported for `lib/oauth/constants.ts`, which
+ * derives the OAuth `issuer` and the canonical MCP resource URI from it —
+ * clients byte-compare the issuer against the URL they built, so both must come
+ * from this one resolver rather than from a second, drift-prone copy.
+ */
+export function trustedCompassBaseUrl(): URL {
   if (process.env.VERCEL_ENV === "preview") {
     const previewHost = process.env.VERCEL_BRANCH_URL ?? process.env.VERCEL_URL
     if (!previewHost) throw new CompassUrlNotConfiguredError("Compass preview URL is not configured.")
