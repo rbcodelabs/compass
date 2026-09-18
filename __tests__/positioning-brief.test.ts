@@ -8,8 +8,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockRoadmapItem = { findFirst: vi.fn() };
 const mockDoc = { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() };
+const mockWorkspace = { findUnique: vi.fn() };
 
-const mockPrisma = { roadmapItem: mockRoadmapItem, doc: mockDoc };
+const mockPrisma = { roadmapItem: mockRoadmapItem, doc: mockDoc, workspace: mockWorkspace };
 
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }));
 
@@ -25,6 +26,10 @@ beforeEach(() => {
   mockDoc.findUnique.mockResolvedValue(null); // no existing brief by default
   mockDoc.findFirst.mockResolvedValue({ sortOrder: 4 }); // last sibling
   mockDoc.create.mockResolvedValue({ id: "doc-1", title: "Positioning Brief — Ship payments" });
+  // Positioning briefs are part of the marketing-launch surface — default the
+  // fixture workspace to "on" so the existing tests below exercise the doc
+  // creation path, not the gate. The gate itself gets its own test.
+  mockWorkspace.findUnique.mockResolvedValue({ launchWorkflowEnabled: true });
 });
 
 describe("createPositioningBriefCore", () => {
@@ -71,5 +76,14 @@ describe("createPositioningBriefCore", () => {
     mockDoc.findFirst.mockResolvedValueOnce(null);
     await createPositioningBriefCore(ITEM_ID, WORKSPACE_ID);
     expect(mockDoc.create.mock.calls[0][0].data.sortOrder).toBe(0);
+  });
+
+  it("returns launch_workflow_disabled and creates nothing when the workspace has the launch workflow off", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+
+    const result = await createPositioningBriefCore(ITEM_ID, WORKSPACE_ID);
+
+    expect(result).toEqual({ ok: false, error: "launch_workflow_disabled" });
+    expect(mockDoc.create).not.toHaveBeenCalled();
   });
 });

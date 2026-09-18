@@ -31,6 +31,7 @@ type Props = {
   // NOW/NEXT. See docs/decisions/0005/0006 (Superseded); never wire this
   // into any blocking behavior.
   limit?: number | null;
+  launchWorkflowEnabled?: boolean;
 };
 
 export function RoadmapColumn({
@@ -48,6 +49,7 @@ export function RoadmapColumn({
   availableOpportunities,
   availableExperiments,
   limit,
+  launchWorkflowEnabled = true,
 }: Props) {
   const { label, emptyText } = HORIZON_META[horizon];
   const accent = ({ NOW: "success", NEXT: "info", LATER: "neutral", LAUNCHING: "warning", LAUNCHED: "success", SHIPPED: "success" } as const)[horizon];
@@ -87,6 +89,7 @@ export function RoadmapColumn({
                 orgSlug={orgSlug}
                 workspaceSlug={workspaceSlug}
                 availableOpportunities={availableOpportunities}
+                launchWorkflowEnabled={launchWorkflowEnabled}
               />
             ))
           )}

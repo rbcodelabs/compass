@@ -91,6 +91,7 @@ function roadmapItem(customFields: unknown[]) {
     feedback: null,
     launchChecklist: null,
     positioningBrief: null,
+    launchWorkflowEnabled: true,
     deliveryTasks: [],
     linkableTasks: [],
     members: [],

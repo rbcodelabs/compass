@@ -8,6 +8,7 @@ const roadmapItem = {
   update: vi.fn(),
 };
 const workspaceMember = { findUnique: vi.fn() };
+const workspace = { findUnique: vi.fn() };
 const solution = { findFirst: vi.fn() };
 const opportunity = { findFirst: vi.fn() };
 const squad = { findFirst: vi.fn() };
@@ -21,6 +22,7 @@ const nowGateEvaluation = { create: vi.fn() };
 const prisma = {
   roadmapItem,
   workspaceMember,
+  workspace,
   solution,
   opportunity,
   squad,
@@ -71,6 +73,11 @@ beforeEach(() => {
   experiment.findFirst.mockResolvedValue({ id: "experiment-a" });
   keyResult.findFirst.mockResolvedValue({ id: "kr-a" });
   feedbackItem.findFirst.mockResolvedValue({ title: "Feedback" });
+  // Default the fixture workspace to the launch workflow being on, so the
+  // existing LAUNCHING/LAUNCHED rejection tests below exercise the
+  // pre-existing "use a launch tier" message. The disabled-feature message
+  // gets its own describe block.
+  workspace.findUnique.mockResolvedValue({ launchWorkflowEnabled: true });
   portfolioCapacityReservation.findUnique.mockResolvedValue(null);
   portfolioCapacityPlan.updateMany.mockResolvedValue({ count: 1 });
   prisma.$transaction.mockImplementation((callback: (tx: typeof prisma) => unknown) => callback(prisma));
@@ -149,6 +156,22 @@ describe("roadmap mutation authorization", () => {
     await expect(addRoadmapItem(WS, { title: "No", horizon })).rejects.toThrow(/launch tier/i);
     expect(roadmapItem.create).not.toHaveBeenCalled();
     expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it.each(["LAUNCHING", "LAUNCHED"] as const)(
+    "rejects direct creation in %s with the disabled-feature message when the workspace's launch workflow is off",
+    async (horizon) => {
+      workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+      await expect(addRoadmapItem(WS, { title: "No", horizon })).rejects.toThrow(/launch workflow is disabled/i);
+      expect(roadmapItem.create).not.toHaveBeenCalled();
+      expect(revalidatePath).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects a direct move into LAUNCHING with the disabled-feature message when off", async () => {
+    workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    await expect(moveItem(ITEM, "LAUNCHING", WS)).rejects.toThrow(/launch workflow is disabled/i);
+    expect(roadmapItem.update).not.toHaveBeenCalled();
   });
 
   it("scopes an update target to the authorized workspace", async () => {
@@ -364,6 +387,18 @@ describe("rescheduleRoadmapItem", () => {
     await expect(rescheduleRoadmapItem(ITEM, WS, {
       horizon: "LATER", startDate: new Date("2026-09-08T00:00:00.000Z"), endDate: new Date("2026-09-07T00:00:00.000Z"),
     })).rejects.toThrow(/inclusive range/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects launch horizons with the disabled-feature message (not 'use a launch tier') when the workspace's launch workflow is off", async () => {
+    workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    await expect(
+      rescheduleRoadmapItem(ITEM, WS, {
+        horizon: "LAUNCHING",
+        startDate: new Date("2026-09-07T00:00:00.000Z"),
+        endDate: new Date("2026-09-11T00:00:00.000Z"),
+      }),
+    ).rejects.toThrow(/launch workflow is disabled/i);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 

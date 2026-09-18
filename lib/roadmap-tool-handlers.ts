@@ -167,7 +167,7 @@ export async function setLaunchTier({
     name: template.name,
     tier: template.tier,
     items: template.items.map((i) => ({ label: i.label, description: i.description, order: i.order })),
-  })
+  }, item.workspaceId)
 
   return ok(
     `**Launch tier set:** ${tier}\n` +

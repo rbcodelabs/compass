@@ -1041,3 +1041,29 @@ export async function updateWorkspaceLimits(
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
   revalidatePath(`/${orgSlug}/${workspaceSlug}/roadmap`);
 }
+
+// ─── Marketing launch workflow ─────────────────────────────────────────────────
+
+/**
+ * Toggles the workspace-level marketing-launch surface (launch tiers,
+ * checklists, LAUNCHING/LAUNCHED roadmap horizons, positioning briefs, and
+ * the related MCP tools). Default off; see prisma/schema.prisma comment on
+ * Workspace.launchWorkflowEnabled and Compass solution 8303c3df-498d-4503-
+ * b92b-c7fd7a0fa62d for the product rationale. Revalidates both settings and
+ * roadmap so the board reflects the change without a hard refresh.
+ */
+export async function updateLaunchWorkflowSettings(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: { launchWorkflowEnabled: boolean }
+) {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: { launchWorkflowEnabled: input.launchWorkflowEnabled },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/roadmap`);
+}
