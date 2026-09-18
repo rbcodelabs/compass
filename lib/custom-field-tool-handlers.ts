@@ -150,7 +150,6 @@ export function validateValueForFieldType(
       return null
 
     case "SELECT": {
-      if (value === "") return null
       if (typeof value !== "string") {
         return `Expected a string option value for a SELECT field, got ${typeof value}.`
       }
@@ -226,12 +225,19 @@ export async function setCustomFieldValue({
 
   const field = toCustomFieldDefinitionData(fieldRow)
 
-  const validationError = validateValueForFieldType(field.fieldType, field.options, value)
-  if (validationError) {
-    return fail(validationError)
-  }
-
+  // Clearing takes priority over type validation, and must for every field
+  // type — null/""/[] is how a caller says "unset this field", regardless of
+  // what type it is, exactly matching upsertFieldValue's own clearing check.
+  // Validating first would reject e.g. value: "" against a NUMBER field as
+  // "not a number" instead of clearing it.
   const clearing = isClearingValue(value)
+
+  if (!clearing) {
+    const validationError = validateValueForFieldType(field.fieldType, field.options, value)
+    if (validationError) {
+      return fail(validationError)
+    }
+  }
 
   if (clearing) {
     await prisma.customFieldValue.deleteMany({ where: { fieldId, objectId } })

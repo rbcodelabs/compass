@@ -272,16 +272,30 @@ describe("setCustomFieldValue", () => {
     )
   })
 
+  // Clearing must take priority over type validation for EVERY field type —
+  // null/""/[] means "unset this field" regardless of what type it is,
+  // exactly matching upsertFieldValue's own clearing check. Before the fix
+  // for this, clearing ran AFTER validateValueForFieldType, so e.g. value: ""
+  // against a NUMBER field failed with "Expected a finite number... got """
+  // instead of clearing — these cases pin down that every field type accepts
+  // every clearing form without ever reaching validation.
   it.each([
     [null, "TEXT"],
+    [null, "NUMBER"],
+    [null, "BOOLEAN"],
+    [null, "DATE"],
+    [null, "SELECT"],
+    [null, "MULTI_SELECT"],
     ["", "TEXT"],
-    // An empty array is only a meaningful clearing signal for a field whose
-    // type actually stores an array (MULTI_SELECT) — validation rejects an
-    // array value for a scalar field type like TEXT before clearing is ever
-    // considered, matching how the Settings UI's own pickers only ever send
-    // [] for a MULTI_SELECT field.
+    ["", "URL"],
+    ["", "NUMBER"],
+    ["", "BOOLEAN"],
+    ["", "DATE"],
+    ["", "SELECT"],
+    [[], "TEXT"],
+    [[], "URL"],
     [[], "MULTI_SELECT"],
-  ])("clears the value via %j, deleting rather than upserting", async (clearingValue, fieldType) => {
+  ])("clears the value via %j on a %s field, deleting rather than upserting", async (clearingValue, fieldType) => {
     mockPrisma.task.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.customFieldDefinition.findUnique.mockResolvedValue(buildFieldRow({ fieldType }))
     const result = (await setCustomFieldValue({ objectType: "TASK", objectId: "task-1", fieldId: "f1", value: clearingValue })) as ResultShape
