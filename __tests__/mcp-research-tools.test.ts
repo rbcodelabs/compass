@@ -31,6 +31,13 @@ describe("research MCP adapters", () => {
     expect(result.content[0].text.split("\n")).toContain("ID: study")
     expect(result.structuredContent).toMatchObject({ ok: true, data: { id: "study" } })
   })
+  it("reports a staged draft without a participant link, distinct from an active creation", async () => {
+    m.service.mockResolvedValue({ id: "study", status: "DRAFT" })
+    const result = await runWithMcpActor({ userId: "member", purpose: "USER" }, () => handlers.createResearchStudyTool({ ...input, status: "DRAFT" }))
+    expect(result.content[0].text).toMatch(/draft/i)
+    expect(result.content[0].text).not.toContain("Participant link")
+    expect(result.structuredContent).toMatchObject({ ok: true, data: { id: "study", status: "DRAFT" } })
+  })
   it("preserves the deliberate shared service-key actor", async () => {
     await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => handlers.getResearchStudyTool(input))
     expect(m.service.mock.calls[0][1]).toEqual({ userId: null, service: true, source: "MCP" })
