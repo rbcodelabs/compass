@@ -19,7 +19,7 @@ import {
   CONSENT_REQUEST_TTL_MS,
   buildConsentCookie,
   consentCookieApproves,
-  grantedOrganizations,
+  grantedAccess,
   hasStoredConsent,
   readConsentCookie,
   recordConsent,
@@ -188,7 +188,7 @@ describe("stored consent", () => {
   })
 })
 
-describe("grantedOrganizations — what the consent screen must enumerate", () => {
+describe("grantedAccess — what the consent screen must enumerate", () => {
   async function seed() {
     await store.workspaceMember.create({
       data: {
@@ -233,7 +233,7 @@ describe("grantedOrganizations — what the consent screen must enumerate", () =
     // boundaries — which is broader than "connect Compass" sounds. Naming them
     // is the compensating control that decision was made in exchange for.
     await seed()
-    const organizations = await grantedOrganizations("user-1")
+    const { organizations } = await grantedAccess("user-1")
 
     expect(organizations.map((org) => org.name)).toEqual(["Acme", "Beta Corp"])
     expect(organizations[0].workspaces.map((ws) => ws.name)).toEqual(["Alpha", "Zebra"])
@@ -246,7 +246,7 @@ describe("grantedOrganizations — what the consent screen must enumerate", () =
     await store.organizationMember.create({
       data: { userId: "user-1", organization: { id: "org-9", name: "Empty Co", slug: "empty" } },
     })
-    const organizations = await grantedOrganizations("user-1")
+    const { organizations } = await grantedAccess("user-1")
     expect(organizations).toHaveLength(1)
     expect(organizations[0].organizationMember).toBe(true)
     expect(organizations[0].workspaces).toEqual([])
@@ -264,17 +264,113 @@ describe("grantedOrganizations — what the consent screen must enumerate", () =
         },
       },
     })
-    const organizations = await grantedOrganizations("user-1")
+    const { organizations } = await grantedAccess("user-1")
     expect(organizations[0].organizationMember).toBe(false)
     expect(organizations[0].workspaces.map((ws) => ws.name)).toEqual(["Guest"])
   })
 
   it("returns nothing for a user with no memberships", async () => {
-    expect(await grantedOrganizations("user-nobody")).toEqual([])
+    expect(await grantedAccess("user-nobody")).toEqual({
+      organizations: [],
+      unresolvedMemberships: 0,
+    })
   })
 
   it("does not leak another user's memberships", async () => {
     await seed()
-    expect(await grantedOrganizations("user-2")).toEqual([])
+    expect(await grantedAccess("user-2")).toEqual({
+      organizations: [],
+      unresolvedMemberships: 0,
+    })
+  })
+})
+
+/**
+ * Regression cover for the crash QA reproduced against the live consent screen:
+ *
+ *     TypeError: Cannot read properties of null (reading 'organization')
+ *         at grantedOrganizations (lib/oauth/consent.ts:304:22)
+ *         at async AuthorizePage (app/oauth/authorize/page.tsx:128:25)
+ *
+ * This is not a local-only artifact. `relationMode = "prisma"` means the
+ * database enforces no foreign keys and performs no cascade deletes, so an
+ * ordinary workspace deletion leaves membership rows behind that resolve to
+ * `null`. One such row took the entire authorize endpoint down — the user could
+ * not consent at all.
+ */
+describe("grantedAccess — a membership that resolves to nothing", () => {
+  beforeEach(() => {
+    // The skip is a handled data-integrity defect, and it logs. Silence the
+    // warning so an expected condition does not look like test noise, while
+    // still exercising the branch that emits it.
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it("degrades instead of throwing when a workspace no longer resolves", async () => {
+    // Exactly the shape from the trace: the row exists, the workspace does not.
+    await store.workspaceMember.create({ data: { userId: "user-1", workspace: null } })
+
+    await expect(grantedAccess("user-1")).resolves.toEqual({
+      organizations: [],
+      unresolvedMemberships: 1,
+    })
+  })
+
+  it("still lists every membership that does resolve", async () => {
+    await store.workspaceMember.create({ data: { userId: "user-1", workspace: null } })
+    await store.workspaceMember.create({
+      data: {
+        userId: "user-1",
+        workspace: {
+          id: "ws-1",
+          name: "Alpha",
+          slug: "alpha",
+          organization: { id: "org-1", name: "Acme", slug: "acme" },
+        },
+      },
+    })
+
+    const { organizations, unresolvedMemberships } = await grantedAccess("user-1")
+    expect(organizations.map((org) => org.name)).toEqual(["Acme"])
+    expect(organizations[0].workspaces.map((ws) => ws.name)).toEqual(["Alpha"])
+    // Reported, not swallowed: the enumeration is the compensating control for
+    // there being no workspace picker, so the screen has to be able to say the
+    // list is short rather than present it as exhaustive.
+    expect(unresolvedMemberships).toBe(1)
+  })
+
+  it("survives a workspace whose organization is the part that is missing", async () => {
+    // The second orphan shape: the workspace row outlived its organization.
+    await store.workspaceMember.create({
+      data: {
+        userId: "user-1",
+        workspace: { id: "ws-2", name: "Stray", slug: "stray", organization: null },
+      },
+    })
+
+    await expect(grantedAccess("user-1")).resolves.toEqual({
+      organizations: [],
+      unresolvedMemberships: 1,
+    })
+  })
+
+  it("survives an organization membership that no longer resolves", async () => {
+    await store.organizationMember.create({ data: { userId: "user-1", organization: null } })
+
+    await expect(grantedAccess("user-1")).resolves.toEqual({
+      organizations: [],
+      unresolvedMemberships: 1,
+    })
+  })
+
+  it("never over-reports — an unresolvable row is counted, never invented", async () => {
+    for (let i = 0; i < 3; i += 1) {
+      await store.workspaceMember.create({ data: { userId: "user-1", workspace: null } })
+    }
+
+    const { organizations, unresolvedMemberships } = await grantedAccess("user-1")
+    expect(organizations).toEqual([])
+    expect(unresolvedMemberships).toBe(3)
   })
 })

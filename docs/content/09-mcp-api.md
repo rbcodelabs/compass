@@ -83,6 +83,17 @@ API key already has — everything you can reach, across every organization you
 belong to — so the screen names it rather than leaving you to assume it means
 one workspace.
 
+If your account still holds a membership in a workspace or organization that has
+since been deleted, the screen says so — "one membership could not be shown" —
+instead of quietly listing one fewer place. A deleted workspace grants no access,
+so nothing reachable is missing from the list; the note is there so you never have
+to wonder whether the list you are approving is the whole list.
+
+Because both the approve and decline buttons stay pinned to the bottom of the
+card, a long list scrolls inside the card rather than pushing the buttons off the
+screen. Scroll the details with the mouse, or with the arrow keys once the detail
+region has keyboard focus.
+
 It also shows the **redirect host** — where the connection will actually be
 handed off — and marks every application as unverified. Compass does not review
 or vouch for applications that connect to it, and any application can pick its

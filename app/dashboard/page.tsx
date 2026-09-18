@@ -17,7 +17,7 @@ export default async function DashboardPage() {
 
   const prisma = getPrisma()
 
-  const memberships = await prisma.workspaceMember.findMany({
+  const membershipRows = await prisma.workspaceMember.findMany({
     where: { userId: session.user.id },
     include: {
       workspace: {
@@ -25,6 +25,15 @@ export default async function DashboardPage() {
       },
     },
   })
+
+  // `relationMode = "prisma"` means the database enforces no foreign keys and
+  // no cascade deletes, so deleting a workspace (or an organization) leaves its
+  // membership rows behind pointing at nothing. Prisma still types both
+  // relations as non-nullable, so the `workspace.organization.slug` below would
+  // throw on such a row and take the whole workspace picker down. A membership
+  // that resolves to no workspace grants nothing and has nowhere to link to, so
+  // dropping it is the whole of the correct behaviour here.
+  const memberships = membershipRows.filter((row) => row.workspace?.organization)
 
   if (memberships.length === 0) {
     redirect("/onboarding")

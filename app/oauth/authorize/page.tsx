@@ -49,10 +49,10 @@ import { issueAuthorizationCode } from "@/lib/oauth/codes"
 import {
   CONSENT_COOKIE_NAME,
   consentCookieApproves,
-  grantedOrganizations,
+  grantedAccess,
   hasStoredConsent,
   signAuthorizationRequest,
-  type GrantedOrganization,
+  type GrantedAccessSummary,
 } from "@/lib/oauth/consent"
 import { SCOPE_MCP_READ, SCOPE_MCP_WRITE, SCOPE_OFFLINE_ACCESS, parseScope } from "@/lib/oauth/constants"
 
@@ -125,48 +125,84 @@ export default async function AuthorizePage({ searchParams }: AuthorizePageProps
     )
   }
 
-  const organizations = await grantedOrganizations(userId)
+  const granted = await grantedAccess(userId)
   const signedRequest = signAuthorizationRequest(request, userId)
   const redirectHost = new URL(request.redirectUri).host || request.redirectUri
 
+  /*
+    ## Why the card owns the viewport instead of the document
+
+    Approve and Deny are the only two controls on this screen, and at 1280×800
+    the enumeration above them is tall enough to push "Allow access" past the
+    fold — measured at 807px against an 800px viewport, so the primary action
+    was clipped by 7px at the standard desktop size, and sat 59px below the fold
+    at 390×844. A consent control the user has to go looking for is a consent
+    control they can approve without having read what is above it.
+
+    None of the content can go: the client name, the redirect host, the scope
+    list, the org/workspace enumeration and the unverified marking are each a
+    named compensating control in the design's security section. So the *page*
+    stops scrolling and the *content* scrolls instead — `main` is pinned to the
+    viewport, the descriptive region scrolls inside the card, and the action row
+    is a sibling of that region rather than the last thing inside it. That makes
+    both buttons unconditionally visible at any viewport height, and the divider
+    above them reads as the boundary it now is.
+  */
   return (
-    <main className="flex min-h-screen items-center justify-center bg-surface-app px-4 py-10">
-      <div className="w-full max-w-lg space-y-6">
-        <div className="space-y-4 rounded-2xl border border-border-default bg-surface-panel p-8 shadow-[var(--shadow-card)]">
-          <div className="space-y-1">
-            <h1 className="text-lg font-bold text-text-primary">
-              Authorize {client.clientName}
-            </h1>
-            <p className="text-sm text-text-subtle">
-              {client.clientName} is asking to connect to Compass as{" "}
-              <span className="font-medium text-text-primary">
-                {session?.user?.email ?? "your account"}
-              </span>
-              .
-            </p>
+    <main className="flex h-dvh items-center justify-center overflow-hidden bg-surface-app px-4 py-6">
+      <div className="flex max-h-full w-full max-w-lg flex-col gap-3">
+        <div className="flex min-h-0 flex-col rounded-2xl border border-border-default bg-surface-panel shadow-[var(--shadow-card)]">
+          {/*
+            `tabIndex` is load-bearing, not decoration. Moving the buttons out
+            of this region left it with no focusable descendant, and a
+            scrollable region containing nothing focusable cannot be scrolled by
+            keyboard at all (WCAG 2.1.1). On this screen that would mean a
+            keyboard-only user could reach "Allow access" while being physically
+            unable to read the grant it approves. Making the region itself a tab
+            stop restores arrow-key and Page Down scrolling, and the label tells
+            a screen-reader user what they have landed in.
+          */}
+          <div
+            role="region"
+            aria-label="Authorization details"
+            tabIndex={0}
+            className="min-h-0 space-y-4 overflow-y-auto p-6 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset sm:p-7"
+          >
+            <div className="space-y-1">
+              <h1 className="text-lg font-bold text-text-primary">
+                Authorize {client.clientName}
+              </h1>
+              <p className="text-sm text-text-subtle">
+                {client.clientName} is asking to connect to Compass as{" "}
+                <span className="font-medium text-text-primary">
+                  {session?.user?.email ?? "your account"}
+                </span>
+                .
+              </p>
+            </div>
+
+            <UnverifiedNotice redirectHost={redirectHost} redirectUri={request.redirectUri} />
+
+            <section className="space-y-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+                What it will be able to do
+              </h2>
+              <ul className="space-y-1.5 text-sm text-text-primary">
+                {requestedScopes.map((scope) => (
+                  <li key={scope} className="flex gap-2">
+                    <span aria-hidden="true" className="text-text-subtle">
+                      •
+                    </span>
+                    <span>{describeScope(scope)}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <GrantedAccessSection granted={granted} />
           </div>
 
-          <UnverifiedNotice redirectHost={redirectHost} redirectUri={request.redirectUri} />
-
-          <section className="space-y-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-              What it will be able to do
-            </h2>
-            <ul className="space-y-1.5 text-sm text-text-primary">
-              {requestedScopes.map((scope) => (
-                <li key={scope} className="flex gap-2">
-                  <span aria-hidden="true" className="text-text-subtle">
-                    •
-                  </span>
-                  <span>{describeScope(scope)}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <GrantedAccess organizations={organizations} />
-
-          <div className="flex gap-3 pt-2">
+          <div className="flex shrink-0 gap-3 border-t border-border-default p-4 sm:px-7 sm:py-5">
             {/*
               Two forms rather than one form with two named submit buttons: the
               decision then travels as an ordinary hidden field, so it does not
@@ -191,7 +227,7 @@ export default async function AuthorizePage({ searchParams }: AuthorizePageProps
           </div>
         </div>
 
-        <p className="px-2 text-center text-xs text-text-subtle">
+        <p className="shrink-0 px-2 text-center text-xs text-text-subtle">
           You can revoke this access at any time. Compass never shares your password
           or sign-in method with {client.clientName}.
         </p>
@@ -221,7 +257,9 @@ function UnverifiedNotice({ redirectHost, redirectUri }: { redirectHost: string;
   )
 }
 
-function GrantedAccess({ organizations }: { organizations: GrantedOrganization[] }) {
+function GrantedAccessSection({ granted }: { granted: GrantedAccessSummary }) {
+  const { organizations, unresolvedMemberships } = granted
+
   if (organizations.length === 0) {
     return (
       <section className="space-y-2">
@@ -233,6 +271,7 @@ function GrantedAccess({ organizations }: { organizations: GrantedOrganization[]
           application will not be able to read or change anything yet. It will gain
           access to anything you are added to later.
         </p>
+        <UnresolvedMembershipsNotice count={unresolvedMemberships} />
       </section>
     )
   }
@@ -268,7 +307,30 @@ function GrantedAccess({ organizations }: { organizations: GrantedOrganization[]
           </li>
         ))}
       </ul>
+      <UnresolvedMembershipsNotice count={unresolvedMemberships} />
     </section>
+  )
+}
+
+/**
+ * Says out loud that the list above is incomplete.
+ *
+ * The enumeration is the compensating control for there being no workspace
+ * picker, so a list that quietly omits a row is a weaker version of the problem
+ * this screen exists to solve. A skipped membership points at a workspace that
+ * no longer exists and therefore confers no access — but the user is told
+ * rather than left to assume the list is exhaustive.
+ */
+function UnresolvedMembershipsNotice({ count }: { count: number }) {
+  if (count <= 0) return null
+  return (
+    <p className="text-sm text-text-subtle">
+      {count === 1
+        ? "One membership on your account could not be shown"
+        : `${count} memberships on your account could not be shown`}{" "}
+      because the workspace or organization it points at no longer exists. Deleted
+      workspaces grant no access, so nothing reachable is missing from this list.
+    </p>
   )
 }
 

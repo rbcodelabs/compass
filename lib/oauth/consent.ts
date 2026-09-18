@@ -253,6 +253,39 @@ export interface GrantedOrganization {
   workspaces: Array<{ id: string; name: string; slug: string }>
 }
 
+/** The enumeration the consent screen renders, plus what it could not resolve. */
+export interface GrantedAccessSummary {
+  organizations: GrantedOrganization[]
+  /**
+   * Membership rows that name a workspace or organization which no longer
+   * exists. Counted rather than dropped on the floor — see {@link grantedAccess}.
+   */
+  unresolvedMemberships: number
+}
+
+/**
+ * The shapes the `select`s below *actually* return.
+ *
+ * Prisma types both relations as non-nullable because the schema declares them
+ * required — but `relationMode = "prisma"` means the database enforces no
+ * foreign keys and performs no cascade deletes, so an ordinary workspace or
+ * organization deletion leaves the membership row behind pointing at nothing.
+ * The relation then resolves to `null` at runtime while the generated type
+ * still insists it cannot. These aliases make that gap explicit instead of
+ * letting an unguarded dereference inherit a false guarantee.
+ */
+interface ResolvedOrganization {
+  id: string
+  name: string
+  slug: string
+}
+interface ResolvedWorkspace {
+  id: string
+  name: string
+  slug: string
+  organization: ResolvedOrganization | null
+}
+
 /**
  * Everything an issued token would be able to reach, for the consent screen.
  *
@@ -267,8 +300,27 @@ export interface GrantedOrganization {
  * Organizations the user belongs to but has no workspace membership in are
  * listed too — org-level MCP tools resolve against `OrganizationMember`, so
  * omitting them would understate the grant.
+ *
+ * ## Why an unresolvable membership is counted, not silently skipped
+ *
+ * A membership row whose workspace or organization has been deleted must not
+ * take the screen down — a user who cannot render the consent screen cannot
+ * authorize at all, which is a total outage of this endpoint triggered by an
+ * ordinary workspace deletion. So such rows are skipped.
+ *
+ * But skipping *silently* would quietly under-report a grant on the one screen
+ * whose entire job is to state the grant accurately, and this enumeration is
+ * the compensating control for there being no workspace picker. So the count
+ * comes back with the list and the screen says a row could not be shown.
+ *
+ * Under-reporting here is bounded rather than merely disclosed: `agentWorkspaceWhere`
+ * resolves access by querying `Workspace` with `members: { some: { userId } }`,
+ * so a membership pointing at a deleted workspace matches no row and confers no
+ * access. What is omitted is a dangling pointer, not reachable data — the
+ * disclosure exists so the user is told the list is imperfect, not because
+ * access is being hidden.
  */
-export async function grantedOrganizations(userId: string): Promise<GrantedOrganization[]> {
+export async function grantedAccess(userId: string): Promise<GrantedAccessSummary> {
   const prisma = getPrisma()
   const [workspaceMemberships, orgMemberships] = await Promise.all([
     prisma.workspaceMember.findMany({
@@ -291,7 +343,8 @@ export async function grantedOrganizations(userId: string): Promise<GrantedOrgan
   ])
 
   const byOrg = new Map<string, GrantedOrganization>()
-  const ensure = (org: { id: string; name: string; slug: string }): GrantedOrganization => {
+  let unresolvedMemberships = 0
+  const ensure = (org: ResolvedOrganization): GrantedOrganization => {
     const found = byOrg.get(org.id)
     if (found) return found
     const created: GrantedOrganization = { ...org, organizationMember: false, workspaces: [] }
@@ -299,8 +352,23 @@ export async function grantedOrganizations(userId: string): Promise<GrantedOrgan
     return created
   }
 
-  for (const { organization } of orgMemberships) ensure(organization).organizationMember = true
-  for (const { workspace } of workspaceMemberships) {
+  for (const { organization } of orgMemberships as Array<{
+    organization: ResolvedOrganization | null
+  }>) {
+    if (!organization) {
+      unresolvedMemberships += 1
+      continue
+    }
+    ensure(organization).organizationMember = true
+  }
+
+  for (const { workspace } of workspaceMemberships as Array<{
+    workspace: ResolvedWorkspace | null
+  }>) {
+    if (!workspace || !workspace.organization) {
+      unresolvedMemberships += 1
+      continue
+    }
     ensure(workspace.organization).workspaces.push({
       id: workspace.id,
       name: workspace.name,
@@ -308,11 +376,20 @@ export async function grantedOrganizations(userId: string): Promise<GrantedOrgan
     })
   }
 
+  if (unresolvedMemberships > 0) {
+    // A data-integrity defect, not a user error: something deleted a workspace
+    // or organization without clearing its membership rows. Surfaced in the
+    // logs so it can be repaired, having already been handled on screen.
+    console.warn(
+      `[oauth/consent] ${unresolvedMemberships} membership row(s) for user ${userId} reference a deleted workspace or organization`,
+    )
+  }
+
   const collator = new Intl.Collator("en")
   const organizations = [...byOrg.values()]
   for (const org of organizations) org.workspaces.sort((a, b) => collator.compare(a.name, b.name))
   organizations.sort((a, b) => collator.compare(a.name, b.name))
-  return organizations
+  return { organizations, unresolvedMemberships }
 }
 
 // ── signing primitives ────────────────────────────────────────────────────
