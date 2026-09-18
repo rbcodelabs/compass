@@ -382,8 +382,8 @@ Research tools use the same validation, protocol-locking and link transactions a
 
 | Tool | Description |
 |---|---|
-| `generate_research_guide` | Draft 5–8 editable questions or usability tasks from a goal, study type and duration; does not create a study |
-| `create_research_study` | Create an active study with a reviewed guide and return its new participant link once |
+| `generate_research_guide` | Draft 5–8 editable questions or usability tasks from a goal, study type and duration; does not create a study. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
+| `create_research_study` | Create an active study with a reviewed guide and return its new participant link once. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
 | `list_research_studies` | Page through study settings and session counts in one workspace; no transcripts or participant identities |
 | `get_research_study` | Read one study’s settings, guide and session count in its declared workspace |
 | `update_research_study` | Update the name and supplied settings; omitted protocol fields are preserved, and protocol changes are locked after the first session |

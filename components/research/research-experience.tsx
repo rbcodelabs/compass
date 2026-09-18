@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { ExternalLinkIcon, MessageSquareIcon, MicIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ArtifactSandboxedFrame } from "@/components/artifact-sandboxed-frame"
 import { ResearchChat } from "@/components/research/research-chat"
 import { ResearchVoice } from "@/components/research/research-voice"
 
@@ -11,6 +12,7 @@ export function ResearchExperience({
   studyName,
   studyType,
   appUrl,
+  artifactHtml = null,
   legacyVoiceEnabled = false,
   discoveryVoiceEnabled = false,
 }: {
@@ -18,12 +20,13 @@ export function ResearchExperience({
   studyName: string
   studyType: "CUSTOMER_INTERVIEW" | "USABILITY_TEST"
   appUrl: string | null
+  artifactHtml?: string | null
   legacyVoiceEnabled?: boolean
   discoveryVoiceEnabled?: boolean
 }) {
   const [modality, setModality] = useState<"CHAT" | "VOICE" | null>(null)
   const modalityStorageKey = `compass-research-modality-${token.slice(-16)}`
-  const guided = studyType === "USABILITY_TEST" && Boolean(appUrl)
+  const guided = studyType === "USABILITY_TEST" && (Boolean(appUrl) || Boolean(artifactHtml))
   const canUseVoice = legacyVoiceEnabled && (
     guided || (studyType === "CUSTOMER_INTERVIEW" && discoveryVoiceEnabled)
   )
@@ -69,23 +72,35 @@ export function ResearchExperience({
         : <ResearchVoice onUseChat={() => chooseModality("CHAT")} token={token} />}
     </section>
   }
-  const productUrl = appUrl as string
+  const productUrl = appUrl
 
   return <div className="flex min-h-[70vh] flex-col rounded-xl border bg-surface-panel lg:grid lg:grid-cols-[minmax(0,1.2fr)_minmax(22rem,0.8fr)] lg:overflow-hidden">
     <section className="flex min-h-[22rem] flex-col border-b lg:min-h-0 lg:border-r lg:border-b-0">
-      <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b bg-surface-panel px-4 py-3 lg:static">
-        <div><h2 className="text-sm font-medium">Live product</h2><p className="text-xs text-text-muted">If the product does not appear below, open it separately.</p></div>
-        <a className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-primary hover:underline" href={productUrl} rel="noopener noreferrer" target="_blank">
-          Open product <ExternalLinkIcon className="size-4" />
-        </a>
-      </div>
-      <iframe
-        className="min-h-[20rem] flex-1 bg-background"
-        referrerPolicy="no-referrer"
-        sandbox="allow-scripts allow-forms allow-popups"
-        src={productUrl}
-        title={`Live product for ${studyName}`}
-      />
+      {productUrl
+        ? <>
+          <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b bg-surface-panel px-4 py-3 lg:static">
+            <div><h2 className="text-sm font-medium">Live product</h2><p className="text-xs text-text-muted">If the product does not appear below, open it separately.</p></div>
+            <a className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-primary hover:underline" href={productUrl} rel="noopener noreferrer" target="_blank">
+              Open product <ExternalLinkIcon className="size-4" />
+            </a>
+          </div>
+          <iframe
+            className="min-h-[20rem] flex-1 bg-background"
+            referrerPolicy="no-referrer"
+            sandbox="allow-scripts allow-forms allow-popups"
+            src={productUrl}
+            title={`Live product for ${studyName}`}
+          />
+        </>
+        : <>
+          <div className="sticky top-0 z-20 border-b bg-surface-panel px-4 py-3 lg:static">
+            <h2 className="text-sm font-medium">Prototype</h2>
+            <p className="text-xs text-text-muted">Interact with the prototype below.</p>
+          </div>
+          <div className="min-h-[20rem] flex-1 bg-background p-3">
+            <ArtifactSandboxedFrame title={`Prototype for ${studyName}`} html={artifactHtml as string} />
+          </div>
+        </>}
     </section>
     <section className="flex min-h-[32rem] flex-col p-4 sm:p-5 lg:min-h-0">
       {selectedModality === "CHAT"

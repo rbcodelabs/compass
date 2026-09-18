@@ -273,6 +273,13 @@ const MIGRATIONS = [
     filePath: path.join(process.cwd(), "prisma/migrations/053_shared_field_option_sets/migration.sql"),
   },
   {
+    // Two independent 054s landed concurrently (this one and
+    // 054_workspace_wip_limits from main) — accepted per the same duplicate-
+    // number precedent noted above; the runner keys on exact name, not number.
+    name: "054_research_study_artifact",
+    filePath: path.join(process.cwd(), "prisma/migrations/054_research_study_artifact/migration.sql"),
+  },
+  {
     name: "054_workspace_wip_limits",
     filePath: path.join(process.cwd(), "prisma/migrations/054_workspace_wip_limits/migration.sql"),
   },

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-const m = vi.hoisted(() => ({ workspace: vi.fn(), study: vi.fn(), list: vi.fn(), lock: vi.fn(), update: vi.fn(), count: vi.fn(), token: vi.fn(), issue: vi.fn(), revoke: vi.fn(), create: vi.fn(), agent: vi.fn() }))
+const m = vi.hoisted(() => ({ workspace: vi.fn(), study: vi.fn(), list: vi.fn(), lock: vi.fn(), update: vi.fn(), count: vi.fn(), token: vi.fn(), issue: vi.fn(), revoke: vi.fn(), create: vi.fn(), agent: vi.fn(), artifact: vi.fn() }))
 vi.mock("@/lib/research-agent", () => ({ runResearchInterviewAgent: m.agent }))
 vi.mock("@/lib/db", () => ({ default: () => {
-  const db = { workspace: { findFirst: m.workspace }, researchStudy: { findFirst: m.study, findMany: m.list, updateMany: m.lock, update: m.update, create: m.create }, researchSession: { count: m.count }, researchParticipantToken: { findFirst: m.token, create: m.issue, updateMany: m.revoke } }
+  const db = { workspace: { findFirst: m.workspace }, researchStudy: { findFirst: m.study, findMany: m.list, updateMany: m.lock, update: m.update, create: m.create }, researchSession: { count: m.count }, researchParticipantToken: { findFirst: m.token, create: m.issue, updateMany: m.revoke }, artifact: { findFirst: m.artifact } }
   return { ...db, $transaction: async (fn: unknown) => typeof fn === "function" ? fn(db) : Promise.all(fn as Promise<unknown>[]) }
 } }))
 import { createResearchStudy, generateResearchGuide, getResearchStudy, issueResearchLink, listResearchStudies, updateResearchStudy } from "@/lib/research-study-service"
@@ -114,5 +114,61 @@ describe("shared research study service", () => {
     expect(result.token).toBeTruthy()
     expect(m.create.mock.calls[0][0].data.status).toBe("ACTIVE")
     expect(result).not.toHaveProperty("tokenHash")
+  })
+
+  describe("artifact-backed usability tests", () => {
+    const artifactId = "00000000-0000-4000-8000-0000000000aa"
+
+    it("creates a usability test targeting a valid in-workspace HTML_UPLOAD artifact", async () => {
+      m.artifact.mockResolvedValue({ id: artifactId, title: "Prototype" })
+      const result = await createResearchStudy(scope, actor, { name: "Study", goal: "Goal", guide: ["Task"], studyType: "USABILITY_TEST", artifactId })
+      expect(result.id).toBeTruthy()
+      expect(m.artifact.mock.calls[0][0].where).toMatchObject({ id: artifactId, workspaceId: scope.workspaceId, status: "ACTIVE", sourceType: "HTML_UPLOAD" })
+      expect(m.create.mock.calls[0][0].data.artifactId).toBe(artifactId)
+      expect(m.create.mock.calls[0][0].data.appUrl).toBeNull()
+    })
+
+    it("rejects an artifact id that does not resolve in this workspace (wrong workspace or archived)", async () => {
+      m.artifact.mockResolvedValue(null)
+      await expect(createResearchStudy(scope, actor, { name: "Study", goal: "Goal", guide: ["Task"], studyType: "USABILITY_TEST", artifactId }))
+        .rejects.toThrow(/Artifact not found/)
+      expect(m.create).not.toHaveBeenCalled()
+    })
+
+    it("rejects an artifact whose sourceType is EXTERNAL_LINK by scoping the lookup query", async () => {
+      // EXTERNAL_LINK artifacts are filtered out at the query level, so a
+      // lookup for one behaves identically to "not found".
+      m.artifact.mockResolvedValue(null)
+      await expect(createResearchStudy(scope, actor, { name: "Study", goal: "Goal", guide: ["Task"], studyType: "USABILITY_TEST", artifactId }))
+        .rejects.toThrow(/Artifact not found/)
+      expect(m.artifact.mock.calls[0][0].where.sourceType).toBe("HTML_UPLOAD")
+    })
+
+    it("rejects providing both appUrl and artifactId for a usability test", async () => {
+      await expect(createResearchStudy(scope, actor, { name: "Study", goal: "Goal", guide: ["Task"], studyType: "USABILITY_TEST", appUrl: "https://example.com", artifactId }))
+        .rejects.toThrow(/one of|either/i)
+      expect(m.create).not.toHaveBeenCalled()
+    })
+
+    it("rejects providing neither appUrl nor artifactId for a usability test", async () => {
+      await expect(createResearchStudy(scope, actor, { name: "Study", goal: "Goal", guide: ["Task"], studyType: "USABILITY_TEST" }))
+        .rejects.toThrow(/one of|either|product URL|artifact/i)
+      expect(m.create).not.toHaveBeenCalled()
+    })
+
+    it("allows switching a study's target from appUrl to artifactId before the first session", async () => {
+      m.study.mockResolvedValue({ id: "study", name: "Old", status: "ACTIVE", goal: "Goal", studyType: "USABILITY_TEST", targetMinutes: 30, appUrl: "https://example.com/product", artifactId: null, guide: '[{"id":"1","text":"Task"}]', _count: { sessions: 0 } })
+      m.artifact.mockResolvedValue({ id: artifactId, title: "Prototype" })
+      await updateResearchStudy(scope, actor, "study", { name: "Old", studyType: "USABILITY_TEST", artifactId })
+      expect(m.update.mock.calls[0][0].data.artifactId).toBe(artifactId)
+      expect(m.update.mock.calls[0][0].data.appUrl).toBeNull()
+    })
+
+    it("locks the artifact target after the first session, same as appUrl", async () => {
+      m.study.mockResolvedValue({ id: "study", name: "Old", status: "ACTIVE", goal: "Goal", studyType: "USABILITY_TEST", targetMinutes: 30, appUrl: null, artifactId, guide: '[{"id":"1","text":"Task"}]', _count: { sessions: 1 } })
+      await updateResearchStudy(scope, actor, "study", { name: "Renamed" })
+      expect(m.update.mock.calls[0][0].data).not.toHaveProperty("artifactId")
+      expect(m.artifact).not.toHaveBeenCalled()
+    })
   })
 })

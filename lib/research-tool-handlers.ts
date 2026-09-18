@@ -36,7 +36,7 @@ function mutation(message: string, result: { id: string; token?: string; status?
   const participantUrlLine = participantUrl ?? "unavailable (production URL not configured)"
   return ok(`${message}\nID: ${result.id}${result.token ? `\nParticipant link (shown only now): ${participantUrlLine}` : ""}`, data)
 }
-export async function generateResearchGuideTool(input: Scope & { studyType: ResearchStudyType; goal: string; appUrl?: string; targetMinutes: number }) {
+export async function generateResearchGuideTool(input: Scope & { studyType: ResearchStudyType; goal: string; appUrl?: string; artifactId?: string; targetMinutes: number }) {
   const deadline = Date.now() + 45_000
   return invoke(async actor => ok("Editable research guide generated; review before creating a study.", { guide: await studies.generateResearchGuide({ workspaceId: input.workspaceId }, actor, { ...input, appUrl: input.appUrl ?? "" }, deadline) }))
 }

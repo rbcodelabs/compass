@@ -206,6 +206,7 @@ model ResearchStudy {
   guide             String                     @db.Text
   targetMinutes     Int                        @default(15) @map("target_minutes")
   appUrl            String?                    @map("app_url") @db.Text
+  artifactId        String?                    @map("artifact_id") @db.Uuid
   shareTokenHash    String?                    @unique @map("share_token_hash") @db.VarChar(64)
   shareExpiresAt    DateTime?                  @map("share_expires_at")
   status            String                     @default("DRAFT") @db.VarChar(20)
@@ -215,6 +216,7 @@ model ResearchStudy {
   updatedById       String?                    @map("updated_by_id") @db.Uuid
   source            String                     @default("UI") @db.VarChar(20)
   workspace         Workspace                  @relation(fields: [workspaceId], references: [id])
+  artifact          Artifact?                  @relation(fields: [artifactId], references: [id])
   sessions          ResearchSession[]
   syntheses         ResearchSynthesis[]
   participantTokens ResearchParticipantToken[]
@@ -1793,6 +1795,7 @@ model Artifact {
   revisions         ArtifactRevision[] @relation("ArtifactRevisions")
   currentRevision   ArtifactRevision?  @relation("CurrentArtifactRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   links             ArtifactLink[]
+  researchStudies   ResearchStudy[]
 
   @@index([workspaceId, status, updatedAt])
   @@map("artifacts")
