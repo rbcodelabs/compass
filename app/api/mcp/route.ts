@@ -110,6 +110,7 @@ import {
   getLaunchChecklist,
   updateLaunchChecklistItem,
 } from "@/lib/roadmap-tool-handlers"
+import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
 import {
   createTask,
   getTask,
@@ -2150,16 +2151,23 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ itemId, horizon, status, title, description, startDate, endDate, isPrivate }) => {
-        if (horizon === "LAUNCHING") {
-          return fail(`Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.`)
-        }
-        if (horizon === "LAUNCHED") {
-          return fail(`Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`)
-        }
         const prisma = getPrisma()
         const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, workspaceId: true, title: true, horizon: true, status: true } })
         if (!item) {
           return fail(`Roadmap item "${itemId}" not found.`)
+        }
+        if (horizon === "LAUNCHING" || horizon === "LAUNCHED") {
+          // The whole marketing-launch surface is opt-in per workspace. When
+          // it's off, say so instead of a message that presumes the feature
+          // is available.
+          const workspace = await prisma.workspace.findUnique({ where: { id: item.workspaceId }, select: { launchWorkflowEnabled: true } })
+          if (!workspace?.launchWorkflowEnabled) {
+            return fail(LAUNCH_WORKFLOW_DISABLED_MESSAGE)
+          }
+          if (horizon === "LAUNCHING") {
+            return fail(`Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.`)
+          }
+          return fail(`Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`)
         }
         const updateData = {
             ...(horizon ? { horizon } : {}),

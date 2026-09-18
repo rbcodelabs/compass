@@ -18,7 +18,7 @@ import { RoadmapHeader } from "../roadmap-header";
 import type { CustomFieldFilterGroup } from "@/lib/custom-field-filter";
 import { GripVertical } from "lucide-react";
 import { createTimelineLaneKey, packTimelineIntervals } from "@/lib/roadmap-timeline/lane-packing";
-import { HORIZON_META, HORIZON_ORDER } from "@/lib/roadmap";
+import { HORIZON_META, HORIZON_ORDER, internalBucketFor } from "@/lib/roadmap";
 import { UnscheduledItemsPanel, parseUnscheduledDragId } from "../unscheduled-items-panel";
 import {
   addCalendarDays,
@@ -72,7 +72,11 @@ export function NativeTimeline(props: TimelineEngineProps & {
     initialUnscheduled: props.unscheduledItems,
     workspaceId: props.workspaceId,
   });
-  const rows = useMemo(() => buildTimelineRows(props.squads), [props.squads]);
+  const launchWorkflowEnabled = props.launchWorkflowEnabled ?? true;
+  const rows = useMemo(
+    () => buildTimelineRows(props.squads, launchWorkflowEnabled),
+    [props.squads, launchWorkflowEnabled]
+  );
   const dayWidth = controller.zoom === "month" ? 12 : 4;
   const timelineWidth = inclusiveDayCount(controller.viewportStart, addCalendarDays(controller.viewportEnd, -1)) * dayWidth;
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -90,10 +94,10 @@ export function NativeTimeline(props: TimelineEngineProps & {
   const packedItems = useMemo(() => packTimelineIntervals(controller.items.map((item) => ({
     item,
     id: item.id,
-    laneKey: createTimelineLaneKey(item.horizon, item.squad?.id ?? null),
+    laneKey: createTimelineLaneKey(internalBucketFor(item.horizon, launchWorkflowEnabled), item.squad?.id ?? null),
     start: item.viewStart,
     end: addCalendarDays(item.viewEnd, Math.max(0, Math.ceil(MIN_INTERACTION_WIDTH / dayWidth) - inclusiveDayCount(item.viewStart, item.viewEnd))),
-  }))), [controller.items, dayWidth]);
+  }))), [controller.items, dayWidth, launchWorkflowEnabled]);
   const laneTrackCounts = useMemo(() => new Map(packedItems.map((item) => [item.laneKey, item.trackCount])), [packedItems]);
   const rowHeights = useMemo(() => new Map(rows.map((row) => [
     row.id,
@@ -129,7 +133,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
   const renderWindow = calculateTimelineRenderWindow(scrollViewport.scrollLeft, scrollViewport.width, timelineWidth);
   const itemLayouts = useMemo<NativeItemLayout[]>(() => packedItems.flatMap((packed) => {
     const item = packed.item;
-    const row = rows.find((candidate) => candidate.kind === "lane" && candidate.horizon === item.horizon && candidate.squadId === (item.squad?.id ?? null));
+    const row = rows.find((candidate) => candidate.kind === "lane" && candidate.horizon === internalBucketFor(item.horizon, launchWorkflowEnabled) && candidate.squadId === (item.squad?.id ?? null));
     if (!row) return [];
     return [{
       item,
@@ -144,7 +148,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
   }).sort((left, right) => left.top - right.top
     || left.item.viewStart.localeCompare(right.item.viewStart)
     || left.item.viewEnd.localeCompare(right.item.viewEnd)
-    || left.item.id.localeCompare(right.item.id)), [controller.items, controller.viewportEnd, controller.viewportStart, dayWidth, packedItems, rowTops, rows, timelineWidth]);
+    || left.item.id.localeCompare(right.item.id)), [controller.items, controller.viewportEnd, controller.viewportStart, dayWidth, packedItems, rowTops, rows, timelineWidth, launchWorkflowEnabled]);
   const retainedItemIds = useMemo(
     () => new Set([activeItemId, focusedItemId, triggerItemId].filter((id): id is string => Boolean(id))),
     [activeItemId, focusedItemId, triggerItemId],

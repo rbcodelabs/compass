@@ -287,6 +287,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
             activeCustomFieldId={customFieldFilter?.fieldId ?? null}
             workspaceId={workspace.id}
             unscheduledItems={unscheduledItems}
+            launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
           />
         </Suspense>
       ) : (
@@ -313,6 +314,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
               squads={squads}
               nowLimit={workspace.nowLimit}
               nextLimit={workspace.nextLimit}
+              launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
             />
           </div>
         </div>

@@ -76,9 +76,14 @@ type Props = {
   orgSlug: string;
   workspaceSlug: string;
   availableOpportunities?: Array<{ id: string; title: string }>;
+  // Gates the launch progress chip and the "Launch" card-menu item. Default
+  // true so existing call sites (and tests) that don't pass it keep today's
+  // behavior — the roadmap board/column always pass the workspace's actual
+  // flag explicitly.
+  launchWorkflowEnabled?: boolean;
 };
 
-export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, onUpdate, orgSlug, workspaceSlug, availableOpportunities }: Props) {
+export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, onUpdate, orgSlug, workspaceSlug, availableOpportunities, launchWorkflowEnabled = true }: Props) {
   const [isArchiving, startArchiveTransition] = useTransition();
   const [editOpen, setEditOpen] = useState(false);
   const { openPanel } = usePanelContext();
@@ -143,7 +148,7 @@ export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, o
             {item.isPrivate && (
               <StatusBadge status="neutral" icon={<Lock />} title="Hidden from the public portal roadmap">Private</StatusBadge>
             )}
-            {isLaunchHorizon(item.horizon) && item.launchChecklist && (
+            {launchWorkflowEnabled && isLaunchHorizon(item.horizon) && item.launchChecklist && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -174,10 +179,14 @@ export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, o
                 label: "Edit",
                 onClick: () => setEditOpen(true),
               },
-              {
-                label: "Launch",
-                onClick: () => openPanel("roadmapItem", item.id),
-              },
+              ...(launchWorkflowEnabled
+                ? [
+                    {
+                      label: "Launch",
+                      onClick: () => openPanel("roadmapItem", item.id),
+                    },
+                  ]
+                : []),
               {
                 label: "Archive",
                 onClick: () => handleArchive(),

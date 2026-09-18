@@ -20,6 +20,8 @@ vi.mock("@/lib/launch-checklist", () => ({
   resolveOrSeedTemplate: vi.fn(),
   setLaunchTierCore: vi.fn(),
   updateChecklistItemCore: vi.fn(),
+  assertLaunchWorkflowEnabled: vi.fn(),
+  LAUNCH_WORKFLOW_DISABLED_MESSAGE: "The marketing launch workflow is disabled for this workspace. A workspace admin can turn it on in Settings → Marketing launch.",
 }));
 
 import { auth } from "@/auth";
@@ -28,6 +30,7 @@ import {
   resolveOrSeedTemplate,
   setLaunchTierCore,
   updateChecklistItemCore,
+  assertLaunchWorkflowEnabled,
 } from "@/lib/launch-checklist";
 import {
   setLaunchTier,
@@ -55,6 +58,7 @@ beforeEach(() => {
   });
   vi.mocked(setLaunchTierCore).mockResolvedValue({ launchChecklistId: "cl-1", itemCount: 2 });
   vi.mocked(updateChecklistItemCore).mockResolvedValue({ id: "lci-1", label: "x", status: "DONE" });
+  vi.mocked(assertLaunchWorkflowEnabled).mockResolvedValue(undefined);
 });
 
 // ─── setLaunchTier ───────────────────────────────────────────────────────────
@@ -96,7 +100,7 @@ describe("setLaunchTier", () => {
   it("resolves the template, runs the core, and revalidates on success", async () => {
     await setLaunchTier(ITEM_ID, "TIER_1", WS);
     expect(resolveOrSeedTemplate).toHaveBeenCalledWith(WS, "TIER_1");
-    expect(setLaunchTierCore).toHaveBeenCalledWith(ITEM_ID, "TIER_1", expect.objectContaining({ id: "tmpl-1" }));
+    expect(setLaunchTierCore).toHaveBeenCalledWith(ITEM_ID, "TIER_1", expect.objectContaining({ id: "tmpl-1" }), WS);
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 
@@ -145,5 +149,14 @@ describe("updateLaunchChecklistItem", () => {
     await updateLaunchChecklistItem("lci-1", "DONE", WS);
     expect(updateChecklistItemCore).toHaveBeenCalledWith("lci-1", "DONE");
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("propagates the disabled-feature rejection and does not write", async () => {
+    vi.mocked(assertLaunchWorkflowEnabled).mockRejectedValueOnce(
+      new Error("The marketing launch workflow is disabled for this workspace. A workspace admin can turn it on in Settings → Marketing launch.")
+    );
+    await expect(updateLaunchChecklistItem("lci-1", "DONE", WS)).rejects.toThrow(/disabled for this workspace/);
+    expect(updateChecklistItemCore).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
