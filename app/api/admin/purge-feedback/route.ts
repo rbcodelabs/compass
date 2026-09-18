@@ -19,8 +19,15 @@
 //   - feedbackIds must be a non-empty array of strings. There is deliberately
 //     no "delete all" mode: an empty/missing list is a 400, never a mass
 //     delete of the workspace's feedback.
-//   - Every delete is scoped to the resolved workspace's id, so passing ids
-//     that belong to a different workspace deletes nothing.
+//   - The caller's ids are first resolved against FeedbackItem filtered by the
+//     workspace id; every subsequent delete is driven off that resolved list.
+//     FeedbackVote and FeedbackAttachment carry no workspaceId column, so a
+//     delete keyed directly on caller-supplied ids CANNOT be tenancy-scoped —
+//     resolving through FeedbackItem first is what makes passing another
+//     workspace's ids delete nothing.
+//
+// The response reports requested / resolved / deleted separately so a scope
+// mismatch is visible rather than looking like a clean no-op.
 
 import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
@@ -71,18 +78,41 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Delete children first (votes, attachments), then the items themselves.
-  // The item delete is scoped to { id in list, workspaceId } — the guard that
-  // makes cross-workspace deletion and mass deletion impossible.
+  // Resolve the caller's ids down to the ones that actually live in this
+  // workspace, ONCE, before deleting anything. FeedbackVote and
+  // FeedbackAttachment have no workspaceId of their own, so this resolved list
+  // is the only thing that can scope a child delete to the workspace.
+  const inScope = await prisma.feedbackItem.findMany({
+    where: { id: { in: feedbackIds }, workspaceId: workspace.id },
+    select: { id: true },
+  });
+  const scopedIds = inScope.map((f) => f.id);
+
+  if (scopedIds.length === 0) {
+    return NextResponse.json({
+      deleted: 0,
+      requested: feedbackIds.length,
+      resolved: 0,
+    });
+  }
+
+  // Delete children first (votes, attachments), then the items themselves —
+  // every delete driven off scopedIds, never the raw caller input.
   await prisma.feedbackVote.deleteMany({
-    where: { feedbackId: { in: feedbackIds } },
+    where: { feedbackId: { in: scopedIds } },
   });
   await prisma.feedbackAttachment.deleteMany({
-    where: { feedbackItemId: { in: feedbackIds } },
+    where: { feedbackItemId: { in: scopedIds } },
   });
   const { count } = await prisma.feedbackItem.deleteMany({
-    where: { id: { in: feedbackIds }, workspaceId: workspace.id },
+    // scopedIds is already workspace-filtered; the workspaceId guard is kept
+    // as defense in depth.
+    where: { id: { in: scopedIds }, workspaceId: workspace.id },
   });
 
-  return NextResponse.json({ deleted: count, requested: feedbackIds.length });
+  return NextResponse.json({
+    deleted: count,
+    requested: feedbackIds.length,
+    resolved: scopedIds.length,
+  });
 }

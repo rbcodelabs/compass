@@ -1,5 +1,6 @@
 import getPrisma from "@/lib/db"
 import { searchHelp } from "@/lib/docs"
+import { entityPath, type EntityLinkType } from "@/lib/entity-links"
 
 export const WORKSPACE_SEARCH_GROUPS = [
   { type: "opportunity", label: "Opportunities" },
@@ -77,20 +78,21 @@ export async function searchWorkspace(input: {
 
   const helpResults = searchHelp(input.query, 5)
 
-  const base = `/${encodeURIComponent(input.orgSlug)}/${encodeURIComponent(input.workspaceSlug)}`
-  const detailHref = (path: string, type: string, id: string) =>
-    `${base}/${path}?detail=${encodeURIComponent(`${type}:${id}`)}`
+  // Every non-help result routes through the shared builder, so a search hit
+  // and the URL an MCP tool hands a human always land on the same screen.
+  const href = (type: EntityLinkType, id: string, opportunityId?: string) =>
+    entityPath({ orgSlug: input.orgSlug, workspaceSlug: input.workspaceSlug, type, id, opportunityId })
 
   return {
     query: input.query,
     groups: [
-      { type: "opportunity", label: "Opportunities", items: opportunities.map((item) => ({ type: "opportunity", id: item.id, title: item.title, context: item.status, href: `${base}/discovery/${item.id}` })) },
-      { type: "solution", label: "Solutions", items: solutions.map((item) => ({ type: "solution", id: item.id, title: item.title, context: context(item.status, item.opportunity.title), href: detailHref(`discovery/${item.opportunity.id}`, "solution", item.id) })) },
-      { type: "experiment", label: "Experiments", items: experiments.map((item) => ({ type: "experiment", id: item.id, title: item.title, context: context(item.status, item.conclusion), href: `${base}/experiments/${item.id}` })) },
-      { type: "roadmapItem", label: "Roadmap", items: roadmapItems.map((item) => ({ type: "roadmapItem", id: item.id, title: item.title, context: context(item.horizon, item.status), href: detailHref("roadmap", "roadmapItem", item.id) })) },
-      { type: "task", label: "Tasks", items: tasks.map((item) => ({ type: "task", id: item.id, title: item.title, context: context(item.status, item.priority), href: `${base}/tasks/${item.id}` })) },
-      { type: "feedback", label: "Feedback", items: feedback.map((item) => ({ type: "feedback", id: item.id, title: item.title, context: context(item.type, item.status), href: detailHref("feedback", "feedback", item.id) })) },
-      { type: "doc", label: "Docs", items: docs.map((item) => ({ type: "doc", id: item.id, title: item.title, context: item.docType, href: `${base}/docs/${item.id}` })) },
+      { type: "opportunity", label: "Opportunities", items: opportunities.map((item) => ({ type: "opportunity", id: item.id, title: item.title, context: item.status, href: href("opportunity", item.id) })) },
+      { type: "solution", label: "Solutions", items: solutions.map((item) => ({ type: "solution", id: item.id, title: item.title, context: context(item.status, item.opportunity.title), href: href("solution", item.id, item.opportunity.id) })) },
+      { type: "experiment", label: "Experiments", items: experiments.map((item) => ({ type: "experiment", id: item.id, title: item.title, context: context(item.status, item.conclusion), href: href("experiment", item.id) })) },
+      { type: "roadmapItem", label: "Roadmap", items: roadmapItems.map((item) => ({ type: "roadmapItem", id: item.id, title: item.title, context: context(item.horizon, item.status), href: href("roadmapItem", item.id) })) },
+      { type: "task", label: "Tasks", items: tasks.map((item) => ({ type: "task", id: item.id, title: item.title, context: context(item.status, item.priority), href: href("task", item.id) })) },
+      { type: "feedback", label: "Feedback", items: feedback.map((item) => ({ type: "feedback", id: item.id, title: item.title, context: context(item.type, item.status), href: href("feedback", item.id) })) },
+      { type: "doc", label: "Docs", items: docs.map((item) => ({ type: "doc", id: item.id, title: item.title, context: item.docType, href: href("doc", item.id) })) },
       {
         type: "help",
         label: "Help",

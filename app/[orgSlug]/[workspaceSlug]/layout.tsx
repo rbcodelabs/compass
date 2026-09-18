@@ -1,7 +1,7 @@
-import { auth } from "@/auth"
-import { redirect, notFound } from "next/navigation"
-import { getWorkspace, getUserWorkspaces } from "@/lib/workspace"
-import getPrisma from "@/lib/db"
+import { redirect } from "next/navigation"
+import { getUserWorkspaces } from "@/lib/workspace"
+import { requireWorkspaceContext } from "@/lib/workspace-context"
+import { getSessionUser } from "@/lib/session"
 import { Sidebar } from "@/components/sidebar"
 import { BottomNav } from "@/components/bottom-nav"
 import { MobileHeader } from "@/components/mobile-header"
@@ -26,27 +26,24 @@ export default async function WorkspaceLayout({
   children,
   params,
 }: WorkspaceLayoutProps) {
-  const session = await auth()
-  if (!session?.user?.id) {
+  const { orgSlug, workspaceSlug } = await params
+
+  // Phase 1: the session is the only thing nothing else can start without.
+  const user = await getSessionUser()
+  if (!user) {
     redirect("/login")
   }
 
-  const { orgSlug, workspaceSlug } = await params
-
-  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id)
-  if (!workspace) {
-    notFound()
-  }
-
-  const workspaces = await getUserWorkspaces(session.user.id)
-
-  const prisma = getPrisma()
-  const orgMembership = await prisma.organizationMember.findFirst({
-    where: { organization: { slug: orgSlug }, userId: session.user.id },
-    select: { role: true },
-  })
-  const isOrgAdmin = orgMembership?.role === "OWNER" || orgMembership?.role === "ADMIN"
-  const cookieStore = await cookies()
+  // Phase 2: three independent reads. requireWorkspaceContext's own
+  // getSessionUser() call resolves from the request memo rather than issuing a
+  // second session lookup — that memoization is what makes hoisting it into
+  // this Promise.all safe.
+  const [ctx, workspaces, cookieStore] = await Promise.all([
+    requireWorkspaceContext(orgSlug, workspaceSlug),
+    getUserWorkspaces(user.id),
+    cookies(),
+  ])
+  const { workspace, isOrgAdmin } = ctx
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false"
   // Read beside sidebar_state, for the same reason: the detail panel's layout
   // has to be correct in the first painted frame, not corrected after
@@ -68,9 +65,9 @@ export default async function WorkspaceLayout({
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           workspaceName={workspace.name}
-          userName={session.user.name ?? session.user.email ?? ""}
-          userEmail={session.user.email ?? ""}
-          userImage={session.user.image ?? undefined}
+          userName={user.name ?? user.email ?? ""}
+          userEmail={user.email ?? ""}
+          userImage={user.image ?? undefined}
           isOrgAdmin={isOrgAdmin}
         />
 
@@ -87,9 +84,9 @@ export default async function WorkspaceLayout({
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
               workspaceName={workspace.name}
-              userName={session.user.name ?? session.user.email ?? ""}
-              userEmail={session.user.email ?? ""}
-              userImage={session.user.image ?? undefined}
+              userName={user.name ?? user.email ?? ""}
+              userEmail={user.email ?? ""}
+              userImage={user.image ?? undefined}
               workspaces={workspaces}
               isOrgAdmin={isOrgAdmin}
               researchCaptureEnabled={researchCaptureEnabled}

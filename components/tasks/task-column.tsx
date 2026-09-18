@@ -12,13 +12,13 @@ import { BoardColumn, EmptyState } from "@/components/patterns";
 // detail page cannot drift apart; the accent and empty-state copy are
 // board-only and stay here.
 export const STATUS_CONFIG: Record<TaskStatus, { label: string; accentClass: string; emptyText: string }> = {
-  BACKLOG: { label: TASK_STATUS_LABELS.BACKLOG, accentClass: "bg-slate-400", emptyText: "Nothing in the backlog." },
+  BACKLOG: { label: TASK_STATUS_LABELS.BACKLOG, accentClass: "bg-status-neutral", emptyText: "Nothing in the backlog." },
   TODO: { label: TASK_STATUS_LABELS.TODO, accentClass: "bg-sky-500", emptyText: "Nothing queued up yet." },
   IN_PROGRESS: { label: TASK_STATUS_LABELS.IN_PROGRESS, accentClass: "bg-blue-500", emptyText: "Nothing in progress." },
   BLOCKED: { label: TASK_STATUS_LABELS.BLOCKED, accentClass: "bg-red-500", emptyText: "Nothing blocked." },
   IN_REVIEW: { label: TASK_STATUS_LABELS.IN_REVIEW, accentClass: "bg-amber-500", emptyText: "Nothing in review." },
   DONE: { label: TASK_STATUS_LABELS.DONE, accentClass: "bg-emerald-500", emptyText: "Nothing done yet." },
-  CANCELLED: { label: TASK_STATUS_LABELS.CANCELLED, accentClass: "bg-slate-300", emptyText: "Nothing cancelled." },
+  CANCELLED: { label: TASK_STATUS_LABELS.CANCELLED, accentClass: "bg-text-disabled", emptyText: "Nothing cancelled." },
 };
 
 type Props = {

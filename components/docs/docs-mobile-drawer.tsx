@@ -47,7 +47,7 @@ export function DocsMobileDrawer({
       {/* Drawer */}
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="left" className="w-72 p-0 flex flex-col">
-          <SheetHeader className="px-4 pt-4 pb-2 border-b border-slate-100 shrink-0">
+          <SheetHeader className="px-4 pt-4 pb-2 border-b border-border-default shrink-0">
             <SheetTitle className="text-sm font-semibold text-text-secondary">
               Docs
             </SheetTitle>

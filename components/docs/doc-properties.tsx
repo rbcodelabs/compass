@@ -67,13 +67,13 @@ function TagChips({
       {tags.map((tag) => (
         <span
           key={tag}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium"
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium"
         >
           <Tag className="w-2.5 h-2.5" />
           {tag}
           <button
             onClick={() => onRemove(tag)}
-            className="hover:text-indigo-900 transition-colors ml-0.5"
+            className="hover:text-primary-hover transition-colors ml-0.5"
             aria-label={`Remove ${tag}`}
           >
             <X className="w-2.5 h-2.5" />
@@ -91,7 +91,7 @@ function TagChips({
           }}
           onBlur={commit}
           placeholder="tag name…"
-          className="text-xs px-2 py-0.5 rounded border border-indigo-300 outline-none focus:ring-1 focus:ring-indigo-400 w-24"
+          className="text-xs px-2 py-0.5 rounded border border-border-interactive outline-none focus:ring-1 focus:ring-ring/50 w-24"
         />
       ) : (
         <button
@@ -155,7 +155,7 @@ function PropertyRow({
         </div>
         <button
           onClick={onDelete}
-          className="opacity-0 group-hover/row:opacity-100 transition-opacity text-slate-300 hover:text-red-400 pt-0.5"
+          className="opacity-0 group-hover/row:opacity-100 transition-opacity text-text-disabled hover:text-destructive pt-0.5"
           aria-label="Delete property"
         >
           <X className="w-3.5 h-3.5" />
@@ -196,7 +196,7 @@ function PropertyRow({
             type="date"
             defaultValue={typeof value === "string" ? value.slice(0, 10) : ""}
             onChange={(e) => onChangeValue(e.target.value)}
-            className="text-xs text-text-secondary bg-transparent border-b border-transparent hover:border-border-default focus:border-indigo-300 outline-none"
+            className="text-xs text-text-secondary bg-transparent border-b border-transparent hover:border-border-default focus:border-border-interactive outline-none"
           />
         ) : (
           <input
@@ -206,13 +206,13 @@ function PropertyRow({
             onKeyDown={(e) => {
               if (e.key === "Enter") (e.target as HTMLInputElement).blur();
             }}
-            className="text-xs text-text-secondary bg-transparent border-b border-transparent hover:border-border-default focus:border-indigo-300 outline-none w-full"
+            className="text-xs text-text-secondary bg-transparent border-b border-transparent hover:border-border-default focus:border-border-interactive outline-none w-full"
           />
         )}
       </div>
       <button
         onClick={onDelete}
-        className="opacity-0 group-hover/row:opacity-100 transition-opacity text-slate-300 hover:text-red-400"
+        className="opacity-0 group-hover/row:opacity-100 transition-opacity text-text-disabled hover:text-destructive"
         aria-label="Delete property"
       >
         <X className="w-3.5 h-3.5" />
@@ -291,7 +291,7 @@ export function DocProperties({
         )}
         Properties
         {hasProperties && !open && (
-          <span className="text-slate-300 font-normal">
+          <span className="text-text-disabled font-normal">
             ({Object.keys(metadata).length})
           </span>
         )}

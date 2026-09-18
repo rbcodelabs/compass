@@ -56,6 +56,11 @@ type Props = {
   availableExperiments?: AvailableExperiment[];
   unscheduledItems?: UnscheduledItem[];
   squads?: SquadData[];
+  // Purely visual/advisory WIP limits — only NOW and NEXT ever receive one.
+  // See docs/decisions/0005/0006 (Superseded); never wire into blocking
+  // behavior.
+  nowLimit?: number | null;
+  nextLimit?: number | null;
 };
 
 // Builds a RoadmapCardData for a newly-created item from a promote action's
@@ -182,6 +187,8 @@ export function RoadmapBoard({
   availableExperiments,
   unscheduledItems,
   squads,
+  nowLimit,
+  nextLimit,
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/roadmap`;
   const { openPanel, subscribeEntityMutated } = usePanelContext();
@@ -442,6 +449,7 @@ export function RoadmapBoard({
                 availableSolutions={availableSolutions}
                 availableOpportunities={availableOpportunities}
                 availableExperiments={availableExperiments}
+                limit={horizon === "NOW" ? nowLimit : horizon === "NEXT" ? nextLimit : undefined}
               />
             ))}
             <UnscheduledItemsColumn items={unscheduled} onQuickAdd={handleQuickAdd} />

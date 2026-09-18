@@ -11,6 +11,7 @@
  */
 
 import getPrisma from "@/lib/db"
+import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import matter from "gray-matter"
 import { Prisma } from "@prisma/client"
 import { ok, fail } from "@/lib/mcp-output"
@@ -319,19 +320,32 @@ export async function createDoc({
     },
   })
 
-  return ok(
+  // This used to emit a *relative* `/{org}/{ws}/docs` — the docs index, not the
+  // doc just created, and with no origin for an MCP client to resolve it
+  // against. Now it is the absolute URL of this doc, or absent entirely.
+  const url = safeEntityUrl({
+    orgSlug: workspace.organization?.slug,
+    workspaceSlug: workspace.slug,
+    type: "doc",
+    id: doc.id,
+  })
+
+  const summary = (
     `**Doc created**\n` +
-      `ID: ${doc.id}\n` +
-      `Title: ${doc.title}\n` +
-      (parentId ? `Parent: ${parentId}\n` : "Location: root\n") +
-      (metadata ? `Properties: ${Object.keys(metadata).join(", ")}\n` : "") +
-      (roadmapItemId ? `Linked Roadmap Item: ${roadmapItemId}\n` : "") +
-      (effectiveDocType !== "STANDARD" ? `Doc Type: ${effectiveDocType}\n` : "") +
-      `URL: /${workspace.organization.slug}/${workspace.slug}/docs`,
+    `ID: ${doc.id}\n` +
+    `Title: ${doc.title}\n` +
+    (parentId ? `Parent: ${parentId}\n` : "Location: root\n") +
+    (metadata ? `Properties: ${Object.keys(metadata).join(", ")}\n` : "") +
+    (roadmapItemId ? `Linked Roadmap Item: ${roadmapItemId}\n` : "") +
+    (effectiveDocType !== "STANDARD" ? `Doc Type: ${effectiveDocType}\n` : "")
+  ).trimEnd()
+
+  return ok(
+    withUrlLine(summary, url),
     {
       id: doc.id,
       title: doc.title,
-      url: `/${workspace.organization.slug}/${workspace.slug}/docs`,
+      url,
     }
   )
 }

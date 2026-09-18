@@ -32,8 +32,8 @@ export function SquadFilterBar({ squads }: Props) {
         onClick={() => setFilter(null)}
         className={`flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
           !activeSquadId
-            ? "bg-slate-800 text-white shadow-sm"
-            : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
+            ? "bg-foreground text-background shadow-sm"
+            : "bg-surface-inset text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
         }`}
       >
         All
@@ -45,7 +45,7 @@ export function SquadFilterBar({ squads }: Props) {
           className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
             activeSquadId === squad.id
               ? "text-white shadow-sm"
-              : "bg-surface-inset text-text-secondary hover:bg-slate-200 hover:text-text-primary"
+              : "bg-surface-inset text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
           }`}
           style={
             activeSquadId === squad.id

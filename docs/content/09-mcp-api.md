@@ -78,6 +78,35 @@ curl https://your-compass-url.vercel.app/api/mcp \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl-example","version":"1.0.0"}}}'
 ```
 
+## Response deeplinks
+
+Every tool that creates or promotes an addressable item returns a clickable
+link on its own line, immediately after the usual `ID: <uuid>` line:
+
+```
+**Opportunity created** in "Compass"
+ID: 0f2c…
+Title: Setup is confusing
+Status: EXPLORING
+URL: https://compass.rbcodelabs.com/rbcodelabs/compass/discovery/0f2c…
+```
+
+Relay that URL to the human you are reporting to — it opens the item directly,
+either on its own page or in the workspace detail panel (`?detail=<type>:<id>`,
+which works from any page in the workspace).
+
+Tools that return a `URL:` line: `create_opportunity`, `add_solution`,
+`add_assumption`, `create_objective`, `add_key_result`, `create_experiment`,
+`add_to_roadmap`, `promote_to_roadmap`, `promote_feedback_to_roadmap`,
+`create_task`, `create_doc`, `create_feedback` (and the other feedback
+mutations), and the decision/review tools.
+
+The link is **omitted entirely** — the operation still succeeds — when the
+deployment has no configured public URL. Never reconstruct a link yourself from
+an ID; if there is no `URL:` line, report the ID alone. Tools for items with no
+addressable surface of their own (`create_squad`, `create_okr_cycle`) return no
+link by design.
+
 ## What Agents Can Do
 
 The MCP server exposes tools that agents can call, grouped below by area.
@@ -298,6 +327,18 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 | `link_task` | Link a Task to another Compass object; idempotent — re-linking the same pair is a no-op |
 | `unlink_task` | Remove a link between a Task and another Compass object |
 | `list_task_links` | List all links for a Task, grouped by linked object type with resolved titles |
+
+### Custom Fields
+
+Custom fields let a workspace tag Opportunities, Solutions, Experiments, Objectives, Key Results, Roadmap Items, or Tasks with admin-defined attributes (TEXT, NUMBER, DATE, URL, BOOLEAN, or a single/multi picklist SELECT/MULTI_SELECT). Field definitions and shared option sets are created and edited in Settings → Custom Fields; MCP can read definitions and read/write an object's values, but cannot create, edit, or delete a definition or option set.
+
+| Tool | Description |
+|---|---|
+| `list_custom_field_definitions` | List a workspace's custom field definitions, optionally filtered to one object type; includes each field's type, whether it's required, and its effective options for SELECT/MULTI_SELECT (including options inherited from a shared option set) |
+| `get_custom_field_values` | Read every custom field defined for an object's type, paired with that specific object's current value (or empty) |
+| `set_custom_field_value` | Set or clear one custom field's value on an object |
+
+Passing `null` (or an empty string or empty array) to `set_custom_field_value` clears the field, matching the Settings UI's own clearing behavior. The value is validated against the field's type — a SELECT/MULTI_SELECT value must be one of the field's currently defined options. The tool also rejects a `fieldId` that belongs to a different object type, or to a different workspace, than the target object.
 
 ### Feedback
 
