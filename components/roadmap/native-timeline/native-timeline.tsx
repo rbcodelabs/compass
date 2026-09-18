@@ -16,6 +16,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { RoadmapHeader } from "../roadmap-header";
 import type { CustomFieldFilterGroup } from "@/lib/custom-field-filter";
+import type { SelectOption } from "@/lib/types";
 import { GripVertical } from "lucide-react";
 import { createTimelineLaneKey, packTimelineIntervals } from "@/lib/roadmap-timeline/lane-packing";
 import { HORIZON_META, HORIZON_ORDER } from "@/lib/roadmap";
@@ -23,6 +24,8 @@ import { UnscheduledItemsPanel, parseUnscheduledDragId } from "../unscheduled-it
 import {
   addCalendarDays,
   addCalendarMonths,
+  buildCustomFieldGrouping,
+  buildSquadGrouping,
   buildTimelineRows,
   calculateTimelineRenderWindow,
   dateToPosition,
@@ -30,12 +33,16 @@ import {
   isBacklogCompatibleWithRow,
   isInternalTimelineDestination,
   NATIVE_BACKLOG_HORIZONS,
+  NONE_GROUPING,
+  PHASE_GROUPING,
   pointerClientToCanvasPosition,
   positionToInclusiveDate,
   resizeRange,
   selectTimelineIntervalsForRender,
+  timelineLaneParts,
   timelinePixelDeltaToDays,
   type CalendarDate,
+  type TimelineGrouping,
   type TimelineRow,
 } from "./timeline-model";
 import { EditDatesDialog, TimelineCard, useTimelinePanelNavigation, type TimelineEngineProps } from "./timeline-shared";
@@ -66,13 +73,46 @@ export function NativeTimeline(props: TimelineEngineProps & {
   headerSquads?: TimelineEngineProps["squads"];
   customFieldGroups?: CustomFieldFilterGroup[];
   activeCustomFieldId?: string | null;
+  /** Row grouping mode. Defaults to "phase" — today's only behavior. */
+  groupBy?: "phase" | "squad" | "none" | "customField";
+  /** Required (and only consulted) when groupBy is "customField". */
+  groupByField?: { id: string; name: string; options: SelectOption[] } | null;
+  /** Batch-loaded CustomFieldValue.value per roadmap item id, for "customField" grouping. */
+  customFieldValuesByItemId?: Record<string, unknown>;
+  /** Every groupable (SELECT-type ROADMAP_ITEM) custom field, for the grouping toggle's option list — independent of which one (if any) is currently active. */
+  groupByOptions?: { id: string; label: string }[];
 }) {
   const controller = useTimelineController({
     initialItems: props.items,
     initialUnscheduled: props.unscheduledItems,
     workspaceId: props.workspaceId,
   });
-  const rows = useMemo(() => buildTimelineRows(props.squads), [props.squads]);
+  const grouping: TimelineGrouping = useMemo(() => {
+    if (props.groupBy === "squad") return buildSquadGrouping(props.squads);
+    if (props.groupBy === "none") return NONE_GROUPING;
+    if (props.groupBy === "customField" && props.groupByField) return buildCustomFieldGrouping(props.groupByField, props.customFieldValuesByItemId ?? {});
+    return PHASE_GROUPING;
+  }, [props.groupBy, props.groupByField, props.customFieldValuesByItemId, props.squads]);
+  const rows = useMemo(() => buildTimelineRows(props.squads, grouping), [props.squads, grouping]);
+  // The value the header's grouping Select should show as selected — the
+  // active custom field's id in "customField" mode, else the mode literal.
+  const groupByValue = props.groupBy === "customField" ? (props.groupByField?.id ?? "phase") : (props.groupBy ?? "phase");
+  // Per-item custom-field-value badges, shown on cards only while grouping by
+  // that field — there is no other surface on the timeline that shows a
+  // custom field value today, so without this the grouping itself would be
+  // illegible per item (only visible from which header an item sits under).
+  const customFieldBadgeByItemId = useMemo(() => {
+    if (props.groupBy !== "customField" || !props.groupByField) return null;
+    const optionByValue = new Map(props.groupByField.options.map((option) => [option.value, option]));
+    const values = props.customFieldValuesByItemId ?? {};
+    const badges = new Map<string, { label: string; color: string | null }>();
+    for (const item of controller.items) {
+      const raw = values[item.id];
+      const option = typeof raw === "string" ? optionByValue.get(raw) : undefined;
+      if (option) badges.set(item.id, { label: option.label, color: option.color ?? null });
+    }
+    return badges;
+  }, [controller.items, props.groupBy, props.groupByField, props.customFieldValuesByItemId]);
   const dayWidth = controller.zoom === "month" ? 12 : 4;
   const timelineWidth = inclusiveDayCount(controller.viewportStart, addCalendarDays(controller.viewportEnd, -1)) * dayWidth;
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -87,20 +127,28 @@ export function NativeTimeline(props: TimelineEngineProps & {
   const { openItem, triggerItemId } = useTimelinePanelNavigation();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  const packedItems = useMemo(() => packTimelineIntervals(controller.items.map((item) => ({
-    item,
-    id: item.id,
-    laneKey: createTimelineLaneKey(item.horizon, item.squad?.id ?? null),
-    start: item.viewStart,
-    end: addCalendarDays(item.viewEnd, Math.max(0, Math.ceil(MIN_INTERACTION_WIDTH / dayWidth) - inclusiveDayCount(item.viewStart, item.viewEnd))),
-  }))), [controller.items, dayWidth]);
+  const packedItems = useMemo(() => packTimelineIntervals(controller.items.map((item) => {
+    const { primaryId, secondaryId } = timelineLaneParts(grouping, item);
+    return {
+      item,
+      id: item.id,
+      laneKey: createTimelineLaneKey(primaryId, secondaryId),
+      start: item.viewStart,
+      end: addCalendarDays(item.viewEnd, Math.max(0, Math.ceil(MIN_INTERACTION_WIDTH / dayWidth) - inclusiveDayCount(item.viewStart, item.viewEnd))),
+    };
+  })), [controller.items, dayWidth, grouping]);
   const laneTrackCounts = useMemo(() => new Map(packedItems.map((item) => [item.laneKey, item.trackCount])), [packedItems]);
   const rowHeights = useMemo(() => new Map(rows.map((row) => [
     row.id,
     row.kind === "horizon"
       ? HORIZON_HEIGHT
-      : Math.max(LANE_HEIGHT, 14 + (laneTrackCounts.get(createTimelineLaneKey(row.horizon, row.squadId)) ?? 1) * 36),
-  ])), [laneTrackCounts, rows]);
+      // In Squad grouping (squadIsPrimary), an item's own lane key always
+      // carries a null secondary id (see timelineLaneParts) even though the
+      // row's own squadId is set (needed for the cross-squad drop guard) —
+      // match that here, or Squad mode's rows would never find their track
+      // counts.
+      : Math.max(LANE_HEIGHT, 14 + (laneTrackCounts.get(createTimelineLaneKey(row.primaryId, grouping.squadIsPrimary ? null : row.squadId)) ?? 1) * 36),
+  ])), [grouping.squadIsPrimary, laneTrackCounts, rows]);
   const rowTops = useMemo(() => {
     let top = 0;
     return new Map(rows.map((row) => {
@@ -129,7 +177,12 @@ export function NativeTimeline(props: TimelineEngineProps & {
   const renderWindow = calculateTimelineRenderWindow(scrollViewport.scrollLeft, scrollViewport.width, timelineWidth);
   const itemLayouts = useMemo<NativeItemLayout[]>(() => packedItems.flatMap((packed) => {
     const item = packed.item;
-    const row = rows.find((candidate) => candidate.kind === "lane" && candidate.horizon === item.horizon && candidate.squadId === (item.squad?.id ?? null));
+    const { primaryId, secondaryId } = timelineLaneParts(grouping, item);
+    // In Squad grouping (squadIsPrimary) there is exactly one lane per
+    // primary group, so primaryId alone identifies it — the row's squadId
+    // is set (for the cross-squad drop guard) even though secondaryId is
+    // always null there.
+    const row = rows.find((candidate) => candidate.kind === "lane" && candidate.primaryId === primaryId && (grouping.squadIsPrimary || candidate.squadId === secondaryId));
     if (!row) return [];
     return [{
       item,
@@ -144,7 +197,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
   }).sort((left, right) => left.top - right.top
     || left.item.viewStart.localeCompare(right.item.viewStart)
     || left.item.viewEnd.localeCompare(right.item.viewEnd)
-    || left.item.id.localeCompare(right.item.id)), [controller.items, controller.viewportEnd, controller.viewportStart, dayWidth, packedItems, rowTops, rows, timelineWidth]);
+    || left.item.id.localeCompare(right.item.id)), [controller.items, controller.viewportEnd, controller.viewportStart, dayWidth, grouping, packedItems, rowTops, rows, timelineWidth]);
   const retainedItemIds = useMemo(
     () => new Set([activeItemId, focusedItemId, triggerItemId].filter((id): id is string => Boolean(id))),
     [activeItemId, focusedItemId, triggerItemId],
@@ -190,7 +243,10 @@ export function NativeTimeline(props: TimelineEngineProps & {
       const item = controller.items.find((candidate) => `timeline:item:${candidate.id}` === dragId);
       if (!item) return;
       const destination = rows.find((candidate) => candidate.id === event.over?.id);
-      const destinationHorizon = destination?.kind === "lane" ? destination.horizon : item.horizon;
+      // Disable drag-to-regroup: only a Phase-mode row carries a horizon —
+      // in every other grouping mode a drop only ever moves dates, so the
+      // item keeps its own horizon.
+      const destinationHorizon = destination?.kind === "lane" && destination.horizon !== null ? destination.horizon : item.horizon;
       if (destination?.kind === "lane" && destination.squadId !== (item.squad?.id ?? null)) {
         controller.setAnnouncement(`${item.title} cannot move to a different squad from the timeline`);
         return;
@@ -232,23 +288,26 @@ export function NativeTimeline(props: TimelineEngineProps & {
     const item = controller.items.find((candidate) => `timeline:item:${candidate.id}` === dragId);
     const destination = rows.find((candidate) => candidate.id === event.over?.id);
     if (!item || destination?.kind !== "lane" || destination.squadId !== (item.squad?.id ?? null)) return;
+    // Disable drag-to-regroup: mirrors handleDragEnd's fallback to the
+    // item's own horizon when the destination row doesn't carry one.
+    const destinationHorizon = destination.horizon ?? item.horizon;
     const days = timelinePixelDeltaToDays(event.delta.x, dayWidth);
     const range = { start: addCalendarDays(item.viewStart, days), end: addCalendarDays(item.viewEnd, days) };
     const overlapCount = controller.items.filter((candidate) => (
       candidate.id !== item.id
-      && candidate.horizon === destination.horizon
+      && candidate.horizon === destinationHorizon
       && (candidate.squad?.id ?? null) === destination.squadId
       && candidate.viewStart <= range.end
       && candidate.viewEnd >= range.start
     )).length;
     controller.setAnnouncement(
-      `${item.title} preview: ${destination.horizon}, ${range.start} through ${range.end}, ${overlapCount === 0 ? "no overlaps" : `overlaps ${overlapCount} other ${overlapCount === 1 ? "item" : "items"}`}`,
+      `${item.title} preview: ${destinationHorizon}, ${range.start} through ${range.end}, ${overlapCount === 0 ? "no overlaps" : `overlaps ${overlapCount} other ${overlapCount === 1 ? "item" : "items"}`}`,
     );
   }
 
   return (
     <div className="flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0">
-      <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: controller.jumpToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0 }} />
+      <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} groupByValue={groupByValue} groupByOptions={props.groupByOptions} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: controller.jumpToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0 }} />
       <div data-slot="workspace-content" className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:px-4 md:py-3">
         <DndContext
           sensors={sensors}
@@ -273,7 +332,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
               <div className="grid" style={{ gridTemplateColumns: `clamp(112px, 30vw, ${LABEL_WIDTH}px) minmax(0, 1fr)` }}>
                 <div className="border-r bg-card">
                   <div className="flex items-end border-b bg-muted/30 px-3 pb-2 text-xs font-semibold text-muted-foreground" style={{ height: HEADER_HEIGHT }}>
-                    Horizon → Squad
+                    {grouping.axisLabel}
                   </div>
                   {rows.map((row) => (
                     <div
@@ -340,6 +399,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
                             track={track}
                             trackCount={trackCount}
                             overlapCount={overlapCount}
+                            groupBadge={customFieldBadgeByItemId?.get(item.id) ?? null}
                             disabled={controller.pendingItemIds.has(item.id) || controller.reconciliationRequiredIds.has(item.id) || item.horizon === "LAUNCHING" || item.horizon === "LAUNCHED"}
                             onFocusChange={(focused) => setFocusedItemId(focused ? item.id : null)}
                             onOpen={() => openItem(item.id)}
@@ -450,14 +510,16 @@ function isRowValidForActiveDrag(
   if (!activeDragId) return true;
   if (activeDragId.startsWith("timeline:item:")) {
     const item = items.find((candidate) => `timeline:item:${candidate.id}` === activeDragId);
-    return Boolean(item && row.squadId === (item.squad?.id ?? null) && isInternalTimelineDestination(item.horizon, row.horizon));
+    // A row with no horizon (every non-Phase grouping mode) never changes
+    // horizon on drop, so it is always a legal destination for its own squad.
+    return Boolean(item && row.squadId === (item.squad?.id ?? null) && (row.horizon === null || isInternalTimelineDestination(item.horizon, row.horizon)));
   }
   const parsed = parseUnscheduledDragId(activeDragId);
   const item = parsed ? unscheduled.find((candidate) => candidate.kind === parsed.kind && candidate.id === parsed.id) : undefined;
   return Boolean(item && isBacklogCompatibleWithRow(item, row));
 }
 
-function NativeItem({ item, left, width, interactionWidth, top, dayWidth, track, trackCount, overlapCount, disabled, onOpen, onEdit, onResize, onKeyboardMove, onFocusChange }: { item: TimelineItemView; left: number; width: number; interactionWidth: number; top: number; dayWidth: number; track: number; trackCount: number; overlapCount: number; disabled: boolean; onOpen: () => void; onEdit: () => void; onResize: (edge: "left" | "right", delta: number) => void; onKeyboardMove: (days: number, horizon: TimelineItemView["horizon"]) => void; onFocusChange: (focused: boolean) => void }) {
+function NativeItem({ item, left, width, interactionWidth, top, dayWidth, track, trackCount, overlapCount, groupBadge, disabled, onOpen, onEdit, onResize, onKeyboardMove, onFocusChange }: { item: TimelineItemView; left: number; width: number; interactionWidth: number; top: number; dayWidth: number; track: number; trackCount: number; overlapCount: number; groupBadge?: { label: string; color: string | null } | null; disabled: boolean; onOpen: () => void; onEdit: () => void; onResize: (edge: "left" | "right", delta: number) => void; onKeyboardMove: (days: number, horizon: TimelineItemView["horizon"]) => void; onFocusChange: (focused: boolean) => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `timeline:item:${item.id}`, disabled });
   const style = { left, top, width: interactionWidth, transform: CSS.Translate.toString(transform), zIndex: isDragging ? 30 : 5 };
   const displayOnly = item.horizon === "LAUNCHING" || item.horizon === "LAUNCHED";
@@ -484,7 +546,7 @@ function NativeItem({ item, left, width, interactionWidth, top, dayWidth, track,
             <span className="sr-only">Edit horizon, start date, and end date</span>
           </button>
         </>
-      ) : <TimelineCard item={item} start={item.viewStart} end={item.viewEnd} overlapCount={overlapCount} onOpen={onOpen} onEditDates={onEdit} editable={!displayOnly && !disabled} editControlClassName="mr-6" className={item.hasDates ? "" : "border-dashed"}>
+      ) : <TimelineCard item={item} start={item.viewStart} end={item.viewEnd} overlapCount={overlapCount} groupBadge={groupBadge} onOpen={onOpen} onEditDates={onEdit} editable={!displayOnly && !disabled} editControlClassName="mr-6" className={item.hasDates ? "" : "border-dashed"}>
         {!displayOnly ? <><button
           type="button" {...attributes} {...listeners} disabled={disabled} aria-label={`Move ${item.title}`}
           className="ml-6 inline-flex h-full w-6 shrink-0 touch-none cursor-grab items-center justify-center text-white/70 hover:bg-white/10 hover:text-white focus-visible:bg-white/20 focus-visible:text-white focus-visible:outline-none disabled:cursor-wait disabled:opacity-60"

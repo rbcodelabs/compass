@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useUrlState } from "@/hooks/use-url-state";
 import { RoadmapViewToggle } from "./roadmap-view-toggle";
+import { RoadmapGroupByToggle, type RoadmapGroupByFieldOption } from "./roadmap-group-by-toggle";
 import type { TimelineZoom } from "./native-timeline/timeline-model";
 import { CUSTOM_FIELD_FILTER_PARAMS } from "@/lib/custom-field-filter-menu";
 import type { CustomFieldFilterGroup } from "@/lib/custom-field-filter";
@@ -37,13 +38,17 @@ function IconAction({ label, children, onClick, disabled = false }: { label: str
   );
 }
 
-export function RoadmapHeader({ squads, timeline, customFieldGroups = [], activeCustomFieldId = null }: {
+export function RoadmapHeader({ squads, timeline, customFieldGroups = [], activeCustomFieldId = null, groupByValue, groupByOptions = [] }: {
   squads: SquadData[];
   timeline?: TimelineControls;
   /** Picklist fields on Roadmap Item that have options to filter by. */
   customFieldGroups?: CustomFieldFilterGroup[];
   /** The field the active filter resolved to on this page, if any. */
   activeCustomFieldId?: string | null;
+  /** The timeline's resolved row-grouping mode ("phase" | "squad" | "none" | a CustomFieldDefinition id). Only rendered alongside `timeline`. */
+  groupByValue?: string;
+  /** Groupable (SELECT-type ROADMAP_ITEM) custom fields, for the grouping toggle. */
+  groupByOptions?: RoadmapGroupByFieldOption[];
 }) {
   const { params, set } = useUrlState();
   const squad = params.get("squad");
@@ -66,6 +71,7 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
             <IconAction label="Go to today" onClick={timeline.onToday}><CalendarDays /></IconAction>
             <IconAction label="Next period" onClick={() => timeline.onShift(1)}><ChevronRight /></IconAction>
           </div>}
+          {timeline && <RoadmapGroupByToggle value={groupByValue ?? "phase"} customFieldOptions={groupByOptions} />}
           <DropdownMenu>
             <Tooltip onOpenChange={setOptionsTooltipOpen}>
               <TooltipTrigger aria-describedby={optionsTooltipOpen ? optionsTooltipId : undefined} render={<DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="View options" className="relative ml-auto size-11 md:ml-0 md:size-9" />} />}>

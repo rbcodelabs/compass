@@ -22,7 +22,7 @@ const harness = vi.hoisted(() => ({
       id: string;
       title: string;
       horizon: "NOW" | "NEXT" | "LATER" | "LAUNCHING" | "LAUNCHED" | "SHIPPED";
-      squad: null;
+      squad: { id: string; name: string; color: string } | null;
       viewStart: string;
       viewEnd: string;
       hasDates: boolean;
@@ -68,9 +68,10 @@ vi.mock("../unscheduled-items-panel", () => ({
 
 vi.mock("./timeline-shared", () => ({
   EditDatesDialog: ({ item, onSave, disabled = false }: { item: { title: string; horizon: "NOW" | "NEXT" | "LATER" | "LAUNCHING" | "LAUNCHED" | "SHIPPED" } | null; onSave: (horizon: "NOW" | "NEXT" | "LATER" | "LAUNCHING" | "LAUNCHED" | "SHIPPED", start: string, end: string) => Promise<void>; disabled?: boolean }) => item ? <div role="dialog">Edit dates for {item.title}<button type="button" disabled={disabled} onClick={() => void onSave(item.horizon, "2026-07-10", "2026-07-20")}>Save schedule</button></div> : null,
-  TimelineCard: ({ children, onEditDates, editControlClassName, editable = true }: { children: React.ReactNode; onEditDates: () => void; editControlClassName?: string; editable?: boolean }) => (
+  TimelineCard: ({ children, onEditDates, editControlClassName, editable = true, groupBadge }: { children: React.ReactNode; onEditDates: () => void; editControlClassName?: string; editable?: boolean; groupBadge?: { label: string; color: string | null } | null }) => (
     <div>
       {children}
+      {groupBadge ? <span data-testid="group-badge">{groupBadge.label}</span> : null}
       {editable ? <button type="button" aria-label="Edit dates control" className={`size-6 ${editControlClassName ?? ""}`} onClick={onEditDates} /> : null}
     </div>
   ),
@@ -668,5 +669,141 @@ describe("NativeTimeline", () => {
     expect(harness.controller.reschedule).toHaveBeenCalledWith("item-1", "NEXT", "2026-07-01", "2026-07-02");
     act(() => harness.dndProps?.onDragEnd?.({ active: { id: "timeline:item:item-1" }, delta: { x: -24, y: 0 }, over: null }));
     expect(harness.controller.reschedule).toHaveBeenCalledWith("item-1", "NOW", "2026-06-29", "2026-06-30");
+  });
+
+  describe("configurable grouping", () => {
+    it("keeps horizon unchanged on drop when grouping is Squad (disable drag-to-regroup)", () => {
+      harness.controller.items = [{
+        id: "item-1", title: "Squad grouped", horizon: "NOW", squad: null,
+        viewStart: "2026-07-10", viewEnd: "2026-07-10", hasDates: true,
+      }];
+      render(<NativeTimeline items={[]} squads={[]} workspaceId="workspace-1" unscheduledItems={[]} groupBy="squad" />);
+
+      act(() => harness.dndProps?.onDragStart?.({
+        active: { id: "timeline:item:item-1" },
+        activatorEvent: new MouseEvent("pointerdown", { clientX: 212 }),
+      }));
+      act(() => harness.dndProps?.onDragEnd?.({
+        active: { id: "timeline:item:item-1" },
+        delta: { x: 12, y: 0 },
+        over: { id: "lane:no-squad:__self__" },
+      }));
+
+      expect(harness.controller.reschedule).toHaveBeenCalledWith("item-1", "NOW", "2026-07-11", "2026-07-11");
+    });
+
+    it("keeps horizon unchanged on drop when grouping is None", () => {
+      harness.controller.items = [{
+        id: "item-1", title: "Flat grouped", horizon: "LATER", squad: null,
+        viewStart: "2026-07-10", viewEnd: "2026-07-10", hasDates: true,
+      }];
+      render(<NativeTimeline items={[]} squads={[]} workspaceId="workspace-1" unscheduledItems={[]} groupBy="none" />);
+
+      act(() => harness.dndProps?.onDragEnd?.({
+        active: { id: "timeline:item:item-1" },
+        delta: { x: 12, y: 0 },
+        over: { id: "lane:__all__:unassigned" },
+      }));
+
+      expect(harness.controller.reschedule).toHaveBeenCalledWith("item-1", "LATER", "2026-07-11", "2026-07-11");
+    });
+
+    it("still blocks a drop into a different squad's row when grouping is Squad", () => {
+      harness.controller.items = [{
+        id: "item-1", title: "Guarded", horizon: "NOW", squad: { id: "squad-a", name: "Alpha", color: "#111" },
+        viewStart: "2026-07-10", viewEnd: "2026-07-10", hasDates: true,
+      }];
+      render(
+        <NativeTimeline
+          items={[]}
+          squads={[{ id: "squad-a", name: "Alpha", color: "#111" }, { id: "squad-b", name: "Bravo", color: "#222" }]}
+          workspaceId="workspace-1"
+          unscheduledItems={[]}
+          groupBy="squad"
+        />,
+      );
+
+      act(() => harness.dndProps?.onDragEnd?.({
+        active: { id: "timeline:item:item-1" },
+        delta: { x: 12, y: 0 },
+        over: { id: "lane:squad-b:__self__" },
+      }));
+
+      expect(harness.controller.setAnnouncement).toHaveBeenCalledWith("Guarded cannot move to a different squad from the timeline");
+      expect(harness.controller.reschedule).not.toHaveBeenCalled();
+    });
+
+    it("renders squad headers with no phase rows when grouping is Squad", () => {
+      harness.controller.items = [];
+      render(
+        <NativeTimeline
+          items={[]}
+          squads={[{ id: "squad-a", name: "Alpha", color: "#111" }]}
+          workspaceId="workspace-1"
+          unscheduledItems={[]}
+          groupBy="squad"
+        />,
+      );
+
+      expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0);
+      expect(screen.queryByText("Now")).not.toBeInTheDocument();
+      expect(screen.getAllByText("No squad").length).toBeGreaterThan(0);
+    });
+
+    it("renders no header rows at all when grouping is None", () => {
+      harness.controller.items = [];
+      render(
+        <NativeTimeline
+          items={[]}
+          squads={[{ id: "squad-a", name: "Alpha", color: "#111" }]}
+          workspaceId="workspace-1"
+          unscheduledItems={[]}
+          groupBy="none"
+        />,
+      );
+
+      expect(screen.queryByText("Now")).not.toBeInTheDocument();
+      expect(screen.getByText("Alpha")).toBeInTheDocument();
+    });
+
+    it("shows a custom-field-value badge on a card when grouping by that field", () => {
+      harness.controller.items = [{
+        id: "item-1", title: "Tagged", horizon: "NOW", squad: null,
+        viewStart: "2026-07-10", viewEnd: "2026-07-20", hasDates: true,
+      }];
+      render(
+        <NativeTimeline
+          items={[]}
+          squads={[]}
+          workspaceId="workspace-1"
+          unscheduledItems={[]}
+          groupBy="customField"
+          groupByField={{ id: "field-1", name: "Product Area", options: [{ label: "Payments", value: "payments", color: "#ff0000" }] }}
+          customFieldValuesByItemId={{ "item-1": "payments" }}
+        />,
+      );
+
+      expect(screen.getByTestId("group-badge")).toHaveTextContent("Payments");
+    });
+
+    it("shows no badge for an item with no value or an unknown value", () => {
+      harness.controller.items = [{
+        id: "item-1", title: "Untagged", horizon: "NOW", squad: null,
+        viewStart: "2026-07-10", viewEnd: "2026-07-20", hasDates: true,
+      }];
+      render(
+        <NativeTimeline
+          items={[]}
+          squads={[]}
+          workspaceId="workspace-1"
+          unscheduledItems={[]}
+          groupBy="customField"
+          groupByField={{ id: "field-1", name: "Product Area", options: [{ label: "Payments", value: "payments", color: "#ff0000" }] }}
+          customFieldValuesByItemId={{}}
+        />,
+      );
+
+      expect(screen.queryByTestId("group-badge")).not.toBeInTheDocument();
+    });
   });
 });

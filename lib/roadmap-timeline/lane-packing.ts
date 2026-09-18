@@ -6,6 +6,14 @@ import {
 
 export type TimelineLaneKey = `${string}:${string}`;
 
+/**
+ * Reserved primary-axis id used when a timeline has no primary grouping at
+ * all ("None" mode — see components/roadmap/native-timeline/timeline-model.ts).
+ * Every item shares this one bucket, so lanes end up keyed purely by the
+ * secondary (squad) axis, e.g. `__all__:squad-a`.
+ */
+export const NO_PRIMARY_GROUP_KEY = "__all__";
+
 export type TimelineInterval = {
   id: string;
   laneKey: TimelineLaneKey;
@@ -18,19 +26,31 @@ export type PackedTimelineInterval<T extends TimelineInterval> = T & {
   trackCount: number;
 };
 
-export function createTimelineLaneKey(horizonId: string, squadId: string | null): TimelineLaneKey {
+/**
+ * Builds the canonical `${primary}:${secondary}` key a timeline row and the
+ * intervals that belong to it are packed and measured under.
+ *
+ * `primaryId` is whatever the active grouping mode's header axis is keyed by
+ * (a horizon code in Phase mode, a squad id in Squad mode, a custom field
+ * option's synthetic group id in Custom-field mode, or the reserved
+ * `NO_PRIMARY_GROUP_KEY` sentinel when there is no header axis at all — None
+ * mode). `secondaryId` is the squad id, or `null` for "no squad" (rendered as
+ * the reserved `"unassigned"` token) — always `null` when squad itself is the
+ * primary axis, since there is then no further sub-lane to key by.
+ */
+export function createTimelineLaneKey(primaryId: string, secondaryId: string | null): TimelineLaneKey {
   if (
-    horizonId.trim().length === 0
-    || horizonId !== horizonId.trim()
-    || horizonId.includes(":")
-    || (squadId !== null && squadId.trim().length === 0)
-    || (squadId !== null && squadId !== squadId.trim())
-    || squadId?.includes(":")
-    || squadId === "unassigned"
+    primaryId.trim().length === 0
+    || primaryId !== primaryId.trim()
+    || primaryId.includes(":")
+    || (secondaryId !== null && secondaryId.trim().length === 0)
+    || (secondaryId !== null && secondaryId !== secondaryId.trim())
+    || secondaryId?.includes(":")
+    || secondaryId === "unassigned"
   ) {
     throw new RangeError("Timeline lane parts must be non-empty and unambiguous");
   }
-  return `${horizonId}:${squadId ?? "unassigned"}`;
+  return `${primaryId}:${secondaryId ?? "unassigned"}`;
 }
 
 export function packTimelineIntervals<T extends TimelineInterval>(
