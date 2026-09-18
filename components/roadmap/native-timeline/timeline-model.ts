@@ -1,4 +1,4 @@
-import { HORIZON_META, HORIZON_ORDER } from "@/lib/roadmap";
+import { HORIZON_META, getInternalBoardHorizons } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
 import {
   addCalendarDays,
@@ -40,9 +40,12 @@ export function pointerClientToCanvasPosition(clientX: number, canvasLeft: numbe
   return clientX - canvasLeft;
 }
 
-export function buildTimelineRows(squads: Array<{ id: string; name: string; color: string }>): TimelineRow[] {
+export function buildTimelineRows(
+  squads: Array<{ id: string; name: string; color: string }>,
+  launchWorkflowEnabled: boolean = true
+): TimelineRow[] {
   const orderedSquads = [...squads].sort((a, b) => a.name.localeCompare(b.name));
-  return HORIZON_ORDER.flatMap((horizon) => [
+  return getInternalBoardHorizons(launchWorkflowEnabled).flatMap((horizon) => [
     { id: `horizon:${horizon}`, kind: "horizon" as const, label: HORIZON_META[horizon].label, horizon, squadId: null, color: HORIZON_META[horizon].color },
     ...orderedSquads.map((squad) => ({ id: `lane:${horizon}:${squad.id}`, kind: "lane" as const, label: squad.name, horizon, squadId: squad.id, color: squad.color })),
     { id: `lane:${horizon}:unassigned`, kind: "lane" as const, label: "No squad", horizon, squadId: null, color: null },

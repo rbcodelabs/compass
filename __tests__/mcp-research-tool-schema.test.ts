@@ -18,6 +18,10 @@ describe("research tool registration", () => {
     expect(create.name.safeParse("x".repeat(256)).success).toBe(false)
     expect(create.guide.safeParse(Array(21).fill("Question")).success).toBe(false)
     expect(create.targetMinutes.safeParse(999).success).toBe(false)
+    expect(create.status.safeParse("DRAFT").success).toBe(true)
+    expect(create.status.safeParse("ACTIVE").success).toBe(true)
+    expect(create.status.safeParse("CLOSED").success).toBe(false)
+    expect(create.status.safeParse(undefined).data).toBe("ACTIVE")
     const list = tools.list_research_studies.inputSchema
     expect(list.limit.safeParse(101).success).toBe(false)
     expect(list.cursor.safeParse("x".repeat(1025)).success).toBe(false)

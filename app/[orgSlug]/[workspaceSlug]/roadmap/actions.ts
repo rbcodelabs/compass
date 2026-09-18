@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import type { Horizon } from "@/lib/types";
 import { isLaunchHorizon } from "@/lib/roadmap";
+import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 
 type Database = ReturnType<typeof getPrisma>;
 const ROADMAP_ITEM_NOT_FOUND = "Roadmap item not found";
@@ -48,10 +49,25 @@ function revalidateRoadmap(): void {
   revalidatePath("/", "layout");
 }
 
-function assertDirectLaunchWriteBlocked(horizon: Horizon): void {
-  if (isLaunchHorizon(horizon)) {
-    throw new Error("Use a launch tier to enter LAUNCHING/LAUNCHED");
+/**
+ * LAUNCHING/LAUNCHED can never be entered through these generic write paths
+ * (only setLaunchTier may create the LAUNCHING checklist transaction). The
+ * message differs by workspace state: a workspace with the launch workflow
+ * on gets pointed at the real fix (set a launch tier); a workspace with it
+ * off gets told the feature is off rather than a message that presumes it's
+ * available.
+ */
+async function assertDirectLaunchWriteBlocked(workspaceId: string, horizon: Horizon): Promise<void> {
+  if (!isLaunchHorizon(horizon)) return;
+
+  const workspace = await getPrisma().workspace.findUnique({
+    where: { id: workspaceId },
+    select: { launchWorkflowEnabled: true },
+  });
+  if (!workspace?.launchWorkflowEnabled) {
+    throw new Error(LAUNCH_WORKFLOW_DISABLED_MESSAGE);
   }
+  throw new Error("Use a launch tier to enter LAUNCHING/LAUNCHED");
 }
 
 function validateInclusiveDates(startDate: Date | null, endDate: Date | null): void {
@@ -68,7 +84,7 @@ export async function addRoadmapItem(
   },
 ) {
   await requireWorkspaceMember(workspaceId);
-  assertDirectLaunchWriteBlocked(data.horizon);
+  await assertDirectLaunchWriteBlocked(workspaceId, data.horizon);
   validateInclusiveDates(data.startDate ?? null, data.endDate ?? null);
   const prisma = getPrisma();
   await validateRoadmapRelations(prisma, workspaceId, data);
@@ -200,7 +216,7 @@ export async function editRoadmapItem(
 
 export async function moveItem(itemId: string, horizon: Horizon, workspaceId: string) {
   await requireWorkspaceMember(workspaceId);
-  assertDirectLaunchWriteBlocked(horizon);
+  await assertDirectLaunchWriteBlocked(workspaceId, horizon);
   const prisma = getPrisma();
   await requireRoadmapItem(prisma, itemId, workspaceId);
   const lastItem = await prisma.roadmapItem.findFirst({ where: { workspaceId, horizon, status: "ACTIVE", NOT: { id: itemId } }, orderBy: [{ sortOrder: "desc" }, { id: "desc" }], select: { sortOrder: true } });
@@ -220,7 +236,7 @@ export async function promoteToRoadmap(
   opportunityId: string | null, dates?: { startDate?: Date; endDate?: Date }, isPrivate?: boolean,
 ) {
   await requireWorkspaceMember(workspaceId);
-  assertDirectLaunchWriteBlocked(horizon);
+  await assertDirectLaunchWriteBlocked(workspaceId, horizon);
   validateInclusiveDates(dates?.startDate ?? null, dates?.endDate ?? null);
   const prisma = getPrisma();
 
@@ -260,7 +276,7 @@ export async function promoteFeedbackToRoadmap(
   dates?: { startDate?: Date; endDate?: Date }, isPrivate?: boolean,
 ) {
   await requireWorkspaceMember(workspaceId);
-  assertDirectLaunchWriteBlocked(horizon);
+  await assertDirectLaunchWriteBlocked(workspaceId, horizon);
   validateInclusiveDates(dates?.startDate ?? null, dates?.endDate ?? null);
   const prisma = getPrisma();
   const feedback = await prisma.feedbackItem.findFirst({ where: { id: feedbackId, workspaceId }, select: { title: true } });
@@ -298,7 +314,7 @@ export async function rescheduleRoadmapItem(
   data: { horizon: Horizon; startDate: Date | null; endDate: Date | null },
 ) {
   await requireWorkspaceMember(workspaceId);
-  assertDirectLaunchWriteBlocked(data.horizon);
+  await assertDirectLaunchWriteBlocked(workspaceId, data.horizon);
   validateInclusiveDates(data.startDate, data.endDate);
   const prisma = getPrisma();
   const item = await prisma.$transaction(async (tx) => {

@@ -326,7 +326,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 |---|---|
 | `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
-| `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
+| `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow (rejected here — see below — and gated by the workspace's Marketing launch setting) |
 | `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
 | `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state (`PENDING`, `DECIDED`, or `AWAITING_FOLLOW_THROUGH`), linked item type, outcome, reviewer, or search text |
 | `get_decision` | Read one tracking-only decision, its immutable revision history, the resolved requester (the human or Agent who raised it), and any linked follow-up Tasks |
@@ -336,11 +336,11 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
 | `list_review_requests` | List review requests for a workspace, optionally filtered by state |
 | `apply_recorded_decision` | Idempotently apply the authorized continuation from a recorded decision and return its application receipt |
-| `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items |
-| `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier |
-| `set_launch_tier` | Move a roadmap item into the LAUNCHING horizon by picking a launch tier; attaches a checklist cloned from an explicit or auto-resolved (most recent ACTIVE) template for that tier. Rejects items already LAUNCHING/LAUNCHED |
-| `get_launch_checklist` | Get the launch checklist for a roadmap item, including each item's status and ID |
-| `update_launch_checklist_item` | Set a launch checklist item's status (PENDING/DONE/SKIPPED) |
+| `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items. Requires the workspace's Marketing launch setting to be on (Settings → Marketing launch; off by default) |
+| `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier. Requires Marketing launch to be on |
+| `set_launch_tier` | Move a roadmap item into the LAUNCHING horizon by picking a launch tier; attaches a checklist cloned from an explicit or auto-resolved (most recent ACTIVE) template for that tier. Rejects items already LAUNCHING/LAUNCHED. Requires Marketing launch to be on |
+| `get_launch_checklist` | Get the launch checklist for a roadmap item, including each item's status and ID. Requires Marketing launch to be on |
+| `update_launch_checklist_item` | Set a launch checklist item's status (PENDING/DONE/SKIPPED). Requires Marketing launch to be on |
 
 Decision-taking is deliberately absent from MCP. A signed-in human reviewer opens
 the stable Compass review URL and chooses one option. Agents may prepare and read
@@ -471,7 +471,7 @@ Research tools use the same validation, protocol-locking and link transactions a
 | Tool | Description |
 |---|---|
 | `generate_research_guide` | Draft 5–8 editable questions or usability tasks from a goal, study type and duration; does not create a study. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
-| `create_research_study` | Create an active study with a reviewed guide and return its new participant link once. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
+| `create_research_study` | Create a study with a reviewed guide; defaults to ACTIVE and returns its new participant link once, or pass `status: "DRAFT"` to stage it — protocol fields stay editable — with no link issued. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
 | `list_research_studies` | Page through study settings and session counts in one workspace; no transcripts or participant identities |
 | `get_research_study` | Read one study’s settings, guide and session count in its declared workspace |
 | `update_research_study` | Update the name and supplied settings; omitted protocol fields are preserved, and protocol changes are locked after the first session |
@@ -515,7 +515,7 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 |---|---|
 | `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc`; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`). A doc whose parent is excluded by a recency filter is rendered at the top level so it stays reachable |
 | `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body, and `docType`/`roadmapItemId` when set |
-| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted) |
+| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on |
 | `update_doc` | Update an existing doc's title, content, and/or icon |
 | `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Always writes a new version, even if one was just saved seconds ago — named snapshots are never coalesced away |
 | `list_doc_versions` | List a doc's saved versions (id, label, author, created date), newest first, alongside the doc's own current title and last-updated time as a reference point. Param: `docId`. Does not include full content — call `get_doc_version` for that |

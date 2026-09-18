@@ -285,9 +285,17 @@ const MIGRATIONS = [
     filePath: path.join(process.cwd(), "prisma/migrations/054_workspace_wip_limits/migration.sql"),
   },
   {
-    // 055, not a third 054: both 054s above landed independently and are
-    // tolerated because the runner keys on the exact name, but the convention
-    // recorded on 052/053 is not to add further duplicates.
+    // Two independent 055s, same as the two 054s above: this one and
+    // 055_oauth_authorization_server were authored concurrently on separate
+    // branches. Tolerated because the runner keys on the exact name, never on
+    // the leading number. Do NOT renumber either one to "resolve" the
+    // collision — 055_oauth_authorization_server is already applied under that
+    // exact name in the shared compass_preview schema, so renaming it would
+    // orphan its receipt and re-run the DDL.
+    name: "055_workspace_launch_workflow_flag",
+    filePath: path.join(process.cwd(), "prisma/migrations/055_workspace_launch_workflow_flag/migration.sql"),
+  },
+  {
     name: "055_oauth_authorization_server",
     filePath: path.join(process.cwd(), "prisma/migrations/055_oauth_authorization_server/migration.sql"),
   },

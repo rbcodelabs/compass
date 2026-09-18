@@ -10,6 +10,7 @@ import { ManageMembersPanel } from "@/components/settings/manage-members-panel";
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
 import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel";
+import { LaunchWorkflowSettingsPanel } from "@/components/settings/launch-workflow-settings-panel";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { DeleteWorkspacePanel } from "@/components/settings/delete-workspace-panel";
 import { WorkspaceScoringPanel } from "@/components/scoring-models/workspace-scoring-panel";
@@ -56,6 +57,7 @@ export default async function SettingsPage({ params }: Props) {
       nextLimit: true,
       portalAuthRequired: true,
       ssoEnabled: true,
+      launchWorkflowEnabled: true,
       ssoSecretEncrypted: true,
       ssoSecretUpdatedAt: true,
       brandingPaletteId: true,
@@ -261,6 +263,22 @@ export default async function SettingsPage({ params }: Props) {
           ssoEnabled={workspace.ssoEnabled ?? false}
           ssoSecretConfigured={Boolean(workspace.ssoSecretEncrypted)}
           ssoSecretUpdatedAt={workspace.ssoSecretUpdatedAt}
+        />
+      </SettingsSection>
+
+      {/*
+        Placed after Portal, not before: several functional E2E specs
+        (feedback-attachments, feedback-bug-roadmap, roadmap-unscheduled-items)
+        select Portal's toggles by positional index
+        (page.getByRole("switch").nth(1), etc.) since PortalSettingsPanel's
+        toggles have no stable accessible name. Inserting a new switch above
+        Portal would silently shift those indices and break those specs.
+      */}
+      <SettingsSection title="Marketing launch" description="Turn on launch tiers, checklists, and positioning briefs for teams that run a formal marketing-launch process.">
+        <LaunchWorkflowSettingsPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
         />
       </SettingsSection>
 

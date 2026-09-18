@@ -150,6 +150,14 @@ model Workspace {
   brandingFontFamily   String?                 @map("branding_font_family") @db.VarChar(100)
   brandingLogoUrl      String?                 @map("branding_logo_url") @db.Text
   ssoEnabled           Boolean?                @default(false) @map("sso_enabled")
+  // Gates the entire marketing-launch surface: launch tiers/checklists, the
+  // LAUNCHING/LAUNCHED roadmap horizons, the roadmap-item panel's Launch
+  // section, the roadmap card's launch chip/menu item, positioning briefs
+  // (Doc.docType GTM_POSITIONING_BRIEF), and the related MCP tools. Default
+  // off for every workspace — most teams don't run a marketing-launch
+  // workflow and found the always-on surface noisy. See
+  // Claude/2026-07-21-compass-gtm-planning-design.md for original context.
+  launchWorkflowEnabled Boolean?               @default(false) @map("launch_workflow_enabled")
   // Ciphertext of the raw SSO shared secret (reversible AES-256-GCM
   // encryption via lib/crypto-secrets.ts, not a hash) — Compass must be
   // able to decrypt it to verify inbound customer-signed JWTs. The

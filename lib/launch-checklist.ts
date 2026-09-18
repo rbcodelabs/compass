@@ -20,6 +20,31 @@ export interface ResolvedTemplate {
 }
 
 /**
+ * Shared, actionable rejection message for every launch-gated surface (web
+ * actions, MCP tool gates, and this choke-point) — named so callers/tests can
+ * assert on it without duplicating the copy.
+ */
+export const LAUNCH_WORKFLOW_DISABLED_MESSAGE =
+  "The marketing launch workflow is disabled for this workspace. A workspace admin can turn it on in Settings → Marketing launch.";
+
+/**
+ * Gate for the entire marketing-launch surface: throws when the workspace
+ * hasn't turned on Workspace.launchWorkflowEnabled. Called from setLaunchTierCore
+ * below (so every caller inherits it for free) and independently from the web
+ * actions / MCP tool gates that don't route through setLaunchTierCore.
+ */
+export async function assertLaunchWorkflowEnabled(workspaceId: string): Promise<void> {
+  const prisma = getPrisma();
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { launchWorkflowEnabled: true },
+  });
+  if (!workspace?.launchWorkflowEnabled) {
+    throw new Error(LAUNCH_WORKFLOW_DISABLED_MESSAGE);
+  }
+}
+
+/**
  * The shared write: snapshot the template, create the LaunchChecklist + its
  * items, and flip the roadmap item to LAUNCHING — all in one transaction, in
  * that order. Callers are responsible for having already looked up the item
@@ -28,8 +53,11 @@ export interface ResolvedTemplate {
 export async function setLaunchTierCore(
   itemId: string,
   tier: LaunchTier,
-  template: ResolvedTemplate
+  template: ResolvedTemplate,
+  workspaceId: string
 ): Promise<{ launchChecklistId: string; itemCount: number }> {
+  await assertLaunchWorkflowEnabled(workspaceId);
+
   const prisma = getPrisma();
 
   const snapshot: ChecklistTemplateSnapshot = {

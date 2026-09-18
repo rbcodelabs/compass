@@ -218,13 +218,19 @@ describe("OAuth authorization server migration (055)", () => {
   const runner = readFileSync(ROUTE, "utf-8");
   const TABLES = ["oauth_clients", "oauth_authorization_codes", "oauth_tokens", "oauth_consents"];
 
-  it("is registered exactly once, after both 054s, without adding a third duplicate number", () => {
+  it("is registered exactly once under its exact name, after both 054s", () => {
     expect(registered.filter((name) => name === migrationName)).toHaveLength(1);
     expect(registered.indexOf("054_workspace_wip_limits")).toBeLessThan(registered.indexOf(migrationName));
     expect(registered.indexOf("054_research_study_artifact")).toBeLessThan(registered.indexOf(migrationName));
-    // 054 is already used twice. The runner keys on exact names so a third
-    // would work, but the convention recorded on 052/053 is not to add more.
-    expect(onDisk.filter((name) => name.startsWith("055_"))).toEqual([migrationName]);
+    // This exact directory exists exactly once on disk. It deliberately does
+    // NOT assert that 055_ is unique: 055_workspace_launch_workflow_flag was
+    // authored concurrently on main, exactly as the two 054s above were. The
+    // runner keys on the exact name, never the leading number, so duplicate
+    // numbers are accepted here. Renumbering this one to "resolve" the
+    // collision would be a real bug — it is already applied under this exact
+    // name in the shared compass_preview schema, so a rename would orphan its
+    // receipt and re-run the DDL.
+    expect(onDisk.filter((name) => name === migrationName)).toEqual([migrationName]);
   });
 
   it("creates all four tables from the design's data model and touches no existing table", () => {

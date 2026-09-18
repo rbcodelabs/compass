@@ -36,6 +36,7 @@ import { SCOPE_MCP_READ, SCOPE_MCP_WRITE } from "@/lib/oauth/constants"
 import { gateInterviewTool } from "@/lib/pm-agent-service"
 import { CUSTOM_FIELD_ENTITY } from "@/lib/custom-field-tool-handlers"
 import type { CustomFieldObjectType } from "@/lib/types"
+import { assertLaunchWorkflowEnabled } from "@/lib/launch-checklist"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Args = Record<string, any> // runtime-validated by each tool's zod inputSchema
@@ -277,12 +278,31 @@ export const TOOL_GATES: Record<string, Gate> = {
   // non-USER actor kind. Do not move this back to DENY.
   apply_recorded_decision: async (a, x) => void (await assertEntityAccess(a, "decisionRecord", x.decisionId)),
 
-  // Launch tiers / checklists ----------------------------------------------
-  create_checklist_template: (a, x) => assertWorkspaceMember(a, x.workspaceId),
-  list_checklist_templates: (a, x) => assertWorkspaceMember(a, x.workspaceId),
-  set_launch_tier: async (a, x) => void (await assertEntityAccess(a, "roadmapItem", x.itemId)),
-  get_launch_checklist: async (a, x) => void (await assertEntityAccess(a, "roadmapItem", x.roadmapItemId)),
-  update_launch_checklist_item: async (a, x) => void (await assertEntityAccess(a, "launchChecklistItem", x.itemId)),
+  // Launch tiers / checklists -------------------------------------------------
+  // All five gate on Workspace.launchWorkflowEnabled in addition to normal
+  // membership/entity access — the whole marketing-launch surface is opt-in
+  // per workspace (default off). See lib/launch-checklist.ts's
+  // assertLaunchWorkflowEnabled for the shared rejection message.
+  create_checklist_template: async (a, x) => {
+    await assertWorkspaceMember(a, x.workspaceId)
+    await assertLaunchWorkflowEnabled(x.workspaceId)
+  },
+  list_checklist_templates: async (a, x) => {
+    await assertWorkspaceMember(a, x.workspaceId)
+    await assertLaunchWorkflowEnabled(x.workspaceId)
+  },
+  set_launch_tier: async (a, x) => {
+    const { workspaceId } = await assertEntityAccess(a, "roadmapItem", x.itemId)
+    await assertLaunchWorkflowEnabled(workspaceId)
+  },
+  get_launch_checklist: async (a, x) => {
+    const { workspaceId } = await assertEntityAccess(a, "roadmapItem", x.roadmapItemId)
+    await assertLaunchWorkflowEnabled(workspaceId)
+  },
+  update_launch_checklist_item: async (a, x) => {
+    const { workspaceId } = await assertEntityAccess(a, "launchChecklistItem", x.itemId)
+    await assertLaunchWorkflowEnabled(workspaceId)
+  },
 
   // Squads ------------------------------------------------------------------
   create_squad: (a, x) => assertWorkspaceMember(a, x.workspaceId),
@@ -356,6 +376,9 @@ export const TOOL_GATES: Record<string, Gate> = {
     await assertWorkspaceMember(a, x.workspaceId)
     if (x.parentId) await assertChildInDeclaredWorkspace(a, "doc", x.parentId, x.workspaceId)
     if (x.roadmapItemId) await assertChildInDeclaredWorkspace(a, "roadmapItem", x.roadmapItemId, x.workspaceId)
+    // Positioning briefs are part of the marketing-launch surface, gated the
+    // same as the launch-tier/checklist tools above.
+    if (x.docType === "GTM_POSITIONING_BRIEF") await assertLaunchWorkflowEnabled(x.workspaceId)
   },
   update_doc: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
   create_doc_version: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),

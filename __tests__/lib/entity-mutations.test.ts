@@ -20,6 +20,7 @@ const models = {
 
 const database = {
   ...models,
+  workspace: { findUnique: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
   portfolioCapacityPlan: { updateMany: vi.fn() },
   $transaction: vi.fn(),
@@ -42,6 +43,11 @@ beforeEach(() => {
   // default: entity is in the workspace
   for (const m of Object.values(models)) m.findFirst.mockResolvedValue({ id: "e1" });
   models.roadmapItem.findUnique.mockResolvedValue({ id: "e1", horizon: "NEXT", status: "ACTIVE" });
+  // Default the fixture workspace to the launch workflow being on, so the
+  // existing LAUNCHING/LAUNCHED tests below exercise the pre-existing
+  // validation rather than the new disabled-feature gate (which gets its own
+  // describe block).
+  database.workspace.findUnique.mockResolvedValue({ launchWorkflowEnabled: true });
   database.portfolioCapacityReservation.findUnique.mockResolvedValue(null);
   database.$transaction.mockImplementation((fn: (value: typeof database) => unknown) => fn(database));
 });
@@ -124,6 +130,30 @@ describe("updateEntityField — validation", () => {
     const r = await updateEntityField("opportunity", "e1", WS, "workspaceId", "other-ws");
     expect(r).toEqual({ ok: false, status: 400, error: 'Field "workspaceId" is not editable' });
     expect(models.opportunity.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateEntityField — launch horizon gated by Workspace.launchWorkflowEnabled", () => {
+  it("rejects LAUNCHING with the disabled-feature message (not the 'use a launch tier' message) when the workspace's launch workflow is off", async () => {
+    database.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    const r = await updateEntityField("roadmapItem", "e1", WS, "horizon", "LAUNCHING");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/launch workflow is disabled/i);
+    expect(models.roadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects LAUNCHED with the disabled-feature message when the workspace's launch workflow is off", async () => {
+    database.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    const r = await updateEntityField("roadmapItem", "e1", WS, "horizon", "LAUNCHED");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/launch workflow is disabled/i);
+    expect(models.roadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("still accepts LAUNCHED when the workspace's launch workflow is on", async () => {
+    database.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: true });
+    const r = await updateEntityField("roadmapItem", "e1", WS, "horizon", "LAUNCHED");
+    expect(r.ok).toBe(true);
   });
 });
 

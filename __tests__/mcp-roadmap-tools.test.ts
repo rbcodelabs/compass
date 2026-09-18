@@ -318,27 +318,60 @@ describe("update_roadmap_item MCP tool — isPrivate", () => {
 })
 
 describe("update_roadmap_item MCP tool — launch horizon guard", () => {
+  // The handler now needs one read (the item, to resolve its workspace) to
+  // decide which rejection message applies — the disabled-feature message
+  // when the workspace's launch workflow is off, or the old "use
+  // set_launch_tier" / "not implemented" messages when it's on. It never
+  // writes in either case.
   beforeEach(() => {
     vi.clearAllMocks()
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({
+      id: "item-1", workspaceId: "ws-1", title: "Item", horizon: "NOW", status: "ACTIVE",
+    })
   })
 
-  it("rejects horizon: LAUNCHING with no DB read or write, pointing at set_launch_tier", async () => {
+  it("returns a not-found message and writes nothing for a missing item", async () => {
+    mockPrisma.roadmapItem.findUnique.mockResolvedValueOnce(null)
     const handler = getHandler("update_roadmap_item")
-    const result = await handler({ itemId: "item-1", horizon: "LAUNCHING" })
-    const text = textOf(result)
+    const result = await handler({ itemId: "missing-item", horizon: "LAUNCHING" })
 
-    expect(text).toContain("set_launch_tier")
-    expect(mockPrisma.roadmapItem.findUnique).not.toHaveBeenCalled()
+    expect(textOf(result)).toContain("not found")
     expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
   })
 
-  it("rejects horizon: LAUNCHED with no DB read or write", async () => {
+  it("rejects horizon: LAUNCHING with the disabled-feature message when the workspace's launch workflow is off, without writing", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false })
+    const handler = getHandler("update_roadmap_item")
+    const result = await handler({ itemId: "item-1", horizon: "LAUNCHING" })
+
+    expect(textOf(result)).toMatch(/launch workflow is disabled/i)
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects horizon: LAUNCHED with the disabled-feature message when off, without writing", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false })
     const handler = getHandler("update_roadmap_item")
     const result = await handler({ itemId: "item-1", horizon: "LAUNCHED" })
-    const text = textOf(result)
 
-    expect(text).toMatch(/implemented yet/i)
-    expect(mockPrisma.roadmapItem.findUnique).not.toHaveBeenCalled()
+    expect(textOf(result)).toMatch(/launch workflow is disabled/i)
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects horizon: LAUNCHING pointing at set_launch_tier when the launch workflow is on, without writing", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: true })
+    const handler = getHandler("update_roadmap_item")
+    const result = await handler({ itemId: "item-1", horizon: "LAUNCHING" })
+
+    expect(textOf(result)).toContain("set_launch_tier")
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects horizon: LAUNCHED when the launch workflow is on, without writing", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: true })
+    const handler = getHandler("update_roadmap_item")
+    const result = await handler({ itemId: "item-1", horizon: "LAUNCHED" })
+
+    expect(textOf(result)).toMatch(/implemented yet/i)
     expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
   })
 })

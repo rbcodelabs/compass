@@ -12,7 +12,8 @@
  */
 import getPrisma from "@/lib/db";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
-import { SETTABLE_HORIZONS } from "@/lib/roadmap";
+import { SETTABLE_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
+import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { assignmentUpdate, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -111,6 +112,21 @@ export async function updateEntityField(
     const trimmed = typeof value === "string" ? value.trim() : "";
     data = { description: trimmed.length > 0 ? trimmed : null };
   } else if (config.enum && field === config.enum.field) {
+    // The whole marketing-launch surface (including the LAUNCHING/LAUNCHED
+    // horizons) is opt-in per workspace. When it's off, a direct attempt to
+    // set either launch horizon gets the disabled-feature message instead of
+    // the "use a launch tier" message below, which presumes the feature is
+    // on. Checked before the LAUNCHING-specific guard so the more relevant
+    // message wins.
+    if (type === "roadmapItem" && field === "horizon" && typeof value === "string" && isLaunchHorizon(value)) {
+      const workspace = await getPrisma().workspace.findUnique({
+        where: { id: workspaceId },
+        select: { launchWorkflowEnabled: true },
+      });
+      if (!workspace?.launchWorkflowEnabled) {
+        return { ok: false, status: 400, error: LAUNCH_WORKFLOW_DISABLED_MESSAGE };
+      }
+    }
     // Load-bearing guard: LAUNCHING may only be entered via setLaunchTier,
     // which creates the launch checklist in the same transaction. A bare
     // horizon write here would flip the item to LAUNCHING with no checklist,

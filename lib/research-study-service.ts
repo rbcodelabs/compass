@@ -15,7 +15,12 @@ export type ResearchSessionStatus = (typeof RESEARCH_SESSION_STATUSES)[number]
 
 export type ResearchStudyActor = { userId: string | null; service?: boolean; source?: "UI" | "MCP" }
 export type ResearchWorkspaceScope = { workspaceId: string } | { orgSlug: string; workspaceSlug: string }
-export type ResearchStudyInput = { name: string; goal?: string; studyType?: string; targetMinutes?: number; appUrl?: string; artifactId?: string; guide?: string[] }
+export type ResearchStudyInput = { name: string; goal?: string; studyType?: string; targetMinutes?: number; appUrl?: string; artifactId?: string; guide?: string[]; status?: "DRAFT" | "ACTIVE" }
+
+const CREATABLE_STATUSES = ["DRAFT", "ACTIVE"] as const
+function assertCreatableStatus(value: string): asserts value is (typeof CREATABLE_STATUSES)[number] {
+  if (!CREATABLE_STATUSES.includes(value as (typeof CREATABLE_STATUSES)[number])) throw new ResearchStudyError("Unsupported initial status")
+}
 
 function workspaceWhere(scope: ResearchWorkspaceScope, actor: ResearchStudyActor): Prisma.WorkspaceWhereInput {
   if (!actor.userId && !(actor.service === true && actor.userId === null)) throw new ResearchStudyError("Unauthorized")
@@ -171,14 +176,23 @@ export async function createResearchStudy(scope: ResearchWorkspaceScope, actor: 
   if (!name || !goal || guide.length === 0) throw new ResearchStudyError("Name, goal, and at least one question are required")
   if (name.length > 255) throw new ResearchStudyError("Study name must be 255 characters or fewer")
   if (goal.length > 5_000) throw new ResearchStudyError("Study goal must be 5,000 characters or fewer")
-  const { token, tokenHash } = createResearchToken()
+  const status = String(input.status ?? "ACTIVE")
+  assertCreatableStatus(status)
   const studyId = randomUUID()
+  const studyCreate = prisma.researchStudy.create({ data: { id: studyId, workspaceId: workspace.id, name, goal, studyType, guide: JSON.stringify(guide), targetMinutes, appUrl: target.appUrl, artifactId: target.artifactId, status, source: actor.source ?? "UI", createdById: actor.userId, updatedById: actor.userId } })
+  // DRAFT stages the study without issuing a participant link — activate_research_study
+  // remains the single explicit step that transitions to ACTIVE and mints one.
+  if (status === "DRAFT") {
+    await prisma.$transaction([studyCreate])
+    return { id: studyId, status }
+  }
+  const { token, tokenHash } = createResearchToken()
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
   await prisma.$transaction([
-    prisma.researchStudy.create({ data: { id: studyId, workspaceId: workspace.id, name, goal, studyType, guide: JSON.stringify(guide), targetMinutes, appUrl: target.appUrl, artifactId: target.artifactId, status: "ACTIVE", source: actor.source ?? "UI", createdById: actor.userId, updatedById: actor.userId } }),
+    studyCreate,
     prisma.researchParticipantToken.create({ data: { studyId, tokenHash, kind: "PRIMARY", expiresAt, createdById: actor.userId } }),
   ])
-  return { id: studyId, token }
+  return { id: studyId, status, token }
 }
 
 async function findMemberStudy(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
