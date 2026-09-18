@@ -29,6 +29,19 @@ export const getWorkspace = cache(
       include: {
         organization: true,
       },
+      // Belt and braces. `@@unique([organizationId, slug])` (schema.prisma) is
+      // a real index — `workspaces_organization_id_slug_key`, created by
+      // 001_init — so two workspaces cannot share a slug within one org and
+      // this findFirst can only ever match one row today.
+      //
+      // The orderBy is here anyway because *without* it the failure mode of
+      // that invariant ever lapsing is silent and awful rather than loud: an
+      // unordered findFirst would resolve /{org}/{slug} to a different row
+      // from one request to the next, so writes made against one workspace
+      // would appear and disappear at random rather than erroring. Pinning
+      // the oldest row makes any such lapse degrade into "the newer duplicate
+      // is unreachable", which is diagnosable.
+      orderBy: { createdAt: "asc" },
     })
 
     return workspace

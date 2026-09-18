@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createWorkspace } from "@/app/[orgSlug]/settings/actions";
-import { deriveSlug } from "@/lib/slug";
+import { deriveSlug, SLUG_PATTERN } from "@/lib/slug";
 
 export interface OrgWorkspaceSummary {
   id: string;
@@ -36,7 +36,11 @@ export function CreateWorkspacePanel({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [created, setCreated] = useState<OrgWorkspaceSummary[]>([]);
+  // No optimistic `created` list. The action's revalidatePath re-renders this
+  // route's server components while this client component stays mounted, so an
+  // appended row would arrive a second time in the `workspaces` prop and
+  // render two <li> under the same React key. The unconditional router.push on
+  // success means such a row is never meaningfully seen anyway.
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   // Once the user edits the slug field themselves, typing in Name must stop
@@ -47,7 +51,10 @@ export function CreateWorkspacePanel({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const allWorkspaces = [...workspaces, ...created];
+  // A non-empty Name that derives to nothing (e.g. "日本語", "!!!") leaves the
+  // slug field blank, and the browser then points a "please fill out this
+  // field" tooltip at an input the user never touched. Say why instead.
+  const slugUnderivable = name.trim().length > 0 && deriveSlug(name) === "";
 
   function reset() {
     setName("");
@@ -55,6 +62,24 @@ export function CreateWorkspacePanel({
     setSlugEdited(false);
     setDescription("");
     setError(null);
+  }
+
+  /**
+   * Returns the first reason this submission cannot proceed, or null.
+   *
+   * Whitespace satisfies the `required` attribute, so native validation lets a
+   * name of "   " through — and the client then has to say something, because
+   * previously it returned silently and the button looked broken.
+   */
+  function validationError(trimmedName: string, trimmedSlug: string): string | null {
+    // Same sentences the server action returns for these inputs, so the user
+    // sees one wording whichever layer catches it.
+    if (!trimmedName) return "Workspace name is required.";
+    if (!trimmedSlug) return "URL slug is required.";
+    if (!SLUG_PATTERN.test(trimmedSlug)) {
+      return "Slug may only contain lowercase letters, numbers, and hyphens.";
+    }
+    return null;
   }
 
   function handleNameChange(value: string) {
@@ -68,7 +93,11 @@ export function CreateWorkspacePanel({
 
     const trimmedName = name.trim();
     const trimmedSlug = slug.trim();
-    if (!trimmedName || !trimmedSlug) return;
+    const invalid = validationError(trimmedName, trimmedSlug);
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
 
     setError(null);
     startTransition(async () => {
@@ -83,14 +112,6 @@ export function CreateWorkspacePanel({
         return;
       }
 
-      setCreated((current) => [
-        ...current,
-        {
-          id: result.workspace.id,
-          name: result.workspace.name,
-          slug: result.workspace.slug,
-        },
-      ]);
       setOpen(false);
       reset();
       router.push(result.redirectTo);
@@ -99,9 +120,9 @@ export function CreateWorkspacePanel({
 
   return (
     <div className="flex flex-col gap-3">
-      {allWorkspaces.length > 0 && (
+      {workspaces.length > 0 && (
         <ul className="flex flex-col gap-1.5">
-          {allWorkspaces.map((workspace) => (
+          {workspaces.map((workspace) => (
             <li
               key={workspace.id}
               className="flex items-baseline justify-between gap-3 rounded-lg ring-1 ring-border px-3 py-2"
@@ -157,10 +178,18 @@ export function CreateWorkspacePanel({
                 pattern="[a-z0-9-]+"
                 required
                 disabled={isPending}
+                aria-describedby="new-workspace-slug-hint"
               />
-              <p className="text-xs text-muted-foreground">
-                /{orgSlug}/{slug || "your-workspace"}
-              </p>
+              {slugUnderivable && !slug ? (
+                <p id="new-workspace-slug-hint" className="text-xs text-amber-600">
+                  A slug can&apos;t be derived from that name — enter one using
+                  lowercase letters, numbers, and hyphens.
+                </p>
+              ) : (
+                <p id="new-workspace-slug-hint" className="text-xs text-muted-foreground">
+                  /{orgSlug}/{slug || "your-workspace"}
+                </p>
+              )}
             </div>
           </div>
 

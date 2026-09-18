@@ -175,6 +175,72 @@ describe("createWorkspaceInOrg", () => {
     expect(mockRevalidatePath).not.toHaveBeenCalled()
   })
 
+  // ── Losing a create race ────────────────────────────────────────────────
+  //
+  // The findFirst above is a fast path for a friendly message, not the
+  // enforcement boundary. `workspaces_organization_id_slug_key` (001_init) is,
+  // and it is what fires when two admins submit the same slug at once. Before
+  // this mapping the loser got an unhandled P2002 — a 500 with a digest —
+  // instead of the sentence describing exactly what happened.
+
+  it("maps a P2002 on the slug index onto SLUG_TAKEN", async () => {
+    mockPrisma.workspace.create.mockRejectedValue(
+      Object.assign(new Error("Unique constraint failed"), {
+        code: "P2002",
+        meta: { target: ["organization_id", "slug"] },
+      })
+    )
+
+    const result = await createWorkspaceInOrg({
+      orgSlug: "rbcodelabs",
+      name: "My Product",
+      slug: "my-product",
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      code: "SLUG_TAKEN",
+      // Identical wording to the fast-path rejection — the user cannot tell
+      // which of the two detected it, and should not have to.
+      error: 'A workspace with slug "my-product" already exists in organization "RB Code Labs".',
+    })
+    // A failed create must not leave membership rows behind.
+    expect(mockPrisma.workspaceMember.createMany).not.toHaveBeenCalled()
+    expect(mockRevalidatePath).not.toHaveBeenCalled()
+  })
+
+  it("maps a P2002 with no meta.target onto SLUG_TAKEN", async () => {
+    // Some driver/adapter combinations omit meta. Workspace's only other
+    // unique index is its primary key, so a slug conflict is the sole
+    // plausible cause and a correct message beats an unhandled 500.
+    mockPrisma.workspace.create.mockRejectedValue(
+      Object.assign(new Error("Unique constraint failed"), { code: "P2002" })
+    )
+
+    const result = await createWorkspaceInOrg({
+      orgSlug: "rbcodelabs",
+      name: "My Product",
+      slug: "my-product",
+    })
+
+    expect(result).toMatchObject({ ok: false, code: "SLUG_TAKEN" })
+  })
+
+  it("rethrows a P2002 that names some other column", async () => {
+    // A primary-key collision means gen_random_uuid() repeated itself. That is
+    // not a duplicate slug and must not be reported to the user as one.
+    mockPrisma.workspace.create.mockRejectedValue(
+      Object.assign(new Error("Unique constraint failed"), {
+        code: "P2002",
+        meta: { target: ["id"] },
+      })
+    )
+
+    await expect(
+      createWorkspaceInOrg({ orgSlug: "rbcodelabs", name: "My Product", slug: "my-product" })
+    ).rejects.toThrow("Unique constraint failed")
+  })
+
   it("does not swallow a genuine fault — a failing write still throws", async () => {
     // Expected failures are returned as data; infrastructure faults must keep
     // throwing so they reach error monitoring with a digest.

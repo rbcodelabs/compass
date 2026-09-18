@@ -43,6 +43,22 @@ Click the trash icon next to a member's name to remove their access to the works
 
 You can't remove the last member of a workspace, and you can't remove the last remaining Admin — promote another member to Admin first if you need to remove the current one.
 
+## Creating a Workspace
+
+Workspaces are created from **Organization Settings**, which is a different page from a workspace's own Settings — it covers the organization as a whole rather than one workspace inside it. Only an organization Owner or Admin can reach it.
+
+Open **Organization Settings → Workspaces** and click **Create workspace**. The form asks for:
+
+- **Name** — what the workspace is called, e.g. "Product Team".
+- **URL slug** — the part that appears in the address bar, as in `/your-org/product-team`. It fills in automatically as you type the name, and you can edit it. Slugs may contain lowercase letters, numbers, and hyphens only, and no two workspaces in the same organization can share one.
+- **Description** — optional.
+
+**Every member of the organization is automatically added to the new workspace.** There is no separate step to invite people into it, and nobody in the organization has to be added by hand afterwards. Organization Owners and Admins become workspace Admins; everyone else becomes a workspace Member. You can adjust individual roles afterwards from that workspace's own **Settings → Members**.
+
+On success you land directly in the new workspace's OKRs page, and it appears in the workspace switcher at the top of the sidebar.
+
+Your organization's *first* workspace is created for you when you sign up, as part of onboarding — this page is for adding further ones later.
+
 ## Deleting a Workspace
 
 Deleting a workspace is an admin-only action found in **Settings**, in a dedicated danger-zone panel. Click **Delete workspace**, then type the workspace's exact name to confirm — the delete button stays disabled until the typed name matches.

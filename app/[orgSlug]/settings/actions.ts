@@ -69,6 +69,19 @@ function isUniqueConstraintError(error: unknown): boolean {
 }
 
 /**
+ * Neutral fallback for a unique-constraint violation.
+ *
+ * This used to read "…metric keys must be unique within a scoring model",
+ * which was accurate for the only caller at the time but became a lie the
+ * moment `toFailure` was shared: a duplicate workspace slug would have told
+ * the user about scoring-model metric keys. `toFailure` cannot know which
+ * constraint tripped, so the default says only what is true of every caller,
+ * and callers that *do* know pass their own sentence via `conflictMessage`.
+ */
+const GENERIC_UNIQUE_CONFLICT =
+  "That change collides with an existing record. Adjust the values and try again.";
+
+/**
  * Converts an *expected* failure into a result value.
  *
  * Deliberately narrow: only permission outcomes and unique-constraint
@@ -77,8 +90,14 @@ function isUniqueConstraintError(error: unknown): boolean {
  * logged by Next with a digest, and reaches error monitoring instead of being
  * flattened into a reassuring sentence the user can do nothing about. That is
  * the one case where the opaque production mask is the correct outcome.
+ *
+ * `conflictMessage` lets a caller name the constraint it actually has, since
+ * a generic collision sentence is not much use to someone filling in a form.
  */
-function toFailure(error: unknown): { ok: false; error: string } {
+function toFailure(
+  error: unknown,
+  conflictMessage: string = GENERIC_UNIQUE_CONFLICT
+): { ok: false; error: string } {
   if (isPermissionError(error)) {
     if (error.message === "Unauthorized") {
       return { ok: false, error: "You are not signed in." };
@@ -87,15 +106,15 @@ function toFailure(error: unknown): { ok: false; error: string } {
   }
 
   if (isUniqueConstraintError(error)) {
-    return {
-      ok: false,
-      error:
-        "That change collides with an existing record — metric keys must be unique within a scoring model.",
-    };
+    return { ok: false, error: conflictMessage };
   }
 
   throw error;
 }
+
+/** The scoring-model actions' own unique constraint: `@@unique([scoring_model_id, key])`. */
+const SCORING_METRIC_KEY_CONFLICT =
+  "That change collides with an existing record — metric keys must be unique within a scoring model.";
 
 // ─── Workspaces (org admin only) ──────────────────────────────────────────────
 
@@ -167,7 +186,10 @@ export async function createWorkspace(
       redirectTo: `/${orgSlug}/${result.workspace.slug}/okrs`,
     };
   } catch (error) {
-    return toFailure(error);
+    // A slug collision is already mapped to SLUG_TAKEN inside the service and
+    // returned above as data, so it does not reach here. This message only
+    // covers a P2002 from some *other* unique index on the write path.
+    return toFailure(error, `That workspace slug is already taken in ${orgSlug}.`);
   }
 }
 
@@ -223,7 +245,7 @@ export async function createScoringModel(
     revalidatePath(`/${orgSlug}/settings`);
     return { ok: true, model: { id: model.id, version: model.version } };
   } catch (error) {
-    return toFailure(error);
+    return toFailure(error, SCORING_METRIC_KEY_CONFLICT);
   }
 }
 
@@ -318,7 +340,7 @@ export async function updateScoringModelMetrics(
     revalidatePath(`/${orgSlug}/settings`);
     return { ok: true };
   } catch (error) {
-    return toFailure(error);
+    return toFailure(error, SCORING_METRIC_KEY_CONFLICT);
   }
 }
 

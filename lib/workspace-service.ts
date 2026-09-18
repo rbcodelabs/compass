@@ -58,6 +58,41 @@ export type CreateWorkspaceResult =
   | { ok: true; workspace: CreatedWorkspace }
   | { ok: false; code: CreateWorkspaceFailureCode; error: string }
 
+/** One wording for the duplicate-slug outcome, whichever path detects it. */
+function slugTakenMessage(slug: string, orgName: string): string {
+  return `A workspace with slug "${slug}" already exists in organization "${orgName}".`
+}
+
+/**
+ * True for a Prisma unique-constraint violation (P2002) naming the workspace
+ * slug index.
+ *
+ * Deliberately narrow. Workspace has exactly one other unique index — its
+ * primary key — and a P2002 on `id` would mean `gen_random_uuid()` collided,
+ * which is not a duplicate slug and must not be reported as one. Prisma
+ * reports the offending columns in `meta.target`; when a driver omits it we
+ * fall back to treating the violation as the slug conflict, because on this
+ * table there is no other plausible candidate and a "slug already exists"
+ * message is a far better outcome than an unhandled 500.
+ */
+function isWorkspaceSlugConflict(error: unknown): boolean {
+  if (
+    typeof error !== "object" ||
+    error === null ||
+    (error as { code?: unknown }).code !== "P2002"
+  ) {
+    return false
+  }
+  const target = (error as { meta?: { target?: unknown } }).meta?.target
+  if (Array.isArray(target)) {
+    return target.some((column) => String(column).includes("slug"))
+  }
+  if (typeof target === "string") {
+    return target.includes("slug")
+  }
+  return true
+}
+
 /**
  * Creates a workspace inside an organization and seeds its membership from the
  * organization's members.
@@ -84,30 +119,38 @@ export async function createWorkspaceInOrg({
     }
   }
 
-  // App-level uniqueness. There is no @@unique([organizationId, slug]) on
-  // Workspace yet, so this check is the only thing standing between two
-  // concurrent creates and a duplicate pair — a known, accepted gap rather
-  // than an oversight.
+  // Fast path for the common case, so the user gets a sentence naming the
+  // organization rather than a bare constraint violation. This is NOT the
+  // enforcement boundary — `@@unique([organizationId, slug])` on Workspace is
+  // backed by a real index (`workspaces_organization_id_slug_key`, created in
+  // 001_init), and that is what actually holds under concurrency. The window
+  // between this read and the create below is small but real, so the insert
+  // is wrapped to map the loser of that race onto the same SLUG_TAKEN result
+  // instead of letting a raw P2002 escape as an unhandled fault.
   const existing = await prisma.workspace.findFirst({
     where: { organizationId: org.id, slug },
     select: { id: true },
   })
   if (existing) {
-    return {
-      ok: false,
-      code: "SLUG_TAKEN",
-      error: `A workspace with slug "${slug}" already exists in organization "${org.name}".`,
-    }
+    return { ok: false, code: "SLUG_TAKEN", error: slugTakenMessage(slug, org.name) }
   }
 
-  const workspace = await prisma.workspace.create({
-    data: {
-      organizationId: org.id,
-      name: name.trim(),
-      slug,
-      description: description?.trim(),
-    },
-  })
+  let workspace
+  try {
+    workspace = await prisma.workspace.create({
+      data: {
+        organizationId: org.id,
+        name: name.trim(),
+        slug,
+        description: description?.trim(),
+      },
+    })
+  } catch (error) {
+    if (isWorkspaceSlugConflict(error)) {
+      return { ok: false, code: "SLUG_TAKEN", error: slugTakenMessage(slug, org.name) }
+    }
+    throw error
+  }
 
   // Add all org members as workspace members so the workspace is
   // immediately accessible in the UI. Without this, getWorkspace()

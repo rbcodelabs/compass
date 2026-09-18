@@ -382,6 +382,52 @@ describe("createScoringModel", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("unreachable");
     expect(result.error).toMatch(/unique/i);
+    // The scoring-model actions keep naming their own constraint. `toFailure`
+    // is shared, so this sentence is now passed in by the caller rather than
+    // hard-coded — see the workspace test below for why that matters.
+    expect(result.error).toContain("metric keys must be unique within a scoring model");
+  });
+});
+
+// ─── toFailure's shared unique-constraint branch ───────────────────────────
+//
+// `toFailure` used to hard-code "metric keys must be unique within a scoring
+// model" for every P2002. Correct while scoring models were its only caller;
+// a lie the moment createWorkspace started using it, since a duplicate
+// workspace slug would have told the user about scoring-model metric keys.
+
+describe("toFailure unique-constraint messages are caller-specific", () => {
+  it("createWorkspace never reports a scoring-model constraint", async () => {
+    // Raised from a path the service does not classify as a slug conflict,
+    // so it reaches toFailure rather than being returned as SLUG_TAKEN.
+    mockOrganizationMember.findMany.mockRejectedValue(uniqueConstraintError());
+
+    const result = await createWorkspace("acme", {
+      name: "Product Team",
+      slug: "product-team",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.error).not.toMatch(/scoring model/i);
+    expect(result.error).not.toMatch(/metric/i);
+    expect(result.error).toMatch(/slug/i);
+  });
+
+  it("a duplicate slug is classified by the service, not by toFailure", async () => {
+    mockWorkspace.create.mockRejectedValue(
+      Object.assign(new Error("Unique constraint failed"), {
+        code: "P2002",
+        meta: { target: ["organization_id", "slug"] },
+      })
+    );
+
+    await expect(
+      createWorkspace("acme", { name: "Product Team", slug: "product-team" })
+    ).resolves.toEqual({
+      ok: false,
+      error: 'A workspace with slug "product-team" already exists in organization "Acme".',
+    });
   });
 });
 
