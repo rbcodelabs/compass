@@ -13,12 +13,25 @@ async function actor() {
   return { userId: session.user.id, source: "UI" as const }
 }
 function input(form: FormData): studies.ResearchStudyInput {
-  return { name: String(form.get("name") ?? ""), goal: String(form.get("goal") ?? ""), studyType: form.has("studyType") ? String(form.get("studyType")) : undefined, targetMinutes: Number(form.get("targetMinutes") ?? 15), appUrl: String(form.get("appUrl") ?? ""), guide: form.getAll("guide").map(String) }
+  return {
+    name: String(form.get("name") ?? ""),
+    goal: String(form.get("goal") ?? ""),
+    studyType: form.has("studyType") ? String(form.get("studyType")) : undefined,
+    targetMinutes: Number(form.get("targetMinutes") ?? 15),
+    // Present-but-absent is meaningful here, not just "": the service falls
+    // back to whichever target the study already has when a caller omits
+    // both appUrl and artifactId, so a settings form that renders only one
+    // of the two fields (depending on the study's current target) must not
+    // send the other one at all.
+    appUrl: form.has("appUrl") ? String(form.get("appUrl")) : undefined,
+    artifactId: form.has("artifactId") ? String(form.get("artifactId")) : undefined,
+    guide: form.getAll("guide").map(String),
+  }
 }
 function studyUrl(orgSlug: string, workspaceSlug: string, id: string, token?: string) {
   return `/${orgSlug}/${workspaceSlug}/capture/studies/${id}${token ? `?token=${encodeURIComponent(token)}` : ""}`
 }
-export async function generateResearchGuide(orgSlug: string, workspaceSlug: string, input: { studyType: ResearchStudyType; goal: string; appUrl: string; targetMinutes: number }) {
+export async function generateResearchGuide(orgSlug: string, workspaceSlug: string, input: { studyType: ResearchStudyType; goal: string; appUrl?: string; artifactTitle?: string; targetMinutes: number }) {
   return studies.generateResearchGuide({ orgSlug, workspaceSlug }, await actor(), input)
 }
 export async function createResearchStudy(orgSlug: string, workspaceSlug: string, formData: FormData) {
