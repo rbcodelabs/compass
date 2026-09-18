@@ -32,6 +32,7 @@ import {
   assertEntityAccess,
   assertScoringModelAccess,
 } from "@/lib/mcp-authz"
+import { SCOPE_MCP_READ, SCOPE_MCP_WRITE } from "@/lib/oauth/constants"
 import { gateInterviewTool } from "@/lib/pm-agent-service"
 import { CUSTOM_FIELD_ENTITY } from "@/lib/custom-field-tool-handlers"
 import type { CustomFieldObjectType } from "@/lib/types"
@@ -429,6 +430,117 @@ export const TOOL_GATES: Record<string, Gate> = {
       throw new McpAuthzError("Either workspaceId or orgSlug is required.")
     }
   },
+}
+
+/**
+ * OAuth scope classification for the MCP catalog — the read/write distinction
+ * TOOL_GATES does not encode.
+ *
+ * TOOL_GATES answers "may this identity touch this workspace?"; this map answers
+ * a different, orthogonal question: "is this operation a read or a write?" An
+ * OAuth access token carries `mcp:read` and/or `mcp:write`, and the MCP route
+ * turns a shortfall into a 403 + `insufficient_scope` challenge before the gate
+ * ever runs. Both checks apply — a scope never widens a membership.
+ *
+ * It is also deliberately **not** derived from AGENT_TOOL_POLICY, which looks
+ * superficially similar and is answering a third question again (may a delegated
+ * agent identity perform this at all?). Its DENY entries are all writes, but
+ * "human-only" and "mutating" are not the same predicate, and collapsing them
+ * would silently reclassify a tool the day either list moved.
+ *
+ * FAIL-CLOSED, twice over: `requiredToolScope` returns `mcp:write` for a name
+ * it does not know, and a completeness test (__tests__/mcp-tool-gates.test.ts)
+ * asserts every registered tool appears here — the same pair of guarantees
+ * TOOL_GATES has.
+ */
+const READ_TOOLS = [
+  "get_artifact", "get_comment", "get_current_identity", "get_custom_field_values",
+  "get_decision", "get_doc", "get_doc_comment", "get_doc_version", "get_experiment",
+  "get_feedback_item", "get_help", "get_launch_checklist", "get_okr_cycle", "get_opportunity",
+  "get_opportunity_score", "get_pm_interview", "get_research_session", "get_research_study",
+  "get_review_request", "get_scoring_model", "get_solution_comment", "get_squad", "get_task",
+  "get_workspace_by_slug", "get_workspace_scoring_model", "get_workspace_summary",
+  "list_artifacts", "list_assumptions", "list_checklist_templates", "list_comments",
+  "list_custom_field_definitions", "list_decisions", "list_doc_comments", "list_doc_versions",
+  "list_docs", "list_eligible_parent_key_results", "list_evidence", "list_experiments",
+  "list_feedback", "list_okr_cycles", "list_opportunities", "list_release_runs",
+  "list_research_sessions", "list_research_studies", "list_research_syntheses",
+  "list_review_requests", "list_roadmap_items", "list_scoring_models",
+  "list_solution_comments", "list_solutions", "list_squads", "list_task_assignees",
+  "list_task_links", "list_tasks", "list_top_opportunities", "list_workspaces", "search_help",
+] as const
+
+/**
+ * Everything that creates, changes, deletes, or mints something. Three entries
+ * are judgment calls worth naming:
+ *
+ *  - `generate_research_guide` and `generate_research_synthesis` write nothing
+ *    a caller asked for by name, but both spend a model call and the latter
+ *    stores a synthesis row. A read-only token should not be able to do either.
+ *  - `prepare_feedback_attachment_upload` returns a signed upload target —
+ *    handing out write capability is a write.
+ *  - `score_opportunity` persists the score it computes; its sibling
+ *    `get_opportunity_score` only reads one back.
+ */
+const WRITE_TOOLS = [
+  "activate_research_study", "add_assumption", "add_comment", "add_doc_comment",
+  "add_evidence", "add_feedback_attachment", "add_key_result", "add_solution",
+  "add_solution_comment", "add_solution_plan", "add_to_roadmap", "apply_recorded_decision",
+  "approve_solution_plan", "archive_artifact", "archive_research_study",
+  "archive_scoring_model", "assign_squad", "close_decision_no_action", "close_research_study",
+  "conclude_experiment", "create_artifact", "create_checklist_template", "create_doc",
+  "create_doc_version", "create_experiment", "create_feedback", "create_objective",
+  "create_okr_cycle", "create_opportunity", "create_research_study", "create_scoring_model",
+  "create_squad", "create_task", "create_workspace", "delete_assumption", "delete_comment",
+  "delete_doc_comment", "delete_key_result", "delete_objective", "delete_solution_comment",
+  "generate_research_guide", "generate_research_synthesis", "issue_research_link",
+  "link_artifact_to_decision", "link_artifact_to_solution", "link_evidence",
+  "link_feedback_to_opportunity", "link_opportunity_to_kr", "link_task", "log_checkin",
+  "log_experiment_result", "move_task_status", "prepare_feedback_attachment_upload",
+  "promote_feedback_to_roadmap", "promote_research_finding_to_evidence", "promote_to_roadmap",
+  "reject_solution_plan", "reopen_comment", "reopen_doc_comment", "request_decision",
+  "request_release_authorization", "resolve_comment", "resolve_doc_comment",
+  "restore_doc_version", "revoke_research_links", "rotate_research_link", "score_opportunity",
+  "set_custom_field_value", "set_launch_tier", "set_objective_parent_kr",
+  "set_workspace_scoring_model", "unlink_artifact_from_decision",
+  "unlink_artifact_from_solution", "unlink_task", "update_artifact", "update_assumption",
+  "update_comment", "update_doc", "update_doc_comment", "update_experiment", "update_feedback",
+  "update_feedback_status", "update_feedback_type", "update_key_result",
+  "update_launch_checklist_item", "update_objective", "update_opportunity",
+  "update_opportunity_status", "update_research_study", "update_roadmap_item",
+  "update_scoring_model", "update_solution", "update_solution_comment",
+  "update_solution_status", "update_squad", "update_task",
+] as const
+
+export type ToolScope = typeof SCOPE_MCP_READ | typeof SCOPE_MCP_WRITE
+
+export const TOOL_SCOPES: Record<string, ToolScope> = Object.fromEntries([
+  ...READ_TOOLS.map((name) => [name, SCOPE_MCP_READ]),
+  ...WRITE_TOOLS.map((name) => [name, SCOPE_MCP_WRITE]),
+])
+
+/**
+ * The scope a tool call requires. An unclassified name demands `mcp:write` —
+ * the stronger of the two — so a tool added without a classification cannot
+ * slip through on a read-only token. (`applyToolGate` would deny it anyway for
+ * want of a gate; this keeps the scope layer independently fail-closed.)
+ */
+export function requiredToolScope(toolName: string): ToolScope {
+  return TOOL_SCOPES[toolName] ?? SCOPE_MCP_WRITE
+}
+
+/**
+ * Whether a granted scope set satisfies a requirement.
+ *
+ * `mcp:write` implies `mcp:read`. That is a hierarchy, not a shortcut: the
+ * consent screen already describes write as "Create and change **that same**
+ * data", and without the implication a client that requested write alone could
+ * not even complete `initialize` — which is a read — leaving it unable to do
+ * the one thing it was granted.
+ */
+export function scopesSatisfy(granted: readonly string[], required: ToolScope): boolean {
+  if (granted.includes(SCOPE_MCP_WRITE)) return true
+  return required === SCOPE_MCP_READ && granted.includes(SCOPE_MCP_READ)
 }
 
 // Every operation is explicitly classified. Unlisted tools fail closed for agents.

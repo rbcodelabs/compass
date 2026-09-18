@@ -58,8 +58,25 @@ export async function issueAuthorizationCode(
 ): Promise<IssuedAuthorizationCode> {
   const { code, codeHash } = mintAuthorizationCode()
   const expiresAt = new Date(now.getTime() + AUTHORIZATION_CODE_TTL_MS)
+  // Written out field by field, never `{ ...input }`. Both call sites pass a
+  // whole `PendingAuthorizationRequest`, which also carries `state` — a client
+  // value that belongs in the redirect, not in a column. A spread hands that
+  // straight to Prisma, TypeScript's excess-property check does not fire
+  // through a spread, and the result is a runtime `Unknown argument "state"`
+  // that only appears once a real authorization is attempted. Same discipline
+  // as `claimRefreshToken` in lib/oauth/grants.ts, for the same reason.
   await getPrisma().oAuthAuthorizationCode.create({
-    data: { ...input, codeHash, expiresAt },
+    data: {
+      codeHash,
+      expiresAt,
+      clientId: input.clientId,
+      userId: input.userId,
+      redirectUri: input.redirectUri,
+      codeChallenge: input.codeChallenge,
+      codeChallengeMethod: input.codeChallengeMethod,
+      scope: input.scope,
+      resource: input.resource,
+    },
   })
   return { code, expiresAt }
 }

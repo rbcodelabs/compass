@@ -46,6 +46,40 @@ describe("issueAuthorizationCode", () => {
   it("issues a 60-second TTL", () => {
     expect(AUTHORIZATION_CODE_TTL_MS).toBe(60_000)
   })
+
+  /**
+   * Regression. Both real call sites pass a whole `PendingAuthorizationRequest`
+   * — `{ ...pending, userId }` — which also carries `state`. `state` is not a
+   * column, and a spread into `create({ data })` sent it straight to Prisma,
+   * which rejected the whole authorization with `Unknown argument "state"`.
+   *
+   * TypeScript could not catch it (excess-property checking does not fire
+   * through a spread) and neither could the fake store (its `create` accepts
+   * any `data`), so it survived until the integration probe drove a real
+   * authorization. This asserts the column set directly.
+   */
+  it("writes only real columns, ignoring extra fields on the caller's object", async () => {
+    await issueAuthorizationCode({ ...REQUEST, state: "abc123" } as typeof REQUEST)
+
+    const [row] = store.oAuthAuthorizationCode.rows
+    expect(row).not.toHaveProperty("state")
+    expect(Object.keys(row).sort()).toEqual(
+      [
+        "clientId",
+        "codeChallenge",
+        "codeChallengeMethod",
+        "codeHash",
+        "consumedAt",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "redirectUri",
+        "resource",
+        "scope",
+        "userId",
+      ].sort(),
+    )
+  })
 })
 
 describe("claimAuthorizationCode", () => {
