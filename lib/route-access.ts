@@ -5,6 +5,15 @@
  * can be unit tested directly — the proxy.ts middleware itself is wrapped by
  * next-auth's `auth()` helper and isn't easily testable in isolation.
  */
+/**
+ * Note on OAuth: `/oauth/authorize` and `/oauth/consent` are deliberately
+ * **not** listed below. The authorize endpoint's first question is "who is
+ * this?", and it must hit the middleware auth redirect so an anonymous visitor
+ * is sent to `/login` and returned afterward with the query string intact —
+ * `client_id`, `redirect_uri`, `state`, `code_challenge`, `scope` and
+ * `resource` all live there. Making either public would turn the one endpoint
+ * that binds a token to a human into one that runs without a session.
+ */
 export function isPublicPath(pathname: string): boolean {
   return (
     ["/api/preview-automation/bootstrap", "/api/preview-automation/session", "/api/preview-automation/teardown"].includes(pathname) ||
@@ -22,6 +31,19 @@ export function isPublicPath(pathname: string): boolean {
     // MCP route uses Bearer token auth — let it through so the route
     // handler can validate the API key and return 401 (not 302) on failure.
     pathname.startsWith("/api/mcp") ||
+    // OAuth discovery documents (RFC 8414 / RFC 9728 / OIDC Discovery). An MCP
+    // client fetches these before any user exists, so a 302 to /login would
+    // make the server look like it has no authorization server at all.
+    pathname.startsWith("/.well-known/") ||
+    // The OAuth authorization server's machine-to-machine endpoints. Each one
+    // authenticates the *client* (client_id, and a client_secret where the
+    // client registered one) rather than a browser session, and each returns a
+    // proper OAuth error body — a 302 to /login would be unparseable to them.
+    // Registration is unauthenticated by design: it happens before any user is
+    // involved, so there is no session to gate it on (decision 2).
+    pathname === "/api/oauth/token" ||
+    pathname === "/api/oauth/register" ||
+    pathname === "/api/oauth/revoke" ||
     // All admin routes use x-migration-secret header auth
     pathname.startsWith("/api/admin/") ||
     // Public portal routes — no auth, workspace settings control access
