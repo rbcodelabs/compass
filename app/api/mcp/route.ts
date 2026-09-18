@@ -13,7 +13,9 @@ import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, recencySortSchema } from "@/lib/mcp-recency"
 import { runWithMcpActor, getMcpActor } from "@/lib/mcp-authz"
-import { applyToolGate, AGENT_TOOL_POLICY } from "@/lib/mcp-tool-gates"
+import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
+import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
+import { SCOPE_MCP_READ } from "@/lib/oauth/constants"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { withAgentActivity } from "@/lib/agent-activity"
 import { getPmInterviewTool, withInterviewMutation } from "@/lib/pm-agent-service"
@@ -3498,10 +3500,48 @@ const _handler = createMcpHandler(
   }
 )
 
+/**
+ * The token-verification boundary for `/api/mcp`, and the only place the OAuth
+ * challenge is emitted.
+ *
+ * Three responses are possible before the handler is ever reached:
+ *
+ *  - **401** — no token, or a token that does not resolve to an identity. The
+ *    challenge carries `resource_metadata` (so a client can discover the
+ *    authorization server from nothing but this URL) and `scope="mcp:read"` (so
+ *    it asks for the minimum rather than every scope in `scopes_supported`).
+ *  - **403** — a valid OAuth token whose granted scopes do not cover this
+ *    request. `error="insufficient_scope"` plus the scope that would work.
+ *  - otherwise the request proceeds, unchanged from before OAuth existed.
+ *
+ * Scope enforcement applies **only** to OAuth tokens — `auth.scopes` is
+ * undefined for a static `cmp_…` key and for `MCP_API_KEY`, and those keep
+ * exactly the reach they have always had. Nothing here is a deprecation.
+ */
 async function withMcpAuth(req: Request): Promise<Response> {
+  // Read once, before anything consumes it: the scope decision needs the
+  // JSON-RPC method, and the handler needs the body intact. `clone()` tees the
+  // stream so both get a full copy.
+  const scopeCheck = req.method === "POST" ? await requiredScopeForRequest(req) : SCOPE_MCP_READ
+
   const auth = await validateMcpAuth(req)
   if (!auth.valid) {
-    return new Response("Unauthorized", { status: 401, headers: { "WWW-Authenticate": "Bearer" } })
+    return new Response("Unauthorized", {
+      status: 401,
+      headers: { "WWW-Authenticate": bearerChallenge({ scope: SCOPE_MCP_READ }) },
+    })
+  }
+  if (auth.scopes && !scopesSatisfy(auth.scopes, scopeCheck)) {
+    return new Response("Forbidden", {
+      status: 403,
+      headers: {
+        "WWW-Authenticate": bearerChallenge({
+          error: "insufficient_scope",
+          errorDescription: `This request requires the ${scopeCheck} scope.`,
+          scope: scopeCheck,
+        }),
+      },
+    })
   }
   // Carry the acting identity (userId, or null for the shared service key)
   // into every tool via AsyncLocalStorage; the register() wrapper reads it to
@@ -3515,6 +3555,23 @@ async function withMcpAuth(req: Request): Promise<Response> {
     scopeConversationId: auth.scopeConversationId,
     scopeClaimId: auth.scopeClaimId,
   }, () => _handler(req))
+}
+
+/**
+ * The scope this request needs, decided from its JSON-RPC body.
+ *
+ * An unreadable or non-JSON body falls back to `mcp:read`: the transport is
+ * about to reject it with a parse error, so it can neither read nor write
+ * anything, and answering 403 there would be a confusing lie about the cause.
+ * The fail-closed case that does matter — a well-formed `tools/call` naming an
+ * unclassified tool — is handled inside `requiredScopeForPayload`.
+ */
+async function requiredScopeForRequest(req: Request): Promise<ToolScope> {
+  try {
+    return requiredScopeForPayload(await req.clone().json())
+  } catch {
+    return SCOPE_MCP_READ
+  }
 }
 
 export async function GET(req: Request) { return withMcpAuth(req) }

@@ -35,6 +35,7 @@
     "preview:cleanup": "tsx scripts/preview-automation/cleanup.ts",
     "preview:flow": "tsx scripts/preview-automation/lifecycle.ts",
     "preview:probe": "tsx scripts/preview-automation/probe.ts",
+    "oauth:probe": "node scripts/oauth-mcp-probe.ts",
     "e2e:db:prepare": "node scripts/prepare-e2e-database.mjs",
     "e2e:db:verify-clean": "node scripts/verify-e2e-cleanup.mjs",
     "docs:screenshots": "playwright test --project=screenshots e2e/screenshots.spec.ts"

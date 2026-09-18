@@ -2,13 +2,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const apiKey = { findFirst: vi.fn(), update: vi.fn() }
 const agent = { findFirst: vi.fn() }
-vi.mock("@/lib/db", () => ({ default: () => ({ apiKey, agent }) }))
+const oAuthToken = { findFirst: vi.fn(), update: vi.fn() }
+vi.mock("@/lib/db", () => ({ default: () => ({ apiKey, agent, oAuthToken }) }))
 
 import { validateMcpAuth } from "@/lib/mcp-auth"
+import { hashOAuthToken } from "@/lib/oauth/tokens"
 
 function request() {
   return new Request("https://compass.test/api/mcp", {
     headers: { authorization: `Bearer cmp_${"a".repeat(32)}` },
+  })
+}
+
+const OAUTH_TOKEN = `cmp_oat_${"b".repeat(32)}`
+
+function oauthRequest(token = OAUTH_TOKEN) {
+  return new Request("https://compass.test/api/mcp", {
+    headers: { authorization: `Bearer ${token}` },
   })
 }
 
@@ -102,5 +112,91 @@ describe("MCP credential expiry", () => {
     })
     expect(apiKey.findFirst).not.toHaveBeenCalled()
     vi.unstubAllEnvs()
+  })
+})
+
+describe("OAuth access tokens", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    oAuthToken.update.mockResolvedValue({})
+  })
+
+  const row = {
+    id: "token-1",
+    userId: "user-1",
+    scope: "mcp:read mcp:write",
+    scopeWorkspaceId: null,
+  }
+
+  it("resolves to a USER actor carrying the token's scopes", async () => {
+    oAuthToken.findFirst.mockResolvedValue(row)
+    await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({
+      valid: true,
+      userId: "user-1",
+      purpose: "USER",
+      scopeWorkspaceId: null,
+      scopes: ["mcp:read", "mcp:write"],
+    })
+    // Never RESEARCH, never AGENT: purpose is pinned, not read from the row.
+    expect(apiKey.findFirst).not.toHaveBeenCalled()
+  })
+
+  it("filters on the canonical audience, the ACCESS type, revocation and expiry", async () => {
+    oAuthToken.findFirst.mockResolvedValue(row)
+    await validateMcpAuth(oauthRequest())
+    expect(oAuthToken.findFirst).toHaveBeenCalledWith({
+      where: {
+        tokenHash: hashOAuthToken(OAUTH_TOKEN),
+        type: "ACCESS",
+        revokedAt: null,
+        expiresAt: { gt: expect.any(Date) },
+        // The spec's hardest MUST: a token minted for any other audience must
+        // never match, so this predicate cannot be dropped.
+        resource: "http://localhost:3000/api/mcp",
+      },
+      select: { id: true, userId: true, scope: true, scopeWorkspaceId: true },
+    })
+  })
+
+  it("rejects when no row matches, without falling through to the API-key lookup", async () => {
+    oAuthToken.findFirst.mockResolvedValue(null)
+    await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({ valid: false })
+    expect(apiKey.findFirst).not.toHaveBeenCalled()
+  })
+
+  it("records lastUsedAt without blocking the request", async () => {
+    oAuthToken.findFirst.mockResolvedValue(row)
+    await validateMcpAuth(oauthRequest())
+    expect(oAuthToken.update).toHaveBeenCalledWith({
+      where: { id: "token-1" },
+      data: { lastUsedAt: expect.any(Date) },
+    })
+  })
+
+  it("survives a failed lastUsedAt write", async () => {
+    oAuthToken.findFirst.mockResolvedValue(row)
+    oAuthToken.update.mockRejectedValue(new Error("write conflict"))
+    await expect(validateMcpAuth(oauthRequest())).resolves.toMatchObject({ valid: true })
+  })
+
+  it("refuses every OAuth token when the deployment cannot name its own audience", async () => {
+    // VERCEL_ENV=production with no NEXT_PUBLIC_APP_URL makes
+    // trustedCompassBaseUrl() throw — there is no canonical resource to compare
+    // against, so the audience cannot be verified and the token must not act.
+    vi.stubEnv("VERCEL_ENV", "production")
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "")
+    try {
+      await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({ valid: false })
+      expect(oAuthToken.findFirst).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("does not treat a refresh token as a bearer credential", async () => {
+    await expect(validateMcpAuth(oauthRequest(`cmp_ort_${"c".repeat(32)}`))).resolves.toEqual({
+      valid: false,
+    })
+    expect(oAuthToken.findFirst).not.toHaveBeenCalled()
   })
 })

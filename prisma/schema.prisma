@@ -2269,3 +2269,112 @@ model AgentAuditLog {
   @@index([userId, createdAt])
   @@map("agent_audit_log")
 }
+
+// ─── OAuth authorization server (MCP) ─────────────────────────────────────────
+// Compass is its own OAuth 2.1 authorization server for its MCP endpoint —
+// issuer, resource server and identity provider all on one origin. See
+// docs/design/mcp-oauth-discovery.md.
+//
+// DSQL constraints applied throughout:
+//   - UUID PKs via gen_random_uuid()
+//   - No @updatedAt (no triggers on DSQL)
+//   - No FK constraints (relationMode = "prisma"), and deliberately no Prisma
+//     relation fields either: these tables are written by unauthenticated DCR
+//     and by the token endpoint, both of which resolve ids explicitly. Same
+//     shape as AgentAuditLog.
+//   - redirectUris / grantTypes are Json, not Postgres arrays — the schema
+//     already uses Json in several places and it sidesteps an array-type
+//     question on DSQL.
+
+/// One dynamically registered OAuth client (RFC 7591). DCR is the only
+/// registration path, so every row here is dynamic and unverified — expect one
+/// row per Geode install, all named "Agent Threads". `lastUsedAt` is what TTL
+/// pruning keys off.
+model OAuthClient {
+  id                          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId                    String    @unique(map: "idx_oauth_clients_client_id") @map("client_id") @db.VarChar(64)
+  /// Null for public clients, which is every client today (loopback clients
+  /// cannot hold a secret; Geode registers token_endpoint_auth_method "none").
+  clientSecretHash            String?   @map("client_secret_hash") @db.VarChar(64)
+  clientName                  String    @map("client_name") @db.VarChar(255)
+  /// JSON array of registered redirect URIs. Matched by lib/oauth/redirect-uri.ts.
+  redirectUris                Json      @map("redirect_uris")
+  /// JSON array of granted grant types, e.g. ["authorization_code","refresh_token"].
+  grantTypes                  Json      @map("grant_types")
+  scope                       String    @db.VarChar(255)
+  tokenEndpointAuthMethod     String    @map("token_endpoint_auth_method") @db.VarChar(30)
+  logoUri                     String?   @map("logo_uri") @db.Text
+  clientUri                   String?   @map("client_uri") @db.Text
+  softwareId                  String?   @map("software_id") @db.VarChar(255)
+  registrationAccessTokenHash String?   @map("registration_access_token_hash") @db.VarChar(64)
+  createdAt                   DateTime  @default(now()) @map("created_at")
+  lastUsedAt                  DateTime? @map("last_used_at")
+
+  @@index([lastUsedAt], map: "idx_oauth_clients_last_used")
+  @@map("oauth_clients")
+}
+
+/// A single-use authorization code, 60 s TTL. Consumed atomically with a
+/// conditional updateMany on (codeHash, consumedAt: null) — never read-then-write.
+model OAuthAuthorizationCode {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codeHash            String    @unique(map: "idx_oauth_authorization_codes_hash") @map("code_hash") @db.VarChar(64)
+  clientId            String    @map("client_id") @db.VarChar(64)
+  userId              String    @map("user_id") @db.Uuid
+  redirectUri         String    @map("redirect_uri") @db.Text
+  codeChallenge       String    @map("code_challenge") @db.VarChar(128)
+  codeChallengeMethod String    @map("code_challenge_method") @db.VarChar(10)
+  scope               String    @db.VarChar(255)
+  /// RFC 8707 audience. Defaulted to the canonical MCP resource URI when the
+  /// client omits `resource`, which the Geode broker and mcp-remote both do.
+  resource            String    @db.Text
+  expiresAt           DateTime  @map("expires_at")
+  consumedAt          DateTime? @map("consumed_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  @@index([expiresAt], map: "idx_oauth_authorization_codes_expires")
+  @@map("oauth_authorization_codes")
+}
+
+/// An issued access or refresh token, stored only as a SHA-256 hash.
+/// `familyId` + `parentTokenId` carry refresh-rotation lineage so replay of a
+/// rotated refresh token can revoke the whole family (phase 2).
+model OAuthToken {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tokenHash        String    @unique(map: "idx_oauth_tokens_hash") @map("token_hash") @db.VarChar(64)
+  /// "ACCESS" | "REFRESH" — a VarChar, matching every other status-like column
+  /// in this schema (Prisma enums are not used here).
+  type             String    @db.VarChar(10)
+  clientId         String    @map("client_id") @db.VarChar(64)
+  userId           String    @map("user_id") @db.Uuid
+  scope            String    @db.VarChar(255)
+  resource         String    @db.Text
+  /// Null = every workspace the user is a member of, matching the reach of a
+  /// per-user cmp_… API key (decision 1). Reserved for a future workspace
+  /// picker via assertActorWorkspaceScope.
+  scopeWorkspaceId String?   @map("scope_workspace_id") @db.Uuid
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  familyId         String    @map("family_id") @db.Uuid
+  parentTokenId    String?   @map("parent_token_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+  lastUsedAt       DateTime? @map("last_used_at")
+
+  @@index([familyId], map: "idx_oauth_tokens_family")
+  @@index([userId, clientId], map: "idx_oauth_tokens_user_client")
+  @@index([expiresAt], map: "idx_oauth_tokens_expires")
+  @@map("oauth_tokens")
+}
+
+/// A prior grant, so a returning user re-approving the same client with the
+/// same scopes skips the consent screen.
+model OAuthConsent {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  clientId  String   @map("client_id") @db.VarChar(64)
+  scope     String   @db.VarChar(255)
+  grantedAt DateTime @default(now()) @map("granted_at")
+
+  @@unique([userId, clientId], map: "idx_oauth_consents_user_client")
+  @@map("oauth_consents")
+}

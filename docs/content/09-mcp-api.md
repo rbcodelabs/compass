@@ -46,6 +46,94 @@ The MCP endpoint uses **Streamable HTTP transport**, which is compatible with al
 
 ## Authentication
 
+There are two ways to authenticate, and **both are fully supported**. Pick by
+who is connecting, not by which is newer:
+
+| | Connect by URL (OAuth) | API key |
+|---|---|---|
+| Setup | Paste the endpoint URL into your client and approve a consent screen | Generate a key in Settings and paste it into a config file |
+| Acts as | The person who approved it | The key's owner, or the service account |
+| Best for | A person connecting their own AI client | Server-to-server automation, scheduled jobs, anything unattended |
+| Expiry | Access tokens last an hour and refresh automatically | Until you revoke it (or its explicit expiry) |
+
+Nothing here is deprecated. Static `compass_…` API keys and `MCP_API_KEY`
+service-account behavior remain supported indefinitely, and their access is
+unchanged — an OAuth connection is an additional door, not a replacement one.
+
+### Connect by URL (OAuth)
+
+If your client supports OAuth for remote MCP servers — Claude, Geode / Agent
+Threads, Cursor, VS Code — you do not need a key at all. Give it the endpoint
+URL:
+
+```
+https://your-compass-url.vercel.app/api/mcp
+```
+
+The client discovers everything else on its own: it reads the
+`WWW-Authenticate` header on the endpoint's 401, follows it to Compass's
+protected-resource metadata, registers itself, and opens a browser. You sign in
+to Compass as normal (magic link or Google — there is no separate password for
+this), review a consent screen, and approve.
+
+**What you are approving.** The consent screen lists the scopes being granted
+and, by name, every organization and workspace the connection will be able to
+reach. That is deliberate: an OAuth connection carries the same reach a personal
+API key already has — everything you can reach, across every organization you
+belong to — so the screen names it rather than leaving you to assume it means
+one workspace.
+
+If your account still holds a membership in a workspace or organization that has
+since been deleted, the screen says so — "one membership could not be shown" —
+instead of quietly listing one fewer place. A deleted workspace grants no access,
+so nothing reachable is missing from the list; the note is there so you never have
+to wonder whether the list you are approving is the whole list.
+
+Because both the approve and decline buttons stay pinned to the bottom of the
+card, a long list scrolls inside the card rather than pushing the buttons off the
+screen. Scroll the details with the mouse, or with the arrow keys once the detail
+region has keyboard focus.
+
+It also shows the **redirect host** — where the connection will actually be
+handed off — and marks every application as unverified. Compass does not review
+or vouch for applications that connect to it, and any application can pick its
+own display name. The redirect host is the one thing on that screen that cannot
+be faked, so read it: a loopback address (`127.0.0.1`) means software running on
+your own computer, and anything else means the connection is being handed to
+that host.
+
+**Scopes.** Two of them:
+
+| Scope | Grants |
+|---|---|
+| `mcp:read` | Read your opportunities, solutions, roadmap, OKRs, research, feedback and docs |
+| `mcp:write` | Create and change that same data on your behalf |
+
+A client may also request `offline_access`, which lets it stay connected without
+sending you back through sign-in every hour. Compass issues a refresh token for
+every approved connection regardless, because several clients depend on refresh
+to recover from an expired token without prompting you.
+
+Within those scopes, an OAuth connection is subject to **exactly the same
+per-tool authorization as any other credential**. A scope never widens what you
+can reach; it only narrows what the client may do with the access you already
+have. A read-only connection calling a tool that writes gets an explicit
+"insufficient scope" refusal rather than a silent failure.
+
+**Endpoints**, if you are implementing a client by hand:
+
+| Document | URL |
+|---|---|
+| Protected resource metadata | `/.well-known/oauth-protected-resource/api/mcp` (also served at `/.well-known/oauth-protected-resource`) |
+| Authorization server metadata | `/.well-known/oauth-authorization-server` (also served at `/.well-known/openid-configuration`) |
+
+PKCE with `S256` is required, client registration is dynamic (RFC 7591), and
+tokens are revocable at the advertised revocation endpoint. See
+[ADR 0014](https://github.com/rbcodelabs/compass/blob/main/docs/decisions/0014-compass-is-its-own-oauth-authorization-server.md)
+for why Compass issues its own tokens rather than delegating to Google.
+
+### API key
+
 Generate an API key from **Settings → API Keys**. Pass it as a Bearer token in the `Authorization` header:
 
 ```http
@@ -564,6 +652,15 @@ comment instead of rewriting one under someone else's name or approval badge.
 Personal and service credential behavior is unchanged.
 
 ## Example: Connecting Claude Desktop
+
+**If your client can connect by URL**, prefer that — add Compass as a remote MCP
+server with the URL `https://your-compass-url.vercel.app/api/mcp` and approve the
+consent screen. There is no config file to edit and no secret to paste. See
+[Connect by URL (OAuth)](#connect-by-url-oauth) above.
+
+The `mcp-remote` recipe below remains fully supported and is the right choice
+when you want a fixed, long-lived credential — an unattended job, a shared
+service account, or a client without OAuth support.
 
 Add this to your Claude Desktop `claude_desktop_config.json`:
 
