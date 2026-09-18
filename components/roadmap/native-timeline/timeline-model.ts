@@ -1,4 +1,4 @@
-import { HORIZON_META, HORIZON_ORDER } from "@/lib/roadmap";
+import { HORIZON_META, getInternalBoardHorizons, internalBucketFor } from "@/lib/roadmap";
 import type { Horizon, SelectOption } from "@/lib/types";
 import {
   addCalendarDays,
@@ -91,23 +91,32 @@ export const NO_SQUAD_GROUP_ID = "no-squad";
 export const NO_FIELD_VALUE_GROUP_ID = "no-value";
 
 /**
- * The default, and today's only, grouping: header rows are the roadmap
- * horizons in `HORIZON_ORDER`, and every header's secondary lanes are the
- * workspace's squads. `buildTimelineRows(squads)` (no grouping argument)
- * uses this, which is what keeps the default path byte-identical to the
- * pre-generalization implementation.
+ * The default, and today's only *unconfigured*, grouping: header rows are the
+ * workspace's internal-board horizons (`getInternalBoardHorizons`), and every
+ * header's secondary lanes are the workspace's squads. When
+ * `launchWorkflowEnabled` is false, LAUNCHING/LAUNCHED never appear as their
+ * own headers and any item still sitting in one of those horizons folds into
+ * the SHIPPED header instead (`internalBucketFor`) — the same treatment the
+ * internal board and public portal already give that case.
+ * `buildTimelineRows(squads)` (no grouping argument) uses
+ * `PHASE_GROUPING` (`launchWorkflowEnabled: true`), which is what keeps the
+ * default path byte-identical to the pre-generalization implementation.
  */
-export const PHASE_GROUPING: TimelineGrouping = {
-  primaryGroups: HORIZON_ORDER.map((horizon) => ({
-    id: horizon,
-    label: HORIZON_META[horizon].label,
-    color: HORIZON_META[horizon].color,
-    horizon,
-  })),
-  squadIsPrimary: false,
-  primaryOf: (item) => item.horizon,
-  axisLabel: "Horizon → Squad",
-};
+export function buildPhaseGrouping(launchWorkflowEnabled: boolean): TimelineGrouping {
+  return {
+    primaryGroups: getInternalBoardHorizons(launchWorkflowEnabled).map((horizon) => ({
+      id: horizon,
+      label: HORIZON_META[horizon].label,
+      color: HORIZON_META[horizon].color,
+      horizon,
+    })),
+    squadIsPrimary: false,
+    primaryOf: (item) => internalBucketFor(item.horizon, launchWorkflowEnabled),
+    axisLabel: "Horizon → Squad",
+  };
+}
+
+export const PHASE_GROUPING: TimelineGrouping = buildPhaseGrouping(true);
 
 /** Squad grouping: one header + single lane per squad, plus a trailing "No squad" group. No secondary axis. */
 export function buildSquadGrouping(squads: Array<{ id: string; name: string; color: string }>): TimelineGrouping {

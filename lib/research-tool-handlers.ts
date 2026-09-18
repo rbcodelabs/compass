@@ -41,7 +41,13 @@ export async function generateResearchGuideTool(input: Scope & { studyType: Rese
   return invoke(async actor => ok("Editable research guide generated; review before creating a study.", { guide: await studies.generateResearchGuide({ workspaceId: input.workspaceId }, actor, { ...input, appUrl: input.appUrl ?? "" }, deadline) }))
 }
 export async function createResearchStudyTool(input: Scope & studies.ResearchStudyInput) {
-  return invoke(async actor => mutation("Research study created.", await studies.createResearchStudy({ workspaceId: input.workspaceId }, actor, input)))
+  return invoke(async actor => {
+    const result = await studies.createResearchStudy({ workspaceId: input.workspaceId }, actor, input)
+    const message = result.status === "DRAFT"
+      ? "Research study staged in DRAFT; no participant link issued. Protocol fields remain editable — call activate_research_study when ready to launch it."
+      : "Research study created."
+    return mutation(message, result)
+  })
 }
 export async function updateResearchStudyTool(input: Study & studies.ResearchStudyInput) {
   return invoke(async actor => mutation("Research study updated. Protocol fields remain locked after the first session.", await studies.updateResearchStudy({ workspaceId: input.workspaceId }, actor, input.studyId, input)))

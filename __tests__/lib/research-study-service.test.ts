@@ -112,8 +112,22 @@ describe("shared research study service", () => {
     const result = await createResearchStudy(scope, actor, { name: "Study", goal: "Goal", guide: ["Question"] })
     expect(result.id).toBeTruthy()
     expect(result.token).toBeTruthy()
+    expect(result.status).toBe("ACTIVE")
     expect(m.create.mock.calls[0][0].data.status).toBe("ACTIVE")
     expect(result).not.toHaveProperty("tokenHash")
+  })
+  it("stages a draft study without issuing a participant link", async () => {
+    const result = await createResearchStudy(scope, actor, { name: "Study", goal: "Goal", guide: ["Question"], status: "DRAFT" })
+    expect(result.id).toBeTruthy()
+    expect(result.status).toBe("DRAFT")
+    expect(result).not.toHaveProperty("token")
+    expect(m.create.mock.calls[0][0].data.status).toBe("DRAFT")
+    expect(m.issue).not.toHaveBeenCalled()
+  })
+  it("rejects an unsupported initial status", async () => {
+    await expect(createResearchStudy(scope, actor, { name: "Study", goal: "Goal", guide: ["Question"], status: "CLOSED" as never }))
+      .rejects.toThrow(/status/i)
+    expect(m.create).not.toHaveBeenCalled()
   })
 
   describe("artifact-backed usability tests", () => {

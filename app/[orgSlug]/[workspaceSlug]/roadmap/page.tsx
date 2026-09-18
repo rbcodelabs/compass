@@ -310,6 +310,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
             groupByField={resolvedGroupBy.mode === "customField" ? { id: resolvedGroupBy.field.id, name: resolvedGroupBy.field.name, options: resolvedGroupBy.field.options ?? [] } : undefined}
             customFieldValuesByItemId={customFieldValuesByItemId}
             groupByOptions={groupByOptions}
+            launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
           />
         </Suspense>
       ) : (
@@ -336,6 +337,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
               squads={squads}
               nowLimit={workspace.nowLimit}
               nextLimit={workspace.nextLimit}
+              launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
             />
           </div>
         </div>

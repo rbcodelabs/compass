@@ -25,6 +25,7 @@ import {
   addCalendarDays,
   addCalendarMonths,
   buildCustomFieldGrouping,
+  buildPhaseGrouping,
   buildSquadGrouping,
   buildTimelineRows,
   calculateTimelineRenderWindow,
@@ -34,7 +35,6 @@ import {
   isInternalTimelineDestination,
   NATIVE_BACKLOG_HORIZONS,
   NONE_GROUPING,
-  PHASE_GROUPING,
   pointerClientToCanvasPosition,
   positionToInclusiveDate,
   resizeRange,
@@ -87,12 +87,13 @@ export function NativeTimeline(props: TimelineEngineProps & {
     initialUnscheduled: props.unscheduledItems,
     workspaceId: props.workspaceId,
   });
+  const launchWorkflowEnabled = props.launchWorkflowEnabled ?? true;
   const grouping: TimelineGrouping = useMemo(() => {
     if (props.groupBy === "squad") return buildSquadGrouping(props.squads);
     if (props.groupBy === "none") return NONE_GROUPING;
     if (props.groupBy === "customField" && props.groupByField) return buildCustomFieldGrouping(props.groupByField, props.customFieldValuesByItemId ?? {});
-    return PHASE_GROUPING;
-  }, [props.groupBy, props.groupByField, props.customFieldValuesByItemId, props.squads]);
+    return buildPhaseGrouping(launchWorkflowEnabled);
+  }, [props.groupBy, props.groupByField, props.customFieldValuesByItemId, props.squads, launchWorkflowEnabled]);
   const rows = useMemo(() => buildTimelineRows(props.squads, grouping), [props.squads, grouping]);
   // The value the header's grouping Select should show as selected — the
   // active custom field's id in "customField" mode, else the mode literal.

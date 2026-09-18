@@ -315,6 +315,7 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
       // positioning brief, if either exists. `horizon` is already a scalar.
       launchChecklist: { include: { items: { orderBy: { order: "asc" } } } },
       positioningBrief: { select: { id: true, title: true } },
+      workspace: { select: { launchWorkflowEnabled: true } },
       _count: { select: { votes: true } },
     },
   });
@@ -327,7 +328,15 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
     loadCustomFieldsForObject(prisma, { workspaceId, objectType: "ROADMAP_ITEM", objectId: id }),
   ]);
 
-  return { ...item, ...linkedTasks, customFields };
+  const { workspace, ...rest } = item;
+  return {
+    ...rest,
+    ...linkedTasks,
+    customFields,
+    // Flattened onto the panel payload so the client doesn't need a second
+    // fetch just to know whether to render the Launch section.
+    launchWorkflowEnabled: workspace.launchWorkflowEnabled ?? false,
+  };
 }
 
 async function fetchFeedback(id: string, workspaceId: string) {

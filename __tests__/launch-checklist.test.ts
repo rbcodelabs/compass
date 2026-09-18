@@ -18,6 +18,7 @@ const mockLaunchChecklistItem = {
   findUnique: vi.fn(),
   update: vi.fn(),
 };
+const mockWorkspace = { findUnique: vi.fn() };
 
 const mockPrisma = {
   roadmapItem: mockRoadmapItem,
@@ -27,6 +28,7 @@ const mockPrisma = {
   launchChecklistItem: mockLaunchChecklistItem,
   portfolioCapacityReservation: mockCapacityReservation,
   portfolioCapacityPlan: mockCapacityPlan,
+  workspace: mockWorkspace,
   // Array-form $transaction, matching the real client's behaviour when passed
   // an array of operations (not the interactive-callback form).
   $transaction: vi.fn(),
@@ -39,6 +41,8 @@ import {
   setLaunchTierCore,
   updateChecklistItemCore,
   checklistProgress,
+  assertLaunchWorkflowEnabled,
+  LAUNCH_WORKFLOW_DISABLED_MESSAGE,
   type ResolvedTemplate,
 } from "@/lib/launch-checklist";
 import { DEFAULT_CHECKLIST_TEMPLATES } from "@/lib/launch-defaults";
@@ -56,6 +60,28 @@ beforeEach(() => {
   mockLaunchChecklistItem.createMany.mockResolvedValue({ count: 0 });
   mockChecklistTemplateItem.createMany.mockResolvedValue({ count: 0 });
   mockRoadmapItem.update.mockResolvedValue({ id: ITEM_ID, horizon: "LAUNCHING" });
+  // Default every test to a workspace with the launch workflow turned on —
+  // the specific "disabled" behavior gets its own describe block below.
+  mockWorkspace.findUnique.mockResolvedValue({ launchWorkflowEnabled: true });
+});
+
+// ─── assertLaunchWorkflowEnabled ─────────────────────────────────────────────
+
+describe("assertLaunchWorkflowEnabled", () => {
+  it("resolves when the workspace has the launch workflow on", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: true });
+    await expect(assertLaunchWorkflowEnabled(WORKSPACE_ID)).resolves.toBeUndefined();
+  });
+
+  it("throws the shared disabled-feature message when off", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    await expect(assertLaunchWorkflowEnabled(WORKSPACE_ID)).rejects.toThrow(LAUNCH_WORKFLOW_DISABLED_MESSAGE);
+  });
+
+  it("throws when the workspace has never set the flag (null)", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: null });
+    await expect(assertLaunchWorkflowEnabled(WORKSPACE_ID)).rejects.toThrow(LAUNCH_WORKFLOW_DISABLED_MESSAGE);
+  });
 });
 
 // ─── resolveOrSeedTemplate ───────────────────────────────────────────────────
@@ -163,7 +189,7 @@ describe("setLaunchTierCore", () => {
       return Promise.resolve({ id: ITEM_ID, horizon: "LAUNCHING" });
     });
 
-    const result = await setLaunchTierCore(ITEM_ID, "TIER_1", template);
+    const result = await setLaunchTierCore(ITEM_ID, "TIER_1", template, WORKSPACE_ID);
 
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
     expect(typeof mockPrisma.$transaction.mock.calls[0][0]).toBe("function");
@@ -176,7 +202,7 @@ describe("setLaunchTierCore", () => {
   });
 
   it("flips the roadmap item to LAUNCHING and sets updatedAt", async () => {
-    await setLaunchTierCore(ITEM_ID, "TIER_1", template);
+    await setLaunchTierCore(ITEM_ID, "TIER_1", template, WORKSPACE_ID);
     const args = mockRoadmapItem.update.mock.calls[0][0];
     expect(args.where).toEqual({ id: ITEM_ID });
     expect(args.data.horizon).toBe("LAUNCHING");
@@ -184,13 +210,22 @@ describe("setLaunchTierCore", () => {
   });
 
   it("persists a template snapshot on the checklist row", async () => {
-    await setLaunchTierCore(ITEM_ID, "TIER_1", template);
+    await setLaunchTierCore(ITEM_ID, "TIER_1", template, WORKSPACE_ID);
     const data = mockLaunchChecklist.create.mock.calls[0][0].data;
     expect(data.roadmapItemId).toBe(ITEM_ID);
     expect(data.tier).toBe("TIER_1");
     const snapshot = JSON.parse(data.templateSnapshot);
     expect(snapshot.templateId).toBe(TEMPLATE_ID);
     expect(snapshot.items).toHaveLength(2);
+  });
+
+  it("rejects with the disabled-feature message and writes nothing when the workspace has the launch workflow off", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    await expect(setLaunchTierCore(ITEM_ID, "TIER_1", template, WORKSPACE_ID)).rejects.toThrow(
+      LAUNCH_WORKFLOW_DISABLED_MESSAGE
+    );
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockLaunchChecklist.create).not.toHaveBeenCalled();
   });
 });
 

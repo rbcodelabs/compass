@@ -26,6 +26,13 @@ export type TimelineEngineProps = {
   squads: Array<{ id: string; name: string; color: string }>;
   workspaceId: string;
   unscheduledItems: import("../unscheduled-items-panel").UnscheduledItem[];
+  // Gates the LAUNCHING/LAUNCHED horizon rows. Any item still in a launch
+  // horizon while this is off folds into the SHIPPED row rather than
+  // disappearing — see internalBucketFor in lib/roadmap.ts. Optional and
+  // defaults to true (today's unrestricted behavior) so existing tests that
+  // don't pass it are unaffected; real page call sites always pass the
+  // workspace's actual flag explicitly.
+  launchWorkflowEnabled?: boolean;
 };
 
 export function TimelineToolbar({

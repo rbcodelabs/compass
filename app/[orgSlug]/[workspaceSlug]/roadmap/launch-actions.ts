@@ -17,6 +17,7 @@ import {
   resolveOrSeedTemplate,
   setLaunchTierCore,
   updateChecklistItemCore,
+  assertLaunchWorkflowEnabled,
 } from "@/lib/launch-checklist";
 
 /**
@@ -48,7 +49,7 @@ export async function setLaunchTier(
   }
 
   const template = await resolveOrSeedTemplate(workspaceId, tier);
-  await setLaunchTierCore(item.id, tier, template);
+  await setLaunchTierCore(item.id, tier, template, workspaceId);
 
   const updated = await prisma.roadmapItem.findUniqueOrThrow({
     where: { id: item.id },
@@ -83,6 +84,7 @@ export async function updateLaunchChecklistItem(
     select: { id: true },
   });
   if (!owned) throw new Error("Checklist item not found");
+  await assertLaunchWorkflowEnabled(workspaceId);
 
   await updateChecklistItemCore(itemId, status);
 

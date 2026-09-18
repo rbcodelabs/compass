@@ -100,6 +100,29 @@ export function isLaunchHorizon(horizon: string): horizon is "LAUNCHING" | "LAUN
 }
 
 /**
+ * The internal roadmap board's columns for a workspace, gated by
+ * `Workspace.launchWorkflowEnabled`. When the marketing-launch workflow is
+ * off, LAUNCHING/LAUNCHED never render as their own columns — any item still
+ * sitting in one of those horizons instead folds into SHIPPED (see
+ * `internalBucketFor`), the same treatment the public portal already gives
+ * LAUNCHED (`portalBucketFor`).
+ */
+export function getInternalBoardHorizons(launchWorkflowEnabled: boolean): Horizon[] {
+  return launchWorkflowEnabled ? INTERNAL_BOARD_HORIZONS : INTERNAL_BOARD_HORIZONS.filter((h) => !isLaunchHorizon(h));
+}
+
+/**
+ * Which internal board column a stored horizon should display under. Unlike
+ * `portalBucketFor` (which keeps LAUNCHING as its own public column and only
+ * folds LAUNCHED), disabling the launch workflow hides both launch horizons
+ * from the internal board, so both fold into SHIPPED.
+ */
+export function internalBucketFor(horizon: string, launchWorkflowEnabled: boolean): Horizon {
+  if (!launchWorkflowEnabled && isLaunchHorizon(horizon)) return "SHIPPED";
+  return horizon as Horizon;
+}
+
+/**
  * Horizons a user may set directly — via a manual drag between columns or the
  * generic single-field panel edit. LAUNCHING is intentionally excluded (only
  * `setLaunchTier` may enter it, so the checklist-creation transaction can't be
