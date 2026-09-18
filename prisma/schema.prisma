@@ -137,6 +137,12 @@ model Workspace {
   description          String?                 @db.Text
   feedbackEnabled      Boolean?                @default(false) @map("feedback_enabled")
   roadmapPublic        Boolean?                @default(false) @map("roadmap_public")
+  // WIP limits for the NOW/NEXT roadmap columns — purely visual/advisory
+  // (see docs/decisions/0005 and 0006, which retired the old runtime
+  // enforcement machinery). Null means "no limit set"; there is
+  // deliberately no default limit.
+  nowLimit             Int?                    @map("now_limit")
+  nextLimit            Int?                    @map("next_limit")
   portalAuthRequired   Boolean?                @default(false) @map("portal_auth_required")
   brandingPaletteId    String?                 @map("branding_palette_id") @db.VarChar(50)
   brandingPrimaryHex   String?                 @map("branding_primary_hex") @db.VarChar(7)

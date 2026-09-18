@@ -27,6 +27,8 @@ const mockPrisma = {
   researchStudy: { findUnique: vi.fn() },
   agent: { findFirst: vi.fn() },
   agentWorkspaceGrant: { findMany: vi.fn() },
+  task: { findUnique: vi.fn() },
+  customFieldDefinition: { findMany: vi.fn(), findUnique: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
@@ -300,6 +302,43 @@ describe("applyToolGate", () => {
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
     await expect(applyToolGate(tool, MEMBER, { feedbackId: "feedback-1" }))
       .rejects.toThrow(/not found or access denied/)
+  })
+
+  describe("custom field tools", () => {
+    it("list_custom_field_definitions is workspace-member gated", async () => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate("list_custom_field_definitions", MEMBER, { workspaceId: "ws-1" }))
+        .rejects.toThrow(/not found or access denied/)
+    })
+
+    it.each(["get_custom_field_values", "set_custom_field_value"])(
+      "%s denies a non-member of the object's workspace",
+      async (tool) => {
+        mockPrisma.task.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+        mockPrisma.workspace.findFirst.mockResolvedValue(null)
+        await expect(
+          applyToolGate(tool, MEMBER, { objectType: "TASK", objectId: "task-1", fieldId: "field-1", value: "x" })
+        ).rejects.toThrow(/not found or access denied/)
+      }
+    )
+
+    it.each(["get_custom_field_values", "set_custom_field_value"])(
+      "%s rejects an unknown objectType before touching the database",
+      async (tool) => {
+        await expect(
+          applyToolGate(tool, MEMBER, { objectType: "NOT_A_TYPE", objectId: "task-1", fieldId: "field-1", value: "x" })
+        ).rejects.toThrow(/Unknown objectType/)
+        expect(mockPrisma.task.findUnique).not.toHaveBeenCalled()
+      }
+    )
+
+    it("set_custom_field_value allows a member and reaches the handler's own field-level checks", async () => {
+      mockPrisma.task.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      await expect(
+        applyToolGate("set_custom_field_value", MEMBER, { objectType: "TASK", objectId: "task-1", fieldId: "field-1", value: "x" })
+      ).resolves.toBeUndefined()
+    })
   })
 })
 

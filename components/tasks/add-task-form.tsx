@@ -76,7 +76,7 @@ export function AddTaskForm({ workspaceId, status, revalidatePathStr, members, o
     return (
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 w-full rounded-lg px-2.5 py-2 text-xs font-medium text-text-subtle hover:text-indigo-600 hover:bg-surface-panel/70 transition-all duration-150"
+        className="flex items-center gap-1.5 w-full rounded-lg px-2.5 py-2 text-xs font-medium text-text-subtle hover:text-primary hover:bg-surface-panel/70 transition-all duration-150"
       >
         <PlusIcon className="w-3.5 h-3.5" />
         Add task

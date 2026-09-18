@@ -139,7 +139,7 @@ export function FeedbackPanel({
                 href={a.url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-sm text-indigo-600 hover:underline truncate"
+                className="text-sm text-primary hover:underline truncate"
               >
                 {a.filename}
               </a>

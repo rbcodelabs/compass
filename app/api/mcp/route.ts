@@ -143,6 +143,11 @@ import {
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
 import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
+import {
+  listCustomFieldDefinitions,
+  getCustomFieldValues,
+  setCustomFieldValue,
+} from "@/lib/custom-field-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -2369,6 +2374,81 @@ const _handler = createMcpHandler(
           { objectType, objectId, squadId },
         )
       }
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // CUSTOM FIELDS
+    // ════════════════════════════════════════════════════════════════
+    // Definitions (and SharedFieldOptionSets) remain UI-only — created and
+    // edited exclusively in Settings → Custom Fields. These three tools only
+    // read definitions and read/write an object's values. See
+    // docs/decisions/0013-custom-field-value-mcp-management.md.
+
+    const customFieldObjectTypeSchema = z.enum([
+      "OPPORTUNITY",
+      "SOLUTION",
+      "EXPERIMENT",
+      "OBJECTIVE",
+      "KEY_RESULT",
+      "ROADMAP_ITEM",
+      "TASK",
+    ])
+
+    register(
+      "list_custom_field_definitions",
+      {
+        title: "List Custom Field Definitions",
+        description:
+          "Lists a workspace's custom field definitions, optionally filtered to one object type. Each definition " +
+          "includes its field type (TEXT, NUMBER, DATE, URL, BOOLEAN, SELECT, or MULTI_SELECT), whether it's " +
+          "required, and — for SELECT/MULTI_SELECT — its effective options, including any inherited from a shared " +
+          "option set. Definitions themselves are managed only in Settings → Custom Fields; this tool is read-only.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          objectType: customFieldObjectTypeSchema.optional().describe("Filter to definitions for this object type only"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listCustomFieldDefinitions
+    )
+
+    register(
+      "get_custom_field_values",
+      {
+        title: "Get Custom Field Values",
+        description:
+          "Reads every custom field defined for an object's type, paired with that specific object's current " +
+          "value (or unset). objectType must match the object's actual entity type.",
+        inputSchema: {
+          objectType: customFieldObjectTypeSchema.describe("The object's entity type"),
+          objectId: z.string().uuid().describe("UUID of the object"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getCustomFieldValues
+    )
+
+    register(
+      "set_custom_field_value",
+      {
+        title: "Set Custom Field Value",
+        description:
+          "Sets or clears one custom field's value on an object. Pass value: null (or an empty string or empty " +
+          "array) to clear the field, matching the Settings UI's own clearing behavior. The value is validated " +
+          "against the field's declared type — a SELECT value must be one of the field's currently defined " +
+          "options, and a MULTI_SELECT value must be an array where every entry is one of those options. Rejects " +
+          "a fieldId that belongs to a different object type, or to a different workspace, than the target object.",
+        inputSchema: {
+          objectType: customFieldObjectTypeSchema.describe("The object's entity type"),
+          objectId: z.string().uuid().describe("UUID of the object"),
+          fieldId: z.string().uuid().describe("UUID of the custom field definition"),
+          value: z
+            .union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()])
+            .describe("New value, matching the field's type; null (or empty string/array) clears it"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      setCustomFieldValue
     )
 
     // ════════════════════════════════════════════════════════════════
