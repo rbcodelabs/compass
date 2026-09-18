@@ -192,6 +192,22 @@ describe("createTask", () => {
     expect(text).not.toContain("**ID:**")
   })
 
+  it("appends a deeplink to the task's own page when workspace slugs resolve", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ id: WORKSPACE_ID, slug: "compass", organization: { slug: "rbcodelabs" } })
+
+    const result = await createTask({ workspaceId: WORKSPACE_ID, title: "Ship payments" })
+
+    expect(textOf(result)).toContain(`URL: http://localhost:3000/rbcodelabs/compass/tasks/${TASK_ID}`)
+  })
+
+  it("still creates the task, with no URL line, when workspace slugs are unavailable", async () => {
+    const result = await createTask({ workspaceId: WORKSPACE_ID, title: "Ship payments" })
+
+    expect(mockTask.create).toHaveBeenCalled()
+    expect(textOf(result)).toContain(`ID: ${TASK_ID}`)
+    expect(textOf(result)).not.toContain("URL:")
+  })
+
   it("places the task after the last item in its status column", async () => {
     mockTask.findFirst.mockResolvedValueOnce({ sortOrder: 4 })
     await createTask({ workspaceId: WORKSPACE_ID, title: "Task X", status: "IN_PROGRESS" })

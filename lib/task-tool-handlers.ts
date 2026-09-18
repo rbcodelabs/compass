@@ -12,6 +12,7 @@
  */
 
 import getPrisma from "@/lib/db"
+import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types"
@@ -122,7 +123,12 @@ export async function createTask({
 }) {
   const prisma = getPrisma()
 
-  const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } })
+  // Slugs ride along on the existence check this handler already performs, so
+  // the deeplink below adds no query.
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { id: true, slug: true, organization: { select: { slug: true } } },
+  })
   if (!workspace) {
     return fail(`Workspace "${workspaceId}" not found.`)
   }
@@ -172,10 +178,18 @@ export async function createTask({
   })
 
   return ok(
-    `**Task created:** ${task.title}\n` +
-      `Status: ${task.status}\n` +
-      `Priority: ${task.priority}\n` +
-      `ID: ${task.id}`,
+    withUrlLine(
+      `**Task created:** ${task.title}\n` +
+        `Status: ${task.status}\n` +
+        `Priority: ${task.priority}\n` +
+        `ID: ${task.id}`,
+      safeEntityUrl({
+        orgSlug: workspace.organization?.slug,
+        workspaceSlug: workspace.slug,
+        type: "task",
+        id: task.id,
+      }),
+    ),
     (await resolveTaskAssignees(workspaceId, [task]))[0],
   )
 }

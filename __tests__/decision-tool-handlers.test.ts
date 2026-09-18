@@ -186,11 +186,11 @@ describe("decision review deep links", () => {
     expect((result.structuredContent.data as { reviewUrl: string | null }).reviewUrl).toBeNull()
   })
 
-  it("still reports a prepared review as successful when the deployment origin is untrusted", async () => {
-    // trustedCompassBaseUrl() throws here. The review WAS created, so reporting a
-    // failure would be a lie that makes the agent retry an already-durable gate.
+  it("still reports a prepared review as successful when the deployment origin is unconfigured", async () => {
+    // Missing config only. The review WAS created, so reporting a failure would
+    // be a lie that makes the agent retry an already-durable gate.
     process.env.VERCEL_ENV = "production"
-    process.env.NEXT_PUBLIC_APP_URL = "http://evil.example.com"
+    delete process.env.NEXT_PUBLIC_APP_URL
     mockPrepareRelease.mockResolvedValue({ status: "READY", releaseRunId: "run-1", requestId: "request-1", revisionId: "revision-1" })
 
     const result = await requestReleaseAuthorization({
@@ -204,5 +204,43 @@ describe("decision review deep links", () => {
     expect(result.content[0].text).toContain("request-1")
     expect(result.content[0].text).not.toContain("URL:")
     expect((result.structuredContent.data as { reviewUrl: string | null }).reviewUrl).toBeNull()
+  })
+
+  // Regression: buildReviewUrl used a bare `catch { return null }`, which
+  // swallowed an *unsafe configured* origin (non-HTTPS, credentials, malformed)
+  // exactly as if the origin were merely absent. lib/compass-url.ts's contract
+  // is explicit that only CompassUrlNotConfiguredError may degrade to a null
+  // link — a bad configured origin must abort, the same way every feedback
+  // mutation already does (see "feedback mutation safety").
+  it.each([
+    ["a single review request", () => getReviewRequest({ requestId: "request-1" })],
+    ["a listed page of review requests", () => listReviewRequests({ workspaceId: "workspace-1" })],
+  ])("propagates an unsafe configured origin instead of silently dropping the link on %s", async (_name, invoke) => {
+    process.env.VERCEL_ENV = "production"
+    process.env.NEXT_PUBLIC_APP_URL = "http://evil.example.com"
+    mockFindRequest.mockResolvedValue({ id: "request-1", workspaceId: "workspace-1", state: "PENDING", gateType: "TRACKED_DECISION", subjectType: "TRACKED_DECISION", subjectId: "key-1" })
+    mockListRequests.mockResolvedValue([{ id: "request-1", state: "PENDING", subjectId: "item-1", currentRevision: { title: "Commit item", fingerprint: "abc" } }])
+
+    await expect(invoke()).rejects.toThrow(/HTTPS|invalid/i)
+  })
+
+  // requestReleaseAuthorization wraps its whole body in a try/catch that turns
+  // any throw into a failed tool result, so the unsafe origin surfaces there as
+  // a loud `ok: false` carrying the misconfiguration message rather than as a
+  // rejection — either way it is no longer swallowed into a missing link.
+  it("surfaces an unsafe configured origin as a failed release authorization result", async () => {
+    process.env.VERCEL_ENV = "production"
+    process.env.NEXT_PUBLIC_APP_URL = "http://evil.example.com"
+    mockPrepareRelease.mockResolvedValue({ status: "READY", releaseRunId: "run-1", requestId: "request-1", revisionId: "revision-1" })
+
+    const result = await requestReleaseAuthorization({
+      workspaceId: "workspace-1", provider: "GITHUB", repositoryOwner: "rbcodelabs",
+      repositoryName: "compass", pullRequestNumber: 42, baseRef: "main",
+      headSha: "a".repeat(40), targetEnvironment: "PRODUCTION",
+      releasePolicyId: "release-policy-v1", taskIds: ["task-1"],
+    })
+
+    expect(result.structuredContent.ok).toBe(false)
+    expect(result.content[0].text).toMatch(/HTTPS|invalid/i)
   })
 })
