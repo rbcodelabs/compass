@@ -299,6 +299,18 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 | `unlink_task` | Remove a link between a Task and another Compass object |
 | `list_task_links` | List all links for a Task, grouped by linked object type with resolved titles |
 
+### Custom Fields
+
+Custom fields let a workspace tag Opportunities, Solutions, Experiments, Objectives, Key Results, Roadmap Items, or Tasks with admin-defined attributes (TEXT, NUMBER, DATE, URL, BOOLEAN, or a single/multi picklist SELECT/MULTI_SELECT). Field definitions and shared option sets are created and edited in Settings → Custom Fields; MCP can read definitions and read/write an object's values, but cannot create, edit, or delete a definition or option set.
+
+| Tool | Description |
+|---|---|
+| `list_custom_field_definitions` | List a workspace's custom field definitions, optionally filtered to one object type; includes each field's type, whether it's required, and its effective options for SELECT/MULTI_SELECT (including options inherited from a shared option set) |
+| `get_custom_field_values` | Read every custom field defined for an object's type, paired with that specific object's current value (or empty) |
+| `set_custom_field_value` | Set or clear one custom field's value on an object |
+
+Passing `null` (or an empty string or empty array) to `set_custom_field_value` clears the field, matching the Settings UI's own clearing behavior. The value is validated against the field's type — a SELECT/MULTI_SELECT value must be one of the field's currently defined options. The tool also rejects a `fieldId` that belongs to a different object type, or to a different workspace, than the target object.
+
 ### Feedback
 
 | Tool | Description |
