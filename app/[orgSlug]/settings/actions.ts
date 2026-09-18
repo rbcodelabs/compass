@@ -5,6 +5,8 @@ import { isPermissionError, resolveOrgAdmin } from "@/lib/permissions";
 import { findMetricConfigIssues, type MetricConfigIssue } from "@/lib/scoring";
 import type { ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
+import { SLUG_PATTERN } from "@/lib/slug";
+import { createWorkspaceInOrg } from "@/lib/workspace-service";
 
 export interface ScoringMetricInput {
   key: string;
@@ -48,6 +50,14 @@ export type DeleteOrganizationResult =
   | { ok: true; redirectTo: string }
   | { ok: false; error: string };
 
+export type CreateWorkspaceResult =
+  | {
+      ok: true;
+      workspace: { id: string; name: string; slug: string; description: string | null };
+      redirectTo: string;
+    }
+  | { ok: false; error: string };
+
 /** Prisma unique-constraint violation. */
 function isUniqueConstraintError(error: unknown): boolean {
   return (
@@ -85,6 +95,80 @@ function toFailure(error: unknown): { ok: false; error: string } {
   }
 
   throw error;
+}
+
+// ─── Workspaces (org admin only) ──────────────────────────────────────────────
+
+/**
+ * Creates a workspace in this organization and seeds its membership from the
+ * org's members.
+ *
+ * The write itself is `createWorkspaceInOrg` (lib/workspace-service.ts), shared
+ * verbatim with the MCP `create_workspace` tool — the two surfaces must produce
+ * identical rows, because a workspace created from the browser and one created
+ * by an agent are the same thing.
+ *
+ * `resolveOrgAdmin` is the authorization gate and nothing more; the service
+ * re-resolves the org from its slug because its other caller (the MCP route)
+ * has no pre-resolved organization to hand it. That is one extra indexed
+ * lookup, in exchange for a single creation path with no second parameter shape
+ * to keep in sync.
+ *
+ * Returns `redirectTo` rather than calling `redirect()`, matching
+ * `deleteOrganization` below: the navigation stays on the client, and the
+ * action stays unit-testable without a Next router.
+ */
+export async function createWorkspace(
+  orgSlug: string,
+  input: { name: string; slug: string; description?: string }
+): Promise<CreateWorkspaceResult> {
+  try {
+    await resolveOrgAdmin(orgSlug);
+
+    const name = input.name.trim();
+    if (!name) {
+      return { ok: false, error: "Workspace name is required." };
+    }
+
+    const slug = input.slug.trim();
+    if (!slug) {
+      return { ok: false, error: "URL slug is required." };
+    }
+    // Same shape the MCP tool's input schema enforces. Checked here too
+    // because a Server Action's arguments are attacker-controlled: the
+    // client-side `pattern` attribute is a hint, not a boundary, and a bad
+    // slug would otherwise produce a workspace with an unroutable URL.
+    if (!SLUG_PATTERN.test(slug)) {
+      return {
+        ok: false,
+        error: "Slug may only contain lowercase letters, numbers, and hyphens.",
+      };
+    }
+
+    const result = await createWorkspaceInOrg({
+      orgSlug,
+      name,
+      slug,
+      description: input.description,
+    });
+    if (!result.ok) {
+      return { ok: false, error: result.error };
+    }
+
+    // The service already revalidated /dashboard and the root layout. This
+    // page renders its own workspace list (the delete-confirmation copy), so
+    // it needs its own invalidation.
+    revalidatePath(`/${orgSlug}/settings`);
+
+    return {
+      ok: true,
+      workspace: result.workspace,
+      // Matches the workspace links on /dashboard (app/dashboard/page.tsx).
+      redirectTo: `/${orgSlug}/${result.workspace.slug}/okrs`,
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
 }
 
 // ─── Scoring Models (org admin only) ──────────────────────────────────────────

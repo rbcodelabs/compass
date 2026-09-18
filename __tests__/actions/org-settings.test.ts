@@ -9,19 +9,30 @@ const mockScoringModelMetric = {
   createMany: vi.fn(),
   deleteMany: vi.fn(),
 };
-const mockOrganizationMember = { findFirst: vi.fn() };
+// `findMany` is used by createWorkspace's shared service to seed workspace
+// membership from the org's members; `findFirst` is resolveOrgAdmin's gate.
+const mockOrganizationMember = { findFirst: vi.fn(), findMany: vi.fn() };
+const mockOrganization = { findUnique: vi.fn() };
+const mockWorkspace = { findFirst: vi.fn(), create: vi.fn() };
+const mockWorkspaceMember = { createMany: vi.fn() };
 
 const mockPrisma = {
   scoringModel: mockScoringModel,
   scoringModelMetric: mockScoringModelMetric,
   organizationMember: mockOrganizationMember,
+  organization: mockOrganization,
+  workspace: mockWorkspace,
+  workspaceMember: mockWorkspaceMember,
 };
 
 vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),
 }));
 
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+const mockRevalidatePath = vi.fn();
+vi.mock("next/cache", () => ({
+  revalidatePath: (...args: unknown[]) => mockRevalidatePath(...args),
+}));
 
 vi.mock("@/auth", () => ({
   auth: vi.fn(),
@@ -30,6 +41,7 @@ vi.mock("@/auth", () => ({
 import { auth } from "@/auth";
 import {
   createScoringModel,
+  createWorkspace,
   updateScoringModelDetails,
   updateScoringModelMetrics,
   archiveScoringModel,
@@ -58,6 +70,140 @@ beforeEach(() => {
   mockScoringModelMetric.deleteMany.mockResolvedValue({ count: 0 });
   mockScoringModel.findUnique.mockResolvedValue({ formulaType: "WEIGHTED_SUM", version: 1 });
   mockScoringModel.update.mockResolvedValue({ id: "model-1" });
+  mockOrganization.findUnique.mockResolvedValue({ id: "org-1", name: "Acme" });
+  mockWorkspace.findFirst.mockResolvedValue(null);
+  mockWorkspace.create.mockResolvedValue({
+    id: "ws-1",
+    name: "Product Team",
+    slug: "product-team",
+    description: null,
+  });
+  mockOrganizationMember.findMany.mockResolvedValue([{ userId: "user-1", role: "OWNER" }]);
+  mockWorkspaceMember.createMany.mockResolvedValue({ count: 1 });
+});
+
+// ─── createWorkspace ───────────────────────────────────────────────────────
+
+describe("createWorkspace", () => {
+  it("creates the workspace and returns the workspace plus its landing route", async () => {
+    const result = await createWorkspace("acme", {
+      name: "  Product Team  ",
+      slug: "product-team",
+      description: "  Core product  ",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      workspace: { id: "ws-1", name: "Product Team", slug: "product-team", description: null },
+      // Matches the workspace links rendered on /dashboard.
+      redirectTo: "/acme/product-team/okrs",
+    });
+    expect(mockWorkspace.create).toHaveBeenCalledWith({
+      data: {
+        organizationId: "org-1",
+        name: "Product Team",
+        slug: "product-team",
+        description: "Core product",
+      },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/acme/settings");
+  });
+
+  it("seeds workspace membership for every org member with normalized roles", async () => {
+    mockOrganizationMember.findMany.mockResolvedValue([
+      { userId: "user-owner", role: "OWNER" },
+      { userId: "user-admin", role: "ADMIN" },
+      { userId: "user-member", role: "MEMBER" },
+      { userId: "user-legacy", role: "owner" },
+    ]);
+
+    await createWorkspace("acme", { name: "Product Team", slug: "product-team" });
+
+    expect(mockWorkspaceMember.createMany).toHaveBeenCalledWith({
+      data: [
+        { workspaceId: "ws-1", userId: "user-owner", role: "ADMIN" },
+        { workspaceId: "ws-1", userId: "user-admin", role: "ADMIN" },
+        { workspaceId: "ws-1", userId: "user-member", role: "MEMBER" },
+        { workspaceId: "ws-1", userId: "user-legacy", role: "ADMIN" },
+      ],
+      skipDuplicates: true,
+    });
+    const seeded = mockWorkspaceMember.createMany.mock.calls[0][0].data as Array<{ role: string }>;
+    expect(seeded.map((d) => d.role)).not.toContain("OWNER");
+  });
+
+  // Returned, never thrown — Next replaces a thrown action error's message in
+  // production builds, so a throw here would reach the form as boilerplate.
+  it("returns the duplicate-slug failure as data", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({ id: "existing-ws" });
+
+    await expect(createWorkspace("acme", { name: "Dup", slug: "product-team" })).resolves.toEqual({
+      ok: false,
+      error: 'A workspace with slug "product-team" already exists in organization "Acme".',
+    });
+    expect(mockWorkspace.create).not.toHaveBeenCalled();
+  });
+
+  it("returns a clean error when the org does not resolve for the caller", async () => {
+    mockOrganizationMember.findFirst.mockResolvedValue(null);
+
+    await expect(
+      createWorkspace("nonexistent", { name: "Product Team", slug: "product-team" })
+    ).resolves.toEqual({ ok: false, error: "Organization not found" });
+    expect(mockWorkspace.create).not.toHaveBeenCalled();
+  });
+
+  it("returns a clean error when the org row itself is missing", async () => {
+    // resolveOrgAdmin passes (a membership row exists) but the organization is
+    // gone — relationMode="prisma" means no FK stops that.
+    mockOrganization.findUnique.mockResolvedValue(null);
+
+    await expect(
+      createWorkspace("acme", { name: "Product Team", slug: "product-team" })
+    ).resolves.toEqual({ ok: false, error: 'No organization found with slug "acme".' });
+    expect(mockWorkspace.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-admin caller without writing anything", async () => {
+    mockOrganizationMember.findFirst.mockResolvedValue({ role: "MEMBER", organizationId: "org-1" });
+
+    await expect(
+      createWorkspace("acme", { name: "Product Team", slug: "product-team" })
+    ).resolves.toEqual({ ok: false, error: "Forbidden: organization admin required" });
+    expect(mockWorkspace.create).not.toHaveBeenCalled();
+    expect(mockWorkspaceMember.createMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a caller who is not signed in", async () => {
+    mockAuth.mockResolvedValue(null as never);
+
+    await expect(
+      createWorkspace("acme", { name: "Product Team", slug: "product-team" })
+    ).resolves.toEqual({ ok: false, error: "You are not signed in." });
+    expect(mockWorkspace.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a slug outside /^[a-z0-9-]+$/ — the client pattern is a hint, not a boundary", async () => {
+    await expect(
+      createWorkspace("acme", { name: "Product Team", slug: "Product Team!" })
+    ).resolves.toEqual({
+      ok: false,
+      error: "Slug may only contain lowercase letters, numbers, and hyphens.",
+    });
+    expect(mockWorkspace.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty name and an empty slug", async () => {
+    await expect(createWorkspace("acme", { name: "   ", slug: "product-team" })).resolves.toEqual({
+      ok: false,
+      error: "Workspace name is required.",
+    });
+    await expect(createWorkspace("acme", { name: "Product Team", slug: "  " })).resolves.toEqual({
+      ok: false,
+      error: "URL slug is required.",
+    });
+    expect(mockWorkspace.create).not.toHaveBeenCalled();
+  });
 });
 
 // ─── createScoringModel ────────────────────────────────────────────────────
