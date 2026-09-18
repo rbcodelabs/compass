@@ -212,6 +212,111 @@ describe("research evidence promotion migration (052)", () => {
   });
 });
 
+describe("OAuth authorization server migration (055)", () => {
+  const migrationName = "055_oauth_authorization_server";
+  const sql = sqlFor(migrationName);
+  const runner = readFileSync(ROUTE, "utf-8");
+  const TABLES = ["oauth_clients", "oauth_authorization_codes", "oauth_tokens", "oauth_consents"];
+
+  it("is registered exactly once, after both 054s, without adding a third duplicate number", () => {
+    expect(registered.filter((name) => name === migrationName)).toHaveLength(1);
+    expect(registered.indexOf("054_workspace_wip_limits")).toBeLessThan(registered.indexOf(migrationName));
+    expect(registered.indexOf("054_research_study_artifact")).toBeLessThan(registered.indexOf(migrationName));
+    // 054 is already used twice. The runner keys on exact names so a third
+    // would work, but the convention recorded on 052/053 is not to add more.
+    expect(onDisk.filter((name) => name.startsWith("055_"))).toEqual([migrationName]);
+  });
+
+  it("creates all four tables from the design's data model and touches no existing table", () => {
+    for (const table of TABLES) {
+      expect(sql).toContain(`CREATE TABLE IF NOT EXISTS ${table} (`);
+    }
+    // Purely additive: nothing here can change current behavior.
+    expect(sql).not.toMatch(/\bALTER\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bDROP\b/i);
+    expect(sql).not.toMatch(/\bINSERT\s+INTO\b/i);
+    expect(sql).not.toMatch(/\bUPDATE\s+\w+\s+SET\b/i);
+  });
+
+  it("is DSQL-safe: UUID PKs, no foreign keys, no triggers, no SERIAL", () => {
+    expect(sql).not.toMatch(/FOREIGN\s+KEY/i);
+    expect(sql).not.toMatch(/REFERENCES\s+/i);
+    expect(sql).not.toMatch(/CREATE\s+TRIGGER/i);
+    expect(sql).not.toMatch(/\bSERIAL\b/i);
+    expect(sql.match(/id UUID PRIMARY KEY DEFAULT gen_random_uuid\(\)/g)).toHaveLength(TABLES.length);
+  });
+
+  it("stores redirect_uris and grant_types as JSONB, not Postgres arrays", () => {
+    expect(sql).toContain("redirect_uris JSONB NOT NULL");
+    expect(sql).toContain("grant_types JSONB NOT NULL");
+    expect(sql).not.toMatch(/\bTEXT\s*\[\s*\]/i);
+    expect(sql).not.toMatch(/\bVARCHAR\s*\(\s*\d+\s*\)\s*\[\s*\]/i);
+  });
+
+  it("uses one DDL statement per transaction and creates every index ASYNC", () => {
+    const raw = readFileSync(path.join(MIGRATIONS_DIR, migrationName, "migration.sql"), "utf-8");
+    // No BEGIN/COMMIT at all: each statement is its own implicit transaction,
+    // matching 052 and 053.
+    expect(raw).not.toMatch(/\bBEGIN;/i);
+    expect(raw).not.toMatch(/\bCOMMIT;/i);
+    expect(raw).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?!ASYNC\b)/i);
+    expect(sql.match(/CREATE (?:UNIQUE )?INDEX ASYNC IF NOT EXISTS/g)).toHaveLength(9);
+  });
+
+  it("is re-runnable: every statement is IF NOT EXISTS", () => {
+    const statements = sql.split(/;\s*\n/).map((s) => s.trim()).filter((s) => /^(?:CREATE|ALTER)\s/i.test(s));
+    expect(statements).toHaveLength(13);
+    for (const statement of statements) {
+      expect(statement, statement.slice(0, 80)).toMatch(/IF NOT EXISTS/i);
+    }
+  });
+
+  it("makes the three hash lookups and the consent lookup unique", () => {
+    for (const unique of [
+      "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_oauth_clients_client_id ON oauth_clients (client_id)",
+      "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_oauth_authorization_codes_hash ON oauth_authorization_codes (code_hash)",
+      "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_oauth_tokens_hash ON oauth_tokens (token_hash)",
+      "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_oauth_consents_user_client ON oauth_consents (user_id, client_id)",
+    ]) {
+      expect(sql).toContain(unique);
+    }
+  });
+
+  it("uses index names the Prisma schema maps, so no drift is reported", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    for (const name of [
+      "idx_oauth_clients_client_id",
+      "idx_oauth_clients_last_used",
+      "idx_oauth_authorization_codes_hash",
+      "idx_oauth_authorization_codes_expires",
+      "idx_oauth_tokens_hash",
+      "idx_oauth_tokens_family",
+      "idx_oauth_tokens_user_client",
+      "idx_oauth_tokens_expires",
+      "idx_oauth_consents_user_client",
+    ]) {
+      expect(sql).toContain(name);
+      expect(schema).toContain(`map: "${name}"`);
+    }
+  });
+
+  it("declares no @updatedAt on any of the new models", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const oauthBlock = schema.slice(schema.indexOf("model OAuthClient {"));
+    expect(oauthBlock).toContain("model OAuthConsent {");
+    expect(oauthBlock).not.toContain("@updatedAt");
+  });
+
+  it("waits for its async indexes, can resume a timed-out wait, and verifies the catalog before receipt", () => {
+    expect(runner).toMatch(/ASYNC_WAIT_MIGRATIONS = \[[^\]]*"055_oauth_authorization_server"(?:, "[^"]+")*\]/);
+    expect(runner).toMatch(/\[[^\]]*"055_oauth_authorization_server"(?:, "[^"]+")*\]\.includes\(migration\.name\)/);
+    expect(runner).toContain('if (migration.name === "055_oauth_authorization_server") await assertOAuthAuthorizationServerMigration(client, schema)');
+    expect(runner.indexOf('if (migration.name === "055_oauth_authorization_server") await assertOAuthAuthorizationServerMigration')).toBeLessThan(
+      runner.indexOf('UPDATE "${schema}"._prisma_migrations SET finished_at = CURRENT_TIMESTAMP'),
+    );
+  });
+});
+
 describe("feedback grid indexes (033)", () => {
   const sql = sqlFor("033_feedback_grid_indexes");
 
