@@ -78,6 +78,35 @@ curl https://your-compass-url.vercel.app/api/mcp \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl-example","version":"1.0.0"}}}'
 ```
 
+## Response deeplinks
+
+Every tool that creates or promotes an addressable item returns a clickable
+link on its own line, immediately after the usual `ID: <uuid>` line:
+
+```
+**Opportunity created** in "Compass"
+ID: 0f2c…
+Title: Setup is confusing
+Status: EXPLORING
+URL: https://compass.rbcodelabs.com/rbcodelabs/compass/discovery/0f2c…
+```
+
+Relay that URL to the human you are reporting to — it opens the item directly,
+either on its own page or in the workspace detail panel (`?detail=<type>:<id>`,
+which works from any page in the workspace).
+
+Tools that return a `URL:` line: `create_opportunity`, `add_solution`,
+`add_assumption`, `create_objective`, `add_key_result`, `create_experiment`,
+`add_to_roadmap`, `promote_to_roadmap`, `promote_feedback_to_roadmap`,
+`create_task`, `create_doc`, `create_feedback` (and the other feedback
+mutations), and the decision/review tools.
+
+The link is **omitted entirely** — the operation still succeeds — when the
+deployment has no configured public URL. Never reconstruct a link yourself from
+an ID; if there is no `URL:` line, report the ID alone. Tools for items with no
+addressable surface of their own (`create_squad`, `create_okr_cycle`) return no
+link by design.
+
 ## What Agents Can Do
 
 The MCP server exposes tools that agents can call, grouped below by area.
