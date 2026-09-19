@@ -99,6 +99,18 @@ describe("migration applicability", () => {
     expect(pending.length).toBeGreaterThan(production.length)
   })
 
+  // Duplicate number prefixes are accepted in this repo (ADR-0012) because the
+  // runner keys on the exact name. Applicability now indexes the manifest by
+  // name, so a duplicate NAME would silently collapse two entries into one and
+  // could resolve an `alternatives` reference to the wrong migration.
+  it("registers every migration under a unique name", async () => {
+    const manifest: string[] = (await (await getMigrationStatus(statusPool([]).pool, "compass_prod")).json()).manifest
+    expect(manifest).toHaveLength(new Set(manifest).size)
+    // Duplicate leading numbers are expected and must stay tolerated.
+    const numbers = manifest.map((name) => name.slice(0, 3))
+    expect(numbers.length).toBeGreaterThan(new Set(numbers).size)
+  })
+
   it("never reports an already-applied migration as either pending or not applicable", () => {
     const applied = new Set([PREVIEW_AUTOMATION, NATIVE_GATES])
     const { pending, notApplicable } = partitionPendingMigrations("compass_preview", applied)
