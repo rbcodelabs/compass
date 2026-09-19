@@ -88,6 +88,31 @@ describe("Sidebar", () => {
     expect(await screen.findByText("Sign out")).toBeInTheDocument();
   });
 
+  /**
+   * The account-wide `/settings/*` routes are only reachable from this menu —
+   * they have no entry in the main nav and no workspace-scoped equivalent. A
+   * passkey page nobody can navigate to is the same as no passkey page, and
+   * that gap shipped once already: `/settings/passkeys` was built, deployed and
+   * WebAuthn-verified while being unreachable from anywhere in the UI, because
+   * every test drove it via a direct URL. Assert the links themselves, not just
+   * the pages they point at.
+   */
+  it("links to both account-wide settings routes from the avatar dropdown", async () => {
+    renderSidebar(false);
+
+    const trigger = screen.getByText("Rick Bowman").closest("button");
+    fireEvent.click(trigger as HTMLButtonElement);
+
+    expect(await screen.findByRole("link", { name: "My agents" })).toHaveAttribute(
+      "href",
+      "/settings/agents"
+    );
+    expect(await screen.findByRole("link", { name: "Passkeys" })).toHaveAttribute(
+      "href",
+      "/settings/passkeys"
+    );
+  });
+
   it("hides Org Settings from the avatar dropdown for non-admins", async () => {
     renderSidebar(false);
 

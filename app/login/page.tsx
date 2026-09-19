@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { FormField } from "@/components/patterns/form-field"
 import { safeCallbackUrl } from "@/lib/safe-callback-url"
+import { PasskeyLoginButton } from "@/components/auth/passkey-login-button"
+import { passkeysEnabled } from "@/lib/passkeys"
 
 export const metadata = {
   title: "Sign in",
@@ -132,6 +134,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                     Continue with Google
                   </Button>
                 </form>
+
+                {passkeysEnabled() && <PasskeyLoginButton />}
 
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center">
