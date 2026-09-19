@@ -5,6 +5,8 @@ import { isPermissionError, resolveOrgAdmin } from "@/lib/permissions";
 import { findMetricConfigIssues, type MetricConfigIssue } from "@/lib/scoring";
 import type { ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
+import { SLUG_PATTERN } from "@/lib/slug";
+import { createWorkspaceInOrg } from "@/lib/workspace-service";
 
 export interface ScoringMetricInput {
   key: string;
@@ -48,6 +50,14 @@ export type DeleteOrganizationResult =
   | { ok: true; redirectTo: string }
   | { ok: false; error: string };
 
+export type CreateWorkspaceResult =
+  | {
+      ok: true;
+      workspace: { id: string; name: string; slug: string; description: string | null };
+      redirectTo: string;
+    }
+  | { ok: false; error: string };
+
 /** Prisma unique-constraint violation. */
 function isUniqueConstraintError(error: unknown): boolean {
   return (
@@ -59,6 +69,19 @@ function isUniqueConstraintError(error: unknown): boolean {
 }
 
 /**
+ * Neutral fallback for a unique-constraint violation.
+ *
+ * This used to read "…metric keys must be unique within a scoring model",
+ * which was accurate for the only caller at the time but became a lie the
+ * moment `toFailure` was shared: a duplicate workspace slug would have told
+ * the user about scoring-model metric keys. `toFailure` cannot know which
+ * constraint tripped, so the default says only what is true of every caller,
+ * and callers that *do* know pass their own sentence via `conflictMessage`.
+ */
+const GENERIC_UNIQUE_CONFLICT =
+  "That change collides with an existing record. Adjust the values and try again.";
+
+/**
  * Converts an *expected* failure into a result value.
  *
  * Deliberately narrow: only permission outcomes and unique-constraint
@@ -67,8 +90,14 @@ function isUniqueConstraintError(error: unknown): boolean {
  * logged by Next with a digest, and reaches error monitoring instead of being
  * flattened into a reassuring sentence the user can do nothing about. That is
  * the one case where the opaque production mask is the correct outcome.
+ *
+ * `conflictMessage` lets a caller name the constraint it actually has, since
+ * a generic collision sentence is not much use to someone filling in a form.
  */
-function toFailure(error: unknown): { ok: false; error: string } {
+function toFailure(
+  error: unknown,
+  conflictMessage: string = GENERIC_UNIQUE_CONFLICT
+): { ok: false; error: string } {
   if (isPermissionError(error)) {
     if (error.message === "Unauthorized") {
       return { ok: false, error: "You are not signed in." };
@@ -77,14 +106,91 @@ function toFailure(error: unknown): { ok: false; error: string } {
   }
 
   if (isUniqueConstraintError(error)) {
-    return {
-      ok: false,
-      error:
-        "That change collides with an existing record — metric keys must be unique within a scoring model.",
-    };
+    return { ok: false, error: conflictMessage };
   }
 
   throw error;
+}
+
+/** The scoring-model actions' own unique constraint: `@@unique([scoring_model_id, key])`. */
+const SCORING_METRIC_KEY_CONFLICT =
+  "That change collides with an existing record — metric keys must be unique within a scoring model.";
+
+// ─── Workspaces (org admin only) ──────────────────────────────────────────────
+
+/**
+ * Creates a workspace in this organization and seeds its membership from the
+ * org's members.
+ *
+ * The write itself is `createWorkspaceInOrg` (lib/workspace-service.ts), shared
+ * verbatim with the MCP `create_workspace` tool — the two surfaces must produce
+ * identical rows, because a workspace created from the browser and one created
+ * by an agent are the same thing.
+ *
+ * `resolveOrgAdmin` is the authorization gate and nothing more; the service
+ * re-resolves the org from its slug because its other caller (the MCP route)
+ * has no pre-resolved organization to hand it. That is one extra indexed
+ * lookup, in exchange for a single creation path with no second parameter shape
+ * to keep in sync.
+ *
+ * Returns `redirectTo` rather than calling `redirect()`, matching
+ * `deleteOrganization` below: the navigation stays on the client, and the
+ * action stays unit-testable without a Next router.
+ */
+export async function createWorkspace(
+  orgSlug: string,
+  input: { name: string; slug: string; description?: string }
+): Promise<CreateWorkspaceResult> {
+  try {
+    await resolveOrgAdmin(orgSlug);
+
+    const name = input.name.trim();
+    if (!name) {
+      return { ok: false, error: "Workspace name is required." };
+    }
+
+    const slug = input.slug.trim();
+    if (!slug) {
+      return { ok: false, error: "URL slug is required." };
+    }
+    // Same shape the MCP tool's input schema enforces. Checked here too
+    // because a Server Action's arguments are attacker-controlled: the
+    // client-side `pattern` attribute is a hint, not a boundary, and a bad
+    // slug would otherwise produce a workspace with an unroutable URL.
+    if (!SLUG_PATTERN.test(slug)) {
+      return {
+        ok: false,
+        error: "Slug may only contain lowercase letters, numbers, and hyphens.",
+      };
+    }
+
+    const result = await createWorkspaceInOrg({
+      orgSlug,
+      name,
+      slug,
+      description: input.description,
+    });
+    if (!result.ok) {
+      return { ok: false, error: result.error };
+    }
+
+    // The service already revalidated /dashboard and the root layout. This
+    // page renders its own workspace list (the delete-confirmation copy), so
+    // it needs its own invalidation.
+    revalidatePath(`/${orgSlug}/settings`);
+
+    return {
+      ok: true,
+      workspace: result.workspace,
+      // Matches the workspace links on /dashboard (app/dashboard/page.tsx).
+      redirectTo: `/${orgSlug}/${result.workspace.slug}/okrs`,
+    };
+  } catch (error) {
+    // A slug collision is already mapped to SLUG_TAKEN inside the service and
+    // returned above as data, so it does not reach here. This message only
+    // covers a P2002 from some *other* unique index on the write path.
+    return toFailure(error, `That workspace slug is already taken in ${orgSlug}.`);
+  }
 }
 
 // ─── Scoring Models (org admin only) ──────────────────────────────────────────
@@ -139,7 +245,7 @@ export async function createScoringModel(
     revalidatePath(`/${orgSlug}/settings`);
     return { ok: true, model: { id: model.id, version: model.version } };
   } catch (error) {
-    return toFailure(error);
+    return toFailure(error, SCORING_METRIC_KEY_CONFLICT);
   }
 }
 
@@ -234,7 +340,7 @@ export async function updateScoringModelMetrics(
     revalidatePath(`/${orgSlug}/settings`);
     return { ok: true };
   } catch (error) {
-    return toFailure(error);
+    return toFailure(error, SCORING_METRIC_KEY_CONFLICT);
   }
 }
 

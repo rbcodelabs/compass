@@ -36,6 +36,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 const mockWorkspace = {
   findMany: vi.fn(),
+  findFirst: vi.fn(),
 }
 
 const mockPrisma = {
@@ -46,10 +47,44 @@ vi.mock("@/lib/db", () => ({
   default: () => mockPrisma,
 }))
 
-import { getUserWorkspaces } from "@/lib/workspace"
+import { getUserWorkspaces, getWorkspace } from "@/lib/workspace"
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+describe("getWorkspace", () => {
+  it("resolves a slug deterministically by ordering on createdAt", async () => {
+    // `@@unique([organizationId, slug])` — the real index
+    // `workspaces_organization_id_slug_key`, created by 001_init — means this
+    // findFirst can only match one row. The orderBy is what keeps the failure
+    // mode *diagnosable* if that invariant ever lapses: an unordered findFirst
+    // would resolve /{org}/{slug} to a different workspace between requests,
+    // so writes would appear and disappear rather than erroring.
+    mockWorkspace.findFirst.mockResolvedValue(null)
+
+    await getWorkspace("org-1", "alpha", "user-1")
+
+    expect(mockWorkspace.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { createdAt: "asc" } })
+    )
+  })
+
+  it("still scopes the lookup to org slug, workspace slug, and membership", async () => {
+    mockWorkspace.findFirst.mockResolvedValue(null)
+
+    await getWorkspace("org-2", "beta", "user-2")
+
+    expect(mockWorkspace.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          slug: "beta",
+          organization: { slug: "org-2" },
+          members: { some: { userId: "user-2" } },
+        },
+      })
+    )
+  })
 })
 
 describe("getUserWorkspaces", () => {
