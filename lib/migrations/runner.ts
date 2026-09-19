@@ -424,6 +424,70 @@ export function partitionPendingMigrations(schema: string, applied: ReadonlySet<
   return { environment, pending, notApplicable };
 }
 
+/**
+ * One row of `_prisma_migrations` as the status report reads it. The table holds
+ * one row per *attempt*, so a migration that failed and was retried has several,
+ * and `applied` is `finished_at IS NOT NULL` for that one attempt.
+ */
+export type MigrationAttempt = { name: string; applied?: boolean };
+
+/**
+ * Splits attempt history into the two states an operator has to tell apart,
+ * which a flat per-attempt list cannot express:
+ *
+ * - `unresolved` — deduped names with an unfinished attempt and no finished
+ *   receipt anywhere. Genuinely stuck. This is the alert.
+ * - `retried` — names whose unfinished attempt was followed (or preceded) by a
+ *   finished receipt. Scar tissue in the table with nothing left to do, kept
+ *   with its failure count as history.
+ *
+ * `incomplete` is the raw per-attempt list, unchanged, because it is documented
+ * as forensic history and consumers read it that way.
+ *
+ * The direction of safety here is deliberately the opposite of
+ * `partitionPendingMigrations`, which fails *open* on an unrecognized schema so
+ * a migration is never silently skipped. Health reporting fails *loud*: an
+ * attempt row whose state is not literally `true` or `false` — a NULL from a
+ * hand-edited table, a driver that starts handing back `'t'`/`'f'`, a shape
+ * change — cannot be called benign, so its migration is reported unresolved
+ * even when a finished receipt exists beside it. A stuck migration filed away
+ * as history is the failure that must not happen; a spurious alert costs a
+ * human one look at the table.
+ *
+ * Two consequences of that ambiguity rule are worth knowing before reading a
+ * status body:
+ *
+ * - `appliedMigrations` is computed separately and keeps its own fail-open test
+ *   (`applied !== false`), so an unclassifiable name appears in *both* it and
+ *   `unresolvedMigrations`, and in neither `incompleteMigrations` (which needs a
+ *   literal `false`) nor `retriedMigrations`. `unresolvedMigrations` is the only
+ *   field that raises the alarm; that asymmetry is deliberate, because redefining
+ *   `appliedMigrations` would change a field other consumers already read.
+ * - A name can stay unresolved with no retry left to clear it — a failed
+ *   decision migration writes its unfinished row before any DDL, so a 039 that
+ *   failed and was then repaired by 042 is unresolved forever while also being
+ *   `notApplicable`. Read `unresolvedMigrations` against `pending` and
+ *   `notApplicable` before concluding work is still owed.
+ */
+export function classifyMigrationAttempts(rows: readonly MigrationAttempt[]) {
+  const finished = new Set<string>();
+  const unclassifiable = new Set<string>();
+  const failures = new Map<string, number>();
+  const order: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!seen.has(row.name)) { seen.add(row.name); order.push(row.name); }
+    if (row.applied === true) finished.add(row.name);
+    else if (row.applied === false) failures.set(row.name, (failures.get(row.name) ?? 0) + 1);
+    else unclassifiable.add(row.name);
+  }
+  const unresolved = order.filter((name) => unclassifiable.has(name) || (failures.has(name) && !finished.has(name)));
+  const retried = order
+    .filter((name) => !unclassifiable.has(name) && failures.has(name) && finished.has(name))
+    .map((name) => ({ name, failedAttempts: failures.get(name)! }));
+  return { incomplete: rows.filter((row) => row.applied === false).map((row) => row.name), unresolved, retried };
+}
+
 const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "decision_evidence_refs", "now_policy_application_evidence", "now_gate_evaluations", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"] as const;
 const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record_id"] as const;
 const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_decision_evidence_refs_subject", "idx_now_policy_evidence_workspace_created", "idx_now_gate_evaluations_workspace_created", "idx_now_gate_evaluations_workspace_outcome_created", "idx_now_gate_evaluations_item_created", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
@@ -581,7 +645,12 @@ export function getDecisionGateExpectedCatalog() {
   }
 }
 
-export async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string, applied: readonly string[], incomplete: readonly string[] = []) {
+/**
+ * `unresolved` is the genuinely-stuck set from `classifyMigrationAttempts`, not
+ * raw attempt history: an `INCOMPLETE` receipt has to mean "this migration
+ * needs attention", never "it failed once months ago and then succeeded".
+ */
+export async function getDecisionGateInfrastructureHealth(client: PoolClient, schema: string, applied: readonly string[], unresolved: readonly string[] = []) {
   const [tablesResult, columnsResult, indexesResult, constraintsResult, provenanceResult, integrityResult] = await Promise.all([
     client.query<{ table_name: string }>(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = ANY($2::text[])`, [schema, [...DECISION_GATE_TABLES]]),
     client.query<{ table_name: string; column_name: string; data_type: string; character_maximum_length: number | null; datetime_precision: number | null; is_nullable: string; column_default: string | null }>(`SELECT table_name, column_name, data_type, character_maximum_length, datetime_precision, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND (table_name = ANY($2::text[]) OR (table_name = 'roadmap_items' AND column_name = ANY($3::text[]))) ORDER BY table_name, ordinal_position`, [schema, [...DECISION_GATE_TABLES], [...DECISION_GATE_COLUMNS]]),
@@ -711,7 +780,7 @@ export async function getDecisionGateInfrastructureHealth(client: PoolClient, sc
     return {
       name,
       applied: appliedSet.has(name),
-      status: repairedBy ? "REPAIRED_BY" : alternative ? "SATISFIED_BY_ALTERNATIVE" : appliedSet.has(name) ? "APPLIED" : incomplete.includes(name) ? "INCOMPLETE" : "MISSING",
+      status: repairedBy ? "REPAIRED_BY" : alternative ? "SATISFIED_BY_ALTERNATIVE" : appliedSet.has(name) ? "APPLIED" : unresolved.includes(name) ? "INCOMPLETE" : "MISSING",
       satisfiedBy: alternative,
       repairedBy,
     }
@@ -1409,13 +1478,17 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 
   try {
     // Check if tracking table exists
-    const { rows } = await client.query<{ name: string; applied?: boolean }>(`
+    const { rows } = await client.query<MigrationAttempt>(`
       SELECT migration_name as name, finished_at IS NOT NULL AS applied
        FROM "${schema}"._prisma_migrations
       ORDER BY started_at ASC
-    `).catch(() => ({ rows: [] as { name: string; applied?: boolean }[] }));
+    `).catch(() => ({ rows: [] as MigrationAttempt[] }));
     const appliedNames = rows.filter((row) => row.applied !== false).map((row) => row.name)
-    const incompleteNames = rows.filter((row) => row.applied === false).map((row) => row.name)
+    // `incompleteMigrations` stays raw attempt history. `unresolvedMigrations`
+    // is the grouped current state and the only one of the two that clears once
+    // a retry succeeds, so it — not attempt history — is what an alert or a
+    // readiness gate should read.
+    const { incomplete: incompleteNames, unresolved: unresolvedNames, retried: retriedMigrations } = classifyMigrationAttempts(rows)
     // `manifest` stays the complete registered list. `pending` is the subset
     // that can actually still apply here, and `notApplicable` explains the
     // difference — so a permanently-unapplicable entry is visible as a stated
@@ -1426,7 +1499,7 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       getResearchGuidedUxReport(client, schema),
       getResearchBlobCleanupReport(client, schema),
       getResearchVoiceControlPlaneReport(client, schema),
-      getDecisionGateInfrastructureHealth(client, schema, appliedNames, incompleteNames),
+      getDecisionGateInfrastructureHealth(client, schema, appliedNames, unresolvedNames),
       client.query(`SELECT migration_name, attempt_id, plan_version, plan_fingerprint, next_step, executing_step, executing_started_at, pending_step, pending_job_id, claim_epoch, claimed_by IS NOT NULL AND claim_expires_at >= CURRENT_TIMESTAMP AS claimed, last_error, updated_at FROM "${schema}"._migration_execution_state ORDER BY updated_at DESC`).then(({ rows }) => rows).catch(() => []),
       getLegacyDecisionReviewRepairStatus(pool, schema),
     ]);
@@ -1436,6 +1509,8 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       schemaEnvironment: environment,
       appliedMigrations: appliedNames,
       incompleteMigrations: incompleteNames,
+      unresolvedMigrations: unresolvedNames,
+      retriedMigrations,
       manifest: MIGRATIONS.map((m) => m.name),
       pending: pending.map((m) => m.name),
       notApplicable,
