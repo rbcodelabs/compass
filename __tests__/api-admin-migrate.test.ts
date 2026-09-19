@@ -707,7 +707,12 @@ describe("/api/admin/migrate rollout observability", () => {
     const repairTables = catalog.tables.slice(0, 5)
     mocks.query.mockImplementation(async (sqlValue: unknown, values?: unknown[]) => {
       const sql = String(sqlValue)
-      if (sql.includes("SELECT migration_name FROM")) return { rows: [{ migration_name: "039_native_decision_gates" }] }
+      // No finished 039 receipt: a partially applied 039 leaves its attempt
+      // unfinished, which is the only state 042 exists to repair. A *finished*
+      // 039 receipt instead retires 042 as already satisfied, and is refused
+      // earlier — see the applicability coverage in
+      // __tests__/migration-applicability.test.ts.
+      if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
       if (sql.includes("information_schema.tables") && Array.isArray(values?.[1]) && values[1].includes("review_requests")) return { rows: repairTables.map((table_name) => ({ table_name })) }
       if (sql.includes("information_schema.columns") && sql.includes("roadmap_items")) return { rows: [
         { table_name: "roadmap_items", column_name: "now_commitment_provenance", data_type: "character varying", character_maximum_length: 30, datetime_precision: null, is_nullable: "YES", column_default: "'LEGACY_UNGATED'::character varying" },
@@ -844,7 +849,9 @@ describe("/api/admin/migrate rollout observability", () => {
     mocks.query.mockImplementation(async (sqlValue: unknown, values?: unknown[]) => {
       const sql = String(sqlValue)
       if (sql === 'SET search_path TO "compass_preview"') { searchPathSet = true; return { rows: [] } }
-      if (sql.includes("SELECT migration_name FROM")) return { rows: [{ migration_name: "039_native_decision_gates" }] }
+      // Unfinished 039, i.e. the partial state 042 repairs. A finished 039
+      // receipt would instead make 042 non-applicable.
+      if (sql.includes("SELECT migration_name FROM")) return { rows: [] }
       if (sql.includes("information_schema.tables") && Array.isArray(values?.[1]) && values[1].includes("review_requests")) return { rows: repairTables.map((table_name) => ({ table_name })) }
       if (sql.includes("information_schema.columns") && sql.includes("roadmap_items")) return { rows: [
         ...catalog.columns.filter((column) => repairTables.includes(column.table)).map((column) => ({ table_name: column.table, column_name: column.name, data_type: column.type, character_maximum_length: column.maxLength, datetime_precision: column.datetimePrecision, is_nullable: column.nullable ? "YES" : "NO", column_default: column.default })),
