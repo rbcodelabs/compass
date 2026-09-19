@@ -181,7 +181,7 @@ export function CreateWorkspacePanel({
                 aria-describedby="new-workspace-slug-hint"
               />
               {slugUnderivable && !slug ? (
-                <p id="new-workspace-slug-hint" className="text-xs text-amber-600">
+                <p id="new-workspace-slug-hint" className="text-xs text-status-warning">
                   A slug can&apos;t be derived from that name — enter one using
                   lowercase letters, numbers, and hyphens.
                 </p>
