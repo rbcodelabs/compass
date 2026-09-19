@@ -2,6 +2,25 @@
 
 # Compass — Project Notes
 
+## Architecture decisions live in Compass, not the repo
+
+**Compass Docs is the authoritative home for Compass ADRs.** They sit under the
+[**Architecture Decisions**](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/57218788-1db1-4148-b954-b98fb7055c62)
+parent doc in the `rbcodelabs/compass` workspace. This is what
+`Products/Compass/pm-config.md` already routes to — both `review_requests` and
+`decision_records` resolve to the `compass_decisions` provider.
+
+- **To record a new architecture decision:** create a child Doc under that
+  parent, then route it for approval with `request_decision` using
+  `subjectType: "DOC"`.
+- **Never self-certify.** Do not write `Status: Accepted` on your own record.
+  Approval is an event that comes back from the provider; if it did not come
+  back, the decision is not approved.
+- **`docs/decisions/` holds pointer stubs only.** The 16 historical ADRs were
+  migrated to Compass on 2026-09-19; the files remain as stubs solely so the
+  ~85 existing references across the codebase keep resolving. **Do not add new
+  files to that directory**, and do not expand a stub back into a full record.
+
 ## Secrets
 
 - **`MIGRATION_SECRET`** (gates `/api/admin/migrate`, the admin DDL-execution endpoint): stored in **1Password** under **"Compass Prod MIGRATION_SECRET"**.
