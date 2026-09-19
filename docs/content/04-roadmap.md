@@ -56,7 +56,18 @@ Toggle between **Board** and **Timeline** at the top of the Roadmap page. Board 
 
 Every workspace uses the **Compass native timeline** when you select Timeline. Existing timeline links continue to work, including bookmarks that previously selected the classic renderer.
 
-The native chart groups items by horizon and squad, with separate tracks for overlapping bars. The **Roadmap header** contains icon controls for **Previous period**, **Go to today**, **Next period**, and **Reload timeline**; hover or focus an icon for its tooltip. Open **View options** to filter by **Squad** or choose **Month / Quarter** under **Timeline scale**. **Clear filters** clears only the squad filter. On Board, View options contains squad filtering without timeline controls. Scroll the chart horizontally to reach dates outside the visible area.
+The native chart groups items by horizon and squad by default, with separate tracks for overlapping bars. The **Roadmap header** contains icon controls for **Previous period**, **Go to today**, **Next period**, and **Reload timeline**; hover or focus an icon for its tooltip. Open **View options** to filter by **Squad** or choose **Month / Quarter** under **Timeline scale**. **Clear filters** clears only the squad filter. On Board, View options contains squad filtering without timeline controls. Scroll the chart horizontally to reach dates outside the visible area.
+
+### Timeline grouping
+
+Use the **Group by** control next to the timeline navigation to change how rows are organized:
+
+- **Phase** (default) — a header row per horizon (Now/Next/Later/Launching/Launched/Shipped), with squad sub-lanes underneath.
+- **Squad** — one header and lane per squad, plus a No squad group. No horizon rows.
+- **None** — no header rows at all; a flat list of squad lanes across every horizon.
+- **A custom field** — any `SELECT`-type custom field defined for Roadmap Item appears in the list. Choosing one groups by that field's values (plus a No value group), with squad sub-lanes underneath, and shows a small badge on each card with its value. `MULTI_SELECT` fields are not offered, since an item could belong to more than one group.
+
+Grouping is a display choice only: dragging a bar to a new date never changes its horizon, squad, or custom field value except in Phase grouping, where dropping a bar into a different horizon's lane still moves it to that horizon, exactly as before. The choice is saved in the page URL (`?groupBy=squad`, `?groupBy=none`, or `?groupBy=<field id>`) so it survives reloads and is shareable; leaving it off, or `?groupBy=phase`, uses the default.
 
 On mobile, the title and Board/Timeline tabs share the first header row; navigation and View options/Reload sit below with larger touch targets. The calendar can scroll horizontally without widening the page.
 
