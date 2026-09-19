@@ -14,7 +14,11 @@ async function main() {
     await migrateToReady(async () => (await applyMigrations(pool, schema, undefined, { preProvisionedSchema: true })).status, async () => {
       const status = await (await getMigrationStatus(pool, schema)).json()
       const indexes = await pool.query("SELECT COUNT(*) AS pending FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=$1 AND (NOT i.indisvalid OR NOT i.indisready)", [schema])
-      return Number(indexes.rows[0].pending) === 0 && status.incompleteMigrations.length === 0 && status.manifest.every((name: string) => status.appliedMigrations.includes(name) || (name === "039_native_decision_gates" && status.appliedMigrations.includes("042_native_decision_gates_repair")))
+      // `pending` is the runner's own applicable-and-unapplied set: it already
+      // excludes migrations scoped to another environment and any settled by an
+      // applied alternative (039/042). Comparing against the full `manifest`
+      // here would never reach zero, because an applied 039 retires 042.
+      return Number(indexes.rows[0].pending) === 0 && status.incompleteMigrations.length === 0 && status.pending.length === 0
     }, () => new Promise(resolve => setTimeout(resolve, 3000)))
   } finally { await pool.end() }
 }

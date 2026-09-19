@@ -63,7 +63,7 @@ describe("decision-gate expand precursor migrations", () => {
     expect(route).toContain('"040_release_authorization":')
     expect(route).toContain('"041_portfolio_capacity_ledger":')
     expect(route).toContain('"043_decision_evidence_refs":')
-    expect(route).toContain('applied.includes("043_decision_evidence_refs")')
+    expect(route).toContain('appliedSet.has("043_decision_evidence_refs")')
     expect(route).toContain("assertDecisionMigrationPostconditions")
     expect(route).toContain("tables.length === expected.tables.size")
     expect(route).toContain("constraints.length === expected.constraints.size")
