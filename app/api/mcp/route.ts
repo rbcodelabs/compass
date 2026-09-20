@@ -2086,7 +2086,7 @@ const _handler = createMcpHandler(
       {
         title: "Update Roadmap Item",
         description:
-          "Updates an existing roadmap item's horizon, status, title, description, or dates. " +
+          "Updates an existing roadmap item's horizon, status, title, description, dates, privacy, or linked Solution. " +
           "Use horizon to move items between NOW / NEXT / LATER. Use status ARCHIVED to remove from view. " +
           "LAUNCHING and LAUNCHED cannot be set here — use set_launch_tier to move an item into LAUNCHING.",
         inputSchema: {
@@ -2098,10 +2098,11 @@ const _handler = createMcpHandler(
           startDate: z.string().optional().describe("ISO date string for the item's start date, e.g. '2026-07-01'"),
           endDate: z.string().optional().describe("ISO date string for the item's end date, e.g. '2026-09-30'"),
           isPrivate: z.boolean().optional().describe("Set to true to hide this item from the public portal roadmap and block voting on it"),
+          solutionId: z.string().uuid().optional().describe("UUID of the Solution to attach to this item, replacing any existing Solution link"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ itemId, horizon, status, title, description, startDate, endDate, isPrivate }) => {
+      async ({ itemId, horizon, status, title, description, startDate, endDate, isPrivate, solutionId }) => {
         const prisma = getPrisma()
         const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, workspaceId: true, title: true, horizon: true, status: true } })
         if (!item) {
@@ -2128,6 +2129,7 @@ const _handler = createMcpHandler(
             ...(startDate !== undefined ? { startDate: new Date(startDate) } : {}),
             ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
             ...(isPrivate !== undefined ? { isPrivate } : {}),
+            ...(solutionId !== undefined ? { solutionId } : {}),
             updatedAt: new Date(),
         }
         const updated = await prisma.roadmapItem.update({ where: { id: itemId }, data: updateData })
@@ -2135,6 +2137,7 @@ const _handler = createMcpHandler(
           `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
             `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
             (updated.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
+            (updated.solutionId ? `\nLinked Solution: ${updated.solutionId}` : "") +
             (updated.startDate || updated.endDate
               ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
               : ""),
@@ -2144,6 +2147,7 @@ const _handler = createMcpHandler(
             horizon: updated.horizon,
             status: updated.status,
             isPrivate: updated.isPrivate,
+            solutionId: updated.solutionId,
             startDate: updated.startDate,
             endDate: updated.endDate,
           },
