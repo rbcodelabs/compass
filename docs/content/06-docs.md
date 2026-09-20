@@ -41,6 +41,18 @@ Uploaded HTML runs in an opaque-origin preview with the exact `allow-scripts` sa
 
 Replacing an Artifact creates an immutable revision and advances the current preview without changing the Artifact ID or breaking its Solution links. The detail screen shows revision history and lets workspace members edit metadata, link or unlink Solutions, replace the current revision, or archive the Artifact. Archived Artifacts disappear from the default navigator while their history and links remain preserved.
 
+### Artifact comments
+
+Open **Comments** on an Artifact to discuss the whole prototype or external reference. Comments support Markdown, one-level replies, editing, deletion, and resolving/reopening threads. Human and agent authors are identified. Comments stay with the Artifact across revisions; they are not pinned to coordinates or a particular revision, and never constitute approval or authorization. Existing discussions remain available on archived Artifacts.
+
+On a wide screen, choose **Pin panel** to keep the discussion beside the preview. Drag the divider or use its arrow keys to resize it. Artifact Comments remembers its own pin preference and width independently of Page Comments, Version History, and object detail panels. Narrow viewports—or a content row too narrow to leave 480px for the preview—use an overlay without changing that preference.
+
+Closing, reopening, pinning, or changing screen size preserves unfinished comments and replies while you remain on the same Artifact. Reopening refreshes the discussion. Navigating to another Artifact or reloading the page clears unsent drafts. Escape cancels an active edit or reply first; otherwise it closes the focused panel. Interacting with the preview does not dismiss a pinned discussion.
+
+![Artifact discussion pinned beside an interactive preview](/screenshots/docs/artifact-comments-desktop.png)
+
+![Artifact Comments overlay on a phone](/screenshots/docs/artifact-comments-mobile.png)
+
 ## The Editor
 
 Docs uses a Tiptap-powered rich-text editor. Supported formatting includes:

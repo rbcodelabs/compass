@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -41,7 +41,13 @@ function timestamp(iso: string) {
   return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
 }
 
-export function Discussion({ targetType, targetId }: { targetType: CommentTargetType; targetId: string }) {
+export function Discussion({ targetType, targetId, refreshKey, render }: {
+  targetType: CommentTargetType
+  targetId: string
+  refreshKey?: number
+  /** Keep the controller mounted above a shell whose portal/docked body can remount. */
+  render?: (content: ReactNode) => ReactNode
+}) {
   const [items, setItems] = useState<BrowserCommentDto[] | null>(null)
   const [loadError, setLoadError] = useState("")
   const [actionError, setActionError] = useState("")
@@ -53,6 +59,8 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
   const returnFocusLabel = useRef("")
   const requestGeneration = useRef(0)
   const activeLoad = useRef<AbortController | null>(null)
+  const lastRefresh = useRef(refreshKey)
+  const loadedTarget = useRef({ targetType, targetId })
 
   const load = useCallback(async (reset = false) => {
     activeLoad.current?.abort()
@@ -73,7 +81,7 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
     try {
       const query = new URLSearchParams({ targetType, targetId })
       const payload = await responseJson<{ items: BrowserCommentDto[] }>(await fetch(`/api/comments?${query}`, { signal: controller.signal }))
-      if (generation !== requestGeneration.current) return
+      if (controller.signal.aborted || generation !== requestGeneration.current) return
       setItems(chronological(payload.items))
     } catch (error) {
       if (controller.signal.aborted || generation !== requestGeneration.current) return
@@ -84,12 +92,26 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
   useEffect(() => {
     requestGeneration.current += 1
     activeLoad.current?.abort()
-    const timer = window.setTimeout(() => void load(true), 0)
+    const reset = loadedTarget.current.targetType !== targetType || loadedTarget.current.targetId !== targetId
+    const timer = window.setTimeout(() => {
+      loadedTarget.current = { targetType, targetId }
+      void load(reset)
+    }, 0)
     return () => {
       window.clearTimeout(timer)
       activeLoad.current?.abort()
     }
-  }, [load])
+  }, [load, targetType, targetId])
+
+  useEffect(() => {
+    if (lastRefresh.current === refreshKey || busy) return
+    // Reopening refreshes remote comments, but never resets an unfinished draft.
+    const timer = window.setTimeout(() => {
+      lastRefresh.current = refreshKey
+      void load()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [refreshKey, busy, load])
 
   function closeEditor() {
     setEditor(null)
@@ -116,6 +138,7 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
       setActionError(parentId ? "Enter a reply." : "Enter a comment.")
       return
     }
+    activeLoad.current?.abort()
     setBusy(key)
     setActionError("")
     try {
@@ -142,6 +165,7 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
   async function edit(commentId: string) {
     const generation = requestGeneration.current
     if (!editorBody.trim()) { setActionError("Enter a comment."); return }
+    activeLoad.current?.abort()
     setBusy(`edit:${commentId}`)
     setActionError("")
     try {
@@ -161,6 +185,7 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
   async function changeStatus(comment: BrowserCommentDto) {
     const generation = requestGeneration.current
     const action = comment.status === "RESOLVED" ? "reopen" : "resolve"
+    activeLoad.current?.abort()
     setBusy(`${action}:${comment.id}`)
     setActionError("")
     try {
@@ -180,6 +205,7 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
     const generation = requestGeneration.current
     const deletesThread = isRoot && comment.replies.length > 0
     if (deletesThread && !window.confirm("Delete this comment and every reply? This cannot be undone.")) return
+    activeLoad.current?.abort()
     setBusy(`delete:${comment.id}`)
     setActionError("")
     try {
@@ -217,7 +243,7 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
             {resolved && isRoot && <Button type="button" variant="ghost" size="xs" className="mt-2" aria-label={`Collapse resolved thread by ${comment.authorName}`} onClick={() => setExpandedResolved((current) => { const next = new Set(current); next.delete(comment.id); return next })}>Collapse thread</Button>}
             {editing ? (
               <form className="mt-2 space-y-2" onSubmit={(event) => { event.preventDefault(); void edit(comment.id) }}>
-                <Textarea autoFocus aria-label={`Edit comment by ${comment.authorName}`} value={editorBody} disabled={busy === `edit:${comment.id}`} onChange={(event) => setEditorBody(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") closeEditor() }} />
+                <Textarea autoFocus aria-label={`Edit comment by ${comment.authorName}`} value={editorBody} disabled={busy === `edit:${comment.id}`} onChange={(event) => setEditorBody(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeEditor() } }} />
                 <div className="flex flex-wrap gap-2"><Button size="sm" type="submit" disabled={busy === `edit:${comment.id}`}>Save edit</Button><Button size="sm" variant="ghost" type="button" onClick={closeEditor}>Cancel</Button></div>
               </form>
             ) : <MarkdownContent className="mt-2">{comment.body}</MarkdownContent>}
@@ -231,7 +257,7 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
 
             {isRoot && editor?.kind === "reply" && editor.commentId === comment.id && (
               <form className="mt-3 space-y-2 border-l-2 border-border pl-3" onSubmit={(event) => { event.preventDefault(); void post(editorBody, comment.id) }}>
-                <Textarea autoFocus aria-label={`Reply to ${comment.authorName}`} value={editorBody} disabled={busy === `reply:${comment.id}`} onChange={(event) => setEditorBody(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") closeEditor() }} />
+                <Textarea autoFocus aria-label={`Reply to ${comment.authorName}`} value={editorBody} disabled={busy === `reply:${comment.id}`} onChange={(event) => setEditorBody(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeEditor() } }} />
                 <div className="flex flex-wrap gap-2"><Button size="sm" type="submit" disabled={busy === `reply:${comment.id}`}>Post reply</Button><Button size="sm" variant="ghost" type="button" onClick={closeEditor}>Cancel</Button></div>
               </form>
             )}
@@ -242,18 +268,19 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
     )
   }
 
-  return (
+  const content = (
     <section aria-labelledby={`discussion-${targetType}-${targetId}`} aria-busy={busy ? "true" : undefined} className="min-w-0 space-y-3 border-t border-border pt-4">
       <div><h3 id={`discussion-${targetType}-${targetId}`} className="text-sm font-semibold">Discussion</h3><p className="text-xs text-muted-foreground">Comments are discussion, not decisions or authorization.</p></div>
       {items === null && !loadError && <p role="status" className="text-sm text-muted-foreground">Loading discussion…</p>}
-      {loadError && <div className="flex flex-wrap items-center gap-2"><p role="alert" className="text-sm text-destructive">{loadError}</p><Button type="button" variant="outline" size="sm" aria-label="Retry discussion" onClick={() => void load()}>Retry</Button></div>}
+      {loadError && <div className="flex flex-wrap items-center gap-2"><p role="alert" className="text-sm text-destructive">{loadError}</p><Button type="button" variant="outline" size="sm" aria-label="Retry discussion" disabled={Boolean(busy)} onClick={() => void load()}>Retry</Button></div>}
       {items?.length === 0 && <p className="text-sm text-muted-foreground">No comments yet.</p>}
       {items && items.length > 0 && <div className="space-y-3">{chronological(items).map((item) => renderComment(item, true))}</div>}
       {actionError && <p role="alert" className="text-sm text-destructive">{actionError}</p>}
       <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); void post(rootBody, null) }}>
         <Textarea aria-label="Add comment" placeholder="Add to the discussion…" value={rootBody} disabled={busy === "root"} onChange={(event) => setRootBody(event.target.value)} />
-        <div className="flex justify-end"><Button size="sm" type="submit" disabled={busy === "root"}>{busy === "root" ? "Posting…" : "Post comment"}</Button></div>
+        <div className="flex justify-end"><Button size="sm" type="submit" disabled={items === null || busy === "root"}>{busy === "root" ? "Posting…" : "Post comment"}</Button></div>
       </form>
     </section>
   )
+  return render ? render(content) : content
 }

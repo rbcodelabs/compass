@@ -1,4 +1,6 @@
 import { auth } from "@/auth"
+import { cookies } from "next/headers"
+import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin"
 import getPrisma from "@/lib/db"
 import { notFound, redirect } from "next/navigation"
 import { ArtifactDetail } from "@/components/docs/artifact-detail"
@@ -22,5 +24,6 @@ export default async function ArtifactPage({ params }: { params: Promise<{ orgSl
   const rawSolutions = await prisma.solution.findMany({ where: { opportunity: { workspaceId: workspace.id } }, select: { id: true, title: true }, orderBy: { title: "asc" } })
   const linkedIds = new Set(artifact.links.map((link) => link.linkedId))
   const decisions = await getArtifactDecisions(workspace.id, artifactId)
-  return <ArtifactDetail artifact={toArtifactDetailDto(artifact)} html={html} workspaceId={workspace.id} basePath={`/${orgSlug}/${workspaceSlug}/docs`} decisions={decisions} solutions={rawSolutions.map((solution) => ({ ...solution, linked: linkedIds.has(solution.id) }))} />
+  const initialCommentsPin = parsePanelPin((await cookies()).get(panelPinCookieName("artifactComments"))?.value)
+  return <ArtifactDetail artifact={toArtifactDetailDto(artifact)} html={html} initialCommentsPin={initialCommentsPin} workspaceId={workspace.id} basePath={`/${orgSlug}/${workspaceSlug}/docs`} decisions={decisions} solutions={rawSolutions.map((solution) => ({ ...solution, linked: linkedIds.has(solution.id) }))} />
 }
