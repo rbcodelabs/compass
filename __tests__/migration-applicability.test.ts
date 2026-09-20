@@ -9,6 +9,7 @@ vi.mock("@/lib/migrations/legacy-decision-review-repair", () => ({
 
 import {
   applyMigrations,
+  classifyMigrationAttempts,
   getDecisionGateExpectedCatalog,
   getDecisionGateInfrastructureHealth,
   getMigrationStatus,
@@ -16,6 +17,7 @@ import {
   resolveSchemaEnvironment,
   satisfyingAlternative,
 } from "@/lib/migrations/runner"
+import type { MigrationAttempt } from "@/lib/migrations/runner"
 
 const PREVIEW_AUTOMATION = "047_preview_automation"
 const NATIVE_GATES = "039_native_decision_gates"
@@ -354,14 +356,25 @@ describe("decision-gate table shape check is expected-subset, not exact-equality
  * test can prove nothing was executed.
  */
 function statusPool(appliedNames: readonly string[], mutateColumns?: (rows: ColumnRow[]) => ColumnRow[]) {
+  return attemptPool(appliedNames.map((name) => ({ name, applied: true })), mutateColumns)
+}
+
+/**
+ * The same pool, driven by raw `_prisma_migrations` rows instead of a list of
+ * finished names — one row per *attempt*, exactly as the table stores them — so
+ * a test can reproduce a failed-then-retried history rather than only a clean
+ * one. The apply path still sees finished receipts only, which is what its own
+ * `WHERE finished_at IS NOT NULL` query returns.
+ */
+function attemptPool(attempts: readonly MigrationAttempt[], mutateColumns?: (rows: ColumnRow[]) => ColumnRow[]) {
   const health = healthClient(mutateColumns) as unknown as { query: (sql: unknown, values?: unknown[]) => Promise<{ rows: unknown[] }> }
   const statements: string[] = []
   const client = {
     query: async (sqlValue: unknown, values?: unknown[]) => {
       const sql = String(sqlValue)
       statements.push(sql)
-      if (sql.includes("migration_name as name")) return { rows: appliedNames.map((name) => ({ name, applied: true })) }
-      if (sql.includes("SELECT migration_name FROM")) return { rows: appliedNames.map((migration_name) => ({ migration_name })) }
+      if (sql.includes("migration_name as name")) return { rows: attempts.map((attempt) => ({ ...attempt })) }
+      if (sql.includes("SELECT migration_name FROM")) return { rows: attempts.filter((attempt) => attempt.applied === true).map(({ name }) => ({ migration_name: name })) }
       if (sql.includes("information_schema.schemata")) return { rows: [{ schema_name: "compass_prod" }] }
       return health.query(sqlValue, values)
     },
@@ -482,5 +495,198 @@ describe("POST apply respects applicability", () => {
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.not.toHaveProperty("error")
     expect(statements.some((sql) => sql.includes("preview_automation_sessions"))).toBe(true)
+  })
+})
+
+/**
+ * Production's real attempt history, read from an authenticated
+ * `GET /api/admin/migrate` on 2026-09-19. Four distinct names, six unfinished
+ * attempt rows between them, and every one of the four also has a finished
+ * receipt — so the correct answer is "nothing is stuck", which the flat
+ * `incompleteMigrations` list cannot express.
+ */
+const PRODUCTION_INCOMPLETE = [
+  "047_research_voice_control_plane",
+  "047_research_voice_control_plane",
+  "049_agent_identity",
+  "050_pm_interviews",
+  "055_oauth_authorization_server",
+  "055_oauth_authorization_server",
+] as const
+
+const PRODUCTION_ATTEMPTS: MigrationAttempt[] = [
+  { name: "047_research_voice_control_plane", applied: false },
+  { name: "047_research_voice_control_plane", applied: false },
+  { name: "047_research_voice_control_plane", applied: true },
+  { name: "049_agent_identity", applied: false },
+  { name: "049_agent_identity", applied: true },
+  { name: "050_pm_interviews", applied: false },
+  { name: "050_pm_interviews", applied: true },
+  { name: "055_oauth_authorization_server", applied: false },
+  { name: "055_oauth_authorization_server", applied: false },
+  { name: "055_oauth_authorization_server", applied: true },
+]
+
+describe("attempt history is split into what is stuck and what merely scarred", () => {
+  it("reports a migration whose every attempt is unfinished as unresolved, never as retried", () => {
+    const { unresolved, retried } = classifyMigrationAttempts([{ name: NATIVE_GATES, applied: false }])
+    expect(unresolved).toEqual([NATIVE_GATES])
+    expect(retried).toEqual([])
+  })
+
+  it("reports a migration that failed and later succeeded as retried, with its failure count, and never as unresolved", () => {
+    const { unresolved, retried } = classifyMigrationAttempts([
+      { name: NATIVE_GATES, applied: false },
+      { name: NATIVE_GATES, applied: false },
+      { name: NATIVE_GATES, applied: true },
+    ])
+    expect(retried).toEqual([{ name: NATIVE_GATES, failedAttempts: 2 }])
+    expect(unresolved).toEqual([])
+  })
+
+  // Order in the table is `started_at ASC`, but a finished receipt settles the
+  // name whenever it appears — a retry recorded before a stale unfinished row
+  // must not read as stuck.
+  it("does not depend on the finished receipt coming last", () => {
+    const { unresolved, retried } = classifyMigrationAttempts([
+      { name: NATIVE_GATES, applied: true },
+      { name: NATIVE_GATES, applied: false },
+    ])
+    expect(retried).toEqual([{ name: NATIVE_GATES, failedAttempts: 1 }])
+    expect(unresolved).toEqual([])
+  })
+
+  it("puts a cleanly applied migration in neither list", () => {
+    const { unresolved, retried, incomplete } = classifyMigrationAttempts([{ name: NATIVE_GATES, applied: true }])
+    expect(unresolved).toEqual([])
+    expect(retried).toEqual([])
+    expect(incomplete).toEqual([])
+  })
+
+  it("dedupes repeated unfinished attempts of the same stuck migration", () => {
+    const { unresolved, incomplete } = classifyMigrationAttempts([
+      { name: NATIVE_GATES, applied: false },
+      { name: NATIVE_GATES, applied: false },
+      { name: NATIVE_GATES, applied: false },
+    ])
+    expect(unresolved).toEqual([NATIVE_GATES])
+    // The raw per-attempt history keeps every row.
+    expect(incomplete).toHaveLength(3)
+  })
+
+  it("separates a stuck migration from a retried one in the same history", () => {
+    const { unresolved, retried } = classifyMigrationAttempts([
+      { name: NATIVE_GATES, applied: false },
+      { name: NATIVE_GATES, applied: true },
+      { name: PREVIEW_AUTOMATION, applied: false },
+    ])
+    expect(unresolved).toEqual([PREVIEW_AUTOMATION])
+    expect(retried).toEqual([{ name: NATIVE_GATES, failedAttempts: 1 }])
+  })
+
+  // The safety direction, and it is the opposite of `partitionPendingMigrations`
+  // (which fails OPEN so nothing is silently skipped). Health reporting fails
+  // LOUD: an attempt row whose state is not literally true/false cannot be
+  // called benign, so its migration is alerted on. A stuck migration filed as
+  // history is the failure that must never happen.
+  it.each([
+    ["a NULL finished flag", { name: NATIVE_GATES, applied: null as unknown as boolean }],
+    ["an absent finished flag", { name: NATIVE_GATES }],
+    ["a falsy non-boolean driver value", { name: NATIVE_GATES, applied: "f" as unknown as boolean }],
+    ["a truthy non-boolean driver value", { name: NATIVE_GATES, applied: "t" as unknown as boolean }],
+  ])("fails LOUD on %s: unresolved, never retried, even beside a finished receipt", (_case, row) => {
+    const { unresolved, retried } = classifyMigrationAttempts([row, { name: NATIVE_GATES, applied: true }])
+    expect(unresolved).toEqual([NATIVE_GATES])
+    expect(retried).toEqual([])
+  })
+
+  it("classifies production's exact attempt history as four retried names and nothing stuck", async () => {
+    const { pool } = attemptPool(PRODUCTION_ATTEMPTS)
+
+    const body = await (await getMigrationStatus(pool, "compass_prod")).json()
+
+    expect(body.unresolvedMigrations).toEqual([])
+    expect(body.retriedMigrations).toEqual([
+      { name: "047_research_voice_control_plane", failedAttempts: 2 },
+      { name: "049_agent_identity", failedAttempts: 1 },
+      { name: "050_pm_interviews", failedAttempts: 1 },
+      { name: "055_oauth_authorization_server", failedAttempts: 2 },
+    ])
+    // Unchanged and still forensic: one entry per attempt, duplicates included.
+    expect(body.incompleteMigrations).toEqual([...PRODUCTION_INCOMPLETE])
+    // Unchanged too: the finished receipts only, deduped by the fail-open test.
+    expect(body.appliedMigrations).toEqual([
+      "047_research_voice_control_plane",
+      "049_agent_identity",
+      "050_pm_interviews",
+      "055_oauth_authorization_server",
+    ])
+  })
+
+  it("alerts on a genuinely stuck migration in the GET body", async () => {
+    const { pool } = attemptPool([
+      ...PRODUCTION_ATTEMPTS,
+      { name: "056_hypothetical", applied: false },
+    ])
+
+    const body = await (await getMigrationStatus(pool, "compass_prod")).json()
+
+    expect(body.unresolvedMigrations).toEqual(["056_hypothetical"])
+    expect(body.retriedMigrations.map((entry: { name: string }) => entry.name)).not.toContain("056_hypothetical")
+  })
+})
+
+describe("decision-gate receipt health reads the unresolved set, not attempt history", () => {
+  // INCOMPLETE must mean "this migration is stuck", so the health report is
+  // handed the unresolved names. The fourth argument is the only thing that can
+  // produce INCOMPLETE rather than MISSING, which is what these two pin.
+  it("reports a genuinely stuck 039 as INCOMPLETE", async () => {
+    const health = await getDecisionGateInfrastructureHealth(healthClient(), "compass_prod", [], [NATIVE_GATES])
+    expect(health.migrationReceipts).toContainEqual(expect.objectContaining({ name: NATIVE_GATES, applied: false, status: "INCOMPLETE" }))
+  })
+
+  it("reports an unapplied 039 that is not unresolved as MISSING", async () => {
+    const health = await getDecisionGateInfrastructureHealth(healthClient(), "compass_prod", [], [])
+    expect(health.migrationReceipts).toContainEqual(expect.objectContaining({ name: NATIVE_GATES, applied: false, status: "MISSING" }))
+  })
+
+  /**
+   * Passing the unresolved set rather than raw attempt history cannot change any
+   * output that `getMigrationStatus` can actually produce: a retried name always
+   * has a finished receipt, so it is in `appliedMigrations`, and the APPLIED
+   * branch is tested before INCOMPLETE either way. This pins the semantics that
+   * follow from that — a retried migration is never flagged as needing
+   * attention — not a behavior difference.
+   */
+  it("never labels a retried-then-applied 039 INCOMPLETE", async () => {
+    const { pool } = attemptPool([
+      { name: NATIVE_GATES, applied: false },
+      { name: NATIVE_GATES, applied: true },
+    ])
+
+    const body = await (await getMigrationStatus(pool, "compass_prod")).json()
+
+    expect(body.retriedMigrations).toEqual([{ name: NATIVE_GATES, failedAttempts: 1 }])
+    expect(body.decisionGateInfrastructure.migrationReceipts).toContainEqual(expect.objectContaining({ name: NATIVE_GATES, applied: true, status: "APPLIED" }))
+    expect(body.decisionGateInfrastructure.migrationReceipts.filter((receipt: { status: string }) => receipt.status === "INCOMPLETE")).toEqual([])
+  })
+
+  // #263's decided outputs, re-asserted through the new fourth argument so a
+  // change to it cannot quietly take them with it.
+  it("keeps REPAIRED_BY and SATISFIED_BY_ALTERNATIVE intact while an unresolved set is supplied", async () => {
+    const health = await getDecisionGateInfrastructureHealth(healthClient(), "compass_prod", [GATES_REPAIR], [NATIVE_GATES])
+    expect(health.migrationReceipts).toContainEqual(expect.objectContaining({
+      name: NATIVE_GATES,
+      status: "REPAIRED_BY",
+      satisfiedBy: GATES_REPAIR,
+      repairedBy: GATES_REPAIR,
+    }))
+    const reverse = await getDecisionGateInfrastructureHealth(healthClient(), "compass_prod", [NATIVE_GATES], [GATES_REPAIR])
+    expect(reverse.migrationReceipts).toContainEqual(expect.objectContaining({
+      name: GATES_REPAIR,
+      status: "SATISFIED_BY_ALTERNATIVE",
+      satisfiedBy: NATIVE_GATES,
+      repairedBy: null,
+    }))
   })
 })

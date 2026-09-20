@@ -34,6 +34,13 @@ Schemas where the exact production workspace does not exist are an explicit no-o
 
 ## Verify
 
-Repeat the authenticated GET and verify that `appliedMigrations` contains migration 048 and the repair plans contain only `ALREADY_APPLIED` and `SKIPPED_DECIDED` results. `incompleteMigrations` is forensic attempt history rather than a grouped current state, so an earlier failed 048 attempt can remain listed after a successful retry; the finished receipt and terminal readback are authoritative.
+Repeat the authenticated GET and verify that `appliedMigrations` contains migration 048 and the repair plans contain only `ALREADY_APPLIED` and `SKIPPED_DECIDED` results.
+
+`unresolvedMigrations` is the authoritative current-state signal for stuck work: a name is listed while it has an unfinished attempt and no finished receipt, and it clears once a retry succeeds. An empty `unresolvedMigrations` means nothing is stuck. `incompleteMigrations` is forensic attempt history — one entry per unfinished attempt, duplicates included — so an earlier failed 048 attempt remains listed forever after a successful retry, and its length is never a health check. `retriedMigrations` names those failed-then-succeeded migrations with their `failedAttempts` count, which is where a name that leaves `unresolvedMigrations` by succeeding shows up. The finished receipt and terminal readback remain authoritative for the repair itself.
+
+Two states read as unresolved without owing any work, so cross-check a non-empty `unresolvedMigrations` against `pending` and `notApplicable` before acting:
+
+- **Unresolved but not pending.** A failed decision migration records its unfinished attempt before running any DDL, so a 039 that failed and was then repaired by 042 stays unresolved permanently while `notApplicable` reports it as `satisfied by 042`. There is no retry to run; `migrationReceipts` reports it as `REPAIRED_BY`, which is the decided answer.
+- **Unresolved and simultaneously in `appliedMigrations`.** Health reporting classifies deliberately loud: an attempt row whose finished state is not a literal `true`/`false` is alerted on rather than assumed benign, and such a row also passes the separate fail-open test behind `appliedMigrations`. A name in both fields means the attempt history itself is unreadable — inspect `_prisma_migrations` directly rather than trusting either field.
 
 Then read back the allowlisted requests through the normal review API/UI. The nine still-pending requests should retain their URLs and decision cycles while showing readable linked context. The already decided request must remain unchanged.
