@@ -53,7 +53,10 @@ vi.mock("@/lib/db", () => ({
 
 // ── Fake McpServer that captures every registered tool callback ─────────────
 
-type ToolCallback = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>
+type ToolCallback = (args: Record<string, unknown>) => Promise<{
+  content: Array<{ type: string; text: string }>
+  structuredContent?: { data: unknown }
+}>
 
 const registeredTools: Record<string, ToolCallback> = {}
 const registeredSchemas: Record<string, Record<string, z.ZodType>> = {}
@@ -252,6 +255,16 @@ describe("update_roadmap_item MCP tool — optional links", () => {
     })
     expect(data).not.toHaveProperty("opportunityId")
     expect(data).not.toHaveProperty("squadId")
+  })
+
+  it("preserves the linked Solution response contract when setting and clearing links", async () => {
+    const linked = await getHandler("update_roadmap_item")({ itemId: "item-1", solutionId: targetId })
+    expect(textOf(linked)).toContain(`Linked Solution: ${targetId}`)
+    expect(linked.structuredContent?.data).toMatchObject({ solutionId: targetId })
+
+    const cleared = await getHandler("update_roadmap_item")({ itemId: "item-1", solutionId: null })
+    expect(textOf(cleared)).not.toContain("Linked Solution:")
+    expect(cleared.structuredContent?.data).toMatchObject({ solutionId: null })
   })
 })
 
