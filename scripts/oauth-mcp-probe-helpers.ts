@@ -15,6 +15,27 @@ export type McpToolEnvelope = {
   data: unknown
 }
 
+export function probeOpportunityFixture(id: string, workspaceId: string, nonce: string) {
+  return {
+    id,
+    workspaceId,
+    title: `OAuth probe opportunity ${nonce}`,
+    description: "Synthetic row proving the agent can read its granted workspace.",
+    source: "MCP" as const,
+  }
+}
+
+export function mcpEnvelopeContainsItemId(
+  envelope: McpToolEnvelope | null,
+  expectedId: string,
+): boolean {
+  if (!envelope?.ok || !envelope.data || typeof envelope.data !== "object") return false
+  const items = (envelope.data as { items?: unknown }).items
+  return Array.isArray(items) && items.some(
+    (item) => Boolean(item && typeof item === "object" && (item as { id?: unknown }).id === expectedId),
+  )
+}
+
 function isPayload(value: unknown): value is McpPayload {
   return Boolean(value && typeof value === "object" && "jsonrpc" in value)
 }

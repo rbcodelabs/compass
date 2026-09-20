@@ -59,9 +59,11 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import { getActiveSchema } from "../lib/schema.ts"
 import {
+  mcpEnvelopeContainsItemId,
   mcpErrorText,
   mcpToolEnvelope,
   parseMcpPayload,
+  probeOpportunityFixture,
   runCleanupStack,
   type McpPayload,
 } from "./oauth-mcp-probe-helpers.ts"
@@ -256,6 +258,7 @@ type AgentFixture = {
   orgSlug: string
   grantedWorkspaceId: string
   ungrantedWorkspaceId: string
+  opportunityId: string
   cleanup: () => Promise<void>
 }
 
@@ -273,6 +276,7 @@ async function seedAgentFixture(db: Db): Promise<AgentFixture> {
   const grantedWorkspaceId = randomUUID()
   const ungrantedWorkspaceId = randomUUID()
   const agentId = randomUUID()
+  const opportunityId = randomUUID()
   const orgSlug = `oauth-probe-${nonce}`
   const agentName = `OAuth probe agent ${nonce}`
 
@@ -292,6 +296,7 @@ async function seedAgentFixture(db: Db): Promise<AgentFixture> {
       async () => void (await db.prisma.task.deleteMany({
         where: { workspaceId: { in: [grantedWorkspaceId, ungrantedWorkspaceId] } },
       })),
+      async () => void (await db.prisma.opportunity.deleteMany({ where: { id: opportunityId } })),
     ])
     if (cleanupFailures.length > 0) {
       throw new Error(`agent fixture cleanup had ${cleanupFailures.length} failure(s)`)
@@ -328,6 +333,9 @@ async function seedAgentFixture(db: Db): Promise<AgentFixture> {
         grantedByUserId: user.id,
       },
     })
+    await db.prisma.opportunity.create({
+      data: probeOpportunityFixture(opportunityId, grantedWorkspaceId, nonce),
+    })
   } catch (error) {
     try {
       await cleanup()
@@ -343,6 +351,7 @@ async function seedAgentFixture(db: Db): Promise<AgentFixture> {
     orgSlug,
     grantedWorkspaceId,
     ungrantedWorkspaceId,
+    opportunityId,
     cleanup,
   }
 }
@@ -672,7 +681,10 @@ async function main() {
     const grantedEnvelope = mcpToolEnvelope(grantedRead.payload)
     check(
       "read in a granted workspace succeeds",
-      grantedRead.response.status === 200 && grantedEnvelope?.ok === true,
+      grantedRead.response.status === 200 &&
+        (fixture
+          ? mcpEnvelopeContainsItemId(grantedEnvelope, fixture.opportunityId)
+          : grantedEnvelope?.ok === true),
       `${grantedRead.response.status} ${grantedEnvelope?.message ?? mcpErrorText(grantedRead.payload) ?? "no result"}`,
     )
   } else {

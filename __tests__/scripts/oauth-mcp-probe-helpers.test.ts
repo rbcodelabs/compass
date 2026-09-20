@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  mcpEnvelopeContainsItemId,
   mcpErrorText,
   mcpToolEnvelope,
   parseMcpPayload,
+  probeOpportunityFixture,
   runCleanupStack,
 } from "../../scripts/oauth-mcp-probe-helpers"
 
@@ -48,6 +50,29 @@ describe("mcpToolEnvelope", () => {
 
   it("returns null for a JSON-RPC error", () => {
     expect(mcpToolEnvelope({ jsonrpc: "2.0", id: 7, error: { code: -1, message: "denied" } })).toBeNull()
+  })
+})
+
+describe("agent fixture opportunity", () => {
+  it("seeds an identifiable opportunity in the granted workspace", () => {
+    expect(probeOpportunityFixture("opportunity-1", "workspace-granted", "abc123")).toEqual({
+      id: "opportunity-1",
+      workspaceId: "workspace-granted",
+      title: "OAuth probe opportunity abc123",
+      description: "Synthetic row proving the agent can read its granted workspace.",
+      source: "MCP",
+    })
+  })
+
+  it("requires the granted-workspace response to contain the seeded row", () => {
+    const envelope = {
+      ok: true,
+      message: "Found 1 opportunity.",
+      data: { items: [{ id: "opportunity-1" }] },
+    }
+    expect(mcpEnvelopeContainsItemId(envelope, "opportunity-1")).toBe(true)
+    expect(mcpEnvelopeContainsItemId(envelope, "some-other-opportunity")).toBe(false)
+    expect(mcpEnvelopeContainsItemId({ ...envelope, ok: false }, "opportunity-1")).toBe(false)
   })
 })
 
