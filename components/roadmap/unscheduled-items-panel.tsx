@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
 import { BoardColumn, EmptyState } from "@/components/patterns";
+import { usePanelContext } from "@/components/panels/panel-context";
 import { HORIZON_META, QUICK_ADD_HORIZONS } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
 
@@ -155,6 +156,7 @@ function UnscheduledItemCard({
     data: { unscheduledItem: item },
     disabled: pending,
   });
+  const { openPanel } = usePanelContext();
 
   const style: React.CSSProperties = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, zIndex: 50 }
@@ -185,7 +187,16 @@ function UnscheduledItemCard({
             <GripVertical className="size-3.5" />
           </button>
 
-          <CardTitle className="flex-1 text-sm leading-snug">{item.title}</CardTitle>
+          <CardTitle className="flex-1 text-sm leading-snug">
+            <button
+              type="button"
+              onClick={() => openPanel(item.kind, item.id)}
+              disabled={pending}
+              className="text-left hover:underline underline-offset-2 disabled:cursor-wait disabled:no-underline"
+            >
+              {item.title}
+            </button>
+          </CardTitle>
 
           {pending ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground">Scheduling…</span> : null}
 
