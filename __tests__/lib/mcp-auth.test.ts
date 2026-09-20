@@ -126,6 +126,8 @@ describe("OAuth access tokens", () => {
     userId: "user-1",
     scope: "mcp:read mcp:write",
     scopeWorkspaceId: null,
+    authorizationMode: "USER",
+    agentId: null,
   }
 
   it("resolves to a USER actor carrying the token's scopes", async () => {
@@ -276,22 +278,24 @@ describe("OAuth access tokens bound to an agent", () => {
     expect(agent.findFirst).not.toHaveBeenCalled()
   })
 
-  const NON_AGENT_MODES: Array<[string | null, string]> = [
-    ["USER", "the admin override"],
+  it("accepts exact USER mode as the admin override", async () => {
+    oAuthToken.findFirst.mockResolvedValue({ ...agentRow, authorizationMode: "USER", agentId: null })
+    await expect(validateMcpAuth(oauthRequest())).resolves.toMatchObject({
+      valid: true,
+      purpose: "USER",
+    })
+    expect(agent.findFirst).not.toHaveBeenCalled()
+  })
+
+  const INVALID_MODES: Array<[string | null, string]> = [
     [null, "a row written before migration 056"],
     ["RESEARCH", "a value the switch does not recognise"],
     ["AGENT_TURN", "a purpose no OAuth token may ever take"],
     ["agent", "the right word in the wrong case"],
   ]
-  it.each(NON_AGENT_MODES)("treats authorizationMode %s as USER mode (%s)", async (mode) => {
-    // A closed two-way switch, never a pass-through of a stored purpose string.
-    // RESEARCH and AGENT_TURN in particular must not become reachable by
-    // writing a string into a column.
+  it.each(INVALID_MODES)("refuses authorizationMode %s (%s)", async (mode) => {
     oAuthToken.findFirst.mockResolvedValue({ ...agentRow, authorizationMode: mode })
-    await expect(validateMcpAuth(oauthRequest())).resolves.toMatchObject({
-      valid: true,
-      purpose: "USER",
-    })
+    await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({ valid: false })
     expect(agent.findFirst).not.toHaveBeenCalled()
   })
 

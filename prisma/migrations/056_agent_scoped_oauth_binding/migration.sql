@@ -19,8 +19,9 @@
 -- must not be ambiguous between "the user elected the admin override" and "this
 -- row predates agent binding". Inferring the mode from `agent_id IS NULL` would
 -- collapse those two into one value and turn a security column into a footgun,
--- so the mode is stored explicitly and read as a closed two-way switch:
--- exactly "AGENT" takes the agent path, anything else is USER mode.
+-- so the mode is stored explicitly and read as a closed two-way switch: only
+-- exact "AGENT" and "USER" values are accepted; null or unknown values fail
+-- closed.
 --
 -- WHY agent_tool_calls.credential_type. An agent-bound OAuth token must supply
 -- a credentialId to withAgentActivity (lib/agent-activity.ts:7) or every

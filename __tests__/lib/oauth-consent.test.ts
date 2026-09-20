@@ -1,10 +1,19 @@
 /**
- * The consent step's signing, CSRF binding, and cookie.
+ * The consent step's signing, CSRF binding, and remembered approval.
  *
- * The property that matters most: a consent submission carries **no unsigned
- * fields**. Everything that decides what gets issued lives inside an HMAC bound
- * to one signed-in user, so a cross-site form cannot mint one and nothing can be
- * rewritten between the screen the user read and the code that is issued.
+ * The property that matters most: the *authorization request* carries no
+ * unsigned fields. Everything that decides what is being authorized lives
+ * inside an HMAC bound to one signed-in user, so a cross-site form cannot mint
+ * one and the redirect URI cannot be rewritten between the screen the user read
+ * and the code that is issued. (ADR 0015 adds unsigned *binding* fields, which
+ * are re-validated server-side instead — see oauth-agent-binding-consent.test.ts.)
+ *
+ * There is no consent cookie any more, and the tests that covered it are gone
+ * with it rather than being rewritten. A remembered approval now carries a
+ * binding, and a security-relevant decision may not live in 90-day client state
+ * that no server-side migration can revoke. `OAuthConsent` is the only record,
+ * and the assertion that replaced those tests is that approving writes no
+ * cookie at all (api-oauth-consent-route.test.ts).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createOAuthStore } from "../helpers/oauth-store"
@@ -13,15 +22,9 @@ const store = createOAuthStore()
 vi.mock("@/lib/db", () => ({ default: () => store.prisma }))
 
 import {
-  CONSENT_COOKIE_MAX_AGE_SECONDS,
-  CONSENT_COOKIE_NAME,
-  CONSENT_COOKIE_OPTIONS,
   CONSENT_REQUEST_TTL_MS,
-  buildConsentCookie,
-  consentCookieApproves,
+  findStoredConsent,
   grantedAccess,
-  hasStoredConsent,
-  readConsentCookie,
   recordConsent,
   scopeCovers,
   signAuthorizationRequest,
@@ -101,61 +104,6 @@ describe("the signed authorization request", () => {
   })
 })
 
-describe("the consent cookie", () => {
-  it("uses the __Host- prefix with Secure, HttpOnly and SameSite=Lax", () => {
-    // __Host- makes the browser enforce Secure + Path=/ + no Domain, so a
-    // sibling subdomain cannot set or overwrite an approval record.
-    expect(CONSENT_COOKIE_NAME.startsWith("__Host-")).toBe(true)
-    expect(CONSENT_COOKIE_OPTIONS).toMatchObject({
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-      path: "/",
-    })
-    expect(CONSENT_COOKIE_OPTIONS.maxAge).toBe(CONSENT_COOKIE_MAX_AGE_SECONDS)
-  })
-
-  it("records an approval bound to one client and scope", () => {
-    const cookie = buildConsentCookie(null, "user-1", "client-a", "mcp:read mcp:write")
-    expect(consentCookieApproves(cookie, "user-1", "client-a", ["mcp:read"])).toBe(true)
-    expect(consentCookieApproves(cookie, "user-1", "client-b", ["mcp:read"])).toBe(false)
-  })
-
-  it("does not carry an approval across a user switch", () => {
-    const cookie = buildConsentCookie(null, "user-1", "client-a", "mcp:read")
-    expect(consentCookieApproves(cookie, "user-2", "client-a", ["mcp:read"])).toBe(false)
-  })
-
-  it("does not let an old narrow approval cover a widened request", () => {
-    const cookie = buildConsentCookie(null, "user-1", "client-a", "mcp:read")
-    // A client that previously got read-only must not silently gain write.
-    expect(consentCookieApproves(cookie, "user-1", "client-a", ["mcp:read", "mcp:write"])).toBe(false)
-  })
-
-  it("accumulates clients and replaces a re-approved one in place", () => {
-    const first = buildConsentCookie(null, "user-1", "client-a", "mcp:read")
-    const second = buildConsentCookie(first, "user-1", "client-b", "mcp:read")
-    const rewidened = buildConsentCookie(second, "user-1", "client-a", "mcp:read mcp:write")
-
-    const entries = readConsentCookie(rewidened, "user-1")
-    expect(entries).toHaveLength(2)
-    expect(consentCookieApproves(rewidened, "user-1", "client-a", ["mcp:write"])).toBe(true)
-    expect(consentCookieApproves(rewidened, "user-1", "client-b", ["mcp:read"])).toBe(true)
-  })
-
-  it("bounds how many clients it remembers", () => {
-    let cookie: string | null = null
-    for (let i = 0; i < 30; i += 1) cookie = buildConsentCookie(cookie, "user-1", `client-${i}`, "mcp:read")
-    expect(readConsentCookie(cookie, "user-1").length).toBeLessThanOrEqual(20)
-  })
-
-  it("ignores a forged or expired cookie", () => {
-    expect(readConsentCookie("forged.value", "user-1")).toEqual([])
-    const cookie = buildConsentCookie(null, "user-1", "client-a", "mcp:read", new Date("2026-01-01"))
-    expect(readConsentCookie(cookie, "user-1", new Date("2026-09-18"))).toEqual([])
-  })
-})
-
 describe("scopeCovers", () => {
   it("requires every requested scope to be present", () => {
     expect(scopeCovers("mcp:read mcp:write", ["mcp:read"])).toBe(true)
@@ -168,23 +116,62 @@ describe("scopeCovers", () => {
 describe("stored consent", () => {
   it("skips the screen for an already-approved client", async () => {
     await recordConsent("user-1", "client-a", "mcp:read mcp:write")
-    expect(await hasStoredConsent("user-1", "client-a", ["mcp:read"])).toBe(true)
+    expect(await findStoredConsent("user-1", "client-a", ["mcp:read"])).not.toBeNull()
   })
 
   it("does not skip when the request widens past the stored approval", async () => {
     await recordConsent("user-1", "client-a", "mcp:read")
-    expect(await hasStoredConsent("user-1", "client-a", ["mcp:read", "mcp:write"])).toBe(false)
+    expect(await findStoredConsent("user-1", "client-a", ["mcp:read", "mcp:write"])).toBeNull()
   })
 
   it("overwrites rather than accumulating rows for the same pair", async () => {
     await recordConsent("user-1", "client-a", "mcp:read")
     await recordConsent("user-1", "client-a", "mcp:read mcp:write")
     expect(store.oAuthConsent.rows).toHaveLength(1)
-    expect(await hasStoredConsent("user-1", "client-a", ["mcp:write"])).toBe(true)
+    expect(await findStoredConsent("user-1", "client-a", ["mcp:write"])).not.toBeNull()
   })
 
-  it("is false for a client that was never approved", async () => {
-    expect(await hasStoredConsent("user-1", "client-never", ["mcp:read"])).toBe(false)
+  it("is null for a client that was never approved", async () => {
+    expect(await findStoredConsent("user-1", "client-never", ["mcp:read"])).toBeNull()
+  })
+
+  // The binding is the whole reason this returns a row rather than a boolean.
+  // A reconnect has to replay the identity the user chose; replaying only "yes,
+  // approved" would silently re-mint a user-mode token for an agent-bound
+  // connection, which is the exact privilege increase ADR 0015 exists to close.
+  it("defaults to USER mode when no binding is supplied", async () => {
+    await recordConsent("user-1", "client-a", "mcp:read")
+    expect(await findStoredConsent("user-1", "client-a", ["mcp:read"])).toEqual({
+      authorizationMode: "USER",
+      agentId: null,
+    })
+  })
+
+  it("remembers an agent binding so a reconnect replays it", async () => {
+    await recordConsent("user-1", "client-a", "mcp:read", {
+      authorizationMode: "AGENT",
+      agentId: "agent-7",
+    })
+    expect(await findStoredConsent("user-1", "client-a", ["mcp:read"])).toEqual({
+      authorizationMode: "AGENT",
+      agentId: "agent-7",
+    })
+  })
+
+  it("replaces an agent binding with the override when the same client is re-approved", async () => {
+    await recordConsent("user-1", "client-a", "mcp:read", {
+      authorizationMode: "AGENT",
+      agentId: "agent-7",
+    })
+    await recordConsent("user-1", "client-a", "mcp:read", {
+      authorizationMode: "USER",
+      agentId: null,
+    })
+    expect(store.oAuthConsent.rows).toHaveLength(1)
+    expect(await findStoredConsent("user-1", "client-a", ["mcp:read"])).toEqual({
+      authorizationMode: "USER",
+      agentId: null,
+    })
   })
 })
 

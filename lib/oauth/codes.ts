@@ -30,7 +30,7 @@
  * and letting a wrong `code_verifier` leave it spendable turns it into an
  * oracle an attacker can retry against.
  */
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppPrismaClient, type AppTransactionClient } from "@/lib/db"
 import { hashOAuthToken, mintAuthorizationCode } from "@/lib/oauth/tokens"
 
 /** 60 s, per the design. Long enough for a browser redirect, short enough that
@@ -39,6 +39,7 @@ export const AUTHORIZATION_CODE_TTL_MS = 60_000
 
 export interface IssuedAuthorizationCode {
   code: string
+  authorizationCodeId: string
   expiresAt: Date
 }
 
@@ -60,10 +61,9 @@ export interface AuthorizationBinding {
  * Normalises a stored binding for carrying forward into a freshly minted row —
  * code to token, and token to rotated token.
  *
- * The same **closed two-way switch** `validateOAuthAccessToken` applies: a
- * stored mode that is not exactly `"AGENT"` carries no agent forward, so a
- * stray `agent_id` left on a USER-mode row can never become live by being
- * copied into a new token.
+ * The same **closed two-value parser** `validateOAuthAccessToken` applies.
+ * Exact `"USER"` carries no agent forward; exact `"AGENT"` carries its agent;
+ * null or an unrecognised value returns `null` so callers refuse the grant.
  *
  * `"AGENT"` with a missing `agentId` is carried forward **as-is** rather than
  * quietly repaired to USER. That state is unwritable today, but if it ever
@@ -75,10 +75,14 @@ export interface AuthorizationBinding {
 export function carryAuthorizationBinding(row: {
   authorizationMode: string | null
   agentId: string | null
-}): Required<AuthorizationBinding> {
-  return row.authorizationMode === "AGENT"
-    ? { authorizationMode: "AGENT", agentId: row.agentId }
-    : { authorizationMode: "USER", agentId: null }
+}): Required<AuthorizationBinding> | null {
+  if (row.authorizationMode === "AGENT") {
+    return { authorizationMode: "AGENT", agentId: row.agentId }
+  }
+  if (row.authorizationMode === "USER") {
+    return { authorizationMode: "USER", agentId: null }
+  }
+  return null
 }
 
 export interface AuthorizationCodeInput extends AuthorizationBinding {
@@ -94,6 +98,7 @@ export interface AuthorizationCodeInput extends AuthorizationBinding {
 export async function issueAuthorizationCode(
   input: AuthorizationCodeInput,
   now: Date = new Date(),
+  prisma: Pick<AppPrismaClient | AppTransactionClient, "oAuthAuthorizationCode"> = getPrisma(),
 ): Promise<IssuedAuthorizationCode> {
   const { code, codeHash } = mintAuthorizationCode()
   const expiresAt = new Date(now.getTime() + AUTHORIZATION_CODE_TTL_MS)
@@ -104,7 +109,7 @@ export async function issueAuthorizationCode(
   // through a spread, and the result is a runtime `Unknown argument "state"`
   // that only appears once a real authorization is attempted. Same discipline
   // as `claimRefreshToken` in lib/oauth/grants.ts, for the same reason.
-  await getPrisma().oAuthAuthorizationCode.create({
+  const stored = await prisma.oAuthAuthorizationCode.create({
     data: {
       codeHash,
       expiresAt,
@@ -120,8 +125,9 @@ export async function issueAuthorizationCode(
       authorizationMode: input.authorizationMode,
       agentId: input.agentId ?? null,
     },
+    select: { id: true },
   })
-  return { code, expiresAt }
+  return { code, authorizationCodeId: stored.id, expiresAt }
 }
 
 /** The row behind a successfully claimed code. */
@@ -134,7 +140,7 @@ export interface ClaimedAuthorizationCode {
   codeChallengeMethod: string
   scope: string
   resource: string
-  /** Null only on a row written before migration 056; read as USER mode. */
+  /** Null only on a malformed or incompletely migrated row; reject it. */
   authorizationMode: string | null
   agentId: string | null
   expiresAt: Date

@@ -28,7 +28,7 @@
  * expiry. `offline_access` is still advertised in the AS metadata because
  * Claude gates its *request* for a refresh token on seeing it.
  */
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppPrismaClient, type AppTransactionClient } from "@/lib/db"
 import type { AuthorizationBinding } from "@/lib/oauth/codes"
 import { mintOAuthToken } from "@/lib/oauth/tokens"
 
@@ -67,8 +67,8 @@ export interface IssueTokenPairInput extends AuthorizationBinding {
 export async function issueTokenPair(
   input: IssueTokenPairInput,
   now: Date = new Date(),
+  prisma: Pick<AppPrismaClient | AppTransactionClient, "oAuthToken"> = getPrisma(),
 ): Promise<TokenResponseBody> {
-  const prisma = getPrisma()
   const access = mintOAuthToken("ACCESS")
   const refresh = mintOAuthToken("REFRESH")
 
@@ -88,12 +88,10 @@ export async function issueTokenPair(
     agentId: input.agentId ?? null,
   }
 
-  // Two rows, not a transaction. DSQL has no foreign keys and these two inserts
-  // touch different rows, so a transaction would buy only atomicity of the
-  // *pair* — and the failure it would guard against (access written, refresh
-  // not) degrades to the client holding a working access token with no way to
-  // refresh, which is exactly what it would get from a rolled-back transaction
-  // anyway, minus an hour of usable session.
+  // This helper does not open its own transaction. The token route passes the
+  // transaction that also reads current consent, making consent + pair issuance
+  // one OCC boundary. Lower-level callers may omit it when pair atomicity is not
+  // their security boundary (for example, test fixture construction).
   await prisma.oAuthToken.create({
     data: {
       ...common,
@@ -142,7 +140,7 @@ export interface RefreshTokenRow {
   scope: string
   resource: string
   scopeWorkspaceId: string | null
-  /** Null only on a row written before migration 056; read as USER mode. */
+  /** Null only on a malformed or incompletely migrated row; reject it. */
   authorizationMode: string | null
   agentId: string | null
   familyId: string

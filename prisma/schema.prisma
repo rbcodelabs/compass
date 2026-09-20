@@ -2340,9 +2340,10 @@ model OAuthAuthorizationCode {
   /// "AGENT" | "USER" (ADR 0015). Explicit rather than inferred from
   /// `agentId IS NULL`, because a null agentId must not be ambiguous between
   /// "the user elected the admin override" and "this row predates agent
-  /// binding". Read as a closed two-way switch: anything that is not exactly
-  /// "AGENT" is USER mode. Nullable in the database (DSQL rejects a DEFAULT on
-  /// ALTER TABLE ADD COLUMN); migration 056 backfills legacy rows to "USER".
+  /// binding". Read as a closed two-value parser: only exact "AGENT" and
+  /// "USER" are accepted; null or unknown values fail closed. Nullable in the
+  /// database (DSQL rejects a DEFAULT on ALTER TABLE ADD COLUMN); migration 056
+  /// backfills legacy rows to "USER".
   authorizationMode   String?   @default("USER") @map("authorization_mode") @db.VarChar(10)
   /// Non-null iff authorizationMode is "AGENT". An Agent.id owned by userId —
   /// re-validated at every use, never trusted from issuance.
@@ -2418,4 +2419,25 @@ model OAuthConsent {
 
   @@unique([userId, clientId], map: "idx_oauth_consents_user_client")
   @@map("oauth_consents")
+}
+
+/// Immutable, secret-free evidence that a human explicitly authorized USER
+/// credentials. Agent-bound authorizations use the existing per-call audit.
+model OAuthAuthorizationEvent {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventType            String   @map("event_type") @db.VarChar(50)
+  source               String   @db.VarChar(30)
+  authorizationCodeId  String   @unique(map: "idx_oauth_authorization_events_code") @map("authorization_code_id") @db.Uuid
+  userId               String   @map("user_id") @db.Uuid
+  clientId             String   @map("client_id") @db.VarChar(64)
+  clientNameSnapshot   String   @map("client_name_snapshot") @db.VarChar(255)
+  redirectOrigin       String   @map("redirect_origin") @db.Text
+  authorizationMode    String   @map("authorization_mode") @db.VarChar(10)
+  agentId              String?  @map("agent_id") @db.Uuid
+  scope                String   @db.VarChar(255)
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt], map: "idx_oauth_authorization_events_user_created")
+  @@index([clientId, createdAt], map: "idx_oauth_authorization_events_client_created")
+  @@map("oauth_authorization_events")
 }

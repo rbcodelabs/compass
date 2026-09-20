@@ -64,8 +64,9 @@ const BACKFILLED_COLUMNS: ReadonlyArray<readonly [string, string]> = [
  * These stay nullable. `authorization_mode` and `credential_type` are nullable
  * because DSQL will not accept a DEFAULT on ADD COLUMN and a NOT NULL without
  * one cannot be added to a populated table; `agent_id` is nullable because
- * USER-mode tokens have no agent. Every reader treats a null mode as USER, so
- * nullability is load-bearing rather than incidental.
+ * USER-mode tokens have no agent. The columns stay nullable for DSQL schema
+ * compatibility, but readers accept only exact "USER" or "AGENT" values and
+ * fail closed if a null or unknown value survives the migration backfill.
  */
 const NULLABLE_COLUMNS = AGENT_SCOPED_OAUTH_COLUMNS
 

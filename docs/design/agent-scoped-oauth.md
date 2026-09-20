@@ -1,11 +1,11 @@
 # Design — Agent-Scoped OAuth for the Compass MCP Server
 
-- **Status:** Proposed (not implemented)
+- **Status:** Accepted — implemented on this feature branch; pending merge and release
 - **Date:** 2026-09-19
 - **Supersedes:** decision 1 of `docs/design/mcp-oauth-discovery.md` ("No
   workspace picker on consent"), and the corresponding section of ADR 0014
 - **Design of record it extends:** `docs/design/mcp-oauth-discovery.md`
-- **ADR candidate:** `docs/decisions/0015-agent-scoped-oauth-tokens.md`
+- **Accepted ADR:** `docs/decisions/0015-agent-scoped-oauth-tokens.md`
 - **Compass tracking:** solution `d1c8d2a1-1850-4485-8109-e867d2c8e733` under
   opportunity `91588247-78df-49d1-bd8a-dd782e26eeef`
 - **Scope:** Bind an OAuth access token to a workspace agent at consent time, so
@@ -505,18 +505,39 @@ instead"*. Expanding it reveals a destructive-styled panel that:
 If the predicate does not hold, the disclosure is not rendered at all, and the
 screen explains that agent authorization is the only option available.
 
-**Auditing.** A user-mode authorization writes an `AgentAuditLog` row at
-issuance naming the user, client, redirect host and timestamp. The model already
-exists (`prisma/schema.prisma`, `agent_audit_logs`) and this is the one path
-with no per-call `AgentToolCall` trail, so issuance is the only place it can be
-recorded. Confirm the existing column shape fits before assuming this is free.
+**Auditing.** The existing `AgentAuditLog` cannot truthfully record a user-mode
+authorization. Its schema requires one `workspaceId`, defines `toolName` as a
+mutating MCP tool, and has no client or redirect-host fields. A user-mode token
+can span several workspaces (or carry organization-level reach without any
+workspace), so choosing an arbitrary workspace or writing one synthetic "tool"
+row per workspace would falsify both provenance and cardinality. Those rows are
+also deleted with their workspace, which is wrong for an authorization event.
+
+Stage 2 therefore discloses that the override waives the agents' per-call audit
+trail and does **not** write fabricated mutation rows. Instead, each USER-mode
+authorization-code issuance atomically writes one dedicated
+`OAuthAuthorizationEvent`; if that event cannot be persisted, no code is
+returned. This applies to both interactive consent and remembered-consent
+replay. The record contains the event source, code-row ID, user and client IDs,
+the client-name snapshot, normalized redirect origin, USER binding, scope, and
+timestamp. It contains no raw code or token, code hash, state, PKCE material,
+raw redirect URI, email address, IP address, user agent, or request body. AGENT
+issuance continues to use its per-call audit and does not create this USER event.
+
+The MVP has no audit UI or generalized audit model. Authorization events are
+independent of workspace deletion and retained for the lifetime of the account,
+pending a broader retention policy. Compass has no general account-erasure path
+to extend in this release; when one is introduced, these user-linked records
+must be included explicitly.
 
 ### An amendment to the "only input is a signature" invariant
 
-`app/oauth/consent/route.ts` currently states, at length and correctly, that the
-POST reads *nothing* unsigned: everything that determines what gets issued is
-recovered from inside the HMAC blob, so there is no tamper window between the
-screen the user read and the code that gets issued.
+Before agent binding, `app/oauth/consent/route.ts` stated that the POST read
+*nothing* unsigned: everything that determined what was issued came from the
+HMAC blob, leaving no tamper window between the screen the user read and the
+code sent to the client. The implemented route now documents the narrower
+invariant below: authorization-request fields remain signed, while the later
+binding choice is unsigned and independently re-validated.
 
 Agent binding breaks that literally. The binding is a *user choice made at the
 consent screen*, so the GET that signed the blob could not have known it. The
@@ -578,13 +599,15 @@ one; there is no authorization-code flow that could produce one; and
 `validateMcpAuth` requires both `scopeWorkspaceId` and a live `expiresAt` for it
 (`lib/mcp-auth.ts:65`). Binding a 1-hour OAuth token with a 30-day refresh to a
 turn-scoped purpose is incoherent, not merely unimplemented. The
-`validateOAuthAccessToken` branch must therefore be a closed two-way switch on
-`authorizationMode`, never a pass-through of a stored purpose string.
+`validateOAuthAccessToken` must therefore parse `authorizationMode` as a closed
+two-value field: exact `AGENT` or exact `USER`. It never passes through a stored
+purpose string, and it refuses null or unknown values rather than normalizing
+them to the broader USER identity.
 
 ## Backward compatibility
 
 **Decision: forced re-consent. Revoke every live OAuth token and delete every
-stored consent in the migration.**
+stored consent and outstanding authorization code in the migration.**
 
 Existing tokens carry no `agentId`. The three options were:
 
@@ -603,6 +626,13 @@ deliberately leaving that token live is not defensible.
 The `USER`-mode code path still exists — it is what the admin override produces.
 Legacy rows are backfilled to `authorizationMode = "USER"` so the column is never
 null, and then revoked. The two facts are independent and both are needed.
+
+Outstanding authorization codes are credentials-to-be, not harmless temporary
+rows. Deleting them is the third required cutover step: otherwise a code
+issued before migration 057 could mint a fresh legacy token family after the
+live-token revocation. Token exchange and refresh therefore also require a
+current consent with matching scope and binding, and perform that read together
+with token issuance so a successful revoke cannot be raced by a new family.
 
 ### Two ways to ship this and have it do nothing
 
@@ -640,9 +670,10 @@ existing connection from one agent to another, or from an agent to the override.
 This promotes the **"Connected apps" Settings panel** from ADR 0014's *"not in
 this decision"* list to a **prerequisite of this one**. It needs to list each
 connection with its client, redirect host, binding, scopes and last-used, and
-offer revoke plus "reconnect as a different agent" (which deletes the
-`OAuthConsent` row so the next authorization shows the screen). With the cookie
-short-circuit retired, that is sufficient; with it retained, it is not.
+offer revoke plus "reconnect as a different agent" (which revokes live token
+families and deletes both the `OAuthConsent` row and outstanding authorization
+codes so the next authorization shows the screen). With the cookie short-circuit
+retired, that is sufficient; with it retained, it is not.
 
 ## Security considerations
 
@@ -703,8 +734,9 @@ to accept it or schedule a follow-up narrowing per-user keys. Open question 2.
 
 ## Phasing
 
-**Phase 2a — the fix.** Schema plus DSQL migration (including the revoke and the
-`OAuthConsent` purge), the consent-screen binding section with effective-reach
+**Phase 2a — the fix.** Schema plus DSQL migrations (including token revocation,
+the `OAuthConsent` and authorization-code purge, and the dedicated USER
+authorization event), the consent-screen binding section with effective-reach
 display and the zero-reach block, inline agent creation with grant selection, the
 `validateOAuthAccessToken` agent branch with `credentialId` and liveness checks,
 `credentialType` on `AgentToolCall`, and retirement of the consent cookie
@@ -782,7 +814,7 @@ revoked and that a reconnect renders the new screen rather than short-circuiting
 |---|---|
 | Prisma changes + DSQL migration + revoke/backfill | 0.5 d |
 | Consent screen: picker, inline create, grant selection, effective reach, zero-reach block | 1.5 d |
-| Admin override: disclosure, typed confirmation, predicate, refresh re-check, audit row | 1 d |
+| Admin override: disclosure, typed confirmation, predicate, refresh re-check, audit-gap disclosure | 1 d |
 | `validateOAuthAccessToken` branch, `credentialId`, `credentialType` | 0.5 d |
 | Consent record + cookie retirement + remembered-binding replay | 0.5 d |
 | Connected apps Settings panel | 1 d |
@@ -811,9 +843,10 @@ deliberately rather than incidental complexity.
    user can obtain is unchanged. Accept the reasoning in *The escalation path
    just moves*, or schedule a follow-up?
 
-3. **Confirm the forced re-consent.** The migration revokes every live OAuth
-   token and deletes every consent record, which breaks Rick's current Geode
-   connection once and requires him to re-authorize. Confirmed?
+3. **Forced re-consent — approved and implemented.** The migration revokes every
+   live OAuth token and deletes every consent record and outstanding
+   authorization code, which breaks Rick's current Geode connection once and
+   requires him to re-authorize.
 
 4. **Is the override predicate right?** Org `OWNER`/`ADMIN` in *every*
    organization the user belongs to, re-evaluated on refresh. Stricter than

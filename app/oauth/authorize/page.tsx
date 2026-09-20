@@ -34,27 +34,50 @@
  *  - **An explicit unverified marker.** Not on *some* clients: on every one of
  *    them. A badge that appears only sometimes trains people to read its absence
  *    as an endorsement, and here there is nothing to endorse.
+ *
+ * ## What ADR 0015 changed here
+ *
+ * Two things, both of them load-bearing.
+ *
+ * **The screen now asks which identity the connection acts as.** Phase 1 minted
+ * `purpose: "USER"` tokens unconditionally, which routed around the entire
+ * agent authorization model — grant-scoped workspace reach, the "Human
+ * administrator required." assertions, the 17 human-only tools, and the
+ * per-call audit trail. The binding section is where that is chosen, and
+ * "Where it will have access" is now computed from the chosen binding's
+ * *effective reach* rather than from every membership the user holds. See
+ * `app/oauth/authorize/consent-form.tsx`.
+ *
+ * **The `__Host-` consent cookie short-circuit is gone.** A remembered approval
+ * now carries a binding, which makes it a security-relevant decision, and a
+ * security-relevant decision may not live in 90-day client state that no
+ * server-side migration can reach. `OAuthConsent` is the single source of truth
+ * for remembered consent, and a remembered binding is re-validated before it is
+ * replayed — an agent suspended since the last authorization sends the user
+ * back to this screen rather than minting a token that 401s on its first call.
  */
 import { redirect } from "next/navigation"
-import { cookies } from "next/headers"
 import { auth } from "@/auth"
-import { Button } from "@/components/ui/button"
 import { CompassUrlNotConfiguredError } from "@/lib/compass-url"
 import {
   buildAuthorizationErrorUrl,
   buildAuthorizationSuccessUrl,
   validateAuthorizationRequest,
 } from "@/lib/oauth/authorize-request"
-import { issueAuthorizationCode } from "@/lib/oauth/codes"
 import {
-  CONSENT_COOKIE_NAME,
-  consentCookieApproves,
+  inlineGrantAccess,
+  loadConsentBindingOptions,
+  revalidateRememberedBinding,
+} from "@/lib/oauth/agent-binding"
+import { issueAuthorizationCodeWithEvent } from "@/lib/oauth/authorization-events"
+import {
+  findStoredConsent,
   grantedAccess,
-  hasStoredConsent,
   signAuthorizationRequest,
   type GrantedAccessSummary,
 } from "@/lib/oauth/consent"
 import { SCOPE_MCP_READ, SCOPE_MCP_WRITE, SCOPE_OFFLINE_ACCESS, parseScope } from "@/lib/oauth/constants"
+import { ConsentForm } from "./consent-form"
 
 export const dynamic = "force-dynamic"
 
@@ -106,26 +129,36 @@ export default async function AuthorizePage({ searchParams }: AuthorizePageProps
   const { request, client } = validated
   const requestedScopes = parseScope(request.scope)
 
-  // Two independent records of a previous approval. The database row is
-  // durable and survives a new browser; the cookie makes the common
-  // same-browser reconnect free even if the row was cleared. Either is enough.
-  const cookieStore = await cookies()
-  const remembered =
-    consentCookieApproves(
-      cookieStore.get(CONSENT_COOKIE_NAME)?.value,
-      userId,
-      request.clientId,
-      requestedScopes,
-    ) || (await hasStoredConsent(userId, request.clientId, requestedScopes))
-
-  if (remembered) {
-    const { code } = await issueAuthorizationCode({ ...request, userId })
-    redirect(
-      buildAuthorizationSuccessUrl({ redirectUri: request.redirectUri, code, state: request.state }),
-    )
+  // One record of a previous approval, not two. The `__Host-` cookie that used
+  // to be ORed in here is gone (ADR 0015): it was a 90-day, non-revocable
+  // second source of truth for what is now a security-relevant decision, and
+  // no server-side migration could reach it — leaving it in place would have
+  // made this entire change a silent no-op on the one browser that authorized
+  // the over-privileged connection. `OAuthConsent` is durable, inspectable and
+  // revocable, and the cost of losing the cookie is one primary-key read.
+  const stored = await findStoredConsent(userId, request.clientId, requestedScopes)
+  if (stored) {
+    // The remembered *binding* is replayed, not just the approval — but only
+    // after it is re-checked against the world as it is now. An agent that has
+    // since been suspended, deleted or stripped of every grant returns null
+    // here, and the user drops through to the screen instead of receiving a
+    // code that fails on its first call with no indication it must re-consent.
+    const binding = await revalidateRememberedBinding(stored, userId)
+    if (binding) {
+      const { code } = await issueAuthorizationCodeWithEvent(
+        { ...request, userId, ...binding },
+        { source: "REMEMBERED_CONSENT", clientNameSnapshot: client.clientName },
+      )
+      redirect(
+        buildAuthorizationSuccessUrl({ redirectUri: request.redirectUri, code, state: request.state }),
+      )
+    }
   }
 
-  const granted = await grantedAccess(userId)
+  const [granted, bindingOptions] = await Promise.all([
+    grantedAccess(userId),
+    loadConsentBindingOptions(userId),
+  ])
   const signedRequest = signAuthorizationRequest(request, userId)
   const redirectHost = new URL(request.redirectUri).host || request.redirectUri
 
@@ -147,85 +180,58 @@ export default async function AuthorizePage({ searchParams }: AuthorizePageProps
     is a sibling of that region rather than the last thing inside it. That makes
     both buttons unconditionally visible at any viewport height, and the divider
     above them reads as the boundary it now is.
+
+    ADR 0015 adds a whole binding section above the action row, which is exactly
+    the kind of growth that quietly reintroduces the original bug — so the
+    structure is preserved rather than reasoned about again: `main` still owns
+    the viewport, the scroll region still scrolls, and the action row is still
+    its sibling. It now lives inside ConsentForm because the primary button's
+    label, styling and disabled state all depend on the current selection.
   */
   return (
     <main className="flex h-dvh items-center justify-center overflow-hidden bg-surface-app px-4 py-6">
       <div className="flex max-h-full w-full max-w-lg flex-col gap-3">
-        <div className="flex min-h-0 flex-col rounded-2xl border border-border-default bg-surface-panel shadow-[var(--shadow-card)]">
-          {/*
-            `tabIndex` is load-bearing, not decoration. Moving the buttons out
-            of this region left it with no focusable descendant, and a
-            scrollable region containing nothing focusable cannot be scrolled by
-            keyboard at all (WCAG 2.1.1). On this screen that would mean a
-            keyboard-only user could reach "Allow access" while being physically
-            unable to read the grant it approves. Making the region itself a tab
-            stop restores arrow-key and Page Down scrolling, and the label tells
-            a screen-reader user what they have landed in.
-          */}
-          <div
-            role="region"
-            aria-label="Authorization details"
-            tabIndex={0}
-            className="min-h-0 space-y-4 overflow-y-auto p-6 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset sm:p-7"
-          >
-            <div className="space-y-1">
-              <h1 className="text-lg font-bold text-text-primary">
-                Authorize {client.clientName}
-              </h1>
-              <p className="text-sm text-text-subtle">
-                {client.clientName} is asking to connect to Compass as{" "}
-                <span className="font-medium text-text-primary">
-                  {session?.user?.email ?? "your account"}
-                </span>
-                .
-              </p>
-            </div>
+        <ConsentForm
+          signedRequest={signedRequest}
+          options={bindingOptions}
+          inlineAccess={inlineGrantAccess(requestedScopes)}
+          userEmail={session?.user?.email ?? null}
+          details={
+            <>
+              <div className="space-y-1">
+                <h1 className="text-lg font-bold text-text-primary">
+                  Authorize {client.clientName}
+                </h1>
+                <p className="text-sm text-text-subtle">
+                  {client.clientName} is asking to connect to Compass as{" "}
+                  <span className="font-medium text-text-primary">
+                    {session?.user?.email ?? "your account"}
+                  </span>
+                  .
+                </p>
+              </div>
 
-            <UnverifiedNotice redirectHost={redirectHost} redirectUri={request.redirectUri} />
+              <UnverifiedNotice redirectHost={redirectHost} redirectUri={request.redirectUri} />
 
-            <section className="space-y-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-                What it will be able to do
-              </h2>
-              <ul className="space-y-1.5 text-sm text-text-primary">
-                {requestedScopes.map((scope) => (
-                  <li key={scope} className="flex gap-2">
-                    <span aria-hidden="true" className="text-text-subtle">
-                      •
-                    </span>
-                    <span>{describeScope(scope)}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            <GrantedAccessSection granted={granted} />
-          </div>
-
-          <div className="flex shrink-0 gap-3 border-t border-border-default p-4 sm:px-7 sm:py-5">
-            {/*
-              Two forms rather than one form with two named submit buttons: the
-              decision then travels as an ordinary hidden field, so it does not
-              depend on the button component forwarding `name`/`value` to the
-              underlying element, and a form submitted by pressing Enter cannot
-              be ambiguous about which action was taken.
-            */}
-            <form action="/oauth/consent" method="POST" className="flex-1">
-              <input type="hidden" name="decision" value="deny" />
-              <input type="hidden" name="request" value={signedRequest} />
-              <Button type="submit" variant="outline" className="h-11 w-full font-semibold">
-                Cancel
-              </Button>
-            </form>
-            <form action="/oauth/consent" method="POST" className="flex-1">
-              <input type="hidden" name="decision" value="allow" />
-              <input type="hidden" name="request" value={signedRequest} />
-              <Button type="submit" className="h-11 w-full font-semibold shadow-sm">
-                Allow access
-              </Button>
-            </form>
-          </div>
-        </div>
+              <section className="space-y-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+                  What it will be able to do
+                </h2>
+                <ul className="space-y-1.5 text-sm text-text-primary">
+                  {requestedScopes.map((scope) => (
+                    <li key={scope} className="flex gap-2">
+                      <span aria-hidden="true" className="text-text-subtle">
+                        •
+                      </span>
+                      <span>{describeScope(scope)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            </>
+          }
+          overrideReach={<GrantedAccessSection granted={granted} />}
+        />
 
         <p className="shrink-0 px-2 text-center text-xs text-text-subtle">
           You can revoke this access at any time. Compass never shares your password
@@ -257,31 +263,37 @@ function UnverifiedNotice({ redirectHost, redirectUri }: { redirectHost: string;
   )
 }
 
+/**
+ * The full membership enumeration.
+ *
+ * Phase 1 rendered this as the whole of "Where it will have access", because a
+ * user-mode token really did reach every membership. Under ADR 0015 it is the
+ * reach of **one specific choice** — the admin override — so it no longer owns
+ * that heading and no longer appears unconditionally. It is passed into
+ * ConsentForm and rendered inside the override panel, and as the reach display
+ * when the override is armed. The enumeration itself is unchanged, including
+ * the "could not be shown" disclosure, because it is still the compensating
+ * control for the breadth of the thing it describes.
+ */
 function GrantedAccessSection({ granted }: { granted: GrantedAccessSummary }) {
   const { organizations, unresolvedMemberships } = granted
 
   if (organizations.length === 0) {
     return (
-      <section className="space-y-2">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Where it will have access
-        </h2>
+      <div className="space-y-2">
         <p className="text-sm text-text-subtle">
           You are not currently a member of any organization or workspace, so this
           application will not be able to read or change anything yet. It will gain
           access to anything you are added to later.
         </p>
         <UnresolvedMembershipsNotice count={unresolvedMemberships} />
-      </section>
+      </div>
     )
   }
 
   const workspaceCount = organizations.reduce((total, org) => total + org.workspaces.length, 0)
   return (
-    <section className="space-y-2">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-        Where it will have access
-      </h2>
+    <div className="space-y-2">
       <p className="text-sm text-text-primary">
         Everything you can reach — {organizations.length}{" "}
         {organizations.length === 1 ? "organization" : "organizations"} and {workspaceCount}{" "}
@@ -308,7 +320,7 @@ function GrantedAccessSection({ granted }: { granted: GrantedAccessSummary }) {
         ))}
       </ul>
       <UnresolvedMembershipsNotice count={unresolvedMemberships} />
-    </section>
+    </div>
   )
 }
 

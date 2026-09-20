@@ -210,18 +210,16 @@ describe("carryAuthorizationBinding", () => {
     })
   })
 
-  it.each([["USER"], [null], ["RESEARCH"], ["agent"]])(
-    "treats stored mode %s as USER and drops any agent with it",
-    (mode) => {
-      // The same closed two-way switch validateOAuthAccessToken applies. A
-      // stray agent_id on a USER-mode row must not become live by being copied
-      // into a freshly minted token.
-      expect(carryAuthorizationBinding({ authorizationMode: mode, agentId: "agent-1" })).toEqual({
-        authorizationMode: "USER",
-        agentId: null,
-      })
-    },
-  )
+  it("carries exact USER mode and drops a stray agent id", () => {
+    expect(carryAuthorizationBinding({ authorizationMode: "USER", agentId: "agent-1" })).toEqual({
+      authorizationMode: "USER",
+      agentId: null,
+    })
+  })
+
+  it.each([[null], ["RESEARCH"], ["agent"]])("refuses stored mode %s", (mode) => {
+    expect(carryAuthorizationBinding({ authorizationMode: mode, agentId: "agent-1" })).toBeNull()
+  })
 
   it("does not repair an AGENT row with no agent — that would widen the grant", () => {
     // Unwritable today. If it ever happened, resolving it to USER would hand

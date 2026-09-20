@@ -113,10 +113,10 @@ export async function validateMcpAuth(request: Request): Promise<McpAuthResult> 
  *    revoked token that was only checked for existence would still authenticate.
  *  - `expiresAt: { gt: … }` for the ordinary one-hour lifetime.
  *
- * `purpose` is decided by a **closed two-way switch** on the stored
+ * `purpose` is decided by a **closed two-value parser** on the stored
  * `authorizationMode`, never a pass-through of a stored purpose string (ADR
- * 0015). Exactly `"AGENT"` takes the agent path; every other value — including
- * `null` on a row written before migration 056 — is USER mode. An OAuth token
+ * 0015). Only exact `"AGENT"` and `"USER"` values are accepted; null or an
+ * unrecognised value invalidates the token rather than widening it. An OAuth token
  * still cannot reach `RESEARCH` (a public interview credential's narrow
  * allowlist) or `AGENT_TURN` (server-minted, 5-minute, conversation-scoped);
  * binding a 1-hour token with a 30-day refresh to a turn-scoped purpose is
@@ -145,6 +145,9 @@ async function validateOAuthAccessToken(token: string): Promise<McpAuthResult> {
     select: { id: true, userId: true, scope: true, scopeWorkspaceId: true, authorizationMode: true, agentId: true },
   })
   if (!accessToken) return { valid: false }
+  if (accessToken.authorizationMode !== "AGENT" && accessToken.authorizationMode !== "USER") {
+    return { valid: false }
+  }
 
   // Fire-and-forget, exactly like the ApiKey path above: `lastUsedAt` is what
   // the phase-2 "Connected apps" panel and TTL pruning key off, and no request
@@ -200,9 +203,8 @@ async function validateOAuthAccessToken(token: string): Promise<McpAuthResult> {
     userId: accessToken.userId,
     purpose: "USER",
     // Null on every USER-mode token, meaning "every membership the user has".
-    // Reaching this branch now means either the admin override was elected or
-    // the row predates migration 056 — which is why the mode is an explicit
-    // column and not inferred from `agentId IS NULL`.
+    // Reaching this branch means the admin override was explicitly elected;
+    // legacy null and unrecognised modes were refused above.
     scopeWorkspaceId: accessToken.scopeWorkspaceId,
     scopes: parseScope(accessToken.scope),
   }
