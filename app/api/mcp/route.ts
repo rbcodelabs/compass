@@ -2088,11 +2088,16 @@ const _handler = createMcpHandler(
       {
         title: "Update Roadmap Item",
         description:
-          "Updates an existing roadmap item's horizon, status, title, description, dates, privacy, or linked Solution. " +
+          "Updates an existing roadmap item's horizon, status, title, description, dates, privacy, or links. " +
+          "Omit link fields to preserve them; pass null to clear them. " +
           "Use horizon to move items between NOW / NEXT / LATER. Use status ARCHIVED to remove from view. " +
           "LAUNCHING and LAUNCHED cannot be set here — use set_launch_tier to move an item into LAUNCHING.",
         inputSchema: {
           itemId: z.string().uuid().describe("UUID of the roadmap item"),
+          keyResultId: z.string().uuid().nullable().optional().describe("Key Result UUID in the item's workspace; null clears the link, omitted preserves it"),
+          opportunityId: z.string().uuid().nullable().optional().describe("Opportunity UUID in the item's workspace; null clears the link, omitted preserves it"),
+          solutionId: z.string().uuid().nullable().optional().describe("Solution UUID in the item's workspace; null clears the link, omitted preserves it"),
+          squadId: z.string().uuid().nullable().optional().describe("Squad UUID in the item's workspace; null clears the link, omitted preserves it"),
           horizon: z.enum(["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional().describe("Move to a new horizon (LAUNCHING/LAUNCHED are rejected here — use set_launch_tier)"),
           status: z.enum(["ACTIVE", "ARCHIVED"]).optional().describe("Set to ARCHIVED to hide from roadmap"),
           title: z.string().min(1).optional().describe("New title for the item"),
@@ -2100,11 +2105,10 @@ const _handler = createMcpHandler(
           startDate: z.string().optional().describe("ISO date string for the item's start date, e.g. '2026-07-01'"),
           endDate: z.string().optional().describe("ISO date string for the item's end date, e.g. '2026-09-30'"),
           isPrivate: z.boolean().optional().describe("Set to true to hide this item from the public portal roadmap and block voting on it"),
-          solutionId: z.string().uuid().optional().describe("UUID of the Solution to attach to this item, replacing any existing Solution link"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ itemId, horizon, status, title, description, startDate, endDate, isPrivate, solutionId }) => {
+      async ({ itemId, keyResultId, opportunityId, solutionId, squadId, horizon, status, title, description, startDate, endDate, isPrivate }) => {
         const prisma = getPrisma()
         const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, workspaceId: true, title: true, horizon: true, status: true } })
         if (!item) {
@@ -2124,6 +2128,10 @@ const _handler = createMcpHandler(
           return fail(`Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`)
         }
         const updateData = {
+            ...(keyResultId !== undefined ? { keyResultId } : {}),
+            ...(opportunityId !== undefined ? { opportunityId } : {}),
+            ...(solutionId !== undefined ? { solutionId } : {}),
+            ...(squadId !== undefined ? { squadId } : {}),
             ...(horizon ? { horizon } : {}),
             ...(status ? { status } : {}),
             ...(title ? { title: title.trim() } : {}),
@@ -2131,7 +2139,6 @@ const _handler = createMcpHandler(
             ...(startDate !== undefined ? { startDate: new Date(startDate) } : {}),
             ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
             ...(isPrivate !== undefined ? { isPrivate } : {}),
-            ...(solutionId !== undefined ? { solutionId } : {}),
             updatedAt: new Date(),
         }
         const updated = await prisma.roadmapItem.update({ where: { id: itemId }, data: updateData })

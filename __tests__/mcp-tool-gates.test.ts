@@ -28,7 +28,10 @@ const mockPrisma = {
   researchStudy: { findUnique: vi.fn() },
   agent: { findFirst: vi.fn() },
   agentWorkspaceGrant: { findMany: vi.fn() },
+  agentToolCall: { create: vi.fn(), update: vi.fn() },
   task: { findUnique: vi.fn() },
+  keyResult: { findUnique: vi.fn() },
+  squad: { findUnique: vi.fn() },
   customFieldDefinition: { findMany: vi.fn(), findUnique: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
@@ -64,6 +67,71 @@ const callTool = (name: string, actor: { userId: string | null }, args: any) =>
   runWithMcpActor(actor, () => (registeredTools[name] as (a: unknown) => Promise<unknown>)(args))
 
 beforeEach(() => vi.clearAllMocks())
+
+describe("update_roadmap_item source-workspace link boundaries", () => {
+  const targets = [
+    ["keyResultId", "keyResult", (workspaceId: string) => ({ objective: { cycle: { workspaceId } } })],
+    ["opportunityId", "opportunity", (workspaceId: string) => ({ workspaceId })],
+    ["solutionId", "solution", (workspaceId: string) => ({ opportunity: { workspaceId } })],
+    ["squadId", "squad", (workspaceId: string) => ({ workspaceId })],
+  ] as const
+
+  for (const purpose of ["USER", "AGENT"] as const) {
+    const actor = () => ({ userId: "user-1", purpose, ...(purpose === "AGENT" ? { agentId: "agent-1", credentialId: "credential-1" } : {}) })
+    beforeEach(() => {
+      mockPrisma.roadmapItem.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+      // Membership in BOTH workspaces must not allow cross-workspace linkage.
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "member-workspace" })
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1" })
+      mockPrisma.agentToolCall.create.mockResolvedValue({ id: "activity-1" })
+      mockPrisma.agentToolCall.update.mockResolvedValue({})
+      mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }, { workspaceId: "ws-2" }])
+    })
+    for (const [field, model, row] of targets) {
+      it(`${purpose} accepts same-workspace ${field}`, async () => {
+        vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+        try {
+          mockPrisma[model].findUnique.mockResolvedValue(row("ws-1"))
+          await expect(applyToolGate("update_roadmap_item", actor(), { itemId: "item-1", [field]: "target" })).resolves.toBeUndefined()
+          expect(mockPrisma[model].findUnique).toHaveBeenCalled()
+        } finally { vi.unstubAllEnvs() }
+      })
+      it(`${purpose} rejects foreign ${field} through the registered wrapper without writing`, async () => {
+        vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+        try {
+          mockPrisma[model].findUnique.mockResolvedValue(row("ws-2"))
+          await expect(callTool("update_roadmap_item", actor(), {
+            itemId: "item-1", [field]: "target", title: "must not write", workspaceId: "ws-2",
+          })).rejects.toThrow(/does not belong to workspace/)
+          expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+          expect(mockPrisma.roadmapItem.findUnique).toHaveBeenCalledTimes(1)
+        } finally { vi.unstubAllEnvs() }
+      })
+      it(`${purpose} rejects missing ${field}`, async () => {
+        vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+        try {
+          mockPrisma[model].findUnique.mockResolvedValue(null)
+          await expect(applyToolGate("update_roadmap_item", actor(), { itemId: "item-1", [field]: "missing" })).rejects.toThrow(/not found or access denied/)
+        } finally { vi.unstubAllEnvs() }
+      })
+    }
+    it(`${purpose} allows null and omitted links without target lookups`, async () => {
+      vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+      try {
+        await expect(applyToolGate("update_roadmap_item", actor(), { itemId: "item-1", keyResultId: null, solutionId: null })).resolves.toBeUndefined()
+        for (const [, model] of targets) expect(mockPrisma[model].findUnique).not.toHaveBeenCalled()
+      } finally { vi.unstubAllEnvs() }
+    })
+    it(`${purpose} cannot clear links without access to the source item`, async () => {
+      vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+      try {
+        mockPrisma.workspace.findFirst.mockResolvedValue(null)
+        await expect(callTool("update_roadmap_item", actor(), { itemId: "item-1", squadId: null })).rejects.toThrow(/not found or access denied/)
+        expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+      } finally { vi.unstubAllEnvs() }
+    })
+  }
+})
 
 describe("Decision Artifact mutation boundaries", () => {
   for (const tool of ["link_artifact_to_decision", "unlink_artifact_from_decision"]) {

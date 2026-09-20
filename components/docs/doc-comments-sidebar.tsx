@@ -2,12 +2,8 @@
 
 import { useMemo, useState } from "react"
 import { Check, RotateCcw, Trash2, MessageSquare, CornerDownRight } from "lucide-react"
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+import { DocPanelShell } from "@/components/docs/doc-panel-shell"
+import type { PanelPin } from "@/lib/panel-pin"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { relativeTime } from "@/lib/relative-time"
@@ -30,6 +26,7 @@ export interface DocCommentItem {
 }
 
 interface DocCommentsSidebarProps {
+  initialPin?: PanelPin
   open: boolean
   onOpenChange: (open: boolean) => void
   comments: DocCommentItem[]
@@ -42,6 +39,7 @@ interface DocCommentsSidebarProps {
 }
 
 export function DocCommentsSidebar({
+  initialPin,
   open,
   onOpenChange,
   comments,
@@ -75,15 +73,7 @@ export function DocCommentsSidebar({
   const resolvedCount = roots.filter((r) => r.status === "RESOLVED").length
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col">
-        <SheetHeader className="px-4 pt-4 pb-2 border-b border-border-default shrink-0">
-          <SheetTitle className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
-            <MessageSquare className="w-4 h-4" />
-            Comments
-          </SheetTitle>
-        </SheetHeader>
-
+    <DocPanelShell panelId="docsComments" title="Comments" icon={<MessageSquare className="w-4 h-4" />} open={open} onOpenChange={onOpenChange} initialPin={initialPin}>
         <div className="flex-1 overflow-y-auto min-h-0 p-3" data-testid="doc-comments-list">
           {visibleRoots.length === 0 ? (
             <p className="text-xs text-text-subtle px-1 py-3">
@@ -122,8 +112,7 @@ export function DocCommentsSidebar({
             </button>
           </div>
         )}
-      </SheetContent>
-    </Sheet>
+    </DocPanelShell>
   )
 }
 

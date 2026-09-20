@@ -11,15 +11,12 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { useMediaQuery } from "@/hooks/use-media-query";
+import { usePanelPin } from "@/hooks/use-panel-pin";
 import {
   DEFAULT_PANEL_PIN,
   PANEL_MIN_MAIN,
-  PANEL_PIN_MEDIA_QUERY,
   PANEL_WIDTH_MAX,
   PANEL_WIDTH_MIN,
-  clampPanelWidth,
-  panelPinCookieString,
   type PanelPin,
 } from "@/lib/panel-pin";
 import { PANEL_WIDTH_PROPERTY, PanelResizeHandle } from "./panel-resize-handle";
@@ -71,22 +68,9 @@ export interface PanelShellProps {
 export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps = {}) {
   const { panel, closePanel, orgSlug, workspaceSlug } = usePanelContext();
   const [hydrated, setHydrated] = useState(false);
-  const [pinned, setPinned] = useState(initialPin.pinned);
-  const [width, setWidth] = useState(() => clampPanelWidth(initialPin.width));
+  const { pinned, width, isPinnedMode, togglePinned, commitWidth } = usePanelPin("detail", initialPin);
   const asideRef = useRef<HTMLElement | null>(null);
   const common = { orgSlug, workspaceSlug };
-
-  // Seeded with `pinned`, not `false` — see the `serverSnapshot` note in
-  // hooks/use-media-query.ts. A pinned user's server render and hydration
-  // render both produce the pinned column, so there is no overlay to flash.
-  // The guess is only safe because the aside is *also* CSS-gated below.
-  const viewportAllowsPin = useMediaQuery(PANEL_PIN_MEDIA_QUERY, pinned);
-
-  // The preference is the user's; the suspension is the environment's. A
-  // narrow viewport demotes to overlay but deliberately does NOT rewrite the
-  // cookie, so widening the window restores the pinned layout with no
-  // re-click.
-  const isPinnedMode = pinned && viewportAllowsPin;
 
   // A deep link is already present during SSR. Opening Base UI's modal Sheet
   // before hydration completes applies aria-hidden to the server-rendered
@@ -140,35 +124,6 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
       if (timerId !== undefined) window.clearTimeout(timerId);
     };
   }, []);
-
-  const persist = useCallback((next: PanelPin) => {
-    // Written from event handlers only — never in render and never in a mount
-    // effect, so the server-seeded value is the only thing that decides the
-    // first paint and a client write can never race hydration.
-    document.cookie = panelPinCookieString("detail", next);
-  }, []);
-
-  const togglePinned = useCallback(() => {
-    // Computed outside the state updater on purpose: an updater must stay
-    // pure, and StrictMode double-invokes it in development.
-    const next = !pinned;
-    setPinned(next);
-    persist({ pinned: next, width });
-  }, [persist, pinned, width]);
-
-  const commitWidth = useCallback(
-    (next: number) => {
-      const clamped = clampPanelWidth(next);
-      setWidth(clamped);
-      persist({ pinned: true, width: clamped });
-      // Some widgets measure their container once and cache it — the roadmap
-      // Gantt is the one that actually does. A commit is rare (once per
-      // gesture, or per keyboard step), so this is cheap insurance against a
-      // resized panel leaving a stale-width chart beside it.
-      window.dispatchEvent(new Event("resize"));
-    },
-    [persist],
-  );
 
   /**
    * The gesture's upper bound, measured from the live layout rather than

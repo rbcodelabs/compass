@@ -96,6 +96,18 @@ Every page keeps a history of past versions, so you can always see what changed 
 
 Version history is also available over MCP — see [MCP API](/help/09-mcp-api) for `create_doc_version`, `list_doc_versions`, `get_doc_version`, and `restore_doc_version`.
 
+## Pinning Docs panels
+
+Comments and Version History open as overlays by default. On a wide screen, use **Pin panel** in either header to dock it alongside the editable page. Only one Docs panel opens at a time; opening the other replaces it. **Unpin panel** returns to the overlay.
+
+Drag the left divider to resize a pinned panel, or focus the divider and use the arrow keys (Shift for larger steps), Home, or End. Each panel remembers its own pin preference and width across reloads. Panels range from 320–720px, while the editor keeps at least 480px. If the window is below 1024px or the Docs row cannot fit both, the panel temporarily becomes an overlay; widening the window restores the preference.
+
+Use **Close panel**, or press Escape while focused inside a pinned panel, to close it. Escape in the editor leaves the docked panel open. Restoring a version keeps pinned History open; an overlay closes after restoration.
+
+![Comments docked beside the editor, with long text contained](/screenshots/docs/docs-pin-comments-desktop.png)
+
+![Version History uses a full-width overlay on a phone](/screenshots/docs/docs-pin-history-mobile.png)
+
 ## Inline Comments
 
 Leave Google-Docs-style comments anchored to a specific span of a page, so discussion stays attached to the exact text it's about.

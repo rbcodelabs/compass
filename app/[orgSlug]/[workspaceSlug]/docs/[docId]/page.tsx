@@ -1,4 +1,6 @@
 import { auth } from "@/auth";
+import { cookies } from "next/headers";
+import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin";
 import { redirect, notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { DocEditor } from "@/components/docs/doc-editor";
@@ -85,10 +87,13 @@ export default async function DocPage({ params }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/docs/${docId}`;
 
   const linkedTasks = await fetchLinkedTasksBundle(workspace.id, "DOC", doc.id);
+  const cookieStore = await cookies();
 
   return (
     <DocEditor
       doc={doc}
+      initialCommentsPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsComments"))?.value)}
+      initialHistoryPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsHistory"))?.value)}
       versions={versions}
       comments={comments}
       revalidatePathStr={revalidatePathStr}
