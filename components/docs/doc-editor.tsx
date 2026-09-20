@@ -47,8 +47,11 @@ import {
 } from "@/components/docs/comment-highlight-extension";
 import { createDocEditorExtensions } from "@/components/docs/doc-editor-extensions";
 import { resolveCommentAnchor } from "@/lib/comment-anchor";
+import type { PanelPin } from "@/lib/panel-pin";
 
 interface DocEditorProps {
+  initialCommentsPin?: PanelPin;
+  initialHistoryPin?: PanelPin;
   doc: {
     id: string;
     title: string;
@@ -106,13 +109,13 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, initialCommentsPin, initialHistoryPin }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [currentContent, setCurrentContent] = useState(doc.content);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [activeDocPanel, setActiveDocPanel] = useState<"comments" | "history" | null>(null);
   const [showSaveVersionInput, setShowSaveVersionInput] = useState(false);
   const [isSavingVersion, setIsSavingVersion] = useState(false);
 
@@ -130,7 +133,6 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
   // ── Inline comments state ──────────────────────────────────────────────────
   const [comments, setComments] = useState<DocCommentItem[]>(initialComments);
-  const [commentsOpen, setCommentsOpen] = useState(false);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [pendingAnchor, setPendingAnchor] = useState<PendingAnchor | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
@@ -310,7 +312,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     setComments((prev) => [...prev, toItem(created)]);
     setPendingAnchor(null);
     setCommentDraft("");
-    setCommentsOpen(true);
+    setActiveDocPanel("comments");
   }
 
   async function handleAddReply(parentId: string, body: string) {
@@ -353,7 +355,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   if (!editor) return null;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 min-w-0">
+      <div data-slot="doc-editor-column" className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Save indicator */}
       <div className="flex justify-end px-8 pt-3 h-7">
         {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
@@ -529,7 +532,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           )}
         </div>
         {/* Open comments sidebar */}
-        <ToolbarButton onClick={() => setCommentsOpen(true)} title="Comments">
+        <ToolbarButton onClick={() => setActiveDocPanel("comments")} title="Comments">
           <span className="relative flex items-center justify-center">
             <MessageSquare className="w-4 h-4" />
             {openCommentCount > 0 && (
@@ -540,7 +543,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           </span>
         </ToolbarButton>
         <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
-        <ToolbarButton onClick={() => setHistoryOpen(true)} title="Version history">
+        <ToolbarButton onClick={() => setActiveDocPanel("history")} title="Version history">
           <History className="w-4 h-4" />
         </ToolbarButton>
         <div className="relative shrink-0">
@@ -625,9 +628,11 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
       </div>
 
+      </div>
       <DocVersionHistoryPanel
-        open={historyOpen}
-        onOpenChange={setHistoryOpen}
+        open={activeDocPanel === "history"}
+        onOpenChange={(open) => setActiveDocPanel((current) => open ? "history" : current === "history" ? null : current)}
+        initialPin={initialHistoryPin}
         currentTitle={title}
         currentContent={currentContent}
         versions={versions}
@@ -636,8 +641,9 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       />
 
       <DocCommentsSidebar
-        open={commentsOpen}
-        onOpenChange={setCommentsOpen}
+        open={activeDocPanel === "comments"}
+        onOpenChange={(open) => setActiveDocPanel((current) => open ? "comments" : current === "comments" ? null : current)}
+        initialPin={initialCommentsPin}
         comments={comments}
         orphanedIds={orphanedIds}
         onAddReply={handleAddReply}
