@@ -232,6 +232,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
   async function uploadAndInsertImage(file: File) {
     const form = new FormData();
+    form.append("workspaceId", workspaceId);
     form.append("file", file);
     const res = await fetch("/api/docs/upload", { method: "POST", body: form });
     if (!res.ok) return;

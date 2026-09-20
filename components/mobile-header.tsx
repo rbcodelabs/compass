@@ -155,7 +155,7 @@ export function MobileHeader({
                 className="flex w-full items-center gap-2 px-1.5 py-1"
               >
                 <HelpCircle className="w-3.5 h-3.5 shrink-0 text-text-subtle" aria-hidden="true" />
-                Help
+                User Guide
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem className="p-0 cursor-pointer" closeOnClick={false}>

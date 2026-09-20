@@ -10,7 +10,7 @@ export const WORKSPACE_SEARCH_GROUPS = [
   { type: "task", label: "Tasks" },
   { type: "feedback", label: "Feedback" },
   { type: "doc", label: "Docs" },
-  { type: "help", label: "Help" },
+  { type: "help", label: "User Guide" },
 ] as const
 
 export type WorkspaceSearchType = (typeof WORKSPACE_SEARCH_GROUPS)[number]["type"]
@@ -95,7 +95,7 @@ export async function searchWorkspace(input: {
       { type: "doc", label: "Docs", items: docs.map((item) => ({ type: "doc", id: item.id, title: item.title, context: item.docType, href: href("doc", item.id) })) },
       {
         type: "help",
-        label: "Help",
+        label: "User Guide",
         items: helpResults.map((item) => ({
           type: "help",
           id: `${item.slug}:${item.anchor ?? "root"}`,
