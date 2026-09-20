@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { runWithMcpActor } from "@/lib/mcp-authz"
+import { z } from "zod"
 
 // ── Prisma mock ─────────────────────────────────────────────────────────────
 
@@ -55,12 +56,14 @@ vi.mock("@/lib/db", () => ({
 type ToolCallback = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>
 
 const registeredTools: Record<string, ToolCallback> = {}
+const registeredSchemas: Record<string, Record<string, z.ZodType>> = {}
 
 vi.mock("mcp-handler", () => ({
   createMcpHandler: (setup: (server: { registerTool: (name: string, meta: unknown, cb: ToolCallback) => void }) => void) => {
     setup({
       registerTool(name, _meta, cb) {
         registeredTools[name] = cb
+        registeredSchemas[name] = (_meta as { inputSchema: Record<string, z.ZodType> }).inputSchema
       },
     })
     return () => new Response("ok")
@@ -203,6 +206,52 @@ describe("add_to_roadmap MCP tool — isPrivate", () => {
     const createArgs = mockPrisma.roadmapItem.create.mock.calls[0][0]
     expect(createArgs.data.isPrivate).toBe(true)
     expect(textOf(result)).toMatch(/Private: yes/)
+  })
+})
+
+describe("update_roadmap_item MCP tool — optional links", () => {
+  const fields = ["keyResultId", "opportunityId", "solutionId", "squadId"] as const
+  const targetId = "11111111-1111-4111-8111-111111111111"
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({
+      id: "item-1", workspaceId: "ws-1", title: "Item", horizon: "LATER", status: "ACTIVE",
+    })
+    mockPrisma.roadmapItem.update.mockImplementation(async ({ data }) => ({
+      id: "item-1", title: "Item", horizon: "LATER", status: "ACTIVE", ...data,
+    }))
+  })
+
+  it.each(fields)("validates %s as optional nullable UUID", (field) => {
+    const schema = registeredSchemas.update_roadmap_item[field]
+    expect(schema, field).toBeDefined()
+    for (const value of [undefined, null, targetId]) expect(schema.safeParse(value).success).toBe(true)
+    for (const value of ["", "not-a-uuid", 123]) expect(schema.safeParse(value).success).toBe(false)
+  })
+
+  it.each(fields)("sets and explicitly clears %s", async (field) => {
+    for (const value of [targetId, null]) {
+      const result = await getHandler("update_roadmap_item")({ itemId: "item-1", [field]: value })
+      expect(mockPrisma.roadmapItem.update).toHaveBeenLastCalledWith({
+        where: { id: "item-1" }, data: { [field]: value, updatedAt: expect.any(Date) },
+      })
+      expect(textOf(result)).toContain("ID: item-1")
+    }
+  })
+
+  it("preserves omitted links in a mixed update while retaining ordinary fields", async () => {
+    await getHandler("update_roadmap_item")({
+      itemId: "item-1", keyResultId: targetId, solutionId: null, title: " Updated ",
+      horizon: "NEXT", status: "ACTIVE", isPrivate: false, startDate: "2026-09-01",
+    })
+    const data = mockPrisma.roadmapItem.update.mock.calls[0][0].data
+    expect(data).toEqual({
+      keyResultId: targetId, solutionId: null, title: "Updated", horizon: "NEXT",
+      status: "ACTIVE", isPrivate: false, startDate: new Date("2026-09-01"), updatedAt: expect.any(Date),
+    })
+    expect(data).not.toHaveProperty("opportunityId")
+    expect(data).not.toHaveProperty("squadId")
   })
 })
 

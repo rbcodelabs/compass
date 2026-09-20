@@ -245,7 +245,13 @@ export const TOOL_GATES: Record<string, Gate> = {
 
   // Roadmap -----------------------------------------------------------------
   list_roadmap_items: (a, x) => assertWorkspaceMember(a, x.workspaceId),
-  update_roadmap_item: async (a, x) => void (await assertEntityAccess(a, "roadmapItem", x.itemId)),
+  update_roadmap_item: async (a, x) => {
+    const { workspaceId } = await assertEntityAccess(a, "roadmapItem", x.itemId)
+    if (x.keyResultId) await assertChildInDeclaredWorkspace(a, "keyResult", x.keyResultId, workspaceId)
+    if (x.opportunityId) await assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, workspaceId)
+    if (x.solutionId) await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, workspaceId)
+    if (x.squadId) await assertChildInDeclaredWorkspace(a, "squad", x.squadId, workspaceId)
+  },
   add_to_roadmap: async (a, x) => {
     await assertWorkspaceMember(a, x.workspaceId)
     if (x.solutionId) await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId)
