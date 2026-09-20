@@ -41,7 +41,7 @@
  * Every panel that can be pinned, including the two Phase 2 Docs panels.
  * Reserved here deliberately — see the module doc.
  */
-export const PANEL_IDS = ["detail", "docsComments", "docsHistory"] as const;
+export const PANEL_IDS = ["detail", "docsComments", "docsHistory", "artifactComments"] as const;
 
 export type PanelId = (typeof PANEL_IDS)[number];
 

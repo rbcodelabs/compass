@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useRef, useState, useTransition } from "react"
+import { MessageSquare } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { archiveArtifact, linkArtifact, replaceArtifactRevision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
@@ -9,28 +10,45 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { MarkdownContent } from "@/components/markdown-content"
+import { Discussion } from "@/components/comments/discussion"
+import { DocPanelShell } from "./doc-panel-shell"
+import type { PanelPin } from "@/lib/panel-pin"
 
 type ArtifactDetailProps = {
   artifact: { id: string; title: string; description: string | null; sourceType: string; status: string; currentRevision: { externalUrl: string | null } | null; revisions: Array<{ id: string; revisionNumber: number; filename: string | null; byteSize: number | null; externalUrl: string | null; createdAt: string }> }
   html?: string
+  initialCommentsPin?: PanelPin
   workspaceId: string
   basePath: string
   solutions: Array<{ id: string; title: string; linked: boolean }>
   decisions: Array<{ id: string; title: string; state: string }>
 }
 
-export function ArtifactDetail({ artifact, html, workspaceId, basePath, solutions, decisions }: ArtifactDetailProps) {
+export function ArtifactDetail({ artifact, html, workspaceId, basePath, solutions, decisions, initialCommentsPin }: ArtifactDetailProps) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [selectedSolution, setSelectedSolution] = useState("")
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const [commentsVisits, setCommentsVisits] = useState(0)
+  const commentsTrigger = useRef<HTMLButtonElement>(null)
+  const changeCommentsOpen = (open: boolean) => {
+    setCommentsOpen(open)
+    if (open) setCommentsVisits((visits) => visits + 1)
+    else commentsTrigger.current?.focus()
+  }
   const linked = solutions.filter((solution) => solution.linked)
   const available = solutions.filter((solution) => !solution.linked)
   const run = (fn: () => Promise<unknown>) => startTransition(async () => { try { setError(null); await fn(); router.refresh() } catch (cause) { setError(cause instanceof Error ? cause.message : "Action failed") } })
-  return <div className="mx-auto max-w-5xl p-4 sm:p-8 space-y-6">
-    <header className="flex items-start justify-between gap-4">
-      <div><div className="text-xs font-medium uppercase tracking-wide text-primary">Artifact · {artifact.sourceType === "EXTERNAL_LINK" ? "External" : "HTML prototype"}</div><h1 className="text-2xl font-semibold text-text-primary">{artifact.title}</h1>{artifact.description && <MarkdownContent className="mt-1 text-text-secondary">{artifact.description}</MarkdownContent>}</div>
-      {artifact.status === "ACTIVE" && <Button variant="outline" disabled={pending} onClick={() => run(() => archiveArtifact(workspaceId, artifact.id, basePath))}>Archive</Button>}
+  return <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
+    <div data-slot="artifact-content-column" className="min-w-0 flex-1 overflow-y-auto">
+    <div className="mx-auto max-w-5xl p-4 sm:p-8 space-y-6">
+    <header className="flex flex-col items-start justify-between gap-4 sm:flex-row">
+      <div className="min-w-0"><div className="text-xs font-medium uppercase tracking-wide text-primary">Artifact · {artifact.sourceType === "EXTERNAL_LINK" ? "External" : "HTML prototype"}</div><h1 className="break-words [overflow-wrap:anywhere] text-2xl font-semibold text-text-primary">{artifact.title}</h1>{artifact.description && <MarkdownContent className="mt-1 text-text-secondary">{artifact.description}</MarkdownContent>}</div>
+      <div className="flex shrink-0 flex-wrap gap-2">
+        <Button ref={commentsTrigger} variant="outline" aria-expanded={commentsOpen} onClick={() => changeCommentsOpen(!commentsOpen)}><MessageSquare aria-hidden />Comments</Button>
+        {artifact.status === "ACTIVE" && <Button variant="outline" disabled={pending} onClick={() => run(() => archiveArtifact(workspaceId, artifact.id, basePath))}>Archive</Button>}
+      </div>
     </header>
     {artifact.status === "ARCHIVED" && <div className="rounded-md bg-status-warning-surface p-3 text-sm text-status-warning">This artifact is archived.</div>}
     <ArtifactPreview title={artifact.title} html={html} externalUrl={artifact.currentRevision?.externalUrl} />
@@ -57,5 +75,15 @@ export function ArtifactDetail({ artifact, html, workspaceId, basePath, solution
     <section className="rounded-lg border p-4"><h2 className="font-semibold mb-2">Revision history</h2><ol className="space-y-2 text-sm">{artifact.revisions.map((revision) => <li key={revision.id} className="flex justify-between"><span>Revision {revision.revisionNumber}{revision.filename ? ` · ${revision.filename}` : " · External URL"}</span><time>{new Date(revision.createdAt).toLocaleString()}</time></li>)}</ol></section>
     {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
     <Link href={basePath} className="text-sm text-primary">Back to Docs</Link>
+    </div>
+    </div>
+    {commentsVisits > 0 && <Discussion key={artifact.id} targetType="ARTIFACT" targetId={artifact.id} refreshKey={commentsVisits} render={(content) => (
+      <DocPanelShell panelId="artifactComments" title="Comments" icon={<MessageSquare aria-hidden className="size-4" />} open={commentsOpen} onOpenChange={changeCommentsOpen} initialPin={initialCommentsPin} contentColumnSelector='[data-slot="artifact-content-column"]' returnFocusRef={commentsTrigger}>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <p className="mb-3 text-xs text-muted-foreground">Whole-artifact discussion · continues across revisions.</p>
+          {content}
+        </div>
+      </DocPanelShell>
+    )} />}
   </div>
 }

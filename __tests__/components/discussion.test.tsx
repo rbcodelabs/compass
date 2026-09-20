@@ -25,6 +25,65 @@ afterEach(() => {
 })
 
 describe("Discussion", () => {
+  it("preserves a draft typed before the initial load starts", async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({ items: [] }))
+    render(<Discussion targetType="ARTIFACT" targetId="target-1" />)
+    fireEvent.change(screen.getByRole("textbox", { name: "Add comment" }), { target: { value: "Immediate draft" } })
+    await screen.findByText("No comments yet.")
+    expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveValue("Immediate draft")
+  })
+  it("waits for the initial discussion before allowing a post to cancel its load", async () => {
+    let finishLoad!: (value: Response) => void
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { finishLoad = resolve }))
+    render(<Discussion targetType="ARTIFACT" targetId="target-1" />)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole("button", { name: "Post comment" })).toBeDisabled()
+    finishLoad(await jsonResponse({ items: [] }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Post comment" })).toBeEnabled())
+  })
+  it("consumes Escape in an editor before a containing panel can close", async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({ items: [comment()] }))
+    const closePanel = vi.fn()
+    render(<div onKeyDown={closePanel}><Discussion targetType="ARTIFACT" targetId="target-1" /></div>)
+    await screen.findByText("Root comment")
+    fireEvent.click(screen.getByRole("button", { name: "Reply to Rick" }))
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Reply to Rick" }), { key: "Escape" })
+    expect(screen.queryByRole("textbox", { name: "Reply to Rick" })).toBeNull()
+    expect(closePanel).not.toHaveBeenCalled()
+  })
+
+  it("does not let an older refresh erase a newly posted comment", async () => {
+    let finishRefresh!: (value: Response) => void
+    fetchMock.mockReturnValueOnce(jsonResponse({ items: [] }))
+    const { rerender } = render(<Discussion targetType="ARTIFACT" targetId="target-1" refreshKey={1} />)
+    await screen.findByText("No comments yet.")
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { finishRefresh = resolve }))
+    rerender(<Discussion targetType="ARTIFACT" targetId="target-1" refreshKey={2} />)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    fetchMock.mockReturnValueOnce(jsonResponse(comment({ body: "New comment" })))
+    fireEvent.change(screen.getByRole("textbox", { name: "Add comment" }), { target: { value: "New comment" } })
+    fireEvent.click(screen.getByRole("button", { name: "Post comment" }))
+    await screen.findByText("New comment", { selector: "p" })
+    finishRefresh(await jsonResponse({ items: [] }))
+    await waitFor(() => expect(fetchMock.mock.calls[1][1].signal.aborted).toBe(true))
+    expect(screen.getByText("New comment", { selector: "p" })).toBeVisible()
+  })
+
+  it("defers reopen refresh until a pending mutation finishes without resetting the draft", async () => {
+    let finishPost!: (value: Response) => void
+    fetchMock.mockReturnValueOnce(jsonResponse({ items: [] }))
+    const { rerender } = render(<Discussion targetType="ARTIFACT" targetId="target-1" refreshKey={1} />)
+    await screen.findByText("No comments yet.")
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { finishPost = resolve }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Add comment" }), { target: { value: "New comment" } })
+    fireEvent.click(screen.getByRole("button", { name: "Post comment" }))
+    rerender(<Discussion targetType="ARTIFACT" targetId="target-1" refreshKey={2} />)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    fetchMock.mockReturnValueOnce(jsonResponse({ items: [comment({ body: "New comment" })] }))
+    finishPost(await jsonResponse(comment({ body: "New comment" })))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(screen.getByText("New comment", { selector: "p" })).toBeVisible()
+  })
   it("shows loading and then an accessible empty state", async () => {
     let finish: ((value: Response) => void) | undefined
     fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve }))

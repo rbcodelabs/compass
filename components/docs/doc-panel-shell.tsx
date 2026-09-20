@@ -7,6 +7,7 @@ import {
   useState,
   type CSSProperties,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { PanelRightClose, Pin, PinOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,12 +30,14 @@ import {
 } from "@/lib/panel-pin";
 
 interface DocPanelShellProps {
-  panelId: "docsComments" | "docsHistory";
+  panelId: "docsComments" | "docsHistory" | "artifactComments";
   title: string;
   icon?: ReactNode;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialPin?: PanelPin;
+  contentColumnSelector?: string;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   children: ReactNode | ((pinned: boolean) => ReactNode);
 }
 
@@ -46,6 +49,8 @@ export function DocPanelShell({
   open,
   onOpenChange,
   initialPin,
+  contentColumnSelector = '[data-slot="doc-editor-column"]',
+  returnFocusRef,
   children,
 }: DocPanelShellProps) {
   const pin = usePanelPin(panelId, initialPin);
@@ -78,7 +83,7 @@ export function DocPanelShell({
   );
   const resolveMaxWidth = useCallback(() => {
     const column = anchorRef.current?.parentElement?.querySelector(
-      '[data-slot="doc-editor-column"]',
+      contentColumnSelector,
     );
     if (!(column instanceof HTMLElement)) return PANEL_WIDTH_MAX;
     const actualPanelWidth = asideRef.current?.getBoundingClientRect().width
@@ -88,7 +93,7 @@ export function DocPanelShell({
       Math.min(PANEL_WIDTH_MAX,
         actualPanelWidth + column.getBoundingClientRect().width - PANEL_MIN_MAIN),
     );
-  }, [effectiveWidth]);
+  }, [effectiveWidth, contentColumnSelector]);
   const toggle = (
     <Button
       variant="ghost"
@@ -120,7 +125,7 @@ export function DocPanelShell({
           maxWidth: `calc(100% - ${PANEL_MIN_MAIN}px)`,
         } as CSSProperties}
         onKeyDown={(event) => {
-          if (event.key === "Escape") onOpenChange(false);
+          if (event.key === "Escape" && !event.defaultPrevented) onOpenChange(false);
         }}
       >
         <PanelResizeHandle
@@ -150,7 +155,7 @@ export function DocPanelShell({
       </aside>
     ) : (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col">
+        <SheetContent side="right" finalFocus={returnFocusRef} className="w-full sm:max-w-md p-0 flex flex-col">
           <SheetHeader className="px-4 pt-4 pb-2 border-b border-border-default shrink-0">
             <div className="flex items-center justify-between gap-2 pr-8">
               <SheetTitle className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
