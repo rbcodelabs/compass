@@ -103,6 +103,8 @@ export function DocPanelShell({
     </Button>
   );
   const body = typeof children === "function" ? children(isPinnedMode) : children;
+  // No hydration/idle gate is needed: DocEditor's activeDocPanel starts null,
+  // so neither Docs surface opens before the user interacts with the editor.
   return <>
     <span ref={anchorRef} hidden />
     {isPinnedMode ? open && (
