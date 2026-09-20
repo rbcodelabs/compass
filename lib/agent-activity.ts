@@ -6,7 +6,11 @@ export async function withAgentActivity<T>(actor: McpActor, toolName: string, mu
   if (actor.purpose !== "AGENT" || !mutation) { await gate(); return operation() }
   if (!actor.agentId || !actor.userId || !actor.credentialId) throw new McpAuthzError("Incomplete agent identity.")
   const prisma = getPrisma()
-  const row = await prisma.agentToolCall.create({ data: { agentId: actor.agentId, userId: actor.userId, credentialId: actor.credentialId, toolName, status: "STARTED" }, select: { id: true } })
+  // credentialType defaults to API_KEY rather than being left null: every actor
+  // that reaches here today comes from validateMcpAuth, which sets it on both
+  // branches, and API_KEY is what the column means for every row written before
+  // ADR 0015. A null would be a third value with no meaning.
+  const row = await prisma.agentToolCall.create({ data: { agentId: actor.agentId, userId: actor.userId, credentialId: actor.credentialId, credentialType: actor.credentialType ?? "API_KEY", toolName, status: "STARTED" }, select: { id: true } })
   const finish = async (status: string) => {
     try { await prisma.agentToolCall.update({ where: { id: row.id }, data: { status, workspaceId: actor.authorizedWorkspaceId, finishedAt: new Date() } }) }
     catch { console.error("Unable to record agent operation outcome", { operationId: row.id }) }

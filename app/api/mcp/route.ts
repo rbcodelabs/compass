@@ -3551,6 +3551,7 @@ async function withMcpAuth(req: Request): Promise<Response> {
     purpose: auth.purpose,
     agentId: auth.agentId,
     credentialId: auth.credentialId,
+    credentialType: auth.credentialType,
     scopeWorkspaceId: auth.scopeWorkspaceId,
     scopeConversationId: auth.scopeConversationId,
     scopeClaimId: auth.scopeClaimId,

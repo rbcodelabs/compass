@@ -33,7 +33,7 @@ import {
   touchOAuthClient,
   type RegisteredClient,
 } from "@/lib/oauth/clients"
-import { claimAuthorizationCode } from "@/lib/oauth/codes"
+import { carryAuthorizationBinding, claimAuthorizationCode } from "@/lib/oauth/codes"
 import { claimRefreshToken, issueTokenPair, revokeTokenFamily } from "@/lib/oauth/grants"
 import { verifyPkce } from "@/lib/oauth/pkce"
 import { resolveResource } from "@/lib/oauth/resource"
@@ -197,6 +197,9 @@ async function authorizationCodeGrant(
     scope: stored.scope,
     resource: stored.resource,
     familyId: stored.id,
+    // The acting identity was chosen by the human at consent and recorded on
+    // the code; the token endpoint copies it, never decides it.
+    ...carryAuthorizationBinding(stored),
   })
   return tokenResponse(tokens)
 }
@@ -259,6 +262,9 @@ async function refreshTokenGrant(
     familyId: previous.familyId,
     parentTokenId: previous.id,
     scopeWorkspaceId: previous.scopeWorkspaceId,
+    // A rotation must never widen the grant. Scope is already checked above;
+    // this is the same rule for the acting identity.
+    ...carryAuthorizationBinding(previous),
   })
   return tokenResponse(tokens)
 }

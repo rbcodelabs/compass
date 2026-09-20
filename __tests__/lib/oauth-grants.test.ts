@@ -26,6 +26,7 @@ import {
   revokeTokenById,
   revokeTokenFamily,
 } from "@/lib/oauth/grants"
+import { carryAuthorizationBinding } from "@/lib/oauth/codes"
 import { hashOAuthToken } from "@/lib/oauth/tokens"
 
 const GRANT = {
@@ -219,5 +220,64 @@ describe("findRevocationTarget / revokeTokenById", () => {
 
   it("reports an unknown hash as not found", async () => {
     expect(await findRevocationTarget("0".repeat(64))).toEqual({ found: false })
+  })
+})
+
+/**
+ * The binding rides the whole token family (ADR 0015).
+ *
+ * The case that matters is rotation. An agent-bound connection that silently
+ * became user-bound at its first refresh would be a privilege escalation with
+ * no audit event, no user action, and a one-hour fuse — the kind of bug that
+ * only shows up as "why does this token see seven workspaces again?".
+ */
+describe("agent binding across issuance and rotation", () => {
+  const AGENT_GRANT = { ...GRANT, authorizationMode: "AGENT" as const, agentId: "agent-1" }
+
+  it("stamps both the access and the refresh token with the binding", async () => {
+    await issueTokenPair(AGENT_GRANT)
+    expect(store.oAuthToken.rows).toHaveLength(2)
+    for (const row of store.oAuthToken.rows) {
+      expect(row.authorizationMode).toBe("AGENT")
+      expect(row.agentId).toBe("agent-1")
+    }
+  })
+
+  it("leaves the binding unset when the grant carries none, so the column default stands", async () => {
+    await issueTokenPair(GRANT)
+    for (const row of store.oAuthToken.rows) {
+      expect(row.authorizationMode).toBeUndefined()
+      expect(row.agentId).toBeNull()
+    }
+  })
+
+  it("returns the binding from claimRefreshToken so rotation can copy it", async () => {
+    const tokens = await issueTokenPair(AGENT_GRANT)
+    const claim = await claimRefreshToken(hashOAuthToken(tokens.refresh_token))
+    expect(claim.ok).toBe(true)
+    if (!claim.ok) return
+    expect(claim.token.authorizationMode).toBe("AGENT")
+    expect(claim.token.agentId).toBe("agent-1")
+  })
+
+  it("keeps the binding across a rotation rather than widening to user mode", async () => {
+    const first = await issueTokenPair(AGENT_GRANT)
+    const claim = await claimRefreshToken(hashOAuthToken(first.refresh_token))
+    expect(claim.ok).toBe(true)
+    if (!claim.ok) return
+
+    await issueTokenPair({
+      ...GRANT,
+      familyId: claim.token.familyId,
+      parentTokenId: claim.token.id,
+      ...carryAuthorizationBinding(claim.token),
+    })
+
+    const rotated = store.oAuthToken.rows.filter((row) => row.parentTokenId === claim.token.id)
+    expect(rotated).toHaveLength(2)
+    for (const row of rotated) {
+      expect(row.authorizationMode).toBe("AGENT")
+      expect(row.agentId).toBe("agent-1")
+    }
   })
 })

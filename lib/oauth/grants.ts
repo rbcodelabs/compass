@@ -29,6 +29,7 @@
  * Claude gates its *request* for a refresh token on seeing it.
  */
 import getPrisma from "@/lib/db"
+import type { AuthorizationBinding } from "@/lib/oauth/codes"
 import { mintOAuthToken } from "@/lib/oauth/tokens"
 
 /**
@@ -50,7 +51,7 @@ export interface TokenResponseBody {
   scope: string
 }
 
-export interface IssueTokenPairInput {
+export interface IssueTokenPairInput extends AuthorizationBinding {
   clientId: string
   userId: string
   scope: string
@@ -79,6 +80,12 @@ export async function issueTokenPair(
     familyId: input.familyId,
     parentTokenId: input.parentTokenId ?? null,
     scopeWorkspaceId: input.scopeWorkspaceId ?? null,
+    // The binding rides the whole family, including every rotation (ADR 0015).
+    // Dropping it on refresh would silently turn an agent-bound connection into
+    // a user-bound one an hour after consent — a privilege escalation with no
+    // audit event and no user-visible cause.
+    authorizationMode: input.authorizationMode,
+    agentId: input.agentId ?? null,
   }
 
   // Two rows, not a transaction. DSQL has no foreign keys and these two inserts
@@ -135,6 +142,9 @@ export interface RefreshTokenRow {
   scope: string
   resource: string
   scopeWorkspaceId: string | null
+  /** Null only on a row written before migration 056; read as USER mode. */
+  authorizationMode: string | null
+  agentId: string | null
   familyId: string
   expiresAt: Date
   revokedAt: Date | null
@@ -174,6 +184,8 @@ export async function claimRefreshToken(
       scope: true,
       resource: true,
       scopeWorkspaceId: true,
+      authorizationMode: true,
+      agentId: true,
       familyId: true,
       expiresAt: true,
       revokedAt: true,
@@ -218,6 +230,8 @@ export async function claimRefreshToken(
       scope: existing.scope,
       resource: existing.resource,
       scopeWorkspaceId: existing.scopeWorkspaceId,
+      authorizationMode: existing.authorizationMode,
+      agentId: existing.agentId,
       familyId: existing.familyId,
       expiresAt: existing.expiresAt,
       revokedAt: existing.revokedAt,

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const apiKey = { findFirst: vi.fn(), update: vi.fn() }
 const agent = { findFirst: vi.fn() }
@@ -154,7 +154,7 @@ describe("OAuth access tokens", () => {
         // never match, so this predicate cannot be dropped.
         resource: "http://localhost:3000/api/mcp",
       },
-      select: { id: true, userId: true, scope: true, scopeWorkspaceId: true },
+      select: { id: true, userId: true, scope: true, scopeWorkspaceId: true, authorizationMode: true, agentId: true },
     })
   })
 
@@ -198,5 +198,117 @@ describe("OAuth access tokens", () => {
       valid: false,
     })
     expect(oAuthToken.findFirst).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The escalation matrix for ADR 0015. Every case below asserts the *same*
+ * property from a different direction: an agent-bound token either acts as its
+ * agent or does not act at all. There is no third outcome, and in particular
+ * there is no downgrade to `purpose: "USER"` — that would make flipping
+ * COMPASS_AGENTS_ENABLED off a privilege escalation, and would let a suspended
+ * agent keep working through OAuth while failing through its own key.
+ */
+describe("OAuth access tokens bound to an agent", () => {
+  const agentRow = {
+    id: "token-1",
+    userId: "user-1",
+    scope: "mcp:read mcp:write",
+    scopeWorkspaceId: null,
+    authorizationMode: "AGENT",
+    agentId: "agent-1",
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    oAuthToken.update.mockResolvedValue({})
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+  })
+  afterEach(() => vi.unstubAllEnvs())
+
+  it("resolves to an AGENT actor carrying agentId, credentialId and credentialType", async () => {
+    oAuthToken.findFirst.mockResolvedValue(agentRow)
+    agent.findFirst.mockResolvedValue({ id: "agent-1" })
+    await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({
+      valid: true,
+      userId: "user-1",
+      purpose: "AGENT",
+      agentId: "agent-1",
+      // The whole point: withAgentActivity throws "Incomplete agent identity."
+      // without this, so every read would work and every write would fail.
+      credentialId: "token-1",
+      credentialType: "OAUTH",
+      scopeWorkspaceId: null,
+      scopes: ["mcp:read", "mcp:write"],
+    })
+  })
+
+  it("re-checks agent ownership and liveness on every request, never trusting issuance", async () => {
+    oAuthToken.findFirst.mockResolvedValue(agentRow)
+    agent.findFirst.mockResolvedValue({ id: "agent-1" })
+    await validateMcpAuth(oauthRequest())
+    // Identical predicate to the ApiKey AGENT branch: owned by the token's own
+    // user, and ACTIVE. An agent belonging to someone else can never match.
+    expect(agent.findFirst).toHaveBeenCalledWith({
+      where: { id: "agent-1", ownerUserId: "user-1", status: "ACTIVE" },
+      select: { id: true },
+    })
+  })
+
+  it("refuses, and does not downgrade, when the agent is suspended or deleted", async () => {
+    oAuthToken.findFirst.mockResolvedValue(agentRow)
+    agent.findFirst.mockResolvedValue(null)
+    await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({ valid: false })
+  })
+
+  it("refuses, and does not downgrade, while the agent rollout is disabled", async () => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+    oAuthToken.findFirst.mockResolvedValue(agentRow)
+    await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({ valid: false })
+    // Refused before the agent lookup — the flag is checked first, exactly as
+    // on the key path.
+    expect(agent.findFirst).not.toHaveBeenCalled()
+  })
+
+  it("refuses an AGENT-mode row whose agentId is missing", async () => {
+    oAuthToken.findFirst.mockResolvedValue({ ...agentRow, agentId: null })
+    await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({ valid: false })
+    expect(agent.findFirst).not.toHaveBeenCalled()
+  })
+
+  const NON_AGENT_MODES: Array<[string | null, string]> = [
+    ["USER", "the admin override"],
+    [null, "a row written before migration 056"],
+    ["RESEARCH", "a value the switch does not recognise"],
+    ["AGENT_TURN", "a purpose no OAuth token may ever take"],
+    ["agent", "the right word in the wrong case"],
+  ]
+  it.each(NON_AGENT_MODES)("treats authorizationMode %s as USER mode (%s)", async (mode) => {
+    // A closed two-way switch, never a pass-through of a stored purpose string.
+    // RESEARCH and AGENT_TURN in particular must not become reachable by
+    // writing a string into a column.
+    oAuthToken.findFirst.mockResolvedValue({ ...agentRow, authorizationMode: mode })
+    await expect(validateMcpAuth(oauthRequest())).resolves.toMatchObject({
+      valid: true,
+      purpose: "USER",
+    })
+    expect(agent.findFirst).not.toHaveBeenCalled()
+  })
+
+  it("pins scopeWorkspaceId to null so grants are the only workspace narrowing", async () => {
+    // Even if a stray value is on the row, the agent path must not honour it:
+    // scopeWorkspaceId is superseded and is not a complete boundary as built.
+    oAuthToken.findFirst.mockResolvedValue({ ...agentRow, scopeWorkspaceId: "workspace-9" })
+    agent.findFirst.mockResolvedValue({ id: "agent-1" })
+    await expect(validateMcpAuth(oauthRequest())).resolves.toMatchObject({
+      purpose: "AGENT",
+      scopeWorkspaceId: null,
+    })
+  })
+
+  it("still enforces the scopes the token was granted", async () => {
+    oAuthToken.findFirst.mockResolvedValue({ ...agentRow, scope: "mcp:read" })
+    agent.findFirst.mockResolvedValue({ id: "agent-1" })
+    await expect(validateMcpAuth(oauthRequest())).resolves.toMatchObject({ scopes: ["mcp:read"] })
   })
 })

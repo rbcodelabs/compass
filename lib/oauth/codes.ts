@@ -42,7 +42,46 @@ export interface IssuedAuthorizationCode {
   expiresAt: Date
 }
 
-export interface AuthorizationCodeInput {
+/**
+ * Which identity the tokens issued from this grant will act as (ADR 0015).
+ * `"AGENT"` requires `agentId`; `"USER"` is the admin override and today's
+ * legacy behavior. Stored as a distinct value from `agentId` so that a null
+ * agent is never ambiguous between "override elected" and "predates binding".
+ */
+export type AuthorizationMode = "AGENT" | "USER"
+
+export interface AuthorizationBinding {
+  /** Omitted means USER mode, matching the column default. */
+  authorizationMode?: AuthorizationMode
+  agentId?: string | null
+}
+
+/**
+ * Normalises a stored binding for carrying forward into a freshly minted row —
+ * code to token, and token to rotated token.
+ *
+ * The same **closed two-way switch** `validateOAuthAccessToken` applies: a
+ * stored mode that is not exactly `"AGENT"` carries no agent forward, so a
+ * stray `agent_id` left on a USER-mode row can never become live by being
+ * copied into a new token.
+ *
+ * `"AGENT"` with a missing `agentId` is carried forward **as-is** rather than
+ * quietly repaired to USER. That state is unwritable today, but if it ever
+ * occurred, "repairing" it would hand the client a broader token than the one
+ * it presented. Carried forward it stays narrower than broken:
+ * `validateOAuthAccessToken` refuses an AGENT-mode token with no agent, so the
+ * client gets a 401 and re-consents.
+ */
+export function carryAuthorizationBinding(row: {
+  authorizationMode: string | null
+  agentId: string | null
+}): Required<AuthorizationBinding> {
+  return row.authorizationMode === "AGENT"
+    ? { authorizationMode: "AGENT", agentId: row.agentId }
+    : { authorizationMode: "USER", agentId: null }
+}
+
+export interface AuthorizationCodeInput extends AuthorizationBinding {
   clientId: string
   userId: string
   redirectUri: string
@@ -76,6 +115,10 @@ export async function issueAuthorizationCode(
       codeChallengeMethod: input.codeChallengeMethod,
       scope: input.scope,
       resource: input.resource,
+      // Omitted by every caller that has no binding to express, which lets
+      // Prisma's @default("USER") stand rather than writing an explicit null.
+      authorizationMode: input.authorizationMode,
+      agentId: input.agentId ?? null,
     },
   })
   return { code, expiresAt }
@@ -91,6 +134,9 @@ export interface ClaimedAuthorizationCode {
   codeChallengeMethod: string
   scope: string
   resource: string
+  /** Null only on a row written before migration 056; read as USER mode. */
+  authorizationMode: string | null
+  agentId: string | null
   expiresAt: Date
 }
 
@@ -117,6 +163,8 @@ const CLAIMED_FIELDS = {
   codeChallengeMethod: true,
   scope: true,
   resource: true,
+  authorizationMode: true,
+  agentId: true,
   expiresAt: true,
 } as const
 

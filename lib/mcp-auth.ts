@@ -9,6 +9,13 @@ export type McpAuthResult = {
   purpose: "SERVICE" | "USER" | "RESEARCH" | "AGENT" | "AGENT_TURN"
   agentId?: string | null
   credentialId?: string
+  /**
+   * Which table `credentialId` points into. `AgentToolCall.credential_id` is a
+   * bare uuid that holds an `ApiKey.id` on the key path and an `OAuthToken.id`
+   * on the agent-bound OAuth path, so without this the audit trail is silently
+   * polymorphic (ADR 0015). Absent for actors that write no audit rows.
+   */
+  credentialType?: "API_KEY" | "OAUTH"
   scopeWorkspaceId: string | null
   scopeConversationId?: string | null
   scopeClaimId?: string | null
@@ -81,6 +88,7 @@ export async function validateMcpAuth(request: Request): Promise<McpAuthResult> 
     purpose: (apiKey.purpose || "USER") as "USER" | "RESEARCH" | "AGENT" | "AGENT_TURN",
     agentId: apiKey.agentId,
     credentialId: apiKey.id,
+    credentialType: "API_KEY",
     scopeWorkspaceId: apiKey.scopeWorkspaceId,
     scopeConversationId: apiKey.scopeConversationId,
     scopeClaimId: apiKey.scopeClaimId,
@@ -105,9 +113,14 @@ export async function validateMcpAuth(request: Request): Promise<McpAuthResult> 
  *    revoked token that was only checked for existence would still authenticate.
  *  - `expiresAt: { gt: … }` for the ordinary one-hour lifetime.
  *
- * `purpose` is pinned to `"USER"` rather than read from anywhere. An OAuth
- * token must never be able to take the `RESEARCH` path (which grants a public
- * interview credential its own narrow allowlist) or the `AGENT` paths.
+ * `purpose` is decided by a **closed two-way switch** on the stored
+ * `authorizationMode`, never a pass-through of a stored purpose string (ADR
+ * 0015). Exactly `"AGENT"` takes the agent path; every other value — including
+ * `null` on a row written before migration 056 — is USER mode. An OAuth token
+ * still cannot reach `RESEARCH` (a public interview credential's narrow
+ * allowlist) or `AGENT_TURN` (server-minted, 5-minute, conversation-scoped);
+ * binding a 1-hour token with a 30-day refresh to a turn-scoped purpose is
+ * incoherent rather than merely unimplemented.
  */
 async function validateOAuthAccessToken(token: string): Promise<McpAuthResult> {
   let resource: string
@@ -129,7 +142,7 @@ async function validateOAuthAccessToken(token: string): Promise<McpAuthResult> {
       expiresAt: { gt: new Date() },
       resource,
     },
-    select: { id: true, userId: true, scope: true, scopeWorkspaceId: true },
+    select: { id: true, userId: true, scope: true, scopeWorkspaceId: true, authorizationMode: true, agentId: true },
   })
   if (!accessToken) return { valid: false }
 
@@ -140,13 +153,56 @@ async function validateOAuthAccessToken(token: string): Promise<McpAuthResult> {
     .update({ where: { id: accessToken.id }, data: { lastUsedAt: new Date() } })
     .catch(() => {})
 
+  if (accessToken.authorizationMode === "AGENT") {
+    // Mirrors the ApiKey AGENT branch above, predicate for predicate. Three
+    // properties here are load-bearing:
+    //
+    //  1. Agent liveness is re-checked on **every request**, not trusted from
+    //     issuance, so suspending an agent stops its OAuth connection at the
+    //     next call exactly as it stops its key. Yes, this is a second read on
+    //     the hot path; the key path already pays it and there is no FK to join
+    //     across (relationMode = "prisma"), so two reads it is.
+    //  2. Every failure is `{ valid: false }` — **never** a downgrade to USER.
+    //     Downgrading would make flipping COMPASS_AGENTS_ENABLED off into a
+    //     privilege *escalation*, and would let a suspended agent keep working
+    //     through OAuth while failing through its own key. A 401 sends the
+    //     client back through discovery and consent, which is the correct and
+    //     recoverable outcome.
+    //  3. `credentialId` is mandatory, not decorative. withAgentActivity
+    //     (lib/agent-activity.ts:7) throws "Incomplete agent identity." without
+    //     it, so omitting it yields a connection where every read succeeds and
+    //     every write fails — a half-working credential that reads as a Compass
+    //     bug rather than a missing field.
+    if (process.env.COMPASS_AGENTS_ENABLED !== "1" || !accessToken.agentId) return { valid: false }
+    const agent = await prisma.agent.findFirst({
+      where: { id: accessToken.agentId, ownerUserId: accessToken.userId, status: "ACTIVE" },
+      select: { id: true },
+    })
+    if (!agent) return { valid: false }
+    return {
+      valid: true,
+      userId: accessToken.userId,
+      purpose: "AGENT",
+      agentId: accessToken.agentId,
+      credentialId: accessToken.id,
+      credentialType: "OAUTH",
+      // Pinned null rather than read from the row, so exactly one mechanism
+      // narrows workspaces on this path and it is AgentWorkspaceGrant. See the
+      // scopeWorkspaceId comment in prisma/schema.prisma for why the column is
+      // superseded rather than built on.
+      scopeWorkspaceId: null,
+      scopes: parseScope(accessToken.scope),
+    }
+  }
+
   return {
     valid: true,
     userId: accessToken.userId,
     purpose: "USER",
-    // Always null today (decision 1 — no workspace picker), meaning "every
-    // membership the user has", which is the same reach a per-user cmp_… key
-    // already carries. The column exists so narrowing stays additive.
+    // Null on every USER-mode token, meaning "every membership the user has".
+    // Reaching this branch now means either the admin override was elected or
+    // the row predates migration 056 — which is why the mode is an explicit
+    // column and not inferred from `agentId IS NULL`.
     scopeWorkspaceId: accessToken.scopeWorkspaceId,
     scopes: parseScope(accessToken.scope),
   }

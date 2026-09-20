@@ -2073,7 +2073,16 @@ model AgentToolCall {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   agentId String @map("agent_id") @db.Uuid
   userId String @map("user_id") @db.Uuid
+  /// Polymorphic: an ApiKey.id when credentialType is "API_KEY", an
+  /// OAuthToken.id when it is "OAUTH". Read `credentialType` first — a bare
+  /// uuid join against api_keys will silently miss every OAuth-issued call.
   credentialId String @map("credential_id") @db.Uuid
+  /// "API_KEY" | "OAUTH". The discriminator for credentialId, added by ADR 0015
+  /// when an agent-bound OAuth token became a second source of agent identity.
+  /// Nullable because DSQL rejects a DEFAULT on ALTER TABLE ADD COLUMN; rows
+  /// predating migration 056 are backfilled to "API_KEY", which is what they
+  /// all were. New rows get the value from Prisma's ORM-layer default.
+  credentialType String? @default("API_KEY") @map("credential_type") @db.VarChar(10)
   toolName String @map("tool_name") @db.VarChar(100)
   workspaceId String? @map("workspace_id") @db.Uuid
   status String @default("STARTED") @db.VarChar(20)
@@ -2328,6 +2337,16 @@ model OAuthAuthorizationCode {
   /// RFC 8707 audience. Defaulted to the canonical MCP resource URI when the
   /// client omits `resource`, which the Geode broker and mcp-remote both do.
   resource            String    @db.Text
+  /// "AGENT" | "USER" (ADR 0015). Explicit rather than inferred from
+  /// `agentId IS NULL`, because a null agentId must not be ambiguous between
+  /// "the user elected the admin override" and "this row predates agent
+  /// binding". Read as a closed two-way switch: anything that is not exactly
+  /// "AGENT" is USER mode. Nullable in the database (DSQL rejects a DEFAULT on
+  /// ALTER TABLE ADD COLUMN); migration 056 backfills legacy rows to "USER".
+  authorizationMode   String?   @default("USER") @map("authorization_mode") @db.VarChar(10)
+  /// Non-null iff authorizationMode is "AGENT". An Agent.id owned by userId —
+  /// re-validated at every use, never trusted from issuance.
+  agentId             String?   @map("agent_id") @db.Uuid
   expiresAt           DateTime  @map("expires_at")
   consumedAt          DateTime? @map("consumed_at")
   createdAt           DateTime  @default(now()) @map("created_at")
@@ -2349,10 +2368,23 @@ model OAuthToken {
   userId           String    @map("user_id") @db.Uuid
   scope            String    @db.VarChar(255)
   resource         String    @db.Text
-  /// Null = every workspace the user is a member of, matching the reach of a
-  /// per-user cmp_… API key (decision 1). Reserved for a future workspace
-  /// picker via assertActorWorkspaceScope.
+  /// **Superseded by agentId + AgentWorkspaceGrant; always null** (ADR 0015).
+  /// It was reserved for a workspace picker, but it is not a complete boundary
+  /// as built — assertActorWorkspaceScope (lib/mcp-authz.ts) fires only for
+  /// RESEARCH and AGENT_TURN, and assertWorkspaceAdmin / assertOrgMemberBySlug
+  /// / assertOrgAdminBySlug never consult it — and it expresses one workspace
+  /// with no access level where a grant set expresses many with per-workspace
+  /// READ/WRITE. Grants strictly dominate. Kept only because dropping a column
+  /// on DSQL helps nobody. Do not resurrect it.
   scopeWorkspaceId String?   @map("scope_workspace_id") @db.Uuid
+  /// "AGENT" | "USER" (ADR 0015) — see OAuthAuthorizationCode.authorizationMode.
+  /// This is the column validateOAuthAccessToken branches on to decide whether
+  /// the token resolves to purpose "AGENT" or purpose "USER".
+  authorizationMode String? @default("USER") @map("authorization_mode") @db.VarChar(10)
+  /// Non-null iff authorizationMode is "AGENT". Carried forward across refresh
+  /// rotation so a refresh can never silently widen an agent token into a user
+  /// token.
+  agentId          String?   @map("agent_id") @db.Uuid
   expiresAt        DateTime  @map("expires_at")
   revokedAt        DateTime? @map("revoked_at")
   familyId         String    @map("family_id") @db.Uuid
@@ -2360,6 +2392,7 @@ model OAuthToken {
   createdAt        DateTime  @default(now()) @map("created_at")
   lastUsedAt       DateTime? @map("last_used_at")
 
+  @@index([agentId], map: "idx_oauth_tokens_agent")
   @@index([familyId], map: "idx_oauth_tokens_family")
   @@index([userId, clientId], map: "idx_oauth_tokens_user_client")
   @@index([expiresAt], map: "idx_oauth_tokens_expires")
@@ -2373,6 +2406,14 @@ model OAuthConsent {
   userId    String   @map("user_id") @db.Uuid
   clientId  String   @map("client_id") @db.VarChar(64)
   scope     String   @db.VarChar(255)
+  /// "AGENT" | "USER" (ADR 0015) — see OAuthAuthorizationCode.authorizationMode.
+  /// The unique key stays (userId, clientId): one connection has one binding,
+  /// and the binding is data on the row rather than part of its identity, so a
+  /// returning client replays the remembered binding instead of being offered a
+  /// second one.
+  authorizationMode String? @default("USER") @map("authorization_mode") @db.VarChar(10)
+  /// Non-null iff authorizationMode is "AGENT".
+  agentId   String?  @map("agent_id") @db.Uuid
   grantedAt DateTime @default(now()) @map("granted_at")
 
   @@unique([userId, clientId], map: "idx_oauth_consents_user_client")
