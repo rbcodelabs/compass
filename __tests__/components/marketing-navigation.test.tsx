@@ -34,7 +34,7 @@ describe("MarketingNavigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Account menu" }))
     expect(await screen.findByText("rick@example.com")).toBeInTheDocument()
     expect(within(await screen.findByRole("menu")).getByRole("link", { name: "Set up workspace" })).toHaveAttribute("href", "/onboarding")
-    expect(screen.getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help")
+    expect(screen.getByRole("link", { name: "User Guide" })).toHaveAttribute("href", "/help")
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument()
   })
 
@@ -64,6 +64,7 @@ describe("marketing calls to action", () => {
     render(<><HeroSection viewer={{ kind: "signed-out" }} /><MarketingFooter viewer={{ kind: "signed-out" }} /></>)
     expect(screen.getAllByRole("link", { name: "Sign in" })).toHaveLength(2)
     expect(screen.getByRole("link", { name: "Start for free →" })).toHaveAttribute("href", "/dashboard")
+    expect(screen.getByRole("link", { name: "User Guide" })).toHaveAttribute("href", "/help")
   })
 
   it("shows setup CTAs and no sign-in links for a user without workspaces", () => {

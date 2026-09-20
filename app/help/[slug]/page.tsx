@@ -21,7 +21,7 @@ export async function generateMetadata({
   const doc = await getDoc(slug);
   if (!doc) return {};
   return {
-    title: `${doc.title} — Compass Docs`,
+    title: `${doc.title} — Compass User Guide`,
     description: doc.description,
   };
 }

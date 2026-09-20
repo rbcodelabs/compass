@@ -36,7 +36,7 @@ The **OST Tree view** in Discovery lets you see the full tree at a glance: outco
 
 Beyond the core OST workflow, Compass includes:
 
-- **Workspace Search** — Press **⌘K** on macOS or **Ctrl+K** on Windows and Linux, or choose Search in the desktop sidebar, to find Opportunities, Solutions, Experiments, Roadmap items, Tasks, Feedback, Docs, and product Help articles by title or topic. Entity results stay within your current workspace; use the workspace switcher before searching another workspace. Help results search Compass's own product documentation and aren't workspace-scoped.
+- **Workspace Search** — Press **⌘K** on macOS or **Ctrl+K** on Windows and Linux, or choose Search in the desktop sidebar, to find Opportunities, Solutions, Experiments, Roadmap items, Tasks, Feedback, Docs, and User Guide articles by title or topic. Entity results stay within your current workspace; use the workspace switcher before searching another workspace. User Guide results search Compass's own product documentation and aren't workspace-scoped.
 - **Capture** — Collect direct feedback and run shareable customer-interview studies without moving research into a separate product.
 - **Feedback Portal** — A public-facing page where customers can submit feedback and vote on requests. Internal teams triage incoming feedback by linking it to opportunities.
 - **Docs** — A rich-text editor for internal documentation. Pages live in a hierarchical tree and support inline screenshots.
@@ -51,7 +51,7 @@ Compass supports email magic-link sign-in by default — enter your email and cl
 
 Manage your passkeys from your avatar menu → **Passkeys**: register a new one, see when each was added and which device it's tied to, and revoke any you no longer use. Registering a passkey adds it to the account you're already signed in to — it doesn't replace your existing sign-in method, so Google and magic-link both keep working.
 
-When you return to the Compass homepage while signed in, the header provides a direct path back to your work. A single-workspace account gets a Dashboard shortcut; accounts with multiple workspaces can choose one from the workspace menu; and new accounts can continue workspace setup. Your avatar menu also includes Dashboard or setup, Help, and Sign out.
+When you return to the Compass homepage while signed in, the header provides a direct path back to your work. A single-workspace account gets a Dashboard shortcut; accounts with multiple workspaces can choose one from the workspace menu; and new accounts can continue workspace setup. Your avatar menu also includes Dashboard or setup, User Guide, and Sign out.
 
 ## Getting Started
 

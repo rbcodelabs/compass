@@ -300,7 +300,7 @@ export function Sidebar({
                 <DropdownMenuItem className="cursor-pointer p-0">
                   <Link href="/help" className="flex w-full items-center gap-2 px-1.5 py-1">
                     <HelpCircle className="size-3.5 shrink-0 text-text-subtle" aria-hidden="true" />
-                    Help
+                    User Guide
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem className="cursor-pointer p-0" closeOnClick={false}>

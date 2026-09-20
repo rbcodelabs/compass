@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getAllDocs } from "@/lib/docs";
 import { NavLink } from "@/components/help-nav-link";
+
+export const metadata: Metadata = { title: "User Guide" };
 
 export default function HelpLayout({ children }: { children: React.ReactNode }) {
   const docs = getAllDocs();
@@ -36,7 +39,7 @@ export default function HelpLayout({ children }: { children: React.ReactNode }) 
             </div>
             <span className="font-semibold text-sm tracking-tight">Compass</span>
             <span className="text-slate-500 text-sm">/</span>
-            <span className="text-slate-300 text-sm">Docs</span>
+            <span className="text-slate-300 text-sm">User Guide</span>
           </Link>
         </div>
       </header>
@@ -44,7 +47,7 @@ export default function HelpLayout({ children }: { children: React.ReactNode }) 
       <div className="flex-1 max-w-6xl mx-auto w-full flex gap-0 px-4 sm:px-6 py-6 sm:py-8">
         {/* Sidebar — hidden on mobile, visible on md+ */}
         <aside className="hidden md:block w-[220px] shrink-0 pr-8">
-          <nav aria-label="Documentation navigation">
+          <nav aria-label="User Guide navigation">
             {Object.entries(sections).map(([section, sectionDocs]) => (
               <div key={section} className="mb-6">
                 <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">
