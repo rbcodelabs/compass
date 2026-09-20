@@ -107,6 +107,15 @@ reconnecting a Connected App invalidates its outstanding codes as well as its
 live tokens. A later reconnect replays the remembered binding only while that
 binding remains valid.
 
+Manage these connections in **Settings → Agents → Connected apps**. Each entry
+shows the client and redirect host, its USER or agent binding, approved scopes,
+current workspace reach, and last-used time. **Revoke** disconnects the client
+and removes its remembered approval. **Reconnect** does the same invalidation,
+then starts authorization again so you can choose a different agent or binding.
+For a USER override, the workspace list is an advisory disclosure rather than
+an exhaustive account-access inventory: organization-level capabilities do not
+always correspond to an individual workspace row.
+
 Because both the approve and decline buttons stay pinned to the bottom of the
 card, a long list scrolls inside the card rather than pushing the buttons off the
 screen. Scroll the details with the mouse, or with the arrow keys once the detail

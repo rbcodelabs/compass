@@ -169,7 +169,7 @@ async function waitForCallback(page: Page, callbackOrigin: string): Promise<URL>
 async function captureConsentScreenshots(page: Page): Promise<void> {
   const originalViewport = page.viewportSize() ?? { width: 1280, height: 800 };
   await mkdir("test-results/oauth-qa", { recursive: true });
-  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.setViewportSize({ width: 1280, height: 800 });
   await page.screenshot({
     path: "test-results/oauth-qa/consent-desktop.png",
     animations: "disabled",
@@ -177,6 +177,23 @@ async function captureConsentScreenshots(page: Page): Promise<void> {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({
     path: "test-results/oauth-qa/consent-mobile.png",
+    animations: "disabled",
+  });
+  await page.setViewportSize(originalViewport);
+}
+
+/** Connected Apps exposes binding metadata, never the bearer itself. */
+async function captureConnectedAppsScreenshots(page: Page): Promise<void> {
+  const originalViewport = page.viewportSize() ?? { width: 1280, height: 800 };
+  await mkdir("test-results/oauth-qa", { recursive: true });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.screenshot({
+    path: "test-results/oauth-qa/connected-apps-desktop.png",
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: "test-results/oauth-qa/connected-apps-mobile.png",
     animations: "disabled",
   });
   await page.setViewportSize(originalViewport);
@@ -384,8 +401,12 @@ test("an MCP client registers, survives the login bounce, and the consent screen
         // blocked even once the agent has a name.
         await anonPage.getByRole("textbox", { name: "Name" }).fill(INLINE_AGENT_NAME);
         await expect(allow).toBeEnabled();
-        const boxes = anonPage.getByRole("checkbox", { name: /E2E/ });
+        // Scope to the binding fieldset rather than matching fixture names.
+        // The seeded user also administers the Compass meta workspace, whose
+        // label contains no "E2E"; leaving it checked would not be zero reach.
+        const boxes = anonPage.getByRole("group", { name: "Act as" }).getByRole("checkbox");
         const count = await boxes.count();
+        expect(count, "the inline agent must have at least one grantable workspace").toBeGreaterThan(0);
         for (let index = 0; index < count; index += 1) await boxes.nth(index).uncheck();
         await expect(allow).toBeDisabled();
         await expect(
@@ -625,9 +646,14 @@ test("an MCP client registers, survives the login bounce, and the consent screen
         await expect(connection).toContainText(`127.0.0.1:${callbackPort}`);
         await expect(connection).toContainText(INLINE_AGENT_NAME);
         await expect(connection).toContainText("mcp:read, mcp:write, offline_access");
-        await expect(connection).toContainText("E2E Test Org · E2E Workspace · Read and write");
+        await expect(connection).toContainText(
+          /E2E Test Org(?: \[[^\]]+\])? · E2E Workspace · Read and write/
+        );
         await expect(connection.getByText("Never", { exact: true }), "the MCP call must update last-used").toHaveCount(0);
 
+        await captureConnectedAppsScreenshots(anonPage);
+        // The component gives each generic-looking button a client-specific
+        // accessible name; the Playwright error-context snapshot confirms it.
         await connection.getByRole("button", { name: `Revoke ${LOOPBACK_CLIENT_NAME}` }).click();
         await expect(connection, "revoking must remove the remembered connection").toHaveCount(0);
 
