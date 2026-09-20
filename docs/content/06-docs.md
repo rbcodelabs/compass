@@ -64,7 +64,9 @@ The count includes only pending decisions whose primary subject is this page, no
 
 Click the **image icon** in the toolbar to upload a screenshot. You can also paste an image from the clipboard directly into the editor — Compass will upload it automatically and embed it inline.
 
-Images are stored in Vercel Blob storage and served via a CDN. They are always private — only workspace members can view them.
+New uploads accept PNG, JPEG, GIF, or WebP images up to 10 MiB. Compass stores them in the private Artifact Blob store and serves them through a workspace-authorized Compass URL, so the viewer must be signed in as a member of that workspace. Deployments must configure `ARTIFACT_BLOB_READ_WRITE_TOKEN`; Compass does not fall back to the public Blob store.
+
+Images uploaded before workspace-private storage was introduced keep their existing public Vercel Blob URLs so old documents continue to render. Those legacy URLs remain accessible to anyone who has the URL. This upgrade does not copy or delete blobs or rewrite existing documents; retroactively privatizing them requires a separately planned migration.
 
 ## Page Properties
 

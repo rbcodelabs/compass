@@ -543,6 +543,7 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 |---|---|
 | `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc`; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`). A doc whose parent is excluded by a recency filter is rendered at the top level so it stays reachable |
 | `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body, and `docType`/`roadmapItemId` when set |
+| `prepare_doc_image_upload` | Prepare a signed, short-lived upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB in workspace-private Docs storage; returns the upload pathname/token plus the relative Compass image URL and Markdown |
 | `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on |
 | `update_doc` | Update an existing doc's title, content, and/or icon |
 | `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Always writes a new version, even if one was just saved seconds ago — named snapshots are never coalesced away |
@@ -551,6 +552,10 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 | `restore_doc_version` | Restore a doc's live content to a previously saved version. Param: `versionId`. The doc's current state is snapshotted first (labeled "Before restore"), so restoring never loses data |
 
 Every `update_doc` call also automatically snapshots the doc's pre-change state before applying the new values (coalesced to one snapshot per 5-minute window per author, so an agent making several quick edits in a row doesn't flood the history) — you don't need to call `create_doc_version` yourself unless you want a deliberately named checkpoint.
+
+To add a local screenshot, call `prepare_doc_image_upload` with its exact filename, MIME type, and byte size. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: fileType })` from `@vercel/blob/client`, then place the returned `markdown` in `create_doc` or `update_doc`. The token expires after ten minutes and is bound to one random workspace-prefixed pathname, MIME type, and maximum size; it cannot overwrite an existing blob. The saved Markdown contains only a relative Compass read URL, never the storage pathname or token. Image reads require a signed-in member of the owning workspace.
+
+This private flow applies to new uploads. Existing documents may contain older absolute `*.public.blob.vercel-storage.com` image URLs; they remain public and continue rendering. Compass does not migrate, delete, or rewrite those legacy blobs automatically.
 
 ### Artifacts
 

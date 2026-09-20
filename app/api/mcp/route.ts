@@ -48,6 +48,8 @@ import {
   createDoc,
   updateDoc,
 } from "@/lib/doc-tool-handlers"
+import { prepareDocImageUploadTool } from "@/lib/doc-image-tool-handlers"
+import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
 import {
   archiveArtifact,
   createArtifact,
@@ -2951,6 +2953,22 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getDoc
+    )
+
+    register(
+      "prepare_doc_image_upload",
+      {
+        title: "Prepare Docs Image Upload",
+        description: "Prepares a short-lived upload to private Docs image storage. Upload with the returned client token, then embed the returned relative image URL or Markdown in a Compass Doc.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace that will own the image"),
+          filename: z.string().min(1).max(255).describe("Original filename used in the Markdown alt text"),
+          fileType: z.enum(DOC_IMAGE_ALLOWED_MIME_TYPES).describe("Raster image MIME type"),
+          fileSize: z.number().int().min(1).max(DOC_IMAGE_MAX_BYTES).describe("Exact image size in bytes"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      prepareDocImageUploadTool,
     )
 
     register(
