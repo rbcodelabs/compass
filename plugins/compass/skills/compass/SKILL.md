@@ -284,6 +284,7 @@ Field *definitions* and shared option sets are UI-only (Settings → Custom Fiel
 |---|---|
 | `list_docs` | Fetch the doc tree for a workspace; recency-filterable |
 | `get_doc` | Fetch a single doc's content and metadata (properties) |
+| `prepare_doc_image_upload` | Prepare a short-lived private direct upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB. Upload with `@vercel/blob/client` using `access: "private"`, then embed the returned relative URL or Markdown in a Doc |
 | `create_doc` | Create a new doc page, optionally nested under a parent. Pass `roadmapItemId` + `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on |
 | `update_doc` | Update a doc's title, content, or metadata (properties). Automatically snapshots the doc's pre-change state first (coalesced to one snapshot per 5-min window per author) |
 | `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Never coalesced — always writes a new version |
