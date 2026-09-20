@@ -27,6 +27,7 @@ model User {
   workspaceMembers    WorkspaceMember[]
   apiKeys             ApiKey[]
   agentConversations  AgentConversation[]
+  authenticators      Authenticator[]
 
   @@map("users")
 }
@@ -100,6 +101,30 @@ model VerificationToken {
 
   @@id([identifier, token])
   @@map("verification_tokens")
+}
+
+// Auth.js's Passkey/WebAuthn provider. @auth/prisma-adapter drives
+// createAuthenticator/getAuthenticator/listAuthenticatorsByUserId/
+// updateAuthenticatorCounter against this model by its Prisma field names
+// (credentialID, userId, counter) once it exists — no adapter code changes
+// needed. Own synthetic UUID `id` PK for house-style consistency; credentialID
+// (the base64url WebAuthn credential id from the browser) is the adapter's
+// actual lookup key and stays a separate unique column, matching Auth.js's
+// documented model shape.
+model Authenticator {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  credentialID         String   @unique @map("credential_id") @db.VarChar(512)
+  userId               String   @map("user_id") @db.Uuid
+  user                 User     @relation(fields: [userId], references: [id])
+  providerAccountId    String   @map("provider_account_id") @db.VarChar(255)
+  credentialPublicKey  String   @map("credential_public_key")
+  counter              Int
+  credentialDeviceType String   @map("credential_device_type") @db.VarChar(50)
+  credentialBackedUp   Boolean  @map("credential_backed_up")
+  transports           String?  @db.VarChar(255)
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@map("authenticators")
 }
 
 // ─── Multi-tenancy ────────────────────────────────────────────────────────────

@@ -4,7 +4,6 @@
 // Endpoint: POST /api/mcp  (Streamable HTTP transport)
 
 import { createMcpHandler } from "mcp-handler"
-import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
@@ -23,7 +22,7 @@ import { updateExperiment } from "@/lib/experiment-update-tool"
 import { generateResearchGuideTool, createResearchStudyTool, listResearchStudiesTool, getResearchStudyTool, updateResearchStudyTool, activateResearchStudyTool, closeResearchStudyTool, archiveResearchStudyTool, issueResearchLinkTool, rotateResearchLinkTool, revokeResearchLinksTool, listResearchSessionsTool, getResearchSessionTool, listResearchSynthesesTool, generateResearchSynthesisTool, promoteResearchFindingToEvidenceTool } from "@/lib/research-tool-handlers"
 import { RESEARCH_SESSION_STATUSES } from "@/lib/research-study-service"
 import { synthesisSchema } from "@/lib/research-analysis"
-import { normalizeWorkspaceRole } from "@/lib/roles"
+import { createWorkspaceInOrg } from "@/lib/workspace-service"
 import {
   createFeedback,
   addFeedbackAttachment,
@@ -481,66 +480,16 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ orgSlug, name, slug, description }) => {
-        const prisma = getPrisma()
-        const org = await prisma.organization.findUnique({
-          where: { slug: orgSlug },
-          select: { id: true, name: true },
-        })
-        if (!org) {
-          return fail(`No organization found with slug "${orgSlug}".`)
+        // Creation, membership seeding and revalidation live in
+        // lib/workspace-service.ts so the org-settings "Create workspace" form
+        // performs exactly the same write. Authorization is unchanged and
+        // stays outside: lib/mcp-tool-gates.ts gates this tool with
+        // assertOrgAdminBySlug and denies it to agent identities.
+        const result = await createWorkspaceInOrg({ orgSlug, name, slug, description })
+        if (!result.ok) {
+          return fail(result.error)
         }
-        const existing = await prisma.workspace.findFirst({
-          where: { organizationId: org.id, slug },
-          select: { id: true },
-        })
-        if (existing) {
-          return fail(`A workspace with slug "${slug}" already exists in organization "${org.name}".`)
-        }
-        const workspace = await prisma.workspace.create({
-          data: {
-            organizationId: org.id,
-            name: name.trim(),
-            slug,
-            description: description?.trim(),
-          },
-        })
-
-        // Add all org members as workspace members so the workspace is
-        // immediately accessible in the UI. Without this, getWorkspace()
-        // filters by membership and returns null → 404.
-        const orgMembers = await prisma.organizationMember.findMany({
-          where: { organizationId: org.id },
-          select: { userId: true, role: true },
-        })
-        if (orgMembers.length > 0) {
-          await prisma.workspaceMember.createMany({
-            data: orgMembers.map((m) => ({
-              workspaceId: workspace.id,
-              userId: m.userId,
-              // Org and workspace roles are different domains: OrgRole has an
-              // OWNER, WorkspaceRole does not. Copying m.role straight across
-              // wrote "OWNER" into WorkspaceMember.role, a value outside
-              // WorkspaceRole, which then failed resolveWorkspaceAdmin's strict
-              // ADMIN check and locked the org owner out of the workspace they
-              // had just created.
-              role: normalizeWorkspaceRole(m.role),
-            })),
-            skipDuplicates: true,
-          })
-        }
-
-        // This mutation happens via the MCP route (a plain Prisma write, not
-        // a Server Action), so none of Next's automatic revalidation kicks
-        // in. Without this, /dashboard and the workspace sidebar switcher
-        // keep serving the stale pre-creation payload from the client-side
-        // router cache on a soft nav — the workspace exists in the DB but
-        // looks missing until a hard reload. There's no single concrete
-        // per-workspace-slug path to target yet (the workspace is brand
-        // new), so revalidate /dashboard directly plus the root layout to
-        // cover the sidebar switcher on whichever workspace the browsing
-        // user currently has open.
-        revalidatePath("/dashboard")
-        revalidatePath("/", "layout")
+        const { workspace } = result
 
         return ok(
           `**Workspace created**\n` +

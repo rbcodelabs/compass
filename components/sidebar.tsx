@@ -311,6 +311,9 @@ export function Sidebar({
                   <Link href="/settings/agents" className="flex w-full items-center px-1.5 py-1">My agents</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem className="cursor-pointer p-0">
+                  <Link href="/settings/passkeys" className="flex w-full items-center px-1.5 py-1">Passkeys</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer p-0">
                   <form action={signOutAction} className="w-full">
                     <Button type="submit" variant="ghost" size="sm" className="w-full justify-start">
                       Sign out
