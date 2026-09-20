@@ -17,6 +17,9 @@ vi.mock("next-auth/providers/google", () => ({
 vi.mock("next-auth/providers/resend", () => ({
   default: vi.fn(() => ({ id: "resend" })),
 }));
+vi.mock("next-auth/providers/passkey", () => ({
+  default: { id: "passkey" },
+}));
 
 describe("production auth initialization", () => {
   beforeEach(() => {
@@ -50,5 +53,39 @@ describe("production auth initialization", () => {
       config.adapter?.getAccount?.("account-1", "google")
     ).rejects.toThrow("Neither DATABASE_URL nor PGHOST is set.");
     expect(mocks.getPrisma).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers the Passkey provider and enables the WebAuthn experimental flag", async () => {
+    await import("@/auth");
+
+    const config = mocks.nextAuth.mock.calls[0]?.[0] as NextAuthConfig;
+    expect(config.providers).toContainEqual({ id: "passkey" });
+    expect(config.experimental).toEqual({ enableWebAuthn: true });
+  });
+});
+
+describe("dev auth initialization", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubEnv("NODE_ENV", "development");
+    mocks.nextAuth.mockReset();
+    mocks.nextAuth.mockReturnValue({
+      handlers: {},
+      auth: vi.fn(),
+      signIn: vi.fn(),
+      signOut: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("never registers the Passkey provider or the WebAuthn experimental flag", async () => {
+    await import("@/auth");
+
+    const config = mocks.nextAuth.mock.calls[0]?.[0] as NextAuthConfig;
+    expect(config.providers).not.toContainEqual({ id: "passkey" });
+    expect(config.experimental?.enableWebAuthn).not.toBe(true);
   });
 });

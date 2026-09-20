@@ -50,6 +50,7 @@ type RoadmapItemData = {
   feedback: { id: string; title: string } | null;
   launchChecklist: { id: string; tier: string; items: LaunchChecklistItemData[] } | null;
   positioningBrief: { id: string; title: string } | null;
+  launchWorkflowEnabled: boolean;
   deliveryTasks: LinkedTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
@@ -163,33 +164,35 @@ export function RoadmapItemPanel({
         </Section>
       )}
 
-      <Section {...SECTION} defaultOpen label="Launch">
-        <div className="flex flex-col gap-4">
-          {data.launchChecklist ? (
-            <LaunchChecklist
-              horizon={data.horizon}
-              tier={data.launchChecklist.tier}
-              items={data.launchChecklist.items}
-              workspaceId={data.workspaceId}
-              revalidatePathStr={roadmapPath}
-            />
-          ) : (
-            <LaunchTierPicker
+      {data.launchWorkflowEnabled && (
+        <Section {...SECTION} defaultOpen label="Launch">
+          <div className="flex flex-col gap-4">
+            {data.launchChecklist ? (
+              <LaunchChecklist
+                horizon={data.horizon}
+                tier={data.launchChecklist.tier}
+                items={data.launchChecklist.items}
+                workspaceId={data.workspaceId}
+                revalidatePathStr={roadmapPath}
+              />
+            ) : (
+              <LaunchTierPicker
+                itemId={id}
+                workspaceId={data.workspaceId}
+                revalidatePathStr={roadmapPath}
+                onDone={refresh}
+              />
+            )}
+            <PositioningBriefRow
               itemId={id}
               workspaceId={data.workspaceId}
-              revalidatePathStr={roadmapPath}
-              onDone={refresh}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+              brief={data.positioningBrief}
             />
-          )}
-          <PositioningBriefRow
-            itemId={id}
-            workspaceId={data.workspaceId}
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-            brief={data.positioningBrief}
-          />
-        </div>
-      </Section>
+          </div>
+        </Section>
+      )}
 
       <Section {...SECTION} label="Linked to" count={linked.length} empty={linked.length === 0}>
         <RelationList items={linked} empty="Not linked to any discovery item." />

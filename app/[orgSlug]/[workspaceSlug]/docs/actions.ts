@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
 import { createPositioningBriefCore } from "@/lib/positioning-brief";
+import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { maybeSnapshotDocVersion, restoreDocVersionCore } from "@/lib/doc-versions";
 import {
   createDocCommentCore,
@@ -214,7 +215,13 @@ export async function createPositioningBrief(
   if (!session?.user?.id) throw new Error("Unauthorized");
 
   const result = await createPositioningBriefCore(roadmapItemId, workspaceId);
-  if (!result.ok) throw new Error("Roadmap item not found");
+  if (!result.ok) {
+    throw new Error(
+      result.error === "launch_workflow_disabled"
+        ? LAUNCH_WORKFLOW_DISABLED_MESSAGE
+        : "Roadmap item not found"
+    );
+  }
 
   revalidatePath(revalidatePathStr);
   return { docId: result.docId };

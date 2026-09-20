@@ -191,6 +191,20 @@ describe("Discussion", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Edit comment by Rick" })).toHaveFocus())
   })
 
+  it("renders comment bodies as formatted markdown, not literal source", async () => {
+    const markdownBody = "**bold** text\n\n## Heading\n\n| Repository | URL |\n| --- | --- |\n| compass | github.com/example/compass |"
+    fetchMock.mockReturnValueOnce(jsonResponse({ items: [comment({ body: markdownBody })] }))
+    render(<Discussion targetType="ROADMAP_ITEM" targetId="target-1" />)
+
+    const heading = await screen.findByRole("heading", { level: 2, name: "Heading" })
+    expect(heading).toBeVisible()
+    expect(screen.getByText("bold").closest("strong")).toBeVisible()
+    expect(screen.getByRole("table")).toBeVisible()
+    expect(screen.getByText("compass")).toBeVisible()
+    expect(screen.queryByText(/##\s*Heading/)).toBeNull()
+    expect(screen.queryByText(/\*\*bold\*\*/)).toBeNull()
+  })
+
   it("hides normal deletion for a replied-to root and confirms an admin thread delete", async () => {
     const reply = comment({ id: "reply-1", parentId: "root-1", body: "Reply", canDelete: true })
     fetchMock.mockReturnValueOnce(jsonResponse({ items: [comment({ canDelete: false, replies: [reply] })] }))

@@ -12,9 +12,16 @@
   - To rotate: `vercel env rm REPAIR_SECRET production` then `vercel env add REPAIR_SECRET production` (paste the 1Password value, no trailing newline), then **redeploy**.
   - Verify without mutating real data: `POST` with a garbage `orgSlug` (e.g. `__verify-probe__`) — a correct secret returns `404 "No org found with slug ..."`; a wrong/stale secret returns `401 Unauthorized`.
 
+- **`COMPASS_VERCEL_BYPASS_SECRET`** — Vercel Deployment Protection bypass for this project's `*.vercel.app` preview and production URLs. **Read it from the agent-harness env var; do not go looking for it in 1Password.**
+  - Pass as the header `x-vercel-protection-bypass: $COMPASS_VERCEL_BYPASS_SECRET`. Without it, preview URLs answer **302 → `vercel.com/sso-api`** and nothing else works.
+  - It clears *Vercel's* SSO gate only — it is **not** app auth. NextAuth login is still required for any authenticated page.
+  - Unlike the secrets above, this one is not consumed by the app at runtime, so there is nothing to redeploy after changing it.
+
 **Standing rule for any secret in this project:** the moment you rotate a value in Vercel, save it to 1Password *before* doing anything else with it (before testing, before moving to the next step) — a dropped connection or a session that dies mid-task should never mean losing the value again. If a saved 1Password copy no longer matches what's live in Vercel (write-only vars can't be read back to confirm), treat it as an incident: rotate fresh, save immediately, redeploy, and verify live — don't assume the stale copy might still work.
 
 ### Reading a secret: the only correct order
+
+This ordering is about the **app-consumed** secrets above (`MIGRATION_SECRET`, `REPAIR_SECRET`). It does **not** apply to `COMPASS_VERCEL_BYPASS_SECRET`, which is read straight from the harness env var — see its entry above.
 
 Vercel env values are **write-only**. `vercel env pull` and `vercel env ls` will happily return a var as present-but-blank, and that tells you **nothing** about the value the running deployment actually has.
 

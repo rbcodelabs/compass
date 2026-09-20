@@ -165,6 +165,9 @@ export function MobileHeader({
             <DropdownMenuItem className="p-0 cursor-pointer">
               <Link href="/settings/agents" className="flex w-full items-center px-1.5 py-1">My agents</Link>
             </DropdownMenuItem>
+            <DropdownMenuItem className="p-0 cursor-pointer">
+              <Link href="/settings/passkeys" className="flex w-full items-center px-1.5 py-1">Passkeys</Link>
+            </DropdownMenuItem>
             <DropdownMenuItem className="cursor-pointer p-0">
               <form action={signOutAction} className="w-full">
                 <button

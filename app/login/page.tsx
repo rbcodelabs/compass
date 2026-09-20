@@ -4,6 +4,9 @@ import { redirect } from "next/navigation"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { FormField } from "@/components/patterns/form-field"
+import { safeCallbackUrl } from "@/lib/safe-callback-url"
+import { PasskeyLoginButton } from "@/components/auth/passkey-login-button"
+import { passkeysEnabled } from "@/lib/passkeys"
 
 export const metadata = {
   title: "Sign in",
@@ -33,19 +36,26 @@ function GoogleIcon() {
 }
 
 interface LoginPageProps {
-  searchParams: Promise<{ "check-email"?: string }>
+  searchParams: Promise<{ "check-email"?: string; callbackUrl?: string | string[] }>
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const params = await searchParams
+  // Where to land after a successful sign-in. proxy.ts sets this to the URL the
+  // visitor was originally trying to reach, which for an OAuth authorize
+  // request carries client_id, redirect_uri, state, code_challenge, resource
+  // and scope. It is attacker-controllable, so safeCallbackUrl reduces it to a
+  // same-origin relative path (or /dashboard) before it is used anywhere.
+  const callbackUrl = safeCallbackUrl(params.callbackUrl)
+
   const session = await auth()
   // Only redirect if the session is fully resolved (user.id present).
   // A session object without user.id means the DB lookup failed (e.g. wrong
   // schema in preview env) — fall through and show the login form instead.
   if (session?.user?.id) {
-    redirect("/dashboard")
+    redirect(callbackUrl)
   }
 
-  const params = await searchParams
   const checkEmail = params["check-email"] === "1"
   const isDev = process.env.NODE_ENV === "development"
 
@@ -105,7 +115,14 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 <form
                   action={async () => {
                     "use server"
-                    await signIn("google", { callbackUrl: "/dashboard" })
+                    // `redirectTo`, not `callbackUrl`: Auth.js v5 builds the
+                    // POST body as `{ ...rest, callbackUrl }` where its own
+                    // callbackUrl is `redirectTo ?? Referer ?? "/"`, so an
+                    // options.callbackUrl is always overwritten. The previous
+                    // hardcoded "/dashboard" here never took effect — the
+                    // destination came from the Referer header and happened to
+                    // land on /dashboard by way of /login.
+                    await signIn("google", { redirectTo: callbackUrl })
                   }}
                 >
                   <Button
@@ -117,6 +134,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                     Continue with Google
                   </Button>
                 </form>
+
+                {passkeysEnabled() && <PasskeyLoginButton />}
 
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center">
@@ -136,7 +155,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 // redirect: false lets us control the post-submission redirect.
                 // Without it, Auth.js redirects through /api/auth/verify-request
                 // which strips the ?check-email=1 query param from our custom page.
-                await signIn("resend", { email, redirect: false })
+                // redirectTo is what the emailed magic link carries as its
+                // post-verification destination. Without it a Resend user who
+                // started at /oauth/authorize lands on the dashboard with the
+                // authorize request lost — the same blocker this change exists
+                // to fix, just one provider over.
+                await signIn("resend", { email, redirect: false, redirectTo: callbackUrl })
                 redirect("/login?check-email=1")
               }}
               className="space-y-4"
@@ -175,7 +199,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                     // Use the dev-credentials provider — no token, no email, instant session.
                     await signIn("dev-credentials", {
                       email: "dev@localhost.dev",
-                      redirectTo: "/dashboard",
+                      redirectTo: callbackUrl,
                     })
                   }}
                 >

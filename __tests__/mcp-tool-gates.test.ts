@@ -27,6 +27,8 @@ const mockPrisma = {
   researchStudy: { findUnique: vi.fn() },
   agent: { findFirst: vi.fn() },
   agentWorkspaceGrant: { findMany: vi.fn() },
+  task: { findUnique: vi.fn() },
+  customFieldDefinition: { findMany: vi.fn(), findUnique: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
@@ -41,7 +43,15 @@ vi.mock("mcp-handler", () => ({
 vi.mock("@/lib/mcp-auth", () => ({ validateMcpAuth: vi.fn().mockResolvedValue({ valid: true, userId: "u1" }) }))
 
 await import("@/app/api/mcp/route")
-import { AGENT_TOOL_POLICY, RESEARCH_TOOL_ALLOWLIST, TOOL_GATES, applyToolGate } from "@/lib/mcp-tool-gates"
+import {
+  AGENT_TOOL_POLICY,
+  RESEARCH_TOOL_ALLOWLIST,
+  TOOL_GATES,
+  TOOL_SCOPES,
+  applyToolGate,
+  requiredToolScope,
+  scopesSatisfy,
+} from "@/lib/mcp-tool-gates"
 import { runWithMcpActor } from "@/lib/mcp-authz"
 
 const MEMBER = { userId: "user-1" }
@@ -168,6 +178,57 @@ describe("TOOL_GATES completeness", () => {
   it("has no policy entries for tools that are not registered (no dead policies)", () => {
     const dead = Object.keys(TOOL_GATES).filter((name) => !(name in registeredTools))
     expect(dead).toEqual([])
+  })
+})
+
+/**
+ * The same fail-closed completeness contract TOOL_GATES has, for the OAuth
+ * read/write classification. Without it a tool added after this phase would
+ * silently inherit `requiredToolScope`'s `mcp:write` default — safe, but a
+ * write-scope demand nobody chose, on a tool that might be a pure read.
+ */
+describe("TOOL_SCOPES completeness", () => {
+  it("classifies every registered tool as read or write", () => {
+    const missing = Object.keys(registeredTools).filter((name) => !(name in TOOL_SCOPES))
+    expect(missing).toEqual([])
+  })
+
+  it("has no scope entries for tools that are not registered", () => {
+    const dead = Object.keys(TOOL_SCOPES).filter((name) => !(name in registeredTools))
+    expect(dead).toEqual([])
+  })
+
+  it("classifies exactly the whole catalog, with no third value", () => {
+    expect(Object.keys(TOOL_SCOPES).length).toBe(Object.keys(registeredTools).length)
+    expect([...new Set(Object.values(TOOL_SCOPES))].sort()).toEqual(["mcp:read", "mcp:write"])
+  })
+
+  it("keeps the read/write split aligned with the obvious naming conventions", () => {
+    // Not a tautology against the map: it re-derives the expectation from the
+    // tool NAMES, so a get_*/list_* tool silently classified as a write (or a
+    // create_*/update_*/delete_* one as a read) fails here.
+    const misread = Object.keys(registeredTools).filter(
+      (name) => /^(get|list|search)_/.test(name) && TOOL_SCOPES[name] !== "mcp:read",
+    )
+    const miswritten = Object.keys(registeredTools).filter(
+      (name) =>
+        /^(create|update|delete|add|remove|archive|link|unlink|promote|set|move|assign|revoke|rotate|issue|close|reopen|resolve|approve|reject|conclude|restore|score|log)_/.test(name) &&
+        TOOL_SCOPES[name] !== "mcp:write",
+    )
+    expect({ misread, miswritten }).toEqual({ misread: [], miswritten: [] })
+  })
+
+  it("demands the stronger scope for a tool it has never heard of", () => {
+    expect(requiredToolScope("totally_new_tool")).toBe("mcp:write")
+  })
+
+  it("treats mcp:write as covering reads, and read alone as not covering writes", () => {
+    expect(scopesSatisfy(["mcp:read"], "mcp:read")).toBe(true)
+    expect(scopesSatisfy(["mcp:read"], "mcp:write")).toBe(false)
+    expect(scopesSatisfy(["mcp:write"], "mcp:read")).toBe(true)
+    expect(scopesSatisfy(["mcp:write"], "mcp:write")).toBe(true)
+    expect(scopesSatisfy(["offline_access"], "mcp:read")).toBe(false)
+    expect(scopesSatisfy([], "mcp:read")).toBe(false)
   })
 })
 
@@ -300,6 +361,43 @@ describe("applyToolGate", () => {
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
     await expect(applyToolGate(tool, MEMBER, { feedbackId: "feedback-1" }))
       .rejects.toThrow(/not found or access denied/)
+  })
+
+  describe("custom field tools", () => {
+    it("list_custom_field_definitions is workspace-member gated", async () => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate("list_custom_field_definitions", MEMBER, { workspaceId: "ws-1" }))
+        .rejects.toThrow(/not found or access denied/)
+    })
+
+    it.each(["get_custom_field_values", "set_custom_field_value"])(
+      "%s denies a non-member of the object's workspace",
+      async (tool) => {
+        mockPrisma.task.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+        mockPrisma.workspace.findFirst.mockResolvedValue(null)
+        await expect(
+          applyToolGate(tool, MEMBER, { objectType: "TASK", objectId: "task-1", fieldId: "field-1", value: "x" })
+        ).rejects.toThrow(/not found or access denied/)
+      }
+    )
+
+    it.each(["get_custom_field_values", "set_custom_field_value"])(
+      "%s rejects an unknown objectType before touching the database",
+      async (tool) => {
+        await expect(
+          applyToolGate(tool, MEMBER, { objectType: "NOT_A_TYPE", objectId: "task-1", fieldId: "field-1", value: "x" })
+        ).rejects.toThrow(/Unknown objectType/)
+        expect(mockPrisma.task.findUnique).not.toHaveBeenCalled()
+      }
+    )
+
+    it("set_custom_field_value allows a member and reaches the handler's own field-level checks", async () => {
+      mockPrisma.task.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      await expect(
+        applyToolGate("set_custom_field_value", MEMBER, { objectType: "TASK", objectId: "task-1", fieldId: "field-1", value: "x" })
+      ).resolves.toBeUndefined()
+    })
   })
 })
 

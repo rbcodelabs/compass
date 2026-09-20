@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { ManageScoringModelsPanel } from "@/components/scoring-models/manage-scoring-models-panel";
 import { DeleteOrganizationPanel } from "@/components/settings/delete-organization-panel";
+import { CreateWorkspacePanel } from "@/components/settings/create-workspace-panel";
 import type { ScoringModelData, ScoringModelStatus, ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
@@ -33,9 +34,11 @@ export default async function OrgSettingsPage({ params }: Props) {
     orderBy: { createdAt: "asc" },
   });
 
+  // `id`/`slug` are for the Workspaces section below; DeleteOrganizationPanel
+  // only reads `name`.
   const workspaces = await prisma.workspace.findMany({
     where: { organizationId: organization.id },
-    select: { name: true },
+    select: { id: true, name: true, slug: true },
     orderBy: { name: "asc" },
   });
 
@@ -62,6 +65,13 @@ export default async function OrgSettingsPage({ params }: Props) {
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8 max-w-3xl">
       <PageHeader title="Organization Settings" description={organization.name} />
+
+      <SettingsSection
+        title="Workspaces"
+        description="Workspaces are where teams run OKRs, discovery, and experiments. Creating one adds every member of this organization to it."
+      >
+        <CreateWorkspacePanel orgSlug={orgSlug} workspaces={workspaces} />
+      </SettingsSection>
 
       <SettingsSection
         title="Scoring Models"

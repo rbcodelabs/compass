@@ -4,16 +4,17 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
 import { applyTrackedDecision, createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, recordDecisionNoAction, TrackedDecisionError, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
-import { reviewRequestUrl } from "@/lib/compass-url"
+import { CompassUrlNotConfiguredError, reviewRequestUrl, withUrlLine } from "@/lib/compass-url"
 
 /**
  * Deep links to the human decision surface at /{orgSlug}/{workspaceSlug}/reviews/{requestId}.
  *
  * A human cannot call an MCP tool, so every gate that asks for a decision has to hand the
- * agent a URL it can relay. These helpers are deliberately non-throwing: `reviewRequestUrl`
- * throws when the deployment origin is unconfigured or untrusted, and several callers below
- * build the link inside a try/catch that would otherwise report a *successfully created*
- * review request as a failure. A missing link degrades to `null`; it never fails the gate.
+ * agent a URL it can relay. A link the deployment simply can't build — no configured origin —
+ * degrades to `null` rather than reporting a *successfully created* review request as a
+ * failure. An unsafe *configured* origin is a different matter and propagates: see the
+ * CompassUrlNotConfiguredError doc in lib/compass-url.ts, and `canonicalFeedbackUrl` in
+ * lib/feedback-tool-handlers.ts, which has always drawn that line.
  */
 type WorkspaceSlugs = { orgSlug: string; workspaceSlug: string }
 
@@ -33,18 +34,18 @@ function buildReviewUrl(slugs: WorkspaceSlugs | null, requestId: string): string
   if (!slugs) return null
   try {
     return reviewRequestUrl({ ...slugs, requestId })
-  } catch {
-    return null
+  } catch (error) {
+    // Only a *missing* origin degrades to a null link. A configured-but-unsafe
+    // origin (non-HTTPS, embedded credentials, malformed) must abort — the bare
+    // `catch {}` this replaced swallowed it, silently dropping review links on a
+    // misconfigured deployment instead of surfacing the misconfiguration.
+    if (error instanceof CompassUrlNotConfiguredError) return null
+    throw error
   }
 }
 
 async function reviewUrlByWorkspace(workspaceId: string, requestId: string): Promise<string | null> {
   return buildReviewUrl(await workspaceSlugs(workspaceId), requestId)
-}
-
-/** Appends a `URL:` line to a tool's human-readable message when a link is available. */
-function withUrlLine(text: string, url: string | null): string {
-  return url ? `${text}\nURL: ${url}` : text
 }
 
 export type ResolvedRequester = { type: "USER" | "AGENT"; id: string; name: string } | null

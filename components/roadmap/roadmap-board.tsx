@@ -32,7 +32,7 @@ import {
   type UnscheduledItem,
 } from "./unscheduled-items-panel";
 import { usePanelContext } from "@/components/panels/panel-context";
-import { INTERNAL_BOARD_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
+import { INTERNAL_BOARD_HORIZONS, getInternalBoardHorizons, isLaunchHorizon } from "@/lib/roadmap";
 import type { Horizon, SquadData } from "@/lib/types";
 import { Board } from "@/components/patterns/board";
 
@@ -56,6 +56,16 @@ type Props = {
   availableExperiments?: AvailableExperiment[];
   unscheduledItems?: UnscheduledItem[];
   squads?: SquadData[];
+  // Purely visual/advisory WIP limits — only NOW and NEXT ever receive one.
+  // See docs/decisions/0005/0006 (Superseded); never wire into blocking
+  // behavior.
+  nowLimit?: number | null;
+  nextLimit?: number | null;
+  // Gates the LAUNCHING/LAUNCHED columns and the launch chip/menu item on
+  // cards. Any item still sitting in a launch horizon while this is off
+  // displays folded into SHIPPED (see internalBucketFor in lib/roadmap.ts)
+  // rather than disappearing.
+  launchWorkflowEnabled: boolean;
 };
 
 // Builds a RoadmapCardData for a newly-created item from a promote action's
@@ -182,11 +192,27 @@ export function RoadmapBoard({
   availableExperiments,
   unscheduledItems,
   squads,
+  nowLimit,
+  nextLimit,
+  launchWorkflowEnabled,
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/roadmap`;
   const { openPanel, subscribeEntityMutated } = usePanelContext();
 
   const [columns, setColumns] = useState<ColumnMap>(() => buildColumnMap(initialItems));
+  const visibleHorizons = getInternalBoardHorizons(launchWorkflowEnabled);
+  // Display-only fold: an item's stored horizon is untouched, so it
+  // un-folds automatically if the flag is re-enabled. Mirrors the public
+  // portal's portalBucketFor treatment of LAUNCHED, extended to also fold
+  // LAUNCHING when the whole launch workflow is off.
+  const displayColumns: ColumnMap = launchWorkflowEnabled
+    ? columns
+    : {
+        ...columns,
+        SHIPPED: [...columns.SHIPPED, ...columns.LAUNCHING, ...columns.LAUNCHED].sort(
+          (a, b) => a.sortOrder - b.sortOrder
+        ),
+      };
   const [unscheduled, setUnscheduled] = useState<UnscheduledItem[]>(unscheduledItems ?? []);
   const [activeItem, setActiveItem] = useState<RoadmapCardData | null>(null);
   const [activeUnscheduledItem, setActiveUnscheduledItem] = useState<UnscheduledItem | null>(null);
@@ -426,11 +452,11 @@ export function RoadmapBoard({
             data-slot="roadmap-board-track"
             className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
           >
-            {HORIZONS.map((horizon) => (
+            {visibleHorizons.map((horizon) => (
               <RoadmapColumn
                 key={horizon}
                 horizon={horizon}
-                items={columns[horizon]}
+                items={displayColumns[horizon]}
                 workspaceId={workspaceId}
                 orgSlug={orgSlug}
                 workspaceSlug={workspaceSlug}
@@ -442,6 +468,8 @@ export function RoadmapBoard({
                 availableSolutions={availableSolutions}
                 availableOpportunities={availableOpportunities}
                 availableExperiments={availableExperiments}
+                limit={horizon === "NOW" ? nowLimit : horizon === "NEXT" ? nextLimit : undefined}
+                launchWorkflowEnabled={launchWorkflowEnabled}
               />
             ))}
             <UnscheduledItemsColumn items={unscheduled} onQuickAdd={handleQuickAdd} />
@@ -461,6 +489,7 @@ export function RoadmapBoard({
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
               availableOpportunities={availableOpportunities}
+              launchWorkflowEnabled={launchWorkflowEnabled}
             />
           </div>
         ) : activeUnscheduledItem ? (

@@ -98,6 +98,7 @@ const roadmapItemData = {
   feedback: null,
   launchChecklist: null,
   positioningBrief: null,
+  launchWorkflowEnabled: true,
   deliveryTasks: [{ id: "task-1" }],
   linkableTasks: [],
   members: [],

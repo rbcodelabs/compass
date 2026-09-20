@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { MarketingNavigation } from "@/components/marketing/marketing-navigation";
+import { ProductSwitcher } from "@/components/marketing/product-switcher";
 import { getMarketingViewer } from "@/lib/marketing-viewer";
 
 export default async function MarketingLayout({ children }: { children: ReactNode }) {
@@ -8,15 +9,18 @@ export default async function MarketingLayout({ children }: { children: ReactNod
   return (
     <>
       {/* Marketing nav */}
-      <header className="border-b border-slate-200 bg-white">
-        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+      <header className="border-b border-border-default bg-surface-panel">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-4">
           <Link
             href="/"
-            className="font-semibold text-slate-900 text-base tracking-tight"
+            className="shrink-0 font-semibold text-text-primary text-base tracking-tight"
           >
             Compass
           </Link>
-          <MarketingNavigation viewer={viewer} />
+          <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+            <ProductSwitcher />
+            <MarketingNavigation viewer={viewer} />
+          </div>
         </div>
       </header>
 

@@ -13,10 +13,39 @@ import {
 import type { LegacyDecisionRepairManifest } from "@/lib/legacy-decision-repair";
 import { assertAgentIdentityMigration } from "@/lib/migrations/agent-identity";
 import { assertSharedFieldOptionSetsMigration } from "@/lib/migrations/shared-field-option-sets";
+import { assertOAuthAuthorizationServerMigration } from "@/lib/migrations/oauth-authorization-server";
 
 
 
-const MIGRATIONS = [
+/**
+ * Deployment environments a migration can be scoped to. Resolved from the
+ * schema NAME (see `resolveSchemaEnvironment`), never from env vars — the
+ * runner is handed a schema string and must work identically whether it is
+ * called from the admin route, the scoped preview worker, or a test.
+ */
+export type MigrationEnvironment = "development" | "preview" | "production";
+
+type MigrationEntry = {
+  name: string;
+  filePath: string;
+  /**
+   * Environments this migration is applicable to. OMITTED MEANS ALL — the
+   * common case, so existing entries need no annotation.
+   */
+  environments?: readonly MigrationEnvironment[];
+  /**
+   * Migrations that are interchangeable with this one: if any of them already
+   * has a receipt, this migration has no remaining work and is not applicable.
+   * Declared on the manifest so the relationship lives in one place instead of
+   * as name-equality special cases spread through the status and apply paths.
+   * Alternatives are expected to be declared symmetrically (A lists B and B
+   * lists A); nothing here enforces that, and one-directional use is valid when
+   * only one of the pair can stand in for the other.
+   */
+  alternatives?: readonly string[];
+};
+
+const MIGRATIONS: readonly MigrationEntry[] = [
   {
     name: "001_init",
     filePath: path.join(process.cwd(), "prisma/migrations/001_init/migration.sql"),
@@ -192,6 +221,9 @@ const MIGRATIONS = [
   {
     name: "039_native_decision_gates",
     filePath: path.join(process.cwd(), "prisma/migrations/039_native_decision_gates/migration.sql"),
+    // 042 rebuilds the same catalog forward-only, so either receipt settles the
+    // other. Symmetric: whichever ran first leaves the other with no work.
+    alternatives: ["042_native_decision_gates_repair"],
   },
   {
     name: "040_release_authorization",
@@ -202,8 +234,13 @@ const MIGRATIONS = [
     filePath: path.join(process.cwd(), "prisma/migrations/041_portfolio_capacity_ledger/migration.sql"),
   },
   {
+    // Forward-only repair for the exact partial state a failed 039 leaves
+    // behind. NOT environment-scoped: it stays genuinely applicable anywhere
+    // 039 has not reached a finished receipt, which is the only situation it
+    // exists for. A clean 039 receipt is what retires it, via `alternatives`.
     name: "042_native_decision_gates_repair",
     filePath: path.join(process.cwd(), "prisma/migrations/042_native_decision_gates_repair/migration.sql"),
+    alternatives: ["039_native_decision_gates"],
   },
   {
     name: "043_decision_evidence_refs",
@@ -224,6 +261,12 @@ const MIGRATIONS = [
   {
     name: "047_preview_automation",
     filePath: path.join(process.cwd(), "prisma/migrations/047_preview_automation/migration.sql"),
+    // The ephemeral preview harness (preview_automation_* tables) exists only
+    // where preview automation runs. Production has none, so this would sit
+    // pending there forever and mask real drift. Development keeps it because
+    // the Prisma models live in schema.prisma and dev DBs are built with
+    // `db push`, so dev parity must not change.
+    environments: ["development", "preview"],
   },
   {
     // Migration receipts use full names, so independently chosen 047 prefixes coexist.
@@ -272,14 +315,121 @@ const MIGRATIONS = [
     name: "053_shared_field_option_sets",
     filePath: path.join(process.cwd(), "prisma/migrations/053_shared_field_option_sets/migration.sql"),
   },
+  {
+    // Multiple independent 054s/055s landed concurrently — accepted per the
+    // same duplicate-number precedent noted above; the runner keys on exact
+    // name, not number. Do NOT renumber any of these to "resolve" the
+    // collision — some are already applied under their exact name in the
+    // shared compass_preview schema, so renaming would orphan their receipt
+    // and re-run the DDL.
+    name: "054_research_study_artifact",
+    filePath: path.join(process.cwd(), "prisma/migrations/054_research_study_artifact/migration.sql"),
+  },
+  {
+    name: "054_workspace_wip_limits",
+    filePath: path.join(process.cwd(), "prisma/migrations/054_workspace_wip_limits/migration.sql"),
+  },
+  {
+    name: "054_webauthn_authenticators",
+    filePath: path.join(process.cwd(), "prisma/migrations/054_webauthn_authenticators/migration.sql"),
+  },
+  {
+    name: "055_workspace_launch_workflow_flag",
+    filePath: path.join(process.cwd(), "prisma/migrations/055_workspace_launch_workflow_flag/migration.sql"),
+  },
+  {
+    name: "055_oauth_authorization_server",
+    filePath: path.join(process.cwd(), "prisma/migrations/055_oauth_authorization_server/migration.sql"),
+  },
 ];
+
+const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));
+
+/**
+ * Derives the deployment environment from a schema NAME.
+ *
+ * The runner is handed a schema string, not the env vars `getActiveSchema()`
+ * read, so the name is the only signal available. Recognized shapes, matching
+ * `lib/schema.ts` and `scripts/preview-automation/database.ts`:
+ *
+ *   - `compass_pr_{prId}_{12 hex}` → preview (isolated per-PR automation schema;
+ *     this prefix is fixed by `assertSchema`, not configurable)
+ *   - `*_prod`    → production
+ *   - `*_preview` → preview
+ *   - `*_dev`     → development
+ *
+ * Only the suffix is matched, because the prefix is configurable via `PGSCHEMA`.
+ *
+ * SAFETY: returns null for anything unrecognized, and null means "applicable
+ * everywhere" downstream (see `migrationApplicability`). A name this function
+ * fails to parse must never cause a migration to be silently skipped — failing
+ * open costs a pending migration that cannot apply; failing closed would cost a
+ * migration that should have applied and didn't.
+ */
+export function resolveSchemaEnvironment(schema: string): MigrationEnvironment | null {
+  if (/^compass_pr_[1-9]\d{0,9}_[a-f0-9]{12}$/.test(schema)) return "preview";
+  if (/_prod$/.test(schema)) return "production";
+  if (/_preview$/.test(schema)) return "preview";
+  if (/_dev$/.test(schema)) return "development";
+  return null;
+}
+
+/**
+ * The applied migration that stands in for `name`, or null. Generalizes what
+ * used to be an inline "039 counts as done when 042 is applied" check, in both
+ * directions, for any pair declared via `alternatives`.
+ */
+export function satisfyingAlternative(name: string, applied: ReadonlySet<string>): string | null {
+  if (applied.has(name)) return null;
+  for (const alternative of MIGRATIONS_BY_NAME.get(name)?.alternatives ?? []) {
+    if (applied.has(alternative)) return alternative;
+  }
+  return null;
+}
+
+/**
+ * Whether an unapplied migration still has work to do in this schema, and if
+ * not, a human-readable reason for the status report.
+ */
+export function migrationApplicability(
+  migration: MigrationEntry,
+  environment: MigrationEnvironment | null,
+  applied: ReadonlySet<string>,
+): { applicable: boolean; reason: string | null } {
+  // `environment === null` deliberately skips the scope test entirely: an
+  // unrecognized schema name must not narrow the applicable set.
+  if (environment && migration.environments && !migration.environments.includes(environment)) {
+    return { applicable: false, reason: `scoped to ${migration.environments.join(", ")}` };
+  }
+  const alternative = satisfyingAlternative(migration.name, applied);
+  if (alternative) return { applicable: false, reason: `satisfied by ${alternative}` };
+  return { applicable: true, reason: null };
+}
+
+/**
+ * Splits the not-yet-applied manifest into what this schema should still run
+ * and what it never will, with reasons. Both the status report and the apply
+ * path read from this so they can never disagree.
+ */
+export function partitionPendingMigrations(schema: string, applied: ReadonlySet<string>) {
+  const environment = resolveSchemaEnvironment(schema);
+  const pending: MigrationEntry[] = [];
+  const notApplicable: { name: string; reason: string }[] = [];
+  for (const migration of MIGRATIONS) {
+    if (applied.has(migration.name)) continue;
+    const { applicable, reason } = migrationApplicability(migration, environment, applied);
+    if (applicable) pending.push(migration);
+    else notApplicable.push({ name: migration.name, reason: reason! });
+  }
+  return { environment, pending, notApplicable };
+}
 
 const DECISION_GATE_TABLES = ["review_requests", "review_revisions", "review_options", "decision_records", "decision_applications", "decision_evidence_refs", "now_policy_application_evidence", "now_gate_evaluations", "release_runs", "release_run_tasks", "release_dispatches", "portfolio_capacity_plans", "portfolio_capacity_reservations", "portfolio_capacity_operations"] as const;
 const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record_id"] as const;
 const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_decision_evidence_refs_subject", "idx_now_policy_evidence_workspace_created", "idx_now_gate_evaluations_workspace_created", "idx_now_gate_evaluations_workspace_outcome_created", "idx_now_gate_evaluations_item_created", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
 const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "decision_evidence_refs_pkey", "idx_decision_evidence_refs_revision_authority", "now_policy_application_evidence_pkey", "idx_now_policy_evidence_receipt", "now_gate_evaluations_pkey", "chk_now_gate_evaluations_mode", "chk_now_gate_evaluations_outcome", "chk_now_gate_evaluations_actor", "chk_roadmap_items_commitment_provenance_not_null", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
 const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger", "042_native_decision_gates_repair", "043_decision_evidence_refs", "044_now_policy_application_evidence", "045_now_gate_shadow_evaluations"] as const;
-const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets"] as const;
+const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "055_oauth_authorization_server", "054_webauthn_authenticators"] as const;
 /** ADR-0012 step 5. Unique first: the idempotency lookup promotion depends on. */
 const RESEARCH_EVIDENCE_PROMOTION_INDEXES = ["idx_evidence_workspace_finding_key", "idx_evidence_research_sources_evidence_turn", "idx_evidence_research_synthesis", "idx_evidence_research_sources_turn"] as const;
 const RESEARCH_VOICE_CONTROL_PLANE_INDEXES = [
@@ -469,20 +619,43 @@ export async function getDecisionGateInfrastructureHealth(client: PoolClient, sc
     if (!row.table_name || row.table_name === "roadmap_items") continue
     actualColumnsByTable.set(row.table_name, [...(actualColumnsByTable.get(row.table_name) ?? []), row])
   }
+  // Expected ⊆ actual, not expected == actual. COLUMN_EXPECTATIONS is parsed
+  // from the SQL of 039–045 only, so any later migration that legitimately adds
+  // a column to one of these tables (051_decision_task_bridge added four to
+  // review_requests) would otherwise read as permanent drift. Missing and
+  // mismatched expected columns still fail; extras are reported, not failed.
   const tableShapes = DECISION_GATE_TABLES.map((name) => {
     const expected = [...COLUMN_EXPECTATIONS.values()].filter((column) => column.table === name)
     const actual = actualColumnsByTable.get(name) ?? []
-    const structureMatches = actual.length === expected.length && expected.every((column) => {
+    const missingColumns: string[] = []
+    const mismatchedColumns: string[] = []
+    for (const column of expected) {
       const row = actual.find((candidate) => candidate.column_name === column.name)
-      return Boolean(row && row.data_type === column.type
+      if (!row) { missingColumns.push(column.name); continue }
+      const matches = row.data_type === column.type
         && (row.character_maximum_length ?? null) === column.maxLength
         && (row.datetime_precision ?? null) === column.datetimePrecision
         && (row.is_nullable === "YES") === column.nullable
-        && normalizeColumnDefault(row.column_default) === column.default)
-    })
+        && normalizeColumnDefault(row.column_default) === column.default
+      if (!matches) mismatchedColumns.push(column.name)
+    }
+    const expectedNames = new Set(expected.map((column) => column.name))
+    const additionalColumns = actual.filter((column) => !expectedNames.has(column.column_name)).map((column) => column.column_name)
+    // Zero parsed expectations would make every actual shape trivially pass, so
+    // treat it as drift: it can only mean the SQL-parsing above regressed.
+    const structureMatches = expected.length > 0 && missingColumns.length === 0 && mismatchedColumns.length === 0
     const expectedEvidence = expected.map((column) => ({ name: column.name, type: column.type, maxLength: column.maxLength, datetimePrecision: column.datetimePrecision, nullable: column.nullable, default: sanitizeDefaultEvidence(column.default) }))
     const actualEvidence = actual.map((column) => ({ name: column.column_name, type: column.data_type, maxLength: column.character_maximum_length ?? null, datetimePrecision: column.datetime_precision ?? null, nullable: column.is_nullable === "YES", default: sanitizeDefaultEvidence(column.column_default) }))
-    return { name, structureMatches, status: structureMatches ? "MATCHED" : "DRIFTED", expectedColumns: expectedEvidence, actualColumns: actualEvidence }
+    return {
+      name,
+      structureMatches,
+      status: !structureMatches ? "DRIFTED" : additionalColumns.length > 0 ? "MATCHED_WITH_ADDITIONS" : "MATCHED",
+      missingColumns,
+      mismatchedColumns,
+      additionalColumns,
+      expectedColumns: expectedEvidence,
+      actualColumns: actualEvidence,
+    }
   })
   const indexesByName = new Map(indexesResult.rows.map((row) => [row.name, row]));
   const tables = DECISION_GATE_TABLES.map((name) => ({ name, present: presentTables.has(name) }));
@@ -522,14 +695,29 @@ export async function getDecisionGateInfrastructureHealth(client: PoolClient, sc
   const integrity = { available: Boolean(integrityRow), planViolations: count(integrityRow?.plan_violations), reservationViolations: count(integrityRow?.reservation_violations) };
   const provenanceColumn = columnsByName.get("now_commitment_provenance");
   const columnsHealthy = columns.every((item) => item.present && item.structureMatches) && Boolean(provenanceColumn?.column_default?.includes("LEGACY_UNGATED"));
-  const repairApplied = applied.includes("042_native_decision_gates_repair")
-  const migrationReceipts = DECISION_GATE_MIGRATIONS.map((name) => ({
-    name,
-    applied: applied.includes(name),
-    status: name === "039_native_decision_gates" && !applied.includes(name) && repairApplied ? "REPAIRED_BY" : applied.includes(name) ? "APPLIED" : incomplete.includes(name) ? "INCOMPLETE" : "MISSING",
-    repairedBy: name === "039_native_decision_gates" && !applied.includes(name) && repairApplied ? "042_native_decision_gates_repair" : null,
-  }));
-  const receiptsReady = (applied.includes("039_native_decision_gates") || repairApplied) && applied.includes("040_release_authorization") && applied.includes("041_portfolio_capacity_ledger") && applied.includes("043_decision_evidence_refs") && applied.includes("044_now_policy_application_evidence") && applied.includes("045_now_gate_shadow_evaluations")
+  const appliedSet = new Set(applied)
+  // Symmetric alternative resolution, driven by the manifest's `alternatives`:
+  // an applied 042 settles 039 and an applied 039 settles 042, without either
+  // direction being special-cased here. `repairedBy` keeps its established
+  // meaning (the 042-repaired-039 case) and is null for any other alternative.
+  const migrationReceipts = DECISION_GATE_MIGRATIONS.map((name) => {
+    const alternative = satisfyingAlternative(name, appliedSet)
+    // ADR-0006 fixed the wording for the direction it decided: a failed 039
+    // superseded by 042 reports REPAIRED_BY and is never relabeled APPLIED.
+    // That output is preserved exactly. The reverse direction — a clean 039
+    // leaving 042 with nothing to repair — is not a repair, so it reports the
+    // general alternative status instead of borrowing the repair vocabulary.
+    const repairedBy = name === "039_native_decision_gates" && alternative === "042_native_decision_gates_repair" ? alternative : null
+    return {
+      name,
+      applied: appliedSet.has(name),
+      status: repairedBy ? "REPAIRED_BY" : alternative ? "SATISFIED_BY_ALTERNATIVE" : appliedSet.has(name) ? "APPLIED" : incomplete.includes(name) ? "INCOMPLETE" : "MISSING",
+      satisfiedBy: alternative,
+      repairedBy,
+    }
+  });
+  const receiptsSettled = (name: typeof DECISION_GATE_MIGRATIONS[number]) => appliedSet.has(name) || satisfyingAlternative(name, appliedSet) !== null
+  const receiptsReady = receiptsSettled("039_native_decision_gates") && appliedSet.has("040_release_authorization") && appliedSet.has("041_portfolio_capacity_ledger") && appliedSet.has("043_decision_evidence_refs") && appliedSet.has("044_now_policy_application_evidence") && appliedSet.has("045_now_gate_shadow_evaluations")
   const migrationReady = receiptsReady && tables.every((item) => item.present) && tableShapes.every((item) => item.structureMatches) && columnsHealthy && constraints.every((item) => item.present && item.valid && item.structureMatches) && indexes.every((item) => item.state === "ACTIVE") && provenance.available && provenance.nullCount === 0 && provenance.unknownCount === 0 && provenance.legacyLinkDrift === 0 && integrity.available && integrity.planViolations === 0 && integrity.reservationViolations === 0;
   return { migrationReceipts, tables, tableShapes, columns, constraints, indexes, provenance, integrity, migrationReady, capacityMetadataReady: false, runtimeEnforcementReady: false };
 }
@@ -1228,6 +1416,11 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
     `).catch(() => ({ rows: [] as { name: string; applied?: boolean }[] }));
     const appliedNames = rows.filter((row) => row.applied !== false).map((row) => row.name)
     const incompleteNames = rows.filter((row) => row.applied === false).map((row) => row.name)
+    // `manifest` stays the complete registered list. `pending` is the subset
+    // that can actually still apply here, and `notApplicable` explains the
+    // difference — so a permanently-unapplicable entry is visible as a stated
+    // reason rather than as indefinite pending work.
+    const { environment, pending, notApplicable } = partitionPendingMigrations(schema, new Set(appliedNames))
     const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup, researchVoiceControlPlane, decisionGateInfrastructure, decisionMigrationProgress, legacyDecisionReviewRepair] = await Promise.all([
       getResearchCaptureHardeningReport(client, schema),
       getResearchGuidedUxReport(client, schema),
@@ -1240,9 +1433,12 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 
     return NextResponse.json({
       schema,
+      schemaEnvironment: environment,
       appliedMigrations: appliedNames,
       incompleteMigrations: incompleteNames,
       manifest: MIGRATIONS.map((m) => m.name),
+      pending: pending.map((m) => m.name),
+      notApplicable,
       researchCaptureHardening,
       researchGuidedUx,
       researchBlobCleanup,
@@ -1291,11 +1487,26 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
     );
     const appliedSet = new Set(applied.map((r) => r.migration_name));
 
-    const toRun = MIGRATIONS.filter((m) =>
-      targetScript
-        ? m.name === targetScript && !(appliedSet.has(m.name) || (m.name === "039_native_decision_gates" && appliedSet.has("042_native_decision_gates_repair")))
-        : !(appliedSet.has(m.name) || (m.name === "039_native_decision_gates" && appliedSet.has("042_native_decision_gates_repair")))
-    );
+    // Single source of applicability, shared with the status report: scoped to
+    // the wrong environment, or already settled by an applied alternative.
+    const { environment, pending, notApplicable } = partitionPendingMigrations(schema, appliedSet);
+
+    // A targeted POST naming a migration that cannot apply here must say so.
+    // Silently running nothing and answering "all migrations up to date" would
+    // report success for work that was never done.
+    if (targetScript && !appliedSet.has(targetScript)) {
+      const refusal = notApplicable.find((entry) => entry.name === targetScript);
+      if (refusal) {
+        return NextResponse.json({
+          error: `Migration ${targetScript} is not applicable to schema "${schema}" (${environment ?? "unrecognized environment"}): ${refusal.reason}. Nothing was applied.`,
+          schema,
+          schemaEnvironment: environment,
+          notApplicable: [refusal],
+        }, { status: 409 });
+      }
+    }
+
+    const toRun = targetScript ? pending.filter((m) => m.name === targetScript) : pending;
 
     if (toRun.length === 0) {
       const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup, researchVoiceControlPlane] = await Promise.all([
@@ -1427,7 +1638,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
             const jobId = result.rows[0]?.job_id
             // IF NOT EXISTS returns no job for an already-created agent index.
             // Its validity is checked before a completion receipt is written.
-            if (!jobId && ["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets"].includes(migration.name)) continue
+            if (!jobId && ["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "055_oauth_authorization_server", "054_webauthn_authenticators"].includes(migration.name)) continue
             if (!jobId) throw new Error(`Migration ${migration.name} async DDL returned no job_id.`)
             await client.query("CALL sys.wait_for_job($1)", [jobId])
             const waited = await client.query<{ status: string }>("SELECT status FROM sys.jobs WHERE job_id = $1", [jobId])
@@ -1484,6 +1695,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "049_agent_identity") await assertAgentIdentityMigration(client, schema)
       if (migration.name === "052_research_evidence_promotion") await assertResearchEvidencePromotionPostconditions(client, schema)
       if (migration.name === "053_shared_field_option_sets") await assertSharedFieldOptionSetsMigration(client, schema)
+      if (migration.name === "055_oauth_authorization_server") await assertOAuthAuthorizationServerMigration(client, schema)
 
       // Only this distinct attempt becomes a successful receipt. A failed
       // attempt remains unfinished as forensic evidence and is never relabeled.

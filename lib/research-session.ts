@@ -700,6 +700,7 @@ export async function respondToResearchSession({
       })),
       studyType: context.study.studyType as "CUSTOMER_INTERVIEW" | "USABILITY_TEST" | "PM_INTERVIEW",
       appUrl: context.study.appUrl,
+      isArtifact: Boolean(context.study.artifactId),
     })
     const prompt = buildPrompt ? buildPrompt({ defaultPrompt, turns: canonicalTurns }) : defaultPrompt
     const attachmentRows = attachmentIds.length === 0 ? [] : await prisma.researchAttachment.findMany({

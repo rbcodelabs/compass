@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { MarkdownContent } from "@/components/markdown-content"
 import type { BrowserCommentDto } from "@/lib/comment-browser"
 import type { CommentTargetType } from "@/lib/comments"
 
@@ -219,7 +220,7 @@ export function Discussion({ targetType, targetId }: { targetType: CommentTarget
                 <Textarea autoFocus aria-label={`Edit comment by ${comment.authorName}`} value={editorBody} disabled={busy === `edit:${comment.id}`} onChange={(event) => setEditorBody(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") closeEditor() }} />
                 <div className="flex flex-wrap gap-2"><Button size="sm" type="submit" disabled={busy === `edit:${comment.id}`}>Save edit</Button><Button size="sm" variant="ghost" type="button" onClick={closeEditor}>Cancel</Button></div>
               </form>
-            ) : <p className="mt-2 break-words whitespace-pre-wrap text-sm text-foreground">{comment.body}</p>}
+            ) : <MarkdownContent className="mt-2">{comment.body}</MarkdownContent>}
 
             {!editing && <div className="mt-2 flex flex-wrap gap-1">
               {isRoot && <Button type="button" variant="ghost" size="xs" aria-label={`Reply to ${comment.authorName}`} disabled={Boolean(busy)} onClick={(event) => openEditor({ kind: "reply", commentId: comment.id }, "", event.currentTarget)}>Reply</Button>}

@@ -46,6 +46,94 @@ The MCP endpoint uses **Streamable HTTP transport**, which is compatible with al
 
 ## Authentication
 
+There are two ways to authenticate, and **both are fully supported**. Pick by
+who is connecting, not by which is newer:
+
+| | Connect by URL (OAuth) | API key |
+|---|---|---|
+| Setup | Paste the endpoint URL into your client and approve a consent screen | Generate a key in Settings and paste it into a config file |
+| Acts as | The person who approved it | The key's owner, or the service account |
+| Best for | A person connecting their own AI client | Server-to-server automation, scheduled jobs, anything unattended |
+| Expiry | Access tokens last an hour and refresh automatically | Until you revoke it (or its explicit expiry) |
+
+Nothing here is deprecated. Static `compass_…` API keys and `MCP_API_KEY`
+service-account behavior remain supported indefinitely, and their access is
+unchanged — an OAuth connection is an additional door, not a replacement one.
+
+### Connect by URL (OAuth)
+
+If your client supports OAuth for remote MCP servers — Claude, Geode / Agent
+Threads, Cursor, VS Code — you do not need a key at all. Give it the endpoint
+URL:
+
+```
+https://your-compass-url.vercel.app/api/mcp
+```
+
+The client discovers everything else on its own: it reads the
+`WWW-Authenticate` header on the endpoint's 401, follows it to Compass's
+protected-resource metadata, registers itself, and opens a browser. You sign in
+to Compass as normal (magic link or Google — there is no separate password for
+this), review a consent screen, and approve.
+
+**What you are approving.** The consent screen lists the scopes being granted
+and, by name, every organization and workspace the connection will be able to
+reach. That is deliberate: an OAuth connection carries the same reach a personal
+API key already has — everything you can reach, across every organization you
+belong to — so the screen names it rather than leaving you to assume it means
+one workspace.
+
+If your account still holds a membership in a workspace or organization that has
+since been deleted, the screen says so — "one membership could not be shown" —
+instead of quietly listing one fewer place. A deleted workspace grants no access,
+so nothing reachable is missing from the list; the note is there so you never have
+to wonder whether the list you are approving is the whole list.
+
+Because both the approve and decline buttons stay pinned to the bottom of the
+card, a long list scrolls inside the card rather than pushing the buttons off the
+screen. Scroll the details with the mouse, or with the arrow keys once the detail
+region has keyboard focus.
+
+It also shows the **redirect host** — where the connection will actually be
+handed off — and marks every application as unverified. Compass does not review
+or vouch for applications that connect to it, and any application can pick its
+own display name. The redirect host is the one thing on that screen that cannot
+be faked, so read it: a loopback address (`127.0.0.1`) means software running on
+your own computer, and anything else means the connection is being handed to
+that host.
+
+**Scopes.** Two of them:
+
+| Scope | Grants |
+|---|---|
+| `mcp:read` | Read your opportunities, solutions, roadmap, OKRs, research, feedback and docs |
+| `mcp:write` | Create and change that same data on your behalf |
+
+A client may also request `offline_access`, which lets it stay connected without
+sending you back through sign-in every hour. Compass issues a refresh token for
+every approved connection regardless, because several clients depend on refresh
+to recover from an expired token without prompting you.
+
+Within those scopes, an OAuth connection is subject to **exactly the same
+per-tool authorization as any other credential**. A scope never widens what you
+can reach; it only narrows what the client may do with the access you already
+have. A read-only connection calling a tool that writes gets an explicit
+"insufficient scope" refusal rather than a silent failure.
+
+**Endpoints**, if you are implementing a client by hand:
+
+| Document | URL |
+|---|---|
+| Protected resource metadata | `/.well-known/oauth-protected-resource/api/mcp` (also served at `/.well-known/oauth-protected-resource`) |
+| Authorization server metadata | `/.well-known/oauth-authorization-server` (also served at `/.well-known/openid-configuration`) |
+
+PKCE with `S256` is required, client registration is dynamic (RFC 7591), and
+tokens are revocable at the advertised revocation endpoint. See
+[ADR 0014](https://github.com/rbcodelabs/compass/blob/main/docs/decisions/0014-compass-is-its-own-oauth-authorization-server.md)
+for why Compass issues its own tokens rather than delegating to Google.
+
+### API key
+
 Generate an API key from **Settings → API Keys**. Pass it as a Bearer token in the `Authorization` header:
 
 ```http
@@ -77,6 +165,35 @@ curl https://your-compass-url.vercel.app/api/mcp \
   --header "Accept: application/json, text/event-stream" \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl-example","version":"1.0.0"}}}'
 ```
+
+## Response deeplinks
+
+Every tool that creates or promotes an addressable item returns a clickable
+link on its own line, immediately after the usual `ID: <uuid>` line:
+
+```
+**Opportunity created** in "Compass"
+ID: 0f2c…
+Title: Setup is confusing
+Status: EXPLORING
+URL: https://compass.rbcodelabs.com/rbcodelabs/compass/discovery/0f2c…
+```
+
+Relay that URL to the human you are reporting to — it opens the item directly,
+either on its own page or in the workspace detail panel (`?detail=<type>:<id>`,
+which works from any page in the workspace).
+
+Tools that return a `URL:` line: `create_opportunity`, `add_solution`,
+`add_assumption`, `create_objective`, `add_key_result`, `create_experiment`,
+`add_to_roadmap`, `promote_to_roadmap`, `promote_feedback_to_roadmap`,
+`create_task`, `create_doc`, `create_feedback` (and the other feedback
+mutations), and the decision/review tools.
+
+The link is **omitted entirely** — the operation still succeeds — when the
+deployment has no configured public URL. Never reconstruct a link yourself from
+an ID; if there is no `URL:` line, report the ID alone. Tools for items with no
+addressable surface of their own (`create_squad`, `create_okr_cycle`) return no
+link by design.
 
 ## What Agents Can Do
 
@@ -209,7 +326,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 |---|---|
 | `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
-| `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
+| `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow (rejected here — see below — and gated by the workspace's Marketing launch setting) |
 | `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
 | `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state (`PENDING`, `DECIDED`, or `AWAITING_FOLLOW_THROUGH`), linked item type, outcome, reviewer, or search text |
 | `get_decision` | Read one tracking-only decision, its immutable revision history, the resolved requester (the human or Agent who raised it), and any linked follow-up Tasks |
@@ -219,11 +336,11 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
 | `list_review_requests` | List review requests for a workspace, optionally filtered by state |
 | `apply_recorded_decision` | Idempotently apply the authorized continuation from a recorded decision and return its application receipt |
-| `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items |
-| `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier |
-| `set_launch_tier` | Move a roadmap item into the LAUNCHING horizon by picking a launch tier; attaches a checklist cloned from an explicit or auto-resolved (most recent ACTIVE) template for that tier. Rejects items already LAUNCHING/LAUNCHED |
-| `get_launch_checklist` | Get the launch checklist for a roadmap item, including each item's status and ID |
-| `update_launch_checklist_item` | Set a launch checklist item's status (PENDING/DONE/SKIPPED) |
+| `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items. Requires the workspace's Marketing launch setting to be on (Settings → Marketing launch; off by default) |
+| `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier. Requires Marketing launch to be on |
+| `set_launch_tier` | Move a roadmap item into the LAUNCHING horizon by picking a launch tier; attaches a checklist cloned from an explicit or auto-resolved (most recent ACTIVE) template for that tier. Rejects items already LAUNCHING/LAUNCHED. Requires Marketing launch to be on |
+| `get_launch_checklist` | Get the launch checklist for a roadmap item, including each item's status and ID. Requires Marketing launch to be on |
+| `update_launch_checklist_item` | Set a launch checklist item's status (PENDING/DONE/SKIPPED). Requires Marketing launch to be on |
 
 Decision-taking is deliberately absent from MCP. A signed-in human reviewer opens
 the stable Compass review URL and chooses one option. Agents may prepare and read
@@ -299,6 +416,18 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 | `unlink_task` | Remove a link between a Task and another Compass object |
 | `list_task_links` | List all links for a Task, grouped by linked object type with resolved titles |
 
+### Custom Fields
+
+Custom fields let a workspace tag Opportunities, Solutions, Experiments, Objectives, Key Results, Roadmap Items, or Tasks with admin-defined attributes (TEXT, NUMBER, DATE, URL, BOOLEAN, or a single/multi picklist SELECT/MULTI_SELECT). Field definitions and shared option sets are created and edited in Settings → Custom Fields; MCP can read definitions and read/write an object's values, but cannot create, edit, or delete a definition or option set.
+
+| Tool | Description |
+|---|---|
+| `list_custom_field_definitions` | List a workspace's custom field definitions, optionally filtered to one object type; includes each field's type, whether it's required, and its effective options for SELECT/MULTI_SELECT (including options inherited from a shared option set) |
+| `get_custom_field_values` | Read every custom field defined for an object's type, paired with that specific object's current value (or empty) |
+| `set_custom_field_value` | Set or clear one custom field's value on an object |
+
+Passing `null` (or an empty string or empty array) to `set_custom_field_value` clears the field, matching the Settings UI's own clearing behavior. The value is validated against the field's type — a SELECT/MULTI_SELECT value must be one of the field's currently defined options. The tool also rejects a `fieldId` that belongs to a different object type, or to a different workspace, than the target object.
+
 ### Feedback
 
 | Tool | Description |
@@ -341,8 +470,8 @@ Research tools use the same validation, protocol-locking and link transactions a
 
 | Tool | Description |
 |---|---|
-| `generate_research_guide` | Draft 5–8 editable questions or usability tasks from a goal, study type and duration; does not create a study |
-| `create_research_study` | Create an active study with a reviewed guide and return its new participant link once |
+| `generate_research_guide` | Draft 5–8 editable questions or usability tasks from a goal, study type and duration; does not create a study. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
+| `create_research_study` | Create a study with a reviewed guide; defaults to ACTIVE and returns its new participant link once, or pass `status: "DRAFT"` to stage it — protocol fields stay editable — with no link issued. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
 | `list_research_studies` | Page through study settings and session counts in one workspace; no transcripts or participant identities |
 | `get_research_study` | Read one study’s settings, guide and session count in its declared workspace |
 | `update_research_study` | Update the name and supplied settings; omitted protocol fields are preserved, and protocol changes are locked after the first session |
@@ -386,7 +515,7 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 |---|---|
 | `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc`; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`). A doc whose parent is excluded by a recency filter is rendered at the top level so it stays reachable |
 | `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body, and `docType`/`roadmapItemId` when set |
-| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted) |
+| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on |
 | `update_doc` | Update an existing doc's title, content, and/or icon |
 | `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Always writes a new version, even if one was just saved seconds ago — named snapshots are never coalesced away |
 | `list_doc_versions` | List a doc's saved versions (id, label, author, created date), newest first, alongside the doc's own current title and last-updated time as a reference point. Param: `docId`. Does not include full content — call `get_doc_version` for that |
@@ -523,6 +652,15 @@ comment instead of rewriting one under someone else's name or approval badge.
 Personal and service credential behavior is unchanged.
 
 ## Example: Connecting Claude Desktop
+
+**If your client can connect by URL**, prefer that — add Compass as a remote MCP
+server with the URL `https://your-compass-url.vercel.app/api/mcp` and approve the
+consent screen. There is no config file to edit and no secret to paste. See
+[Connect by URL (OAuth)](#connect-by-url-oauth) above.
+
+The `mcp-remote` recipe below remains fully supported and is the right choice
+when you want a fixed, long-lived credential — an unattended job, a shared
+service account, or a client without OAuth support.
 
 Add this to your Claude Desktop `claude_desktop_config.json`:
 

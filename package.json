@@ -35,6 +35,7 @@
     "preview:cleanup": "tsx scripts/preview-automation/cleanup.ts",
     "preview:flow": "tsx scripts/preview-automation/lifecycle.ts",
     "preview:probe": "tsx scripts/preview-automation/probe.ts",
+    "oauth:probe": "node scripts/oauth-mcp-probe.ts",
     "e2e:db:prepare": "node scripts/prepare-e2e-database.mjs",
     "e2e:db:verify-clean": "node scripts/verify-e2e-cleanup.mjs",
     "docs:screenshots": "playwright test --project=screenshots e2e/screenshots.spec.ts"
@@ -49,6 +50,8 @@
     "@modelcontextprotocol/sdk": "1.26.0",
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
+    "@simplewebauthn/browser": "^9.0.1",
+    "@simplewebauthn/server": "^9.0.2",
     "@tanstack/react-table": "^9.1.2",
     "@tiptap/extension-character-count": "^3.27.1",
     "@tiptap/extension-image": "^3.27.1",

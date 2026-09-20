@@ -326,6 +326,18 @@ const WORKSPACE_ENTITY_RESOLVERS: Record<
 }
 
 /**
+ * Resolve the workspace a child entity belongs to, without asserting
+ * membership. For handlers that need the workspaceId again after the
+ * gate already ran assertEntityAccess on the same (entityType, id).
+ */
+export async function resolveEntityWorkspaceId(
+  entityType: WorkspaceEntityType,
+  id: string
+): Promise<string | null> {
+  return WORKSPACE_ENTITY_RESOLVERS[entityType](getPrisma(), id)
+}
+
+/**
  * Assert the actor may act on a child entity, identified by its id. Resolves
  * the entity's owning workspace and checks membership. Returns the resolved
  * `workspaceId` for the handler to reuse. A missing entity and a

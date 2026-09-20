@@ -36,12 +36,18 @@ function mutation(message: string, result: { id: string; token?: string; status?
   const participantUrlLine = participantUrl ?? "unavailable (production URL not configured)"
   return ok(`${message}\nID: ${result.id}${result.token ? `\nParticipant link (shown only now): ${participantUrlLine}` : ""}`, data)
 }
-export async function generateResearchGuideTool(input: Scope & { studyType: ResearchStudyType; goal: string; appUrl?: string; targetMinutes: number }) {
+export async function generateResearchGuideTool(input: Scope & { studyType: ResearchStudyType; goal: string; appUrl?: string; artifactId?: string; targetMinutes: number }) {
   const deadline = Date.now() + 45_000
   return invoke(async actor => ok("Editable research guide generated; review before creating a study.", { guide: await studies.generateResearchGuide({ workspaceId: input.workspaceId }, actor, { ...input, appUrl: input.appUrl ?? "" }, deadline) }))
 }
 export async function createResearchStudyTool(input: Scope & studies.ResearchStudyInput) {
-  return invoke(async actor => mutation("Research study created.", await studies.createResearchStudy({ workspaceId: input.workspaceId }, actor, input)))
+  return invoke(async actor => {
+    const result = await studies.createResearchStudy({ workspaceId: input.workspaceId }, actor, input)
+    const message = result.status === "DRAFT"
+      ? "Research study staged in DRAFT; no participant link issued. Protocol fields remain editable — call activate_research_study when ready to launch it."
+      : "Research study created."
+    return mutation(message, result)
+  })
 }
 export async function updateResearchStudyTool(input: Study & studies.ResearchStudyInput) {
   return invoke(async actor => mutation("Research study updated. Protocol fields remain locked after the first session.", await studies.updateResearchStudy({ workspaceId: input.workspaceId }, actor, input.studyId, input)))

@@ -171,6 +171,36 @@ Focus areas.`
 
 // ---------------------------------------------------------------------------
 
+// Regression: createDoc used to emit `URL: /{org}/{ws}/docs` — a *relative*
+// path pointing at the docs index rather than the doc that was just created.
+// An MCP client has no origin to resolve that against, and even resolved it
+// opened the wrong page.
+describe("createDoc — deeplink", () => {
+  it("returns an absolute URL to the created doc, not the docs index", async () => {
+    const result = await createDoc({ workspaceId: WORKSPACE_ID, title: "Vision" })
+
+    const text = result.content[0].text
+    expect(text).toContain(`URL: http://localhost:3000/rbcodelabs/compass/docs/${DOC_ID}`)
+    expect(text).not.toMatch(/URL: \/rbcodelabs\/compass\/docs$/m)
+    expect(result.structuredContent.data).toMatchObject({
+      url: `http://localhost:3000/rbcodelabs/compass/docs/${DOC_ID}`,
+    })
+  })
+
+  it("still creates the doc, with no URL line, when the origin is unconfigured", async () => {
+    vi.stubEnv("VERCEL_ENV", "production")
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "")
+
+    const result = await createDoc({ workspaceId: WORKSPACE_ID, title: "Vision" })
+
+    expect(mockDoc.create).toHaveBeenCalled()
+    expect(result.content[0].text).toContain(`ID: ${DOC_ID}`)
+    expect(result.content[0].text).not.toContain("URL:")
+    expect(result.structuredContent.data).toMatchObject({ url: null })
+    vi.unstubAllEnvs()
+  })
+})
+
 describe("createDoc — roadmapItemId / docType (GTM Positioning Brief)", () => {
   const ROADMAP_ITEM_ID = "ri-1"
 

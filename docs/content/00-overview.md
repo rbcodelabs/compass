@@ -47,7 +47,9 @@ Beyond the core OST workflow, Compass includes:
 
 ## Signing In
 
-Compass supports email magic-link sign-in by default — enter your email and click the link sent to your inbox. In production, you can also sign in with **Continue with Google**. Development environments don't register a Google provider, so local sign-in instead shows a **Dev Login** button for instant access.
+Compass supports email magic-link sign-in by default — enter your email and click the link sent to your inbox. In production, you can also sign in with **Continue with Google**, or with a **passkey** if you've registered one (Face ID, Touch ID, a security key, or your device's built-in authenticator) — a faster, phishing-resistant option that doesn't need a password or a round trip to your inbox. Development environments don't register a Google or passkey provider, so local sign-in instead shows a **Dev Login** button for instant access.
+
+Manage your passkeys from your avatar menu → **Passkeys**: register a new one, see when each was added and which device it's tied to, and revoke any you no longer use. Registering a passkey adds it to the account you're already signed in to — it doesn't replace your existing sign-in method, so Google and magic-link both keep working.
 
 When you return to the Compass homepage while signed in, the header provides a direct path back to your work. A single-workspace account gets a Dashboard shortcut; accounts with multiple workspaces can choose one from the workspace menu; and new accounts can continue workspace setup. Your avatar menu also includes Dashboard or setup, Help, and Sign out.
 

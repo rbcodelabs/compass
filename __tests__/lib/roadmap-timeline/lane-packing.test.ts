@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createTimelineLaneKey,
+  NO_PRIMARY_GROUP_KEY,
   packTimelineIntervals,
 } from "@/lib/roadmap-timeline/lane-packing";
 
@@ -8,6 +9,11 @@ describe("native timeline lane packing", () => {
   it("builds the canonical horizon and squad lane key", () => {
     expect(createTimelineLaneKey("NOW", "squad-a")).toBe("NOW:squad-a");
     expect(createTimelineLaneKey("NEXT", null)).toBe("NEXT:unassigned");
+  });
+
+  it("accepts the reserved no-primary-grouping sentinel as the primary id (None mode)", () => {
+    expect(createTimelineLaneKey(NO_PRIMARY_GROUP_KEY, "squad-a")).toBe(`${NO_PRIMARY_GROUP_KEY}:squad-a`);
+    expect(createTimelineLaneKey(NO_PRIMARY_GROUP_KEY, null)).toBe(`${NO_PRIMARY_GROUP_KEY}:unassigned`);
   });
 
   it("rejects ambiguous canonical lane-key parts", () => {

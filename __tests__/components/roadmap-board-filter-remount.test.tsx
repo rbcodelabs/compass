@@ -81,6 +81,7 @@ function Page({ items, filters = {} }: { items: RoadmapCardData[]; filters?: Fil
         workspaceId="ws-1"
         orgSlug="rbcodelabs"
         workspaceSlug="compass"
+        launchWorkflowEnabled={true}
       />
     </PanelProvider>
   );

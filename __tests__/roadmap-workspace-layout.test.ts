@@ -124,6 +124,7 @@ describe("Roadmap dashboard workspace layout", () => {
           workspaceId: "workspace-1",
           orgSlug: "rbcodelabs",
           workspaceSlug: "compass",
+          launchWorkflowEnabled: true,
         }),
       ),
     );

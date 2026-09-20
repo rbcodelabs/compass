@@ -4,6 +4,7 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { redirect } from "next/navigation"
 import { z } from "zod"
+import { deriveSlug } from "@/lib/slug"
 
 const OnboardingSchema = z.object({
   orgName: z.string().min(1, "Organization name is required").max(255),
@@ -58,10 +59,7 @@ export async function createOrganizationAndWorkspace(
   }
 
   // Derive workspace slug from name
-  const workspaceSlug = workspaceName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "") || "workspace"
+  const workspaceSlug = deriveSlug(workspaceName, "workspace")
 
   // Create org, member, workspace, workspace member in sequence
   // (relationMode = "prisma" — no FK constraints, so we can create in order)

@@ -4,14 +4,17 @@
 // Endpoint: POST /api/mcp  (Streamable HTTP transport)
 
 import { createMcpHandler } from "mcp-handler"
-import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import getPrisma from "@/lib/db"
+import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
+import type { EntityLinkType } from "@/lib/entity-links"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, recencySortSchema } from "@/lib/mcp-recency"
 import { runWithMcpActor, getMcpActor } from "@/lib/mcp-authz"
-import { applyToolGate, AGENT_TOOL_POLICY } from "@/lib/mcp-tool-gates"
+import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
+import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
+import { SCOPE_MCP_READ } from "@/lib/oauth/constants"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { withAgentActivity } from "@/lib/agent-activity"
 import { getPmInterviewTool, withInterviewMutation } from "@/lib/pm-agent-service"
@@ -19,7 +22,7 @@ import { updateExperiment } from "@/lib/experiment-update-tool"
 import { generateResearchGuideTool, createResearchStudyTool, listResearchStudiesTool, getResearchStudyTool, updateResearchStudyTool, activateResearchStudyTool, closeResearchStudyTool, archiveResearchStudyTool, issueResearchLinkTool, rotateResearchLinkTool, revokeResearchLinksTool, listResearchSessionsTool, getResearchSessionTool, listResearchSynthesesTool, generateResearchSynthesisTool, promoteResearchFindingToEvidenceTool } from "@/lib/research-tool-handlers"
 import { RESEARCH_SESSION_STATUSES } from "@/lib/research-study-service"
 import { synthesisSchema } from "@/lib/research-analysis"
-import { normalizeWorkspaceRole } from "@/lib/roles"
+import { createWorkspaceInOrg } from "@/lib/workspace-service"
 import {
   createFeedback,
   addFeedbackAttachment,
@@ -108,6 +111,7 @@ import {
   getLaunchChecklist,
   updateLaunchChecklistItem,
 } from "@/lib/roadmap-tool-handlers"
+import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
 import {
   createTask,
   getTask,
@@ -143,6 +147,11 @@ import {
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
 import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
+import {
+  listCustomFieldDefinitions,
+  getCustomFieldValues,
+  setCustomFieldValue,
+} from "@/lib/custom-field-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -151,6 +160,33 @@ import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopen
 // UTC offset, so format in UTC to match how the date was parsed.
 function formatUtcDate(date: Date): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
+}
+
+/**
+ * Deeplinks for the create/promote tools below.
+ *
+ * A bare `ID: <uuid>` is useless to the human an agent is reporting to, so
+ * every tool that mints a panel-addressable entity appends a `URL:` line built
+ * from lib/entity-links.ts — the same path builder the in-app search uses.
+ *
+ * The slugs come off the lookup each handler already performs (widened by one
+ * relation, never a second round trip). Where they can't be resolved the link
+ * is simply omitted: a create must never fail because a link couldn't be
+ * built, and a link must never be guessed from a partial identity.
+ */
+const WORKSPACE_LINK_SELECT = { slug: true, organization: { select: { slug: true } } } as const
+
+type WorkspaceLinkRow = { slug?: string | null; organization?: { slug?: string | null } | null } | null | undefined
+
+function workspaceEntityUrl(
+  workspace: WorkspaceLinkRow,
+  entity: { type: EntityLinkType; id: string; opportunityId?: string | null },
+): string | null {
+  return safeEntityUrl({
+    orgSlug: workspace?.organization?.slug,
+    workspaceSlug: workspace?.slug,
+    ...entity,
+  })
 }
 
 const _handler = createMcpHandler(
@@ -197,9 +233,9 @@ const _handler = createMcpHandler(
     const researchType = z.enum(["CUSTOMER_INTERVIEW", "USABILITY_TEST"])
     const researchDuration = z.union([z.literal(10), z.literal(15), z.literal(20), z.literal(30)])
     const researchGuide = z.array(z.string().trim().min(1).max(1_000)).min(1).max(20).refine(items => items.reduce((n, item) => n + item.length, 0) <= 10_000, "Guide exceeds 10,000 characters")
-    const researchFields = { name: z.string().trim().min(1).max(255), goal: z.string().trim().min(1).max(5_000), guide: researchGuide, studyType: researchType.optional(), targetMinutes: researchDuration.optional(), appUrl: z.string().max(2_048).optional() }
-    register("generate_research_guide", { title: "Generate Research Guide", description: "Draft 5–8 editable neutral questions or usability tasks. Does not create a study. Uses a bounded tool-free model call; review the guide before use.", inputSchema: { ...researchScope, studyType: researchType, goal: researchFields.goal, appUrl: researchFields.appUrl, targetMinutes: researchDuration }, outputSchema: TOOL_OUTPUT_SCHEMA }, generateResearchGuideTool)
-    register("create_research_study", { title: "Create Research Study", description: "Create an active research study and return its new participant link once. Store the returned link securely; plaintext cannot be retrieved later.", inputSchema: { ...researchScope, ...researchFields }, outputSchema: TOOL_OUTPUT_SCHEMA }, createResearchStudyTool)
+    const researchFields = { name: z.string().trim().min(1).max(255), goal: z.string().trim().min(1).max(5_000), guide: researchGuide, studyType: researchType.optional(), targetMinutes: researchDuration.optional(), appUrl: z.string().max(2_048).optional(), artifactId: z.string().uuid().optional() }
+    register("generate_research_guide", { title: "Generate Research Guide", description: "Draft 5–8 editable neutral questions or usability tasks for a live URL or a Compass Artifact target. Does not create a study. Uses a bounded tool-free model call; review the guide before use.", inputSchema: { ...researchScope, studyType: researchType, goal: researchFields.goal, appUrl: researchFields.appUrl, artifactId: researchFields.artifactId, targetMinutes: researchDuration }, outputSchema: TOOL_OUTPUT_SCHEMA }, generateResearchGuideTool)
+    register("create_research_study", { title: "Create Research Study", description: "Create a research study. Defaults to ACTIVE, returning its new participant link once (store it securely; plaintext cannot be retrieved later). Pass status: \"DRAFT\" to stage the study — protocol fields stay editable via update_research_study — without issuing a link; call activate_research_study when ready to launch it.", inputSchema: { ...researchScope, ...researchFields, status: z.enum(["DRAFT", "ACTIVE"]).optional().default("ACTIVE").describe("Initial lifecycle status. DRAFT stages the study with no participant link issued; ACTIVE (default) issues one immediately.") }, outputSchema: TOOL_OUTPUT_SCHEMA }, createResearchStudyTool)
     register("list_research_studies", { title: "List Research Studies", description: "Page through study metadata and counts, newest first. Archived studies are excluded unless status ARCHIVED is requested. Cursors are scoped to workspace and status; no transcripts or participant identities are returned.", inputSchema: { ...researchScope, status: z.enum(["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]).optional(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(1_024).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listResearchStudiesTool)
     register("get_research_study", { title: "Get Research Study", description: "Get study settings, guide and session count only. Does not return participant credentials, transcripts, identities or private storage paths.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, getResearchStudyTool)
     register("update_research_study", { title: "Update Research Study", description: "Update study settings. After any session starts, only the name changes; protocol fields remain locked. Archived studies cannot be edited.", inputSchema: { ...researchStudy, ...researchFields, goal: researchFields.goal.optional(), guide: researchGuide.optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, updateResearchStudyTool)
@@ -444,66 +480,16 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ orgSlug, name, slug, description }) => {
-        const prisma = getPrisma()
-        const org = await prisma.organization.findUnique({
-          where: { slug: orgSlug },
-          select: { id: true, name: true },
-        })
-        if (!org) {
-          return fail(`No organization found with slug "${orgSlug}".`)
+        // Creation, membership seeding and revalidation live in
+        // lib/workspace-service.ts so the org-settings "Create workspace" form
+        // performs exactly the same write. Authorization is unchanged and
+        // stays outside: lib/mcp-tool-gates.ts gates this tool with
+        // assertOrgAdminBySlug and denies it to agent identities.
+        const result = await createWorkspaceInOrg({ orgSlug, name, slug, description })
+        if (!result.ok) {
+          return fail(result.error)
         }
-        const existing = await prisma.workspace.findFirst({
-          where: { organizationId: org.id, slug },
-          select: { id: true },
-        })
-        if (existing) {
-          return fail(`A workspace with slug "${slug}" already exists in organization "${org.name}".`)
-        }
-        const workspace = await prisma.workspace.create({
-          data: {
-            organizationId: org.id,
-            name: name.trim(),
-            slug,
-            description: description?.trim(),
-          },
-        })
-
-        // Add all org members as workspace members so the workspace is
-        // immediately accessible in the UI. Without this, getWorkspace()
-        // filters by membership and returns null → 404.
-        const orgMembers = await prisma.organizationMember.findMany({
-          where: { organizationId: org.id },
-          select: { userId: true, role: true },
-        })
-        if (orgMembers.length > 0) {
-          await prisma.workspaceMember.createMany({
-            data: orgMembers.map((m) => ({
-              workspaceId: workspace.id,
-              userId: m.userId,
-              // Org and workspace roles are different domains: OrgRole has an
-              // OWNER, WorkspaceRole does not. Copying m.role straight across
-              // wrote "OWNER" into WorkspaceMember.role, a value outside
-              // WorkspaceRole, which then failed resolveWorkspaceAdmin's strict
-              // ADMIN check and locked the org owner out of the workspace they
-              // had just created.
-              role: normalizeWorkspaceRole(m.role),
-            })),
-            skipDuplicates: true,
-          })
-        }
-
-        // This mutation happens via the MCP route (a plain Prisma write, not
-        // a Server Action), so none of Next's automatic revalidation kicks
-        // in. Without this, /dashboard and the workspace sidebar switcher
-        // keep serving the stale pre-creation payload from the client-side
-        // router cache on a soft nav — the workspace exists in the DB but
-        // looks missing until a hard reload. There's no single concrete
-        // per-workspace-slug path to target yet (the workspace is brand
-        // new), so revalidate /dashboard directly plus the root layout to
-        // cover the sidebar switcher on whichever workspace the browsing
-        // user currently has open.
-        revalidatePath("/dashboard")
-        revalidatePath("/", "layout")
+        const { workspace } = result
 
         return ok(
           `**Workspace created**\n` +
@@ -700,7 +686,7 @@ const _handler = createMcpHandler(
       },
       async ({ workspaceId, cycleId, title, description, owner, squadId, parentKeyResultId }) => {
         const prisma = getPrisma()
-        const cycle = await prisma.oKRCycle.findFirst({ where: { id: cycleId, workspaceId }, select: { id: true, title: true } })
+        const cycle = await prisma.oKRCycle.findFirst({ where: { id: cycleId, workspaceId }, select: { id: true, title: true, workspace: { select: WORKSPACE_LINK_SELECT } } })
         if (!cycle) {
           return fail(`OKR cycle "${cycleId}" not found in workspace.`)
         }
@@ -714,7 +700,10 @@ const _handler = createMcpHandler(
           data: { cycleId, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
         })
         return ok(
-          `**Objective created** in cycle "${cycle.title}"\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
+          withUrlLine(
+            `**Objective created** in cycle "${cycle.title}"\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
+            workspaceEntityUrl(cycle.workspace, { type: "objective", id: objective.id }),
+          ),
           {
             id: objective.id,
             title: objective.title,
@@ -773,7 +762,13 @@ const _handler = createMcpHandler(
       },
       async ({ objectiveId, title, target, unit }) => {
         const prisma = getPrisma()
-        const objective = await prisma.objective.findUnique({ where: { id: objectiveId }, select: { id: true, title: true } })
+        // A KeyResult is scoped through objective -> cycle -> workspace (see
+        // entityScopeWhere in lib/entity-detail.ts), so the deeplink's slugs
+        // come down that same chain on the lookup already being made.
+        const objective = await prisma.objective.findUnique({
+          where: { id: objectiveId },
+          select: { id: true, title: true, cycle: { select: { workspace: { select: WORKSPACE_LINK_SELECT } } } },
+        })
         if (!objective) {
           return fail(`Objective "${objectiveId}" not found.`)
         }
@@ -781,7 +776,10 @@ const _handler = createMcpHandler(
           data: { objectiveId, title: title.trim(), target, unit: unit?.trim() },
         })
         return ok(
-          `**Key Result created** on "${objective.title}"\nID: ${keyResult.id}\nTitle: ${keyResult.title}\nTarget: ${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""}\nCurrent: 0`,
+          withUrlLine(
+            `**Key Result created** on "${objective.title}"\nID: ${keyResult.id}\nTitle: ${keyResult.title}\nTarget: ${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""}\nCurrent: 0`,
+            workspaceEntityUrl(objective.cycle?.workspace, { type: "keyResult", id: keyResult.id }),
+          ),
           {
             id: keyResult.id,
             title: keyResult.title,
@@ -1120,7 +1118,7 @@ const _handler = createMcpHandler(
       },
       async ({ workspaceId, title, description, customerSegment, status, keyResultId, squadId }) => {
         const prisma = getPrisma()
-        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
+        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, ...WORKSPACE_LINK_SELECT } })
         if (!workspace) {
           return fail(`Workspace "${workspaceId}" not found.`)
         }
@@ -1136,7 +1134,10 @@ const _handler = createMcpHandler(
           },
         })
         return ok(
-          `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
+          withUrlLine(
+            `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
+            workspaceEntityUrl(workspace, { type: "opportunity", id: opportunity.id }),
+          ),
           {
             id: opportunity.id,
             title: opportunity.title,
@@ -1237,13 +1238,19 @@ const _handler = createMcpHandler(
       },
       async ({ opportunityId, title, description }) => {
         const prisma = getPrisma()
-        const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { id: true, title: true } })
+        const opp = await prisma.opportunity.findUnique({
+          where: { id: opportunityId },
+          select: { id: true, title: true, workspace: { select: WORKSPACE_LINK_SELECT } },
+        })
         if (!opp) {
           return fail(`Opportunity "${opportunityId}" not found.`)
         }
         const solution = await prisma.solution.create({ data: { opportunityId, title: title.trim(), description: description?.trim() } })
         return ok(
-          `**Solution created** for "${opp.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
+          withUrlLine(
+            `**Solution created** for "${opp.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
+            workspaceEntityUrl(opp.workspace, { type: "solution", id: solution.id, opportunityId }),
+          ),
           {
             id: solution.id,
             title: solution.title,
@@ -1300,13 +1307,29 @@ const _handler = createMcpHandler(
       },
       async ({ solutionId, title, description, riskLevel }) => {
         const prisma = getPrisma()
-        const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true } })
+        // Two hops: an Assumption's workspace (and the discovery page its panel
+        // opens on) live up through Solution -> Opportunity.
+        const solution = await prisma.solution.findUnique({
+          where: { id: solutionId },
+          select: {
+            id: true,
+            title: true,
+            opportunity: { select: { id: true, workspace: { select: WORKSPACE_LINK_SELECT } } },
+          },
+        })
         if (!solution) {
           return fail(`Solution "${solutionId}" not found.`)
         }
         const assumption = await prisma.assumption.create({ data: { solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED" } })
         return ok(
-          `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
+          withUrlLine(
+            `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
+            workspaceEntityUrl(solution.opportunity?.workspace, {
+              type: "assumption",
+              id: assumption.id,
+              opportunityId: solution.opportunity?.id,
+            }),
+          ),
           {
             id: assumption.id,
             title: assumption.title,
@@ -1478,7 +1501,7 @@ const _handler = createMcpHandler(
         const prisma = getPrisma()
         const solution = await prisma.solution.findUnique({
           where: { id: solutionId },
-          include: { opportunity: { select: { id: true, title: true, squadId: true } } },
+          include: { opportunity: { select: { id: true, title: true, squadId: true, workspaceId: true, workspace: { select: WORKSPACE_LINK_SELECT } } } },
         })
         if (!solution) {
           return fail(`Solution "${solutionId}" not found.`)
@@ -1499,9 +1522,17 @@ const _handler = createMcpHandler(
             isPrivate: isPrivate ?? false,
           } })
         return ok(
-          `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
-            (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-            `\nLinked Solution: ${solutionId}\nLinked Opportunity: ${solution.opportunity.title}`,
+          withUrlLine(
+            `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
+              (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
+              `\nLinked Solution: ${solutionId}\nLinked Opportunity: ${solution.opportunity.title}`,
+            // The item is created in `workspaceId`, which the solution's own
+            // workspace need not match — only link when they do, rather than
+            // pointing at a roadmap the item isn't on.
+            solution.opportunity.workspaceId === workspaceId
+              ? workspaceEntityUrl(solution.opportunity.workspace, { type: "roadmapItem", id: item.id })
+              : null,
+          ),
           {
             id: item.id,
             title: item.title,
@@ -1673,7 +1704,7 @@ const _handler = createMcpHandler(
       },
       async ({ workspaceId, title, hypothesis, method, killCondition, assumptionId, squadId }) => {
         const prisma = getPrisma()
-        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
+        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, ...WORKSPACE_LINK_SELECT } })
         if (!workspace) {
           return fail(`Workspace "${workspaceId}" not found.`)
         }
@@ -1685,7 +1716,10 @@ const _handler = createMcpHandler(
           data: { workspaceId, title: title.trim(), hypothesis: hypothesis.trim(), method: method.trim(), killCondition: killCondition.trim(), assumptionId: assumptionId ?? null, squadId: squadId ?? null, status: "DESIGNING" },
         })
         return ok(
-          `**Experiment created**\nID: ${experiment.id}\nTitle: ${experiment.title}\nStatus: DESIGNING\nKill Condition: ${experiment.killCondition}`,
+          withUrlLine(
+            `**Experiment created**\nID: ${experiment.id}\nTitle: ${experiment.title}\nStatus: DESIGNING\nKill Condition: ${experiment.killCondition}`,
+            workspaceEntityUrl(workspace, { type: "experiment", id: experiment.id }),
+          ),
           {
             id: experiment.id,
             title: experiment.title,
@@ -2068,16 +2102,23 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ itemId, horizon, status, title, description, startDate, endDate, isPrivate }) => {
-        if (horizon === "LAUNCHING") {
-          return fail(`Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.`)
-        }
-        if (horizon === "LAUNCHED") {
-          return fail(`Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`)
-        }
         const prisma = getPrisma()
         const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, workspaceId: true, title: true, horizon: true, status: true } })
         if (!item) {
           return fail(`Roadmap item "${itemId}" not found.`)
+        }
+        if (horizon === "LAUNCHING" || horizon === "LAUNCHED") {
+          // The whole marketing-launch surface is opt-in per workspace. When
+          // it's off, say so instead of a message that presumes the feature
+          // is available.
+          const workspace = await prisma.workspace.findUnique({ where: { id: item.workspaceId }, select: { launchWorkflowEnabled: true } })
+          if (!workspace?.launchWorkflowEnabled) {
+            return fail(LAUNCH_WORKFLOW_DISABLED_MESSAGE)
+          }
+          if (horizon === "LAUNCHING") {
+            return fail(`Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.`)
+          }
+          return fail(`Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`)
         }
         const updateData = {
             ...(horizon ? { horizon } : {}),
@@ -2132,7 +2173,7 @@ const _handler = createMcpHandler(
       },
       async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId, startDate, endDate, isPrivate }) => {
         const prisma = getPrisma()
-        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
+        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, ...WORKSPACE_LINK_SELECT } })
         if (!workspace) {
           return fail(`Workspace "${workspaceId}" not found.`)
         }
@@ -2156,14 +2197,17 @@ const _handler = createMcpHandler(
             isPrivate: isPrivate ?? false,
           } })
         return ok(
-          `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
-            (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-            (solutionId ? `\nLinked Solution: ${solutionId}` : "") +
-            (keyResultId ? `\nLinked KR: ${keyResultId}` : "") +
-            (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : "") +
-            (item.startDate || item.endDate
-              ? `\nDates: ${item.startDate ? formatUtcDate(item.startDate) : "?"} – ${item.endDate ? formatUtcDate(item.endDate) : "?"}`
-              : ""),
+          withUrlLine(
+            `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
+              (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
+              (solutionId ? `\nLinked Solution: ${solutionId}` : "") +
+              (keyResultId ? `\nLinked KR: ${keyResultId}` : "") +
+              (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : "") +
+              (item.startDate || item.endDate
+                ? `\nDates: ${item.startDate ? formatUtcDate(item.startDate) : "?"} – ${item.endDate ? formatUtcDate(item.endDate) : "?"}`
+                : ""),
+            workspaceEntityUrl(workspace, { type: "roadmapItem", id: item.id }),
+          ),
           {
             id: item.id,
             title: item.title,
@@ -2369,6 +2413,81 @@ const _handler = createMcpHandler(
           { objectType, objectId, squadId },
         )
       }
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // CUSTOM FIELDS
+    // ════════════════════════════════════════════════════════════════
+    // Definitions (and SharedFieldOptionSets) remain UI-only — created and
+    // edited exclusively in Settings → Custom Fields. These three tools only
+    // read definitions and read/write an object's values. See
+    // docs/decisions/0013-custom-field-value-mcp-management.md.
+
+    const customFieldObjectTypeSchema = z.enum([
+      "OPPORTUNITY",
+      "SOLUTION",
+      "EXPERIMENT",
+      "OBJECTIVE",
+      "KEY_RESULT",
+      "ROADMAP_ITEM",
+      "TASK",
+    ])
+
+    register(
+      "list_custom_field_definitions",
+      {
+        title: "List Custom Field Definitions",
+        description:
+          "Lists a workspace's custom field definitions, optionally filtered to one object type. Each definition " +
+          "includes its field type (TEXT, NUMBER, DATE, URL, BOOLEAN, SELECT, or MULTI_SELECT), whether it's " +
+          "required, and — for SELECT/MULTI_SELECT — its effective options, including any inherited from a shared " +
+          "option set. Definitions themselves are managed only in Settings → Custom Fields; this tool is read-only.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          objectType: customFieldObjectTypeSchema.optional().describe("Filter to definitions for this object type only"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listCustomFieldDefinitions
+    )
+
+    register(
+      "get_custom_field_values",
+      {
+        title: "Get Custom Field Values",
+        description:
+          "Reads every custom field defined for an object's type, paired with that specific object's current " +
+          "value (or unset). objectType must match the object's actual entity type.",
+        inputSchema: {
+          objectType: customFieldObjectTypeSchema.describe("The object's entity type"),
+          objectId: z.string().uuid().describe("UUID of the object"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getCustomFieldValues
+    )
+
+    register(
+      "set_custom_field_value",
+      {
+        title: "Set Custom Field Value",
+        description:
+          "Sets or clears one custom field's value on an object. Pass value: null (or an empty string or empty " +
+          "array) to clear the field, matching the Settings UI's own clearing behavior. The value is validated " +
+          "against the field's declared type — a SELECT value must be one of the field's currently defined " +
+          "options, and a MULTI_SELECT value must be an array where every entry is one of those options. Rejects " +
+          "a fieldId that belongs to a different object type, or to a different workspace, than the target object.",
+        inputSchema: {
+          objectType: customFieldObjectTypeSchema.describe("The object's entity type"),
+          objectId: z.string().uuid().describe("UUID of the object"),
+          fieldId: z.string().uuid().describe("UUID of the custom field definition"),
+          value: z
+            .union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()])
+            .describe("New value, matching the field's type; null (or empty string/array) clears it"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      setCustomFieldValue
     )
 
     // ════════════════════════════════════════════════════════════════
@@ -3330,10 +3449,48 @@ const _handler = createMcpHandler(
   }
 )
 
+/**
+ * The token-verification boundary for `/api/mcp`, and the only place the OAuth
+ * challenge is emitted.
+ *
+ * Three responses are possible before the handler is ever reached:
+ *
+ *  - **401** — no token, or a token that does not resolve to an identity. The
+ *    challenge carries `resource_metadata` (so a client can discover the
+ *    authorization server from nothing but this URL) and `scope="mcp:read"` (so
+ *    it asks for the minimum rather than every scope in `scopes_supported`).
+ *  - **403** — a valid OAuth token whose granted scopes do not cover this
+ *    request. `error="insufficient_scope"` plus the scope that would work.
+ *  - otherwise the request proceeds, unchanged from before OAuth existed.
+ *
+ * Scope enforcement applies **only** to OAuth tokens — `auth.scopes` is
+ * undefined for a static `cmp_…` key and for `MCP_API_KEY`, and those keep
+ * exactly the reach they have always had. Nothing here is a deprecation.
+ */
 async function withMcpAuth(req: Request): Promise<Response> {
+  // Read once, before anything consumes it: the scope decision needs the
+  // JSON-RPC method, and the handler needs the body intact. `clone()` tees the
+  // stream so both get a full copy.
+  const scopeCheck = req.method === "POST" ? await requiredScopeForRequest(req) : SCOPE_MCP_READ
+
   const auth = await validateMcpAuth(req)
   if (!auth.valid) {
-    return new Response("Unauthorized", { status: 401, headers: { "WWW-Authenticate": "Bearer" } })
+    return new Response("Unauthorized", {
+      status: 401,
+      headers: { "WWW-Authenticate": bearerChallenge({ scope: SCOPE_MCP_READ }) },
+    })
+  }
+  if (auth.scopes && !scopesSatisfy(auth.scopes, scopeCheck)) {
+    return new Response("Forbidden", {
+      status: 403,
+      headers: {
+        "WWW-Authenticate": bearerChallenge({
+          error: "insufficient_scope",
+          errorDescription: `This request requires the ${scopeCheck} scope.`,
+          scope: scopeCheck,
+        }),
+      },
+    })
   }
   // Carry the acting identity (userId, or null for the shared service key)
   // into every tool via AsyncLocalStorage; the register() wrapper reads it to
@@ -3347,6 +3504,23 @@ async function withMcpAuth(req: Request): Promise<Response> {
     scopeConversationId: auth.scopeConversationId,
     scopeClaimId: auth.scopeClaimId,
   }, () => _handler(req))
+}
+
+/**
+ * The scope this request needs, decided from its JSON-RPC body.
+ *
+ * An unreadable or non-JSON body falls back to `mcp:read`: the transport is
+ * about to reject it with a parse error, so it can neither read nor write
+ * anything, and answering 403 there would be a confusing lie about the cause.
+ * The fail-closed case that does matter — a well-formed `tools/call` naming an
+ * unclassified tool — is handled inside `requiredScopeForPayload`.
+ */
+async function requiredScopeForRequest(req: Request): Promise<ToolScope> {
+  try {
+    return requiredScopeForPayload(await req.clone().json())
+  } catch {
+    return SCOPE_MCP_READ
+  }
 }
 
 export async function GET(req: Request) { return withMcpAuth(req) }

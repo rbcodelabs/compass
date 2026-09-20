@@ -11,13 +11,19 @@ import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates";
 
 export type CreatePositioningBriefResult =
   | { ok: true; docId: string; title: string; created: boolean }
-  | { ok: false; error: "item_not_found" };
+  | { ok: false; error: "item_not_found" }
+  | { ok: false; error: "launch_workflow_disabled" };
 
 /**
  * Ensure a positioning brief exists for `roadmapItemId` (scoped to
  * `workspaceId`). Idempotent: if one already exists it's returned with
  * `created: false`; otherwise a fresh templated brief is created. Returns the
  * doc id so the caller can navigate straight to the editor.
+ *
+ * Positioning briefs are part of the marketing-launch surface gated by
+ * Workspace.launchWorkflowEnabled — see lib/launch-checklist.ts. The web UI's
+ * only entry point (PositioningBriefRow) already lives inside the panel's
+ * gated Launch section, so this is defense-in-depth against a stale client.
  */
 export async function createPositioningBriefCore(
   roadmapItemId: string,
@@ -30,6 +36,14 @@ export async function createPositioningBriefCore(
     select: { id: true, title: true },
   });
   if (!item) return { ok: false, error: "item_not_found" };
+
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { launchWorkflowEnabled: true },
+  });
+  if (!workspace?.launchWorkflowEnabled) {
+    return { ok: false, error: "launch_workflow_disabled" };
+  }
 
   // A roadmap item has at most one brief (Doc.roadmapItemId is unique).
   const existing = await prisma.doc.findUnique({
