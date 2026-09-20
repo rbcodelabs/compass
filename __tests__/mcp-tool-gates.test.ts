@@ -354,6 +354,38 @@ describe("applyToolGate", () => {
     expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
   })
 
+  it("update_roadmap_item authorizes same-workspace targets and forwards solutionId to the handler", async () => {
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({
+      id: "item-1",
+      workspaceId: "ws-1",
+      title: "Roadmap item",
+      horizon: "NEXT",
+      status: "ACTIVE",
+    })
+    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    mockPrisma.roadmapItem.update.mockResolvedValue({
+      id: "item-1",
+      title: "Roadmap item",
+      horizon: "NEXT",
+      status: "ACTIVE",
+      solutionId: "solution-1",
+      isPrivate: false,
+      startDate: null,
+      endDate: null,
+    })
+
+    await expect(callTool("update_roadmap_item", MEMBER, {
+      itemId: "item-1",
+      solutionId: "solution-1",
+    })).resolves.toBeDefined()
+
+    expect(mockPrisma.roadmapItem.update).toHaveBeenCalledWith({
+      where: { id: "item-1" },
+      data: { solutionId: "solution-1", updatedAt: expect.any(Date) },
+    })
+  })
+
   it("link_artifact_to_solution: rejects cross-workspace targets", async () => {
     mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-2" } })
