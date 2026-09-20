@@ -55,7 +55,7 @@ describe("MobileHeader account menu", () => {
     )
   })
 
-  it("keeps workspace-scoped and help links alongside them", async () => {
+  it("keeps workspace-scoped and User Guide links alongside them", async () => {
     openAccountMenu(true)
 
     expect(await screen.findByRole("link", { name: "Settings" })).toHaveAttribute(
@@ -66,13 +66,13 @@ describe("MobileHeader account menu", () => {
       "href",
       "/rbcodelabs/settings"
     )
-    expect(await screen.findByRole("link", { name: "Help" })).toHaveAttribute("href", "/help")
+    expect(await screen.findByRole("link", { name: "User Guide" })).toHaveAttribute("href", "/help")
   })
 
   it("hides Org Settings from non-admins", async () => {
     openAccountMenu(false)
 
-    expect(await screen.findByRole("link", { name: "Help" })).toBeInTheDocument()
+    expect(await screen.findByRole("link", { name: "User Guide" })).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Org Settings" })).not.toBeInTheDocument()
   })
 })

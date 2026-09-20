@@ -51,24 +51,25 @@ describe("Sidebar", () => {
     cleanup();
   });
 
-  it("does not clutter primary nav with Settings, Org Settings, Help, or Send Feedback", () => {
+  it("does not clutter primary nav with Settings, Org Settings, User Guide, or Send Feedback", () => {
     renderSidebar(true);
 
     const mainNav = screen.getByRole("navigation", { name: "Main navigation" });
     // Primary sections stay in the main nav...
     expect(within(mainNav).getByText("OKRs")).toBeInTheDocument();
     expect(within(mainNav).getByText("Roadmap")).toBeInTheDocument();
+    expect(within(mainNav).getByText("Docs")).toBeInTheDocument();
     // ...but the secondary items no longer render as standalone nav landmarks.
     expect(screen.queryByRole("navigation", { name: "Settings navigation" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Help navigation" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "User Guide navigation" })).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Feedback navigation" })).not.toBeInTheDocument();
     // The menu is closed by default, so these items aren't in the document at all yet.
     expect(screen.queryByText("Org Settings")).not.toBeInTheDocument();
-    expect(screen.queryByText("Help")).not.toBeInTheDocument();
+    expect(screen.queryByText("User Guide")).not.toBeInTheDocument();
     expect(screen.queryByText("Send Feedback about Compass")).not.toBeInTheDocument();
   });
 
-  it("surfaces Settings, Org Settings, Help, and Send Feedback inside the avatar dropdown for org admins", async () => {
+  it("surfaces Settings, Org Settings, User Guide, and Send Feedback inside the avatar dropdown for org admins", async () => {
     renderSidebar(true);
 
     const trigger = screen.getByText("Rick Bowman").closest("button");
@@ -83,7 +84,7 @@ describe("Sidebar", () => {
       "href",
       "/rbcodelabs/settings"
     );
-    expect(await screen.findByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
+    expect(await screen.findByRole("link", { name: "User Guide" })).toHaveAttribute("href", "/help");
     expect(await screen.findByText("Send Feedback about Compass")).toBeInTheDocument();
     expect(await screen.findByText("Sign out")).toBeInTheDocument();
   });
@@ -119,7 +120,7 @@ describe("Sidebar", () => {
     const trigger = screen.getByText("Rick Bowman").closest("button");
     fireEvent.click(trigger as HTMLButtonElement);
 
-    expect(await screen.findByRole("link", { name: "Help" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "User Guide" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Org Settings" })).not.toBeInTheDocument();
   });
 

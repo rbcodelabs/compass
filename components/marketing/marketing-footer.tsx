@@ -31,7 +31,7 @@ export function MarketingFooter({ viewer }: { viewer: MarketingViewer }) {
             href="/help"
             className="hover:text-slate-900 transition-colors"
           >
-            Help
+            User Guide
           </Link>
           <Link
             href="/portal/rbcodelabs/compass/roadmap"

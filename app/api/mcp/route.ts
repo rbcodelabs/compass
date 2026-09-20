@@ -3232,7 +3232,7 @@ const _handler = createMcpHandler(
     register(
       "search_help",
       {
-        title: "Search Help",
+        title: "Search User Guide",
         description:
           "Full-text search over Compass's own product/usage documentation (the same content " +
           "rendered at /help/[slug]). Returns the best-matching doc section(s) for the query, each " +
@@ -3251,7 +3251,7 @@ const _handler = createMcpHandler(
     register(
       "get_help",
       {
-        title: "Get Help",
+        title: "Get User Guide",
         description:
           "Resolves a free-text topic (a doc slug, title, or close match) to a single Compass help " +
           "doc and returns its full raw markdown content, plus its /help/[slug] path. Use search_help " +

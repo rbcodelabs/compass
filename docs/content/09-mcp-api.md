@@ -586,12 +586,12 @@ Google-Docs-style comments anchored to a span of a doc's text (or left as a gene
 
 Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-text projection**, not its raw markdown — the same projection the editor highlights against. In practice agents most often add doc-level or freshly-computed anchored comments; the UI is what captures precise anchors from a live text selection.
 
-### Help
+### User Guide
 
 | Tool | Description |
 |---|---|
-| `search_help` | Full-text search over Compass's own product/usage documentation (the same content rendered at `/help/[slug]`); returns the best-matching doc section(s) with a `Path` pointer (deep-linking to a heading anchor when applicable) and a short excerpt. Not workspace-scoped |
-| `get_help` | Resolve a free-text topic (a doc slug, title, or close match) to a single help doc and return its full raw markdown content plus its `/help/[slug]` path. Not workspace-scoped |
+| `search_help` | Full-text search over Compass's User Guide (the same content rendered at `/help/[slug]`); returns the best-matching article section(s) with a `Path` pointer (deep-linking to a heading anchor when applicable) and a short excerpt. Not workspace-scoped |
+| `get_help` | Resolve a free-text topic (an article slug, title, or close match) to a single User Guide article and return its full raw markdown content plus its `/help/[slug]` path. Not workspace-scoped |
 
 ### Scoring
 
