@@ -1,5 +1,6 @@
 /**
- * An in-memory stand-in for the four OAuth tables.
+ * An in-memory stand-in for the OAuth tables, plus the membership, agent and
+ * grant tables the ADR 0015 binding computation reads.
  *
  * The point of building this rather than reaching for per-call `vi.fn()`
  * stubs is the **concurrency tests**. A stub that resolves a canned value
@@ -43,6 +44,14 @@ function matches(row: Row, where: Record<string, unknown>): boolean {
       const condition = expected as Record<string, unknown>
       if ("gt" in condition) return (actual as Date) > (condition.gt as Date)
       if ("lt" in condition) return (actual as Date) < (condition.lt as Date)
+      if ("in" in condition) return (condition.in as unknown[]).includes(actual)
+      // `{ some: { userId } }` over a to-many relation the seeded row carries
+      // inline. Used by the workspace membership check in
+      // revalidateRememberedBinding.
+      if ("some" in condition) {
+        const rows = Array.isArray(actual) ? (actual as Row[]) : []
+        return rows.some((entry) => matches(entry, condition.some as Record<string, unknown>))
+      }
       // A compound-unique group: the key names the index, the value holds the
       // real fields. Recursing matches them against the row directly.
       if (actual === undefined && Object.keys(condition).every((field) => field in row)) {
@@ -88,10 +97,38 @@ class Table {
     },
   )
 
+  findFirst = vi.fn(
+    async ({ where, select }: { where?: Record<string, unknown>; select?: Record<string, unknown> } = {}) => {
+      const row = this.rows.find((candidate) => (where ? matches(candidate, where) : true))
+      return row ? project(row, select) : null
+    },
+  )
+
   findMany = vi.fn(
-    async ({ where, select }: { where?: Record<string, unknown>; select?: Record<string, unknown> } = {}) =>
+    async ({
+      where,
+      select,
+    }: {
+      where?: Record<string, unknown>
+      select?: Record<string, unknown>
+      /** Accepted and ignored: ordering is not what any of these tests assert. */
+      orderBy?: unknown
+    } = {}) =>
       this.rows.filter((row) => (where ? matches(row, where) : true)).map((row) => project(row, select)),
   )
+
+  delete = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+    const index = this.rows.findIndex((row) => matches(row, where))
+    if (index < 0) throw new Error("oauth-store fake: delete matched no row")
+    return this.rows.splice(index, 1)[0]
+  })
+
+  deleteMany = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+    const retained = this.rows.filter((row) => !matches(row, where))
+    const count = this.rows.length - retained.length
+    this.rows = retained
+    return { count }
+  })
 
   /**
    * Yields before mutating, so two callers in the same `Promise.all` are both
@@ -143,6 +180,7 @@ export function createOAuthStore() {
     consumedAt: null,
     createdAt: new Date(),
   }))
+  const oAuthAuthorizationEvent = new Table("authorization-event", () => ({ createdAt: new Date() }))
   const oAuthToken = new Table("token", () => ({
     revokedAt: null,
     parentTokenId: null,
@@ -153,21 +191,44 @@ export function createOAuthStore() {
   const oAuthConsent = new Table("consent", () => ({ grantedAt: new Date() }))
   const workspaceMember = new Table("workspace-member", () => ({}))
   const organizationMember = new Table("org-member", () => ({}))
+  // ADR 0015: the consent screen's binding options and the remembered-binding
+  // re-validation both read these.
+  const workspace = new Table("workspace", () => ({}))
+  const agent = new Table("agent", () => ({ status: "ACTIVE" }))
+  const agentWorkspaceGrant = new Table("grant", () => ({ revokedAt: null }))
 
-  const prisma = {
+  const tables = {
     oAuthClient,
     oAuthAuthorizationCode,
+    oAuthAuthorizationEvent,
     oAuthToken,
     oAuthConsent,
     workspaceMember,
     organizationMember,
+    workspace,
+    agent,
+    agentWorkspaceGrant,
+  }
+  const prisma = {
+    ...tables,
+    $transaction: vi.fn(async <T>(operation: (tx: typeof tables) => Promise<T>) => {
+      const snapshots = new Map(
+        Object.values(tables).map((table) => [table, table.rows.map((row) => ({ ...row }))]),
+      )
+      try {
+        return await operation(tables)
+      } catch (error) {
+        for (const [table, rows] of snapshots) table.rows = rows
+        throw error
+      }
+    }),
   }
 
   return {
     prisma,
-    ...prisma,
+    ...tables,
     reset() {
-      for (const table of Object.values(prisma)) table.rows = []
+      for (const table of Object.values(tables)) table.rows = []
       sequence = 0
     },
   }

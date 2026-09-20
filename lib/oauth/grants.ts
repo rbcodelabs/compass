@@ -28,7 +28,8 @@
  * expiry. `offline_access` is still advertised in the AS metadata because
  * Claude gates its *request* for a refresh token on seeing it.
  */
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppPrismaClient, type AppTransactionClient } from "@/lib/db"
+import type { AuthorizationBinding } from "@/lib/oauth/codes"
 import { mintOAuthToken } from "@/lib/oauth/tokens"
 
 /**
@@ -50,7 +51,7 @@ export interface TokenResponseBody {
   scope: string
 }
 
-export interface IssueTokenPairInput {
+export interface IssueTokenPairInput extends AuthorizationBinding {
   clientId: string
   userId: string
   scope: string
@@ -66,8 +67,8 @@ export interface IssueTokenPairInput {
 export async function issueTokenPair(
   input: IssueTokenPairInput,
   now: Date = new Date(),
+  prisma: Pick<AppPrismaClient | AppTransactionClient, "oAuthToken"> = getPrisma(),
 ): Promise<TokenResponseBody> {
-  const prisma = getPrisma()
   const access = mintOAuthToken("ACCESS")
   const refresh = mintOAuthToken("REFRESH")
 
@@ -79,14 +80,18 @@ export async function issueTokenPair(
     familyId: input.familyId,
     parentTokenId: input.parentTokenId ?? null,
     scopeWorkspaceId: input.scopeWorkspaceId ?? null,
+    // The binding rides the whole family, including every rotation (ADR 0015).
+    // Dropping it on refresh would silently turn an agent-bound connection into
+    // a user-bound one an hour after consent — a privilege escalation with no
+    // audit event and no user-visible cause.
+    authorizationMode: input.authorizationMode,
+    agentId: input.agentId ?? null,
   }
 
-  // Two rows, not a transaction. DSQL has no foreign keys and these two inserts
-  // touch different rows, so a transaction would buy only atomicity of the
-  // *pair* — and the failure it would guard against (access written, refresh
-  // not) degrades to the client holding a working access token with no way to
-  // refresh, which is exactly what it would get from a rolled-back transaction
-  // anyway, minus an hour of usable session.
+  // This helper does not open its own transaction. The token route passes the
+  // transaction that also reads current consent, making consent + pair issuance
+  // one OCC boundary. Lower-level callers may omit it when pair atomicity is not
+  // their security boundary (for example, test fixture construction).
   await prisma.oAuthToken.create({
     data: {
       ...common,
@@ -135,6 +140,9 @@ export interface RefreshTokenRow {
   scope: string
   resource: string
   scopeWorkspaceId: string | null
+  /** Null only on a malformed or incompletely migrated row; reject it. */
+  authorizationMode: string | null
+  agentId: string | null
   familyId: string
   expiresAt: Date
   revokedAt: Date | null
@@ -174,6 +182,8 @@ export async function claimRefreshToken(
       scope: true,
       resource: true,
       scopeWorkspaceId: true,
+      authorizationMode: true,
+      agentId: true,
       familyId: true,
       expiresAt: true,
       revokedAt: true,
@@ -218,6 +228,8 @@ export async function claimRefreshToken(
       scope: existing.scope,
       resource: existing.resource,
       scopeWorkspaceId: existing.scopeWorkspaceId,
+      authorizationMode: existing.authorizationMode,
+      agentId: existing.agentId,
       familyId: existing.familyId,
       expiresAt: existing.expiresAt,
       revokedAt: existing.revokedAt,

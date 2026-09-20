@@ -16,6 +16,7 @@
  * a read-then-write.
  */
 import { NextResponse } from "next/server"
+import getPrisma from "@/lib/db"
 import { oauthErrorResponse } from "@/lib/oauth/errors"
 import {
   OAUTH_NO_STORE_HEADERS,
@@ -33,8 +34,16 @@ import {
   touchOAuthClient,
   type RegisteredClient,
 } from "@/lib/oauth/clients"
-import { claimAuthorizationCode } from "@/lib/oauth/codes"
-import { claimRefreshToken, issueTokenPair, revokeTokenFamily } from "@/lib/oauth/grants"
+import { carryAuthorizationBinding, claimAuthorizationCode } from "@/lib/oauth/codes"
+import { isUserOverrideEligible } from "@/lib/oauth/agent-binding"
+import { scopeCovers } from "@/lib/oauth/consent"
+import {
+  claimRefreshToken,
+  issueTokenPair,
+  revokeTokenFamily,
+  type IssueTokenPairInput,
+  type TokenResponseBody,
+} from "@/lib/oauth/grants"
 import { verifyPkce } from "@/lib/oauth/pkce"
 import { resolveResource } from "@/lib/oauth/resource"
 import { hashOAuthToken, isOAuthRefreshToken } from "@/lib/oauth/tokens"
@@ -191,13 +200,26 @@ async function authorizationCodeGrant(
     return fail("invalid_target", "resource does not match the authorization request.")
   }
 
-  const tokens = await issueTokenPair({
+  const binding = carryAuthorizationBinding(stored)
+  if (!binding) {
+    await revokeTokenFamily(stored.id)
+    return fail("invalid_grant", "The authorization code is invalid, expired, or already used.")
+  }
+
+  const tokens = await issueTokenPairForCurrentConsent({
     clientId: client.clientId,
     userId: stored.userId,
     scope: stored.scope,
     resource: stored.resource,
     familyId: stored.id,
+    // The acting identity was chosen by the human at consent and recorded on
+    // the code; the token endpoint copies it, never decides it.
+    ...binding,
   })
+  if (!tokens) {
+    await revokeTokenFamily(stored.id)
+    return fail("invalid_grant", "The authorization code is invalid, expired, or already used.")
+  }
   return tokenResponse(tokens)
 }
 
@@ -231,6 +253,16 @@ async function refreshTokenGrant(
     return fail("invalid_grant", "This refresh token was issued to a different client.")
   }
 
+  const binding = carryAuthorizationBinding(previous)
+  if (!binding) {
+    await revokeTokenFamily(previous.familyId)
+    return fail("invalid_grant", "The refresh token is invalid, expired, or has been revoked.")
+  }
+  if (binding.authorizationMode === "USER" && !(await isUserOverrideEligible(previous.userId))) {
+    await revokeTokenFamily(previous.familyId)
+    return fail("invalid_grant", "The refresh token is invalid, expired, or has been revoked.")
+  }
+
   // RFC 6749 §6: a requested scope must be a subset of the original grant.
   const requested = formField(params, "scope")
   const granted = parseScope(previous.scope)
@@ -249,7 +281,7 @@ async function refreshTokenGrant(
     return fail("invalid_target", "resource does not match the original grant.")
   }
 
-  const tokens = await issueTokenPair({
+  const tokens = await issueTokenPairForCurrentConsent({
     clientId: client.clientId,
     userId: previous.userId,
     scope,
@@ -259,8 +291,74 @@ async function refreshTokenGrant(
     familyId: previous.familyId,
     parentTokenId: previous.id,
     scopeWorkspaceId: previous.scopeWorkspaceId,
+    // A rotation must never widen the grant. Scope is already checked above;
+    // this is the same rule for the acting identity.
+    ...binding,
   })
+  if (!tokens) {
+    await revokeTokenFamily(previous.familyId)
+    return fail("invalid_grant", "The refresh token is invalid, expired, or has been revoked.")
+  }
   return tokenResponse(tokens)
+}
+
+/**
+ * Consent is the durable connection record. Read and conditionally touch its
+ * exact version before minting the replacement pair in one transaction, so a
+ * successful Revoke/Reconnect either conflicts with issuance or observes and
+ * revokes the newly committed family. A code or refresh token whose consent is
+ * already gone can never recreate access.
+ */
+async function issueTokenPairForCurrentConsent(
+  input: IssueTokenPairInput,
+): Promise<TokenResponseBody | null> {
+  const prisma = getPrisma()
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const consent = await tx.oAuthConsent.findUnique({
+        where: { userId_clientId: { userId: input.userId, clientId: input.clientId } },
+        select: {
+          id: true,
+          scope: true,
+          authorizationMode: true,
+          agentId: true,
+          grantedAt: true,
+        },
+      })
+      if (
+        !consent ||
+        !scopeCovers(consent.scope, parseScope(input.scope)) ||
+        consent.authorizationMode !== input.authorizationMode ||
+        consent.agentId !== (input.agentId ?? null)
+      ) {
+        return null
+      }
+
+      // A snapshot read alone does not fence a concurrent Revoke/Reconnect on
+      // Aurora DSQL. Touch the exact consent version we validated so both
+      // transactions write the same row: revocation's delete then either makes
+      // this conditional update miss (Postgres) or causes an OCC abort (DSQL).
+      const touched = await tx.oAuthConsent.updateMany({
+        where: {
+          id: consent.id,
+          userId: input.userId,
+          clientId: input.clientId,
+          scope: consent.scope,
+          authorizationMode: consent.authorizationMode,
+          agentId: consent.agentId,
+          grantedAt: consent.grantedAt,
+        },
+        data: { grantedAt: consent.grantedAt },
+      })
+      if (touched.count !== 1) return null
+
+      return issueTokenPair(input, new Date(), tx)
+    })
+  } catch {
+    // A DSQL write conflict means revocation or re-consent won the row. Keep
+    // the OAuth response non-disclosing and never mint outside the transaction.
+    return null
+  }
 }
 
 function tokenResponse(body: object): NextResponse {

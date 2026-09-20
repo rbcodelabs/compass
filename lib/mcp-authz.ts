@@ -42,6 +42,8 @@ export type McpActor = {
   purpose?: "SERVICE" | "USER" | "RESEARCH" | "AGENT" | "AGENT_TURN"
   agentId?: string | null
   credentialId?: string
+  /** Which table `credentialId` points into — see McpAuthResult (ADR 0015). */
+  credentialType?: "API_KEY" | "OAUTH"
   requiredAgentAccess?: "READ" | "WRITE"
   authorizedWorkspaceId?: string
   scopeWorkspaceId?: string | null

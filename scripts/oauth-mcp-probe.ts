@@ -15,9 +15,10 @@
  *   4. POST /api/oauth/register      → DCR, public client, loopback redirect
  *   5. GET /oauth/authorize          → consent, then `code` + `state` + `iss`
  *   6. POST /api/oauth/token         → exchange the code (PKCE S256)
- *   7. POST /api/mcp `initialize`    → the access token actually works
+ *   7. Agent authorization matrix    → identity, grants, gates, audited mutation
  *   8. Audience enforcement          → a foreign-`resource` token is refused
  *   9. Scope enforcement             → a read-only token gets a real 403
+ *  10. Agent suspension              → the same access token immediately gets 401
  *
  * ## Running it
  *
@@ -34,10 +35,18 @@
  *       deployment whose database this process cannot reach.
  *
  *   DATABASE_URL=… [COMPASS_PROBE_EMAIL=dev@localhost.dev]
- *       Seeds a `Session` row directly and uses it, then deletes it on the way
- *       out. Requires the database-session strategy, i.e. a production-mode
- *       server (`pnpm build && pnpm start`) — `pnpm dev` issues JWT sessions
- *       from a Credentials provider and has no `sessions` table to seed.
+ *       Seeds a `Session`, isolated organization, two workspaces and an agent
+ *       directly, then deletes them on the way out. Requires the database-
+ *       session strategy, i.e. a production-mode server (`pnpm build && pnpm
+ *       start`) — `pnpm dev` issues JWT sessions from a Credentials provider
+ *       and has no `sessions` table to seed.
+ *
+ *   COMPASS_PROBE_SESSION_COOKIE=… COMPASS_PROBE_AGENT_ID=…
+ *       Against a remote deployment, names an existing active agent for a
+ *       fresh consent screen. Optional `COMPASS_PROBE_AGENT_NAME`,
+ *       `COMPASS_PROBE_GRANTED_WORKSPACE_ID`,
+ *       `COMPASS_PROBE_UNGRANTED_WORKSPACE_ID` and `COMPASS_PROBE_ORG_SLUG`
+ *       enable the corresponding assertions without database readback.
  *
  * Step 8's second half (a real token row carrying a foreign audience) also
  * needs DATABASE_URL. Without it the probe still asserts that the *authorization
@@ -49,6 +58,15 @@ import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import { getActiveSchema } from "../lib/schema.ts"
+import {
+  mcpEnvelopeContainsItemId,
+  mcpErrorText,
+  mcpToolEnvelope,
+  parseMcpPayload,
+  probeOpportunityFixture,
+  runCleanupStack,
+  type McpPayload,
+} from "./oauth-mcp-probe-helpers.ts"
 
 // ── Configuration ───────────────────────────────────────────────────────────
 
@@ -64,6 +82,11 @@ const BASE_URL = (
 ).replace(/\/$/, "")
 
 const PROBE_EMAIL = process.env.COMPASS_PROBE_EMAIL ?? "dev@localhost.dev"
+const PROBE_AGENT_ID = process.env.COMPASS_PROBE_AGENT_ID
+const PROBE_AGENT_NAME = process.env.COMPASS_PROBE_AGENT_NAME
+const PROBE_GRANTED_WORKSPACE_ID = process.env.COMPASS_PROBE_GRANTED_WORKSPACE_ID
+const PROBE_UNGRANTED_WORKSPACE_ID = process.env.COMPASS_PROBE_UNGRANTED_WORKSPACE_ID
+const PROBE_ORG_SLUG = process.env.COMPASS_PROBE_ORG_SLUG
 /** Portless on purpose — the Geode broker registers exactly this. */
 const REDIRECT_URI_REGISTERED = "http://127.0.0.1/callback"
 /**
@@ -138,6 +161,33 @@ function form(fields: Record<string, string>): RequestInit {
   }
 }
 
+function mcpRequest(accessToken: string, body: unknown): Promise<Response> {
+  return request("/api/mcp", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify(body),
+  })
+}
+
+async function callTool(
+  accessToken: string,
+  id: number,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ response: Response; payload: McpPayload }> {
+  const response = await mcpRequest(accessToken, {
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: { name, arguments: args },
+  })
+  return { response, payload: parseMcpPayload(await response.text()) }
+}
+
 /**
  * Parses an RFC 6750 `WWW-Authenticate: Bearer …` header into its parameters.
  * Deliberately tolerant about ordering and whitespace, strict about quoting —
@@ -197,8 +247,112 @@ async function seedSession(db: Db): Promise<{ cookie: string; cleanup: () => Pro
   return {
     cookie: `authjs.session-token=${sessionToken}`,
     cleanup: async () => {
-      await db.prisma.session.deleteMany({ where: { sessionToken } }).catch(() => {})
+      await db.prisma.session.deleteMany({ where: { sessionToken } })
     },
+  }
+}
+
+type AgentFixture = {
+  agentId: string
+  agentName: string
+  orgSlug: string
+  grantedWorkspaceId: string
+  ungrantedWorkspaceId: string
+  opportunityId: string
+  cleanup: () => Promise<void>
+}
+
+/**
+ * Builds two isolated workspaces for the probe user and grants the probe agent
+ * only the first. This makes both sides of the grant boundary deterministic;
+ * no shared developer or preview data is inspected or modified.
+ */
+async function seedAgentFixture(db: Db): Promise<AgentFixture> {
+  const user = await db.prisma.user.findUnique({ where: { email: PROBE_EMAIL }, select: { id: true } })
+  if (!user) abort(`cannot seed agent fixture: no user ${PROBE_EMAIL}`)
+
+  const nonce = randomBytes(6).toString("hex")
+  const organizationId = randomUUID()
+  const grantedWorkspaceId = randomUUID()
+  const ungrantedWorkspaceId = randomUUID()
+  const agentId = randomUUID()
+  const opportunityId = randomUUID()
+  const orgSlug = `oauth-probe-${nonce}`
+  const agentName = `OAuth probe agent ${nonce}`
+
+  const cleanup = async () => {
+    const cleanupFailures = await runCleanupStack([
+      async () => void (await db.prisma.organization.deleteMany({ where: { id: organizationId } })),
+      async () => void (await db.prisma.organizationMember.deleteMany({ where: { organizationId } })),
+      async () => void (await db.prisma.workspace.deleteMany({
+        where: { id: { in: [grantedWorkspaceId, ungrantedWorkspaceId] } },
+      })),
+      async () => void (await db.prisma.workspaceMember.deleteMany({
+        where: { workspaceId: { in: [grantedWorkspaceId, ungrantedWorkspaceId] } },
+      })),
+      async () => void (await db.prisma.agent.deleteMany({ where: { id: agentId } })),
+      async () => void (await db.prisma.agentWorkspaceGrant.deleteMany({ where: { agentId } })),
+      async () => void (await db.prisma.agentToolCall.deleteMany({ where: { agentId } })),
+      async () => void (await db.prisma.task.deleteMany({
+        where: { workspaceId: { in: [grantedWorkspaceId, ungrantedWorkspaceId] } },
+      })),
+      async () => void (await db.prisma.opportunity.deleteMany({ where: { id: opportunityId } })),
+    ])
+    if (cleanupFailures.length > 0) {
+      throw new Error(`agent fixture cleanup had ${cleanupFailures.length} failure(s)`)
+    }
+  }
+
+  try {
+    await db.prisma.organization.create({
+      data: { id: organizationId, slug: orgSlug, name: `OAuth probe ${nonce}` },
+    })
+    await db.prisma.organizationMember.create({
+      data: { organizationId, userId: user.id, role: "OWNER" },
+    })
+    await db.prisma.workspace.createMany({
+      data: [
+        { id: grantedWorkspaceId, organizationId, slug: "granted", name: "OAuth probe granted" },
+        { id: ungrantedWorkspaceId, organizationId, slug: "ungranted", name: "OAuth probe ungranted" },
+      ],
+    })
+    await db.prisma.workspaceMember.createMany({
+      data: [
+        { workspaceId: grantedWorkspaceId, userId: user.id, role: "ADMIN" },
+        { workspaceId: ungrantedWorkspaceId, userId: user.id, role: "ADMIN" },
+      ],
+    })
+    await db.prisma.agent.create({
+      data: { id: agentId, ownerUserId: user.id, name: agentName },
+    })
+    await db.prisma.agentWorkspaceGrant.create({
+      data: {
+        agentId,
+        workspaceId: grantedWorkspaceId,
+        access: "WRITE",
+        grantedByUserId: user.id,
+      },
+    })
+    await db.prisma.opportunity.create({
+      data: probeOpportunityFixture(opportunityId, grantedWorkspaceId, nonce),
+    })
+  } catch (error) {
+    try {
+      await cleanup()
+    } catch {
+      console.error("  WARN  partial agent fixture cleanup failed")
+    }
+    throw error
+  }
+
+  return {
+    agentId,
+    agentName,
+    orgSlug,
+    grantedWorkspaceId,
+    ungrantedWorkspaceId,
+    opportunityId,
+    cleanup,
   }
 }
 
@@ -216,6 +370,8 @@ async function authorize(options: {
   redirectUri: string
   /** Defaults to both MCP scopes. */
   scope?: string
+  /** Required when a fresh Stage 2 consent screen renders. */
+  agentId?: string
 }): Promise<{ code: string; verifier: string }> {
   const { verifier, challenge: codeChallenge } = pkcePair()
   const state = randomBytes(16).toString("hex")
@@ -243,9 +399,14 @@ async function authorize(options: {
     const html = await authorizePage.text()
     const signed = /name="request"\s+value="([^"]+)"/.exec(html)?.[1]
     if (!signed) abort("consent screen rendered but carried no signed request blob")
+    if (!options.agentId) {
+      abort(
+        "Stage 2 consent requires an agent binding; set DATABASE_URL for an isolated fixture or COMPASS_PROBE_AGENT_ID",
+      )
+    }
     pass("consent screen rendered", "extracting the signed request blob")
     const consent = await request("/oauth/consent", {
-      ...form({ decision: "allow", request: signed }),
+      ...form({ decision: "allow", request: signed, binding: "agent", agentId: options.agentId }),
       headers: {
         "content-type": "application/x-www-form-urlencoded",
         cookie: options.cookie,
@@ -274,7 +435,7 @@ async function authorize(options: {
   // RFC 9207. New in MCP 2026-07-28 and heading SHOULD → MUST.
   checkEqual("iss on the authorization response", callback.searchParams.get("iss"), BASE_URL)
   const code = callback.searchParams.get("code")
-  check("authorization code issued", Boolean(code), code ? `${code.slice(0, 12)}…` : "absent")
+  check("authorization code issued", Boolean(code), code ? "present" : "absent")
   if (!code) abort("no authorization code; nothing further can run")
   return { code, verifier }
 }
@@ -283,6 +444,10 @@ async function authorize(options: {
 
 async function main() {
   console.log(`Compass MCP OAuth probe → ${BASE_URL}`)
+  const cleanupStack: Array<() => Promise<void>> = []
+  let probeError: unknown
+
+  try {
 
   // 1 ──────────────────────────────────────────────────────────────────────
   step(1, "POST /api/mcp with no token → 401 challenge")
@@ -375,6 +540,17 @@ async function main() {
   const client = (await registration.json()) as Record<string, unknown>
   const clientId = client.client_id as string
   if (!clientId) abort("registration returned no client_id; nothing further can run")
+  const db = openDatabase()
+  if (db) {
+    // Registered as soon as the client ID exists. LIFO cleanup closes the
+    // connection last, after every dependent OAuth row has been attempted.
+    cleanupStack.push(db.close)
+    cleanupStack.push(async () => void (await db.prisma.oAuthClient.deleteMany({ where: { clientId } })))
+    cleanupStack.push(async () => void (await db.prisma.oAuthConsent.deleteMany({ where: { clientId } })))
+    cleanupStack.push(async () => void (await db.prisma.oAuthToken.deleteMany({ where: { clientId } })))
+    cleanupStack.push(async () => void (await db.prisma.oAuthAuthorizationCode.deleteMany({ where: { clientId } })))
+    cleanupStack.push(async () => void (await db.prisma.oAuthAuthorizationEvent.deleteMany({ where: { clientId } })))
+  }
   check("client_id issued", true, clientId)
   check(
     "registered as a public client (no secret)",
@@ -384,13 +560,13 @@ async function main() {
 
   // 5 ──────────────────────────────────────────────────────────────────────
   step(5, "Authorize with a signed-in session")
-  const db = openDatabase()
   let cookie = process.env.COMPASS_PROBE_SESSION_COOKIE ?? null
   let cleanupSession: (() => Promise<void>) | null = null
   if (!cookie && db) {
     const seeded = await seedSession(db)
     cookie = seeded.cookie
     cleanupSession = seeded.cleanup
+    cleanupStack.push(seeded.cleanup)
     pass("session", `seeded a database session for ${PROBE_EMAIL}`)
   } else if (cookie) {
     pass("session", "using COMPASS_PROBE_SESSION_COOKIE")
@@ -400,7 +576,29 @@ async function main() {
     )
   }
 
-  const authorized = await authorize({ clientId, cookie, redirectUri: REDIRECT_URI_AUTHORIZED })
+  // Only pair a database fixture with the database session we minted for the
+  // same PROBE_EMAIL. An externally supplied cookie may belong to a different
+  // user, in which case a fixture owned by PROBE_EMAIL would be correctly
+  // rejected by consent and would make the probe configuration misleading.
+  const fixture = db && cleanupSession ? await seedAgentFixture(db) : null
+  if (fixture) cleanupStack.push(fixture.cleanup)
+  const agentId = fixture?.agentId ?? PROBE_AGENT_ID
+  const expectedAgentName = fixture?.agentName ?? PROBE_AGENT_NAME
+  const grantedWorkspaceId = fixture?.grantedWorkspaceId ?? PROBE_GRANTED_WORKSPACE_ID
+  const ungrantedWorkspaceId = fixture?.ungrantedWorkspaceId ?? PROBE_UNGRANTED_WORKSPACE_ID
+  const probeOrgSlug = fixture?.orgSlug ?? PROBE_ORG_SLUG
+  if (fixture) {
+    pass("agent fixture", "created isolated granted and ungranted workspaces")
+  } else if (agentId) {
+    pass("agent fixture", "using COMPASS_PROBE_AGENT_ID")
+  }
+
+  const authorized = await authorize({
+    clientId,
+    cookie,
+    redirectUri: REDIRECT_URI_AUTHORIZED,
+    agentId,
+  })
   const { code, verifier } = authorized
 
   // 6 ──────────────────────────────────────────────────────────────────────
@@ -431,24 +629,16 @@ async function main() {
   if (!accessToken) abort("no access token; nothing further can run")
 
   // 7 ──────────────────────────────────────────────────────────────────────
-  step(7, "initialize against /api/mcp with the access token")
-  const initialize = await request("/api/mcp", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
+  step(7, "Agent binding and authorization matrix")
+  const initialize = await mcpRequest(accessToken, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "compass-oauth-probe", version: "1.0.0" },
     },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-06-18",
-        capabilities: {},
-        clientInfo: { name: "compass-oauth-probe", version: "1.0.0" },
-      },
-    }),
   })
   checkEqual("status", initialize.status, 200)
   const initializeBody = await initialize.text()
@@ -457,6 +647,129 @@ async function main() {
     initializeBody.includes("serverInfo") || initializeBody.includes("protocolVersion"),
     initializeBody.slice(0, 120).replace(/\s+/g, " "),
   )
+
+  const identityCall = await callTool(accessToken, 2, "get_current_identity", {})
+  checkEqual("get_current_identity status", identityCall.response.status, 200)
+  const identity = mcpToolEnvelope(identityCall.payload)
+  const identityData = identity?.data as
+    | { purpose?: unknown; agent?: { id?: unknown; name?: unknown } | null; workspaces?: Array<{ id?: unknown }> }
+    | undefined
+  checkEqual("OAuth token acts with AGENT purpose", identityData?.purpose, "AGENT")
+  if (agentId) checkEqual("OAuth token is bound to the selected agent", identityData?.agent?.id, agentId)
+  if (expectedAgentName) {
+    checkEqual("selected agent name round-trips", identityData?.agent?.name, expectedAgentName)
+  }
+  if (grantedWorkspaceId) {
+    check(
+      "identity includes the granted workspace",
+      Boolean(identityData?.workspaces?.some((workspace) => workspace.id === grantedWorkspaceId)),
+      grantedWorkspaceId,
+    )
+  }
+  if (ungrantedWorkspaceId) {
+    check(
+      "identity excludes the ungranted workspace",
+      !identityData?.workspaces?.some((workspace) => workspace.id === ungrantedWorkspaceId),
+      ungrantedWorkspaceId,
+    )
+  }
+
+  if (grantedWorkspaceId) {
+    const grantedRead = await callTool(accessToken, 3, "list_opportunities", {
+      workspaceId: grantedWorkspaceId,
+    })
+    const grantedEnvelope = mcpToolEnvelope(grantedRead.payload)
+    check(
+      "read in a granted workspace succeeds",
+      grantedRead.response.status === 200 &&
+        (fixture
+          ? mcpEnvelopeContainsItemId(grantedEnvelope, fixture.opportunityId)
+          : grantedEnvelope?.ok === true),
+      `${grantedRead.response.status} ${grantedEnvelope?.message ?? mcpErrorText(grantedRead.payload) ?? "no result"}`,
+    )
+  } else {
+    skip("read in a granted workspace succeeds", "set DATABASE_URL or COMPASS_PROBE_GRANTED_WORKSPACE_ID")
+  }
+
+  if (ungrantedWorkspaceId) {
+    const ungrantedRead = await callTool(accessToken, 4, "list_opportunities", {
+      workspaceId: ungrantedWorkspaceId,
+    })
+    const denial = mcpErrorText(ungrantedRead.payload)
+    check(
+      "read in an ungranted workspace is denied",
+      ungrantedRead.response.status === 200 && Boolean(denial?.includes("Workspace not found or access denied")),
+      `${ungrantedRead.response.status} ${denial ?? "no error"}`,
+    )
+  } else {
+    skip("read in an ungranted workspace is denied", "set DATABASE_URL or COMPASS_PROBE_UNGRANTED_WORKSPACE_ID")
+  }
+
+  if (probeOrgSlug) {
+    const humanOnly = await callTool(accessToken, 5, "create_workspace", {
+      orgSlug: probeOrgSlug,
+      name: "Must not be created",
+      slug: `must-not-exist-${randomBytes(4).toString("hex")}`,
+    })
+    const denial = mcpErrorText(humanOnly.payload)
+    check(
+      "create_workspace is denied as human-only",
+      humanOnly.response.status === 200 &&
+        Boolean(denial?.includes("Tool requires a human identity: create_workspace")),
+      `${humanOnly.response.status} ${denial ?? "no error"}`,
+    )
+  } else {
+    skip("create_workspace is denied as human-only", "set DATABASE_URL or COMPASS_PROBE_ORG_SLUG")
+  }
+
+  // All four MCP tools backed by assertWorkspaceAdmin/assertOrgAdminBySlug are
+  // classified DENY, and policy denial runs before the tool gate. The distinct
+  // message is therefore unreachable through MCP by design; direct coverage is
+  // in __tests__/lib/oauth-agent-binding.test.ts.
+  skip(
+    "representative admin tool returns Human administrator required",
+    "policy-level human-only denial runs first; direct authz assertion is unit-tested",
+  )
+
+  if (grantedWorkspaceId) {
+    const mutation = await callTool(accessToken, 6, "create_task", {
+      workspaceId: grantedWorkspaceId,
+      title: `OAuth credentialId probe ${randomBytes(4).toString("hex")}`,
+    })
+    const mutationEnvelope = mcpToolEnvelope(mutation.payload)
+    check(
+      "agent-bound mutation succeeds",
+      mutation.response.status === 200 && mutationEnvelope?.ok === true,
+      `${mutation.response.status} ${mutationEnvelope?.message ?? mcpErrorText(mutation.payload) ?? "no result"}`,
+    )
+
+    if (db && agentId) {
+      const audit = await db.prisma.agentToolCall.findFirst({
+        where: { agentId, toolName: "create_task" },
+        orderBy: { createdAt: "desc" },
+        select: { credentialId: true, credentialType: true, status: true },
+      })
+      const credential = audit
+        ? await db.prisma.oAuthToken.findUnique({
+            where: { id: audit.credentialId },
+            select: { agentId: true, authorizationMode: true },
+          })
+        : null
+      check(
+        "mutation audit points to its OAuth credential",
+        audit?.credentialType === "OAUTH" &&
+          audit.status === "SUCCEEDED" &&
+          credential?.authorizationMode === "AGENT" &&
+          credential.agentId === agentId,
+        audit ? `${audit.status} ${audit.credentialType}` : "no audit row",
+      )
+    } else {
+      skip("mutation audit points to its OAuth credential", "needs DATABASE_URL for readback")
+    }
+  } else {
+    skip("agent-bound mutation succeeds", "set DATABASE_URL or COMPASS_PROBE_GRANTED_WORKSPACE_ID")
+    skip("mutation audit points to its OAuth credential", "mutation was not run")
+  }
 
   // 8 ──────────────────────────────────────────────────────────────────────
   step(8, "Audience enforcement")
@@ -474,6 +787,7 @@ async function main() {
     clientId,
     cookie,
     redirectUri: REDIRECT_URI_REAUTHORIZED,
+    agentId,
   })
   const foreignExchange = await request(meta.token_endpoint as string, {
     ...form({
@@ -545,6 +859,7 @@ async function main() {
     cookie,
     redirectUri: REDIRECT_URI_AUTHORIZED,
     scope: "mcp:read",
+    agentId,
   })
   const readOnlyExchange = await request(meta.token_endpoint as string, {
     ...form({
@@ -598,8 +913,38 @@ async function main() {
   // through and the ordinary authorization gate ran, exactly as for an API key.
   checkEqual("a read tool is allowed through to its own gate", readCall.status, 200)
 
-  if (cleanupSession) await cleanupSession()
-  if (db) await db.close()
+  // 10 ─────────────────────────────────────────────────────────────────────
+  step(10, "Agent suspension invalidates the existing access token")
+  if (db && fixture) {
+    await db.prisma.agent.update({
+      where: { id: fixture.agentId },
+      data: { status: "SUSPENDED", updatedAt: new Date() },
+    })
+    const afterSuspension = await mcpRequest(accessToken, {
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: { name: "get_current_identity", arguments: {} },
+    })
+    checkEqual("the next call after suspension is unauthorized", afterSuspension.status, 401)
+  } else {
+    skip("the next call after suspension is unauthorized", "needs DATABASE_URL to suspend the isolated agent")
+  }
+
+  } catch (error) {
+    probeError = error
+    throw error
+  } finally {
+    const cleanupFailures = await runCleanupStack(cleanupStack)
+    if (cleanupFailures.length > 0) {
+      // Counts only: cleanup errors may contain database values or connection
+      // details and must not replace (or leak alongside) the original failure.
+      console.error(`  WARN  probe cleanup had ${cleanupFailures.length} failure(s)`)
+      if (probeError === undefined) {
+        throw new Error(`probe cleanup had ${cleanupFailures.length} failure(s)`)
+      }
+    }
+  }
 }
 
 main()

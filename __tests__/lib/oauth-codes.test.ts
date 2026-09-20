@@ -15,7 +15,7 @@ import { createOAuthStore } from "../helpers/oauth-store"
 const store = createOAuthStore()
 vi.mock("@/lib/db", () => ({ default: () => store.prisma }))
 
-import { AUTHORIZATION_CODE_TTL_MS, claimAuthorizationCode, issueAuthorizationCode } from "@/lib/oauth/codes"
+import { AUTHORIZATION_CODE_TTL_MS, carryAuthorizationBinding, claimAuthorizationCode, issueAuthorizationCode } from "@/lib/oauth/codes"
 import { AUTHORIZATION_CODE_PREFIX, hashOAuthToken } from "@/lib/oauth/tokens"
 
 const REQUEST = {
@@ -65,6 +65,8 @@ describe("issueAuthorizationCode", () => {
     expect(row).not.toHaveProperty("state")
     expect(Object.keys(row).sort()).toEqual(
       [
+        "agentId",
+        "authorizationMode",
         "clientId",
         "codeChallenge",
         "codeChallengeMethod",
@@ -168,5 +170,64 @@ describe("claimAuthorizationCode", () => {
 
     const claim = await claimAuthorizationCode(code)
     expect(claim).toEqual({ ok: false, reason: "conflict" })
+  })
+})
+
+/**
+ * The agent binding on the code (ADR 0015). The binding is chosen by a human at
+ * the consent screen, recorded here, and copied — never re-decided — by the
+ * token endpoint.
+ */
+describe("authorization mode and agent binding", () => {
+  it("defaults to no explicit binding, leaving the column default to stand", async () => {
+    await issueAuthorizationCode(REQUEST)
+    const row = store.oAuthAuthorizationCode.rows.at(-1)
+    // Deliberately `undefined`, not an explicit null: Prisma's
+    // @default("USER") only applies to a field the create omits.
+    expect(row?.authorizationMode).toBeUndefined()
+    expect(row?.agentId).toBeNull()
+  })
+
+  it("records an agent binding and hands it back on claim", async () => {
+    const { code } = await issueAuthorizationCode({
+      ...REQUEST,
+      authorizationMode: "AGENT",
+      agentId: "agent-1",
+    })
+    const claim = await claimAuthorizationCode(code)
+    expect(claim.ok).toBe(true)
+    if (!claim.ok) return
+    expect(claim.code.authorizationMode).toBe("AGENT")
+    expect(claim.code.agentId).toBe("agent-1")
+  })
+})
+
+describe("carryAuthorizationBinding", () => {
+  it("carries an agent binding forward unchanged", () => {
+    expect(carryAuthorizationBinding({ authorizationMode: "AGENT", agentId: "agent-1" })).toEqual({
+      authorizationMode: "AGENT",
+      agentId: "agent-1",
+    })
+  })
+
+  it("carries exact USER mode and drops a stray agent id", () => {
+    expect(carryAuthorizationBinding({ authorizationMode: "USER", agentId: "agent-1" })).toEqual({
+      authorizationMode: "USER",
+      agentId: null,
+    })
+  })
+
+  it.each([[null], ["RESEARCH"], ["agent"]])("refuses stored mode %s", (mode) => {
+    expect(carryAuthorizationBinding({ authorizationMode: mode, agentId: "agent-1" })).toBeNull()
+  })
+
+  it("does not repair an AGENT row with no agent — that would widen the grant", () => {
+    // Unwritable today. If it ever happened, resolving it to USER would hand
+    // the client a *broader* token than the one it presented. Carried forward,
+    // validateOAuthAccessToken refuses it and the client re-consents.
+    expect(carryAuthorizationBinding({ authorizationMode: "AGENT", agentId: null })).toEqual({
+      authorizationMode: "AGENT",
+      agentId: null,
+    })
   })
 })

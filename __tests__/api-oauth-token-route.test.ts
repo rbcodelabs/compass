@@ -48,7 +48,17 @@ async function registerClient(overrides: Record<string, unknown> = {}) {
   })
 }
 
-async function issueCode(overrides: Record<string, string> = {}) {
+async function issueCode(overrides: Record<string, string> = {}, rememberConsent = true) {
+  const scope = overrides.scope ?? "mcp:read mcp:write"
+  const authorizationMode = overrides.authorizationMode ?? "USER"
+  const agentId = overrides.agentId ?? null
+  if (rememberConsent) {
+    await store.oAuthConsent.upsert({
+      where: { userId_clientId: { userId: "user-1", clientId: CLIENT_ID } },
+      create: { userId: "user-1", clientId: CLIENT_ID, scope, authorizationMode, agentId },
+      update: { scope, authorizationMode, agentId, grantedAt: new Date() },
+    })
+  }
   const { code } = await issueAuthorizationCode({
     clientId: CLIENT_ID,
     userId: "user-1",
@@ -57,6 +67,7 @@ async function issueCode(overrides: Record<string, string> = {}) {
     codeChallengeMethod: "S256",
     scope: "mcp:read mcp:write",
     resource: RESOURCE,
+    authorizationMode: "USER",
     ...overrides,
   })
   return code
@@ -209,6 +220,66 @@ describe("authorization_code grant", () => {
     await Promise.resolve()
     expect(store.oAuthClient.rows[0].lastUsedAt).toBeInstanceOf(Date)
   })
+
+  it("rejects an already-issued code after its connection is revoked", async () => {
+    const code = await issueCode()
+    await store.oAuthConsent.deleteMany({ where: { userId: "user-1", clientId: CLIENT_ID } })
+
+    const response = await exchange(code)
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toBe("invalid_grant")
+    expect(store.oAuthToken.rows).toHaveLength(0)
+  })
+
+  it("does not issue tokens when revocation wins after the consent snapshot read", async () => {
+    const code = await issueCode()
+    const [consent] = store.oAuthConsent.rows
+    store.oAuthConsent.updateMany.mockImplementationOnce(async ({ where, data }) => {
+      expect(where).toEqual({
+        id: consent.id,
+        userId: "user-1",
+        clientId: CLIENT_ID,
+        scope: consent.scope,
+        authorizationMode: consent.authorizationMode,
+        agentId: consent.agentId,
+        grantedAt: consent.grantedAt,
+      })
+      expect(data).toEqual({ grantedAt: consent.grantedAt })
+      await store.oAuthConsent.deleteMany({ where: { userId: "user-1", clientId: CLIENT_ID } })
+      return { count: 0 }
+    })
+
+    const response = await exchange(code)
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toBe("invalid_grant")
+    expect(store.oAuthToken.rows).toHaveLength(0)
+  })
+
+  it("rejects a pre-migration code after forced re-consent removed every consent", async () => {
+    const code = await issueCode({}, false)
+
+    const response = await exchange(code)
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toBe("invalid_grant")
+    expect(store.oAuthToken.rows).toHaveLength(0)
+  })
+
+  it.each([null, "RESEARCH", "agent"])(
+    "refuses a code carrying invalid authorizationMode %s",
+    async (authorizationMode) => {
+      const code = await issueCode()
+      store.oAuthAuthorizationCode.rows[0].authorizationMode = authorizationMode
+
+      const response = await exchange(code)
+
+      expect(response.status).toBe(400)
+      expect((await response.json()).error).toBe("invalid_grant")
+      expect(store.oAuthToken.rows).toHaveLength(0)
+    },
+  )
 })
 
 describe("client authentication", () => {
@@ -265,7 +336,14 @@ describe("client authentication", () => {
 })
 
 describe("refresh_token grant", () => {
+  async function seedOverrideEligible() {
+    await store.organizationMember.create({
+      data: { organizationId: "org-1", userId: "user-1", role: "OWNER" },
+    })
+  }
+
   async function firstPair() {
+    await seedOverrideEligible()
     return (await exchange(await issueCode())).json()
   }
 
@@ -317,9 +395,7 @@ describe("refresh_token grant", () => {
   })
 
   it("narrows scope on request but refuses to widen it", async () => {
-    store.reset()
-    await registerClient()
-    const initial = await (await exchange(await issueCode())).json()
+    const initial = await firstPair()
 
     const narrowed = await (await refresh(initial.refresh_token, { scope: "mcp:read" })).json()
     expect(narrowed.scope).toBe("mcp:read")
@@ -348,6 +424,88 @@ describe("refresh_token grant", () => {
     // Structural rejection, before any database round trip.
     expect(store.oAuthToken.findUnique).not.toHaveBeenCalled()
   })
+
+  it("revokes the family instead of rotating after its connection is revoked", async () => {
+    const initial = await firstPair()
+    await store.oAuthConsent.deleteMany({ where: { userId: "user-1", clientId: CLIENT_ID } })
+
+    const response = await refresh(initial.refresh_token)
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toBe("invalid_grant")
+    expect(store.oAuthToken.rows.every((row) => row.revokedAt !== null)).toBe(true)
+  })
+
+  it("does not rotate when revocation wins after the consent snapshot read", async () => {
+    const initial = await firstPair()
+    store.oAuthConsent.updateMany.mockImplementationOnce(async () => {
+      await store.oAuthConsent.deleteMany({ where: { userId: "user-1", clientId: CLIENT_ID } })
+      return { count: 0 }
+    })
+
+    const response = await refresh(initial.refresh_token)
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toBe("invalid_grant")
+    expect(store.oAuthToken.rows).toHaveLength(2)
+    expect(store.oAuthToken.rows.every((row) => row.revokedAt !== null)).toBe(true)
+  })
+
+  it("revokes the family when the user loses organization-admin eligibility", async () => {
+    const initial = await firstPair()
+    await store.organizationMember.updateMany({
+      where: { organizationId: "org-1", userId: "user-1" },
+      data: { role: "MEMBER" },
+    })
+
+    const response = await refresh(initial.refresh_token)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: "invalid_grant",
+      error_description: "The refresh token is invalid, expired, or has been revoked.",
+    })
+    expect(store.oAuthToken.rows.every((row) => row.revokedAt !== null)).toBe(true)
+  })
+
+  it("revokes the family when a workspace-only membership makes USER mode ineligible", async () => {
+    const initial = await firstPair()
+    await store.workspaceMember.create({
+      data: {
+        userId: "user-1",
+        role: "MEMBER",
+        workspace: {
+          id: "ws-2",
+          name: "Other workspace",
+          slug: "other",
+          organization: { id: "org-2", name: "Other org", slug: "other", members: [] },
+        },
+      },
+    })
+
+    const response = await refresh(initial.refresh_token)
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toBe("invalid_grant")
+    expect(store.oAuthToken.rows.every((row) => row.revokedAt !== null)).toBe(true)
+  })
+
+  it.each([null, "RESEARCH", "agent"])(
+    "revokes the family instead of rotating invalid authorizationMode %s",
+    async (authorizationMode) => {
+      const initial = await firstPair()
+      const refreshRow = store.oAuthToken.rows.find(
+        (row) => row.tokenHash === hashOAuthToken(initial.refresh_token),
+      )
+      refreshRow!.authorizationMode = authorizationMode
+
+      const response = await refresh(initial.refresh_token)
+
+      expect(response.status).toBe(400)
+      expect((await response.json()).error).toBe("invalid_grant")
+      expect(store.oAuthToken.rows.every((row) => row.revokedAt !== null)).toBe(true)
+    },
+  )
 })
 
 describe("request shape", () => {

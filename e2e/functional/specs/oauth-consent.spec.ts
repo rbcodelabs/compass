@@ -24,6 +24,17 @@
  *    spec registers call themselves "Compass Official …" precisely to prove the
  *    screen never treats a name as an endorsement. The marking, and the
  *    redirect target beside it, are the only unforgeable signals on the page.
+ *  - **The binding picker governs what the token becomes.** ADR 0015: the screen
+ *    asks which identity the connection acts as, and the answer is asserted
+ *    where it actually matters — on the exchanged token's `get_current_identity`
+ *    result, not on the radio button. A perfect picker that writes
+ *    `authorization_mode = 'USER'` is the silent no-op the whole change exists
+ *    to avoid.
+ *  - **A zero-reach selection cannot be approved.** An agent with no grants
+ *    yields a token that authenticates, passes every gate, and then fails every
+ *    call with "Workspace not found or access denied." The design calls this the
+ *    requirement most likely to be quietly dropped under time pressure, so it is
+ *    asserted on the live button rather than in a unit test alone.
  *  - **Deny issues nothing.** Asserted twice — once on the redirect the client
  *    receives, once against `oauth_authorization_codes` directly — because a
  *    code that is issued but not delivered is still a code.
@@ -58,6 +69,7 @@ import http from "node:http";
 import { AddressInfo } from "node:net";
 import pg from "pg";
 import { createHash, randomBytes } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 
 /** Names no user should read as an endorsement — see the unverified assertions. */
 const HOSTED_CLIENT_NAME = "Compass Official Sync";
@@ -66,8 +78,15 @@ const HOSTED_CALLBACK_HOST = "oauth-e2e.example.com";
 const HOSTED_REDIRECT_URI = `https://${HOSTED_CALLBACK_HOST}/callback`;
 const REQUESTED_SCOPE = "mcp:read mcp:write offline_access";
 const DEV_USER_EMAIL = "dev@localhost.dev";
-/** Kept in sync with CONSENT_COOKIE_NAME in lib/oauth/consent.ts. */
-const CONSENT_COOKIE_NAME = "__Host-compass_oauth_consent";
+/**
+ * Retired by ADR 0015 and asserted as *absent*. A 90-day signed approval cookie
+ * is a second source of truth no server-side migration can revoke, which would
+ * have let an already-consented browser skip the binding screen entirely.
+ */
+const RETIRED_CONSENT_COOKIE_NAME = "__Host-compass_oauth_consent";
+/** Named so the teardown can find them however the run fails. */
+const SEEDED_AGENT_NAME = "E2E OAuth Seeded Agent";
+const INLINE_AGENT_NAME = "E2E OAuth Inline Agent";
 
 /** Mirrors globalSetup's schema resolution (`compass_dev`, or `<PGSCHEMA>_dev`). */
 const SCHEMA = process.env.PGSCHEMA ? `${process.env.PGSCHEMA}_dev` : "compass_dev";
@@ -80,6 +99,7 @@ function base64Url(input: Buffer): string {
 function newAuthorizationParams() {
   const codeVerifier = base64Url(randomBytes(32));
   return {
+    codeVerifier,
     codeChallenge: base64Url(createHash("sha256").update(codeVerifier).digest()),
     state: `e2e-state-${randomBytes(8).toString("hex")}`,
   };
@@ -143,6 +163,40 @@ async function codeCount(pool: pg.Pool, clientId: string): Promise<number> {
 async function waitForCallback(page: Page, callbackOrigin: string): Promise<URL> {
   await page.waitForURL((url) => url.origin === callbackOrigin, { timeout: 30_000 });
   return new URL(page.url());
+}
+
+/** Visual QA evidence only; the consent page contains no code or bearer token. */
+async function captureConsentScreenshots(page: Page): Promise<void> {
+  const originalViewport = page.viewportSize() ?? { width: 1280, height: 800 };
+  await mkdir("test-results/oauth-qa", { recursive: true });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.screenshot({
+    path: "test-results/oauth-qa/consent-desktop.png",
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: "test-results/oauth-qa/consent-mobile.png",
+    animations: "disabled",
+  });
+  await page.setViewportSize(originalViewport);
+}
+
+/** Connected Apps exposes binding metadata, never the bearer itself. */
+async function captureConnectedAppsScreenshots(page: Page): Promise<void> {
+  const originalViewport = page.viewportSize() ?? { width: 1280, height: 800 };
+  await mkdir("test-results/oauth-qa", { recursive: true });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.screenshot({
+    path: "test-results/oauth-qa/connected-apps-desktop.png",
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: "test-results/oauth-qa/connected-apps-mobile.png",
+    animations: "disabled",
+  });
+  await page.setViewportSize(originalViewport);
 }
 
 test("an MCP client registers, survives the login bounce, and the consent screen governs what it gets", async ({
@@ -311,21 +365,72 @@ test("an MCP client registers, survives the login bounce, and the consent screen
           anonPage.getByText(/Stay connected without asking you to sign in again/i)
         ).toBeVisible();
 
-        // The compensating control for there being no workspace picker.
+        // Still the compensating control, but now for the *binding's* reach
+        // rather than for every membership — under an agent binding the old
+        // enumeration would overstate the grant, which is the one failure this
+        // screen exists to prevent.
         await expect(
           anonPage.getByRole("heading", { name: /Where it will have access/i })
         ).toBeVisible();
-        await expect(anonPage.getByText(/E2E Test Org/)).toBeVisible();
-        await expect(anonPage.getByText("E2E Workspace", { exact: true })).toBeVisible();
-        await expect(anonPage.getByText("E2E Planning", { exact: true })).toBeVisible();
+        await expect(anonPage.getByText(/E2E Test Org/).first()).toBeVisible();
+        await expect(anonPage.getByText(/E2E Workspace/).first()).toBeVisible();
+        await expect(anonPage.getByText(/E2E Planning/).first()).toBeVisible();
 
-        // …and it must not undercount. A summary that says "1 workspace" while
-        // granting four is worse than no summary at all, so the number is
-        // checked against the memberships the database actually holds.
+        // Captured before approval: browser chrome is not part of Playwright's
+        // page screenshot, and no authorization code or bearer token exists yet.
+        await captureConsentScreenshots(anonPage);
+      });
+
+      // ── 5b. The binding section, which is the whole of ADR 0015 stage 2. ──
+      await test.step("the screen asks which identity the connection will act as", async () => {
+        await expect(anonPage.getByText("Act as", { exact: true })).toBeVisible();
+        // The seeded user has no agents, so inline creation is the only agent
+        // path and is selected by default.
+        await expect(
+          anonPage.getByRole("radio", { name: /Create a new agent/ })
+        ).toBeChecked();
+        await expect(anonPage.getByText(/Give it access to/)).toBeVisible();
+
+        // Unnamed: not approvable, and the reason is on screen beside the
+        // disabled button rather than hidden in the scroll region.
+        const allow = anonPage.getByRole("button", { name: "Allow access" });
+        await expect(allow).toBeDisabled();
+        await expect(anonPage.getByText(/Name the new agent to continue/)).toBeVisible();
+
+        // Unchecking everything is the dead-credential case, and it stays
+        // blocked even once the agent has a name.
+        await anonPage.getByRole("textbox", { name: "Name" }).fill(INLINE_AGENT_NAME);
+        await expect(allow).toBeEnabled();
+        // Scope to the binding fieldset rather than matching fixture names.
+        // The seeded user also administers the Compass meta workspace, whose
+        // label contains no "E2E"; leaving it checked would not be zero reach.
+        const boxes = anonPage.getByRole("group", { name: "Act as" }).getByRole("checkbox");
+        const count = await boxes.count();
+        expect(count, "the inline agent must have at least one grantable workspace").toBeGreaterThan(0);
+        for (let index = 0; index < count; index += 1) await boxes.nth(index).uncheck();
+        await expect(allow).toBeDisabled();
+        await expect(
+          anonPage.getByText(/An agent with no workspace access would fail every request/)
+        ).toBeVisible();
+      });
+
+      await test.step("the admin override is a disclosure, not a peer of the agent options, and needs a typed confirmation", async () => {
+        // Not in the radio group: a list of peers is how something gets chosen
+        // without being read.
+        await expect(anonPage.getByRole("radio", { name: /yourself/i })).toHaveCount(0);
+
+        // Collapsed, so the full membership enumeration is not even on screen
+        // until the user deliberately opens it.
         const summaryLine = anonPage.getByText(
           /Everything you can reach — \d+ organizations? and \d+ workspaces?/
         );
+        await expect(summaryLine).toBeHidden();
+
+        await anonPage.getByText("Authorize as yourself instead").click();
         await expect(summaryLine).toBeVisible();
+
+        // The enumeration must not undercount. A summary that says "1 workspace"
+        // while granting four is worse than no summary at all.
         const listedWorkspaces = Number((await summaryLine.innerText()).match(/and (\d+) workspaces?/)![1]);
         const seeded = await pool.query<{ workspaces: string }>(
           `SELECT COUNT(*)::text AS workspaces
@@ -336,8 +441,26 @@ test("an MCP client registers, survives the login bounce, and the consent screen
         );
         expect(
           listedWorkspaces,
-          "the consent screen must enumerate every workspace membership the user actually holds"
+          "the override must enumerate every workspace membership the user actually holds"
         ).toBe(Number(seeded.rows[0].workspaces));
+
+        // Opening it changes nothing on its own.
+        await expect(anonPage.getByRole("button", { name: "Allow full account access" })).toHaveCount(0);
+
+        await anonPage.getByRole("checkbox", { name: /I understand this grants my full account access/ }).check();
+        const destructive = anonPage.getByRole("button", { name: "Allow full account access" });
+        await expect(destructive, "arming it relabels the primary action").toBeVisible();
+        await expect(destructive, "…but the typed confirmation is still required").toBeDisabled();
+
+        await anonPage.getByRole("textbox", { name: new RegExp(`Type ${DEV_USER_EMAIL}`) }).fill("wrong@example.com");
+        await expect(destructive).toBeDisabled();
+        await anonPage.getByRole("textbox", { name: new RegExp(`Type ${DEV_USER_EMAIL}`) }).fill(DEV_USER_EMAIL);
+        await expect(destructive).toBeEnabled();
+
+        // Collapsing disarms, so the screen cannot sit in its most dangerous
+        // state with nothing visible to say so.
+        await anonPage.getByText("Authorize as yourself instead").click();
+        await expect(anonPage.getByRole("button", { name: "Allow access" })).toBeVisible();
       });
 
       await test.step("the client is visibly marked unverified despite calling itself official", async () => {
@@ -348,14 +471,15 @@ test("an MCP client registers, survives the login bounce, and the consent screen
       });
 
       await test.step("rendering the consent screen writes no approval cookie", async () => {
-        // The design requires the consent cookie be set only *after* an explicit
-        // approval, so a drive-by GET — an <img> tag, a prefetch, a link in an
-        // email — cannot plant state a later request would honour as consent.
+        // A drive-by GET — an <img> tag, a prefetch, a link in an email —
+        // must not plant state a later request would honour as consent. Since
+        // ADR 0015 the cookie is gone entirely, so this also guards against it
+        // being reintroduced on the GET.
         const cookies = await anonContext.cookies();
         expect(
           cookies.map((cookie) => cookie.name),
           "a GET of /oauth/authorize must not write the consent cookie"
-        ).not.toContain(CONSENT_COOKIE_NAME);
+        ).not.toContain(RETIRED_CONSENT_COOKIE_NAME);
       });
 
       // ── 6. Deny first — deliberately before approve, because approving
@@ -395,8 +519,9 @@ test("an MCP client registers, survives the login bounce, and the consent screen
         ).toBe(0);
       });
 
-      // ── 7. Approve. ──────────────────────────────────────────────────────
+      // ── 7. Approve, creating the agent inline. ───────────────────────────
       const approved = newAuthorizationParams();
+      let authorizationCode = "";
       await test.step("approving redirects to the registered redirect_uri with code, state and iss", async () => {
         await anonPage.goto(
           `/oauth/authorize?${authorizeQuery(loopbackClientId, loopbackRedirectUri, approved.state, approved.codeChallenge)}`
@@ -404,6 +529,12 @@ test("an MCP client registers, survives the login bounce, and the consent screen
         await expect(
           anonPage.getByRole("heading", { name: `Authorize ${LOOPBACK_CLIENT_NAME}` })
         ).toBeVisible();
+
+        // Agent selection and grant selection are one interaction: naming the
+        // agent is not enough on its own, and the default has every grantable
+        // workspace checked precisely so the common case is not the blocked one.
+        await anonPage.getByRole("textbox", { name: "Name" }).fill(INLINE_AGENT_NAME);
+        await expect(anonPage.getByRole("checkbox", { name: /E2E Workspace/ })).toBeChecked();
 
         await anonPage.getByRole("button", { name: "Allow access" }).click();
         const callback = await waitForCallback(anonPage, loopbackOrigin);
@@ -421,17 +552,201 @@ test("an MCP client registers, survives the login bounce, and the consent screen
           "RFC 9207 iss must match the issuer the AS metadata advertises"
         ).toBe(expectedIssuer);
         expect(callback.searchParams.get("error")).toBeNull();
+        authorizationCode = callback.searchParams.get("code")!;
 
         expect(
           await codeCount(pool, loopbackClientId),
           "approval must write exactly one authorization code"
         ).toBe(1);
       });
+
+      await test.step("the inline agent was created and granted through the ordinary grant model", async () => {
+        const { rows } = await pool.query<{ id: string; grants: string }>(
+          `SELECT a.id,
+                  (SELECT COUNT(*)::text FROM "${SCHEMA}".agent_workspace_grants g
+                    WHERE g.agent_id = a.id AND g.revoked_at IS NULL) AS grants
+             FROM "${SCHEMA}".agents a
+            WHERE a.name = $1`,
+          [INLINE_AGENT_NAME]
+        );
+        expect(rows, "the consent screen must have created the agent").toHaveLength(1);
+        expect(
+          Number(rows[0].grants),
+          "an agent with no grants is the dead credential the screen refuses to mint"
+        ).toBeGreaterThan(0);
+      });
+
+      // ── 8. The assertion the whole change is for: the *token* is an agent. ─
+      let accessToken = "";
+      await test.step("the exchanged token resolves to purpose AGENT, not USER", async () => {
+        const exchange = await request.post("/api/oauth/token", {
+          form: {
+            grant_type: "authorization_code",
+            code: authorizationCode,
+            redirect_uri: loopbackRedirectUri,
+            client_id: loopbackClientId,
+            code_verifier: approved.codeVerifier,
+          },
+        });
+        expect(exchange.status(), "the code must exchange for a token").toBe(200);
+        const tokens = await exchange.json();
+        expect(tokens.access_token, "the exchange must return an access token").toBeTruthy();
+        accessToken = tokens.access_token;
+
+        // The column, because that is what validateOAuthAccessToken branches on.
+        const stored = await pool.query<{ mode: string | null; agent: string | null }>(
+          `SELECT authorization_mode AS mode, agent_id AS agent
+             FROM "${SCHEMA}".oauth_tokens
+            WHERE client_id = $1 AND type = 'ACCESS'`,
+          [loopbackClientId]
+        );
+        expect(stored.rows[0].mode).toBe("AGENT");
+        expect(stored.rows[0].agent).toBeTruthy();
+
+        // …and the identity the server actually reports, because the column
+        // only matters if the branch reads it. Phase 1 answered "USER" here
+        // with every workspace attached; that is the gap being closed.
+        const identity = await request.post("/api/mcp", {
+          headers: {
+            authorization: `Bearer ${tokens.access_token}`,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          data: {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "get_current_identity", arguments: {} },
+          },
+        });
+        expect(identity.status(), "an agent-bound token must authenticate").toBe(200);
+        const body = await identity.text();
+        expect(body, "get_current_identity must report an AGENT purpose").toContain('"AGENT"');
+        expect(body).toContain(INLINE_AGENT_NAME);
+        // Authentication stamps lastUsedAt asynchronously. Wait on the durable
+        // value before navigating to Settings so the panel assertion cannot
+        // race the intentionally fire-and-forget write.
+        await expect.poll(async () => {
+          const used = await pool.query<{ last_used_at: Date | null }>(
+            `SELECT last_used_at FROM "${SCHEMA}".oauth_tokens
+              WHERE client_id = $1 AND type = 'ACCESS'`,
+            [loopbackClientId]
+          );
+          return used.rows[0]?.last_used_at ?? null;
+        }).not.toBeNull();
+      });
+
+      // ── 8b. The connection remains inspectable and revocable from Settings.
+      await test.step("Connected apps shows the binding and Revoke invalidates its bearer token", async () => {
+        await anonPage.goto("/settings/agents");
+        await expect(anonPage.getByRole("heading", { name: "Connected apps" })).toBeVisible();
+
+        const connection = anonPage.locator("article").filter({ hasText: LOOPBACK_CLIENT_NAME });
+        await expect(connection, "the exchanged client's connection must be listed").toHaveCount(1);
+        await expect(connection).toContainText(`127.0.0.1:${callbackPort}`);
+        await expect(connection).toContainText(INLINE_AGENT_NAME);
+        await expect(connection).toContainText("mcp:read, mcp:write, offline_access");
+        await expect(connection).toContainText(
+          /E2E Test Org(?: \[[^\]]+\])? · E2E Workspace · Read and write/
+        );
+        await expect(connection.getByText("Never", { exact: true }), "the MCP call must update last-used").toHaveCount(0);
+
+        await captureConnectedAppsScreenshots(anonPage);
+        // The component gives each generic-looking button a client-specific
+        // accessible name; the Playwright error-context snapshot confirms it.
+        await connection.getByRole("button", { name: `Revoke ${LOOPBACK_CLIENT_NAME}` }).click();
+        await expect(connection, "revoking must remove the remembered connection").toHaveCount(0);
+
+        const revokedIdentity = await request.post("/api/mcp", {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          data: {
+            jsonrpc: "2.0",
+            id: 2,
+            method: "tools/call",
+            params: { name: "get_current_identity", arguments: {} },
+          },
+        });
+        expect(revokedIdentity.status(), "a revoked Connected Apps token must fail authentication").toBe(401);
+      });
+
+      // ── 9. Selecting an existing agent, including the zero-reach refusal. ─
+      //      Run against the hosted client, which has no consent row yet.
+      await test.step("an agent with no grants is shown, selectable, and refused", async () => {
+        await pool.query(
+          `INSERT INTO "${SCHEMA}".agents (id, owner_user_id, name, status, created_at, updated_at)
+           SELECT gen_random_uuid(), u.id, $1, 'ACTIVE', NOW(), NOW()
+             FROM "${SCHEMA}".users u WHERE u.email = $2`,
+          [SEEDED_AGENT_NAME, DEV_USER_EMAIL]
+        );
+
+        const picked = newAuthorizationParams();
+        await anonPage.goto(
+          `/oauth/authorize?${authorizeQuery(hostedClientId, HOSTED_REDIRECT_URI, picked.state, picked.codeChallenge)}`
+        );
+        const radio = anonPage.getByRole("radio", { name: new RegExp(SEEDED_AGENT_NAME) });
+        await expect(radio, "an existing agent must be offered").toBeVisible();
+        await expect(
+          anonPage.getByText(/No workspace access — cannot be used for this connection/)
+        ).toBeVisible();
+
+        await radio.check();
+        // Selecting an existing agent offers no grant editing: widening a
+        // long-lived agent's standing reach from a screen the application named
+        // would be a privilege change smuggled into an authorization flow.
+        await expect(anonPage.getByRole("checkbox", { name: /E2E Workspace/ })).toHaveCount(0);
+
+        const allow = anonPage.getByRole("button", { name: "Allow access" });
+        await expect(allow, "a zero-reach agent must not be approvable").toBeDisabled();
+        await expect(
+          anonPage.getByText(/has not been granted access to any workspace/)
+        ).toBeVisible();
+        expect(
+          await codeCount(pool, hostedClientId),
+          "a blocked screen must not have issued anything"
+        ).toBe(0);
+      });
+
+      await test.step("granting that agent access unblocks the same selection", async () => {
+        await pool.query(
+          `INSERT INTO "${SCHEMA}".agent_workspace_grants
+             (id, agent_id, workspace_id, access, granted_by_user_id, created_at, updated_at)
+           SELECT gen_random_uuid(), a.id, w.id, 'WRITE', u.id, NOW(), NOW()
+             FROM "${SCHEMA}".agents a
+             JOIN "${SCHEMA}".users u ON u.email = $2
+             JOIN "${SCHEMA}".workspace_members m ON m.user_id = u.id
+             JOIN "${SCHEMA}".workspaces w ON w.id = m.workspace_id AND w.name = 'E2E Workspace'
+            WHERE a.name = $1
+            LIMIT 1`,
+          [SEEDED_AGENT_NAME, DEV_USER_EMAIL]
+        );
+
+        await anonPage.reload();
+        await anonPage.getByRole("radio", { name: new RegExp(SEEDED_AGENT_NAME) }).check();
+        await expect(anonPage.getByRole("button", { name: "Allow access" })).toBeEnabled();
+        // The reach shown is the grant, not the membership — one workspace,
+        // where the user belongs to several.
+        await expect(
+          anonPage.getByText(/E2E Workspace · .* · read and write/)
+        ).toBeVisible();
+      });
     } finally {
       await anonContext.close();
     }
   } finally {
+    for (const name of [SEEDED_AGENT_NAME, INLINE_AGENT_NAME]) {
+      await pool.query(
+        `DELETE FROM "${SCHEMA}".agent_workspace_grants
+          WHERE agent_id IN (SELECT id FROM "${SCHEMA}".agents WHERE name = $1)`,
+        [name]
+      );
+      await pool.query(`DELETE FROM "${SCHEMA}".agents WHERE name = $1`, [name]);
+    }
     for (const clientId of registeredClientIds) {
+      await pool.query(`DELETE FROM "${SCHEMA}".oauth_authorization_events WHERE client_id = $1`, [clientId]);
       await pool.query(`DELETE FROM "${SCHEMA}".oauth_authorization_codes WHERE client_id = $1`, [clientId]);
       await pool.query(`DELETE FROM "${SCHEMA}".oauth_tokens WHERE client_id = $1`, [clientId]);
       await pool.query(`DELETE FROM "${SCHEMA}".oauth_consents WHERE client_id = $1`, [clientId]);

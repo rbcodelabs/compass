@@ -52,7 +52,7 @@ who is connecting, not by which is newer:
 | | Connect by URL (OAuth) | API key |
 |---|---|---|
 | Setup | Paste the endpoint URL into your client and approve a consent screen | Generate a key in Settings and paste it into a config file |
-| Acts as | The person who approved it | The key's owner, or the service account |
+| Acts as | A selected or newly created agent by default; an eligible administrator may explicitly choose full-account access | The key's owner, registered agent, or service account |
 | Best for | A person connecting their own AI client | Server-to-server automation, scheduled jobs, anything unattended |
 | Expiry | Access tokens last an hour and refresh automatically | Until you revoke it (or its explicit expiry) |
 
@@ -76,18 +76,45 @@ protected-resource metadata, registers itself, and opens a browser. You sign in
 to Compass as normal (magic link or Google — there is no separate password for
 this), review a consent screen, and approve.
 
-**What you are approving.** The consent screen lists the scopes being granted
-and, by name, every organization and workspace the connection will be able to
-reach. That is deliberate: an OAuth connection carries the same reach a personal
-API key already has — everything you can reach, across every organization you
-belong to — so the screen names it rather than leaving you to assume it means
-one workspace.
+**What you are approving.** By default, an OAuth connection acts as an agent you
+select or create on the consent screen. The screen shows that agent's effective
+reach by name. Existing agents keep their current grants; creating an agent here
+can grant only workspaces where you are both a member and an administrator. The
+token then reaches only that agent's current, unrevoked workspace grants, at each
+grant's READ or WRITE level. Suspending the agent or revoking a grant takes effect
+on the next request.
 
-If your account still holds a membership in a workspace or organization that has
-since been deleted, the screen says so — "one membership could not be shown" —
-instead of quietly listing one fewer place. A deleted workspace grants no access,
-so nothing reachable is missing from the list; the note is there so you never have
-to wonder whether the list you are approving is the whole list.
+An agent with no workspace grants cannot be approved. If you cannot grant any
+workspace yourself, ask a workspace administrator to grant one of your agents
+access, then reconnect.
+
+**Full-account administrator override.** Eligible administrators can explicitly
+choose an override that acts as their human identity across every organization
+and workspace they can reach. This is not the default: the consent screen names
+the agent protections being waived and requires a typed confirmation before the
+full-account option can be approved. Eligibility is checked again when a refresh
+token rotates. Compass records the authorization choice itself with a dedicated,
+secret-free event for both interactive approval and remembered-consent replay;
+the override still does not create agent-style audit rows for every later call.
+
+Existing OAuth tokens do not silently keep their previous broad access. Migration
+`057_oauth_forced_reconsent` revokes every live OAuth token and removes remembered
+OAuth consent plus outstanding authorization codes, so an authorization started
+before the migration cannot mint a new legacy token afterward. Existing clients
+must show this consent choice once and receive a newly bound token. Code exchange
+and refresh also require the same current consent and binding; revoking or
+reconnecting a Connected App invalidates its outstanding codes as well as its
+live tokens. A later reconnect replays the remembered binding only while that
+binding remains valid.
+
+Manage these connections in **Settings → Agents → Connected apps**. Each entry
+shows the client and redirect host, its USER or agent binding, approved scopes,
+current workspace reach, and last-used time. **Revoke** disconnects the client
+and removes its remembered approval. **Reconnect** does the same invalidation,
+then starts authorization again so you can choose a different agent or binding.
+For a USER override, the workspace list is an advisory disclosure rather than
+an exhaustive account-access inventory: organization-level capabilities do not
+always correspond to an individual workspace row.
 
 Because both the approve and decline buttons stay pinned to the bottom of the
 card, a long list scrolls inside the card rather than pushing the buttons off the
@@ -114,10 +141,11 @@ sending you back through sign-in every hour. Compass issues a refresh token for
 every approved connection regardless, because several clients depend on refresh
 to recover from an expired token without prompting you.
 
-Within those scopes, an OAuth connection is subject to **exactly the same
-per-tool authorization as any other credential**. A scope never widens what you
-can reach; it only narrows what the client may do with the access you already
-have. A read-only connection calling a tool that writes gets an explicit
+Within those scopes, an agent-bound OAuth connection is subject to the same
+grant-scoped reach, human-only tool restrictions, administrator restrictions,
+agent liveness checks, and mutation audit trail as a registered-agent key. A
+scope never widens what the chosen identity can reach; it only narrows what the
+client may do. A read-only connection calling a tool that writes gets an explicit
 "insufficient scope" refusal rather than a silent failure.
 
 **Endpoints**, if you are implementing a client by hand:
