@@ -379,6 +379,61 @@ describe("update_roadmap_item MCP tool — isPrivate", () => {
   })
 })
 
+describe("update_roadmap_item MCP tool — Solution link", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({
+      id: "item-1",
+      workspaceId: "ws-1",
+      title: "Ship payments",
+      horizon: "NOW",
+      status: "ACTIVE",
+    })
+  })
+
+  it("attaches or replaces the linked Solution and returns its ID", async () => {
+    mockPrisma.roadmapItem.update.mockResolvedValue({
+      id: "item-1",
+      title: "Ship payments",
+      horizon: "NOW",
+      status: "ACTIVE",
+      solutionId: "solution-2",
+      isPrivate: false,
+      startDate: null,
+      endDate: null,
+    })
+
+    const result = await getHandler("update_roadmap_item")({
+      itemId: "item-1",
+      solutionId: "solution-2",
+    })
+
+    expect(mockPrisma.roadmapItem.update).toHaveBeenCalledWith({
+      where: { id: "item-1" },
+      data: { solutionId: "solution-2", updatedAt: expect.any(Date) },
+    })
+    expect(textOf(result)).toContain("Linked Solution: solution-2")
+    expect(result.structuredContent?.data).toMatchObject({ solutionId: "solution-2" })
+  })
+
+  it("preserves the existing Solution link when solutionId is omitted", async () => {
+    mockPrisma.roadmapItem.update.mockResolvedValue({
+      id: "item-1",
+      title: "Renamed",
+      horizon: "NOW",
+      status: "ACTIVE",
+      solutionId: "existing-solution",
+      isPrivate: false,
+      startDate: null,
+      endDate: null,
+    })
+
+    await getHandler("update_roadmap_item")({ itemId: "item-1", title: "Renamed" })
+
+    expect(mockPrisma.roadmapItem.update.mock.calls[0][0].data.solutionId).toBeUndefined()
+  })
+})
+
 describe("update_roadmap_item MCP tool — launch horizon guard", () => {
   // The handler now needs one read (the item, to resolve its workspace) to
   // decide which rejection message applies — the disabled-feature message

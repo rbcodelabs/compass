@@ -2086,7 +2086,7 @@ const _handler = createMcpHandler(
       {
         title: "Update Roadmap Item",
         description:
-          "Updates an existing roadmap item's horizon, status, title, description, dates, or links. " +
+          "Updates an existing roadmap item's horizon, status, title, description, dates, privacy, or links. " +
           "Omit link fields to preserve them; pass null to clear them. " +
           "Use horizon to move items between NOW / NEXT / LATER. Use status ARCHIVED to remove from view. " +
           "LAUNCHING and LAUNCHED cannot be set here — use set_launch_tier to move an item into LAUNCHING.",
@@ -2144,6 +2144,7 @@ const _handler = createMcpHandler(
           `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
             `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
             (updated.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
+            (updated.solutionId ? `\nLinked Solution: ${updated.solutionId}` : "") +
             (updated.startDate || updated.endDate
               ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
               : ""),
@@ -2153,6 +2154,7 @@ const _handler = createMcpHandler(
             horizon: updated.horizon,
             status: updated.status,
             isPrivate: updated.isPrivate,
+            solutionId: updated.solutionId,
             startDate: updated.startDate,
             endDate: updated.endDate,
           },
