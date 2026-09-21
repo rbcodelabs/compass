@@ -5,6 +5,7 @@ import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-dat
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
+import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 
 /**
  * Deletes a single workspace and every row that hangs off it, children before
@@ -19,6 +20,7 @@ import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
  * FeedbackAttachment, CanvasNodePosition).
  */
 export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceId: string, options: { skipBlobCleanup?: boolean } = {}) {
+  await assertDocumentPilotCleanupReviewed(prisma, workspaceId);
   const ids = async (
     rows: Promise<{ id: string }[]>
   ): Promise<string[]> => (await rows).map((r) => r.id);

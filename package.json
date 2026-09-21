@@ -50,6 +50,7 @@
     "@modelcontextprotocol/sdk": "1.26.0",
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
+    "@rbcodelabs/geode-headless": "file:vendor/rbcodelabs-geode-headless-0.1.0.tgz",
     "@simplewebauthn/browser": "^9.0.1",
     "@simplewebauthn/server": "^9.0.2",
     "@tanstack/react-table": "^9.1.2",

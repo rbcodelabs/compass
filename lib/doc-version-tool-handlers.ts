@@ -8,15 +8,16 @@
  * entity is required per .claude/pr-guidelines.md (create-without-list/get/update
  * is a recurring dogfood failure called out there).
  *
- * MCP tool handlers have no access to a resolved per-user identity --
- * validateMcpAuth is only checked once at the top of the route as a gate --
- * so authorName is always a required explicit input here, never derived.
+ * authorName is an explicit history display label. Pilot operation receipts
+ * bind the authenticated actor separately, so labels cannot impersonate a retry.
  */
 
 import getPrisma from "@/lib/db"
 import { ok, fail } from "@/lib/mcp-output"
 import { maybeSnapshotDocVersion, restoreDocVersionCore } from "@/lib/doc-versions"
 import { relativeTime } from "@/lib/relative-time"
+import { hydrateDocument, snapshotDocument, restoreDocument } from "@/lib/document-service"
+import { documentMcpActor } from "@/lib/document-mcp-actor"
 
 // ── create_doc_version ──────────────────────────────────────────────────────
 // Manual "named" snapshot -- always writes a version, bypassing the 5-minute
@@ -27,21 +28,29 @@ export async function createDocVersion({
   docId,
   label,
   authorName,
+  expectedRevision,
+  operationId,
 }: {
   docId: string
   label?: string
   authorName: string
+  expectedRevision?: string
+  operationId?: string
 }) {
   const prisma = getPrisma()
 
   const doc = await prisma.doc.findUnique({
     where: { id: docId },
-    select: { id: true, title: true },
+    select: { id: true, title: true, storageProvider: true },
   })
   if (!doc) {
     return fail(`Doc "${docId}" not found.`)
   }
 
+  if (doc.storageProvider === "GEODE") {
+    const version = await snapshotDocument(docId, { ...documentMcpActor(authorName), expectedRevision, operationId, label: label?.trim() || "Snapshot" })
+    return ok(`Named snapshot saved for doc "${doc.title}"\nID: ${version?.id}`, { id: version?.id, label: version?.label })
+  }
   await maybeSnapshotDocVersion(docId, {
     authorName,
     label: label?.trim() || "Snapshot",
@@ -123,6 +132,10 @@ export async function getDocVersion({ versionId }: { versionId: string }) {
     return fail(`Doc version "${versionId}" not found.`)
   }
 
+  const parent = await prisma.doc.findUnique({ where: { id: version.docId }, select: { workspaceId: true } })
+  if (version.storageProvider === "GEODE" && !parent) return fail("Document not found")
+  const hydrated = await hydrateDocument(parent?.workspaceId ?? "", version)
+
   const lines: string[] = [
     `# ${version.icon ? version.icon + " " : ""}${version.title}`,
     `ID: ${version.id}`,
@@ -133,9 +146,9 @@ export async function getDocVersion({ versionId }: { versionId: string }) {
     "",
   ].filter((line): line is string => line !== null)
 
-  lines.push(version.content ? version.content : "*(no content)*")
+  lines.push(hydrated.content ? hydrated.content : "*(no content)*")
 
-  return ok(lines.join("\n"), version)
+  return ok(lines.join("\n"), hydrated)
 }
 
 // ── restore_doc_version ─────────────────────────────────────────────────────
@@ -143,7 +156,7 @@ export async function getDocVersion({ versionId }: { versionId: string }) {
 // restoreDocVersion server action via restoreDocVersionCore -- see
 // lib/doc-versions.ts.
 
-export async function restoreDocVersion({ versionId }: { versionId: string }) {
+export async function restoreDocVersion({ versionId, expectedRevision, operationId }: { versionId: string; expectedRevision?: string; operationId?: string }) {
   const prisma = getPrisma()
 
   const version = await prisma.docVersion.findUnique({
@@ -154,12 +167,14 @@ export async function restoreDocVersion({ versionId }: { versionId: string }) {
     return fail(`Doc version "${versionId}" not found.`)
   }
 
-  const doc = await prisma.doc.findUnique({ where: { id: version.docId }, select: { id: true } })
+  const doc = await prisma.doc.findUnique({ where: { id: version.docId }, select: { id: true, storageProvider: true } })
   if (!doc) {
     return fail(`Doc "${version.docId}" not found.`)
   }
 
-  const restored = await restoreDocVersionCore(versionId, { authorName: "MCP Agent" })
+  const restored = doc.storageProvider === "GEODE"
+    ? await restoreDocument(versionId, { ...documentMcpActor(), expectedRevision, operationId })
+    : await restoreDocVersionCore(versionId, { authorName: "MCP Agent" })
   // restored can only be null here if the version/doc vanished between the
   // checks above and the core call -- an unlikely race, but handle it rather
   // than throw.

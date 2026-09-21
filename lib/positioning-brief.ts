@@ -8,6 +8,9 @@
  */
 import getPrisma from "@/lib/db";
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates";
+import { createDocument } from "@/lib/document-service";
+import { isDocumentPilotWorkspace } from "@/lib/document-storage";
+import { randomUUID } from "node:crypto";
 
 export type CreatePositioningBriefResult =
   | { ok: true; docId: string; title: string; created: boolean }
@@ -63,8 +66,7 @@ export async function createPositioningBriefCore(
     select: { sortOrder: true },
   });
 
-  const doc = await prisma.doc.create({
-    data: {
+  const data = {
       workspaceId,
       parentId: null,
       title: `Positioning Brief — ${item.title}`,
@@ -72,8 +74,10 @@ export async function createPositioningBriefCore(
       sortOrder: lastSibling ? lastSibling.sortOrder + 1 : 0,
       roadmapItemId,
       docType: "GTM_POSITIONING_BRIEF",
-    },
-  });
+    };
+  const doc = isDocumentPilotWorkspace(workspaceId)
+    ? await createDocument(data, { operationId: randomUUID(), authorName: "Compass" })
+    : await prisma.doc.create({ data });
 
   return { ok: true, docId: doc.id, title: doc.title, created: true };
 }

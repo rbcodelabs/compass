@@ -6,6 +6,7 @@ import { applyPreviewScenario, DEFAULT_PREVIEW_SCENARIO } from "./scenarios";
 import { getActiveSchema } from "@/lib/schema";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
+import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 
 export { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "./cookies";
 /** Revoke first. Retain the registry tombstone so failures can safely retry exact ownership. */
@@ -19,6 +20,9 @@ export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, 
   const userIds = [run.ownerUserId, run.viewerUserId];
   await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.previewAutomationSession.deleteMany({ where: { runId } });
+  // Revoke access first; preserve both workspaces if either has pilot evidence.
+  await assertDocumentPilotCleanupReviewed(prisma, run.workspaceId);
+  await assertDocumentPilotCleanupReviewed(prisma, run.isolatedWorkspaceId);
   for (const workspaceId of [run.workspaceId, run.isolatedWorkspaceId]) {
     const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId } });
     if (!workspace) continue;

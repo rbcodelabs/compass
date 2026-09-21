@@ -12,11 +12,12 @@ function fixture() {
     get(_target, property: string) {
       if (!models.has(property)) {
         const methods: Record<string, ReturnType<typeof vi.fn>> = {};
-        for (const method of ["findUnique", "deleteMany", "updateMany", "update", "count"]) {
+        for (const method of ["findUnique", "findFirst", "deleteMany", "updateMany", "update", "count"]) {
           methods[method] = vi.fn(async (args: unknown) => {
             calls.push({ model: property, operation: method, args });
             if (property === "previewAutomationRun" && method === "findUnique") return run;
             if (property === "workspace" && method === "findUnique") return { organizationId: run.orgId };
+            if (method === "findFirst") return null;
             return method === "count" ? 0 : { count: 1 };
           });
         }
@@ -30,6 +31,14 @@ function fixture() {
 beforeEach(() => cascade.mockReset().mockResolvedValue(undefined));
 
 describe("independent QA: exact cleanup ownership and recoverable revocation", () => {
+  it("revokes access but preserves both workspaces when pilot inventory remains", async () => {
+    const { db, calls } = fixture();
+    vi.mocked(db.docStorageObject.findFirst).mockResolvedValueOnce({ id: "object" } as never);
+    await expect(cleanupPreviewRun(db, run.id, run.deploymentId)).rejects.toThrow("explicit cleanup review");
+    expect(db.session.deleteMany).toHaveBeenCalled();
+    expect(cascade).not.toHaveBeenCalled();
+    expect(calls.some(call => call.model === "previewAutomationRun" && JSON.stringify(call.args).includes("cleanedAt"))).toBe(false);
+  });
   it("denies a run from another deployment before deleting anything", async () => {
     const { db, calls } = fixture();
     await expect(cleanupPreviewRun(db, run.id, "dpl_other")).rejects.toThrow();

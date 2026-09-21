@@ -39,7 +39,7 @@ const mockCapabilityPackVersion = { findMany: vi.fn(), findFirst: vi.fn(), delet
 const mockCanvasNodePosition = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
-const mockDoc = { deleteMany: vi.fn() };
+const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) };
 const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactLink = { deleteMany: vi.fn() };
@@ -60,6 +60,8 @@ const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
 
 const mockPrisma = {
+  docStorageObject: { findFirst: vi.fn().mockResolvedValue(null) },
+  docOperation: { findFirst: vi.fn().mockResolvedValue(null) },
   apiKey: { deleteMany: vi.fn() },
   agentMessage: { deleteMany: vi.fn() },
   agentAuditLog: { deleteMany: vi.fn() },
