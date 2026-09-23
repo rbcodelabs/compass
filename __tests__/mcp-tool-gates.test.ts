@@ -26,6 +26,7 @@ const mockPrisma = {
   reviewRequest: { findUnique: vi.fn() },
   decisionRecord: { findUnique: vi.fn() },
   researchStudy: { findUnique: vi.fn() },
+  experiment: { findUnique: vi.fn() },
   agent: { findFirst: vi.fn() },
   agentWorkspaceGrant: { findMany: vi.fn() },
   agentToolCall: { create: vi.fn(), update: vi.fn() },
@@ -67,6 +68,21 @@ const callTool = (name: string, actor: { userId: string | null }, args: any) =>
   runWithMcpActor(actor, () => (registeredTools[name] as (a: unknown) => Promise<unknown>)(args))
 
 beforeEach(() => vi.clearAllMocks())
+
+describe("experiment-study relationship gates", () => {
+  for (const tool of ["link_experiment_to_research_study", "unlink_experiment_from_research_study"]) {
+    it(`${tool} requires write scope and checks both endpoint workspaces`, async () => {
+      expect(requiredToolScope(tool)).toBe("mcp:write")
+      expect(AGENT_TOOL_POLICY[tool]).toBe("WRITE")
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      mockPrisma.experiment.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+      mockPrisma.researchStudy.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
+      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1", experimentId: "exp", studyId: "study" })).rejects.toThrow(/does not belong/)
+      mockPrisma.researchStudy.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1", experimentId: "exp", studyId: "study" })).resolves.toBeUndefined()
+    })
+  }
+})
 
 describe("update_roadmap_item source-workspace link boundaries", () => {
   const targets = [

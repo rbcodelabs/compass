@@ -179,6 +179,10 @@ export default async function globalTeardown() {
         [wsId]
       );
       await pool.query(
+        `DELETE FROM "${S}".experiment_research_study_links WHERE workspace_id = $1`,
+        [wsId]
+      );
+      await pool.query(
         `DELETE FROM "${S}".research_studies WHERE workspace_id = $1`,
         [wsId]
       );

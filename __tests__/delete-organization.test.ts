@@ -132,6 +132,7 @@ const mockPrisma = {
   researchParticipantToken: mockResearchDelete,
   researchSynthesis: mockResearchDelete,
   researchStudy: mockResearchDelete,
+  experimentResearchStudyLink: mockResearchDelete,
 };
 
 vi.mock("@/lib/db", () => ({

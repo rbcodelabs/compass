@@ -6,6 +6,7 @@ import { createResearchToken, normalizeResearchAppUrl, parseResearchGuide, type 
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { runResearchInterviewAgent } from "@/lib/research-agent"
 import { readSessionAnalysis, readStudySynthesis } from "@/lib/research-analysis"
+import { getStudyExperiments } from "@/lib/experiment-research-links"
 
 export class ResearchStudyError extends Error {}
 
@@ -362,7 +363,8 @@ function publicMetadata(study: StudyMetadata) {
 
 export async function getResearchStudy(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
   if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
-  return publicMetadata((await findMemberStudy(scope, actor, studyId)).study)
+  const { study } = await findMemberStudy(scope, actor, studyId)
+  return { ...publicMetadata(study), experiments: await getStudyExperiments(study.workspaceId, study.id) }
 }
 
 /**

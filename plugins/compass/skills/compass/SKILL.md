@@ -162,7 +162,9 @@ synthesized and individual findings promoted into Evidence.
 | `generate_research_guide` | Draft 5–8 editable neutral questions or usability tasks for a live URL or a Compass Artifact target. Does **not** create a study — review the guide before use |
 | `create_research_study` | Create a study with a reviewed guide. Defaults to `ACTIVE`, returning its new participant link **once**. Pass `status: "DRAFT"` to stage it with no link issued — protocol fields stay editable — then `activate_research_study` when ready |
 | `list_research_studies` | Page through study metadata and counts, newest first. Archived studies excluded unless `status: ARCHIVED` is requested. No transcripts or participant identities |
-| `get_research_study` | Study settings, guide and session count only. Never returns participant credentials, transcripts, identities, or private storage paths |
+| `get_research_study` | Study settings, guide, session count, and linked experiment summaries. Never returns participant credentials, transcripts, identities, or private storage paths |
+| `link_experiment_to_research_study` | Link an experiment and an existing customer interview or usability study in the same workspace; takes `workspaceId`, `experimentId`, `studyId` |
+| `unlink_experiment_from_research_study` | Remove only that relationship; takes `workspaceId`, `experimentId`, `studyId`; preserves both records |
 | `update_research_study` | Update study settings. After any session starts, only the name changes — protocol fields lock. Archived studies cannot be edited |
 | `activate_research_study` | Activate a DRAFT or CLOSED study and return a fresh participant link once. Cannot reactivate an archived study |
 | `close_research_study` | Close an active study and revoke PRIMARY participant links; existing research is retained |
@@ -175,6 +177,8 @@ synthesized and individual findings promoted into Evidence.
 | `list_research_syntheses` | Page through stored cross-session synthesis snapshots, newest first. Running/failed generations are not listed |
 | `generate_research_synthesis` | Store a synthesis **you wrote yourself** from saved transcripts. Despite the name it analyzes nothing — read every session page first, then submit. Compass re-verifies every quote and turn id and stores nothing if a citation is fabricated |
 | `promote_research_finding_to_evidence` | Promote one finding from a stored synthesis into linked Evidence on an opportunity, solution, or assumption, carrying its exact source turns. Idempotent; re-targeting an already-promoted finding is refused rather than overwritten |
+
+**Experiment relationships are many-to-many.** Both mutation tools return endpoint IDs and a `changed` flag; retries converge without duplicate links. Draft, active, and closed studies accept new links. Archived links remain readable and removable; PM interviews are excluded. Relationship changes do not alter protocols, lifecycle, results, or assumption validation, even after sessions begin. Research Capture must be enabled. OAuth write scope and delegated-agent WRITE permission apply; scoped PM-interview and synthesis agents cannot mutate these links.
 
 **Participant links are shown once.** `create_research_study` (when ACTIVE),
 `activate_research_study`, `issue_research_link`, and `rotate_research_link` each return
@@ -221,7 +225,7 @@ requests a decision, persist its request ID, report `AWAITING_DECISION`, and sto
 | Tool | Description |
 |---|---|
 | `list_experiments` | Filter by status and/or squad; recency-filterable (also accepts `endBefore`) |
-| `get_experiment` | Full details: hypothesis, method, kill condition, results |
+| `get_experiment` | Full details: hypothesis, method, kill condition, results, and linked research study summaries when Research Capture is enabled |
 | `create_experiment` | Create in DESIGNING status; link to an assumption |
 | `log_experiment_result` | Record an observation with optional metric + value |
 | `conclude_experiment` | PROCEED / KILL / ITERATE → auto-updates linked assumption status |
