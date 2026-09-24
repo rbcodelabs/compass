@@ -100,7 +100,7 @@ describe("setLaunchTier", () => {
   it("resolves the template, runs the core, and revalidates on success", async () => {
     await setLaunchTier(ITEM_ID, "TIER_1", WS);
     expect(resolveOrSeedTemplate).toHaveBeenCalledWith(WS, "TIER_1");
-    expect(setLaunchTierCore).toHaveBeenCalledWith(ITEM_ID, "TIER_1", expect.objectContaining({ id: "tmpl-1" }), WS);
+    expect(setLaunchTierCore).toHaveBeenCalledWith(ITEM_ID, "TIER_1", expect.objectContaining({ id: "tmpl-1" }), WS, mockPrisma);
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 

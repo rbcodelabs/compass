@@ -2466,3 +2466,92 @@ model OAuthAuthorizationEvent {
   @@index([clientId, createdAt], map: "idx_oauth_authorization_events_client_created")
   @@map("oauth_authorization_events")
 }
+
+model AnalyticsConnection {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  provider String @db.VarChar(40)
+  projectId String @map("project_id") @db.VarChar(255)
+  teamId String? @map("team_id") @db.VarChar(255)
+  secretEncrypted String? @map("secret_encrypted") @db.Text
+  generation Int @default(1)
+  enabled Boolean @default(true)
+  health String @default("CONNECTED") @db.VarChar(40)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@unique([workspaceId, provider], map: "idx_analytics_connection_workspace_provider")
+  @@map("analytics_connections")
+}
+
+model MetricDefinition {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  currentRevisionId String @map("current_revision_id") @db.Uuid
+  revision Int @default(1)
+  archived Boolean @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@index([workspaceId, archived], map: "idx_metric_definition_workspace")
+  @@map("metric_definitions")
+}
+
+model MetricRevision {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  metricId String @map("metric_id") @db.Uuid
+  revision Int
+  name String @db.VarChar(255)
+  unit String @db.VarChar(80)
+  provider String @db.VarChar(40)
+  connectionId String? @map("connection_id") @db.Uuid
+  queryJson String @map("query_json") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([metricId, revision], map: "idx_metric_revision_number")
+  @@index([workspaceId, connectionId], map: "idx_metric_revision_workspace")
+  @@map("metric_revisions")
+}
+
+model MetricBinding {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  metricId String @map("metric_id") @db.Uuid
+  revisionId String @map("revision_id") @db.Uuid
+  targetType String @map("target_type") @db.VarChar(30)
+  targetId String @map("target_id") @db.Uuid
+  baselineJson String @map("baseline_json") @db.Text
+  followupJson String @map("followup_json") @db.Text
+  targetValue Float? @map("target_value")
+  active Boolean @default(true)
+  lastError String? @map("last_error") @db.VarChar(80)
+  lastAttemptAt DateTime? @map("last_attempt_at")
+  lastAttemptId String? @map("last_attempt_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@index([workspaceId, targetType, targetId], map: "idx_metric_binding_target")
+  @@index([workspaceId, metricId], map: "idx_metric_binding_metric")
+  @@map("metric_bindings")
+}
+
+model MetricObservation {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  bindingId String @map("binding_id") @db.Uuid
+  revisionId String @map("revision_id") @db.Uuid
+  refreshKey String @unique(map: "idx_metric_observation_refresh") @map("refresh_key") @db.VarChar(64)
+  windowKind String @map("window_kind") @db.VarChar(12)
+  snapshotJson String @map("snapshot_json") @db.Text
+  dataJson String @map("data_json") @db.Text
+  retrievedAt DateTime @default(now()) @map("retrieved_at")
+  @@index([workspaceId, bindingId, retrievedAt], map: "idx_metric_observation_binding")
+  @@map("metric_observations")
+}
+
+model WorkspaceActivationState {
+  workspaceId String @id @map("workspace_id") @db.Uuid
+  collectionStartedAt DateTime @map("collection_started_at")
+  discoveryAt DateTime? @map("discovery_at")
+  deliveryAt DateTime? @map("delivery_at")
+  learningAt DateTime? @map("learning_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@map("workspace_activation_states")
+}

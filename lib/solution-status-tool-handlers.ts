@@ -1,4 +1,4 @@
-import getPrisma from "@/lib/db"
+import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import { fail, ok } from "@/lib/mcp-output"
 import type { SolutionStatus } from "@/lib/types"
 

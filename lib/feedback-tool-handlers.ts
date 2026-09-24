@@ -3,7 +3,7 @@
  * Extracted into this module so they can be unit-tested without the MCP server layer.
  */
 
-import getPrisma from "@/lib/db"
+import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { validateFeedbackInput } from "@/lib/feedback"

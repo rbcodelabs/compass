@@ -34,6 +34,7 @@ async function ensureFunctionalSchema(pool: pg.Pool) {
     "prisma/migrations/045_now_gate_shadow_evaluations/migration.sql",
     "prisma/migrations/046_shared_comments/migration.sql",
     "prisma/migrations/050_pm_interviews/migration.sql",
+    "prisma/migrations/061_product_analytics/migration.sql",
   ];
 
   const client = await pool.connect();

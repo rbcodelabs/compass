@@ -15,6 +15,7 @@ import {
 } from "./panel-parts";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
+import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
 
 type KeyResultData = {
   id: string;
@@ -111,6 +112,7 @@ export function KeyResultPanel({
       )}
 
       <PanelTitle title={data.title} edit={edit} />
+      <MeasurementsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ targetType: "KEY_RESULT", targetId: data.id }} compact />
 
       {/* Progress */}
       <div className="flex flex-col gap-1.5">
