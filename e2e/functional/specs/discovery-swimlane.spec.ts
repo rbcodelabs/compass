@@ -116,11 +116,19 @@ test.describe("Discovery swimlane (group by Opportunity)", () => {
     const validatedColumn = columnFor(lane, "Validated");
 
     await expect(ideaColumn.getByText(solutionTitle)).toBeVisible();
+    const statusWrite = page.waitForResponse(response =>
+      response.request().method() === "POST" &&
+      Boolean(response.request().headers()["next-action"]) &&
+      new URL(response.url()).pathname === `${base}/discovery`
+    );
     await dragTo(page, dragHandle, validatedColumn);
     await expect(validatedColumn.getByText(solutionTitle)).toBeVisible({ timeout: 10_000 });
     await expect(ideaColumn.getByText(solutionTitle)).not.toBeVisible();
 
     // Persisted — reload and confirm the status change survived.
+    const response = await statusWrite;
+    expect(response.ok()).toBe(true);
+    await response.finished();
     await page.reload();
     await page.waitForLoadState("networkidle");
     const laneAfterReload = laneFor(page, opportunityTitle);

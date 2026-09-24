@@ -20,6 +20,14 @@ test.describe("Task shared Discussion", () => {
     const targetId = new URL(page.url()).pathname.split("/").at(-1)!;
     const discussion = page.getByRole("region", { name: "Discussion" });
     await expect(discussion.getByText("No comments yet.")).toBeVisible();
+    async function expectHistoricalComment() {
+      await expect(discussion.getByText("Confirm scope", { exact: true })).toBeVisible();
+      await expect(discussion.getByRole("checkbox")).toBeChecked();
+      await expect(discussion.locator("del")).toHaveText("Old estimate");
+      await expect(discussion.locator("code")).toHaveText("handoff");
+      await expect(discussion.getByRole("link", { name: "notes" })).toHaveAttribute("href", "https://example.com/notes");
+      await expect(discussion.getByText("Ready for review.", { exact: true })).toBeVisible();
+    }
 
     // Existing API history must appear on the same task with source text intact.
     const history = "- [x] Confirm scope\n~~Old estimate~~ `handoff` [notes](https://example.com/notes)\n\nReady for review.";
@@ -27,7 +35,7 @@ test.describe("Task shared Discussion", () => {
     expect(created.ok()).toBe(true);
     const historicalComment = await created.json();
     await page.reload();
-    await expect(discussion.getByText(history)).toBeVisible();
+    await expectHistoricalComment();
     const stored = await page.request.get(`/api/comments?targetType=TASK&targetId=${targetId}`);
     expect(stored.ok()).toBe(true);
     expect((await stored.json()).items.find((item: { id: string }) => item.id === historicalComment.id).body).toBe(history);
@@ -48,6 +56,7 @@ test.describe("Task shared Discussion", () => {
     // The Overview/Links tabs are gone: the detail's other sections and the
     // Discussion are stacked on one surface, so assert they coexist rather than
     // switching between them.
+    await page.getByRole("button", { name: "More properties", exact: true }).click();
     await expect(page.getByText("Story points")).toBeVisible();
     await expect(page.getByRole("button", { name: "Add link" })).toBeVisible();
     await expect(discussion).toBeVisible();
@@ -80,7 +89,7 @@ test.describe("Task shared Discussion", () => {
     await root.getByRole("button", { name: /Delete comment by/ }).click();
     await expect(discussion.getByText("The support checklist is ready for review.")).not.toBeVisible();
     await page.reload();
-    await expect(discussion.getByText(history)).toBeVisible();
+    await expectHistoricalComment();
     await expect(discussion.getByText("The support checklist is ready for review.")).not.toBeVisible();
   });
 });

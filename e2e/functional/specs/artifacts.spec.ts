@@ -72,6 +72,7 @@ test.describe("Artifacts", () => {
     await page.getByRole("button", { name: "E2E Baseline Opportunity", exact: true }).click()
     await page.getByRole("link", { name: "Open full page" }).click()
     await page.getByRole("button", { name: solutionTitle, exact: true }).click()
+    await page.getByRole("button", { name: "Artifacts (1)", exact: true }).click()
     await expect(page.getByRole("link", { name: artifactTitle })).toBeVisible()
     await page.getByRole("link", { name: artifactTitle }).click()
     await page.getByRole("button", { name: "Unlink", exact: true }).click()

@@ -60,6 +60,7 @@ test.describe("Solution Current Plan + shared Discussion", () => {
 
       // Specialized plans and ordinary shared comments are distinct surfaces.
       await expect(panel.getByText("Current Plan", { exact: true })).toBeVisible();
+      await panel.getByRole("button", { name: "Current Plan", exact: true }).click();
       await expect(panel.getByText("No plan yet.")).toBeVisible();
       await expect(panel.getByRole("heading", { name: "Discussion" })).toBeVisible();
       await expect(panel.getByText("No comments yet.")).toBeVisible();
