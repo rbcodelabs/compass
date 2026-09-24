@@ -55,9 +55,9 @@ test.describe("Opportunity panel — solutions", () => {
 
     // ── 4. The panel refetches — no reopen needed ─────────────────────────
     await expect(panel.getByText(solTitle)).toBeVisible({ timeout: 15_000 });
-    // Section count reflects the new solution. This is the assertion that
+    // The shared Solutions tab reflects the new solution. This assertion
     // fails if onAdded/refresh is ever dropped.
-    await expect(panel.getByText("(1)", { exact: true })).toBeVisible({
+    await expect(panel.getByRole("tab", { name: "Solutions (1)", exact: true })).toBeVisible({
       timeout: 10_000,
     });
     await expect(panel.getByText("No solutions yet.")).not.toBeVisible();

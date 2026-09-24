@@ -24,7 +24,7 @@ Each panel shows the essentials for that item — its status, key fields, and th
 |---|---|
 | **Objective** | Status, cycle, and its Key Results |
 | **Key Result** | Progress, its Objective, and any linked Opportunities and Roadmap items |
-| **Opportunity** | Status, the Key Result it drives, linked feedback, its Solutions, and evidence |
+| **Opportunity** | The shared full-page detail: editable header, Key Result, Solutions, Evidence, OST Tree, configured scoring/custom fields, feedback, delivery tasks and Discussion |
 | **Solution** | Status, its Opportunity, assumptions, and roadmap links |
 | **Assumption** | Status, risk level, its Solution, and experiments |
 | **Experiment** | Status, kill condition, the assumption it tests, and results |
@@ -33,6 +33,8 @@ Each panel shows the essentials for that item — its status, key fields, and th
 | **Feedback** | Type, status, votes, linked Opportunity, and attachments |
 
 See [Tasks](/help/13-tasks) for what's specific to Task's fields — Epics/Subtasks, Owner, and Iteration.
+
+Opportunities use one responsive detail view in both the panel and full page. The available width controls the layout: Discussion appears beside the tabs on a wide surface and below the content in a narrow panel or phone. The header's **Discussion** shortcut jumps to it. Tabs and comment actions are the same in both surfaces; resizing does not reset your comment draft.
 
 ## Discuss work in context
 
@@ -79,6 +81,10 @@ You don't have to open the full page to make a quick change. In the panel you ca
 - **Edit the description** — select **Edit** beside it and type. Descriptions support Markdown, including paragraphs, headings, lists, links, emphasis, code, and tables. Press **Enter** to save a title, or click away to save a description; press **Escape** to cancel.
 
 Changes save immediately. For anything deeper, use **Open full page** at the top of the panel.
+
+Task and opportunity panels keep **Open full page** as a compact icon beside the pin and close controls, in both floating and pinned panels.
+Their compact summary puts status, priority, assignee, and due date below the title;
+expand **More properties** below subtasks for the remaining task fields.
 
 ## Shareable links
 

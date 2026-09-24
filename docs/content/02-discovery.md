@@ -57,11 +57,23 @@ Click **+ Add Opportunity** in any column. An opportunity needs:
 
 Write opportunity titles from the customer's perspective, not from a solution or feature angle. "Users can't find their billing history" is better than "Add billing history page."
 
+## One opportunity view, at every size
+
+The opportunity panel and full page share the same detail view. Select **Open full page** to give it more room: on wide surfaces, **Discussion** sits beside the main content. In a narrow panel or on a phone, it follows the content in a single column. Use **Discussion** in the header to jump to the conversation.
+
+Both surfaces support inline title and description editing, status, squad and Key Result changes, and the same **Solutions**, **Evidence**, and **OST Tree** tabs. **Scoring** appears when the workspace has an active scoring model; **Details** appears when opportunity custom fields are configured. Linked feedback, delivery tasks, interview history and decision actions remain attached to the opportunity.
+
+Comments are shared across the panel and full page. Add or reply to a comment, edit your own text, and resolve or reopen a thread using the existing Discussion controls. Switching content tabs or resizing the view keeps your unfinished comment in place. Navigating away is not a draft-saving action.
+
+![Opportunity full page with discussion beside its content](/screenshots/docs/opportunity-detail-page-desktop.png)
+
+![Opportunity discussion in the narrow layout](/screenshots/docs/opportunity-detail-discussion-mobile.png)
+
 ## Linked feedback and Key Results
 
 Both the opportunity page and its detail panel show **Linked feedback**, with a count and each item's status. Select a feedback title to open its detail panel and read the original signal. The list is newest first; opportunities without linked feedback show **No feedback linked.**
 
-Select the driving Key Result title to open its detail panel. On the full page, **change KR** remains a separate control for changing the relationship. Panel navigation preserves your underlying page, and browser Back returns to the previous item.
+Select the driving Key Result title to open its detail panel. **change KR** remains a separate control for changing the relationship in either surface. Panel navigation preserves your underlying page, and browser Back returns to the previous item.
 
 Linked Feedback and Evidence are separate records. Linking a feedback item does not create an Evidence record, so their counts can differ.
 

@@ -6,7 +6,7 @@
  * handful of layout primitives (section, field, relation row) — each panel
  * body is then mostly a declarative arrangement of these.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import Link from "next/link";
 import { ExternalLinkIcon, ChevronRightIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -53,10 +53,12 @@ export function useEntityDetail<T>(
 ) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState(false);
+  const generation = useRef(0);
 
   // Refetch without clearing the current data — for post-mutation reloads that
   // shouldn't flash the skeleton.
   const refresh = useCallback(() => {
+    const requestGeneration = ++generation.current;
     return fetch(
       `/api/panels/entity/${type}/${id}?orgSlug=${orgSlug}&workspaceSlug=${workspaceSlug}`
     )
@@ -64,8 +66,12 @@ export function useEntityDetail<T>(
         if (!r.ok) throw new Error("fetch failed");
         return r.json();
       })
-      .then((res) => setData(res.data as T))
-      .catch(() => setError(true));
+      .then((res) => {
+        if (requestGeneration !== generation.current) return;
+        setData(res.data as T);
+        setError(false);
+      })
+      .catch(() => { if (requestGeneration === generation.current) setError(true); });
   }, [type, id, orgSlug, workspaceSlug]);
 
   useEffect(() => {
@@ -74,11 +80,19 @@ export function useEntityDetail<T>(
     setData(null);
     setError(false);
     refresh();
+    return () => { generation.current += 1; };
   }, [refresh]);
 
   // Replace the panel's data in place — used by inline edits to reflect the
   // server's returned entity without a full reload/skeleton flash.
-  return { data, error, refresh, mutate: setData };
+  const mutate = useCallback((next: SetStateAction<T | null>) => {
+    // A saved edit supersedes any reads already in flight. Preserve React's
+    // functional-updater contract for existing hook consumers.
+    generation.current += 1;
+    setData(next);
+    setError(false);
+  }, []);
+  return { data, error, refresh, mutate };
 }
 
 /**
@@ -288,14 +302,16 @@ export function Section({
 export function Field({
   label,
   children,
+  layout = "stacked",
 }: {
   label: string;
   children: React.ReactNode;
+  layout?: "stacked" | "row";
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <p className={LABEL_CLASS}>{label}</p>
-      <div className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+    <div className={layout === "row" ? "grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] items-start gap-3 py-1.5" : "flex flex-col gap-1"}>
+      <p className={layout === "row" ? "text-xs font-medium text-muted-foreground pt-1" : LABEL_CLASS}>{label}</p>
+      <div className={`${layout === "row" ? "min-w-0 break-words " : ""}text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap`}>
         {children}
       </div>
     </div>
@@ -499,12 +515,14 @@ export function StatusSelect({
   options,
   map,
   edit,
+  label,
 }: {
   value: string;
   field: string;
   options: readonly string[];
   map: Record<string, StatusOption>;
   edit: EditContext;
+  label?: string;
 }) {
   const [saving, setSaving] = useState(false);
   const pending = useRef(false);
@@ -534,6 +552,7 @@ export function StatusSelect({
   return (
     <Select value={value} onValueChange={onChange} disabled={saving}>
       <SelectTrigger
+        aria-label={label}
         size="sm"
         className={`w-fit border-0 ${map[value]?.className ?? "bg-surface-inset text-text-secondary"}`}
       >

@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react"
+import { cleanup, render, screen } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { DecisionSources, parseTrackedDecisionPacket } from "@/components/decisions/decision-sources"
 
 const updatedAt = "2026-09-04T12:00:00.000Z"
 
 describe("Decision sources", () => {
+  // Vitest globals are disabled, so Testing Library cannot register auto-cleanup.
+  afterEach(cleanup)
+
+  beforeEach(() => {
+    expect(document.body).toBeEmptyDOMElement()
+  })
+
   it("renders titled navigable snapshots without exposing UUIDs", () => {
     render(<DecisionSources orgSlug="acme" workspaceSlug="product" entity={{ type: "EXPERIMENT", id: "11111111-1111-4111-8111-111111111111", title: "Five-second brand test", updatedAt }} sources={[
       { type: "ASSUMPTION", id: "22222222-2222-4222-8222-222222222222", title: "Visitors recognize the product", updatedAt },

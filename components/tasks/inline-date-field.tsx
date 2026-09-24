@@ -27,9 +27,10 @@ type Props = {
   field: string;
   edit: EditContext;
   placeholder?: string;
+  compact?: boolean;
 };
 
-export function InlineDateField({ value, field, edit, placeholder }: Props) {
+export function InlineDateField({ value, field, edit, placeholder, compact = false }: Props) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const ref = useRef<HTMLInputElement | null>(null);
@@ -82,7 +83,8 @@ export function InlineDateField({ value, field, edit, placeholder }: Props) {
       onClick={begin}
       disabled={saving}
       title="Click to edit"
-      className={`group/edit text-left rounded-md -mx-1 px-1 hover:bg-muted/60 transition-colors ${saving ? "opacity-60" : ""}`}
+      aria-label={`Due date: ${value ? formatDisplay(value) : "not set"}`}
+      className={`group/edit text-left rounded-md -mx-1 px-1 hover:bg-muted/60 transition-colors ${compact ? "min-h-7 [&>span]:text-xs" : ""} ${saving ? "opacity-60" : ""}`}
     >
       {value ? (
         <span className="text-sm">{formatDisplay(value)}</span>

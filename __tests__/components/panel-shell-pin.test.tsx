@@ -142,6 +142,29 @@ afterEach(() => {
 // ── Mode selection ───────────────────────────────────────────────────────────
 
 describe("PanelShell mode selection", () => {
+  it.each([
+    ["opportunity", "discovery", true], ["opportunity", "discovery", false],
+    ["task", "tasks", true], ["task", "tasks", false],
+  ] as const)("keeps one compact %s full-page action beside pin and close (%s, pinned=%s)", async (type, route, pinned) => {
+    panelState = { type, id: "entity-1" };
+    render(<PanelShell initialPin={{ pinned, width: PANEL_WIDTH_DEFAULT }} />);
+    const link = await screen.findByRole("link", { name: "Open full page" });
+    expect(screen.getAllByRole("link", { name: "Open full page" })).toHaveLength(1);
+    expect(link).toHaveAttribute("href", `/acme/product/${route}/entity-1`);
+    expect(link).toHaveTextContent("");
+    expect(link.parentElement).toContainElement(screen.getByRole("button", { name: pinned ? "Unpin panel" : "Pin panel" }));
+    expect(link.parentElement).toContainElement(screen.getByRole("button", { name: "Close panel" }));
+    expect(link.closest(pinned ? '[data-slot="pinned-panel"]' : '[data-slot="sheet-header"]')).not.toBeNull();
+  });
+  it("puts the accessible task full-page action beside pin and close", () => {
+    panelState = { type: "task", id: "task-1" };
+    render(<PanelShell initialPin={{ pinned: true, width: PANEL_WIDTH_DEFAULT }} />);
+    const link = screen.getByRole("link", { name: "Open full page" });
+    expect(link).toHaveAttribute("href", "/acme/product/tasks/task-1");
+    expect(link.parentElement).toContainElement(screen.getByRole("button", { name: "Unpin panel" }));
+    expect(link.parentElement).toContainElement(screen.getByRole("button", { name: "Close panel" }));
+  });
+
   it("renders the overlay Sheet when the cookie is absent (the load-bearing default)", () => {
     render(<PanelShell />);
     expect(aside()).toBeNull();

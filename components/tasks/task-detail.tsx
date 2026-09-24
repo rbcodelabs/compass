@@ -10,10 +10,10 @@
  *      own breadcrumb chrome.
  *
  * Composed from the same panel-parts.tsx primitives every other entity panel
- * uses (PanelContainer/PanelTitle/Section/Field/EditableText/StatusSelect/
+ * uses (PanelTitle/Section/Field/EditableText/StatusSelect/
  * RelationList), plus two new inline field components for assignee and due
  * date, and the existing TaskLinksPanel/CustomFieldsPanel/AddSubtaskForm
- * reused as-is. No tabs — stacked sections, same as every other panel.
+ * reused with compact task styling. No tabs: work comes before secondary properties.
  */
 import { Badge } from "@/components/ui/badge";
 import {
@@ -27,8 +27,6 @@ import {
   patchEntityField,
   PanelSkeleton,
   PanelError,
-  PanelContainer,
-  FullPageLink,
   PanelTitle,
   Section,
   Field,
@@ -194,11 +192,11 @@ function TaskSquadField({ data, edit }: { data: TaskDetailData; edit: EditContex
       value={data.squadId ?? NONE_SQUAD}
       onValueChange={handleChange}
     >
-      <ComboboxTrigger className="h-8 text-sm w-full justify-between">
+      <ComboboxTrigger aria-label="Squad" className="h-8 min-w-0 text-sm w-full justify-between">
         {activeSquad ? (
-          <span className="flex items-center gap-1.5">
+          <span className="flex min-w-0 items-center gap-1.5">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: activeSquad.color }} />
-            <ComboboxValue />
+            <ComboboxValue className="truncate" />
           </span>
         ) : (
           <ComboboxValue placeholder="No squad" />
@@ -243,24 +241,33 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
   };
 
   return (
-    <PanelContainer>
-      {variant === "panel" && <FullPageLink href={detailPath} />}
-
+    <div data-slot="task-detail" className={`flex min-w-0 flex-col gap-3 break-words pb-8 ${variant === "panel" ? "px-5" : ""}`}>
       <PanelTitle
         title={data.title}
-        status={{ value: data.status, ...STATUS_MAP[data.status] }}
-        edit={edit}
-        statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS_MAP }}
-      />
-
-      <StatusSelect
-        value={data.priority}
-        field="priority"
-        options={PRIORITY_ORDER}
-        map={PRIORITY_MAP}
         edit={edit}
       />
-
+      <div aria-label="Task summary" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+        <StatusSelect
+          value={data.status} field="status" options={STATUS_ORDER}
+          map={STATUS_MAP} edit={edit} label="Status"
+        />
+        <StatusSelect
+          value={data.priority} field="priority" options={PRIORITY_ORDER}
+          map={PRIORITY_MAP} edit={edit} label="Priority"
+        />
+        <div className="min-w-0 w-fit max-w-40">
+          <InlineAssigneeField
+            assigneeUserId={data.assigneeUserId}
+            assigneeAgentId={data.assigneeAgentId}
+            current={data.assignee}
+            ownerName={data.ownerName}
+            members={data.members}
+            edit={edit}
+            compact
+          />
+        </div>
+        <InlineDateField value={data.dueDate} field="dueDate" edit={edit} placeholder="Set due date" compact />
+      </div>
       <EditableText
         value={data.description}
         field="description"
@@ -270,60 +277,9 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
         className="text-sm text-foreground/80 leading-relaxed"
       />
 
-      <Field label="Assignee">
-        <InlineAssigneeField
-          assigneeUserId={data.assigneeUserId}
-          assigneeAgentId={data.assigneeAgentId}
-          current={data.assignee}
-          ownerName={data.ownerName}
-          members={data.members}
-          edit={edit}
-        />
-      </Field>
-
-      <Field label="Due date">
-        <InlineDateField value={data.dueDate} field="dueDate" edit={edit} />
-      </Field>
-
-      <Field label="Story points">
-        <EditableText
-          value={data.storyPoints != null ? String(data.storyPoints) : null}
-          field="storyPoints"
-          edit={edit}
-          type="number"
-          placeholder="Add points…"
-        />
-      </Field>
-
-      <Field label="Iteration">
-        <EditableText
-          value={data.iteration}
-          field="iteration"
-          edit={edit}
-          placeholder="e.g. Sprint 24"
-        />
-      </Field>
-
-      {data.squads.length > 0 && (
-        <Field label="Squad">
-          <TaskSquadField data={data} edit={edit} />
-        </Field>
-      )}
-
-      {data.parentTask && (
-        <Section label="Parent task">
-          <RelationList
-            items={[{ type: "task", id: data.parentTask.id, title: data.parentTask.title }]}
-            empty=""
-          />
-        </Section>
-      )}
-
-      <Section label="Subtasks" count={data.subtasks.length}>
-        <div className="flex flex-col gap-2">
-          {data.subtasks.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No subtasks yet.</p>
-          ) : (
+      {data.subtasks.length > 0 ? (
+        <Section label="Subtasks" count={data.subtasks.length}>
+          <div className="flex flex-col gap-2">
             <div className="flex flex-col gap-1">
               {data.subtasks.map((s) => (
                 <button
@@ -339,16 +295,47 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
                 </button>
               ))}
             </div>
-          )}
-          <AddSubtaskForm
-            workspaceId={data.workspaceId}
-            parentTaskId={taskId}
-            members={data.members}
-            revalidatePathStr={detailPath}
-            onAdd={() => refresh()}
+            <AddSubtaskForm
+              workspaceId={data.workspaceId}
+              parentTaskId={taskId}
+              members={data.members}
+              revalidatePathStr={detailPath}
+              onAdd={() => refresh()}
+            />
+          </div>
+        </Section>
+      ) : (
+        <AddSubtaskForm
+          workspaceId={data.workspaceId} parentTaskId={taskId}
+          members={data.members} revalidatePathStr={detailPath} onAdd={() => refresh()}
+        />
+      )}
+
+      <Section label="More properties" collapsible panelType="task">
+        <Field label="Story points" layout="row">
+          <EditableText
+            value={data.storyPoints != null ? String(data.storyPoints) : null}
+            field="storyPoints" edit={edit} type="number" placeholder="Add points…"
           />
-        </div>
+        </Field>
+        <Field label="Iteration" layout="row">
+          <EditableText value={data.iteration} field="iteration" edit={edit} placeholder="e.g. Sprint 24" />
+        </Field>
+        {data.squads.length > 0 && (
+          <Field label="Squad" layout="row">
+            <TaskSquadField data={data} edit={edit} />
+          </Field>
+        )}
+        <Field label="External owner" layout="row">
+          <EditableText value={data.ownerName} field="ownerName" edit={edit} placeholder="Add external owner…" />
+        </Field>
       </Section>
+
+      {data.parentTask && (
+        <Section label="Parent task">
+          <RelationList items={[{ type: "task", id: data.parentTask.id, title: data.parentTask.title }]} empty="" />
+        </Section>
+      )}
 
       <Section label="Links" count={data.links.length}>
         <TaskLinksPanel
@@ -363,11 +350,11 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
 
       {data.customFields.length > 0 && (
         <Section label="Details">
-          <CustomFieldsPanel fields={data.customFields} objectId={taskId} revalidatePathStr={detailPath} onSaved={refresh} />
+          <CustomFieldsPanel fields={data.customFields} objectId={taskId} revalidatePathStr={detailPath} onSaved={refresh} compact />
         </Section>
       )}
 
       <Discussion targetType="TASK" targetId={taskId} />
-    </PanelContainer>
+    </div>
   );
 }
