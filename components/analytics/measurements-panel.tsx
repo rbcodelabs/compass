@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 type Measurement = { binding: BindingDTO; observations: ObservationDTO[] };
 
@@ -231,7 +232,7 @@ function TrackingValue({ observation, binding }: { observation: ObservationDTO |
     {native ? typeof coverageStart === "string" && typeof coverageEnd === "string" && <p className="mt-3 text-xs text-muted-foreground">Snapshot coverage: {coverageStart} – {coverageEnd} (30 × 24 hours)</p> : <>
       {series.length > 0 && <DailyTrend series={series} window={window} />}
       <p className="mt-3 text-xs text-muted-foreground">{binding.metric.query.metric === "daily_visitors" ? "Visitors are shown per day—not added together as unique visitors for the period." : "Values are shown per day."} Missing data is not counted as zero.</p>
-      {series.length > 0 && <details className="mt-3 text-xs"><summary className="cursor-pointer text-muted-foreground">Daily values</summary><div className="mt-2 max-h-40 space-y-1 overflow-y-auto" aria-label="Tracking daily values">{series.map((point) => <div key={point.date} className="flex justify-between gap-3 tabular-nums"><span>{formatDate(point.date)}</span><span>{point.value} {binding.metric.unit}</span></div>)}</div></details>}
+      {series.length > 0 && <Collapsible className="mt-3 text-xs"><CollapsibleTrigger type="button" className="cursor-pointer text-muted-foreground">Daily values</CollapsibleTrigger><CollapsibleContent><div className="mt-2 max-h-40 space-y-1 overflow-y-auto" aria-label="Tracking daily values">{series.map((point) => <div key={point.date} className="flex justify-between gap-3 tabular-nums"><span>{formatDate(point.date)}</span><span>{point.value} {binding.metric.unit}</span></div>)}</div></CollapsibleContent></Collapsible>}
     </>}
     {!observation && <p className="mt-3 text-xs text-muted-foreground">Refresh to capture your first snapshot. No baseline needed.</p>}
     {observation?.data.completeness === "UNAVAILABLE" && <p className="mt-3 text-xs text-muted-foreground">No data returned for this snapshot.</p>}
