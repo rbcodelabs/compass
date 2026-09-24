@@ -2,6 +2,7 @@ import { createHash } from "crypto"
 import getPrisma from "@/lib/db"
 import { mcpResourceUri, parseScope } from "@/lib/oauth/constants"
 import { ACCESS_TOKEN_PREFIX, hashOAuthToken } from "@/lib/oauth/tokens"
+import { getManagedPilotContext } from "@/lib/preview-automation/managed-context"
 
 export type McpAuthResult = {
   valid: true
@@ -37,6 +38,10 @@ export async function validateMcpAuth(request: Request): Promise<McpAuthResult> 
   const authHeader = request.headers.get("authorization")
   if (!authHeader?.startsWith("Bearer ")) return { valid: false }
   const token = authHeader.slice(7)
+  let managed
+  try { managed = getManagedPilotContext() } catch { return { valid: false } }
+  // Signed-run pilots never inherit a shared service credential or OAuth actor.
+  if (managed && (token === process.env.MCP_API_KEY || token.startsWith(ACCESS_TOKEN_PREFIX))) return { valid: false }
 
   // Service-account fallback
   if (process.env.MCP_API_KEY && token === process.env.MCP_API_KEY) {
@@ -63,6 +68,12 @@ export async function validateMcpAuth(request: Request): Promise<McpAuthResult> 
   })
 
   if (!apiKey) return { valid: false }
+  if (managed) {
+    if (apiKey.purpose !== "USER" || apiKey.agentId || (apiKey.scopeWorkspaceId && apiKey.scopeWorkspaceId !== managed.workspaceId)) return { valid: false }
+    const run = await prisma.previewAutomationRun.findUnique({ where: { id: managed.runId } })
+    if (!run || run.workspaceId !== managed.workspaceId || run.deploymentId !== managed.deploymentId || run.revokedAt || run.expiresAt.getTime() <= Date.now() ||
+      ![run.ownerUserId, run.viewerUserId].includes(apiKey.userId)) return { valid: false }
+  }
   if (apiKey.agentId && apiKey.purpose !== "AGENT") return { valid: false }
   if (apiKey.purpose === "AGENT") {
     if (process.env.COMPASS_AGENTS_ENABLED !== "1" || !apiKey.agentId) return { valid: false }
@@ -89,7 +100,7 @@ export async function validateMcpAuth(request: Request): Promise<McpAuthResult> 
     agentId: apiKey.agentId,
     credentialId: apiKey.id,
     credentialType: "API_KEY",
-    scopeWorkspaceId: apiKey.scopeWorkspaceId,
+    scopeWorkspaceId: managed?.workspaceId ?? apiKey.scopeWorkspaceId,
     scopeConversationId: apiKey.scopeConversationId,
     scopeClaimId: apiKey.scopeClaimId,
   }
