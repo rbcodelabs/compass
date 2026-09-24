@@ -43,6 +43,8 @@ test("opportunity discussion persists between full page and panel", async ({ pag
   await page.goto(`${base}/discovery?detail=opportunity:${id}`);
   const panel = page.locator('[data-slot="sheet-content"]');
   const panelDiscussion = panel.getByRole("region", { name: "Discussion", exact: true });
+  await expect(panel.getByRole("link", { name: "Open full page" })).toHaveCount(1);
+  await expect(panel.locator('[data-slot="sheet-header"]').getByRole("link", { name: "Open full page" })).toHaveAttribute("href", `${base}/discovery/${id}`);
   await expect(panelDiscussion.getByText("Test the shared recap with new teams.", { exact: true })).toBeVisible();
   await panelDiscussion.getByRole("button", { name: /Edit comment by / }).first().click();
   await panelDiscussion.getByRole("textbox", { name: /Edit comment by / }).fill("Test the shared recap this week.");
@@ -102,6 +104,8 @@ test("opportunity layout responds to available width without losing comment draf
   await page.screenshot({ path: "public/screenshots/docs/opportunity-detail-panel-desktop.png", fullPage: true, animations: "disabled", style: "nextjs-portal { visibility: hidden; }" });
   await page.getByRole("button", { name: "Pin panel", exact: true }).click();
   const pinned = page.locator('[data-slot="pinned-panel"]');
+  await expect(pinned.getByRole("link", { name: "Open full page" })).toHaveCount(1);
+  await expect(pinned.locator('[data-slot="opportunity-detail"]').getByRole("link", { name: "Open full page" })).toHaveCount(0);
   await expect(pinned.getByRole("region", { name: "Discussion", exact: true }).getByText("The interviews point to a gap in the handoff.", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await pinned.getByRole("button", { name: title, exact: true }).scrollIntoViewIfNeeded();

@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, type ComponentProps } from "react";
 import { MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { useEntityDetail, PanelSkeleton, PanelError, FullPageLink, Section, type EditContext } from "@/components/panels/panel-parts";
+import { useEntityDetail, PanelSkeleton, PanelError, Section, type EditContext } from "@/components/panels/panel-parts";
 import { Discussion } from "@/components/comments/discussion";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { OpportunityHeader } from "./opportunity-header";
@@ -84,7 +84,6 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
     <div data-slot="opportunity-detail" data-variant={variant} className={`@container min-w-0 break-words pb-8 ${variant === "panel" ? "px-5" : ""}`}>
       <div className="flex min-w-0 flex-col gap-5">
         {error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">Could not refresh opportunity. Showing the last loaded details.<Button variant="outline" size="sm" onClick={refresh}>Retry refresh</Button></div>}
-        {variant === "panel" && <FullPageLink href={detailPath} />}
         <OpportunityHeader opportunity={data} squads={data.squads ?? []} availableKeyResults={data.availableKeyResults ?? []} revalidatePathStr={detailPath} edit={edit} onChanged={refresh} />
         <div className="flex flex-wrap items-center gap-3">
           {scoringModel && <ScoreBadge score={toScoreSummary(data.score, scoringModel)} scoringHref={`${detailPath}?tab=scoring`} />}

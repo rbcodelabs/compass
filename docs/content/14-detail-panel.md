@@ -82,7 +82,7 @@ You don't have to open the full page to make a quick change. In the panel you ca
 
 Changes save immediately. For anything deeper, use **Open full page** at the top of the panel.
 
-Task panels keep **Open full page** as an icon beside the pin and close controls.
+Task and opportunity panels keep **Open full page** as a compact icon beside the pin and close controls, in both floating and pinned panels.
 Their compact summary puts status, priority, assignee, and due date below the title;
 expand **More properties** below subtasks for the remaining task fields.
 
