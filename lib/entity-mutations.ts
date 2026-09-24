@@ -168,8 +168,9 @@ export async function updateEntityField(
   // updateMany's where doesn't support the relation filters the indirect
   // entities need, so verify with the scoped findFirst first, then update by
   // id. Same access boundary as reads (entityScopeWhere).
+  const mutationClient = _actor.kind === "USER" ? getHumanActivityPrisma() : getPrisma();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const model = ((_actor.kind === "USER" ? getHumanActivityPrisma() : getPrisma()) as any)[config.model];
+  const model = (mutationClient as any)[config.model];
   const exists = await model.findFirst({
     where: entityScopeWhere(type, id, workspaceId),
     select: { id: true },
@@ -177,7 +178,7 @@ export async function updateEntityField(
   if (!exists) return { ok: false, status: 404, error: "Not found" };
 
   if (type === "opportunity" || type === "solution" || type === "assumption" || type === "experiment" || type === "roadmapItem") {
-    await captureWorkspaceMutation(getPrisma(), type, "update", { actorType: _actor.kind === "USER" ? "USER" : "SYSTEM", actorId: _actor.id }, id, async tx => {
+    await captureWorkspaceMutation(mutationClient, type, "update", { actorType: _actor.kind === "USER" ? "USER" : "SYSTEM", actorId: _actor.id }, id, async tx => {
       // The editable model has already been selected and validated above.
       const delegate = tx[config.model as typeof type] as unknown as { update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<{ id: string }> };
       return delegate.update({ where: { id }, data });

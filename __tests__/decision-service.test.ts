@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const updates = vi.hoisted(() => ({ enabled: false, record: vi.fn() }))
-vi.mock("@/lib/workspace-updates-capture", () => ({ workspaceUpdatesAvailable: async () => updates.enabled, recordWorkspaceUpdate: updates.record }))
+vi.mock("@/lib/workspace-updates-capture", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/workspace-updates-capture")>(), workspaceUpdatesAvailable: async () => updates.enabled, recordWorkspaceUpdate: updates.record }))
 
 const mockPrisma = {
   reviewRevision: { findUnique: vi.fn() },

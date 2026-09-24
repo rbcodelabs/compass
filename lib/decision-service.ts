@@ -1,5 +1,5 @@
 import getPrisma from "@/lib/db"
-import { workspaceUpdatesAvailable, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
+import { workspaceUpdatesAvailable, recordWorkspaceUpdate, retryUpdatesTransaction } from "@/lib/workspace-updates-capture"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 
 export type DecisionActor = { kind: "SERVICE" } | { kind: "USER"; userId: string }
@@ -63,7 +63,7 @@ export async function recordDecision(input: {
   const capture = await workspaceUpdatesAvailable(prisma)
   const expectedIdentity = { actorUserId, revisionId: input.revisionId, optionId: input.optionId, fingerprint: input.fingerprint }
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await retryUpdatesTransaction(prisma, async (tx) => {
       const replay = await tx.decisionRecord.findUnique({ where: { idempotencyKey: input.idempotencyKey } })
       if (replay) {
         assertIdempotentIdentity(replay, expectedIdentity)

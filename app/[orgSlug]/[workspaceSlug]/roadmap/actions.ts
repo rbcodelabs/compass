@@ -2,7 +2,7 @@
 
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
-import { workspaceUpdatesAvailable, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
+import { workspaceUpdatesAvailable, recordWorkspaceUpdate, retryUpdatesTransaction } from "@/lib/workspace-updates-capture"
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
@@ -322,7 +322,7 @@ export async function rescheduleRoadmapItem(
   const prisma = getPrisma();
   const capture = await workspaceUpdatesAvailable(prisma);
   const actor = capture ? await workspaceMutationActor("UI") : null;
-  const item = await prisma.$transaction(async (tx) => {
+  const item = await retryUpdatesTransaction(prisma, async (tx) => {
     const database = tx as unknown as Database;
     const current = await requireRoadmapItem(database, itemId, workspaceId);
     if (current.status !== "ACTIVE") throw new Error(ROADMAP_ITEM_NOT_FOUND);

@@ -29,9 +29,9 @@ events in the same transaction. Existing compound transactions append directly.
   records and repeated status assignments do not generate stories.
 - Evidence reattachment is a new event for the destination; prior events retain
   their original group reference. Current source authorization still applies.
-- Experiment conclusion and its assumption update retain the existing two-write
-  workflow. Each write is atomic with its own event; they are not one combined
-  business transaction.
+- UI experiment conclusion and its assumption update share one transaction with
+  both events. MCP conclusion retains its existing two-write workflow; each write
+  is atomic with its own event.
 - Existing legacy solution-comment writes retain compensating cleanup around
   shared-comment mirroring; the shared comment and its event commit atomically.
 - Capture records the authenticated actor; it is not a replacement for source

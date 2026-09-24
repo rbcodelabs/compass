@@ -1,4 +1,7 @@
 import type { AppPrismaClient, AppTransactionClient } from "./db";
+import getPrisma from "./db";
+import { hasToolTransaction } from "./mcp-tool-db";
+import { getMcpActivityPrisma } from "./analytics/activity";
 export interface WorkspaceUpdateInput {
   workspaceId: string;
   entityType: string;
@@ -15,11 +18,14 @@ export async function workspaceUpdatesAvailable(
   prisma: AppPrismaClient,
 ): Promise<boolean> {
   if (process.env.WORKSPACE_UPDATES_ENABLED !== "1") return false;
+  const database = hasToolTransaction() ? getPrisma() : prisma;
   try {
     await Promise.all([
-      prisma.workspaceUpdatesState.findFirst({ select: { workspaceId: true } }),
-      prisma.workspaceUpdateEvent.findFirst({ select: { id: true } }),
-      prisma.workspaceUpdatesReadState.findFirst({ select: { id: true } }),
+      database.workspaceUpdatesState.findFirst({
+        select: { workspaceId: true },
+      }),
+      database.workspaceUpdateEvent.findFirst({ select: { id: true } }),
+      database.workspaceUpdatesReadState.findFirst({ select: { id: true } }),
     ]);
     return true;
   } catch (error) {
@@ -58,6 +64,7 @@ export async function retryUpdatesTransaction<T>(
   prisma: AppPrismaClient,
   callback: (tx: AppTransactionClient) => Promise<T>,
 ): Promise<T> {
+  if (hasToolTransaction()) return callback(getMcpActivityPrisma());
   for (let attempt = 0; ; attempt++) {
     try {
       return await prisma.$transaction(callback);
@@ -89,6 +96,12 @@ export async function withWorkspaceUpdates<T>(
   prisma: AppPrismaClient,
   callback: (tx: AppTransactionClient, capture: boolean) => Promise<T>,
 ): Promise<T> {
+  // A PM tool may already run inside its receipt transaction. Reuse that
+  // transaction (and its commit-scoped analytics), never nest or replay it.
+  if (hasToolTransaction()) {
+    const enabled = await workspaceUpdatesAvailable(getPrisma());
+    return callback(getMcpActivityPrisma(), enabled);
+  }
   if (!(await workspaceUpdatesAvailable(prisma)))
     return callback(prisma, false);
   return retryUpdatesTransaction(prisma, (tx) => callback(tx, true));

@@ -14,7 +14,7 @@
  * Products/Compass/Designs/decision-directions-2026-09-12.md.
  */
 import getPrisma from "@/lib/db"
-import { workspaceUpdatesAvailable, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
+import { workspaceUpdatesAvailable, recordWorkspaceUpdate, retryUpdatesTransaction } from "@/lib/workspace-updates-capture"
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
 import { eligibleTaskAssignees, type TaskAssignee } from "@/lib/task-assignment"
 
@@ -103,7 +103,7 @@ export async function createDecisionFollowUpTask(input: {
   const capture = await workspaceUpdatesAvailable(prisma)
   const actor = capture ? await workspaceMutationActor("UI") : null
 
-  return prisma.$transaction(async (tx) => {
+  return retryUpdatesTransaction(prisma, async (tx) => {
     const task = await tx.task.create({
       data: {
         workspaceId: input.workspaceId,
