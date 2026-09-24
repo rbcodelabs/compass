@@ -150,7 +150,7 @@ export async function editRoadmapItem(
   workspaceId: string,
   data: {
     title?: string;
-    description?: string;
+    description?: string | null;
     startDate?: Date | null;
     endDate?: Date | null;
     isPrivate?: boolean;
@@ -195,7 +195,7 @@ export async function editRoadmapItem(
 
   const updateData: {
     title?: string;
-    description?: string;
+    description?: string | null;
     startDate?: Date | null;
     endDate?: Date | null;
     isPrivate?: boolean;

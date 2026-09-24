@@ -78,9 +78,23 @@ You don't have to open the full page to make a quick change. In the panel you ca
 
 - **Change the status** (or a Roadmap item's horizon) from the dropdown at the top.
 - **Rename** an item — click its title and type.
-- **Edit the description** — select **Edit** beside it and type. Descriptions support Markdown, including paragraphs, headings, lists, links, emphasis, code, and tables. Press **Enter** to save a title, or click away to save a description; press **Escape** to cancel.
+- **Edit the description** — select **Edit** beside it to open the Markdown editor. Use **Rich** for formatted writing or **Markdown** to edit the source directly.
 
-Changes save immediately. For anything deeper, use **Open full page** at the top of the panel.
+Titles save with **Enter**; **Escape** cancels a title edit. Descriptions use explicit **Save** and **Cancel** actions: clicking away never saves. Press **⌘ Enter** on Mac or **Ctrl Enter** on Windows/Linux to save a changed description. A failed save keeps your draft and shows an error so you can retry.
+
+The description toolbar supports undo/redo, bold, italic, strikethrough, headings, links, bulleted and numbered lists, quotes, inline code, code blocks, horizontal rules, and tables. Scroll the toolbar horizontally in a narrow panel or on your phone. Switch modes to inspect the Markdown behind your formatting.
+
+Place the cursor in a table to add or delete rows and columns. Table cells support one paragraph each; edits that would require unsupported Markdown table structure are not applied, and the editor explains why.
+
+![Rich description editing on desktop](/screenshots/docs/markdown-description-desktop.png)
+
+Descriptions containing raw HTML, images, task lists, footnotes, or code-fence metadata open in source mode with Rich disabled, preserving content the rich editor cannot safely represent. Images and raw HTML are not displayed in rendered descriptions. Source edits retain your Markdown; saving continues to trim outer whitespace, and an empty description clears the field.
+
+The same editor is available on full-page Tasks and in the Roadmap **Edit** dialog. In that dialog, **Save changes** saves all item fields together; **Cancel** discards them. Creation forms retain their compact text fields.
+
+![Description editing on mobile](/screenshots/docs/markdown-description-mobile.png)
+
+For anything deeper, use **Open full page** at the top of the panel.
 
 Task and opportunity panels keep **Open full page** as a compact icon beside the pin and close controls, in both floating and pinned panels.
 Their compact summary puts status, priority, assignee, and due date below the title;
