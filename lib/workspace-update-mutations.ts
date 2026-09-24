@@ -119,7 +119,7 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
     if (operation === "update" && changed.length === 0 && !evidenceAttached)
       return result;
     const workspaceId = await scope(tx, model, after);
-    let entityType: string = types[model];
+    const entityType: string = types[model];
     let entityId = after.id;
     let groupType: string = entityType;
     let groupId = after.id;
