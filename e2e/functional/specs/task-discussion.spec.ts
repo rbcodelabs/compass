@@ -21,7 +21,7 @@ test.describe("Task shared Discussion", () => {
     const discussion = page.getByRole("region", { name: "Discussion" });
     await expect(discussion.getByText("No comments yet.")).toBeVisible();
     async function expectHistoricalComment() {
-      await expect(discussion.getByText("Confirm scope", { exact: true })).toBeVisible();
+      await expect(discussion.getByRole("listitem")).toContainText("Confirm scope");
       await expect(discussion.getByRole("checkbox")).toBeChecked();
       await expect(discussion.locator("del")).toHaveText("Old estimate");
       await expect(discussion.locator("code")).toHaveText("handoff");
