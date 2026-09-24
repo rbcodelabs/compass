@@ -165,7 +165,8 @@ describe("Roadmap dashboard workspace layout", () => {
     );
 
     const column = container.querySelector("section")!;
-    expect(column.className).toContain("min-w-[280px] flex-1 overflow-hidden md:h-full");
+    expect(column).toHaveClass("min-w-[280px]", "flex-1", "md:overflow-hidden", "md:h-full");
+    expect(column).not.toHaveClass("overflow-hidden");
 
     const body = container.querySelector("#roadmap-column-NOW")!;
     expect(body.className).toContain("md:max-h-none");

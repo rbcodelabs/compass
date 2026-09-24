@@ -82,7 +82,7 @@ function ExperimentColumn({
       title={label}
       count={items.length}
       accent={accent}
-      className="min-w-[280px] flex-1 overflow-hidden md:h-full"
+      className="min-w-[280px] flex-1 md:overflow-hidden md:h-full"
       bodyRef={setNodeRef}
       bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`}
     >

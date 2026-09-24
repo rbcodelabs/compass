@@ -66,7 +66,7 @@ export function RoadmapColumn({
       count={items.length}
       limit={limit}
       accent={accent}
-      className="min-w-[280px] flex-1 overflow-hidden md:h-full"
+      className="min-w-[280px] flex-1 md:overflow-hidden md:h-full"
       bodyRef={setNodeRef}
       bodyId={`roadmap-column-${horizon}`}
       bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${

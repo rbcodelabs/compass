@@ -93,7 +93,8 @@ describe("Experiments and Discovery board layout", () => {
 
       // Each column insets itself and fills the track height...
       const column = container.querySelector("section");
-      expect(column?.className).toContain("min-w-[280px] flex-1 overflow-hidden md:h-full");
+      expect(column).toHaveClass("min-w-[280px]", "flex-1", "md:overflow-hidden", "md:h-full");
+      expect(column).not.toHaveClass("overflow-hidden");
 
       // ...while only ITS OWN body (not the column) scrolls vertically.
       const body = column?.querySelector(":scope > div");

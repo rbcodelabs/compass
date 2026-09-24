@@ -102,7 +102,7 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, o
   const hasMetadata = solution._count.assumptions > 0 || solution._count.evidence > 0;
 
   return (
-    <div ref={setNodeRef} style={style} className="touch-none group">
+    <div ref={setNodeRef} style={style} className="group">
       <EntityCard
         interactive
         title={

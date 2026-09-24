@@ -33,6 +33,8 @@ Toggle between **Board** and **List** at the top of the Tasks page — `?view=li
 
 Both views read the same underlying data — there's no separate "lite" data model for the list view.
 
+On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
+
 ## Creating and Assigning Tasks
 
 Click **Add task** at the bottom of any column (or **Add subtask** on a task's detail page) to create one. A task has:

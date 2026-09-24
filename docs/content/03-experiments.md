@@ -18,6 +18,8 @@ Experiments let you test the riskiest assumptions attached to your solutions bef
 
 ## The Experiment Lifecycle
 
+On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
+
 Experiments move through these statuses:
 
 - **DESIGNING** — The experiment is being planned. You're writing the hypothesis, deciding on the method, and defining kill conditions.

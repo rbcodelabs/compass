@@ -68,7 +68,7 @@ export function ExperimentCard({ experiment, revalidatePathStr }: ExperimentCard
   }
 
   return (
-    <div ref={setNodeRef} style={style} className="touch-none group">
+    <div ref={setNodeRef} style={style} className="group">
       <EntityCard
         interactive
         className="w-full p-3 data-[dragging=true]:shadow-[var(--shadow-panel)] data-[dragging=true]:ring-2 data-[dragging=true]:ring-ring/30"

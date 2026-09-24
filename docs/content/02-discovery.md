@@ -22,6 +22,8 @@ In Table view, select the chevron next to an opportunity to reveal its child sol
 
 ## The Opportunity Board
 
+On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
+
 Opportunities move through four columns on the kanban board:
 
 - **EXPLORING** — Newly created opportunities that are being investigated. You've heard this problem from customers but haven't yet assessed its importance or frequency.

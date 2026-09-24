@@ -100,6 +100,8 @@ Ideas (as opposed to Bugs) aren't included in this panel — they're expected to
 
 ## Drag to Reorder
 
+On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
+
 Within each horizon, drag cards to reorder them. Order within a horizon communicates relative priority: items higher in the list are higher priority. This ordering is persisted and visible to all workspace members.
 
 ## Launch Tiers & Checklists
