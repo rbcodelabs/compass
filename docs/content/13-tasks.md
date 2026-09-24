@@ -28,7 +28,7 @@ Cancelled tasks are collapsed behind a **Show cancelled** toggle above the board
 
 Toggle between **Board** and **List** at the top of the Tasks page — `?view=list` in the URL takes you straight there.
 
-- **Board** — the familiar column-per-status kanban. Drag a card to a new column to change its status; drag within a column to reorder (order communicates relative priority, same as the Roadmap).
+- **Board** — the familiar column-per-status kanban. Drag a card to a new column to change its status; drag within a column to reorder. That priority order is persisted for the whole column, including when you reorder a filtered view, and is visible to every workspace member.
 - **List** — a flat, filterable table with one row per task, indented by hierarchy depth. This is the better view for the "PM tracking a handful of initiatives" use case, where a full kanban is more structure than the work needs.
 
 Both views read the same underlying data — there's no separate "lite" data model for the list view.
@@ -93,6 +93,11 @@ Linking works from either side:
 
 - **From the task** — the **Links** section of its detail panel links to (or unlinks from) any of those object types.
 - **From the object** — an Opportunity, Solution, Experiment, Objective, Key Result, Feedback Item, or Doc's own detail panel has a **Delivery tasks** section where you can create a new task inline (title, optional assignee) or link an existing unlinked task, without leaving the panel or navigating to the Tasks board first. A Roadmap Item's sidebar had this first; it now works identically everywhere else a task can point.
+
+When you add a link from a task, one search field looks across every supported
+item type in the workspace. Use the type chips to narrow a broad result set,
+then select a result to review its title and linking context before confirming.
+The picker supports the arrow keys to move through results and Enter to select.
 
 A task's owning **Squad** is not part of this link system — it's a first-class field on the task itself (same as Opportunities and Roadmap Items), so squad-based board filtering stays a simple, exact match.
 

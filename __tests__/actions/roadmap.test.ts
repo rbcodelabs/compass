@@ -547,6 +547,11 @@ describe("editRoadmapItem", () => {
     mockOpportunity.findFirst.mockResolvedValue({ id: "opp-2", title: "Retention friction" });
   });
 
+  it("persists an explicitly cleared description as null", async () => {
+    await editRoadmapItem("item-1", "ws-1", { ...editData, description: null });
+    expect(mockRoadmapItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ description: null }) }));
+  });
+
   it("rejects an unauthenticated caller before querying roadmap data", async () => {
     mockAuth.mockResolvedValue(null);
 

@@ -95,6 +95,36 @@ describe("EditItemDialog opportunity link", () => {
     );
   });
 
+  it("submits Markdown through the dialog transaction and preserves the draft on failure", async () => {
+    renderDialog();
+    editRoadmapItemMock.mockRejectedValueOnce(new Error("Save failed"));
+    fireEvent.click(screen.getByRole("button", { name: "Markdown" }));
+    const source = screen.getByRole("textbox", { name: "Description Markdown source" });
+    fireEvent.change(source, { target: { value: "## A plan\n\n- [ ] Preserve tasks" } });
+    fireEvent.blur(source);
+    expect(editRoadmapItemMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByRole("alert");
+    expect(source).toHaveValue("## A plan\n\n- [ ] Preserve tasks");
+    expect(editRoadmapItemMock).toHaveBeenCalledWith("item-1", "ws-1", expect.objectContaining({ description: "## A plan\n\n- [ ] Preserve tasks" }));
+  });
+
+  it("submits null when the description is cleared", async () => {
+    renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: "Markdown" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Description Markdown source" }), { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(editRoadmapItemMock).toHaveBeenCalledWith("item-1", "ws-1", expect.objectContaining({ description: null })));
+  });
+
+  it("cancels without invoking the server action", () => {
+    const { onOpenChange } = renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(editRoadmapItemMock).not.toHaveBeenCalled();
+  });
+
   it("keeps an archived current opportunity visible when it is absent from the picker list", () => {
     renderDialog(vi.fn(), vi.fn(), [opportunities[1]]);
 

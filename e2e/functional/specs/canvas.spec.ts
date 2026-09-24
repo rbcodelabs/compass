@@ -178,8 +178,8 @@ test.describe("Canvas", () => {
     // unscoped getByText(assumptionTitle) matches both the still-expanded
     // Solutions-tab card and the OST tree — a pre-existing ambiguity also
     // present in assumption-experiment-linking.spec.ts.
-    await page.getByRole("tab", { name: "OST Tree" }).click();
-    const ostTreePanel = page.getByLabel("OST Tree");
+    await page.getByRole("tab", { name: "OST", exact: true }).click();
+    const ostTreePanel = page.getByRole("tabpanel", { name: "OST", exact: true });
     await expect(ostTreePanel.getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
     await ostTreePanel.getByRole("link", { name: "Test this assumption →" }).click();
     await page.waitForLoadState("networkidle");
@@ -207,6 +207,7 @@ test.describe("Canvas", () => {
     await page.getByRole("button", { name: solTitle, exact: true }).click();
     const promotePanel = page.locator('[data-slot="sheet-content"]');
     await expect(promotePanel).toBeVisible();
+    await promotePanel.getByRole("button", { name: "Roadmap", exact: true }).click();
     await promotePanel.getByRole("button", { name: /Promote to Roadmap/i }).click();
     await promotePanel.getByRole("combobox").filter({ hasText: "Now" }).click();
     await page.getByRole("option", { name: "Next" }).click();

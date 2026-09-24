@@ -3,9 +3,11 @@
 //
 // Endpoint: POST /api/mcp  (Streamable HTTP transport)
 
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { createMcpHandler } from "mcp-handler"
 import { z } from "zod"
-import getPrisma from "@/lib/db"
+import { analyticsToolSchemas, handleAnalyticsTool } from "@/lib/analytics/tool-handlers"
+import { getMcpActivityPrisma as getPrisma, withAnalyticsTool } from "@/lib/analytics/activity"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import type { EntityLinkType } from "@/lib/entity-links"
 import { validateMcpAuth } from "@/lib/mcp-auth"
@@ -215,7 +217,7 @@ const _handler = createMcpHandler(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ) => (server.registerTool as (...a: any[]) => any)(name, meta, async (args: any, extra: any) => {
       const actor = { ...getMcpActor(), authorizedWorkspaceId: undefined }
-      return runWithMcpActor(actor, () => withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", () => applyToolGate(name, actor, args ?? {}), () => withInterviewMutation(name, args ?? {}, () => handler(args, extra))))
+      return runWithMcpActor(actor, () => withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", () => applyToolGate(name, actor, args ?? {}), () => withAnalyticsTool(name, () => withInterviewMutation(name, args ?? {}, () => handler(args, extra)))))
     })
 
     register("get_current_identity", { title: "Current Identity", description: "Returns the authenticated caller and currently accessible workspaces.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, async () => {
@@ -842,10 +844,10 @@ const _handler = createMcpHandler(
         if (!existing) {
           return fail(`Key Result "${keyResultId}" not found.`)
         }
-        await Promise.all([
-          prisma.checkIn.create({ data: { keyResultId, value, note: note?.trim() } }),
-          prisma.keyResult.update({ where: { id: keyResultId }, data: { current: value } }),
-        ])
+        await prisma.$transaction(async tx => {
+          await tx.checkIn.create({ data: { keyResultId, value, note: note?.trim() } })
+          await tx.keyResult.update({ where: { id: keyResultId }, data: { current: value } })
+        })
         const pct = existing.target > 0 ? ((value / existing.target) * 100).toFixed(1) : "N/A"
         return ok(
           `**Check-in logged** for "${existing.title}"\nCurrent: ${value}${existing.unit ? " " + existing.unit : ""} / ${existing.target} (${pct}%)` + (note ? `\nNote: ${note}` : ""),
@@ -1124,7 +1126,7 @@ const _handler = createMcpHandler(
         if (!workspace) {
           return fail(`Workspace "${workspaceId}" not found.`)
         }
-        const opportunity = await prisma.opportunity.create({
+        const opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", "MCP", undefined, tx => tx.opportunity.create({
           data: {
             workspaceId,
             title: title.trim(),
@@ -1134,7 +1136,7 @@ const _handler = createMcpHandler(
             linkedKeyResultId: keyResultId ?? null,
             squadId: squadId ?? null,
           },
-        })
+        }))
         return ok(
           withUrlLine(
             `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
@@ -1191,7 +1193,7 @@ const _handler = createMcpHandler(
         if (!opp) {
           return fail(`Opportunity "${opportunityId}" not found.`)
         }
-        await prisma.opportunity.update({ where: { id: opportunityId }, data: { status } })
+        await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", opportunityId, tx => tx.opportunity.update({ where: { id: opportunityId }, data: { status } }))
         return ok(
           `**"${opp.title}"** moved from ${opp.status} → ${status}`,
           { id: opportunityId, title: opp.title, status, previousStatus: opp.status },
@@ -1216,7 +1218,7 @@ const _handler = createMcpHandler(
         if (!opp) {
           return fail(`Opportunity "${opportunityId}" not found.`)
         }
-        await prisma.opportunity.update({ where: { id: opportunityId }, data: { linkedKeyResultId: keyResultId } })
+        await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", opportunityId, tx => tx.opportunity.update({ where: { id: opportunityId }, data: { linkedKeyResultId: keyResultId } }))
         return ok(
           keyResultId
             ? `Linked opportunity "${opp.title}" to KR ${keyResultId}.`
@@ -1247,7 +1249,7 @@ const _handler = createMcpHandler(
         if (!opp) {
           return fail(`Opportunity "${opportunityId}" not found.`)
         }
-        const solution = await prisma.solution.create({ data: { opportunityId, title: title.trim(), description: description?.trim() } })
+        const solution = await captureWorkspaceMutation(prisma, "solution", "create", "MCP", undefined, tx => tx.solution.create({ data: { opportunityId, title: title.trim(), description: description?.trim() } }))
         return ok(
           withUrlLine(
             `**Solution created** for "${opp.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
@@ -1322,7 +1324,7 @@ const _handler = createMcpHandler(
         if (!solution) {
           return fail(`Solution "${solutionId}" not found.`)
         }
-        const assumption = await prisma.assumption.create({ data: { solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED" } })
+        const assumption = await captureWorkspaceMutation(prisma, "assumption", "create", "MCP", undefined, tx => tx.assumption.create({ data: { solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED" } }))
         return ok(
           withUrlLine(
             `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
@@ -1513,7 +1515,7 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const item = await prisma.roadmapItem.create({ data: {
+        const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "MCP", undefined, tx => tx.roadmapItem.create({ data: {
             workspaceId,
             title: solution.title,
             horizon,
@@ -1522,7 +1524,7 @@ const _handler = createMcpHandler(
             opportunityId: solution.opportunity.id,
             squadId: solution.opportunity.squadId ?? null,
             isPrivate: isPrivate ?? false,
-          } })
+          } }))
         return ok(
           withUrlLine(
             `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
@@ -1714,9 +1716,9 @@ const _handler = createMcpHandler(
           const a = await prisma.assumption.findUnique({ where: { id: assumptionId } })
           if (!a) return fail(`Assumption "${assumptionId}" not found.`)
         }
-        const experiment = await prisma.experiment.create({
+        const experiment = await captureWorkspaceMutation(prisma, "experiment", "create", "MCP", undefined, tx => tx.experiment.create({
           data: { workspaceId, title: title.trim(), hypothesis: hypothesis.trim(), method: method.trim(), killCondition: killCondition.trim(), assumptionId: assumptionId ?? null, squadId: squadId ?? null, status: "DESIGNING" },
-        })
+        }))
         return ok(
           withUrlLine(
             `**Experiment created**\nID: ${experiment.id}\nTitle: ${experiment.title}\nStatus: DESIGNING\nKill Condition: ${experiment.killCondition}`,
@@ -1756,9 +1758,9 @@ const _handler = createMcpHandler(
         if (!experiment) {
           return fail(`Experiment "${experimentId}" not found.`)
         }
-        const result = await prisma.experimentResult.create({
+        const result = await captureWorkspaceMutation(prisma, "experimentResult", "create", "MCP", undefined, tx => tx.experimentResult.create({
           data: { experimentId, note: note.trim(), metric: metric?.trim(), value: value ?? null },
-        })
+        }))
         return ok(
           `**Result logged** for "${experiment.title}"\nID: ${result.id}\nNote: ${result.note}` +
             (result.metric ? `\nMetric: ${result.metric}${result.value != null ? " = " + result.value : ""}` : ""),
@@ -1803,15 +1805,15 @@ const _handler = createMcpHandler(
         }
 
         const newStatus = conclusion === "KILL" ? "KILLED" : conclusion === "NOT_PURSUED" ? "NOT_PURSUED" : "COMPLETE"
-        await prisma.experiment.update({
+        await captureWorkspaceMutation(prisma, "experiment", "update", "MCP", experimentId, tx => tx.experiment.update({
           where: { id: experimentId },
           data: { status: newStatus, conclusion, conclusionReason: trimmedReason || null, endDate: new Date() },
-        })
+        }))
 
         let assumptionUpdate = ""
         if (experiment.assumptionId) {
           const assumptionStatus = conclusion === "PROCEED" ? "VALIDATED" : conclusion === "KILL" ? "INVALIDATED" : "UNTESTED"
-          await prisma.assumption.update({ where: { id: experiment.assumptionId }, data: { status: assumptionStatus } })
+          await captureWorkspaceMutation(prisma, "assumption", "update", "MCP", experiment.assumptionId, tx => tx.assumption.update({ where: { id: experiment.assumptionId! }, data: { status: assumptionStatus } }))
           assumptionUpdate = `\nLinked assumption updated → ${assumptionStatus}`
         }
 
@@ -2141,7 +2143,7 @@ const _handler = createMcpHandler(
             ...(isPrivate !== undefined ? { isPrivate } : {}),
             updatedAt: new Date(),
         }
-        const updated = await prisma.roadmapItem.update({ where: { id: itemId }, data: updateData })
+        const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "MCP", itemId, tx => tx.roadmapItem.update({ where: { id: itemId }, data: updateData }))
         return ok(
           `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
             `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
@@ -2195,7 +2197,7 @@ const _handler = createMcpHandler(
           orderBy: { sortOrder: "desc" },
           select: { sortOrder: true },
         })
-        const item = await prisma.roadmapItem.create({ data: {
+        const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "MCP", undefined, tx => tx.roadmapItem.create({ data: {
             workspaceId,
             title: title.trim(),
             horizon,
@@ -2208,7 +2210,7 @@ const _handler = createMcpHandler(
             startDate: startDate ? new Date(startDate) : undefined,
             endDate: endDate ? new Date(endDate) : undefined,
             isPrivate: isPrivate ?? false,
-          } })
+          } }))
         return ok(
           withUrlLine(
             `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
@@ -2404,19 +2406,19 @@ const _handler = createMcpHandler(
         const data = { squadId }
         switch (objectType) {
           case "opportunity":
-            await prisma.opportunity.update({ where: { id: objectId }, data })
+            await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", objectId, tx => tx.opportunity.update({ where: { id: objectId }, data }))
             break
           case "experiment":
-            await prisma.experiment.update({ where: { id: objectId }, data })
+            await captureWorkspaceMutation(prisma, "experiment", "update", "MCP", objectId, tx => tx.experiment.update({ where: { id: objectId }, data }))
             break
           case "roadmap_item":
-            await prisma.roadmapItem.update({ where: { id: objectId }, data: { ...data, updatedAt: new Date() } })
+            await captureWorkspaceMutation(prisma, "roadmapItem", "update", "MCP", objectId, tx => tx.roadmapItem.update({ where: { id: objectId }, data: { ...data, updatedAt: new Date() } }))
             break
           case "objective":
             await prisma.objective.update({ where: { id: objectId }, data })
             break
           case "task":
-            await prisma.task.update({ where: { id: objectId }, data: { ...data, updatedAt: new Date() } })
+            await captureWorkspaceMutation(prisma, "task", "update", "MCP", objectId, tx => tx.task.update({ where: { id: objectId }, data: { ...data, updatedAt: new Date() } }))
             break
         }
         return ok(
@@ -3302,6 +3304,21 @@ const _handler = createMcpHandler(
       weight: z.number().describe("Scalar multiplier applied before the metric enters the formula (1 = no extra weighting)"),
       direction: z.enum(["POSITIVE", "NEGATIVE"]).describe("POSITIVE increases the score, NEGATIVE decreases it (e.g. Effort)"),
     })
+
+    register("list_analytics_connections", { description: "list analytics connections. Workspace-scoped analytics; no credentials. Saved observations are evidence, not automatic conclusions.", inputSchema: analyticsToolSchemas.list_analytics_connections, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("list_analytics_connections", args))
+    register("list_metrics", { description: "list metrics. Workspace-scoped analytics; no credentials. Saved observations are evidence, not automatic conclusions.", inputSchema: analyticsToolSchemas.list_metrics, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("list_metrics", args))
+    register("get_metric", { description: "get metric. Workspace-scoped analytics; no credentials. Saved observations are evidence, not automatic conclusions.", inputSchema: analyticsToolSchemas.get_metric, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("get_metric", args))
+    register("create_metric", { description: "create metric. Workspace-scoped analytics; no credentials. Saved observations are evidence, not automatic conclusions.", inputSchema: analyticsToolSchemas.create_metric, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("create_metric", args))
+    register("update_metric", { description: "update metric. Workspace-scoped analytics; no credentials. Saved observations are evidence, not automatic conclusions.", inputSchema: analyticsToolSchemas.update_metric, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("update_metric", args))
+    register("archive_metric", { description: "archive metric. Workspace-scoped analytics; no credentials. Saved observations are evidence, not automatic conclusions.", inputSchema: analyticsToolSchemas.archive_metric, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("archive_metric", args))
+    register("list_metric_bindings", { description: "list metric bindings. Workspace-scoped analytics; no credentials. Saved observations are evidence, not automatic conclusions.", inputSchema: analyticsToolSchemas.list_metric_bindings, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("list_metric_bindings", args))
+    register("get_metric_binding", { description: "get one metric binding, including inactive historical bindings. Workspace and target authorization are enforced.", inputSchema: analyticsToolSchemas.get_metric_binding, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("get_metric_binding", args))
+    register("link_metric", { description: "link metric. Workspace-scoped analytics; no credentials. Saved observations are evidence, not automatic conclusions.", inputSchema: analyticsToolSchemas.link_metric, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("link_metric", args))
+    register("update_metric_binding", { description: "replace an active metric binding with revised comparison windows or target value. The old binding and its observations remain immutable evidence.", inputSchema: analyticsToolSchemas.update_metric_binding, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("update_metric_binding", args))
+    register("unlink_metric", { description: "unlink metric. Workspace-scoped analytics; no credentials. Saved observations are evidence, not automatic conclusions.", inputSchema: analyticsToolSchemas.unlink_metric, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("unlink_metric", args))
+    register("refresh_metric_binding", { description: "refresh metric binding. Workspace-scoped analytics; no credentials. Saved observations are evidence, not automatic conclusions.", inputSchema: analyticsToolSchemas.refresh_metric_binding, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("refresh_metric_binding", args))
+    register("list_metric_observations", { description: "list metric observations. Workspace-scoped analytics; no credentials. Saved observations are evidence, not automatic conclusions.", inputSchema: analyticsToolSchemas.list_metric_observations, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("list_metric_observations", args))
+    register("get_metric_observation", { description: "get one immutable metric observation by ID after authorizing its binding and product target.", inputSchema: analyticsToolSchemas.get_metric_observation, outputSchema: TOOL_OUTPUT_SCHEMA }, (args) => handleAnalyticsTool("get_metric_observation", args))
 
     register(
       "list_scoring_models",

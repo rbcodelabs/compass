@@ -131,6 +131,20 @@ async function assertChildInDeclaredWorkspace(
 // ── The policy: every MCP tool → its gate ───────────────────────────────────
 
 export const TOOL_GATES: Record<string, Gate> = {
+  list_analytics_connections: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_metrics: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_metric: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  create_metric: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  update_metric: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  archive_metric: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_metric_bindings: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_metric_binding: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  link_metric: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  update_metric_binding: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  unlink_metric: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  refresh_metric_binding: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_metric_observations: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_metric_observation: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_pm_interview: async () => {},
   update_experiment: async (a, x) => void (await assertEntityAccess(a, "experiment", x.experimentId)),
   get_current_identity: async () => {},
@@ -484,6 +498,7 @@ export const TOOL_GATES: Record<string, Gate> = {
  * TOOL_GATES has.
  */
 const READ_TOOLS = [
+  "list_analytics_connections", "list_metrics", "get_metric", "list_metric_bindings", "get_metric_binding", "list_metric_observations", "get_metric_observation",
   "get_artifact", "get_comment", "get_current_identity", "get_custom_field_values",
   "get_decision", "get_doc", "get_doc_comment", "get_doc_version", "get_experiment",
   "get_feedback_item", "get_help", "get_launch_checklist", "get_okr_cycle", "get_opportunity",
@@ -513,6 +528,7 @@ const READ_TOOLS = [
  *    `get_opportunity_score` only reads one back.
  */
 const WRITE_TOOLS = [
+  "create_metric", "update_metric", "archive_metric", "link_metric", "update_metric_binding", "unlink_metric", "refresh_metric_binding",
   "activate_research_study", "add_assumption", "add_comment", "add_doc_comment",
   "add_evidence", "add_feedback_attachment", "add_key_result", "add_solution",
   "add_solution_comment", "add_solution_plan", "add_to_roadmap", "apply_recorded_decision",
@@ -575,6 +591,8 @@ export function scopesSatisfy(granted: readonly string[], required: ToolScope): 
 
 // Every operation is explicitly classified. Unlisted tools fail closed for agents.
 export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Object.fromEntries([
+  ...["list_analytics_connections", "list_metrics", "get_metric", "list_metric_bindings", "get_metric_binding", "list_metric_observations", "get_metric_observation"].map(name => [name, "READ"]),
+  ...["create_metric", "update_metric", "archive_metric", "link_metric", "update_metric_binding", "unlink_metric", "refresh_metric_binding"].map(name => [name, "WRITE"]),
   ["get_pm_interview", "READ"],
   ["update_experiment", "WRITE"],
   // Research tools reviewed 2026-09-13. Reads return only publicMetadata()

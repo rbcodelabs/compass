@@ -4,6 +4,8 @@
  * Mirrors the add_assumption tool (still inline in app/api/mcp/route.ts).
  */
 
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import getDatabase, { type AppTransactionClient } from "@/lib/db"
 import { getToolPrisma as getPrisma, getToolExpectedWhere } from "@/lib/mcp-tool-db"
 import { ok, fail } from "@/lib/mcp-output"
 
@@ -42,10 +44,12 @@ export async function updateAssumption({
   if (riskLevel !== undefined) updateData.riskLevel = riskLevel
   if (status !== undefined) updateData.status = status
 
-  const updated = await prisma.assumption.update({
+  const mutate = (tx: AppTransactionClient) => tx.assumption.update({
     where: { id: assumptionId, ...(expectedUpdatedAt ? { updatedAt: new Date(expectedUpdatedAt) } : {}), ...getToolExpectedWhere() },
     data: updateData,
   })
+  // Interview edits do not accept status, and must retain their owning transaction.
+  const updated = status === undefined ? await mutate(prisma) : await captureWorkspaceMutation(getDatabase(), "assumption", "update", "MCP", assumptionId, mutate)
 
   return ok(
     `**Assumption updated**\n` +

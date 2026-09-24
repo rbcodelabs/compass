@@ -1,4 +1,5 @@
-import { getToolPrisma, getToolExpectedWhere } from "@/lib/mcp-tool-db"
+import { getMcpActivityPrisma as getToolPrisma } from "@/lib/analytics/activity"
+import { getToolExpectedWhere } from "@/lib/mcp-tool-db"
 import { fail, ok } from "@/lib/mcp-output"
 
 export async function updateExperiment({ experimentId, expectedUpdatedAt, title, hypothesis, method, killCondition }: { experimentId: string; expectedUpdatedAt?: string; title?: string; hypothesis?: string; method?: string; killCondition?: string }) {

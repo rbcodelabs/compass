@@ -7,6 +7,23 @@ title = "Compass gitleaks configuration"
 [extend]
 useDefault = true
 
+# Vercel automation bypass values do not have a vendor-specific token prefix.
+# Require the security-sensitive header/env name instead of relying on entropy.
+# Whitespace may span lines; runtime environment references remain valid.
+[[rules]]
+id = "vercel-protection-bypass-literal"
+description = "Literal Vercel protection bypass header credential"
+regex = '''(?i)x-vercel-protection-bypass(?:["'\x60]\s*[:,]\s*["'\x60]|\s*:\s*)([a-z0-9_-]{16,})(?:["'\x60]|\s|$)'''
+secretGroup = 1
+keywords = ["x-vercel-protection-bypass"]
+
+[[rules]]
+id = "vercel-automation-bypass-assignment"
+description = "Literal Vercel automation bypass environment credential"
+regex = '''(?i)\b(?:vercel_automation_bypass_secret|compass_vercel_bypass_secret|mcp_bypass_secret)["'\x60]?\s*(?::\s*["'\x60]|=\s*["'\x60]?)([a-z0-9_-]{16,})(?:["'\x60]|\s|$)'''
+secretGroup = 1
+keywords = ["vercel_automation_bypass_secret", "compass_vercel_bypass_secret", "mcp_bypass_secret"]
+
 # ---------------------------------------------------------------------------
 # generic-api-key
 #

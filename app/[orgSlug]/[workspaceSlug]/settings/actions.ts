@@ -13,10 +13,12 @@ import { generateSsoSecret } from "@/lib/portal-sso";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
+import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { revokeMemberAgentGrants, deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
+import { deleteWorkspaceUpdates } from "@/lib/workspace-updates-cleanup";
 import {
   normalizeSelectOptions,
   parseSelectOptions,
@@ -612,23 +614,7 @@ export async function deleteWorkspace(
   orgSlug: string,
   workspaceSlug: string
 ): Promise<{ redirectTo: string }> {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-
-  const prisma = getPrisma();
-
-  const workspace = await prisma.workspace.findFirst({
-    where: {
-      slug: workspaceSlug,
-      organization: { slug: orgSlug },
-    },
-    select: { id: true, organizationId: true },
-  });
-
-  if (!workspace) throw new Error("Workspace not found");
-
-  const workspaceId = workspace.id;
-  const organizationId = workspace.organizationId;
+  const { prisma, workspaceId, organizationId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
   await assertDocumentPilotCleanupReviewed(prisma, workspaceId);
 
   // Decision/release/capacity aggregates reference Tasks and RoadmapItems.
@@ -781,6 +767,7 @@ export async function deleteWorkspace(
   await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
   await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
   await deleteWorkspaceAgentData(prisma, workspaceId);
+  await deleteWorkspaceUpdates(prisma, workspaceId);
 
   // ── Step 16: Delete WorkspaceMembers ────────────────────────────────────────
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
@@ -792,7 +779,10 @@ export async function deleteWorkspace(
   await prisma.doc.deleteMany({ where: { workspaceId } });
 
   // ── Step 19: Delete the Workspace itself ────────────────────────────────────
-  await prisma.workspace.delete({ where: { id: workspaceId } });
+  await prisma.$transaction(async tx => {
+    await tx.workspace.delete({ where: { id: workspaceId } });
+    await deleteWorkspaceAnalytics(tx, workspaceId);
+  });
 
   // ── Step 20: If the org has no remaining workspaces, delete it too ───────────
   const remainingWorkspaces = await prisma.workspace.findMany({

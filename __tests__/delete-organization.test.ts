@@ -62,6 +62,16 @@ const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
 const mockPrisma = {
   docStorageObject: { findFirst: vi.fn().mockResolvedValue(null) },
   docOperation: { findFirst: vi.fn().mockResolvedValue(null) },
+  workspaceUpdateEvent: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  workspaceUpdatesReadState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  workspaceUpdatesState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  $transaction: vi.fn(),
+  analyticsConnection: { deleteMany: vi.fn() },
+  metricDefinition: { deleteMany: vi.fn() },
+  metricRevision: { deleteMany: vi.fn() },
+  metricBinding: { deleteMany: vi.fn() },
+  metricObservation: { deleteMany: vi.fn() },
+  workspaceActivationState: { deleteMany: vi.fn() },
   apiKey: { deleteMany: vi.fn() },
   agentMessage: { deleteMany: vi.fn() },
   agentAuditLog: { deleteMany: vi.fn() },
@@ -174,6 +184,7 @@ function seedNonEmptyFindMany() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockPrisma.$transaction.mockImplementation(operation => operation(mockPrisma));
   // Authenticated by default.
   mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T>
     ? T
@@ -327,6 +338,8 @@ describe("deleteOrganization", () => {
     const result = await deleteOrganization("acme", ORG_NAME);
 
     expect(mockPrisma.apiKey.deleteMany).toHaveBeenCalledWith({ where: { scopeWorkspaceId: "ws-1", scopeConversationId: { not: null } } });
+    expect(mockPrisma.metricObservation.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: { in: ["ws-1"] } } });
+    expect(mockPrisma.analyticsConnection.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: { in: ["ws-1"] } } });
     expect(mockResearchDelete.updateMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, data: { agentConversationId: null } });
     expect(mockPrisma.agentConversation.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockReleaseDispatch.deleteMany).toHaveBeenCalled();

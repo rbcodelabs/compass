@@ -1,8 +1,10 @@
 "use server";
 
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
-import getPrisma from "@/lib/db";
+import { requireProductEntity, requireProductWorkspace } from "@/lib/product-action-auth";
+import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
 import { Prisma } from "@prisma/client";
 import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat";
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring";
@@ -32,8 +34,10 @@ export async function createOpportunity(
     squadId?: string | null;
   }
 ) {
+  await requireProductWorkspace(workspaceId);
   const prisma = getPrisma();
-  const opportunity = await prisma.opportunity.create({
+  if (data.squadId && !await prisma.squad.findFirst({ where: { id: data.squadId, workspaceId }, select: { id: true } })) throw new Error("Squad not found in workspace");
+  const opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", "UI", undefined, tx => tx.opportunity.create({
     data: {
       workspaceId,
       title: data.title,
@@ -42,7 +46,7 @@ export async function createOpportunity(
       status: data.status ?? "EXPLORING",
       squadId: data.squadId ?? null,
     },
-  });
+  }));
   revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "page");
   return opportunity;
 }
@@ -52,11 +56,12 @@ export async function updateOpportunityStatus(
   status: OpportunityStatus,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
-  const opportunity = await prisma.opportunity.update({
+  const opportunity = await captureWorkspaceMutation(prisma, "opportunity", "update", "UI", opportunityId, tx => tx.opportunity.update({
     where: { id: opportunityId },
     data: { status },
-  });
+  }));
   revalidatePath(revalidatePathStr);
   return opportunity;
 }
@@ -66,14 +71,15 @@ export async function addSolution(
   data: { title: string; description?: string },
   revalidatePathStr: string
 ) {
+  await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
-  const solution = await prisma.solution.create({
+  const solution = await captureWorkspaceMutation(prisma, "solution", "create", "UI", undefined, tx => tx.solution.create({
     data: {
       opportunityId,
       title: data.title,
       description: data.description,
     },
-  });
+  }));
   revalidatePath(revalidatePathStr);
   return solution;
 }
@@ -83,11 +89,12 @@ export async function updateSolutionStatus(
   status: SolutionStatus,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("solution", solutionId);
   const prisma = getPrisma();
-  const solution = await prisma.solution.update({
+  const solution = await captureWorkspaceMutation(prisma, "solution", "update", "UI", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
     data: { status },
-  });
+  }));
   revalidatePath(revalidatePathStr);
   return solution;
 }
@@ -98,13 +105,13 @@ export async function addAssumption(
   revalidatePathStr: string
 ) {
   const prisma = getPrisma();
-  const assumption = await prisma.assumption.create({
+  const assumption = await captureWorkspaceMutation(prisma, "assumption", "create", "UI", undefined, tx => tx.assumption.create({
     data: {
       solutionId,
       title: data.title,
       riskLevel: data.riskLevel,
     },
-  });
+  }));
   revalidatePath(revalidatePathStr);
   return assumption;
 }
@@ -115,10 +122,10 @@ export async function updateAssumptionStatus(
   revalidatePathStr: string
 ) {
   const prisma = getPrisma();
-  const assumption = await prisma.assumption.update({
+  const assumption = await captureWorkspaceMutation(prisma, "assumption", "update", "UI", assumptionId, tx => tx.assumption.update({
     where: { id: assumptionId },
     data: { status },
-  });
+  }));
   revalidatePath(revalidatePathStr);
   return assumption;
 }
@@ -129,10 +136,10 @@ export async function linkOpportunityToKeyResult(
   revalidatePathStr: string
 ) {
   const prisma = getPrisma();
-  await prisma.opportunity.update({
+  await captureWorkspaceMutation(prisma, "opportunity", "update", "UI", opportunityId, tx => tx.opportunity.update({
     where: { id: opportunityId },
     data: { linkedKeyResultId: keyResultId },
-  });
+  }));
   revalidatePath(revalidatePathStr);
 }
 
@@ -140,11 +147,12 @@ export async function archiveOpportunity(
   opportunityId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
-  await prisma.opportunity.update({
+  await captureWorkspaceMutation(prisma, "opportunity", "update", "UI", opportunityId, tx => tx.opportunity.update({
     where: { id: opportunityId },
     data: { status: "ARCHIVED" },
-  });
+  }));
   revalidatePath(revalidatePathStr);
 }
 
@@ -152,11 +160,12 @@ export async function archiveSolution(
   solutionId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("solution", solutionId);
   const prisma = getPrisma();
-  await prisma.solution.update({
+  await captureWorkspaceMutation(prisma, "solution", "update", "UI", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
     data: { status: "KILLED" },
-  });
+  }));
   revalidatePath(revalidatePathStr);
 }
 
@@ -177,6 +186,7 @@ export async function moveOpportunity(
   workspaceId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("opportunity", opportunityId, workspaceId);
   const prisma = getPrisma();
 
   // Place moved item at end of destination column.
@@ -187,10 +197,10 @@ export async function moveOpportunity(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  await prisma.opportunity.update({
+  await captureWorkspaceMutation(prisma, "opportunity", "update", "UI", opportunityId, tx => tx.opportunity.update({
     where: { id: opportunityId },
     data: { status, sortOrder },
-  });
+  }));
   revalidatePath(revalidatePathStr);
 }
 
@@ -201,11 +211,12 @@ export async function reorderOpportunity(
   sortOrder: number,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
-  await prisma.opportunity.update({
+  await captureWorkspaceMutation(prisma, "opportunity", "update", "UI", opportunityId, tx => tx.opportunity.update({
     where: { id: opportunityId },
     data: { sortOrder },
-  });
+  }));
   revalidatePath(revalidatePathStr);
 }
 
@@ -225,6 +236,8 @@ export async function moveSolutionStatus(
   workspaceId: string,
   revalidatePathStr: string
 ) {
+  const authorized = await requireProductEntity("solution", solutionId, workspaceId);
+  if (authorized.opportunityId !== opportunityId) throw new Error("Solution not found in opportunity");
   const prisma = getPrisma();
 
   const lastItem = await prisma.solution.findFirst({
@@ -234,10 +247,10 @@ export async function moveSolutionStatus(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  await prisma.solution.update({
+  await captureWorkspaceMutation(prisma, "solution", "update", "UI", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
     data: { status, sortOrder },
-  });
+  }));
   revalidatePath(revalidatePathStr);
 }
 
@@ -248,11 +261,12 @@ export async function reorderSolution(
   sortOrder: number,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("solution", solutionId);
   const prisma = getPrisma();
-  await prisma.solution.update({
+  await captureWorkspaceMutation(prisma, "solution", "update", "UI", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
     data: { sortOrder },
-  });
+  }));
   revalidatePath(revalidatePathStr);
 }
 
@@ -264,10 +278,10 @@ export async function reorderAssumption(
   revalidatePathStr: string
 ) {
   const prisma = getPrisma();
-  await prisma.assumption.update({
+  await captureWorkspaceMutation(prisma, "assumption", "update", "UI", assumptionId, tx => tx.assumption.update({
     where: { id: assumptionId },
     data: { sortOrder },
-  });
+  }));
   revalidatePath(revalidatePathStr);
 }
 
@@ -431,7 +445,7 @@ export async function addEvidence(
 ) {
   assertExactlyOneTarget(data);
   const prisma = getPrisma();
-  const evidence = await prisma.evidence.create({
+  const evidence = await captureWorkspaceMutation(prisma, "evidence", "create", "UI", undefined, tx => tx.evidence.create({
     data: {
       workspaceId: data.workspaceId,
       sourceType: data.sourceType,
@@ -442,7 +456,7 @@ export async function addEvidence(
       solutionId: data.solutionId,
       assumptionId: data.assumptionId,
     },
-  });
+  }));
   revalidatePath(revalidatePathStr);
   return evidence;
 }
@@ -463,14 +477,14 @@ export async function linkEvidence(
 ) {
   assertExactlyOneTarget(target);
   const prisma = getPrisma();
-  const evidence = await prisma.evidence.update({
+  const evidence = await captureWorkspaceMutation(prisma, "evidence", "update", "UI", evidenceId, tx => tx.evidence.update({
     where: { id: evidenceId },
     data: {
       opportunityId: target.opportunityId ?? null,
       solutionId: target.solutionId ?? null,
       assumptionId: target.assumptionId ?? null,
     },
-  });
+  }));
   revalidatePath(revalidatePathStr);
   return evidence;
 }

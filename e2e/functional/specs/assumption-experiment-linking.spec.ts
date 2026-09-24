@@ -37,6 +37,7 @@ test.describe("Assumption ↔ Experiment linking", () => {
 
       await page.getByRole("button", { name: oppTitle, exact: true }).click();
       await page.getByRole("link", { name: "Open full page" }).click();
+      await expect(page).toHaveURL(new RegExp(`${base}/discovery/[0-9a-f-]{36}$`));
       await page.waitForLoadState("networkidle");
       await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
 
@@ -74,8 +75,8 @@ test.describe("Assumption ↔ Experiment linking", () => {
 
       await page.reload();
       await page.waitForLoadState("networkidle");
-      await page.getByRole("tab", { name: "OST Tree" }).click();
-      await expect(page.getByLabel("OST Tree").getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
+      await page.getByRole("tab", { name: "OST", exact: true }).click();
+      await expect(page.getByRole("tabpanel", { name: "OST", exact: true }).getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
 
       // "No experiments yet" + the new CTA should be visible for this
       // brand-new, unlinked assumption.
@@ -108,8 +109,9 @@ test.describe("Assumption ↔ Experiment linking", () => {
       await page.goto(`${base}/discovery`);
       await page.getByRole("button", { name: oppTitle, exact: true }).click();
       await page.getByRole("link", { name: "Open full page" }).click();
+      await expect(page).toHaveURL(new RegExp(`${base}/discovery/[0-9a-f-]{36}$`));
       await page.waitForLoadState("networkidle");
-      await page.getByRole("tab", { name: "OST Tree" }).click();
+      await page.getByRole("tab", { name: "OST", exact: true }).click();
 
       await expect(page.getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
       await expect(page.getByRole("link", { name: expTitle })).toBeVisible({

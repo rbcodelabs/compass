@@ -6,11 +6,12 @@
  * handful of layout primitives (section, field, relation row) — each panel
  * body is then mostly a declarative arrangement of these.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import Link from "next/link";
 import { ExternalLinkIcon, ChevronRightIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { MarkdownContent } from "@/components/markdown-content";
+import { MarkdownDescriptionEditor } from "@/components/markdown-description-editor";
 import { Separator } from "@/components/ui/separator";
 import {
   Collapsible,
@@ -53,10 +54,12 @@ export function useEntityDetail<T>(
 ) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState(false);
+  const generation = useRef(0);
 
   // Refetch without clearing the current data — for post-mutation reloads that
   // shouldn't flash the skeleton.
   const refresh = useCallback(() => {
+    const requestGeneration = ++generation.current;
     return fetch(
       `/api/panels/entity/${type}/${id}?orgSlug=${orgSlug}&workspaceSlug=${workspaceSlug}`
     )
@@ -64,8 +67,12 @@ export function useEntityDetail<T>(
         if (!r.ok) throw new Error("fetch failed");
         return r.json();
       })
-      .then((res) => setData(res.data as T))
-      .catch(() => setError(true));
+      .then((res) => {
+        if (requestGeneration !== generation.current) return;
+        setData(res.data as T);
+        setError(false);
+      })
+      .catch(() => { if (requestGeneration === generation.current) setError(true); });
   }, [type, id, orgSlug, workspaceSlug]);
 
   useEffect(() => {
@@ -74,11 +81,19 @@ export function useEntityDetail<T>(
     setData(null);
     setError(false);
     refresh();
+    return () => { generation.current += 1; };
   }, [refresh]);
 
   // Replace the panel's data in place — used by inline edits to reflect the
   // server's returned entity without a full reload/skeleton flash.
-  return { data, error, refresh, mutate: setData };
+  const mutate = useCallback((next: SetStateAction<T | null>) => {
+    // A saved edit supersedes any reads already in flight. Preserve React's
+    // functional-updater contract for existing hook consumers.
+    generation.current += 1;
+    setData(next);
+    setError(false);
+  }, []);
+  return { data, error, refresh, mutate };
 }
 
 /**
@@ -358,9 +373,8 @@ export function RelationList({
 
 /**
  * Inline-editable text — a title (single line) or description (multi-line).
- * Click the text to edit; Enter (or Cmd/Ctrl+Enter for multiline) or blur
- * saves, Escape cancels. Optimistically shows the new value, reverting if the
- * PATCH is rejected.
+ * Compact fields save on Enter/blur. Descriptions own an explicit Save/Cancel
+ * transaction and preserve a rejected draft for retry.
  */
 export function EditableText({
   value,
@@ -430,6 +444,8 @@ export function EditableText({
     }
   };
 
+  if (multiline) return <EditableMarkdownText key={`${edit.orgSlug}/${edit.workspaceSlug}/${edit.type}/${edit.id}/${field}`} value={value} field={field} edit={edit} placeholder={placeholder} className={className} />;
+
   if (editing) {
     const shared = {
       autoFocus: true,
@@ -439,17 +455,7 @@ export function EditableText({
       "aria-label": `Edit ${field}`,
       className: `w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring ${className ?? ""}`,
     };
-    return multiline ? (
-      <textarea
-        {...shared}
-        ref={ref as React.RefObject<HTMLTextAreaElement>}
-        rows={4}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void commit();
-          if (e.key === "Escape") setEditing(false);
-        }}
-      />
-    ) : (
+    return (
       <input
         {...shared}
         type={type === "number" ? "number" : "text"}
@@ -463,12 +469,6 @@ export function EditableText({
   }
 
   const isEmpty = !value || value.trim().length === 0;
-  if (multiline) return (
-    <div className={`group/edit relative min-w-0 rounded-md -mx-1 px-1 pr-9 ${saving ? "opacity-60" : ""} ${className ?? ""}`}>
-      {isEmpty ? <span className="text-sm text-muted-foreground italic">{placeholder ?? "Add…"}</span> : <MarkdownContent>{value}</MarkdownContent>}
-      <button type="button" onClick={begin} disabled={saving} aria-label={`Edit ${field}`} className="absolute right-1 top-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">Edit</button>
-    </div>
-  );
   return (
     <button
       type="button"
@@ -485,6 +485,53 @@ export function EditableText({
         <span className="whitespace-pre-wrap">{value}</span>
       )}
     </button>
+  );
+}
+
+function EditableMarkdownText({ value, field, edit, placeholder, className }: {
+  value: string | null;
+  field: string;
+  edit: EditContext;
+  placeholder?: string;
+  className?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pending = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  async function save() {
+    const raw = draft.trim();
+    if (pending.current || raw === (value ?? "").trim()) return;
+    pending.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await patchEntityField(edit.type, edit.id, edit.orgSlug, edit.workspaceSlug, field, raw || null);
+      if (!mounted.current) return;
+      edit.onSaved(result.data);
+      setEditing(false);
+    } catch {
+      if (mounted.current) setError("Could not save the description. Your draft is preserved. Try again.");
+    } finally {
+      pending.current = false;
+      if (mounted.current) setSaving(false);
+    }
+  }
+
+  if (editing) return <MarkdownDescriptionEditor value={draft} onChange={setDraft} label="Description" actions={{ onSave: () => void save(), onCancel: () => setEditing(false), dirty: draft.trim() !== (value ?? "").trim(), saving, error }} />;
+
+  return (
+    <div className={`group/edit relative min-w-0 rounded-md -mx-1 px-1 pr-9 ${className ?? ""}`}>
+      {!value?.trim() ? <span className="text-sm text-muted-foreground italic">{placeholder ?? "Add…"}</span> : <MarkdownContent>{value}</MarkdownContent>}
+      <button type="button" onClick={() => { setDraft(value ?? ""); setError(null); setEditing(true); }} aria-label={`Edit ${field}`} className="absolute right-1 top-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">Edit</button>
+    </div>
   );
 }
 

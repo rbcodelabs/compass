@@ -1,5 +1,6 @@
 "use server";
 
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
 import { auth } from "@/auth";
@@ -17,7 +18,7 @@ async function requireTaskWorkspace(workspaceId: string) {
 async function requireTask(taskId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  const task = await getPrisma().task.findUnique({ where: { id: taskId }, select: { workspaceId: true } });
+  const task = await getPrisma().task.findUnique({ where: { id: taskId }, select: { workspaceId: true, status: true } });
   if (!task) throw new Error("Not found");
   await requireTaskWorkspace(task.workspaceId);
   return task;
@@ -66,7 +67,7 @@ export async function addTask(
   });
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0;
 
-  const task = await prisma.task.create({
+  const task = await captureWorkspaceMutation(prisma, "task", "create", "UI", undefined, tx => tx.task.create({
     data: {
       workspaceId,
       title: data.title,
@@ -82,7 +83,7 @@ export async function addTask(
       iteration: data.iteration,
       sortOrder,
     },
-  });
+  }));
 
   revalidatePath(revalidatePathStr);
   return (await resolveTaskAssignees(workspaceId, [task]))[0];
@@ -120,10 +121,10 @@ export async function updateTask(
   if (data.dueDate !== undefined) updateData.dueDate = data.dueDate;
   if (data.iteration !== undefined) updateData.iteration = data.iteration;
 
-  const task = await prisma.task.update({
+  const task = await captureWorkspaceMutation(prisma, "task", "update", "UI", taskId, tx => tx.task.update({
     where: { id: taskId },
     data: updateData,
-  });
+  }));
 
   revalidatePath(revalidatePathStr);
   return (await resolveTaskAssignees(existing.workspaceId, [task]))[0];
@@ -148,10 +149,10 @@ export async function moveTaskStatus(
   });
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0;
 
-  await prisma.task.update({
+  await captureWorkspaceMutation(prisma, "task", "update", "UI", taskId, tx => tx.task.update({
     where: { id: taskId },
     data: { status, sortOrder, updatedAt: new Date() },
-  });
+  }));
 
   revalidatePath(revalidatePathStr);
 }
@@ -160,15 +161,36 @@ export async function moveTaskStatus(
 
 export async function updateSortOrder(
   taskId: string,
-  sortOrder: number,
+  orderedTaskIds: string[],
   revalidatePathStr: string
 ) {
   const prisma = getPrisma();
-  await requireTask(taskId);
+  const task = await requireTask(taskId);
+  const requestedIds = new Set(orderedTaskIds);
+  if (requestedIds.size !== orderedTaskIds.length || !requestedIds.has(taskId)) {
+    throw new Error("Invalid task order");
+  }
 
-  await prisma.task.update({
-    where: { id: taskId },
-    data: { sortOrder, updatedAt: new Date() },
+  await prisma.$transaction(async (tx) => {
+    const column = await tx.task.findMany({
+      where: { workspaceId: task.workspaceId, status: task.status },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, sortOrder: true },
+    });
+    const columnIds = new Set(column.map(({ id }) => id));
+    if (orderedTaskIds.some((id) => !columnIds.has(id))) throw new Error("Not found");
+
+    const visibleIds = [...orderedTaskIds];
+    const reordered = column.map(({ id }) => requestedIds.has(id) ? visibleIds.shift()! : id);
+    const persistedSortOrders = new Map(column.map(({ id, sortOrder }) => [id, sortOrder]));
+    const updatedAt = new Date();
+    await Promise.all(reordered.map((id, sortOrder) => {
+      if (persistedSortOrders.get(id) === sortOrder) return Promise.resolve();
+      return tx.task.update({
+        where: { id },
+        data: { sortOrder, updatedAt },
+      });
+    }));
   });
 
   revalidatePath(revalidatePathStr);
@@ -180,10 +202,10 @@ export async function cancelTask(taskId: string, revalidatePathStr: string) {
   const prisma = getPrisma();
   await requireTask(taskId);
 
-  await prisma.task.update({
+  await captureWorkspaceMutation(prisma, "task", "update", "UI", taskId, tx => tx.task.update({
     where: { id: taskId },
     data: { status: "CANCELLED", updatedAt: new Date() },
-  });
+  }));
 
   revalidatePath(revalidatePathStr);
 }
@@ -262,7 +284,7 @@ export async function addLinkedTask(
     orderBy: { sortOrder: "desc" },
     select: { sortOrder: true },
   });
-  const task = await getPrisma().task.create({
+  const task = await captureWorkspaceMutation(getPrisma(), "task", "create", "UI", undefined, tx => tx.task.create({
     data: {
       workspaceId: workspace.id,
       title,
@@ -272,7 +294,7 @@ export async function addLinkedTask(
       sortOrder: lastTask ? lastTask.sortOrder + 1 : 0,
       links: { create: { linkedType, linkedId } },
     },
-  });
+  }));
   revalidatePath(revalidatePathStr);
   return task;
 }

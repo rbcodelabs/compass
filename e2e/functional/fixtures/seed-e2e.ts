@@ -75,6 +75,12 @@ export async function seedE2E(
     ON CONFLICT (organization_id, user_id) DO NOTHING
   `, [org.id, user.id]);
 
+  // An interrupted prior run may have left observations and encrypted fixture
+  // credentials. Only this just-claimed test organization's workspaces qualify.
+  for (const table of ["metric_observations", "metric_bindings", "metric_revisions", "metric_definitions", "analytics_connections", "workspace_activation_states"]) {
+    await pool.query(`DELETE FROM "${S}"."${table}" WHERE workspace_id IN (SELECT id FROM "${S}".workspaces WHERE organization_id = $1)`, [org.id]);
+  }
+
   // ── Workspace ─────────────────────────────────────────────────────────────
   const { rows: [ws] } = await pool.query<{ id: string }>(`
     INSERT INTO "${S}".workspaces

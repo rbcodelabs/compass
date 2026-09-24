@@ -1,0 +1,7 @@
+# Revoked Vercel bypass credential, removed from current code in PR #133.
+# These exact historical findings were verified against the revoked fingerprint.
+# Commit + path + rule + line only: future occurrences remain blocking.
+# Never add a secret value or a blanket path/commit exclusion here.
+120a4015d97101d728b9df1ad9c3844f98385482:playwright.config.ts:vercel-protection-bypass-literal:59
+4dae923a95cb0fcbc4f2cc3ba02157bd8e614453:playwright.config.ts:vercel-protection-bypass-literal:8
+303500bf9c58bd415b77ed27341559922fbaf6f7:playwright.config.ts:vercel-protection-bypass-literal:8

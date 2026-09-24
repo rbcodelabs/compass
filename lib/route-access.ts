@@ -16,6 +16,9 @@
  */
 export function isPublicPath(pathname: string): boolean {
   return (
+    // Fixed-path signed relay authenticates HMAC in its handler.
+    pathname === "/api/analytics/activity" ||
+    pathname.startsWith("/_vercel/insights/") ||
     ["/api/preview-automation/bootstrap", "/api/preview-automation/session", "/api/preview-automation/teardown"].includes(pathname) ||
     // ADR-0009 preview-login page + its start route. Both fail closed
     // internally (404 before any DB access) unless VERCEL_ENV=preview and
