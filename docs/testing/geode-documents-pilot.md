@@ -18,6 +18,14 @@ Enable only after the existing preview-automation controller has provisioned a d
 - `GEODE_DOCS_BLOB_TOKEN`: an explicitly supplied private-store token.
 - `GEODE_DOCS_BLOB_PREFIX`: `geode_docs_` followed by the first 40 hex characters of SHA-256 of `<active-schema>:<workspace-id>`, followed by `/`. Use `documentBlobPrefix(workspaceId)` to compute it.
 
+### Migration path and release order
+
+Isolated previews deliberately return HTTP 404 from `/api/admin/migrate` when `PREVIEW_AUTOMATION_ENABLED=1`. Use the existing preview controller's scoped migration worker (`scripts/preview-automation/migrate.ts`), not the administrative endpoint. The controller provisions the exact PR/commit schema first; the worker uses its dedicated `<schema>_migrate` role and the registered migration runner with `preProvisionedSchema: true`. Follow [the controller runbook](../../scripts/preview-automation/README.md), including permission probes and lease ownership. Do not bypass these controls with shared-preview or production credentials.
+
+Before enabling synthetic document writes, verify `059_geode_document_storage` completed, no applicable migrations or unresolved attempts remain, and the receipt index is ready and valid. A READY Vercel build or migration receipt alone does not establish an enabled, verified pilot.
+
+Production remains outside this pilot. Any later integration release needs a separately approved two-stage rollout: deploy migration-only support while retaining the old Prisma models and Docs behavior, apply and verify the exact registered migration through the authenticated production endpoint, then deploy the integration with pilot flags still disabled. New Prisma document reads require the added columns even when the pilot is off. Do not deploy the full integration before schema readiness, backfill existing bodies, or treat this runbook as authorization for production changes.
+
 Only new documents in that workspace use Geode. Existing rows remain database-backed, without backfill. The body limit is 1 MiB. Loss of storage access is an error; Compass does not substitute empty or stale content. Disabling the pilot therefore makes existing Geode documents unavailable until the same configuration is restored.
 
 MCP create requires a UUID `operationId`; pilot updates, snapshots and restores also require `expectedRevision` from `get_doc`. Keep the same operation ID and identical payload on a transport retry. A changed payload or authenticated actor cannot reuse an operation ID. Conflicts require reading the latest document and consciously resubmitting. Tool output and browser payloads never include storage references or Blob paths.
