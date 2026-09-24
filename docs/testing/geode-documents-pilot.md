@@ -1,6 +1,11 @@
 # Geode document storage preview pilot
 
-Compass consumes the compiled `@rbcodelabs/geode-headless` 0.1.0 tarball in `vendor/`. The artifact is pinned by the pnpm lockfile. It has not been published to npm; publishing and switching to the identical registry artifact are separate release steps.
+Compass consumes the published npm package [`@rbcodelabs/geode-headless`](https://www.npmjs.com/package/@rbcodelabs/geode-headless), pinned to exactly `0.1.0` in `package.json` and the pnpm lockfile. Node 22 is required. The release artifact was verified at Geode commit `365438bd38a815dfa1d5230074c395e5ae45f065`. It is byte-identical to the previously verified preview tarball from [Geode SDK PR #268](https://github.com/rbcodelabs/geode/pull/268), original source commit `7fc2c7bc15e015c07a4ad27352833691f43ddc1f`.
+
+Expected SHA-512 integrity (verified against both the registry and the former vendored tarball):
+`sha512-gaBHsRTB3NCScAtzHoD0TuLg/gTL+iGJlFyGdtchNpFFvKuT0YSOloco72GvgR9xzD0jZQUnqYzwMt8/ufodZQ==`
+
+The package includes its MIT license, documentation, ESM exports and TypeScript declarations. The SDK's independent Node 22 consumer proof is `npm run proof:headless-package` in the Geode repository. A registry dependency does not enable this pilot or authorize a production rollout.
 
 The SDK owns immutable UTF-8 bodies and verifies their namespace, digest and length. Compass owns authorization, document identity, metadata, hierarchy, history, and the current content reference in DSQL. A body is uploaded before the atomic Compass transaction updates its reference, revision, history and operation receipt. Failed transactions leave the previous document current. The private Blob write-ahead inventory is not authority to delete objects.
 

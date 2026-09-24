@@ -36,8 +36,8 @@ importers:
         specifier: ^7.5.0
         version: 7.8.0(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(magicast@0.5.3)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3)
       '@rbcodelabs/geode-headless':
-        specifier: file:vendor/rbcodelabs-geode-headless-0.1.0.tgz
-        version: file:vendor/rbcodelabs-geode-headless-0.1.0.tgz(@aws-sdk/credential-provider-web-identity@3.972.77)
+        specifier: 0.1.0
+        version: 0.1.0(@aws-sdk/credential-provider-web-identity@3.972.77)
       '@simplewebauthn/browser':
         specifier: ^9.0.1
         version: 9.0.1
@@ -1496,9 +1496,8 @@ packages:
       '@types/react':
         optional: true
 
-  '@rbcodelabs/geode-headless@file:vendor/rbcodelabs-geode-headless-0.1.0.tgz':
-    resolution: {integrity: sha512-gaBHsRTB3NCScAtzHoD0TuLg/gTL+iGJlFyGdtchNpFFvKuT0YSOloco72GvgR9xzD0jZQUnqYzwMt8/ufodZQ==, tarball: file:vendor/rbcodelabs-geode-headless-0.1.0.tgz}
-    version: 0.1.0
+  '@rbcodelabs/geode-headless@0.1.0':
+    resolution: {integrity: sha512-gaBHsRTB3NCScAtzHoD0TuLg/gTL+iGJlFyGdtchNpFFvKuT0YSOloco72GvgR9xzD0jZQUnqYzwMt8/ufodZQ==}
     engines: {node: '>=22'}
 
   '@redis/bloom@1.2.0':
@@ -7178,7 +7177,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.17
 
-  '@rbcodelabs/geode-headless@file:vendor/rbcodelabs-geode-headless-0.1.0.tgz(@aws-sdk/credential-provider-web-identity@3.972.77)':
+  '@rbcodelabs/geode-headless@0.1.0(@aws-sdk/credential-provider-web-identity@3.972.77)':
     dependencies:
       '@aws-sdk/dsql-signer': 3.1136.0
       '@lezer/markdown': 1.6.4
