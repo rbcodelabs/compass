@@ -28,7 +28,7 @@ Cancelled tasks are collapsed behind a **Show cancelled** toggle above the board
 
 Toggle between **Board** and **List** at the top of the Tasks page — `?view=list` in the URL takes you straight there.
 
-- **Board** — the familiar column-per-status kanban. Drag a card to a new column to change its status; drag within a column to reorder (order communicates relative priority, same as the Roadmap).
+- **Board** — the familiar column-per-status kanban. Drag a card to a new column to change its status; drag within a column to reorder. That priority order is persisted for the whole column, including when you reorder a filtered view, and is visible to every workspace member.
 - **List** — a flat, filterable table with one row per task, indented by hierarchy depth. This is the better view for the "PM tracking a handful of initiatives" use case, where a full kanban is more structure than the work needs.
 
 Both views read the same underlying data — there's no separate "lite" data model for the list view.

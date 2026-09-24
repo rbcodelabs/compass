@@ -168,7 +168,7 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
         setColumns((prev) => ({ ...prev, [currentStatus]: reordered }));
 
         startTransition(async () => {
-          await updateSortOrder(activeId, newIndex, revalidatePathStr);
+          await updateSortOrder(activeId, reordered.map(({ id }) => id), revalidatePathStr);
         });
       }
     }
