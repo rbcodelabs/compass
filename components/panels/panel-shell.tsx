@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
-import { PanelRightClose, Pin, PinOff } from "lucide-react";
+import { ExternalLink, PanelRightClose, Pin, PinOff } from "lucide-react";
+import Link from "next/link";
 
 import {
   Sheet,
@@ -10,7 +11,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { usePanelPin } from "@/hooks/use-panel-pin";
 import {
   DEFAULT_PANEL_PIN,
@@ -163,6 +164,17 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
   };
 
   const title = panel ? PANEL_TITLES[panel.type] ?? panel.type : "";
+  const isTask = panel?.type === "task";
+  const fullPageAction = isTask ? (
+    <Link
+      className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+      href={`/${orgSlug}/${workspaceSlug}/tasks/${panel.id}`}
+      aria-label="Open full page"
+      title="Open full page"
+    >
+      <ExternalLink aria-hidden />
+    </Link>
+  ) : null;
 
   const body = (
     <>
@@ -238,11 +250,12 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
           onCommit={commitWidth}
         />
 
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b px-5 py-3">
+        <div className={`flex shrink-0 items-center justify-between gap-2 border-b px-5 ${isTask ? "py-1.5" : "py-3"}`}>
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             {title}
           </h2>
           <div className="flex items-center gap-1">
+            {fullPageAction}
             {pinToggle}
             <Button
               variant="ghost"
@@ -256,7 +269,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto pt-4">{body}</div>
+        <div className={`flex-1 overflow-y-auto ${isTask ? "pt-3" : "pt-4"}`}>{body}</div>
       </aside>
     );
   }
@@ -274,10 +287,10 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
         // last, so it would silently replace `sheet-content` — the attribute
         // ~21 functional specs locate this panel by.
         className="w-full sm:max-w-md flex flex-col gap-0 p-0 z-[60]"
-        showCloseButton
+        showCloseButton={!isTask}
       >
-        <SheetHeader className="px-5 pt-5 pb-3 shrink-0 border-b">
-          <div className="flex items-center justify-between gap-2 pr-8">
+        <SheetHeader className={isTask ? "px-5 py-1.5 shrink-0 border-b" : "px-5 pt-5 pb-3 shrink-0 border-b"}>
+          <div className={`flex items-center justify-between gap-2 ${isTask ? "" : "pr-8"}`}>
             <SheetTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
               {title}
             </SheetTitle>
@@ -285,11 +298,19 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
                 below lg because pinning is suspended there anyway — offering a
                 control that visibly does nothing is worse than not offering
                 it. */}
-            <div className="hidden lg:flex items-center">{pinToggle}</div>
+            <div className="flex items-center gap-1">
+              {fullPageAction}
+              <div className="hidden lg:flex items-center">{pinToggle}</div>
+              {isTask && (
+                <Button variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close panel" title="Close panel">
+                  <PanelRightClose aria-hidden />
+                </Button>
+              )}
+            </div>
           </div>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto pt-4">{body}</div>
+        <div className={`flex-1 overflow-y-auto ${isTask ? "pt-3" : "pt-4"}`}>{body}</div>
       </SheetContent>
     </Sheet>
   );

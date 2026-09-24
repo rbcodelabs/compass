@@ -45,6 +45,22 @@ Click **Add task** at the bottom of any column (or **Add subtask** on a task's d
 - **Story points** and **Due date** — optional estimation/scheduling fields
 - **Iteration** — a freeform sprint label (e.g. "Sprint 24") for teams that want lightweight grouping without a full Sprint entity
 
+## Task details
+
+Task details put the editable title first, followed by a compact row for status,
+priority, assignee, and due date. The description and subtasks follow immediately.
+Use the **Open full page** icon in the panel toolbar to open the same detail view
+on its own page. On narrow screens, the summary controls wrap to fit.
+
+Expand **More properties** below subtasks to edit story points, iteration, squad,
+or an external owner. Properties and custom fields use simple label/value rows;
+the panel remembers whether you left More properties open. A task with no children
+shows only **Add subtask** until you create its first subtask.
+
+![Compact task detail panel](/screenshots/docs/task-compact-overlay-desktop.png)
+
+![Task details on mobile](/screenshots/docs/task-compact-overlay-mobile.png)
+
 ## Discussion
 
 Open a task to find **Discussion** at the bottom of its detail panel — the same panel used for every other Compass item, opened via a click from the board or list, or as a full page at the task's own URL. Existing comments, including comments added through the API, appear here.

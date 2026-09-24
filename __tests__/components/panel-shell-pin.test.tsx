@@ -142,6 +142,15 @@ afterEach(() => {
 // ── Mode selection ───────────────────────────────────────────────────────────
 
 describe("PanelShell mode selection", () => {
+  it("puts the accessible task full-page action beside pin and close", () => {
+    panelState = { type: "task", id: "task-1" };
+    render(<PanelShell initialPin={{ pinned: true, width: PANEL_WIDTH_DEFAULT }} />);
+    const link = screen.getByRole("link", { name: "Open full page" });
+    expect(link).toHaveAttribute("href", "/acme/product/tasks/task-1");
+    expect(link.parentElement).toContainElement(screen.getByRole("button", { name: "Unpin panel" }));
+    expect(link.parentElement).toContainElement(screen.getByRole("button", { name: "Close panel" }));
+  });
+
   it("renders the overlay Sheet when the cookie is absent (the load-bearing default)", () => {
     render(<PanelShell />);
     expect(aside()).toBeNull();
