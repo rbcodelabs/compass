@@ -141,10 +141,10 @@ test.describe("Tasks", () => {
       await page.getByRole("button", { name: "Add link" }).click();
       const linkDialog = page.getByRole("dialog", { name: "Link to another item" });
 
-      // Type defaults to Opportunity — pick the seeded baseline opportunity.
-      await linkDialog.getByRole("combobox", { name: "Opportunity" }).click();
-      await page.getByRole("option", { name: "E2E Baseline Opportunity" }).click();
-      await linkDialog.getByRole("button", { name: "Link" }).click();
+      // Search the universal picker and choose the seeded baseline opportunity.
+      await linkDialog.getByRole("combobox", { name: "Search linkable items" }).fill("E2E Baseline Opportunity");
+      await linkDialog.getByRole("option", { name: "E2E Baseline Opportunity Opportunity" }).click();
+      await linkDialog.getByRole("button", { name: "Link item" }).click();
 
       await expect(linkDialog).toBeHidden();
       await expect(page.getByText("E2E Baseline Opportunity")).toBeVisible({ timeout: 10_000 });
