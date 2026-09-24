@@ -23,9 +23,10 @@ type Props = {
   ownerName: string | null;
   members: MemberData[];
   edit: EditContext;
+  compact?: boolean;
 };
 
-export function InlineAssigneeField({ assigneeUserId, assigneeAgentId, current, ownerName, members, edit }: Props) {
+export function InlineAssigneeField({ assigneeUserId, assigneeAgentId, current, ownerName, members, edit, compact = false }: Props) {
   const [saving, setSaving] = useState(false);
   const value: TaskAssignee = assigneeAgentId
     ? { type: "AGENT", id: assigneeAgentId }
@@ -48,14 +49,14 @@ export function InlineAssigneeField({ assigneeUserId, assigneeAgentId, current, 
 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <TaskAssigneePicker members={members} value={value} onChange={handleChange} current={current} disabled={saving} />
-      <EditableText
+      <TaskAssigneePicker members={members} value={value} onChange={handleChange} current={current} disabled={saving} compact={compact} />
+      {!compact && <EditableText
         value={ownerName}
         field="ownerName"
         edit={edit}
         placeholder="Or an external owner name…"
         className="text-sm"
-      />
+      />}
     </div>
   );
 }

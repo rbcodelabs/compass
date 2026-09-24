@@ -80,6 +80,10 @@ You don't have to open the full page to make a quick change. In the panel you ca
 
 Changes save immediately. For anything deeper, use **Open full page** at the top of the panel.
 
+Task panels keep **Open full page** as an icon beside the pin and close controls.
+Their compact summary puts status, priority, assignee, and due date below the title;
+expand **More properties** below subtasks for the remaining task fields.
+
 ## Shareable links
 
 The open panel is reflected in the page's web address, so you can **copy the URL and share it** — whoever opens it lands on the same screen with that item's panel already open. Refreshing the page keeps it open too. (Only people who are members of the workspace can open it — the panel never exposes items from a workspace you're not in.)
