@@ -16,6 +16,10 @@ Open a Roadmap item's detail panel to discuss it with the team. Shared Discussio
 
 ![Roadmap](/screenshots/docs/roadmap.png)
 
+On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
+
+![Roadmap on mobile](/screenshots/docs/roadmap-mobile.png)
+
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
 
 ## The Four Horizons
@@ -99,6 +103,8 @@ Compass surfaces validated or in-delivery Solutions from Discovery, and Bug-type
 Ideas (as opposed to Bugs) aren't included in this panel — they're expected to go through Opportunity → Solution discovery first, same as everywhere else in Compass.
 
 ## Drag to Reorder
+
+On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
 
 Within each horizon, drag cards to reorder them. Order within a horizon communicates relative priority: items higher in the list are higher priority. This ordering is persisted and visible to all workspace members.
 

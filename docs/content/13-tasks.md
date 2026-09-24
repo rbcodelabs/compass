@@ -14,6 +14,10 @@ Tasks is Compass's standalone delivery/tracking entity. It's built to scale from
 
 ![Tasks](/screenshots/docs/tasks.png)
 
+On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
+
+![Tasks on mobile](/screenshots/docs/tasks-mobile.png)
+
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
 
 ## Status Vocabulary
@@ -32,6 +36,8 @@ Toggle between **Board** and **List** at the top of the Tasks page — `?view=li
 - **List** — a flat, filterable table with one row per task, indented by hierarchy depth. This is the better view for the "PM tracking a handful of initiatives" use case, where a full kanban is more structure than the work needs.
 
 Both views read the same underlying data — there's no separate "lite" data model for the list view.
+
+On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
 
 ## Creating and Assigning Tasks
 

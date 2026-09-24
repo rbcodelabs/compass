@@ -14,6 +14,10 @@ The Discovery section is the heart of Compass. It's where you manage your **Oppo
 
 ![Discovery board](/screenshots/docs/discovery-board.png)
 
+On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
+
+![Discovery board on mobile](/screenshots/docs/discovery-board-mobile.png)
+
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
 
 Use the **Board | Table** toggle in the page header to choose how you scan active opportunities. Board view supports drag-and-drop workflow management. Table view provides a compact overview of status, squad, customer segment, evidence, and solution count.
@@ -21,6 +25,8 @@ Use the **Board | Table** toggle in the page header to choose how you scan activ
 In Table view, select the chevron next to an opportunity to reveal its child solutions. Each solution row shows its lifecycle status, evidence count, and assumption count. Select an opportunity or solution title to open its detail panel.
 
 ## The Opportunity Board
+
+On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
 
 Opportunities move through four columns on the kanban board:
 
