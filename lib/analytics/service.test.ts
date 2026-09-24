@@ -16,6 +16,29 @@ const workspace = "ab630faf-1d90-4725-bff9-488cc6c4b721"
 const input = { name: "Views", unit: "pageviews", provider: "vercel" as const, connectionId: "72babb15-32b3-4eeb-9ce2-eedff1758971", query: { metric: "pageviews" as const } }
 beforeEach(() => { vi.clearAllMocks(); db.workspace.findFirst.mockResolvedValue({ id: workspace }); db.workspace.updateMany.mockResolvedValue({ count: 1 }); db.metricDefinition.findFirst.mockResolvedValue(null); db.metricObservation.findMany.mockResolvedValue([]) })
 describe("analytics service boundaries", () => {
+  it("links rolling 30-day tracking without baseline or date entry", async () => {
+    const metricId = "dbe8c029-f793-4544-b7a9-bfc01a853cc9"
+    const targetId = "9bc31432-917f-4ab3-95db-6a66509fe336"
+    db.experiment.findFirst.mockResolvedValue({ id: targetId })
+    db.experiment.updateMany.mockResolvedValue({ count: 1 })
+    db.metricDefinition.findFirst.mockResolvedValue({ id: metricId, workspaceId: workspace, currentRevisionId: "rev", archived: false })
+    db.metricRevision.findFirst.mockResolvedValue({ ...input, id: "rev", revision: 1, queryJson: JSON.stringify(input.query) })
+    db.metricBinding.create.mockImplementation(async ({ data }) => ({ id: "tracking", ...data }))
+    const linked = await linkMetric(actor, workspace, { metricId, targetType: "EXPERIMENT", targetId })
+    expect(linked).toMatchObject({ mode: "tracking", baseline: null, followup: { version: 1, mode: "rolling", days: 30 } })
+    expect(db.metricBinding.create).toHaveBeenCalledWith({ data: expect.objectContaining({ baselineJson: "null", followupJson: '{"version":1,"mode":"rolling","days":30}' }) })
+  })
+  it("rejects a misleading seven-day native activation policy", async () => {
+    const metricId = "dbe8c029-f793-4544-b7a9-bfc01a853cc9", targetId = "9bc31432-917f-4ab3-95db-6a66509fe336"
+    vi.stubEnv("COMPASS_ANALYTICS_REPORTING_WORKSPACE_ID", workspace)
+    db.experiment.findFirst.mockResolvedValue({ id: targetId }); db.experiment.updateMany.mockResolvedValue({ count: 1 })
+    db.metricDefinition.findFirst.mockResolvedValue({ id: metricId, workspaceId: workspace, currentRevisionId: "rev", archived: false })
+    db.metricRevision.findFirst.mockResolvedValue({ ...input, id: "rev", provider: "compass_activation", queryJson: '{"metric":"active_discovery_teams"}' })
+    try {
+      await expect(linkMetric(actor, workspace, { metricId, targetType: "EXPERIMENT", targetId, followup: { version: 1, mode: "rolling", days: 7 } })).rejects.toThrow("ACTIVATION_WINDOW")
+      expect(db.metricBinding.create).not.toHaveBeenCalled()
+    } finally { vi.unstubAllEnvs() }
+  })
   it("does not let trusted service credentials link a foreign connection", async () => {
     db.analyticsConnection.findFirst.mockResolvedValue(null)
     await expect(createMetric({ userId: null, purpose: "SERVICE" }, workspace, input)).rejects.toThrow("NOT_FOUND")
@@ -217,6 +240,34 @@ describe("analytics refresh concurrency", () => {
     db.metricObservation.create.mockImplementation(({ data }) => ({ id: "observation", ...data }))
     providerFetch.mockResolvedValue({ value: 12, series: [], completeness: "COMPLETE", provenance: {}, note: null })
   })
+  it("replaces comparison with tracking and back without changing original evidence", async () => {
+    const original = await db.metricBinding.findFirst()
+    db.metricBinding.create.mockImplementation(async ({ data }) => ({ id: "replacement", active: true, ...data }))
+    const tracked = await updateBinding(actor, workspace, bindingId, { baseline: null, followup: { version: 1, mode: "rolling", days: 7 } })
+    expect(tracked).toMatchObject({ mode: "tracking", baseline: null, metricId: original.metricId, revisionId: original.revisionId, replacesBindingId: bindingId })
+    const persisted = { ...original, id: tracked.id, baselineJson: "null", followupJson: JSON.stringify(tracked.followup), targetValue: 10 }
+    db.metricBinding.findFirst.mockResolvedValue(persisted)
+    const targetOnly = await updateBinding(actor, workspace, tracked.id, { target: 12 })
+    expect(targetOnly).toMatchObject({ mode: "tracking", followup: tracked.followup, baseline: null, targetValue: 12 })
+    const compared = await updateBinding(actor, workspace, tracked.id, { baseline: { since: "2026-01-01", until: "2026-01-07" }, followup: { since: "2026-01-08", until: "2026-01-14" } })
+    expect(compared).toMatchObject({ mode: "comparison", metricId: original.metricId, revisionId: original.revisionId })
+    expect(db.metricObservation.deleteMany).not.toHaveBeenCalled()
+    expect(db.metricBinding.updateMany.mock.calls.every(([call]) => call.data.active === false)).toBe(true)
+  })
+  it("replays a competing tracking refresh with exactly one persisted observation", async () => {
+    const original = await db.metricBinding.findFirst()
+    db.metricBinding.findFirst.mockResolvedValue({ ...original, baselineJson: "null", followupJson: '{"version":1,"mode":"rolling","days":30}' })
+    const saved = new Map<string, Record<string, unknown>>()
+    db.metricObservation.findMany.mockImplementation(async () => [...saved.values()])
+    db.metricObservation.create.mockImplementation(async ({ data }) => {
+      if (saved.has(data.refreshKey)) throw new Error("unique key")
+      const row = { id: "observation", ...data }; saved.set(data.refreshKey, row); return row
+    })
+    const [first, second] = await Promise.all([refreshBinding(actor, workspace, bindingId, requestId), refreshBinding(actor, workspace, bindingId, requestId)])
+    expect(saved.size).toBe(1)
+    expect(first).toEqual(second)
+    expect(first[0].windowKind).toBe("FOLLOWUP")
+  })
   it("replays the same refresh without fetching or adding evidence again", async () => {
     const result = await refreshBinding(actor, workspace, bindingId, requestId)
     expect(result).toHaveLength(2)
@@ -225,6 +276,23 @@ describe("analytics refresh concurrency", () => {
     providerFetch.mockClear(); db.metricObservation.create.mockClear()
     expect(await refreshBinding(actor, workspace, bindingId, requestId)).toHaveLength(2)
     expect(providerFetch).not.toHaveBeenCalled(); expect(db.metricObservation.create).not.toHaveBeenCalled()
+  })
+  it("captures only follow-up for tracking and replays the original dates after UTC midnight", async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date("2026-09-24T23:59:59Z"))
+      db.metricBinding.findFirst.mockResolvedValue({ id: bindingId, workspaceId: workspace, metricId: "metric", revisionId: "rev", targetType: "EXPERIMENT", targetId: bindingId, baselineJson: "null", followupJson: '{"version":1,"mode":"rolling","days":30}', active: true })
+      const result = await refreshBinding(actor, workspace, bindingId, requestId)
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({ windowKind: "FOLLOWUP", snapshot: { window: { since: "2026-08-25", until: "2026-09-23" }, logicalWindow: { version: 1, mode: "rolling", days: 30 }, attemptStartedAt: "2026-09-24T23:59:59.000Z" } })
+      expect(providerFetch).toHaveBeenCalledTimes(1)
+      const saved = db.metricObservation.create.mock.calls.map(([call]) => ({ id: "observation", ...call.data }))
+      db.metricObservation.findMany.mockResolvedValue(saved)
+      providerFetch.mockClear()
+      vi.setSystemTime(new Date("2026-09-25T00:00:01Z"))
+      expect(await refreshBinding(actor, workspace, bindingId, requestId)).toEqual(result)
+      expect(providerFetch).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
   })
   it("rejects a connection rotated during the external fetch", async () => {
     db.analyticsConnection.updateMany.mockResolvedValue({ count: 0 })

@@ -5,22 +5,23 @@ import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { assertWorkspaceAdmin, assertWorkspaceMember, type McpActor } from "@/lib/mcp-authz"
 import { getToolPrisma, hasToolTransaction } from "@/lib/mcp-tool-db"
 import { encrypt, decrypt } from "@/lib/crypto-secrets"
-import { AnalyticsError, fetchVercelObservation, validateQuery, validateWindow, querySchema, windowSchema, type ProviderId, type MetricQuery, type MetricWindow, type ObservationData } from "./providers"
+import { AnalyticsError, fetchVercelObservation, validateQuery, querySchema, windowSchema, type ProviderId, type MetricQuery, type ObservationData } from "./providers"
 import { analyticsFetch, validateVercelProject } from "./transport"
 import { ANALYTICS_PROVIDERS, effectiveObservationWindow, type ProviderContext } from "./registry"
+import { decodeBindingWindows, followupPolicySchema, resolveFollowupWindow, type BindingWindows } from "./windows"
 
 export const metricInputSchema = z.object({ name: z.string().trim().min(1).max(255), unit: z.string().trim().min(1).max(80), provider: z.enum(["vercel", "compass_activation"]), connectionId: z.string().uuid().optional(), query: querySchema }).strict()
 export type MetricInput = z.infer<typeof metricInputSchema>
 export const targetSchema = z.object({ targetType: z.enum(["EXPERIMENT", "ROADMAP_ITEM", "KEY_RESULT"]), targetId: z.string().uuid() })
 export type MetricTarget = z.infer<typeof targetSchema>
-export const linkMetricSchema = targetSchema.extend({ metricId: z.string().uuid(), baseline: windowSchema, followup: windowSchema, target: z.number().finite().optional() }).strict()
+export const linkMetricSchema = targetSchema.extend({ metricId: z.string().uuid(), baseline: windowSchema.nullable().optional(), followup: followupPolicySchema.optional(), target: z.number().finite().optional() }).strict()
 export type LinkMetricInput = z.infer<typeof linkMetricSchema>
-export const updateMetricBindingSchema = z.object({ baseline: windowSchema.optional(), followup: windowSchema.optional(), target: z.number().finite().nullable().optional() }).strict()
+export const updateMetricBindingSchema = z.object({ baseline: windowSchema.nullable().optional(), followup: followupPolicySchema.optional(), target: z.number().finite().nullable().optional() }).strict()
   .refine(input => input.baseline !== undefined || input.followup !== undefined || input.target !== undefined, "At least one binding field is required.")
 export type UpdateMetricBindingInput = z.infer<typeof updateMetricBindingSchema>
 export type MetricDTO = { id: string; workspaceId: string; revisionId: string; revision: number; name: string; unit: string; provider: ProviderId; connectionId: string | null; query: MetricQuery; archived: boolean }
 export type ConnectionDTO = Pick<AnalyticsConnection, "id" | "provider" | "projectId" | "teamId" | "enabled" | "health" | "generation">
-export type BindingDTO = Omit<MetricBinding, "baselineJson" | "followupJson"> & { baseline: MetricWindow; followup: MetricWindow; metric: MetricDTO; replacesBindingId?: string }
+export type BindingDTO = Omit<MetricBinding, "baselineJson" | "followupJson"> & BindingWindows & { metric: MetricDTO; replacesBindingId?: string }
 export type ObservationDTO = Omit<MetricObservation, "snapshotJson" | "dataJson"> & { snapshot: Record<string, unknown>; data: ObservationData }
 const denied = () => new AnalyticsError("NOT_FOUND_OR_ACCESS_DENIED")
 const connectionDTO = (row: AnalyticsConnection): ConnectionDTO => ({ id: row.id, provider: row.provider, projectId: row.projectId, teamId: row.teamId, enabled: row.enabled, health: row.health, generation: row.generation })
@@ -159,7 +160,10 @@ async function assertTarget(db: AppTransactionClient, workspaceId: string, targe
 }
 async function bindingDTO(db: AppTransactionClient, row: MetricBinding): Promise<BindingDTO> {
   const { baselineJson, followupJson, ...rest } = row
-  return { ...rest, baseline: JSON.parse(baselineJson), followup: JSON.parse(followupJson), metric: await loadMetric(db, row.workspaceId, row.metricId, row.revisionId) }
+  return { ...rest, ...decodeBindingWindows(JSON.parse(baselineJson), JSON.parse(followupJson)), metric: await loadMetric(db, row.workspaceId, row.metricId, row.revisionId) }
+}
+function validateProviderPolicy(metric: MetricDTO, windows: BindingWindows) {
+  if (metric.provider === "compass_activation" && windows.mode === "tracking" && windows.followup.days !== 30) throw new AnalyticsError("ACTIVATION_WINDOW")
 }
 async function loadBinding(db: AppTransactionClient, workspaceId: string, bindingId: string) {
   const binding = await db.metricBinding.findFirst({ where: { id: bindingId, workspaceId } })
@@ -181,14 +185,15 @@ export async function listBindings(actor: McpActor, workspaceId: string, target:
 export async function linkMetric(actor: McpActor, workspaceId: string, raw: LinkMetricInput): Promise<BindingDTO> {
   await authorize(actor, workspaceId, true)
   const input = linkMetricSchema.parse(raw)
-  validateWindow(input.baseline); validateWindow(input.followup)
+  const windows = decodeBindingWindows(input.baseline, input.followup)
   return transaction(async db => {
     await fenceWorkspace(db, workspaceId)
     await assertTarget(db, workspaceId, { targetType: input.targetType, targetId: input.targetId }, true)
     const metric = await loadMetric(db, workspaceId, input.metricId)
     if (metric.archived) throw new AnalyticsError("METRIC_ARCHIVED")
-    const row = await db.metricBinding.create({ data: { workspaceId, metricId: metric.id, revisionId: metric.revisionId, targetType: input.targetType, targetId: input.targetId, baselineJson: JSON.stringify(input.baseline), followupJson: JSON.stringify(input.followup), targetValue: input.target } })
-    return { ...row, baseline: input.baseline, followup: input.followup, metric }
+    validateProviderPolicy(metric, windows)
+    const row = await db.metricBinding.create({ data: { workspaceId, metricId: metric.id, revisionId: metric.revisionId, targetType: input.targetType, targetId: input.targetId, baselineJson: JSON.stringify(windows.baseline), followupJson: JSON.stringify(windows.followup), targetValue: input.target } })
+    return { ...row, ...windows, metric }
   })
 }
 export async function unlinkMetric(actor: McpActor, workspaceId: string, bindingId: string) {
@@ -200,22 +205,21 @@ export async function unlinkMetric(actor: McpActor, workspaceId: string, binding
 export async function updateBinding(actor: McpActor, workspaceId: string, bindingId: string, raw: UpdateMetricBindingInput): Promise<BindingDTO> {
   await authorize(actor, workspaceId, true)
   const input = updateMetricBindingSchema.parse(raw)
-  if (input.baseline) validateWindow(input.baseline)
-  if (input.followup) validateWindow(input.followup)
   return transaction(async db => {
     await fenceWorkspace(db, workspaceId)
     const previous = await loadBinding(db, workspaceId, bindingId)
     if (!previous.active) throw new AnalyticsError("BINDING_INACTIVE")
     await assertTarget(db, workspaceId, { targetType: previous.targetType as MetricTarget["targetType"], targetId: previous.targetId }, true)
-    const baseline = input.baseline ?? previous.baseline
-    const followup = input.followup ?? previous.followup
+    const windows = decodeBindingWindows(input.baseline === undefined ? previous.baseline : input.baseline, input.followup ?? previous.followup)
+    const { baseline, followup } = windows
+    validateProviderPolicy(previous.metric, windows)
     const targetValue = input.target === undefined ? previous.targetValue : input.target
     if (JSON.stringify(baseline) === JSON.stringify(previous.baseline) && JSON.stringify(followup) === JSON.stringify(previous.followup) && targetValue === previous.targetValue) return previous
     const replacedAt = new Date()
     const retired = await db.metricBinding.updateMany({ where: { id: bindingId, workspaceId, active: true, revisionId: previous.revisionId }, data: { active: false, updatedAt: replacedAt } })
     if (!retired.count) throw new AnalyticsError("BINDING_INACTIVE")
     const row = await db.metricBinding.create({ data: { workspaceId, metricId: previous.metricId, revisionId: previous.revisionId, targetType: previous.targetType, targetId: previous.targetId, baselineJson: JSON.stringify(baseline), followupJson: JSON.stringify(followup), targetValue } })
-    return { ...row, baseline, followup, metric: previous.metric, replacesBindingId: previous.id }
+    return { ...row, ...windows, metric: previous.metric, replacesBindingId: previous.id }
   })
 }
 export async function listObservations(actor: McpActor, workspaceId: string, bindingId: string): Promise<ObservationDTO[]> {
@@ -238,9 +242,10 @@ export async function refreshBinding(actor: McpActor, workspaceId: string, bindi
   const db = getPrisma()
   const binding = await loadBinding(db, workspaceId, bindingId)
   if (!binding.active || binding.metric.archived) throw new AnalyticsError("BINDING_INACTIVE")
-  const keys = ["BASELINE", "FOLLOWUP"].map(kind => createHash("sha256").update(`${workspaceId}:${bindingId}:${binding.revisionId}:${requestId}:${kind}`).digest("hex"))
+  const kinds: ("BASELINE" | "FOLLOWUP")[] = binding.mode === "tracking" ? ["FOLLOWUP"] : ["BASELINE", "FOLLOWUP"]
+  const keys = kinds.map(kind => createHash("sha256").update(`${workspaceId}:${bindingId}:${binding.revisionId}:${requestId}:${kind}`).digest("hex"))
   const cached = await db.metricObservation.findMany({ where: { workspaceId, bindingId, refreshKey: { in: keys } } })
-  if (cached.length === 2) return cached.map(observationDTO)
+  if (cached.length === keys.length) return cached.map(observationDTO)
   const attemptStartedAt = new Date()
   const attemptId = randomUUID()
   await db.metricBinding.updateMany({ where: { id: bindingId, workspaceId, active: true, OR: [{ lastAttemptAt: null }, { lastAttemptAt: { lte: attemptStartedAt } }] }, data: { lastAttemptAt: attemptStartedAt, lastAttemptId: attemptId, lastError: null, updatedAt: attemptStartedAt } })
@@ -267,7 +272,7 @@ export async function refreshBinding(actor: McpActor, workspaceId: string, bindi
       } }
     }
     const adapter = ANALYTICS_PROVIDERS[metric.provider]
-    const windows = [effectiveObservationWindow(metric.provider, "BASELINE", binding.baseline, attemptStartedAt), effectiveObservationWindow(metric.provider, "FOLLOWUP", binding.followup, attemptStartedAt)]
+    const windows = kinds.map(kind => effectiveObservationWindow(metric.provider, kind, kind === "BASELINE" && binding.baseline ? binding.baseline : resolveFollowupWindow(binding.followup, attemptStartedAt), attemptStartedAt))
     const results = await Promise.all(windows.map(window => adapter.fetch({ ...context, window })))
     const retrievedAt = new Date()
     return await db.$transaction(async tx => {
@@ -290,7 +295,7 @@ export async function refreshBinding(actor: McpActor, workspaceId: string, bindi
       await tx.metricBinding.updateMany({ where: { id: bindingId, workspaceId, lastAttemptId: attemptId }, data: { lastError: null, updatedAt: retrievedAt } })
       const observations: ObservationDTO[] = []
       for (let i = 0; i < results.length; i++) {
-        const row = await tx.metricObservation.create({ data: { workspaceId, bindingId, revisionId: metric.revisionId, refreshKey: keys[i], windowKind: i === 0 ? "BASELINE" : "FOLLOWUP", snapshotJson: JSON.stringify({ metric, window: windows[i], logicalWindow: i === 0 ? binding.baseline : binding.followup, windowMode: adapter.capabilities.windowMode, connectionGeneration: connection?.generation ?? null }), dataJson: JSON.stringify(results[i]), retrievedAt } })
+        const row = await tx.metricObservation.create({ data: { workspaceId, bindingId, revisionId: metric.revisionId, refreshKey: keys[i], windowKind: kinds[i], snapshotJson: JSON.stringify({ metric, window: windows[i], logicalWindow: kinds[i] === "BASELINE" ? binding.baseline : binding.followup, windowMode: adapter.capabilities.windowMode, attemptStartedAt, connectionGeneration: connection?.generation ?? null }), dataJson: JSON.stringify(results[i]), retrievedAt } })
         observations.push(observationDTO(row))
       }
       return observations
@@ -298,7 +303,7 @@ export async function refreshBinding(actor: McpActor, workspaceId: string, bindi
   } catch (error) {
     // Unique-key races replay the first committed result, never duplicate evidence.
     const replay = await db.metricObservation.findMany({ where: { workspaceId, bindingId, refreshKey: { in: keys } } })
-    if (replay.length === 2) return replay.map(observationDTO)
+    if (replay.length === keys.length) return replay.map(observationDTO)
     const code = error instanceof AnalyticsError ? error.code : "REFRESH_FAILED"
     if (connection && ["AUTHENTICATION", "PLAN_REQUIRED", "ACCESS_DENIED", "PROJECT_NOT_FOUND", "ANALYTICS_DISABLED", "RATE_LIMITED", "PROVIDER_UNAVAILABLE"].includes(code)) {
       await db.analyticsConnection.updateMany({ where: { id: connection.id, workspaceId, generation: connection.generation, enabled: true, updatedAt: { lte: attemptStartedAt } }, data: { health: code, updatedAt: new Date() } })

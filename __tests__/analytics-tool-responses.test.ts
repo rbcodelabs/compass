@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-const mocks = vi.hoisted(() => ({ create: vi.fn(), list: vi.fn(), refresh: vi.fn(), update: vi.fn(), updateBinding: vi.fn(), getObservation: vi.fn() }))
-vi.mock("@/lib/analytics/service", () => ({ createMetric: mocks.create, listMetrics: mocks.list, refreshBinding: mocks.refresh, updateMetric: mocks.update, updateBinding: mocks.updateBinding, getObservation: mocks.getObservation }))
+const mocks = vi.hoisted(() => ({ link: vi.fn(), create: vi.fn(), list: vi.fn(), refresh: vi.fn(), update: vi.fn(), updateBinding: vi.fn(), getObservation: vi.fn() }))
+vi.mock("@/lib/analytics/service", () => ({ linkMetric: mocks.link, createMetric: mocks.create, listMetrics: mocks.list, refreshBinding: mocks.refresh, updateMetric: mocks.update, updateBinding: mocks.updateBinding, getObservation: mocks.getObservation }))
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ userId: "user", purpose: "USER" }) }))
 import { handleAnalyticsTool } from "@/lib/analytics/tool-handlers"
 import { AnalyticsError } from "@/lib/analytics/providers"
@@ -9,6 +9,14 @@ const id = "22222222-2222-4222-8222-222222222222"
 const definition = { name: "Results recorded", unit: "events", provider: "vercel", query: { metric: "event_count", eventName: "compass_activity", eventProperties: { action: "result_recorded" } } }
 describe("analytics tool response and input contracts", () => {
   beforeEach(() => vi.clearAllMocks())
+  it("links without windows and allows changing comparison to rolling tracking", async () => {
+    mocks.link.mockResolvedValue({ id, baseline: null, followup: { version: 1, mode: "rolling", days: 30 } })
+    const linked = await handleAnalyticsTool("link_metric", { workspaceId, metricId: id, targetType: "EXPERIMENT", targetId: id })
+    expect(linked.structuredContent.ok).toBe(true)
+    expect(mocks.link).toHaveBeenCalledWith(expect.anything(), workspaceId, { metricId: id, targetType: "EXPERIMENT", targetId: id })
+    await handleAnalyticsTool("update_metric_binding", { workspaceId, bindingId: id, baseline: null, followup: { version: 1, mode: "rolling", days: 7 } })
+    expect(mocks.updateBinding).toHaveBeenCalledWith(expect.anything(), workspaceId, id, { baseline: null, followup: { version: 1, mode: "rolling", days: 7 } })
+  })
   it("sends only definition fields to strict service schemas and returns an ID", async () => {
     mocks.create.mockResolvedValue({ id, ...definition })
     const result = await handleAnalyticsTool("create_metric", { workspaceId, ...definition })

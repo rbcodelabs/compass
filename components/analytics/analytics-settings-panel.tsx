@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { ArchiveIcon, PencilIcon, PlusIcon, TriangleIcon } from "lucide-react";
 import type { ConnectionDTO, MetricDTO, MetricInput } from "@/lib/analytics/service";
+import { unwrapAnalyticsAction } from "@/lib/analytics/action-result";
 import {
   archiveAnalyticsMetric,
   connectAnalytics,
@@ -53,6 +54,10 @@ function errorMessage(error: unknown) {
     PLAN_REQUIRED: "This query requires a Vercel plan with Web Analytics access.",
     PROJECT_IDENTITY_IMMUTABLE: "Disconnecting does not change project identity. Reconnect the same project or create a new workspace connection.",
     REVISION_CONFLICT: "This metric changed elsewhere. Reload before editing it again.",
+    ENCRYPTION_NOT_CONFIGURED: "Analytics credential storage is not configured. Contact your Compass administrator.",
+    INVALID_INPUT: "Check the metric or connection fields and try again.",
+    RATE_LIMITED: "Vercel rate-limited this request. Try again later.",
+    PROVIDER_UNAVAILABLE: "Vercel is temporarily unavailable. Try again later.",
   };
   return known[code] ?? "The analytics change could not be saved. Try again.";
 }
@@ -84,11 +89,11 @@ export function AnalyticsSettingsPanel({ orgSlug, workspaceSlug, initialConnecti
     setError(null);
     startTransition(async () => {
       try {
-        const saved = await connectAnalytics(orgSlug, workspaceSlug, {
+        const saved = unwrapAnalyticsAction(await connectAnalytics(orgSlug, workspaceSlug, {
           projectId: String(formData.get("projectId") ?? ""),
           teamId: String(formData.get("teamId") ?? "").trim() || undefined,
           token: String(formData.get("token") ?? ""),
-        });
+        }));
         setConnections((current) => [saved, ...current.filter((connection) => connection.provider !== "vercel")]);
         setConnectionOpen(false);
       } catch (cause) {
@@ -102,7 +107,7 @@ export function AnalyticsSettingsPanel({ orgSlug, workspaceSlug, initialConnecti
     setError(null);
     startTransition(async () => {
       try {
-        await disconnectAnalytics(orgSlug, workspaceSlug, vercel.id);
+        unwrapAnalyticsAction(await disconnectAnalytics(orgSlug, workspaceSlug, vercel.id));
         setConnections((current) => current.map((connection) => connection.id === vercel.id
           ? { ...connection, enabled: false, health: "DISCONNECTED", generation: connection.generation + 1 }
           : connection));
@@ -135,9 +140,9 @@ export function AnalyticsSettingsPanel({ orgSlug, workspaceSlug, initialConnecti
     setError(null);
     startTransition(async () => {
       try {
-        const saved = editingMetric
+        const saved = unwrapAnalyticsAction(editingMetric
           ? await editAnalyticsMetric(orgSlug, workspaceSlug, editingMetric.id, { ...input, expectedRevision: editingMetric.revision })
-          : await createAnalyticsMetric(orgSlug, workspaceSlug, input);
+          : await createAnalyticsMetric(orgSlug, workspaceSlug, input));
         setMetrics((current) => [saved, ...current.filter((metric) => metric.id !== saved.id)]);
         setMetricOpen(false);
       } catch (cause) {
@@ -150,7 +155,7 @@ export function AnalyticsSettingsPanel({ orgSlug, workspaceSlug, initialConnecti
     setError(null);
     startTransition(async () => {
       try {
-        await archiveAnalyticsMetric(orgSlug, workspaceSlug, metric.id);
+        unwrapAnalyticsAction(await archiveAnalyticsMetric(orgSlug, workspaceSlug, metric.id));
         setMetrics((current) => current.map((item) => item.id === metric.id ? { ...item, archived: true } : item));
       } catch (cause) {
         setError(errorMessage(cause));
