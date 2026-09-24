@@ -3,12 +3,16 @@ import { describe, expect, it } from "vitest"
 
 const panels = [
   ["objective-panel.tsx", "OBJECTIVE"], ["key-result-panel.tsx", "KEY_RESULT"],
-  ["opportunity-panel.tsx", "OPPORTUNITY"], ["solution-panel.tsx", "SOLUTION"],
+  ["solution-panel.tsx", "SOLUTION"],
   ["assumption-panel.tsx", "ASSUMPTION"], ["experiment-panel.tsx", "EXPERIMENT"],
   ["roadmap-item-panel.tsx", "ROADMAP_ITEM"], ["feedback-panel.tsx", "FEEDBACK_ITEM"],
 ] as const
 
 describe("entity panel discussion wiring", () => {
+  it("connects the shared opportunity detail to its discussion", () => {
+    const source = readFileSync(new URL("../../components/discovery/opportunity-detail.tsx", import.meta.url), "utf8")
+    expect(source).toContain('<Discussion targetType="OPPORTUNITY" targetId={opportunityId} />')
+  })
   it("connects Task detail to its own TASK discussion", () => {
     // TaskDetail is the shared "one component, two mount points" body (the
     // panel sidebar and the standalone page both render it) — same place

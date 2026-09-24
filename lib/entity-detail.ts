@@ -33,6 +33,8 @@ import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
 import { loadCustomFieldsForObject } from "@/lib/custom-field-definitions";
+import { toOpportunityScoreData } from "@/lib/score-summary";
+import type { ScoringModelData } from "@/lib/types";
 
 /**
  * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
@@ -154,7 +156,7 @@ async function fetchKeyResult(id: string, workspaceId: string) {
 
 async function pmInterviewHistory(workspaceId: string, targetType: string, targetId: string) {
   const delegate = getPrisma().pMInterview
-  return delegate?.findMany ? delegate.findMany({ where: { workspaceId, targetType, targetId }, select: { id: true, disposition: true, generationState: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 20 }) : []
+  return delegate?.findMany ? delegate.findMany({ where: { workspaceId, targetType, targetId }, select: { id: true, disposition: true, generationState: true, agentConversationId: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 20 }) : []
 }
 
 async function fetchOpportunity(id: string, workspaceId: string) {
@@ -173,12 +175,23 @@ async function fetchOpportunity(id: string, workspaceId: string) {
       },
       squad: { select: { id: true, name: true, color: true } },
       solutions: {
-        select: { id: true, title: true, status: true },
-        orderBy: { sortOrder: "asc" },
+        include: {
+          _count: { select: { assumptions: true, evidence: true } },
+          assumptions: {
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+            include: {
+              experiments: {
+                select: { id: true, title: true, status: true, conclusion: true, hypothesis: true },
+                orderBy: { createdAt: "desc" },
+              },
+            },
+          },
+        },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       },
       evidence: { orderBy: { createdAt: "desc" } },
       score: {
-        select: { normalizedScore: true, rawScore: true, modelVersion: true, scoredAt: true },
+        select: { id: true, scoringModelId: true, formulaSnapshot: true, rawValues: true, normalizedScore: true, rawScore: true, modelVersion: true, scoredAt: true },
       },
       // Nested on the existing opportunity fetch (no extra round trip) so the
       // panel can apply the same gate as the board: show a score only when the
@@ -187,7 +200,7 @@ async function fetchOpportunity(id: string, workspaceId: string) {
       workspace: {
         select: {
           scoringConfig: {
-            select: { scoringModel: { select: { id: true, name: true, version: true } } },
+            select: { scoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
           },
         },
       },
@@ -200,12 +213,20 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     },
   });
   if (!item) return null;
-  const [pmInterviews, linkedTasks, evidence] = await Promise.all([
+  const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields] = await Promise.all([
     pmInterviewHistory(workspaceId, "OPPORTUNITY", id),
     fetchLinkedTasksBundle(workspaceId, "OPPORTUNITY", id),
     resolveEvidenceProvenance(item.evidence),
+    getPrisma().squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
+    getPrisma().keyResult.findMany({ where: { objective: { cycle: { workspaceId } } }, select: { id: true, title: true, objective: { select: { title: true } } }, orderBy: { createdAt: "asc" } }),
+    loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OPPORTUNITY", objectId: id }),
   ]);
-  return { ...item, evidence, ...linkedTasks, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews };
+  return {
+    ...item, evidence, ...linkedTasks, squads, customFields,
+    existingScore: toOpportunityScoreData(item.score, item.workspace?.scoringConfig?.scoringModel as ScoringModelData | null),
+    availableKeyResults: keyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })),
+    pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews,
+  };
 }
 
 async function fetchSolution(id: string, workspaceId: string) {

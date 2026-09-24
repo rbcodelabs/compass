@@ -59,9 +59,10 @@ type Props = {
    * this by passing no status at all — same reasoning, same fix.
    */
   showStatus?: boolean;
+  onChanged?: () => void;
 };
 
-export function SolutionCard({ solution, revalidatePathStr, showStatus = true }: Props) {
+export function SolutionCard({ solution, revalidatePathStr, showStatus = true, onChanged }: Props) {
   const { openPanel } = usePanelContext();
   const [isPending, startTransition] = useTransition();
 
@@ -84,12 +85,14 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true }:
   function moveStatus(status: SolutionStatus) {
     startTransition(async () => {
       await updateSolutionStatus(solution.id, status, revalidatePathStr);
+      onChanged?.();
     });
   }
 
   function handleKill() {
     startTransition(async () => {
       await archiveSolution(solution.id, revalidatePathStr);
+      onChanged?.();
     });
   }
 
