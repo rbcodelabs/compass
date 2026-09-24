@@ -85,7 +85,10 @@ test.describe("Scoring Models", () => {
 
       await page.getByRole("button", { name: "E2E Baseline Opportunity", exact: true }).click();
       await page.getByRole("link", { name: "Open full page" }).click();
-      await page.waitForLoadState("networkidle");
+      // Both surfaces now expose Scoring. Wait for the destination, not the
+      // outgoing panel's identical tab, before interacting with it.
+      await expect(page).toHaveURL(new RegExp(`${base}/discovery/[^/?]+$`));
+      await expect(page.locator('[data-slot="opportunity-detail"][data-variant="page"]')).toBeVisible();
 
       await page.getByRole("tab", { name: "Scoring" }).click();
 
