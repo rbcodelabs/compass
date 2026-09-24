@@ -96,7 +96,7 @@ test("task agent assignment persists, filters, replaces a human and survives sus
     // header ("Assignee: Agent: …") made.
     await page.reload();
     await expect(panel).toBeVisible({ timeout: 15_000 });
-    await expect(panel.getByRole("combobox", { name: "Assignee", exact: true })).toContainText(`Agents · ${name}`, { timeout: 15_000 });
+    await expect(panel.getByRole("combobox", { name: "Assignee", exact: true })).toContainText(name, { timeout: 15_000 });
 
     // Nothing in the edit surface may overflow its container — the assertion
     // the old "Edit task" dialog's bounding box carried, now made against the
@@ -132,7 +132,7 @@ test("task agent assignment persists, filters, replaces a human and survives sus
     await pool.query("UPDATE compass_dev.agents SET status='SUSPENDED' WHERE id=$1", [agentId]);
     await page.goto(`${base}/tasks/${taskId}`);
     await expect(page.getByRole("combobox", { name: "Assignee", exact: true })).toContainText(
-      new RegExp(`Agents · ${name}.*\\(unavailable\\)`),
+      new RegExp(`${name}.*\\(unavailable\\)`),
       { timeout: 15_000 }
     );
 

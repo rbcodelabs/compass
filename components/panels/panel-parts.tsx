@@ -288,14 +288,16 @@ export function Section({
 export function Field({
   label,
   children,
+  layout = "stacked",
 }: {
   label: string;
   children: React.ReactNode;
+  layout?: "stacked" | "row";
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <p className={LABEL_CLASS}>{label}</p>
-      <div className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+    <div className={layout === "row" ? "grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] items-start gap-3 py-1.5" : "flex flex-col gap-1"}>
+      <p className={layout === "row" ? "text-xs font-medium text-muted-foreground pt-1" : LABEL_CLASS}>{label}</p>
+      <div className={`${layout === "row" ? "min-w-0 break-words " : ""}text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap`}>
         {children}
       </div>
     </div>
@@ -499,12 +501,14 @@ export function StatusSelect({
   options,
   map,
   edit,
+  label,
 }: {
   value: string;
   field: string;
   options: readonly string[];
   map: Record<string, StatusOption>;
   edit: EditContext;
+  label?: string;
 }) {
   const [saving, setSaving] = useState(false);
   const pending = useRef(false);
@@ -534,6 +538,7 @@ export function StatusSelect({
   return (
     <Select value={value} onValueChange={onChange} disabled={saving}>
       <SelectTrigger
+        aria-label={label}
         size="sm"
         className={`w-fit border-0 ${map[value]?.className ?? "bg-surface-inset text-text-secondary"}`}
       >
