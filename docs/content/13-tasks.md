@@ -94,6 +94,11 @@ Linking works from either side:
 - **From the task** — the **Links** section of its detail panel links to (or unlinks from) any of those object types.
 - **From the object** — an Opportunity, Solution, Experiment, Objective, Key Result, Feedback Item, or Doc's own detail panel has a **Delivery tasks** section where you can create a new task inline (title, optional assignee) or link an existing unlinked task, without leaving the panel or navigating to the Tasks board first. A Roadmap Item's sidebar had this first; it now works identically everywhere else a task can point.
 
+When you add a link from a task, one search field looks across every supported
+item type in the workspace. Use the type chips to narrow a broad result set,
+then select a result to review its title and linking context before confirming.
+The picker supports the arrow keys to move through results and Enter to select.
+
 A task's owning **Squad** is not part of this link system — it's a first-class field on the task itself (same as Opportunities and Roadmap Items), so squad-based board filtering stays a simple, exact match.
 
 ## Filtering
