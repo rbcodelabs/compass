@@ -7,12 +7,21 @@ const mockExperiment = {
 };
 const mockAssumption = {
   update: vi.fn(),
+  findFirst: vi.fn().mockResolvedValue({ id: "ass-99" }),
 };
 
 const mockPrisma = {
   experiment: mockExperiment,
   assumption: mockAssumption,
+  squad: { findFirst: vi.fn().mockResolvedValue({ id: "squad-1" }) },
+  $transaction: (fn: (tx: { experiment: typeof mockExperiment; assumption: typeof mockAssumption }) => unknown) => fn(mockPrisma),
 };
+
+// Authorization is exercised with real helpers in product-analytics-auth.test.ts.
+vi.mock("@/lib/product-action-auth", () => ({
+  requireProductWorkspace: vi.fn().mockResolvedValue("ws-1"),
+  requireProductEntity: vi.fn().mockResolvedValue({ workspaceId: "ws-1" }),
+}));
 
 vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),
@@ -42,13 +51,24 @@ beforeEach(() => {
     status: "RUNNING",
     assumptionId: null,
   });
-  mockExperiment.findFirst.mockResolvedValue(null);
+  mockExperiment.findFirst.mockImplementation(async args => args.select?.assumptionId ? { assumptionId: null } : null);
   mockAssumption.update.mockResolvedValue({ id: "ass-1" });
 });
 
 // ─── createExperiment ─────────────────────────────────────────────────────────
 
 describe("createExperiment", () => {
+  it("rejects an assumption outside the authorized workspace before writing", async () => {
+    mockAssumption.findFirst.mockResolvedValueOnce(null);
+    await expect(createExperiment("ws-1", { title: "Example", hypothesis: "H", method: "M", killCondition: "K", assumptionId: "foreign" })).rejects.toThrow("Assumption not found in workspace");
+    expect(mockExperiment.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a squad outside the authorized workspace before writing", async () => {
+    mockPrisma.squad.findFirst.mockResolvedValueOnce(null);
+    await expect(createExperiment("ws-1", { title: "Example", hypothesis: "H", method: "M", killCondition: "K", squadId: "foreign" })).rejects.toThrow("Squad not found in workspace");
+    expect(mockExperiment.create).not.toHaveBeenCalled();
+  });
   it("creates an experiment with DESIGNING status", async () => {
     const result = await createExperiment("ws-1", {
       title: "Do users click CTA?",

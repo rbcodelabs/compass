@@ -4,7 +4,8 @@
  * Mirrors the updateAssumption pattern in lib/assumption-tool-handlers.ts.
  */
 
-import { getToolPrisma as getPrisma, getToolExpectedWhere } from "@/lib/mcp-tool-db"
+import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
+import { getToolExpectedWhere } from "@/lib/mcp-tool-db"
 import { ok, fail } from "@/lib/mcp-output"
 
 // ── update_solution ──────────────────────────────────────────────────────────

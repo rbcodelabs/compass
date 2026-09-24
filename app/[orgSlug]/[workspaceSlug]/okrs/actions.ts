@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import getPrisma from "@/lib/db";
+import { getHumanActivityPrisma } from "@/lib/analytics/activity";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
 import { setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
@@ -147,22 +148,20 @@ export async function logCheckIn(
     throw new Error(parsed.error.issues[0].message);
   }
 
-  const prisma = getPrisma();
-
   // Create check-in record and update the KR's current value in one transaction.
-  await prisma.$transaction([
-    prisma.checkIn.create({
+  await getHumanActivityPrisma().$transaction(async tx => {
+    await tx.checkIn.create({
       data: {
         keyResultId,
         value: parsed.data.value,
         note: parsed.data.note,
       },
-    }),
-    prisma.keyResult.update({
+    })
+    await tx.keyResult.update({
       where: { id: keyResultId },
       data: { current: parsed.data.value },
-    }),
-  ]);
+    })
+  });
 
   // Revalidate both the cycle detail page (where check-in is triggered) and the
   // cycles index (where cycle cards show aggregate progress).
