@@ -8,6 +8,7 @@
  * invariant is enforced here in application code.
  */
 
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import getPrisma from "@/lib/db"
 import { ok, fail } from "@/lib/mcp-output"
 import { loadEvidenceProvenance, type EvidenceProvenance } from "@/lib/evidence-provenance"
@@ -79,7 +80,7 @@ export async function addEvidence({
     return fail(`${kind} "${id}" not found.`)
   }
 
-  const created = await prisma.evidence.create({
+  const created = await captureWorkspaceMutation(prisma, "evidence", "create", "MCP", undefined, tx => tx.evidence.create({
     data: {
       workspaceId,
       sourceType,
@@ -90,7 +91,7 @@ export async function addEvidence({
       solutionId,
       assumptionId,
     },
-  })
+  }))
 
   return ok(`Created evidence (ID: ${created.id}) linked to ${kind} '${node.title}'.`, created)
 }
@@ -126,7 +127,7 @@ export async function linkEvidence({
     return fail(`${kind} "${id}" not found.`)
   }
 
-  await prisma.evidence.update({
+  await captureWorkspaceMutation(prisma, "evidence", "update", "MCP", evidenceId, tx => tx.evidence.update({
     where: { id: evidenceId },
     data: {
       opportunityId: opportunityId ?? null,
@@ -134,7 +135,7 @@ export async function linkEvidence({
       assumptionId: assumptionId ?? null,
       updatedAt: new Date(),
     },
-  })
+  }))
 
   return ok(
     `Linked evidence '${evidence.excerpt.slice(0, 60)}${evidence.excerpt.length > 60 ? "…" : ""}' to ${kind} '${node.title}'.`,

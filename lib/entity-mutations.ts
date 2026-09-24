@@ -11,6 +11,7 @@
  * general-purpose entity editor.
  */
 import getPrisma from "@/lib/db";
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations";
 import { getHumanActivityPrisma } from "@/lib/analytics/activity";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
 import { SETTABLE_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
@@ -90,7 +91,7 @@ export async function updateEntityField(
   // Task has ~9 editable fields (two enums, a relation, a date, a number) —
   // dispatched to its own allowlist rather than forcing EDIT_CONFIG's
   // title/description/one-enum shape to fit it. See updateTaskField.
-  if (type === "task") return updateTaskField(id, workspaceId, field, value);
+  if (type === "task") return updateTaskField(id, workspaceId, field, value, _actor);
 
   const config = EDIT_CONFIG[type];
 
@@ -167,15 +168,22 @@ export async function updateEntityField(
   // updateMany's where doesn't support the relation filters the indirect
   // entities need, so verify with the scoped findFirst first, then update by
   // id. Same access boundary as reads (entityScopeWhere).
+  const mutationClient = _actor.kind === "USER" ? getHumanActivityPrisma() : getPrisma();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const model = ((_actor.kind === "USER" ? getHumanActivityPrisma() : getPrisma()) as any)[config.model];
+  const model = (mutationClient as any)[config.model];
   const exists = await model.findFirst({
     where: entityScopeWhere(type, id, workspaceId),
     select: { id: true },
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
 
-  await model.update({ where: { id }, data });
+  if (type === "opportunity" || type === "solution" || type === "assumption" || type === "experiment" || type === "roadmapItem") {
+    await captureWorkspaceMutation(mutationClient, type, "update", { actorType: _actor.kind === "USER" ? "USER" : "SYSTEM", actorId: _actor.id }, id, async tx => {
+      // The editable model has already been selected and validated above.
+      const delegate = tx[config.model as typeof type] as unknown as { update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<{ id: string }> };
+      return delegate.update({ where: { id }, data });
+    });
+  } else await model.update({ where: { id }, data });
   return { ok: true };
 }
 
@@ -202,7 +210,8 @@ async function updateTaskField(
   id: string,
   workspaceId: string,
   field: string,
-  value: unknown
+  value: unknown,
+  actor: MutationActor,
 ): Promise<UpdateResult> {
   let data: Record<string, unknown>;
 
@@ -330,6 +339,6 @@ async function updateTaskField(
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
 
-  await prisma.task.update({ where: { id }, data });
+  await captureWorkspaceMutation(prisma, "task", "update", { actorType: actor.kind === "USER" ? "USER" : "SYSTEM", actorId: actor.id }, id, tx => tx.task.update({ where: { id }, data }));
   return { ok: true };
 }

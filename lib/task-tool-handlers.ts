@@ -11,6 +11,7 @@
  * fetching each target table, then stitching titles back onto the links.
  */
 
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import getPrisma from "@/lib/db"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { ok, fail } from "@/lib/mcp-output"
@@ -159,7 +160,7 @@ export async function createTask({
   })
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0
 
-  const task = await prisma.task.create({
+  const task = await captureWorkspaceMutation(prisma, "task", "create", "MCP", undefined, tx => tx.task.create({
     data: {
       workspaceId,
       title: title.trim(),
@@ -175,7 +176,7 @@ export async function createTask({
       iteration,
       sortOrder,
     },
-  })
+  }))
 
   return ok(
     withUrlLine(
@@ -460,7 +461,7 @@ export async function updateTask({
   if (dueDate !== undefined) data.dueDate = dueDate ? new Date(dueDate) : null
   if (iteration !== undefined) data.iteration = iteration
 
-  const updated = await prisma.task.update({ where: { id: taskId }, data })
+  const updated = await captureWorkspaceMutation(prisma, "task", "update", "MCP", taskId, tx => tx.task.update({ where: { id: taskId }, data }))
 
   return ok(
     `**Task updated:** ${updated.title}\n` +
@@ -493,10 +494,10 @@ export async function moveTaskStatus({ taskId, status }: { taskId: string; statu
   })
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0
 
-  const updated = await prisma.task.update({
+  const updated = await captureWorkspaceMutation(prisma, "task", "update", "MCP", taskId, tx => tx.task.update({
     where: { id: taskId },
     data: { status, sortOrder, updatedAt: new Date() },
-  })
+  }))
 
   return ok(
     `**Status updated:** ${existing.title}\n` +

@@ -20,6 +20,7 @@ import { assertOAuthAuthorizationEventsMigration } from "@/lib/migrations/oauth-
 import { assertExperimentResearchStudyLinksMigration } from "@/lib/migrations/experiment-research-study-links";
 import { assertProductAnalyticsMigration } from "@/lib/migrations/product-analytics";
 import { assertGeodeDocumentStorageMigration, getGeodeDocumentStorageHealth } from "@/lib/migrations/geode-document-storage";
+import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-updates";
 
 
 
@@ -371,6 +372,10 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     filePath: path.join(process.cwd(), "prisma/migrations/060_experiment_research_study_links/migration.sql"),
   },
   {
+    name: "060_workspace_updates",
+    filePath: path.join(process.cwd(), "prisma/migrations/060_workspace_updates/migration.sql"),
+  },
+  {
     name: "061_product_analytics",
     filePath: path.join(process.cwd(), "prisma/migrations/061_product_analytics/migration.sql"),
   },
@@ -526,7 +531,7 @@ const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record
 const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_decision_evidence_refs_subject", "idx_now_policy_evidence_workspace_created", "idx_now_gate_evaluations_workspace_created", "idx_now_gate_evaluations_workspace_outcome_created", "idx_now_gate_evaluations_item_created", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
 const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "decision_evidence_refs_pkey", "idx_decision_evidence_refs_revision_authority", "now_policy_application_evidence_pkey", "idx_now_policy_evidence_receipt", "now_gate_evaluations_pkey", "chk_now_gate_evaluations_mode", "chk_now_gate_evaluations_outcome", "chk_now_gate_evaluations_actor", "chk_roadmap_items_commitment_provenance_not_null", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
 const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger", "042_native_decision_gates_repair", "043_decision_evidence_refs", "044_now_policy_application_evidence", "045_now_gate_shadow_evaluations"] as const;
-const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "060_experiment_research_study_links", "061_product_analytics"] as const;
+const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "060_experiment_research_study_links", "060_workspace_updates", "061_product_analytics"] as const;
 /** ADR-0012 step 5. Unique first: the idempotency lookup promotion depends on. */
 const RESEARCH_EVIDENCE_PROMOTION_INDEXES = ["idx_evidence_workspace_finding_key", "idx_evidence_research_sources_evidence_turn", "idx_evidence_research_synthesis", "idx_evidence_research_sources_turn"] as const;
 const RESEARCH_VOICE_CONTROL_PLANE_INDEXES = [
@@ -1811,6 +1816,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "061_product_analytics") await assertProductAnalyticsMigration(client, schema)
       if (migration.name === "059_geode_document_storage") await assertGeodeDocumentStorageMigration(client, schema)
       if (migration.name === "060_experiment_research_study_links") await assertExperimentResearchStudyLinksMigration(client, schema)
+      if (migration.name === "060_workspace_updates") await assertWorkspaceUpdatesMigration(client, schema)
 
       // Only this distinct attempt becomes a successful receipt. A failed
       // attempt remains unfinished as forensic evidence and is never relabeled.

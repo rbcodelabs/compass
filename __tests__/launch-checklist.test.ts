@@ -201,6 +201,13 @@ describe("setLaunchTierCore", () => {
     expect(result).toEqual({ launchChecklistId: expect.any(String), itemCount: 2 });
   });
 
+  it("retries an aborted transaction as a whole before returning the launch result", async () => {
+    mockPrisma.$transaction.mockRejectedValueOnce({ code: "P2034" });
+    await expect(setLaunchTierCore(ITEM_ID, "TIER_1", template, WORKSPACE_ID)).resolves.toEqual({ launchChecklistId: expect.any(String), itemCount: 2 });
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mockLaunchChecklist.create).toHaveBeenCalledTimes(1);
+  });
+
   it("flips the roadmap item to LAUNCHING and sets updatedAt", async () => {
     await setLaunchTierCore(ITEM_ID, "TIER_1", template, WORKSPACE_ID);
     const args = mockRoadmapItem.update.mock.calls[0][0];

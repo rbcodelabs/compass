@@ -1,4 +1,6 @@
 import getPrisma from "@/lib/db"
+import { withWorkspaceUpdates, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
+import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
 
 export const COMMENT_TARGET_TYPES = [
   "OBJECTIVE", "KEY_RESULT", "OPPORTUNITY", "SOLUTION", "ASSUMPTION",
@@ -104,7 +106,8 @@ export async function createComment(input: CreateCommentInput) {
     if (parent.parentId) throw new Error("Comment threads are only one level deep.")
   }
 
-  const comment = await prisma.comment.create({
+  const comment = await withWorkspaceUpdates(prisma, async (tx, capture) => {
+  const comment = await tx.comment.create({
     data: {
       ...(input.id ? { id: input.id } : {}), workspaceId: input.workspaceId,
       targetType: input.targetType, targetId: input.targetId, parentId: input.parentId ?? null,
@@ -115,12 +118,18 @@ export async function createComment(input: CreateCommentInput) {
     },
   })
   try {
-    if (input.docAnchor) await prisma.docCommentAnchor.create({ data: { commentId: comment.id, ...input.docAnchor } })
-    if (input.solutionPlan) await prisma.solutionPlanProposal.create({ data: { commentId: comment.id, trackedDecisionRequestId: input.solutionPlan.trackedDecisionRequestId ?? null, legacyPlanStatus: input.solutionPlan.legacyPlanStatus ?? null } })
+    if (input.docAnchor) await tx.docCommentAnchor.create({ data: { commentId: comment.id, ...input.docAnchor } })
+    if (input.solutionPlan) await tx.solutionPlanProposal.create({ data: { commentId: comment.id, trackedDecisionRequestId: input.solutionPlan.trackedDecisionRequestId ?? null, legacyPlanStatus: input.solutionPlan.legacyPlanStatus ?? null } })
   } catch (error) {
-    await prisma.comment.delete({ where: { id: comment.id } })
+    if (!capture) await tx.comment.delete({ where: { id: comment.id } })
     throw error
   }
+  if (capture && !input.parentId && input.source !== "MIGRATION" && ["TASK", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "EXPERIMENT", "ROADMAP_ITEM", "REVIEW_REQUEST"].includes(input.targetType)) {
+    const actor = await workspaceMutationActor(input.source === "MCP" ? "MCP" : "UI")
+    await recordWorkspaceUpdate(tx, { workspaceId: input.workspaceId, entityType: "COMMENT", entityId: comment.id, groupType: input.targetType === "REVIEW_REQUEST" ? "DECISION" : input.targetType, groupId: input.targetId, kind: input.solutionPlan ? "PLAN_PROPOSED" : "COMMENT_ADDED", ...actor })
+  }
+  return comment
+  })
   return getComment(comment.id)
 }
 
