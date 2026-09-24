@@ -5,7 +5,8 @@ vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/workspace", () => ({ getWorkspace: mocks.workspace }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/analytics/service", () => ({ createMetric: mocks.create, saveVercelConnection: mocks.connect, listBindings: mocks.listBindings, listObservations: mocks.observations }));
-import { createAnalyticsMetric, connectAnalytics, readMeasurements, disconnectAnalytics, editAnalyticsMetric, archiveAnalyticsMetric, linkAnalyticsMetric, unlinkAnalyticsMetric, refreshAnalyticsMeasurement, listAnalyticsMetrics } from "@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions";
+import { createAnalyticsMetric, connectAnalytics, readMeasurements, disconnectAnalytics, editAnalyticsMetric, archiveAnalyticsMetric, linkAnalyticsMetric, unlinkAnalyticsMetric, refreshAnalyticsMeasurement, listAnalyticsMetrics, updateAnalyticsMeasurement } from "@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions";
+import { AnalyticsError } from "@/lib/analytics/providers";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -14,11 +15,22 @@ beforeEach(() => {
 });
 
 describe("analytics server action identity", () => {
+  it("serializes expected provider failures so Next production redaction cannot erase them", async () => {
+    mocks.connect.mockRejectedValue(new AnalyticsError("ANALYTICS_DISABLED"));
+    await expect(connectAnalytics("org", "workspace", { projectId: "project", token: "private" })).resolves.toEqual({ ok: false, error: "ANALYTICS_DISABLED" });
+  });
+  it("never serializes an unknown exception or unrecognized error code", async () => {
+    for (const error of [new Error("private token"), new AnalyticsError("private token")]) {
+      mocks.connect.mockRejectedValue(error);
+      await expect(connectAnalytics("org", "workspace", { projectId: "project", token: "private" })).resolves.toEqual({ ok: false, error: "CHANGE_FAILED" });
+    }
+  });
   it.each([
     () => disconnectAnalytics("org", "workspace", "connection"),
     () => editAnalyticsMetric("org", "workspace", "metric", {} as never),
     () => archiveAnalyticsMetric("org", "workspace", "metric"),
     () => linkAnalyticsMetric("org", "workspace", {} as never),
+    () => updateAnalyticsMeasurement("org", "workspace", "binding", {} as never),
     () => unlinkAnalyticsMetric("org", "workspace", "binding"),
     () => refreshAnalyticsMeasurement("org", "workspace", "binding", "request"),
     () => listAnalyticsMetrics("org", "workspace"),

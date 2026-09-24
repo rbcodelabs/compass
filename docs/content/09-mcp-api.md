@@ -34,7 +34,7 @@ Analytics tools require workspace membership; agent grants and OAuth read/write 
 | `archive_metric` | `metricId` | Stop future use without removing evidence |
 | `list_metric_bindings` | `targetType, targetId, includeInactive?` | Measurements attached to an experiment, roadmap item or KR; inactive history is opt-in |
 | `get_metric_binding` | `bindingId` | One active or inactive binding, authorized through its product target |
-| `link_metric` | `metricId, targetType, targetId, baseline, followup, target?` | Attach explicit comparison windows |
+| `link_metric` | `metricId, targetType, targetId, baseline?, followup?, target?` | Omit both windows to track the last 30 completed UTC days; supply paired fixed windows to compare periods |
 | `update_metric_binding` | `bindingId, baseline?, followup?, target?` | Replacement edit: retire the active binding and return a new ID plus `replacesBindingId`, pinned to the same metric revision and product target; `target: null` clears the target value |
 | `unlink_metric` | `bindingId` | Retire a link without deleting historical observations |
 | `refresh_metric_binding` | `bindingId, requestId` | Fetch and save observations; reuse request UUID for retries |
@@ -44,6 +44,8 @@ Analytics tools require workspace membership; agent grants and OAuth read/write 
 `targetType` is `EXPERIMENT`, `ROADMAP_ITEM` or `KEY_RESULT`. Windows are inclusive UTC `{ since: "YYYY-MM-DD", until: "YYYY-MM-DD" }`. Vercel supports up to 90 days per window. `provider` is `vercel` or `compass_activation`. Vercel queries use `metric: "pageviews" | "daily_visitors" | "event_count"`, with `eventName` required for event counts; optional `path`, `eventProperties`, and `flags` are structured filters, never raw SQL or URLs. Daily visitors are not summed into monthly unique users.
 
 Bindings and observations are generated evidence records, so they are the intentional exception to ordinary in-place update symmetry: `update_metric_binding` never mutates a binding that may already anchor evidence. A semantic no-op returns the existing ID; a real change atomically deactivates the old binding and creates a new ID, while observations remain attached to the old binding. There is deliberately no observation update tool.
+
+Bindings expose `mode: "tracking" | "comparison"`. Tracking has a null baseline and a rolling follow-up policy such as `{version:1,mode:"rolling",days:30}` (Vercel supports 7, 30, or 90 days; Active Discovery Teams supports only its current trailing 30-day snapshot). Comparisons retain fixed `{since,until}` windows. To switch to tracking, update with `baseline:null` and a rolling `followup`; to compare, provide both fixed windows. Tracking refreshes produce one current observation; comparisons produce baseline and follow-up observations. Replaying a completed request returns its original evidence even after the rolling calendar window advances.
 
 Example dogfood event query: `{ metric: "event_count", eventName: "compass_activity", eventProperties: { action: "result_recorded" } }`. The only event properties are `action` and `source` (`ui`, `mcp`, or registered `agent`); source describes the entry point, not whether an ordinary API-key holder is human. Allowed actions are opportunity/solution created or updated; roadmap created or updated; experiment created, started, concluded or updated; `result_recorded`; and `checkin_recorded`.
 

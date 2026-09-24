@@ -25,6 +25,12 @@ The existing context contains Vercel credentials or an authorized activation cou
 
 ## Deployment configuration
 
+### Tracking policies and rollout
+
+Tracking uses the existing binding JSON columns: `baselineJson` contains JSON `null`, and `followupJson` contains a versioned rolling policy. Legacy paired fixed windows remain comparisons. This requires no database migration. Readers must understand the policy union before writers create tracking bindings: reverting to an older application after such records exist is not a transparent rollback.
+
+Resolve a new rolling refresh once, using one attempt timestamp. Vercel windows end yesterday in UTC and include the requested number of completed days. Activation retains its current trailing 30×24-hour snapshot semantics. Persist the concrete window and policy provenance with immutable evidence. Completed request replays must be found before recalculating rolling dates. Tracking expects only `FOLLOWUP`; comparison expects both `BASELINE` and `FOLLOWUP`.
+
 `ANALYTICS_SECRET_ENCRYPTION_KEY` is a dedicated base64-encoded 32-byte encryption key. It is not the portal SSO key. Keep it stable while stored connection credentials need to be decrypted; a key rotation requires a separately planned credential migration or reconnection.
 
 Compass activation uses `COMPASS_ANALYTICS_REPORTING_WORKSPACE_ID`, `COMPASS_ANALYTICS_COLLECTION_STARTED_AT` (an actual prospective deployment timestamp), and optional comma-separated `COMPASS_ANALYTICS_EXCLUDED_WORKSPACE_IDS`. Collect only in production. Do not backdate the collection epoch to imply evidence that was never captured.
