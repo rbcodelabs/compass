@@ -8,6 +8,18 @@ section: "Developer"
 
 # MCP API
 
+## Workspace Updates
+
+When Updates capture is enabled, covered MCP mutations contribute to the same
+workspace feed as changes made in the UI. Capture happens within the business
+write transaction; a failed write does not create a successful-work story.
+Repeated status assignments and ordinary text edits do not create milestones.
+See [Updates](/help/22-updates) for capture scope and limitations.
+
+The feed is not an audit log and does not reconstruct older changes from
+`updatedAt`. Catch-up state belongs to the signed-in user in the Updates UI;
+reading existing MCP list tools does not mark that user's feed caught up.
+
 ## PM interview processing
 
 `get_pm_interview({ interviewId, offset? })` reads the initiating user's saved

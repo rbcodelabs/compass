@@ -4,6 +4,7 @@ import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
+import { deleteWorkspaceUpdates } from "@/lib/workspace-updates-cleanup";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 
 /**
@@ -195,6 +196,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   // 13. Workspace-scoped singletons (both Restrict toward Workspace).
   await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
   await deleteWorkspaceAgentData(prisma, workspaceId);
+  await deleteWorkspaceUpdates(prisma, workspaceId);
   await prisma.workspaceScoringConfig.deleteMany({ where: { workspaceId } });
   await prisma.canvasNodePosition.deleteMany({ where: { workspaceId } });
 

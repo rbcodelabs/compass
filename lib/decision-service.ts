@@ -1,4 +1,5 @@
 import getPrisma from "@/lib/db"
+import { workspaceUpdatesAvailable, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 
 export type DecisionActor = { kind: "SERVICE" } | { kind: "USER"; userId: string }
@@ -59,6 +60,7 @@ export async function recordDecision(input: {
   }
   const actorUserId = input.actor.userId
   const prisma = getPrisma()
+  const capture = await workspaceUpdatesAvailable(prisma)
   const expectedIdentity = { actorUserId, revisionId: input.revisionId, optionId: input.optionId, fingerprint: input.fingerprint }
   try {
     return await prisma.$transaction(async (tx) => {
@@ -112,6 +114,7 @@ export async function recordDecision(input: {
         },
       })
       await tx.reviewRequest.update({ where: { id: revision.requestId }, data: { state: "DECIDED", updatedAt: new Date() } })
+      if (capture) await recordWorkspaceUpdate(tx, { workspaceId: revision.request.workspaceId, entityType: "DECISION", entityId: revision.requestId, kind: "DECISION_RECORDED", actorType: "USER", actorId: actorUserId })
       return decision
     })
   } catch (error) {

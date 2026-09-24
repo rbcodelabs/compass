@@ -115,6 +115,9 @@ const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
 
 const mockPrisma = {
+  workspaceUpdateEvent: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  workspaceUpdatesReadState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  workspaceUpdatesState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   agentMessage: { deleteMany: vi.fn() },
   agentAuditLog: { deleteMany: vi.fn() },
   agentConversation: { deleteMany: vi.fn() },

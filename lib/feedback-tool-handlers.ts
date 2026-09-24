@@ -3,6 +3,7 @@
  * Extracted into this module so they can be unit-tested without the MCP server layer.
  */
 
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import getPrisma from "@/lib/db"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
@@ -701,14 +702,14 @@ export async function promoteFeedbackToRoadmap({
   })
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0
 
-  const item = await prisma.roadmapItem.create({ data: {
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "MCP", undefined, tx => tx.roadmapItem.create({ data: {
       workspaceId,
       title: feedback.title,
       horizon,
       sortOrder,
       feedbackId,
       isPrivate: isPrivate ?? false,
-    } })
+    } }))
 
   const lines = [
     `**Promoted to roadmap (${horizon})**`,

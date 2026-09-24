@@ -8,6 +8,8 @@
  */
 import { randomUUID } from "crypto";
 import getPrisma from "@/lib/db";
+import { workspaceUpdatesAvailable, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture";
+import { workspaceMutationActor } from "@/lib/workspace-update-mutations";
 import type { LaunchTier, ChecklistTemplateSnapshot, LaunchChecklistItemStatus } from "@/lib/types";
 import { DEFAULT_CHECKLIST_TEMPLATES } from "@/lib/launch-defaults";
 
@@ -54,7 +56,8 @@ export async function setLaunchTierCore(
   itemId: string,
   tier: LaunchTier,
   template: ResolvedTemplate,
-  workspaceId: string
+  workspaceId: string,
+  source: "UI" | "MCP" = "UI",
 ): Promise<{ launchChecklistId: string; itemCount: number }> {
   await assertLaunchWorkflowEnabled(workspaceId);
 
@@ -68,8 +71,11 @@ export async function setLaunchTierCore(
   };
 
   const launchChecklistId = randomUUID();
+  const capture = await workspaceUpdatesAvailable(prisma);
+  const actor = capture ? await workspaceMutationActor(source) : null;
 
   await prisma.$transaction(async (tx) => {
+    const before = capture ? await tx.roadmapItem.findUnique({ where: { id: itemId }, select: { horizon: true } }) : null;
     await tx.launchChecklist.create({
       data: {
         id: launchChecklistId,
@@ -91,6 +97,7 @@ export async function setLaunchTierCore(
       where: { id: itemId },
       data: { horizon: "LAUNCHING", updatedAt: new Date() },
     })
+    if (capture && actor) await recordWorkspaceUpdate(tx, { workspaceId, entityType: "ROADMAP_ITEM", entityId: itemId, kind: "STATUS_CHANGED", before: before?.horizon, after: "LAUNCHING", ...actor });
   });
 
   return { launchChecklistId, itemCount: template.items.length };

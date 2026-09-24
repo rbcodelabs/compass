@@ -14,6 +14,8 @@
  * Products/Compass/Designs/decision-directions-2026-09-12.md.
  */
 import getPrisma from "@/lib/db"
+import { workspaceUpdatesAvailable, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
+import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
 import { eligibleTaskAssignees, type TaskAssignee } from "@/lib/task-assignment"
 
 /** Matches Task.title's column width. */
@@ -98,6 +100,8 @@ export async function createDecisionFollowUpTask(input: {
   // Same end-of-column placement convention as addTask in tasks/actions.ts.
   const last = await prisma.task.findFirst({ where: { workspaceId: input.workspaceId, status: "TODO" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
   const sortOrder = last ? last.sortOrder + 1 : 0
+  const capture = await workspaceUpdatesAvailable(prisma)
+  const actor = capture ? await workspaceMutationActor("UI") : null
 
   return prisma.$transaction(async (tx) => {
     const task = await tx.task.create({
@@ -114,6 +118,7 @@ export async function createDecisionFollowUpTask(input: {
     const link = await tx.taskLink.create({
       data: { taskId: task.id, linkedType: "DECISION", linkedId: input.requestId, source: "UI" },
     })
+    if (capture && actor) await recordWorkspaceUpdate(tx, { workspaceId: input.workspaceId, entityType: "TASK", entityId: task.id, kind: "CREATED", ...actor })
     return { taskId: task.id, linkId: link.id }
   })
 }

@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+const updates = vi.hoisted(() => ({ enabled: false, record: vi.fn() }))
+vi.mock("@/lib/workspace-updates-capture", () => ({ workspaceUpdatesAvailable: async () => updates.enabled, recordWorkspaceUpdate: updates.record }))
 
 const mockPrisma = {
   reviewRevision: { findUnique: vi.fn() },
@@ -27,6 +29,7 @@ const revision = {
 describe("recordDecision", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    updates.enabled = false
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma))
   })
 
@@ -108,6 +111,7 @@ describe("recordDecision", () => {
   })
 
   it("commits the decision and terminal request state in one transaction", async () => {
+    updates.enabled = true
     mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
     mockPrisma.reviewRevision.findUnique.mockResolvedValue(revision)
     mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
@@ -120,6 +124,7 @@ describe("recordDecision", () => {
     expect(mockPrisma.$transaction).toHaveBeenCalledOnce()
     expect(mockPrisma.decisionRecord.create).toHaveBeenCalledOnce()
     expect(mockPrisma.reviewRequest.update).toHaveBeenCalledOnce()
+    expect(updates.record).toHaveBeenCalledWith(mockPrisma, expect.objectContaining({ entityType: "DECISION", entityId: "request-1", kind: "DECISION_RECORDED", actorType: "USER", actorId: "user-1" }))
   })
 
   it("records an authorized admin decision with a role snapshot", async () => {

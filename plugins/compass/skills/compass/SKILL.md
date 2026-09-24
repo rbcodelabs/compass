@@ -312,6 +312,20 @@ Field *definitions* and shared option sets are UI-only (Settings → Custom Fiel
 ---
 ## Finding what changed recently
 
+### Workspace Updates UI
+
+When explicitly enabled after its migration, `/{org}/{ws}/updates` is the
+workspace catch-up landing page. Covered UI and MCP mutations record
+transactional, grouped activity. Members can expand cards, follow source links,
+and explicitly mark a fully loaded snapshot caught up. Newer arrivals remain
+unread; Undo cannot overwrite a newer catch-up action. Opening the page or
+calling a list tool does not mark it read.
+
+Capture starts at activation; no historical transitions are inferred from
+`updatedAt`. The feed is not a complete audit log. Consult `/help/22-updates`
+for supported events and exclusions. The existing recency tools below remain
+useful for direct-record scans, with their child-write limitations unchanged.
+
 Every `list_*` tool above marked *recency-filterable* accepts:
 
 | Param | Meaning |

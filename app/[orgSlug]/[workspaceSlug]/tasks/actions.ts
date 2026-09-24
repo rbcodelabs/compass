@@ -1,5 +1,6 @@
 "use server";
 
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
 import { auth } from "@/auth";
@@ -66,7 +67,7 @@ export async function addTask(
   });
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0;
 
-  const task = await prisma.task.create({
+  const task = await captureWorkspaceMutation(prisma, "task", "create", "UI", undefined, tx => tx.task.create({
     data: {
       workspaceId,
       title: data.title,
@@ -82,7 +83,7 @@ export async function addTask(
       iteration: data.iteration,
       sortOrder,
     },
-  });
+  }));
 
   revalidatePath(revalidatePathStr);
   return (await resolveTaskAssignees(workspaceId, [task]))[0];
@@ -120,10 +121,10 @@ export async function updateTask(
   if (data.dueDate !== undefined) updateData.dueDate = data.dueDate;
   if (data.iteration !== undefined) updateData.iteration = data.iteration;
 
-  const task = await prisma.task.update({
+  const task = await captureWorkspaceMutation(prisma, "task", "update", "UI", taskId, tx => tx.task.update({
     where: { id: taskId },
     data: updateData,
-  });
+  }));
 
   revalidatePath(revalidatePathStr);
   return (await resolveTaskAssignees(existing.workspaceId, [task]))[0];
@@ -148,10 +149,10 @@ export async function moveTaskStatus(
   });
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0;
 
-  await prisma.task.update({
+  await captureWorkspaceMutation(prisma, "task", "update", "UI", taskId, tx => tx.task.update({
     where: { id: taskId },
     data: { status, sortOrder, updatedAt: new Date() },
-  });
+  }));
 
   revalidatePath(revalidatePathStr);
 }
@@ -166,10 +167,10 @@ export async function updateSortOrder(
   const prisma = getPrisma();
   await requireTask(taskId);
 
-  await prisma.task.update({
+  await captureWorkspaceMutation(prisma, "task", "update", "UI", taskId, tx => tx.task.update({
     where: { id: taskId },
     data: { sortOrder, updatedAt: new Date() },
-  });
+  }));
 
   revalidatePath(revalidatePathStr);
 }
@@ -180,10 +181,10 @@ export async function cancelTask(taskId: string, revalidatePathStr: string) {
   const prisma = getPrisma();
   await requireTask(taskId);
 
-  await prisma.task.update({
+  await captureWorkspaceMutation(prisma, "task", "update", "UI", taskId, tx => tx.task.update({
     where: { id: taskId },
     data: { status: "CANCELLED", updatedAt: new Date() },
-  });
+  }));
 
   revalidatePath(revalidatePathStr);
 }
@@ -262,7 +263,7 @@ export async function addLinkedTask(
     orderBy: { sortOrder: "desc" },
     select: { sortOrder: true },
   });
-  const task = await getPrisma().task.create({
+  const task = await captureWorkspaceMutation(getPrisma(), "task", "create", "UI", undefined, tx => tx.task.create({
     data: {
       workspaceId: workspace.id,
       title,
@@ -272,7 +273,7 @@ export async function addLinkedTask(
       sortOrder: lastTask ? lastTask.sortOrder + 1 : 0,
       links: { create: { linkedType, linkedId } },
     },
-  });
+  }));
   revalidatePath(revalidatePathStr);
   return task;
 }

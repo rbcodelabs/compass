@@ -1,5 +1,6 @@
 "use server"
 
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache"
 import getPrisma from "@/lib/db"
 import type { ExperimentStatus, AssumptionStatus } from "@/lib/types"
@@ -17,7 +18,7 @@ export async function createExperiment(
 ) {
   const prisma = getPrisma()
 
-  const experiment = await prisma.experiment.create({
+  const experiment = await captureWorkspaceMutation(prisma, "experiment", "create", "UI", undefined, tx => tx.experiment.create({
     data: {
       workspaceId,
       title: data.title,
@@ -28,7 +29,7 @@ export async function createExperiment(
       squadId: data.squadId ?? null,
       status: "DESIGNING",
     },
-  })
+  }))
 
   revalidatePath(`/[orgSlug]/[workspaceSlug]/experiments`)
   return experiment
@@ -37,13 +38,13 @@ export async function createExperiment(
 export async function startExperiment(experimentId: string) {
   const prisma = getPrisma()
 
-  const experiment = await prisma.experiment.update({
+  const experiment = await captureWorkspaceMutation(prisma, "experiment", "update", "UI", experimentId, tx => tx.experiment.update({
     where: { id: experimentId },
     data: {
       status: "RUNNING",
       startDate: new Date(),
     },
-  })
+  }))
 
   revalidatePath(`/[orgSlug]/[workspaceSlug]/experiments`)
   return experiment
@@ -59,14 +60,14 @@ export async function logResult(
 ) {
   const prisma = getPrisma()
 
-  const result = await prisma.experimentResult.create({
+  const result = await captureWorkspaceMutation(prisma, "experimentResult", "create", "UI", undefined, tx => tx.experimentResult.create({
     data: {
       experimentId,
       note: data.note,
       metric: data.metric ?? null,
       value: data.value ?? null,
     },
-  })
+  }))
 
   revalidatePath(`/[orgSlug]/[workspaceSlug]/experiments`)
   return result
@@ -98,7 +99,7 @@ export async function concludeExperiment(
         ? "NOT_PURSUED"
         : "COMPLETE"
 
-  const experiment = await prisma.experiment.update({
+  const experiment = await captureWorkspaceMutation(prisma, "experiment", "update", "UI", experimentId, tx => tx.experiment.update({
     where: { id: experimentId },
     data: {
       status: newStatus,
@@ -106,7 +107,7 @@ export async function concludeExperiment(
       conclusionReason: trimmedReason || null,
       endDate: new Date(),
     },
-  })
+  }))
 
   // Update the linked assumption status if there is one
   if (experiment.assumptionId) {
@@ -120,10 +121,10 @@ export async function concludeExperiment(
           ? "INVALIDATED"
           : "UNTESTED"
 
-    await prisma.assumption.update({
-      where: { id: experiment.assumptionId },
+    await captureWorkspaceMutation(prisma, "assumption", "update", "UI", experiment.assumptionId, tx => tx.assumption.update({
+      where: { id: experiment.assumptionId! },
       data: { status: assumptionStatus },
-    })
+    }))
   }
 
   revalidatePath(`/[orgSlug]/[workspaceSlug]/experiments`)
@@ -135,10 +136,10 @@ export async function archiveExperiment(
   revalidatePathStr: string
 ) {
   const prisma = getPrisma()
-  await prisma.experiment.update({
+  await captureWorkspaceMutation(prisma, "experiment", "update", "UI", experimentId, tx => tx.experiment.update({
     where: { id: experimentId },
     data: { status: "KILLED" },
-  })
+  }))
   revalidatePath(revalidatePathStr)
 }
 
@@ -159,10 +160,10 @@ export async function moveExperiment(
   })
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0
 
-  await prisma.experiment.update({
+  await captureWorkspaceMutation(prisma, "experiment", "update", "UI", experimentId, tx => tx.experiment.update({
     where: { id: experimentId },
     data: { status, sortOrder },
-  })
+  }))
   revalidatePath(revalidatePathStr)
 }
 
@@ -174,9 +175,9 @@ export async function reorderExperiment(
   revalidatePathStr: string
 ) {
   const prisma = getPrisma()
-  await prisma.experiment.update({
+  await captureWorkspaceMutation(prisma, "experiment", "update", "UI", experimentId, tx => tx.experiment.update({
     where: { id: experimentId },
     data: { sortOrder },
-  })
+  }))
   revalidatePath(revalidatePathStr)
 }
