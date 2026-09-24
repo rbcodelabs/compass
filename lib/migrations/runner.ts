@@ -1563,7 +1563,8 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 // POST — apply a migration (or all pending)
-export async function applyMigrations(pool: Pool, schema: string, targetScript?: string, options: { preProvisionedSchema?: boolean; legacyDecisionRepairManifest?: LegacyDecisionRepairManifest } = {}) {
+export async function applyMigrations(pool: Pool, schema: string, targetScript?: string, options: { preProvisionedSchema?: boolean; managedPilot?: boolean; legacyDecisionRepairManifest?: LegacyDecisionRepairManifest } = {}) {
+  if (options.managedPilot && (!options.preProvisionedSchema || !/^compass_pr_276_[a-f0-9]{12}$/.test(schema) || !targetScript)) throw new Error("Invalid managed migration invocation");
   const client = await pool.connect();
   const log: string[] = [`Using schema: ${schema}`];
   const researchCaptureAsyncIndexJobIds: string[] = [];
@@ -1715,6 +1716,9 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
 
       let pendingRoadmapCommitmentProvenanceBackfill = false;
       for (const stmt of statements) {
+        // 001 predates isolated schemas. Only this exact reviewed global DDL
+        // is omitted in the opt-in pilot; all production behavior is unchanged.
+        if (options.managedPilot && migration.name === "001_init" && stmt === 'CREATE SCHEMA IF NOT EXISTS "public";') continue;
         try {
           const existingTable = stmt.match(/^CREATE TABLE (\w+) /)?.[1];
           const existingIndex = stmt.match(/^CREATE (?:UNIQUE )?INDEX ASYNC (\w+) /)?.[1];
