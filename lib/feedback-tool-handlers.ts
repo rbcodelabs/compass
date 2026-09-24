@@ -4,7 +4,7 @@
  */
 
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
-import getPrisma from "@/lib/db"
+import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { validateFeedbackInput } from "@/lib/feedback"

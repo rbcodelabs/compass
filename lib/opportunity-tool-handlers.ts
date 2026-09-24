@@ -1,6 +1,7 @@
 /** Handler functions for Opportunity MCP tools. */
 
-import { getToolPrisma as getPrisma, getToolExpectedWhere } from "@/lib/mcp-tool-db"
+import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
+import { getToolExpectedWhere } from "@/lib/mcp-tool-db"
 import { fail, ok } from "@/lib/mcp-output"
 import { z } from "zod"
 

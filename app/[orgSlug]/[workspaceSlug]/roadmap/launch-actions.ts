@@ -49,7 +49,7 @@ export async function setLaunchTier(
   }
 
   const template = await resolveOrSeedTemplate(workspaceId, tier);
-  await setLaunchTierCore(item.id, tier, template, workspaceId);
+  await setLaunchTierCore(item.id, tier, template, workspaceId, (await import("@/lib/analytics/activity")).getHumanActivityPrisma());
 
   const updated = await prisma.roadmapItem.findUniqueOrThrow({
     where: { id: item.id },

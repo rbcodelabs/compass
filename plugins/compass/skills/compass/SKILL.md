@@ -299,7 +299,39 @@ Field *definitions* and shared option sets are UI-only (Settings → Custom Fiel
 | `resolve_doc_comment` | Mark a comment RESOLVED (hidden from the default open-only view, highlight removed). Param: `commentId` |
 | `reopen_doc_comment` | Reopen a RESOLVED comment back to OPEN. Param: `commentId` |
 
+### Publishing QA screenshots in Docs
+
+A shared QA report must contain accessible image evidence, not a machine-local
+path or an Obsidian `![[...]]` embed. Keep a local archive if required, but upload
+the screenshots to the report's workspace using private Docs image storage:
+
+1. Inspect captures for secrets and unrelated private content. Resolve the
+   report's workspace from project configuration; do not guess it from a filename.
+2. Call `prepare_doc_image_upload(workspaceId, filename, fileType, fileSize)`
+   with the actual byte size and raster MIME type (PNG, JPEG, GIF or WebP;
+   maximum 10 MiB).
+3. Upload with `put(pathname, file, { access: "private", token: clientToken,
+   contentType: fileType })` from `@vercel/blob/client`, using the returned
+   parameters. Tokens expire after ten minutes. Keep tokens in memory, never
+   in reports, logs or committed files. Preparation alone is not an upload.
+4. After upload succeeds, embed the returned `markdown` in the Doc. Its relative
+   `/api/docs/images/...` URL is the reader-facing reference; never substitute
+   a raw Blob URL, local path, upload token or deployment-protection bypass URL.
+   Update an existing report in place and preserve unrelated content.
+5. Caption captures with tested commit/version, date, environment
+   (local/preview/production), viewport and state. Local captures do not prove
+   hosted verification passed.
+6. Read back the saved Doc, then open it as an authorized workspace reader and
+   verify every image displays. Keep the report linked to its existing delivery
+   Task or other verified work association; do not invent a new association.
+
+If uploading or authenticated display verification is blocked, report
+**screenshot publication incomplete** separately from test results. Do not
+claim the handoff complete, make images public, or bypass auth. A vault path
+may identify an optional archive, but is not evidence accessible to Compass readers.
+
 #### Feedback
+
 | Tool | Description |
 |---|---|
 | `list_feedback` | Sorted by vote count; filter by status; recency-filterable (`updatedSince` starts a stable incremental scan, paged via the returned opaque `cursor`) |
@@ -383,6 +415,18 @@ the child-write gap is tracked separately.)
 
 
 ## Common Workflows
+
+### Product analytics
+
+Use `list_analytics_connections` for sanitized connection status; tokens are human-admin-only in Settings → Analytics. All analytics tools require `workspaceId`, and linked entities must belong to it.
+
+- Definitions: `create_metric`, `list_metrics`, `get_metric`, `update_metric` (requires `expectedRevision`), `archive_metric`.
+- Connections to product work: `list_metric_bindings` (optional `includeInactive`), `get_metric_binding`, `link_metric`, replacement-style `update_metric_binding`, `unlink_metric`; targets are `EXPERIMENT`, `ROADMAP_ITEM`, `KEY_RESULT`.
+- Evidence: `refresh_metric_binding` (binding ID plus retry-stable request UUID), `list_metric_observations`, `get_metric_observation`.
+
+Pass explicit inclusive UTC baseline/followup windows (`since`/`until` dates). Vercel definitions support pageviews, daily visitors and named event counts, with structured path/property/flag filters. Do not sum daily uniques. Native Active Discovery Teams is operator-workspace-only, prospective and partial for the first 30 days. Never equate unavailable/stale data with zero or automatically overwrite experiment conclusions or KR check-ins. Example query: `{metric:"event_count",eventName:"compass_activity",eventProperties:{action:"result_recorded"}}`.
+
+Bindings and observations are generated immutable evidence. A semantic no-op binding update returns the existing ID; a real update deactivates the old binding and returns a new ID plus `replacesBindingId`, pinned to the same metric revision and product target. Historical observations remain readable through the inactive binding. There is intentionally no observation update tool.
 
 ### 1. Set up an OKR cycle
 

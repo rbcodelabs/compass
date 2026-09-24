@@ -47,6 +47,7 @@ type Props = {
    * inside an `/[orgSlug]/[workspaceSlug]/` route, so both are always known. */
   orgSlug: string;
   workspaceSlug: string;
+  onMutated?: () => void;
 };
 
 /**
@@ -113,6 +114,7 @@ export function EvidenceList({
   revalidatePathStr,
   orgSlug,
   workspaceSlug,
+  onMutated,
 }: Props) {
   const [evidence, setEvidence] = useState(initialEvidence);
   const [isPending, startTransition] = useTransition();
@@ -125,6 +127,7 @@ export function EvidenceList({
     setEvidence((prev) => prev.filter((e) => e.id !== id));
     startTransition(async () => {
       await deleteEvidence(id, revalidatePathStr);
+      onMutated?.();
     });
   }
 

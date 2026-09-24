@@ -12,6 +12,7 @@
  */
 import getPrisma from "@/lib/db";
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations";
+import { getHumanActivityPrisma } from "@/lib/analytics/activity";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
 import { SETTABLE_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
@@ -112,6 +113,18 @@ export async function updateEntityField(
     }
     const trimmed = typeof value === "string" ? value.trim() : "";
     data = { description: trimmed.length > 0 ? trimmed : null };
+  } else if (type === "opportunity" && (field === "squadId" || field === "linkedKeyResultId")) {
+    if (value !== null && (typeof value !== "string" || !value.trim())) {
+      return { ok: false, status: 400, error: `${field} must be a nonempty string or null` };
+    }
+    if (typeof value === "string") {
+      const prisma = getPrisma();
+      const target = field === "squadId"
+        ? await prisma.squad.findFirst({ where: { id: value, workspaceId }, select: { id: true } })
+        : await prisma.keyResult.findFirst({ where: { id: value, objective: { cycle: { workspaceId } } }, select: { id: true } });
+      if (!target) return { ok: false, status: 404, error: "Not found" };
+    }
+    data = { [field]: value };
   } else if (config.enum && field === config.enum.field) {
     // The whole marketing-launch surface (including the LAUNCHING/LAUNCHED
     // horizons) is opt-in per workspace. When it's off, a direct attempt to
@@ -156,7 +169,7 @@ export async function updateEntityField(
   // entities need, so verify with the scoped findFirst first, then update by
   // id. Same access boundary as reads (entityScopeWhere).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const model = (getPrisma() as any)[config.model];
+  const model = ((_actor.kind === "USER" ? getHumanActivityPrisma() : getPrisma()) as any)[config.model];
   const exists = await model.findFirst({
     where: entityScopeWhere(type, id, workspaceId),
     select: { id: true },

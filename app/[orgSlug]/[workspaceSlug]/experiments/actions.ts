@@ -1,9 +1,12 @@
 "use server"
 
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { workspaceUpdatesAvailable, recordWorkspaceUpdate, retryUpdatesTransaction } from "@/lib/workspace-updates-capture"
+import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache"
-import getPrisma from "@/lib/db"
+import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import type { ExperimentStatus, AssumptionStatus } from "@/lib/types"
+import { requireProductEntity, requireProductWorkspace } from "@/lib/product-action-auth"
 
 export async function createExperiment(
   workspaceId: string,
@@ -16,7 +19,11 @@ export async function createExperiment(
     squadId?: string | null
   }
 ) {
+  await requireProductWorkspace(workspaceId)
   const prisma = getPrisma()
+
+  if (data.assumptionId && !await prisma.assumption.findFirst({ where: { id: data.assumptionId, solution: { opportunity: { workspaceId } } }, select: { id: true } })) throw new Error("Assumption not found in workspace")
+  if (data.squadId && !await prisma.squad.findFirst({ where: { id: data.squadId, workspaceId }, select: { id: true } })) throw new Error("Squad not found in workspace")
 
   const experiment = await captureWorkspaceMutation(prisma, "experiment", "create", "UI", undefined, tx => tx.experiment.create({
     data: {
@@ -36,6 +43,7 @@ export async function createExperiment(
 }
 
 export async function startExperiment(experimentId: string) {
+  await requireProductEntity("experiment", experimentId)
   const prisma = getPrisma()
 
   const experiment = await captureWorkspaceMutation(prisma, "experiment", "update", "UI", experimentId, tx => tx.experiment.update({
@@ -58,6 +66,7 @@ export async function logResult(
     value?: number
   }
 ) {
+  await requireProductEntity("experiment", experimentId)
   const prisma = getPrisma()
 
   const result = await captureWorkspaceMutation(prisma, "experimentResult", "create", "UI", undefined, tx => tx.experimentResult.create({
@@ -78,6 +87,7 @@ export async function concludeExperiment(
   conclusion: "PROCEED" | "KILL" | "ITERATE" | "NOT_PURSUED",
   reason?: string
 ) {
+  const { workspaceId } = await requireProductEntity("experiment", experimentId)
   const prisma = getPrisma()
 
   const trimmedReason = reason?.trim() ?? ""
@@ -99,7 +109,13 @@ export async function concludeExperiment(
         ? "NOT_PURSUED"
         : "COMPLETE"
 
-  const experiment = await captureWorkspaceMutation(prisma, "experiment", "update", "UI", experimentId, tx => tx.experiment.update({
+  const capture = await workspaceUpdatesAvailable(prisma)
+  const actor = capture ? await workspaceMutationActor("UI") : null
+  const experiment = await retryUpdatesTransaction(prisma, async tx => {
+  const current = await tx.experiment.findFirst({ where: { id: experimentId, workspaceId }, select: { assumptionId: true, status: true } })
+  if (!current) throw new Error("Experiment not found")
+  if (current.assumptionId && !await tx.assumption.findFirst({ where: { id: current.assumptionId, solution: { opportunity: { workspaceId } } }, select: { id: true } })) throw new Error("Assumption not found in workspace")
+  const updated = await tx.experiment.update({
     where: { id: experimentId },
     data: {
       status: newStatus,
@@ -107,10 +123,11 @@ export async function concludeExperiment(
       conclusionReason: trimmedReason || null,
       endDate: new Date(),
     },
-  }))
+  })
+  if (capture && actor) await recordWorkspaceUpdate(tx, {workspaceId,entityType:"EXPERIMENT",entityId:experimentId,kind:"STATUS_CHANGED",before:current.status,after:updated.status,...actor})
 
   // Update the linked assumption status if there is one
-  if (experiment.assumptionId) {
+  if (updated.assumptionId) {
     // NOT_PURSUED, like ITERATE, leaves the assumption UNTESTED — the
     // experiment never ran, so the assumption was never disproven, only
     // left unexamined. Do not invent evidence by marking it INVALIDATED.
@@ -121,11 +138,15 @@ export async function concludeExperiment(
           ? "INVALIDATED"
           : "UNTESTED"
 
-    await captureWorkspaceMutation(prisma, "assumption", "update", "UI", experiment.assumptionId, tx => tx.assumption.update({
-      where: { id: experiment.assumptionId! },
+    const beforeAssumption = capture ? await tx.assumption.findUnique({where:{id:updated.assumptionId},select:{status:true}}) : null
+    await tx.assumption.update({
+      where: { id: updated.assumptionId },
       data: { status: assumptionStatus },
-    }))
+    })
+    if(capture && actor) await recordWorkspaceUpdate(tx,{workspaceId,entityType:"ASSUMPTION",entityId:updated.assumptionId,kind:"STATUS_CHANGED",before:beforeAssumption?.status,after:assumptionStatus,...actor})
   }
+  return updated
+  })
 
   revalidatePath(`/[orgSlug]/[workspaceSlug]/experiments`)
   return experiment
@@ -135,6 +156,7 @@ export async function archiveExperiment(
   experimentId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("experiment", experimentId)
   const prisma = getPrisma()
   await captureWorkspaceMutation(prisma, "experiment", "update", "UI", experimentId, tx => tx.experiment.update({
     where: { id: experimentId },
@@ -151,6 +173,7 @@ export async function moveExperiment(
   workspaceId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("experiment", experimentId, workspaceId)
   const prisma = getPrisma()
 
   const lastItem = await prisma.experiment.findFirst({
@@ -174,6 +197,7 @@ export async function reorderExperiment(
   sortOrder: number,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("experiment", experimentId)
   const prisma = getPrisma()
   await captureWorkspaceMutation(prisma, "experiment", "update", "UI", experimentId, tx => tx.experiment.update({
     where: { id: experimentId },

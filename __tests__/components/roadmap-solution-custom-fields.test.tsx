@@ -28,6 +28,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/actions", () => ({ upsertField
 vi.mock("@/components/comments/discussion", () => ({ Discussion: () => null }));
 vi.mock("@/components/decisions/request-decision-link", () => ({ RequestDecisionLink: () => null }));
 vi.mock("@/components/tasks/linked-tasks-section", () => ({ LinkedTasksSection: () => null }));
+vi.mock("@/components/analytics/measurements-panel", () => ({ MeasurementsPanel: () => null }));
 vi.mock("@/components/panels/launch-tier-picker", () => ({ LaunchTierPicker: () => null }));
 vi.mock("@/components/panels/launch-checklist", () => ({ LaunchChecklist: () => null }));
 vi.mock("@/components/panels/positioning-brief-row", () => ({ PositioningBriefRow: () => null }));

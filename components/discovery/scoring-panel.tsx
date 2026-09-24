@@ -16,6 +16,7 @@ interface Props {
   revalidatePathStr: string;
   scoringModel: ScoringModelData;
   existingScore: OpportunityScoreData | null;
+  onSaved?: () => void;
 }
 
 export function ScoringPanel({
@@ -25,6 +26,7 @@ export function ScoringPanel({
   revalidatePathStr,
   scoringModel,
   existingScore,
+  onSaved,
 }: Props) {
   const [rawValues, setRawValues] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
@@ -73,6 +75,7 @@ export function ScoringPanel({
           revalidatePathStr
         );
         setSavedScore(result);
+        onSaved?.();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to save score");
       }

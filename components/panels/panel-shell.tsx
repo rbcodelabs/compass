@@ -164,11 +164,12 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
   };
 
   const title = panel ? PANEL_TITLES[panel.type] ?? panel.type : "";
-  const isTask = panel?.type === "task";
-  const fullPageAction = isTask ? (
+  const fullPageRoute = panel?.type === "task" ? "tasks" : panel?.type === "opportunity" ? "discovery" : null;
+  const hasCompactHeader = fullPageRoute !== null;
+  const fullPageAction = fullPageRoute && panel ? (
     <Link
       className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-      href={`/${orgSlug}/${workspaceSlug}/tasks/${panel.id}`}
+      href={`/${orgSlug}/${workspaceSlug}/${fullPageRoute}/${panel.id}`}
       aria-label="Open full page"
       title="Open full page"
     >
@@ -250,7 +251,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
           onCommit={commitWidth}
         />
 
-        <div className={`flex shrink-0 items-center justify-between gap-2 border-b px-5 ${isTask ? "py-1.5" : "py-3"}`}>
+        <div className={`flex shrink-0 items-center justify-between gap-2 border-b px-5 ${hasCompactHeader ? "py-1.5" : "py-3"}`}>
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             {title}
           </h2>
@@ -269,7 +270,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
           </div>
         </div>
 
-        <div className={`flex-1 overflow-y-auto ${isTask ? "pt-3" : "pt-4"}`}>{body}</div>
+        <div className={`flex-1 overflow-y-auto ${hasCompactHeader ? "pt-3" : "pt-4"}`}>{body}</div>
       </aside>
     );
   }
@@ -287,10 +288,10 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
         // last, so it would silently replace `sheet-content` — the attribute
         // ~21 functional specs locate this panel by.
         className="w-full sm:max-w-md flex flex-col gap-0 p-0 z-[60]"
-        showCloseButton={!isTask}
+        showCloseButton={!hasCompactHeader}
       >
-        <SheetHeader className={isTask ? "px-5 py-1.5 shrink-0 border-b" : "px-5 pt-5 pb-3 shrink-0 border-b"}>
-          <div className={`flex items-center justify-between gap-2 ${isTask ? "" : "pr-8"}`}>
+        <SheetHeader className={hasCompactHeader ? "px-5 py-1.5 shrink-0 border-b" : "px-5 pt-5 pb-3 shrink-0 border-b"}>
+          <div className={`flex items-center justify-between gap-2 ${hasCompactHeader ? "" : "pr-8"}`}>
             <SheetTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
               {title}
             </SheetTitle>
@@ -301,7 +302,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
             <div className="flex items-center gap-1">
               {fullPageAction}
               <div className="hidden lg:flex items-center">{pinToggle}</div>
-              {isTask && (
+              {hasCompactHeader && (
                 <Button variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close panel" title="Close panel">
                   <PanelRightClose aria-hidden />
                 </Button>
@@ -310,7 +311,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
           </div>
         </SheetHeader>
 
-        <div className={`flex-1 overflow-y-auto ${isTask ? "pt-3" : "pt-4"}`}>{body}</div>
+        <div className={`flex-1 overflow-y-auto ${hasCompactHeader ? "pt-3" : "pt-4"}`}>{body}</div>
       </SheetContent>
     </Sheet>
   );

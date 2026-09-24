@@ -118,6 +118,12 @@ const mockPrisma = {
   workspaceUpdateEvent: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   workspaceUpdatesReadState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   workspaceUpdatesState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  analyticsConnection: { deleteMany: vi.fn() },
+  metricDefinition: { deleteMany: vi.fn() },
+  metricRevision: { deleteMany: vi.fn() },
+  metricBinding: { deleteMany: vi.fn() },
+  metricObservation: { deleteMany: vi.fn() },
+  workspaceActivationState: { deleteMany: vi.fn() },
   agentMessage: { deleteMany: vi.fn() },
   agentAuditLog: { deleteMany: vi.fn() },
   agentConversation: { deleteMany: vi.fn() },
@@ -852,6 +858,13 @@ describe("updateWorkspaceLimits", () => {
 // ─── deleteWorkspace ──────────────────────────────────────────────────────────
 
 describe("deleteWorkspace", () => {
+  it("requires a workspace administrator before deleting analytics or any domain data", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "MEMBER" }], organization: { members: [{ role: "MEMBER" }] } });
+    await expect(deleteWorkspace("org", "ws")).rejects.toThrow("workspace admin required");
+    expect(mockPrisma.metricObservation.deleteMany).not.toHaveBeenCalled();
+    expect(mockWorkspace.delete).not.toHaveBeenCalled();
+    expect(mockOpportunity.deleteMany).not.toHaveBeenCalled();
+  });
   it("throws Unauthorized when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
     await expect(deleteWorkspace("org", "ws")).rejects.toThrow("Unauthorized");
@@ -867,7 +880,7 @@ describe("deleteWorkspace", () => {
 
   it("deletes the workspace and all related data when authenticated", async () => {
     // Set up workspace with data to delete
-    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
 
     // Roadmap items exist
     mockRoadmapItem.findMany.mockResolvedValue([{ id: "ri-1" }]);
@@ -893,6 +906,9 @@ describe("deleteWorkspace", () => {
     mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
 
     const result = await deleteWorkspace("org", "ws");
+
+    expect(mockPrisma.metricObservation.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: { in: ["ws-1"] } } });
+    expect(mockPrisma.analyticsConnection.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: { in: ["ws-1"] } } });
 
     expect(mockApiKey.deleteMany).toHaveBeenCalledWith({ where: { scopeWorkspaceId: "ws-1", scopeConversationId: { not: null } } });
     expect(mockResearchDelete.updateMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, data: { agentConversationId: null } });
@@ -979,7 +995,7 @@ describe("deleteWorkspace", () => {
   });
 
   it("deletes the org when no workspaces remain after deletion", async () => {
-    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
     // No remaining workspaces after deletion
     mockWorkspace.findMany.mockResolvedValue([]);
 
@@ -993,7 +1009,7 @@ describe("deleteWorkspace", () => {
   });
 
   it("does not delete the org when other workspaces remain", async () => {
-    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
     mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
 
     await deleteWorkspace("org", "ws");

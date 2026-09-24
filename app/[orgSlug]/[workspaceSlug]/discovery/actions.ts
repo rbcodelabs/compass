@@ -3,7 +3,8 @@
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
-import getPrisma from "@/lib/db";
+import { requireProductEntity, requireProductWorkspace } from "@/lib/product-action-auth";
+import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
 import { Prisma } from "@prisma/client";
 import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat";
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring";
@@ -33,7 +34,9 @@ export async function createOpportunity(
     squadId?: string | null;
   }
 ) {
+  await requireProductWorkspace(workspaceId);
   const prisma = getPrisma();
+  if (data.squadId && !await prisma.squad.findFirst({ where: { id: data.squadId, workspaceId }, select: { id: true } })) throw new Error("Squad not found in workspace");
   const opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", "UI", undefined, tx => tx.opportunity.create({
     data: {
       workspaceId,
@@ -53,6 +56,7 @@ export async function updateOpportunityStatus(
   status: OpportunityStatus,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
   const opportunity = await captureWorkspaceMutation(prisma, "opportunity", "update", "UI", opportunityId, tx => tx.opportunity.update({
     where: { id: opportunityId },
@@ -67,6 +71,7 @@ export async function addSolution(
   data: { title: string; description?: string },
   revalidatePathStr: string
 ) {
+  await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
   const solution = await captureWorkspaceMutation(prisma, "solution", "create", "UI", undefined, tx => tx.solution.create({
     data: {
@@ -84,6 +89,7 @@ export async function updateSolutionStatus(
   status: SolutionStatus,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("solution", solutionId);
   const prisma = getPrisma();
   const solution = await captureWorkspaceMutation(prisma, "solution", "update", "UI", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
@@ -141,6 +147,7 @@ export async function archiveOpportunity(
   opportunityId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
   await captureWorkspaceMutation(prisma, "opportunity", "update", "UI", opportunityId, tx => tx.opportunity.update({
     where: { id: opportunityId },
@@ -153,6 +160,7 @@ export async function archiveSolution(
   solutionId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("solution", solutionId);
   const prisma = getPrisma();
   await captureWorkspaceMutation(prisma, "solution", "update", "UI", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
@@ -178,6 +186,7 @@ export async function moveOpportunity(
   workspaceId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("opportunity", opportunityId, workspaceId);
   const prisma = getPrisma();
 
   // Place moved item at end of destination column.
@@ -202,6 +211,7 @@ export async function reorderOpportunity(
   sortOrder: number,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
   await captureWorkspaceMutation(prisma, "opportunity", "update", "UI", opportunityId, tx => tx.opportunity.update({
     where: { id: opportunityId },
@@ -226,6 +236,8 @@ export async function moveSolutionStatus(
   workspaceId: string,
   revalidatePathStr: string
 ) {
+  const authorized = await requireProductEntity("solution", solutionId, workspaceId);
+  if (authorized.opportunityId !== opportunityId) throw new Error("Solution not found in opportunity");
   const prisma = getPrisma();
 
   const lastItem = await prisma.solution.findFirst({
@@ -249,6 +261,7 @@ export async function reorderSolution(
   sortOrder: number,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("solution", solutionId);
   const prisma = getPrisma();
   await captureWorkspaceMutation(prisma, "solution", "update", "UI", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
