@@ -4,6 +4,7 @@ import { link, mkdir, open, realpath, unlink } from "node:fs/promises"
 import { isAbsolute, join } from "node:path"
 import getPrisma from "@/lib/db"
 import { getActiveSchema } from "@/lib/schema"
+import { getManagedPilotContext } from "@/lib/preview-automation/managed-context"
 
 function isLocalPilot() {
   if (process.env.VERCEL_ENV || process.env.NODE_ENV === "production" || process.env.E2E_ISOLATED_DATABASE !== "1") return false
@@ -18,6 +19,8 @@ export function documentBlobPrefix(workspaceId: string) {
 }
 
 export function isDocumentPilotWorkspace(workspaceId: string): boolean {
+  const managed = getManagedPilotContext()
+  if (managed && process.env.GEODE_DOCS_PILOT_WORKSPACE_ID && process.env.GEODE_DOCS_PILOT_WORKSPACE_ID !== managed.workspaceId) throw new Error("Managed pilot workspace mismatch")
   if (!process.env.GEODE_DOCS_PILOT_WORKSPACE_ID || workspaceId !== process.env.GEODE_DOCS_PILOT_WORKSPACE_ID) return false
   const schema = getActiveSchema()
   // Shared preview/prod schemas are never eligible for the synthetic pilot.
@@ -29,6 +32,13 @@ export function isDocumentPilotWorkspace(workspaceId: string): boolean {
 
 export async function getDocumentStore(workspaceId: string) {
   if (!isDocumentPilotWorkspace(workspaceId)) throw new Error("Geode document storage is unavailable for this workspace")
+  const managed = getManagedPilotContext()
+  async function requireActiveManagedRun() {
+    if (!managed) return
+    const run = await getPrisma().previewAutomationRun.findUnique({ where: { id: managed.runId } })
+    if (!run || run.workspaceId !== workspaceId || run.deploymentId !== managed.deploymentId || run.revokedAt || run.expiresAt <= new Date()) throw new Error("Managed pilot run unavailable")
+  }
+  await requireActiveManagedRun()
   if (process.env.GEODE_DOCS_LOCAL_ROOT) {
     if (!isLocalPilot() || !isAbsolute(process.env.GEODE_DOCS_LOCAL_ROOT)) throw new Error("Geode local storage requires isolated E2E configuration")
     const root = await realpath(process.env.GEODE_DOCS_LOCAL_ROOT)
@@ -74,6 +84,7 @@ export async function getDocumentStore(workspaceId: string) {
     prefix, token, maxObjectBytes: 1_048_576, maxReadBytes: 4_194_304,
     maxUploadedBytes: 11_534_336, maxOperations: 55, timeoutMs: 15_000,
     beforeWrite: async (pathname: string) => {
+      await requireActiveManagedRun()
       await getPrisma().docStorageObject.create({ data: { id: randomUUID(), workspaceId, pathname } })
     },
   })

@@ -1,11 +1,22 @@
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { PrismaClient } from "@prisma/client";
 import type { AppPrismaClient } from "@/lib/db";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createLazyPrismaAuthAdapter } from "@/lib/lazy-prisma-auth-adapter";
 
 describe("createLazyPrismaAuthAdapter", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it("managed pilots reject ordinary and convenience sessions before database access", async () => {
+    vi.stubEnv("PREVIEW_DATABASE_MODE", "vercel-managed");
+    const initialize = vi.fn();
+    const adapter = createLazyPrismaAuthAdapter(initialize);
+    for (const sessionToken of ["ordinary", "previewlogin_test"]) {
+      expect(await adapter.getSessionAndUser!(sessionToken)).toBeNull();
+      expect(await adapter.updateSession!({ sessionToken })).toBeNull();
+    }
+    expect(initialize).not.toHaveBeenCalled();
+  });
   it("does not initialize Prisma while constructing the adapter", () => {
     const getClient = vi.fn();
 

@@ -2,6 +2,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { PrismaClient } from "@prisma/client";
 
 import getPrisma, { type AppPrismaClient } from "@/lib/db";
+import { getManagedPilotContext } from "@/lib/preview-automation/managed-context";
 
 type GetPrisma = () => AppPrismaClient;
 
@@ -25,6 +26,7 @@ export function createLazyPrismaAuthAdapter(
   // injection extension is a no-op for them either way.
   const lazyPrisma = new Proxy({} as PrismaClient, {
     get(_target, property) {
+      getManagedPilotContext();
       prisma ??= initializePrisma();
       const value = Reflect.get(prisma, property, prisma);
       return typeof value === "function" ? value.bind(prisma) : value;
@@ -33,10 +35,12 @@ export function createLazyPrismaAuthAdapter(
 
   const adapter = PrismaAdapter(lazyPrisma);
   async function automationDeadline(row: { sessionToken: string; userId: string }) {
+    const managed = getManagedPilotContext();
     if (process.env.PREVIEW_AUTOMATION_ENABLED !== "1" || process.env.VERCEL_ENV !== "preview") return null;
     const association = await lazyPrisma.previewAutomationSession.findUnique({ where: { sessionToken: row.sessionToken } });
     if (!association) return null;
     const run = await lazyPrisma.previewAutomationRun.findUnique({ where: { id: association.runId } });
+    if (managed && (run?.id !== managed.runId || run.workspaceId !== managed.workspaceId)) return null;
     if (!run || run.revokedAt || run.expiresAt.getTime() <= Date.now() || run.deploymentId !== process.env.VERCEL_DEPLOYMENT_ID ||
       ![run.ownerUserId, run.viewerUserId].includes(row.userId)) return null;
     return run.expiresAt;
@@ -44,6 +48,7 @@ export function createLazyPrismaAuthAdapter(
   return {
     ...adapter,
     async getSessionAndUser(sessionToken) {
+      if (process.env.PREVIEW_DATABASE_MODE && process.env.PREVIEW_DATABASE_MODE !== "scoped-role" && !sessionToken.startsWith("preview_")) return null;
       if (!sessionToken.startsWith("preview_")) return adapter.getSessionAndUser!(sessionToken);
       const row = await lazyPrisma.session.findUnique({ where: { sessionToken }, include: { user: true } });
       if (!row) return null;
@@ -54,6 +59,7 @@ export function createLazyPrismaAuthAdapter(
       return { user, session };
     },
     async updateSession(data) {
+      if (process.env.PREVIEW_DATABASE_MODE && process.env.PREVIEW_DATABASE_MODE !== "scoped-role" && !data.sessionToken.startsWith("preview_")) return null;
       // ADR-0009 preview-login sessions (lib/preview-login.ts): Auth.js's own
       // core session action unconditionally tries to roll a database
       // session's expiry forward to `now + session.maxAge` (30 days by
