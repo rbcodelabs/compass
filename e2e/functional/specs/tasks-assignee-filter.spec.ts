@@ -32,7 +32,9 @@ async function dragCardBefore(page: Page, source: Locator, target: Locator) {
 
 async function appearsBefore(column: Locator, first: string, second: string) {
   const cards = await column.locator('[data-slot="card"]').allTextContents();
-  return cards.findIndex((text) => text.includes(first)) < cards.findIndex((text) => text.includes(second));
+  const firstIndex = cards.findIndex((text) => text.includes(first));
+  const secondIndex = cards.findIndex((text) => text.includes(second));
+  return firstIndex >= 0 && secondIndex >= 0 && firstIndex < secondIndex;
 }
 
 test.describe("Tasks assignee filter", () => {
@@ -115,7 +117,9 @@ test.describe("Tasks assignee filter", () => {
         cardIn(secondUnassignedTitle).getByLabel("Drag to reorder"),
         cardIn(unassignedTitle)
       );
-      expect((await reorderResponse).ok()).toBe(true);
+      const response = await reorderResponse;
+      expect(await response.finished()).toBeNull();
+      expect(response.ok()).toBe(true);
       await expect.poll(() => appearsBefore(todoColumn, secondUnassignedTitle, unassignedTitle)).toBe(true);
 
       await page.reload();
@@ -129,6 +133,8 @@ test.describe("Tasks assignee filter", () => {
       await expect(cardIn(assignedTitle)).toBeVisible({ timeout: 10_000 });
       await expect(cardIn(unassignedTitle)).toBeVisible();
       await expect(cardIn(secondUnassignedTitle)).toBeVisible();
+      await expect.poll(() => appearsBefore(todoColumn, assignedTitle, secondUnassignedTitle)).toBe(true);
+      await expect.poll(() => appearsBefore(todoColumn, assignedTitle, unassignedTitle)).toBe(true);
       await expect.poll(() => appearsBefore(todoColumn, secondUnassignedTitle, unassignedTitle)).toBe(true);
 
       // ── 6. The list view states the same thing ──────────────────────────────
