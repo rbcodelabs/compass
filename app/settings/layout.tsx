@@ -16,8 +16,8 @@ interface SettingsLayoutProps {
 }
 
 /**
- * Layout for the account-wide `/settings/*` routes (currently just
- * `/settings/agents`, "My agents"). Unlike every other authenticated route,
+ * Layout for account-wide `/settings/*` routes (Profile, My agents, Passkeys).
+ * Unlike workspace-scoped authenticated routes,
  * this one has no org or workspace segment in its URL, so with no
  * layout.tsx of its own it fell through to the bare root `app/layout.tsx`
  * and rendered with no Sidebar/BottomNav/MobileHeader chrome at all

@@ -6,12 +6,13 @@ const workspaceFindUnique = vi.fn()
 const commentFindUnique = vi.fn()
 const commentFindMany = vi.fn()
 const transaction = vi.fn()
+const userFindMany = vi.fn()
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => auth(...args) }))
 vi.mock("@/lib/comments", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/comments")>()
   return { ...original, resolveCommentTarget: (...args: unknown[]) => resolveCommentTarget(...args) }
 })
-vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findUnique: workspaceFindUnique }, comment: { findUnique: commentFindUnique, findMany: commentFindMany }, $transaction: transaction }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ user: { findMany: userFindMany }, workspace: { findUnique: workspaceFindUnique }, comment: { findUnique: commentFindUnique, findMany: commentFindMany }, $transaction: transaction }) }))
 
 import { authorizeComment, authorizeCommentTarget, CommentHttpError, listBrowserComments, toCommentDto, toCommentThreads, type BrowserCommentRow } from "@/lib/comment-browser"
 
@@ -30,6 +31,10 @@ beforeEach(() => {
 })
 
 describe("authorizeCommentTarget", () => {
+  it("uses email for a signed-in user without a name", async () => {
+    auth.mockResolvedValue({ user: { id: "user-1", name: null, email: "person@example.com" } })
+    await expect(authorizeCommentTarget("ROADMAP_ITEM", "target-1")).resolves.toMatchObject({ name: "person@example.com" })
+  })
   it("returns 401 without target lookup when signed out", async () => {
     auth.mockResolvedValue(null)
     await expect(authorizeCommentTarget("ROADMAP_ITEM", "target-1")).rejects.toMatchObject({ status: 401 })
@@ -72,6 +77,14 @@ describe("authorizeComment", () => {
 })
 
 describe("browser comment queries", () => {
+  it("shows the current profile for old roots and replies without marking them edited", async () => {
+    commentFindMany.mockResolvedValue([row({ authorName: "Compass user" }), row({ id: "reply", parentId: "comment-1", authorName: "Old name" }), row({ id: "agent", authorType: "AGENT", source: "MCP", authorName: "Agent" })])
+    userFindMany.mockResolvedValue([{ id: "user-1", name: "New name", email: "person@example.com" }])
+    const comments = await listBrowserComments("workspace-1", "TASK", "target-1")
+    expect(comments.map(c => c.authorName)).toEqual(["New name", "New name", "Agent"])
+    expect(userFindMany).toHaveBeenCalledTimes(1)
+    expect(toCommentThreads(comments, actor)[0]).toMatchObject({ edited: false, createdAt: createdAt.toISOString(), updatedAt: createdAt.toISOString() })
+  })
   it("excludes specialized plan proposal rows from a Solution discussion at the database boundary", async () => {
     await listBrowserComments("workspace-1", "SOLUTION", "solution-1")
     expect(commentFindMany).toHaveBeenCalledWith(expect.objectContaining({

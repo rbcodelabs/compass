@@ -1,4 +1,5 @@
 import getPrisma from "@/lib/db"
+import { resolveCommentAuthors } from "@/lib/comment-authors"
 import { withWorkspaceUpdates, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
 
@@ -133,15 +134,17 @@ export async function createComment(input: CreateCommentInput) {
   return getComment(comment.id)
 }
 
-export function listComments(workspaceId: string, targetType: CommentTargetType, targetId: string, status?: CommentStatus) {
-  return getPrisma().comment.findMany({
+export async function listComments(workspaceId: string, targetType: CommentTargetType, targetId: string, status?: CommentStatus) {
+  const comments = await getPrisma().comment.findMany({
     where: { workspaceId, targetType, targetId, ...(status ? { status } : {}) },
     include: { docAnchor: true, solutionPlanProposal: true }, orderBy: { createdAt: "asc" },
   })
+  return resolveCommentAuthors(comments)
 }
 
-export function getComment(commentId: string) {
-  return getPrisma().comment.findUnique({ where: { id: commentId }, include: { docAnchor: true, solutionPlanProposal: true } })
+export async function getComment(commentId: string) {
+  const comment = await getPrisma().comment.findUnique({ where: { id: commentId }, include: { docAnchor: true, solutionPlanProposal: true } })
+  return comment ? (await resolveCommentAuthors([comment]))[0] : null
 }
 
 export async function updateCommentBody(commentId: string, body: string) {

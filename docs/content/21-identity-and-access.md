@@ -15,6 +15,22 @@ everything it is allowed to do.
 This page explains the credential types, how to choose between them, and what
 no assistant can do regardless of which one it holds.
 
+## Your profile and comment name
+
+Open your account menu and choose **Profile** to set a display name. Names are
+shared across your workspaces and must contain 1–120 characters. Your sign-in
+email is shown read-only on this page.
+
+Your current profile name appears on past and future discussion comments and
+inline Doc comments. Until you set a name, your email is shown to workspace
+members. Renaming your profile does not edit comment content or timestamps.
+Agent comments keep their agent attribution; historical entries without a linked
+account keep their original author label.
+
+![Profile settings on desktop, with read-only email and an editable display name](/screenshots/docs/profile-desktop.png)
+
+![Profile settings on mobile, with saved display name and account navigation](/screenshots/docs/profile-mobile.png)
+
 ## The client does not matter
 
 Compass authorizes a request by looking at one thing: **the API key in the

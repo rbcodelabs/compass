@@ -38,20 +38,24 @@ test.describe("Discovery → Roadmap", () => {
 
       // Continue into the full-page editor, where solutions are managed.
       await page.getByRole("link", { name: "Open full page" }).click();
-      await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
+      // The outgoing panel already contains the same heading and controls.
+      // Wait for navigation before interacting, or the form can unmount mid-edit.
+      await expect(page).toHaveURL(new RegExp(`${base}/discovery/[0-9a-f-]+$`));
+      const opportunityPage = page.locator('[data-slot="opportunity-detail"][data-variant="page"]');
+      await expect(opportunityPage.getByRole("heading", { name: oppTitle })).toBeVisible();
 
       // ── 4. Add a solution ─────────────────────────────────────────────────
-      await page.getByRole("button", { name: "Add Solution" }).click();
-      await page.getByLabel("Title").fill(solTitle);
-      await page.getByRole("button", { name: "Add Solution" }).last().click();
+      await opportunityPage.getByRole("button", { name: "Add Solution" }).click();
+      await opportunityPage.getByLabel("Title").fill(solTitle);
+      await opportunityPage.getByRole("button", { name: "Add Solution" }).last().click();
 
       // Solution card appears
-      await expect(page.getByText(solTitle)).toBeVisible({ timeout: 10_000 });
+      await expect(opportunityPage.getByText(solTitle)).toBeVisible({ timeout: 10_000 });
 
       // ── 5. Open the solution's sidebar panel ────────────────────────────────
       // Status changes and Promote-to-Roadmap both moved off the (now
       // compact, non-expanding) solution card into the Solution panel.
-      await page.getByRole("button", { name: solTitle, exact: true }).click();
+      await opportunityPage.getByRole("button", { name: solTitle, exact: true }).click();
       const panel = page.locator('[data-slot="sheet-content"]');
       await expect(panel).toBeVisible();
 

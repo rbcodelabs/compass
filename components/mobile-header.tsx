@@ -163,6 +163,9 @@ export function MobileHeader({
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="p-0 cursor-pointer">
+              <Link href="/settings/profile" className="flex w-full items-center px-1.5 py-1">Profile</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem className="p-0 cursor-pointer">
               <Link href="/settings/agents" className="flex w-full items-center px-1.5 py-1">My agents</Link>
             </DropdownMenuItem>
             <DropdownMenuItem className="p-0 cursor-pointer">
