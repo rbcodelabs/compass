@@ -16,6 +16,7 @@
  */
 
 import getPrisma from "@/lib/db"
+import { resolveCommentAuthors } from "@/lib/comment-authors"
 import type { DocComment } from "@prisma/client"
 import { deleteMirroredComment, mirrorLegacyDocComment, updateMirroredComment, updateMirroredDocStatus } from "@/lib/comment-compat"
 
@@ -94,7 +95,7 @@ export async function createDocCommentCore(
     throw error
   }
 
-  return { ok: true, comment }
+  return { ok: true, comment: (await resolveCommentAuthors([comment]))[0] }
 }
 
 /**
@@ -107,15 +108,17 @@ export async function listDocCommentsCore(
   status?: CommentStatus
 ): Promise<DocComment[]> {
   const prisma = getPrisma()
-  return prisma.docComment.findMany({
+  const comments = await prisma.docComment.findMany({
     where: { docId, ...(status ? { status } : {}) },
     orderBy: { createdAt: "asc" },
   })
+  return resolveCommentAuthors(comments)
 }
 
 export async function getDocCommentCore(commentId: string): Promise<DocComment | null> {
   const prisma = getPrisma()
-  return prisma.docComment.findUnique({ where: { id: commentId } })
+  const comment = await prisma.docComment.findUnique({ where: { id: commentId } })
+  return comment ? (await resolveCommentAuthors([comment]))[0] : null
 }
 
 /**
@@ -134,7 +137,7 @@ export async function updateDocCommentBodyCore(
     data: { body: body.trim(), updatedAt: new Date() },
   })
   await updateMirroredComment(commentId, updated.body)
-  return updated
+  return (await resolveCommentAuthors([updated]))[0]
 }
 
 /**
@@ -153,7 +156,7 @@ export async function setDocCommentStatusCore(
     data: { status, updatedAt: new Date() },
   })
   await updateMirroredDocStatus(commentId, status)
-  return updated
+  return (await resolveCommentAuthors([updated]))[0]
 }
 
 /**

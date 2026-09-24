@@ -18,7 +18,7 @@ async function requireTaskWorkspace(workspaceId: string) {
 async function requireTask(taskId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  const task = await getPrisma().task.findUnique({ where: { id: taskId }, select: { workspaceId: true } });
+  const task = await getPrisma().task.findUnique({ where: { id: taskId }, select: { workspaceId: true, status: true } });
   if (!task) throw new Error("Not found");
   await requireTaskWorkspace(task.workspaceId);
   return task;
@@ -161,16 +161,37 @@ export async function moveTaskStatus(
 
 export async function updateSortOrder(
   taskId: string,
-  sortOrder: number,
+  orderedTaskIds: string[],
   revalidatePathStr: string
 ) {
   const prisma = getPrisma();
-  await requireTask(taskId);
+  const task = await requireTask(taskId);
+  const requestedIds = new Set(orderedTaskIds);
+  if (requestedIds.size !== orderedTaskIds.length || !requestedIds.has(taskId)) {
+    throw new Error("Invalid task order");
+  }
 
-  await captureWorkspaceMutation(prisma, "task", "update", "UI", taskId, tx => tx.task.update({
-    where: { id: taskId },
-    data: { sortOrder, updatedAt: new Date() },
-  }));
+  await prisma.$transaction(async (tx) => {
+    const column = await tx.task.findMany({
+      where: { workspaceId: task.workspaceId, status: task.status },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, sortOrder: true },
+    });
+    const columnIds = new Set(column.map(({ id }) => id));
+    if (orderedTaskIds.some((id) => !columnIds.has(id))) throw new Error("Not found");
+
+    const visibleIds = [...orderedTaskIds];
+    const reordered = column.map(({ id }) => requestedIds.has(id) ? visibleIds.shift()! : id);
+    const persistedSortOrders = new Map(column.map(({ id, sortOrder }) => [id, sortOrder]));
+    const updatedAt = new Date();
+    await Promise.all(reordered.map((id, sortOrder) => {
+      if (persistedSortOrders.get(id) === sortOrder) return Promise.resolve();
+      return tx.task.update({
+        where: { id },
+        data: { sortOrder, updatedAt },
+      });
+    }));
+  });
 
   revalidatePath(revalidatePathStr);
 }

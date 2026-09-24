@@ -15,6 +15,7 @@
     "hooks:install": "git config core.hooksPath scripts/hooks && echo \"Git hooks enabled (scripts/hooks)\"",
     "hooks:uninstall": "git config --unset core.hooksPath && echo \"Git hooks disabled\"",
     "scan:secrets": "gitleaks git . --log-opts=\"--all\" --config .gitleaks.toml --redact",
+    "test:secret-scanning": "node --test scripts/test-secret-scanning.mjs",
     "typecheck": "tsc --noEmit",
     "ui:colors": "node scripts/check-ui-colors.mjs",
     "ui:primitives": "node scripts/check-ui-primitives.mjs",

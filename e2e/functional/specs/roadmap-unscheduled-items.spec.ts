@@ -86,18 +86,24 @@ async function createValidatedSolution(page: Page, base: string, title: string) 
   await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: oppTitle, exact: true }).click();
-  await page.getByRole("link", { name: "Open full page" }).click();
-  await page.waitForLoadState("networkidle");
-  await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
+  const fullPageLink = page.getByRole("link", { name: "Open full page" });
+  const destination = await fullPageLink.getAttribute("href");
+  if (!destination) throw new Error("Opportunity full-page link has no destination");
+  await fullPageLink.click();
+  // The outgoing panel has the same heading and controls. Its already-idle
+  // document does not prove the client-side navigation has committed.
+  await expect(page).toHaveURL(new URL(destination, page.url()).href);
+  const detail = page.locator('[data-slot="opportunity-detail"][data-variant="page"]');
+  await expect(detail.getByRole("heading", { name: oppTitle })).toBeVisible();
 
-  await page.getByRole("button", { name: "Add Solution" }).click();
-  await page.getByLabel("Title").fill(title);
-  await page.getByRole("button", { name: "Add Solution" }).last().click();
-  await expect(page.getByText(title)).toBeVisible({ timeout: 10_000 });
+  await detail.getByRole("button", { name: "Add Solution" }).click();
+  await detail.getByLabel("Title").fill(title);
+  await detail.getByRole("button", { name: "Add Solution" }).click();
+  await expect(detail.getByText(title)).toBeVisible({ timeout: 10_000 });
 
   // Status changes live in the solution's sidebar panel (the card itself is
   // just a compact summary row) — open it and flip status to Validated.
-  await page.getByRole("button", { name: title, exact: true }).click();
+  await detail.getByRole("button", { name: title, exact: true }).click();
   const panel = page.locator('[data-slot="sheet-content"]');
   await expect(panel).toBeVisible();
   await panel.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
@@ -114,6 +120,38 @@ async function createValidatedSolution(page: Page, base: string, title: string) 
 }
 
 test.describe("Roadmap — not yet on the roadmap", () => {
+  test("creates a validated candidate after delayed full-page navigation", async ({ page, base }) => {
+    const editedVariants: Array<string | null> = [];
+    await page.exposeFunction("recordSolutionEdit", (variant: string | null) => editedVariants.push(variant));
+    await page.addInitScript(() => {
+      document.addEventListener("input", (event) => {
+        const input = event.target;
+        if (!(input instanceof HTMLInputElement) || input.placeholder !== "Solution title") return;
+        const detail = input.closest('[data-slot="opportunity-detail"]');
+        void (window as typeof window & { recordSolutionEdit: (variant: string | null) => Promise<void> })
+          .recordSolutionEdit(detail?.getAttribute("data-variant") ?? null);
+      });
+    });
+    // The panel and full page share a heading and Add Solution controls. Keep
+    // the outgoing panel visible while the destination response is in flight.
+    await page.route(`**${base}/discovery/*`, async (route) => {
+      const response = await route.fetch();
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await route.fulfill({ response });
+    });
+    await createValidatedSolution(page, base, `E2E Delayed Solution ${Date.now()}`);
+    try {
+      expect(editedVariants).toEqual(["page"]);
+    } finally {
+      // This suite shares a workspace. Do not leave an extra eligible candidate
+      // in the next test's otherwise-empty unscheduled roadmap column.
+      const panel = page.locator('[data-slot="sheet-content"]');
+      await panel.locator('[role="combobox"]').filter({ hasText: "Validated" }).click();
+      await page.getByRole("option", { name: "Idea", exact: true }).click();
+      await expect(panel.locator('[role="combobox"]').filter({ hasText: "Idea" })).toBeVisible();
+    }
+  });
+
   test(
     "preserves board drag and persists direct timeline placement",
     async ({ page, base, orgSlug, workspaceSlug }) => {

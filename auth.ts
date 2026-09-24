@@ -75,6 +75,14 @@ export const { handlers, auth, signIn, signOut } = isDev
         async session({ session, token }) {
           if (token?.id && session.user) {
             session.user.id = token.id as string;
+            // JWT claims survive profile edits; use the account as the identity source.
+            const profile = await getPrisma().user.findUnique({
+              where: { id: session.user.id }, select: { name: true, email: true },
+            });
+            if (profile) {
+              session.user.name = profile.name;
+              session.user.email = profile.email;
+            }
           }
           return session;
         },

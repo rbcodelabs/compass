@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockTask = {
   findUnique: vi.fn(),
+  findMany: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   findFirst: vi.fn(),
@@ -14,6 +15,7 @@ const mockTaskLink = {
 };
 
 const mockPrisma = {
+  $transaction: vi.fn(async (callback: (tx: { task: typeof mockTask }) => unknown) => callback(mockPrisma)),
   workspaceMember: { findFirst: vi.fn() },
   opportunity: { findFirst: vi.fn() },
   task: mockTask,
@@ -44,6 +46,7 @@ beforeEach(() => {
   mockPrisma.workspaceMember.findFirst.mockResolvedValue({ id: "membership" });
   mockPrisma.opportunity.findFirst.mockResolvedValue({ id: "opp-1" });
   mockTask.findUnique.mockResolvedValue({ id: "task-1", workspaceId: "ws-1" });
+  mockTask.findMany.mockResolvedValue([]);
   mockTaskLink.findUnique.mockResolvedValue({ taskId: "task-1" });
   mockTask.create.mockResolvedValue({ id: "task-1", title: "Test Task", status: "TODO" });
   mockTask.update.mockResolvedValue({ id: "task-1" });
@@ -194,12 +197,36 @@ describe("moveTaskStatus", () => {
 // ─── updateSortOrder ──────────────────────────────────────────────────────────
 
 describe("updateSortOrder", () => {
-  it("updates the sort order directly and bumps updatedAt", async () => {
-    await updateSortOrder("task-1", 9, "/path");
-    const call = mockTask.update.mock.calls[0][0];
-    expect(call.where).toEqual({ id: "task-1" });
-    expect(call.data.sortOrder).toBe(9);
-    expect(call.data.updatedAt).toBeInstanceOf(Date);
+  it("renumbers the full status column while preserving hidden task positions", async () => {
+    mockTask.findUnique.mockResolvedValue({ id: "task-1", workspaceId: "ws-1", status: "TODO" });
+    mockTask.findMany.mockResolvedValue([
+      { id: "task-1", sortOrder: 0 },
+      { id: "hidden-task", sortOrder: 0 },
+      { id: "task-2", sortOrder: 2 },
+    ]);
+
+    await updateSortOrder("task-1", ["task-2", "task-1"], "/path");
+
+    expect(mockTask.findMany).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-1", status: "TODO" },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, sortOrder: true },
+    });
+    expect(mockTask.update.mock.calls.map(([call]) => call)).toEqual([
+      { where: { id: "task-2" }, data: { sortOrder: 0, updatedAt: expect.any(Date) } },
+      { where: { id: "hidden-task" }, data: { sortOrder: 1, updatedAt: expect.any(Date) } },
+      { where: { id: "task-1" }, data: { sortOrder: 2, updatedAt: expect.any(Date) } },
+    ]);
+  });
+
+  it("rejects reordered ids outside the authenticated task's status column", async () => {
+    mockTask.findUnique.mockResolvedValue({ id: "task-1", workspaceId: "ws-1", status: "TODO" });
+    mockTask.findMany.mockResolvedValue([{ id: "task-1", sortOrder: 0 }]);
+
+    await expect(updateSortOrder("task-1", ["foreign-task", "task-1"], "/path"))
+      .rejects.toThrow("Not found");
+
+    expect(mockTask.update).not.toHaveBeenCalled();
   });
 });
 
