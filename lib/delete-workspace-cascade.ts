@@ -5,6 +5,7 @@ import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-dat
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
+import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 
 /**
  * Deletes a single workspace and every row that hangs off it, children before
@@ -202,5 +203,8 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
   await prisma.squad.deleteMany({ where: { workspaceId } });
   await prisma.doc.deleteMany({ where: { workspaceId } });
-  await prisma.workspace.delete({ where: { id: workspaceId } });
+  await prisma.$transaction(async tx => {
+    await tx.workspace.delete({ where: { id: workspaceId } });
+    await deleteWorkspaceAnalytics(tx, workspaceId);
+  });
 }

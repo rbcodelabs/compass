@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "crypto";
 import getPrisma from "@/lib/db";
+import type { AppPrismaClient } from "@/lib/db";
 import type { LaunchTier, ChecklistTemplateSnapshot, LaunchChecklistItemStatus } from "@/lib/types";
 import { DEFAULT_CHECKLIST_TEMPLATES } from "@/lib/launch-defaults";
 
@@ -54,11 +55,12 @@ export async function setLaunchTierCore(
   itemId: string,
   tier: LaunchTier,
   template: ResolvedTemplate,
-  workspaceId: string
+  workspaceId: string,
+  activityClient?: AppPrismaClient
 ): Promise<{ launchChecklistId: string; itemCount: number }> {
   await assertLaunchWorkflowEnabled(workspaceId);
 
-  const prisma = getPrisma();
+  const prisma = activityClient ?? getPrisma();
 
   const snapshot: ChecklistTemplateSnapshot = {
     templateId: template.id,

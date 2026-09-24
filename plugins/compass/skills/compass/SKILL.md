@@ -406,6 +406,18 @@ the child-write gap is tracked separately.)
 
 ## Common Workflows
 
+### Product analytics
+
+Use `list_analytics_connections` for sanitized connection status; tokens are human-admin-only in Settings → Analytics. All analytics tools require `workspaceId`, and linked entities must belong to it.
+
+- Definitions: `create_metric`, `list_metrics`, `get_metric`, `update_metric` (requires `expectedRevision`), `archive_metric`.
+- Connections to product work: `list_metric_bindings` (optional `includeInactive`), `get_metric_binding`, `link_metric`, replacement-style `update_metric_binding`, `unlink_metric`; targets are `EXPERIMENT`, `ROADMAP_ITEM`, `KEY_RESULT`.
+- Evidence: `refresh_metric_binding` (binding ID plus retry-stable request UUID), `list_metric_observations`, `get_metric_observation`.
+
+Pass explicit inclusive UTC baseline/followup windows (`since`/`until` dates). Vercel definitions support pageviews, daily visitors and named event counts, with structured path/property/flag filters. Do not sum daily uniques. Native Active Discovery Teams is operator-workspace-only, prospective and partial for the first 30 days. Never equate unavailable/stale data with zero or automatically overwrite experiment conclusions or KR check-ins. Example query: `{metric:"event_count",eventName:"compass_activity",eventProperties:{action:"result_recorded"}}`.
+
+Bindings and observations are generated immutable evidence. A semantic no-op binding update returns the existing ID; a real update deactivates the old binding and returns a new ID plus `replacesBindingId`, pinned to the same metric revision and product target. Historical observations remain readable through the inactive binding. There is intentionally no observation update tool.
+
 ### 1. Set up an OKR cycle
 
 ```

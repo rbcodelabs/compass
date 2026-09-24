@@ -14,6 +14,7 @@ import { MarkdownContent } from "@/components/markdown-content";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
 import { ExperimentResearchLinksSection } from "@/components/research/experiment-research-links-section";
+import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
 
 type ExperimentData = {
   id: string;
@@ -189,6 +190,7 @@ export function ExperimentPanel({
         </div>
       )}
       <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="EXPERIMENT" subjectId={data.id} subjectTitle={data.title} />
+      <MeasurementsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ targetType: "EXPERIMENT", targetId: data.id }} compact />
       {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="EXPERIMENT" targetId={experimentId} />}
 
       {/* Kill condition — prominent when active */}

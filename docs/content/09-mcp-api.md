@@ -8,6 +8,37 @@ section: "Developer"
 
 # MCP API
 
+## Product analytics
+
+Analytics tools require workspace membership; agent grants and OAuth read/write scopes still apply. Research and temporary scoped credentials cannot use them. Each call takes `workspaceId`; every entity and binding must belong to that workspace, including service-key calls. Tokens are configured only by a workspace admin in Settings → Analytics, never through MCP.
+
+| Tool | Additional input | Purpose |
+| --- | --- | --- |
+| `list_analytics_connections` | — | Sanitized provider/project, enabled and health metadata; no token or encrypted secret |
+| `list_metrics` | — | Reusable metric definitions |
+| `get_metric` | `metricId` | Current definition and revision |
+| `create_metric` | `name, unit, provider, connectionId?, query` | Define a reusable metric |
+| `update_metric` | Above plus `metricId, expectedRevision` | Create a new definition revision; preserve observations |
+| `archive_metric` | `metricId` | Stop future use without removing evidence |
+| `list_metric_bindings` | `targetType, targetId, includeInactive?` | Measurements attached to an experiment, roadmap item or KR; inactive history is opt-in |
+| `get_metric_binding` | `bindingId` | One active or inactive binding, authorized through its product target |
+| `link_metric` | `metricId, targetType, targetId, baseline, followup, target?` | Attach explicit comparison windows |
+| `update_metric_binding` | `bindingId, baseline?, followup?, target?` | Replacement edit: retire the active binding and return a new ID plus `replacesBindingId`, pinned to the same metric revision and product target; `target: null` clears the target value |
+| `unlink_metric` | `bindingId` | Retire a link without deleting historical observations |
+| `refresh_metric_binding` | `bindingId, requestId` | Fetch and save observations; reuse request UUID for retries |
+| `list_metric_observations` | `bindingId` | Immutable snapshots, values, series, provenance and completeness |
+| `get_metric_observation` | `observationId` | One immutable observation, authorized through its binding and product target |
+
+`targetType` is `EXPERIMENT`, `ROADMAP_ITEM` or `KEY_RESULT`. Windows are inclusive UTC `{ since: "YYYY-MM-DD", until: "YYYY-MM-DD" }`. Vercel supports up to 90 days per window. `provider` is `vercel` or `compass_activation`. Vercel queries use `metric: "pageviews" | "daily_visitors" | "event_count"`, with `eventName` required for event counts; optional `path`, `eventProperties`, and `flags` are structured filters, never raw SQL or URLs. Daily visitors are not summed into monthly unique users.
+
+Bindings and observations are generated evidence records, so they are the intentional exception to ordinary in-place update symmetry: `update_metric_binding` never mutates a binding that may already anchor evidence. A semantic no-op returns the existing ID; a real change atomically deactivates the old binding and creates a new ID, while observations remain attached to the old binding. There is deliberately no observation update tool.
+
+Example dogfood event query: `{ metric: "event_count", eventName: "compass_activity", eventProperties: { action: "result_recorded" } }`. The only event properties are `action` and `source` (`ui`, `mcp`, or registered `agent`); source describes the entry point, not whether an ordinary API-key holder is human. Allowed actions are opportunity/solution created or updated; roadmap created or updated; experiment created, started, concluded or updated; `result_recorded`; and `checkin_recorded`.
+
+The native `{ metric: "active_discovery_teams" }` query is available only in the deployment-configured operator reporting workspace. It counts eligible production workspaces with Discovery, Delivery and Learning activity in the last 30 days. Collection is prospective; the first 30 days are incomplete. Refreshes, reads, reorders, imports and settings edits do not create activity. Missing/stale/partial data is never a zero or an automatic experiment conclusion/KR update.
+
+Server event delivery uses a signed fixed-path internal relay (`/api/analytics/activity`) to avoid exporting SDK-inherited request URLs. It requires production environment, a configured production hostname and analytics encryption key; failure drops external telemetry without failing a committed save. Browser collection is currently unmounted pending approval of a no-referrer policy: URL redaction alone cannot prevent the hosted collector's implicit referrer/identity fields. The prepared browser guard allows route templates only and suppresses referrers, persisted attribution and flag payloads. This does not prevent querying an already-instrumented external Vercel project. No private product text or workspace/user identifiers are exported by server activity events.
+
 ## PM interview processing
 
 `get_pm_interview({ interviewId, offset? })` reads the initiating user's saved

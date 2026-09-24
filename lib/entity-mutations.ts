@@ -11,6 +11,7 @@
  * general-purpose entity editor.
  */
 import getPrisma from "@/lib/db";
+import { getHumanActivityPrisma } from "@/lib/analytics/activity";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
 import { SETTABLE_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
@@ -167,7 +168,7 @@ export async function updateEntityField(
   // entities need, so verify with the scoped findFirst first, then update by
   // id. Same access boundary as reads (entityScopeWhere).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const model = (getPrisma() as any)[config.model];
+  const model = ((_actor.kind === "USER" ? getHumanActivityPrisma() : getPrisma()) as any)[config.model];
   const exists = await model.findFirst({
     where: entityScopeWhere(type, id, workspaceId),
     select: { id: true },

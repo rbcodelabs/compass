@@ -45,6 +45,9 @@ vi.mock("@/components/panels/positioning-brief-row", () => ({
 vi.mock("@/components/tasks/linked-tasks-section", () => ({
   LinkedTasksSection: () => null,
 }));
+vi.mock("@/components/analytics/measurements-panel", () => ({
+  MeasurementsPanel: () => null,
+}));
 // Both panels' Details section writes through the settings server actions
 // module, which imports next-auth — a real dependency this jsdom test has no
 // business loading (same boundary as the mocked children above).

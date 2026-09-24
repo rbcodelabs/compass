@@ -21,7 +21,8 @@ import { FleshThisOutLink } from "@/components/research/flesh-this-out-link"
 import { PmInterviewHistory } from "@/components/research/pm-interview-history"
 import { isPmInterviewEnabled, isResearchCaptureEnabled } from "@/lib/research-feature"
 import { ExperimentResearchLinksSection } from "@/components/research/experiment-research-links-section"
-import type { CustomFieldDefinitionData, CustomFieldType, CustomFieldValue, SquadData } from "@/lib/types"
+import type { CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types"
+import { MeasurementsPanel } from "@/components/analytics/measurements-panel"
 
 interface ExperimentDetailPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string; id: string }>
@@ -289,6 +290,14 @@ export default async function ExperimentDetailPage({
           </section>
         </>
       )}
+
+      <Separator />
+
+      <MeasurementsPanel
+        orgSlug={orgSlug}
+        workspaceSlug={workspaceSlug}
+        target={{ targetType: "EXPERIMENT", targetId: id }}
+      />
 
       <Separator />
 

@@ -25,6 +25,7 @@ import { Discussion } from "@/components/comments/discussion";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import type { CustomFieldWithValue } from "@/lib/custom-field-definitions";
 import { usePanelContext } from "./panel-context";
+import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
 
 const ITEM_STATUS_LABELS: Record<ItemStatus, string> = {
   ACTIVE: "Active",
@@ -133,6 +134,7 @@ export function RoadmapItemPanel({
         statusEdit={{ field: "horizon", options: HORIZON_ORDER, map: HORIZON }}
       />
       <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="ROADMAP_ITEM" subjectId={data.id} subjectTitle={data.title} />
+      <MeasurementsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ targetType: "ROADMAP_ITEM", targetId: data.id }} compact />
 
       <EditableText
         value={data.description}
