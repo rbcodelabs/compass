@@ -2,6 +2,7 @@ import { z } from "zod"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { querySchema, windowSchema, AnalyticsError } from "./providers"
+import { followupPolicySchema } from "./windows"
 import * as service from "./service"
 
 const workspace = { workspaceId: z.string().uuid() }
@@ -21,8 +22,8 @@ export const analyticsToolSchemas = {
   archive_metric: metricId,
   list_metric_bindings: { ...workspace, ...target, includeInactive: z.boolean().optional() },
   get_metric_binding: bindingId,
-  link_metric: { ...metricId, ...target, baseline: windowSchema, followup: windowSchema, target: z.number().finite().optional() },
-  update_metric_binding: { ...bindingId, baseline: windowSchema.optional(), followup: windowSchema.optional(), target: z.number().finite().nullable().optional() },
+  link_metric: { ...metricId, ...target, baseline: windowSchema.nullable().optional().describe("Optional comparison baseline. Omit both windows for rolling 30-day tracking."), followup: followupPolicySchema.optional(), target: z.number().finite().optional() },
+  update_metric_binding: { ...bindingId, baseline: windowSchema.nullable().optional().describe("Set null with a rolling followup policy to switch to tracking."), followup: followupPolicySchema.optional(), target: z.number().finite().nullable().optional() },
   unlink_metric: bindingId,
   refresh_metric_binding: { ...bindingId, requestId: z.string().uuid().describe("Reuse this UUID when retrying the same refresh.") },
   list_metric_observations: bindingId,
