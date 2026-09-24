@@ -3,6 +3,7 @@ import type { Pool } from "pg";
 import { initializeManagedPilot, getManagedMigrationStatus, applyManagedMigration } from "@/lib/preview-automation/managed-migrations";
 const m = vi.hoisted(() => ({ query: vi.fn(), release: vi.fn(), status: vi.fn(), apply: vi.fn() }));
 vi.mock("@/lib/migrations/runner", () => ({
+  assertManagedMigrationManifest: () => {},
   getMigrationStatus: m.status, applyMigrations: m.apply,
   partitionPendingMigrations: (_schema: string, applied: Set<string>) => ({ pending: ["001_init", "002_custom_fields"].filter(name => !applied.has(name)).map(name => ({ name, filePath: `prisma/migrations/${name}/migration.sql` })), notApplicable: [] }),
 }));

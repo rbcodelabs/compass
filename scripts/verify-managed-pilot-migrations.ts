@@ -20,11 +20,19 @@ async function main() {
         await pool.query(`CREATE SCHEMA "${schema}"`); created.push(schema);
         await pool.query(`CREATE TABLE "${schema}".docs (id INTEGER PRIMARY KEY, content TEXT NOT NULL)`);
         await pool.query(`INSERT INTO "${schema}".docs VALUES (1, 'untouched synthetic sentinel')`);
+        for (const table of ["oauth_tokens", "oauth_consents", "oauth_authorization_codes"]) {
+          await pool.query(`CREATE TABLE "${schema}".${table} (id INTEGER PRIMARY KEY, revoked_at TIMESTAMP, content TEXT NOT NULL)`);
+          await pool.query(`INSERT INTO "${schema}".${table} VALUES (1, NULL, 'untouched synthetic OAuth sentinel')`);
+        }
       }
       async function snapshot() {
         return {
           columns: (await pool.query("SELECT table_schema,table_name,column_name,data_type,is_nullable FROM information_schema.columns WHERE table_schema=ANY($1::text[]) ORDER BY table_schema,table_name,ordinal_position", [sentinels])).rows,
-          data: await Promise.all(sentinels.map(async s => (await pool.query(`SELECT * FROM "${s}".docs ORDER BY id`)).rows)),
+          data: await Promise.all(sentinels.flatMap(s => ["docs", "oauth_tokens", "oauth_consents", "oauth_authorization_codes"].map(async table => (await pool.query(`SELECT * FROM "${s}".${table} ORDER BY id`)).rows))),
+          // No public data is read: catalog shape detects accidental global DDL.
+          publicColumns: (await pool.query("SELECT table_name,column_name,data_type,is_nullable,column_default FROM information_schema.columns WHERE table_schema='public' ORDER BY table_name,ordinal_position")).rows,
+          publicIndexes: (await pool.query("SELECT tablename,indexname,indexdef FROM pg_indexes WHERE schemaname='public' ORDER BY tablename,indexname")).rows,
+          publicRelations: (await pool.query("SELECT c.relname,c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY c.relname")).rows,
         };
       }
       const before = await snapshot();

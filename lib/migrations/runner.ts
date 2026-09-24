@@ -20,6 +20,7 @@ import { assertOAuthAuthorizationEventsMigration } from "@/lib/migrations/oauth-
 import { assertProductAnalyticsMigration } from "@/lib/migrations/product-analytics";
 import { assertGeodeDocumentStorageMigration, getGeodeDocumentStorageHealth } from "@/lib/migrations/geode-document-storage";
 import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-updates";
+import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest";
 
 
 
@@ -1563,8 +1564,14 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 // POST — apply a migration (or all pending)
+export function assertManagedMigrationManifest(schema: string): void {
+  if (!/^compass_pr_276_[a-f0-9]{12}$/.test(schema)) throw new Error("Invalid managed migration schema");
+  assertReviewedManagedManifest(partitionPendingMigrations(schema, new Set()).pending);
+}
+
 export async function applyMigrations(pool: Pool, schema: string, targetScript?: string, options: { preProvisionedSchema?: boolean; managedPilot?: boolean; legacyDecisionRepairManifest?: LegacyDecisionRepairManifest } = {}) {
   if (options.managedPilot && (!options.preProvisionedSchema || !/^compass_pr_276_[a-f0-9]{12}$/.test(schema) || !targetScript)) throw new Error("Invalid managed migration invocation");
+  if (options.managedPilot) assertManagedMigrationManifest(schema);
   const client = await pool.connect();
   const log: string[] = [`Using schema: ${schema}`];
   const researchCaptureAsyncIndexJobIds: string[] = [];

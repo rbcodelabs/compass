@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ManagedPilotContext } from "./managed-context";
-import { applyMigrations, getMigrationStatus, partitionPendingMigrations } from "@/lib/migrations/runner";
+import { applyMigrations, getMigrationStatus, partitionPendingMigrations, assertManagedMigrationManifest } from "@/lib/migrations/runner";
 
 type Owner = { deployment_id: string; commit_sha: string; run_id: string; workspace_id: string; claimed_by: string | null; claim_script: string | null };
 function table(context: ManagedPilotContext) {
@@ -19,6 +19,7 @@ async function requireOwner(client: PoolClient, context: ManagedPilotContext): P
 
 export async function initializeManagedPilot(pool: Pool, context: ManagedPilotContext): Promise<Response> {
   const ownerTable = table(context);
+  assertManagedMigrationManifest(context.schema);
   const client = await pool.connect();
   try {
     const exists = await client.query("SELECT schema_name FROM information_schema.schemata WHERE schema_name=$1", [context.schema]);
@@ -45,7 +46,7 @@ export function expectedManagedIndexes(schema: string, applied: readonly string[
   const expected = new Set<string>();
   for (const migration of partitionPendingMigrations(schema, new Set()).pending) {
     if (!applied.includes(migration.name)) continue;
-    const sql = readFileSync(path.isAbsolute(migration.filePath) ? migration.filePath : path.join(process.cwd(), migration.filePath), "utf8").replace(/--[^\n]*/g, "");
+    const sql = readFileSync(path.join(process.cwd(), "prisma/migrations", migration.name, "migration.sql"), "utf8").replace(/--[^\n]*/g, "");
     const pattern = /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:ASYNC\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?([a-zA-Z0-9_]+)"?|DROP\s+INDEX\s+(?:IF\s+EXISTS\s+)?"?([a-zA-Z0-9_]+)"?/gi;
     for (const match of sql.matchAll(pattern)) {
       if (match[1]) expected.add(match[1]); else expected.delete(match[2]);
@@ -55,6 +56,7 @@ export function expectedManagedIndexes(schema: string, applied: readonly string[
 }
 
 export async function getManagedMigrationStatus(pool: Pool, context: ManagedPilotContext): Promise<Response> {
+  assertManagedMigrationManifest(context.schema);
   const client = await pool.connect();
   try {
     const owner = await requireOwner(client, context);
@@ -78,6 +80,7 @@ export async function assertManagedPilotReady(pool: Pool, context: ManagedPilotC
 }
 
 export async function applyManagedMigration(pool: Pool, context: ManagedPilotContext, script: string): Promise<Response> {
+  assertManagedMigrationManifest(context.schema);
   if (!partitionPendingMigrations(context.schema, new Set()).pending.some(entry => entry.name === script)) throw new Error("Explicit registered applicable migration required");
   const client = await pool.connect();
   const claim = randomUUID();
