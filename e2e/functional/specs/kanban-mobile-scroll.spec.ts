@@ -46,6 +46,13 @@ test("solution swimlane card content supports vertical and horizontal touch scro
     await page.goto(`${base}/discovery?view=board&groupBy=opportunity`);
     await page.waitForLoadState("networkidle");
     const first = page.getByText("Mobile solution 1", { exact: true });
+    for (const width of [320, 390, 767]) {
+      await page.setViewportSize({ width, height: 844 });
+      const column = first.locator("xpath=ancestor::*[@data-slot='swimlane-column'][1]");
+      const region = column.locator("xpath=ancestor::*[@role='region'][1]");
+      await expect.poll(async () => Math.abs((await column.boundingBox())!.width - (await region.boundingBox())!.width)).toBeLessThan(2);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
     await expect(first).toBeInViewport();
     const firstTop = (await first.boundingBox())!.y;
     await swipe(page, first, 0, -140);
@@ -83,6 +90,19 @@ for (const board of boards) {
       await page.waitForLoadState("networkidle");
       const first = page.getByText("Mobile scroll card 1", { exact: true });
       const last = page.getByText("Mobile scroll card 18", { exact: true });
+      for (const width of [320, 390, 767]) {
+        await page.setViewportSize({ width, height: 844 });
+        const region = page.getByRole("region", { name: /board/i }).first();
+        const column = first.locator("xpath=ancestor::section[1]");
+        const gutters = width < 640 ? 24 : 32;
+        await expect.poll(async () => Math.abs((await column.boundingBox())!.width - ((await region.boundingBox())!.width - gutters))).toBeLessThan(2);
+        if (board.route === "roadmap") {
+          const unscheduled = page.getByTestId("roadmap-unscheduled-column");
+          await expect.poll(async () => Math.abs((await unscheduled.boundingBox())!.width - ((await region.boundingBox())!.width - gutters))).toBeLessThan(2);
+          await expect(unscheduled).toHaveCSS("overflow-y", "visible");
+        }
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
       await expect(first).toBeInViewport();
       await expect(last).not.toBeInViewport();
       await page.mouse.move(170, 550);
@@ -131,6 +151,8 @@ for (const board of boards) {
       await page.reload();
       await page.waitForLoadState("networkidle");
       const column = first.locator("xpath=ancestor::section[1]");
+      expect((await column.boundingBox())!.width).toBeGreaterThanOrEqual(280);
+      expect((await column.boundingBox())!.width).toBeLessThanOrEqual(288);
       const header = column.locator("header");
       const headerTop = (await header.boundingBox())!.y;
       await first.hover();

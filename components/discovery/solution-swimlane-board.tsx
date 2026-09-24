@@ -174,7 +174,7 @@ function SwimlaneColumn({
       data-slot="swimlane-column"
       data-status={status}
       data-opportunity={opportunityId}
-      className="flex min-w-[184px] flex-1 flex-col"
+      className="flex w-[100cqw] min-w-0 flex-none flex-col md:w-auto md:min-w-[184px] md:flex-1"
     >
       <div className="mb-2 flex items-center gap-2">
         <span
