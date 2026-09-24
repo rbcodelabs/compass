@@ -30,7 +30,13 @@ Edits create a new definition revision. Existing links and observations keep the
 
 ## Attach evidence to product work
 
-Use **Measurements** on an experiment, roadmap item, or key result to link a metric. Choose baseline and follow-up windows explicitly. Dates are inclusive UTC calendar dates; provider queries are bounded to supported ranges.
+Use **Measurements** on an experiment, roadmap item, or key result to link a metric. **Track over time** is the default: choose a metric and link it without entering dates or a baseline. Vercel tracking uses the last 30 completed UTC days by default; you can choose 7 or 90 days instead. The window advances when you manually refresh, not while viewing saved evidence.
+
+Tracking shows the current measurement and available daily values without inventing a baseline or percentage change. Daily visitor values remain separate daily counts, never a period-unique total. Missing days are not zero.
+
+![Tracking a daily visitor metric without a baseline](/screenshots/docs/analytics-tracking-desktop.png)
+
+When you have a meaningful baseline, choose **Compare periods** and enter baseline and follow-up dates. Dates are inclusive UTC calendar dates, with each period limited to 1–90 days. Both dates must be present and the end must not precede the start. You can also use **Compare periods** on an existing tracking measurement.
 
 Use the actual launch or experiment dates—not a roadmap due date assumed to be a launch. Keep populations and comparison windows comparable, and account for seasonality or other changes when interpreting a difference.
 

@@ -36,6 +36,7 @@ const metric: MetricDTO = {
 };
 
 const binding = {
+  mode: "comparison",
   id: "00000000-0000-4000-8000-000000000005",
   workspaceId: metric.workspaceId,
   metricId: metric.id,
@@ -52,7 +53,7 @@ const binding = {
   baseline: { since: "2026-09-01", until: "2026-09-02" },
   followup: { since: "2026-09-03", until: "2026-09-04" },
   metric,
-} as BindingDTO;
+} as Extract<BindingDTO, { mode: "comparison" }>;
 
 function observation(kind: "BASELINE" | "FOLLOWUP", window: { since: string; until: string }, values: number[]): ObservationDTO {
   return {

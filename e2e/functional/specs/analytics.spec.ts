@@ -4,7 +4,7 @@ import { test, expect } from "../fixtures/index";
 // Browser tests never contact Vercel or enable production collection.
 test.describe("Analytics measurements", () => {
   test("connect, define, link, refresh, and preserve evidence after disconnect", async ({ page, base }) => {
-    const metricName = `E2E Analytics Views ${Date.now()}`;
+    const metricName = `E2E Daily Visitors ${Date.now()}`;
     const experimentName = `E2E Measured Experiment ${Date.now()}`;
     await page.goto(`${base}/settings`);
     await page.getByRole("button", { name: "Connect Vercel" }).click();
@@ -15,7 +15,10 @@ test.describe("Analytics measurements", () => {
     await page.getByRole("button", { name: "Create metric", exact: true }).click();
     const metricDialog = page.getByRole("dialog");
     await metricDialog.getByLabel("Name", { exact: true }).fill(metricName);
+    await metricDialog.getByLabel("Measure", { exact: true }).selectOption("daily_visitors");
+    await metricDialog.getByLabel("Unit", { exact: true }).fill("visitors");
     await metricDialog.getByRole("button", { name: "Save metric" }).click();
+    await expect(metricDialog).not.toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(metricName, { exact: true })).toBeVisible();
 
     await page.goto(`${base}/experiments`);
@@ -26,17 +29,47 @@ test.describe("Analytics measurements", () => {
     await page.getByLabel("Kill Condition").fill("Stop if recorded learning declines.");
     await page.getByRole("button", { name: "Create Experiment" }).click();
     await page.getByRole("button", { name: experimentName, exact: true }).click();
-    await page.getByRole("link", { name: "Open full page" }).click();
+    const fullPageHref = await page.getByRole("link", { name: "Open full page" }).getAttribute("href");
+    expect(fullPageHref).toBeTruthy();
+    // A direct visit exercises the full record rather than the intercepted panel route.
+    await page.goto(fullPageHref!);
     const experimentUrl = page.url();
     await page.getByRole("button", { name: "Link metric", exact: true }).click();
     const linkDialog = page.getByRole("dialog");
     await linkDialog.getByLabel("Metric", { exact: true }).selectOption({ label: metricName });
+    await expect(linkDialog.getByRole("radio", { name: "Track over time" })).toBeChecked();
+    await expect(linkDialog.getByLabel("Baseline from")).toHaveCount(0);
+    await linkDialog.getByRole("button", { name: "Link metric", exact: true }).click();
+    const measurement = page.getByTestId("metric-measurement").filter({ hasText: metricName });
+    await measurement.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(measurement.getByText("Complete", { exact: true }).first()).toBeVisible();
+    await expect(measurement.getByText("Baseline", { exact: true })).toHaveCount(0);
+    await expect(measurement.getByText("Follow-up", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Designing", { exact: true }).first()).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await measurement.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "public/screenshots/docs/analytics-tracking-desktop.png" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await measurement.scrollIntoViewIfNeeded();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: "public/screenshots/docs/analytics-tracking-mobile.png" });
+
+    await measurement.getByRole("button", { name: /Compare periods/ }).click();
+    await linkDialog.getByRole("button", { name: /Save comparison/ }).click();
+    await expect(linkDialog.getByRole("alert").first()).toBeVisible();
     await linkDialog.getByLabel("Baseline from").fill("2026-09-02");
+    await linkDialog.getByLabel("Baseline through").fill("2026-09-01");
+    await linkDialog.getByLabel("Follow-up from").fill("2026-09-09");
+    await linkDialog.getByLabel("Follow-up through").fill("2026-09-15");
+    await linkDialog.getByRole("button", { name: /Save comparison/ }).click();
+    await expect(linkDialog.getByRole("alert").first()).toBeVisible();
+    await linkDialog.getByLabel("Baseline through").fill("2026-12-31");
+    await linkDialog.getByRole("button", { name: /Save comparison/ }).click();
+    await expect(linkDialog.getByRole("alert").first()).toBeVisible();
     await linkDialog.getByLabel("Baseline through").fill("2026-09-08");
     await linkDialog.getByLabel("Follow-up from").fill("2026-09-09");
     await linkDialog.getByLabel("Follow-up through").fill("2026-09-15");
-    await linkDialog.getByRole("button", { name: "Link metric", exact: true }).click();
-    const measurement = page.getByTestId("metric-measurement").filter({ hasText: metricName });
+    await linkDialog.getByRole("button", { name: /Save comparison/ }).click();
     await measurement.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(measurement.getByText("Complete", { exact: true }).first()).toBeVisible();
     await expect(measurement.getByText("Baseline", { exact: true })).toBeVisible();
@@ -65,7 +98,7 @@ test.describe("Analytics measurements", () => {
     await expect(analyticsHeading).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
-    await page.getByRole("button", { name: "Connect Vercel", exact: true }).click();
+    await page.getByRole("button", { name: /^(Connect Vercel|Manage)$/ }).click();
     const connectionDialog = page.getByRole("dialog", { name: "Vercel connection" });
     await expect(connectionDialog).toBeVisible();
     const projectId = connectionDialog.getByLabel("Project ID", { exact: true });
