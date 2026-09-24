@@ -98,7 +98,7 @@ test.describe("Tasks assignee filter", () => {
       await expect(page).toHaveURL(/detail=task/, { timeout: 15_000 });
       const panel = page.locator('[data-slot="sheet-content"]');
       await expect(panel).toBeVisible({ timeout: 15_000 });
-      await expect(panel.getByText("Assignee", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(panel.getByRole("combobox", { name: "Assignee" })).toBeVisible({ timeout: 15_000 });
       await expect(panel.getByRole("combobox", { name: "Assignee" })).toContainText("Unassigned", {
         timeout: 15_000,
       });

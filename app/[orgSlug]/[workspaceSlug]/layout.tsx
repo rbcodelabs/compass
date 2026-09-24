@@ -16,6 +16,8 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { ThemeProvider } from "@/components/theme/theme-provider"
 import { workspaceThemeInitScript } from "@/lib/theme"
+import getPrisma from "@/lib/db"
+import { workspaceUpdatesAvailable } from "@/lib/workspace-updates-capture"
 
 interface WorkspaceLayoutProps {
   children: React.ReactNode
@@ -52,6 +54,7 @@ export default async function WorkspaceLayout({
     cookieStore.get(panelPinCookieName("detail"))?.value
   )
   const researchCaptureEnabled = isResearchCaptureEnabled()
+  const updatesEnabled = await workspaceUpdatesAvailable(getPrisma())
 
   return (
     <>
@@ -90,6 +93,7 @@ export default async function WorkspaceLayout({
               workspaces={workspaces}
               isOrgAdmin={isOrgAdmin}
               researchCaptureEnabled={researchCaptureEnabled}
+              updatesEnabled={updatesEnabled}
             />
 
             {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}
@@ -108,7 +112,7 @@ export default async function WorkspaceLayout({
         </TooltipProvider>
 
         {/* Mobile bottom nav — shown on small screens only */}
-        <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} researchCaptureEnabled={researchCaptureEnabled} />
+        <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} researchCaptureEnabled={researchCaptureEnabled} updatesEnabled={updatesEnabled} />
         </PanelProvider>
         </div>
       </ThemeProvider>

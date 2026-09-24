@@ -2,6 +2,42 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model WorkspaceUpdateEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  revision    Int
+  entityType  String   @map("entity_type") @db.VarChar(40)
+  entityId    String   @map("entity_id") @db.Uuid
+  groupType   String   @map("group_type") @db.VarChar(40)
+  groupId     String   @map("group_id") @db.Uuid
+  kind        String   @db.VarChar(40)
+  actorType   String   @map("actor_type") @db.VarChar(20)
+  actorId     String?  @map("actor_id") @db.Uuid
+  before      String?  @db.VarChar(80)
+  after       String?  @db.VarChar(80)
+  createdAt   DateTime @default(now()) @map("created_at")
+  @@unique([workspaceId, revision], map: "workspace_update_events_revision_key")
+  @@map("workspace_update_events")
+}
+
+model WorkspaceUpdatesState {
+  workspaceId String @id @map("workspace_id") @db.Uuid
+  revision    Int @default(0)
+  @@map("workspace_updates_state")
+}
+
+model WorkspaceUpdatesReadState {
+  id                 String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String @map("workspace_id") @db.Uuid
+  userId             String @map("user_id") @db.Uuid
+  caughtUpRevision   Int @default(0) @map("caught_up_revision")
+  previousRevision   Int? @map("previous_revision")
+  version            String @db.Uuid
+  baselineAt         DateTime @map("baseline_at")
+  @@unique([workspaceId, userId], map: "workspace_updates_read_state_user_key")
+  @@map("workspace_updates_read_state")
+}
+
 datasource db {
   provider     = "postgresql"
   relationMode = "prisma"

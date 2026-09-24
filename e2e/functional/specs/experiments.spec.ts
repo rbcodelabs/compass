@@ -35,9 +35,10 @@ test.describe("Experiments", () => {
       await page.getByRole("button", { name: expTitle }).click();
       await expect(page).toHaveURL(/detail=experiment/);
       await page.getByRole("link", { name: "Open full page" }).click();
+      await page.waitForURL(new RegExp(`${base}/experiments/[0-9a-f-]{36}$`));
 
       // Confirm we're on the detail page
-      await expect(page.getByRole("heading", { name: expTitle })).toBeVisible();
+      await expect(page.getByRole("heading", { name: expTitle })).toBeVisible({ timeout: 15_000 });
       // Status badge should show "Designing".
       // Use .first() to avoid strict-mode collision with Next.js dev-mode
       // hydration error overlay which also contains the word "Designing".

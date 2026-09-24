@@ -18,6 +18,7 @@ import {
   Sparkles,
   Target,
   Waypoints,
+  Clock3,
 } from "lucide-react"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -59,6 +60,7 @@ interface SidebarProps {
   /** Org admins/owners see an "Org Settings" link in the account menu. */
   isOrgAdmin?: boolean
   researchCaptureEnabled?: boolean
+  updatesEnabled?: boolean
 }
 
 const baseNavItems = [
@@ -92,11 +94,13 @@ export function Sidebar({
   workspaces,
   isOrgAdmin = false,
   researchCaptureEnabled = true,
+  updatesEnabled = false,
 }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const base = `/${orgSlug}/${workspaceSlug}`
   const navItems = [
+    ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
     ...baseNavItems.slice(0, 5),
     researchCaptureEnabled
       ? { label: "Capture", path: "capture", Icon: MessageSquare }

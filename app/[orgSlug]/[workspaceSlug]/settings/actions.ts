@@ -17,6 +17,7 @@ import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { revokeMemberAgentGrants, deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
+import { deleteWorkspaceUpdates } from "@/lib/workspace-updates-cleanup";
 import {
   normalizeSelectOptions,
   parseSelectOptions,
@@ -764,6 +765,7 @@ export async function deleteWorkspace(
   await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
   await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
   await deleteWorkspaceAgentData(prisma, workspaceId);
+  await deleteWorkspaceUpdates(prisma, workspaceId);
 
   // ── Step 16: Delete WorkspaceMembers ────────────────────────────────────────
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
