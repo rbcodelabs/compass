@@ -210,8 +210,10 @@ function ComboboxContent({
               className="w-full rounded-md bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
             />
           </div>
-          <ComboboxPrimitive.Empty className="px-2.5 py-6 text-center text-sm text-muted-foreground">
-            {emptyMessage}
+          <ComboboxPrimitive.Empty>
+            <div className="px-2.5 py-6 text-center text-sm text-muted-foreground">
+              {emptyMessage}
+            </div>
           </ComboboxPrimitive.Empty>
           <ComboboxPrimitive.List className="scroll-my-1 overflow-x-hidden overflow-y-auto p-1">
             {(item: ComboboxItemData) => (

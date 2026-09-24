@@ -145,6 +145,27 @@ test("task agent assignment persists, filters, replaces a human and survives sus
     await expect(agentOption.locator("span").first()).toHaveCSS("white-space", "nowrap");
     await pickerInput.fill(agentId.slice(0, 8));
     await expect(agentOption).toBeVisible();
+    const emptyStatus = picker.getByRole("status");
+    await expect(emptyStatus).toHaveAttribute("aria-live", "polite");
+    const expectOptionImmediatelyBelowSearch = async () => {
+      const [searchBounds, resultBounds] = await Promise.all([
+        pickerInput.locator("..").boundingBox(),
+        agentOption.boundingBox(),
+      ]);
+      expect(searchBounds).not.toBeNull();
+      expect(resultBounds).not.toBeNull();
+      expect(resultBounds!.y - (searchBounds!.y + searchBounds!.height)).toBeLessThanOrEqual(8);
+    };
+    await expectOptionImmediatelyBelowSearch();
+    await pickerInput.fill(`no matching assignee ${agentId}`);
+    await expect(picker.getByText("No matches.", { exact: true })).toBeVisible();
+    await expect(emptyStatus).toHaveAttribute("aria-live", "polite");
+    await page.screenshot({ path: testInfo.outputPath("assignee-picker-no-results.png"), fullPage: true });
+    await pickerInput.fill("");
+    await pickerInput.fill(agentId.slice(0, 8));
+    await expect(agentOption).toBeVisible();
+    await expect(emptyStatus).toHaveAttribute("aria-live", "polite");
+    await expectOptionImmediatelyBelowSearch();
     await page.screenshot({ path: testInfo.outputPath("assignee-picker-pinned-desktop.png"), fullPage: true });
     await pickerInput.fill("");
     await page.keyboard.press("Escape");
