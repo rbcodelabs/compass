@@ -14,6 +14,10 @@ Experiments let you test the riskiest assumptions attached to your solutions bef
 
 ![Experiments page](/screenshots/docs/experiments.png)
 
+On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
+
+![Experiments page on mobile](/screenshots/docs/experiments-mobile.png)
+
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
 
 ## The Experiment Lifecycle

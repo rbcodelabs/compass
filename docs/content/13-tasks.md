@@ -14,6 +14,10 @@ Tasks is Compass's standalone delivery/tracking entity. It's built to scale from
 
 ![Tasks](/screenshots/docs/tasks.png)
 
+On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
+
+![Tasks on mobile](/screenshots/docs/tasks-mobile.png)
+
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
 
 ## Status Vocabulary

@@ -14,6 +14,10 @@ The Discovery section is the heart of Compass. It's where you manage your **Oppo
 
 ![Discovery board](/screenshots/docs/discovery-board.png)
 
+On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
+
+![Discovery board on mobile](/screenshots/docs/discovery-board-mobile.png)
+
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
 
 Use the **Board | Table** toggle in the page header to choose how you scan active opportunities. Board view supports drag-and-drop workflow management. Table view provides a compact overview of status, squad, customer segment, evidence, and solution count.
