@@ -48,6 +48,16 @@ function itemMatchesFilters(item: LinkableItem, query: string, typeFilter: TaskL
     (!normalizedQuery || item.title.toLocaleLowerCase().includes(normalizedQuery));
 }
 
+function getMatchingItems(allItems: LinkableItem[], query: string, typeFilter: TaskLinkedType | "ALL") {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filtered = allItems.filter((item) => itemMatchesFilters(item, query, typeFilter));
+  if (!normalizedQuery) return filtered;
+  return filtered.map((item, originalIndex) => ({ item, originalIndex })).sort((a, b) => {
+    const rank = (title: string) => title === normalizedQuery ? 0 : title.startsWith(normalizedQuery) ? 1 : 2;
+    return rank(a.item.title.toLocaleLowerCase()) - rank(b.item.title.toLocaleLowerCase()) || a.originalIndex - b.originalIndex;
+  }).map(({ item }) => item);
+}
+
 export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, linkableTargets, onLinked }: Props) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -60,15 +70,7 @@ export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, 
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const matchingItems = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    const filtered = allItems.filter((item) => itemMatchesFilters(item, query, typeFilter));
-    if (!normalizedQuery) return filtered;
-    return filtered.map((item, originalIndex) => ({ item, originalIndex })).sort((a, b) => {
-      const rank = (title: string) => title === normalizedQuery ? 0 : title.startsWith(normalizedQuery) ? 1 : 2;
-      return rank(a.item.title.toLocaleLowerCase()) - rank(b.item.title.toLocaleLowerCase()) || a.originalIndex - b.originalIndex;
-    }).map(({ item }) => item);
-  }, [allItems, query, typeFilter]);
+  const matchingItems = useMemo(() => getMatchingItems(allItems, query, typeFilter), [allItems, query, typeFilter]);
 
   const visibleItems = matchingItems.slice(0, MAX_VISIBLE_RESULTS);
   const selectedItem = allItems.find((item) => item.compositeId === selectedCompositeId) ?? null;
@@ -91,7 +93,7 @@ export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, 
   }
   function selectType(nextType: TaskLinkedType | "ALL") {
     setTypeFilter(nextType); setActiveIndex(0); setError(null);
-    if (selectedItem && !itemMatchesFilters(selectedItem, query, nextType)) setSelectedCompositeId(null);
+    if (selectedItem && !getMatchingItems(allItems, query, nextType).slice(0, MAX_VISIBLE_RESULTS).includes(selectedItem)) setSelectedCompositeId(null);
   }
   function selectItem(item: LinkableItem) {
     setSelectedCompositeId(item.compositeId); setError(null);
@@ -143,7 +145,7 @@ export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, 
                 onChange={(event) => {
                   const nextQuery = event.target.value;
                   setQuery(nextQuery); setActiveIndex(0); setError(null);
-                  if (selectedItem && !itemMatchesFilters(selectedItem, nextQuery, typeFilter)) setSelectedCompositeId(null);
+                  if (selectedItem && !getMatchingItems(allItems, nextQuery, typeFilter).slice(0, MAX_VISIBLE_RESULTS).includes(selectedItem)) setSelectedCompositeId(null);
                 }}
                 onKeyDown={handleInputKeyDown} placeholder="Search opportunities, docs, roadmap, and more…"
                 className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed" />
@@ -156,7 +158,8 @@ export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, 
               <Button type="button" variant={activeSecondaryFilter ? "secondary" : "outline"} size="xs"
                 aria-label={!showMoreTypes && activeSecondaryFilter ? `More types, ${LINKED_TYPE_PLURAL_LABELS[activeSecondaryFilter]} active` : "More types"}
                 aria-pressed={Boolean(activeSecondaryFilter)} aria-expanded={showMoreTypes} disabled={isPending}
-                onClick={() => setShowMoreTypes((shown) => !shown)} className="rounded-full">More
+                onClick={() => setShowMoreTypes((shown) => !shown)} className="rounded-full">
+                {!showMoreTypes && activeSecondaryFilter ? `More: ${LINKED_TYPE_PLURAL_LABELS[activeSecondaryFilter]}` : "More"}
                 <ChevronDownIcon className={cn("transition-transform", showMoreTypes && "rotate-180")} aria-hidden="true" />
               </Button>
             </div>

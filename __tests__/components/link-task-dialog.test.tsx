@@ -87,7 +87,9 @@ describe("LinkTaskDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Decisions" }))
     fireEvent.click(screen.getByRole("button", { name: "More types" }))
 
-    expect(screen.getByRole("button", { name: "More types, Decisions active" })).toHaveAttribute("aria-pressed", "true")
+    const moreButton = screen.getByRole("button", { name: "More types, Decisions active" })
+    expect(moreButton).toHaveAttribute("aria-pressed", "true")
+    expect(moreButton).toHaveTextContent("More: Decisions")
   })
 
   it("wraps keyboard navigation, exposes the active descendant, and Enter selects", () => {
@@ -197,5 +199,23 @@ describe("LinkTaskDialog", () => {
 
     expect(screen.getAllByRole("option")).toHaveLength(75)
     expect(screen.getByText("Showing 75 of 88")).toBeInTheDocument()
+  })
+
+  it("clears a selected item when broadening search pushes it outside the visible result cap", () => {
+    const manyTargets: LinkableTargets = {
+      ...targets,
+      OPPORTUNITY: Array.from({ length: 80 }, (_, index) => ({ id: `opp-${index}`, title: `Opportunity ${index}` })),
+    }
+    renderDialog({ linkableTargets: manyTargets })
+    const search = screen.getByRole("combobox", { name: "Search linkable items" })
+    const linkButton = screen.getByRole("button", { name: "Link item" })
+
+    fireEvent.change(search, { target: { value: "Opportunity 79" } })
+    fireEvent.click(screen.getByRole("option", { name: "Opportunity 79 Opportunity" }))
+    expect(linkButton).toBeEnabled()
+
+    fireEvent.change(search, { target: { value: "" } })
+    expect(linkButton).toBeDisabled()
+    expect(screen.getByText("Select an item")).toBeInTheDocument()
   })
 })
