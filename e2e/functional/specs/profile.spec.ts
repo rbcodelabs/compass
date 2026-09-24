@@ -4,6 +4,7 @@ test("Profile updates past and future comment names and account navigation", asy
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.goto("/settings/profile")
   const originalName = await page.getByLabel("Display name").inputValue()
+  const desiredName = originalName === "Alex Taylor" ? "Jordan Taylor" : "Alex Taylor"
   await expect(page.getByLabel("Email", { exact: true })).toHaveAttribute("readonly", "")
   const title = `Profile discussion ${Date.now()}`
   let failed = false
@@ -27,10 +28,10 @@ test("Profile updates past and future comment names and account navigation", asy
     await page.getByLabel("Display name").fill("   ")
     await page.getByRole("button", { name: "Save changes" }).click()
     await expect(page.locator("form").getByRole("alert")).toHaveText("Enter a display name between 1 and 120 characters.")
-    await page.getByLabel("Display name").fill("Alex Taylor")
+    await page.getByLabel("Display name").fill(desiredName)
     await page.getByRole("button", { name: "Save changes" }).click()
     await expect(page.getByRole("status")).toHaveText("Profile saved.")
-    await expect(page.getByRole("button", { name: "Account menu", exact: true })).toContainText("Alex Taylor")
+    await expect(page.getByRole("button", { name: "Account menu", exact: true })).toContainText(desiredName)
     await page.screenshot({ path: testInfo.outputPath("profile-desktop.png"), fullPage: true })
     await page.getByRole("button", { name: "Account menu", exact: true }).click()
     await expect(page.getByRole("link", { name: "Profile", exact: true })).toBeVisible()
@@ -46,14 +47,14 @@ test("Profile updates past and future comment names and account navigation", asy
     await page.goto(`${base}/roadmap`)
     await card.getByRole("button", { name: title }).click()
     panel = page.locator('[data-slot="sheet-content"]')
-    await expect(panel.getByText("Alex Taylor", { exact: true })).toHaveCount(2)
+    await expect(panel.getByText(desiredName, { exact: true })).toHaveCount(2)
     await expect(panel.getByText("Edited", { exact: true })).toHaveCount(0)
     await panel.getByLabel("Add comment").fill("A comment after the rename")
     await panel.getByRole("button", { name: "Post comment" }).click()
-    await expect(panel.getByText("Alex Taylor", { exact: true })).toHaveCount(3)
+    await expect(panel.getByText(desiredName, { exact: true })).toHaveCount(3)
     await page.reload()
     await expect(panel).toBeVisible()
-    await expect(panel.getByText("Alex Taylor", { exact: true })).toHaveCount(3)
+    await expect(panel.getByText(desiredName, { exact: true })).toHaveCount(3)
   } catch (error) {
     failed = true
     throw error
