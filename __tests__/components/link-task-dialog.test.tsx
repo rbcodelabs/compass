@@ -80,6 +80,16 @@ describe("LinkTaskDialog", () => {
     expect(screen.getByRole("button", { name: "Decisions" })).toBeInTheDocument()
   })
 
+  it("keeps a collapsed secondary filter visible on the More control", () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole("button", { name: "More types" }))
+    fireEvent.click(screen.getByRole("button", { name: "Decisions" }))
+    fireEvent.click(screen.getByRole("button", { name: "More types" }))
+
+    expect(screen.getByRole("button", { name: "More types, Decisions active" })).toHaveAttribute("aria-pressed", "true")
+  })
+
   it("wraps keyboard navigation, exposes the active descendant, and Enter selects", () => {
     renderDialog()
     const search = screen.getByRole("combobox", { name: "Search linkable items" })
@@ -107,6 +117,23 @@ describe("LinkTaskDialog", () => {
     expect(within(preview).getByText("Self-serve activation")).toBeInTheDocument()
     expect(within(preview).getByText("Roadmap Item")).toBeInTheDocument()
     expect(within(preview).getByText(/current workspace/i)).toBeInTheDocument()
+  })
+
+  it("clears a selection when search or type filters hide it", () => {
+    renderDialog()
+    const search = screen.getByRole("combobox", { name: "Search linkable items" })
+    const linkButton = screen.getByRole("button", { name: "Link item" })
+
+    fireEvent.click(screen.getByRole("option", { name: /Onboarding checklist Solution/ }))
+    fireEvent.change(search, { target: { value: "research" } })
+    expect(linkButton).toBeDisabled()
+    expect(screen.getByText("Select an item")).toBeInTheDocument()
+
+    fireEvent.change(search, { target: { value: "" } })
+    fireEvent.click(screen.getByRole("option", { name: /Self-serve activation Roadmap Item/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Docs" }))
+    expect(linkButton).toBeDisabled()
+    expect(screen.getByText("Select an item")).toBeInTheDocument()
   })
 
   it("calls linkTask with the selected composite target and resets after success", async () => {

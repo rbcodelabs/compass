@@ -42,6 +42,12 @@ function flattenTargets(linkableTargets: LinkableTargets): LinkableItem[] {
   })));
 }
 
+function itemMatchesFilters(item: LinkableItem, query: string, typeFilter: TaskLinkedType | "ALL") {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  return (typeFilter === "ALL" || item.type === typeFilter) &&
+    (!normalizedQuery || item.title.toLocaleLowerCase().includes(normalizedQuery));
+}
+
 export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, linkableTargets, onLinked }: Props) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -56,10 +62,7 @@ export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, 
 
   const matchingItems = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
-    const filtered = allItems.filter((item) =>
-      (typeFilter === "ALL" || item.type === typeFilter) &&
-      (!normalizedQuery || item.title.toLocaleLowerCase().includes(normalizedQuery))
-    );
+    const filtered = allItems.filter((item) => itemMatchesFilters(item, query, typeFilter));
     if (!normalizedQuery) return filtered;
     return filtered.map((item, originalIndex) => ({ item, originalIndex })).sort((a, b) => {
       const rank = (title: string) => title === normalizedQuery ? 0 : title.startsWith(normalizedQuery) ? 1 : 2;
@@ -69,6 +72,7 @@ export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, 
 
   const visibleItems = matchingItems.slice(0, MAX_VISIBLE_RESULTS);
   const selectedItem = allItems.find((item) => item.compositeId === selectedCompositeId) ?? null;
+  const activeSecondaryFilter = typeFilter !== "ALL" && SECONDARY_FILTERS.includes(typeFilter) ? typeFilter : null;
   const resultLabel = `${matchingItems.length} ${query.trim() ? `result${matchingItems.length === 1 ? "" : "s"}` : `item${matchingItems.length === 1 ? "" : "s"}`}`;
 
   useEffect(() => {
@@ -87,6 +91,7 @@ export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, 
   }
   function selectType(nextType: TaskLinkedType | "ALL") {
     setTypeFilter(nextType); setActiveIndex(0); setError(null);
+    if (selectedItem && !itemMatchesFilters(selectedItem, query, nextType)) setSelectedCompositeId(null);
   }
   function selectItem(item: LinkableItem) {
     setSelectedCompositeId(item.compositeId); setError(null);
@@ -135,7 +140,11 @@ export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, 
               <input ref={inputRef} role="combobox" aria-label="Search linkable items" aria-controls={listboxId} aria-expanded={open}
                 aria-activedescendant={visibleItems.length ? `${listboxId}-${visibleItems[activeIndex]?.compositeId}` : undefined}
                 autoComplete="off" value={query} disabled={isPending}
-                onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); setError(null); }}
+                onChange={(event) => {
+                  const nextQuery = event.target.value;
+                  setQuery(nextQuery); setActiveIndex(0); setError(null);
+                  if (selectedItem && !itemMatchesFilters(selectedItem, nextQuery, typeFilter)) setSelectedCompositeId(null);
+                }}
                 onKeyDown={handleInputKeyDown} placeholder="Search opportunities, docs, roadmap, and more…"
                 className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed" />
               <kbd className="hidden rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground sm:block">ESC</kbd>
@@ -144,7 +153,9 @@ export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, 
               <Button type="button" variant={typeFilter === "ALL" ? "secondary" : "outline"} size="xs" aria-label="All item types"
                 aria-pressed={typeFilter === "ALL"} disabled={isPending} onClick={() => selectType("ALL")} className="rounded-full">All</Button>
               {PRIMARY_FILTERS.map(renderFilter)}
-              <Button type="button" variant="outline" size="xs" aria-label="More types" aria-expanded={showMoreTypes} disabled={isPending}
+              <Button type="button" variant={activeSecondaryFilter ? "secondary" : "outline"} size="xs"
+                aria-label={!showMoreTypes && activeSecondaryFilter ? `More types, ${LINKED_TYPE_PLURAL_LABELS[activeSecondaryFilter]} active` : "More types"}
+                aria-pressed={Boolean(activeSecondaryFilter)} aria-expanded={showMoreTypes} disabled={isPending}
                 onClick={() => setShowMoreTypes((shown) => !shown)} className="rounded-full">More
                 <ChevronDownIcon className={cn("transition-transform", showMoreTypes && "rotate-180")} aria-hidden="true" />
               </Button>
