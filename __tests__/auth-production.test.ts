@@ -65,6 +65,17 @@ describe("production auth initialization", () => {
 });
 
 describe("dev auth initialization", () => {
+  it("loads the current persisted profile rather than the stale JWT name", async () => {
+    const findUnique = vi.fn().mockResolvedValue({ name: "Current name", email: "person@example.com" });
+    mocks.getPrisma.mockReturnValue({ user: { findUnique } });
+    await import("@/auth");
+    const config = mocks.nextAuth.mock.calls[0]?.[0] as NextAuthConfig;
+    const session = { user: { id: "", name: "Old name", email: "old@example.com" }, expires: "2099-01-01" };
+    // Exercise the JWT strategy callback; its union type also covers database sessions.
+    const callback = config.callbacks!.session as (args: unknown) => Promise<typeof session>;
+    await expect(callback({ session, token: { id: "owner" } })).resolves.toMatchObject({ user: { id: "owner", name: "Current name", email: "person@example.com" } });
+    expect(findUnique).toHaveBeenCalledWith({ where: { id: "owner" }, select: { name: true, email: true } });
+  });
   beforeEach(() => {
     vi.resetModules();
     vi.stubEnv("NODE_ENV", "development");

@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { listDocCommentsCore } from "@/lib/doc-comments";
 import { cookies } from "next/headers";
 import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin";
 import { redirect, notFound } from "next/navigation";
@@ -65,24 +66,7 @@ export default async function DocPage({ params }: Props) {
 
   // All inline comments (open + resolved) for the doc — the editor highlights
   // the open/anchored ones and the sidebar filters resolved behind a toggle.
-  const comments = await prisma.docComment.findMany({
-    where: { docId },
-    orderBy: { createdAt: "asc" },
-    select: {
-      id: true,
-      parentId: true,
-      body: true,
-      status: true,
-      anchorText: true,
-      anchorStart: true,
-      anchorEnd: true,
-      anchorPrefix: true,
-      anchorSuffix: true,
-      authorName: true,
-      authorType: true,
-      createdAt: true,
-    },
-  });
+  const comments = await listDocCommentsCore(docId);
 
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/docs/${docId}`;
 

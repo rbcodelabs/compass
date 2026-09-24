@@ -1,5 +1,6 @@
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
+import { resolveCommentAuthors } from "@/lib/comment-authors"
 import { COMMENT_TARGET_TYPES, resolveCommentTarget, type CommentTargetType } from "@/lib/comments"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 
@@ -21,7 +22,7 @@ export type BrowserCommentRow = {
 export type BrowserCommentDto = Omit<BrowserCommentRow, "createdAt" | "updatedAt"> & {
   createdAt: string; updatedAt: string; edited: boolean; canEdit: boolean; canDelete: boolean; canModerate: boolean; replies: BrowserCommentDto[]
 }
-type SessionUser = { id: string; name?: string | null }
+type SessionUser = { id: string; name?: string | null; email?: string | null }
 
 function isCommentTargetType(value: string): value is CommentTargetType {
   return COMMENT_TARGET_TYPES.some((targetType) => targetType === value)
@@ -30,7 +31,7 @@ function isCommentTargetType(value: string): value is CommentTargetType {
 async function requireSessionUser(): Promise<SessionUser> {
   const session = await auth()
   if (!session?.user?.id) throw new CommentHttpError(401, "Unauthorized")
-  return { id: session.user.id, name: session.user.name }
+  return { id: session.user.id, name: session.user.name, email: session.user.email }
 }
 
 async function authorizeTargetForUser(targetType: CommentTargetType, targetId: string, user: SessionUser): Promise<CommentActor> {
@@ -49,7 +50,7 @@ async function authorizeTargetForUser(targetType: CommentTargetType, targetId: s
   if (!workspaceRole && !orgAdmin) throw new CommentHttpError(404, "Not found")
   return {
     userId: user.id,
-    name: user.name?.trim() || "Compass user",
+    name: user.name?.trim() || user.email || "Compass user",
     workspaceId: target.workspaceId,
     admin: normalizeWorkspaceRole(workspaceRole) === "ADMIN" || orgAdmin,
   }
@@ -73,11 +74,12 @@ export async function authorizeComment(commentId: string) {
 }
 
 export async function listBrowserComments(workspaceId: string, targetType: CommentTargetType, targetId: string) {
-  return getPrisma().comment.findMany({
+  const comments = await getPrisma().comment.findMany({
     where: { workspaceId, targetType, targetId, ...(targetType === "SOLUTION" ? { solutionPlanProposal: { is: null } } : {}) },
     include: { docAnchor: true, solutionPlanProposal: true },
     orderBy: { createdAt: "asc" },
-  }) as Promise<BrowserCommentRow[]>
+  }) as BrowserCommentRow[]
+  return resolveCommentAuthors(comments)
 }
 
 export async function deleteBrowserComment(commentId: string, actor: Pick<CommentActor, "admin" | "userId">, deleteThread: boolean) {
