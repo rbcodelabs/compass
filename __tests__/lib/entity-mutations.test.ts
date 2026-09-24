@@ -20,6 +20,7 @@ const models = {
 
 const database = {
   ...models,
+  squad: { findFirst: vi.fn() },
   workspace: { findUnique: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
   portfolioCapacityPlan: { updateMany: vi.fn() },
@@ -58,6 +59,31 @@ describe("EDIT_CONFIG", () => {
   });
   it("uses horizon (not status) as the roadmap item's enum field", () => {
     expect(EDIT_CONFIG.roadmapItem.enum?.field).toBe("horizon");
+  });
+});
+
+describe("opportunity relationship edits", () => {
+  it.each(["squadId", "linkedKeyResultId"])("sets and clears %s only inside the workspace", async (field) => {
+    database.squad.findFirst.mockResolvedValue({ id: "target" });
+    models.keyResult.findFirst.mockResolvedValue({ id: "target" });
+    expect(await updateEntityField("opportunity", "e1", WS, field, "target")).toEqual({ ok: true });
+    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { [field]: "target", updatedAt: expect.any(Date) } });
+    const targetQuery = field === "squadId" ? database.squad.findFirst : models.keyResult.findFirst;
+    expect(targetQuery).toHaveBeenCalledWith({ where: field === "squadId" ? { id: "target", workspaceId: WS } : { id: "target", objective: { cycle: { workspaceId: WS } } }, select: { id: true } });
+    expect(await updateEntityField("opportunity", "e1", WS, field, null)).toEqual({ ok: true });
+  });
+  it.each(["squadId", "linkedKeyResultId"])("rejects a missing or foreign %s and invalid values", async (field) => {
+    database.squad.findFirst.mockResolvedValue(null);
+    models.keyResult.findFirst.mockResolvedValue(null);
+    expect(await updateEntityField("opportunity", "e1", WS, field, "foreign")).toMatchObject({ ok: false, status: 404 });
+    for (const value of ["", 42, {}, undefined]) expect(await updateEntityField("opportunity", "e1", WS, field, value)).toMatchObject({ ok: false, status: 400 });
+    expect(models.opportunity.update).not.toHaveBeenCalled();
+  });
+  it.each(["squadId", "linkedKeyResultId"])("refuses %s edits on a foreign opportunity", async (field) => {
+    models.opportunity.findFirst.mockResolvedValue(null);
+    expect(await updateEntityField("opportunity", "foreign", WS, field, null)).toMatchObject({ ok: false, status: 404 });
+    expect(models.opportunity.findFirst).toHaveBeenCalledWith({ where: { id: "foreign", workspaceId: WS }, select: { id: true } });
+    expect(models.opportunity.update).not.toHaveBeenCalled();
   });
 });
 

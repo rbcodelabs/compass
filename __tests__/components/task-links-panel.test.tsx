@@ -3,14 +3,15 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-const { openPanelMock, unlinkTaskMock } = vi.hoisted(() => ({
+const { openPanelMock, unlinkTaskMock, linkTaskMock } = vi.hoisted(() => ({
   openPanelMock: vi.fn(),
   unlinkTaskMock: vi.fn(),
+  linkTaskMock: vi.fn(),
 }));
 
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
   unlinkTask: unlinkTaskMock,
-  linkTask: vi.fn(),
+  linkTask: linkTaskMock,
 }));
 
 vi.mock("@/components/panels/panel-context", () => ({
@@ -33,7 +34,7 @@ function renderPanel(links: TaskLinkData[] = baseLinks) {
       initialLinks={links}
       revalidatePathStr="/rbcodelabs/compass/tasks/task-1"
       linkableTargets={{
-        OPPORTUNITY: [],
+        OPPORTUNITY: [{ id: "opp-1", title: "Faster onboarding" }],
         SOLUTION: [],
         ROADMAP_ITEM: [],
         OBJECTIVE: [],
@@ -53,6 +54,18 @@ describe("TaskLinksPanel", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+  });
+
+  it("does not add a duplicate optimistic row when linking an existing target", async () => {
+    linkTaskMock.mockResolvedValue({ id: "link-1" });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add link" }));
+    fireEvent.click(screen.getByRole("option", { name: /Faster onboarding Opportunity/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Link item" }));
+
+    await screen.findByText("Faster onboarding");
+    expect(screen.getAllByText("Faster onboarding")).toHaveLength(1);
   });
 
   it("calls openPanel with the mapped panel type and linked id when a mapped link is clicked", () => {

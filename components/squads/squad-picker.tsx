@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import {
   Combobox,
   ComboboxContent,
@@ -16,6 +16,8 @@ interface Props {
   currentSquadId: string | null;
   squads: SquadData[];
   revalidatePathStr: string;
+  onChanged?: () => void;
+  onAssign?: (squadId: string | null) => Promise<void>;
 }
 
 export function SquadPicker({
@@ -24,8 +26,11 @@ export function SquadPicker({
   currentSquadId,
   squads,
   revalidatePathStr,
+  onChanged,
+  onAssign,
 }: Props) {
   const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
 
   if (squads.length === 0) return null;
 
@@ -33,14 +38,20 @@ export function SquadPicker({
     if (!value) return;
     const squadId = value === "__none__" ? null : value;
     startTransition(async () => {
-      await assignSquad(objectType, objectId, squadId, revalidatePathStr);
+      setError(null);
+      try {
+        if (onAssign) await onAssign(squadId);
+        else await assignSquad(objectType, objectId, squadId, revalidatePathStr);
+        onChanged?.();
+      } catch (err) { setError(err instanceof Error ? err.message : "Could not assign squad."); }
     });
   }
 
   const activeSquad = squads.find((s) => s.id === currentSquadId);
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
+      {error && <p role="alert" className="w-full text-xs text-destructive">{error}</p>}
       <span className="text-xs text-muted-foreground">Squad</span>
       <Combobox
         items={[
