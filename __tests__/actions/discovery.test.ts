@@ -37,6 +37,9 @@ const mockPrisma = {
   opportunityScore: mockOpportunityScore,
   squad: { findFirst: vi.fn().mockResolvedValue({ id: "squad-1" }) },
 };
+// createOpportunity writes the opportunity and its links in one transaction.
+const mockTransaction = vi.fn(async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma));
+Object.assign(mockPrisma, { $transaction: mockTransaction });
 
 vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),

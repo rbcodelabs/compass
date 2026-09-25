@@ -2,23 +2,18 @@
 
 import { usePathname } from "next/navigation";
 import { DiscoveryRail, type DiscoveryRailOpportunity } from "@/components/discovery/discovery-rail";
-import type { SquadData } from "@/lib/types";
 
 type DiscoveryShellProps = {
   orgSlug: string;
   workspaceSlug: string;
-  workspaceId: string;
   opportunities: DiscoveryRailOpportunity[];
-  squads: SquadData[];
   children: React.ReactNode;
 };
 
 export function DiscoveryShell({
   orgSlug,
   workspaceSlug,
-  workspaceId,
   opportunities,
-  squads,
   children,
 }: DiscoveryShellProps) {
   const pathname = usePathname();
@@ -38,8 +33,6 @@ export function DiscoveryShell({
         opportunities={opportunities}
         orgSlug={orgSlug}
         workspaceSlug={workspaceSlug}
-        workspaceId={workspaceId}
-        squads={squads}
         activeOpportunityId={detailMatch[1]}
       />
       <div className="min-w-0 flex-1 overflow-y-auto">{children}</div>

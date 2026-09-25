@@ -30,6 +30,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({
   archiveOpportunity: vi.fn(),
   moveOpportunity: vi.fn(),
   reorderOpportunity: vi.fn(),
+  setOpportunityFieldValue: vi.fn(),
 }));
 vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({ openPanel: vi.fn() }),
@@ -37,6 +38,7 @@ vi.mock("@/components/panels/panel-context", () => ({
 
 import { ExperimentBoard } from "@/components/experiments/experiment-board";
 import { OpportunityBoard } from "@/components/discovery/opportunity-board";
+import { OpportunityFieldBoard } from "@/components/discovery/opportunity-field-board";
 import type { OpportunityStatus } from "@/lib/types";
 
 function emptyOpportunitiesByStatus(): Record<OpportunityStatus, never[]> {
@@ -67,6 +69,23 @@ describe("Experiments and Discovery board layout", () => {
         render(
           h(OpportunityBoard, {
             opportunitiesByStatus: emptyOpportunitiesByStatus(),
+            orgSlug: "acme",
+            workspaceSlug: "core",
+            workspaceId: "ws-1",
+          }),
+        ),
+    },
+    {
+      // The card-sort board must keep the same #290 mobile scroll/touch-pan
+      // layout as the Status board it replaces when grouped by a field.
+      name: "opportunity field",
+      track: "opportunity-field-board-track",
+      boardLabel: "Opportunity board grouped by MoSCoW",
+      renderBoard: () =>
+        render(
+          h(OpportunityFieldBoard, {
+            field: { id: "moscow", name: "MoSCoW", options: [{ label: "Must", value: "must" }] },
+            opportunities: [],
             orgSlug: "acme",
             workspaceSlug: "core",
             workspaceId: "ws-1",

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import { isAllowedUri } from "@tiptap/extension-link";
 import {
   BoldIcon, ItalicIcon, StrikethroughIcon, Undo2Icon, Redo2Icon,
@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { createMarkdownEditorExtensions, editorMarkdown } from "@/components/markdown-editor-extensions";
 import { descriptionSourceOnlyReason } from "@/lib/description-markdown";
 import { DescriptionTableGuard } from "@/components/description-table-guard";
+import { cn } from "@/lib/utils";
 
 type EditorActions = {
   onSave: () => void;
@@ -31,9 +32,43 @@ export type MarkdownDescriptionEditorProps = {
   id?: string;
   /** Omit when the containing form owns Save/Cancel and its error handling. */
   actions?: EditorActions;
+  /** Empty-state guidance. May change after mount; the editor follows it. */
+  placeholder?: string;
+  /**
+   * Grow to fill a flex parent instead of the default 11–24rem box. For hosts
+   * that dedicate a region to the body, like the feedback composer panel.
+   */
+  fill?: boolean;
+  /**
+   * Receives files pasted or dropped onto the editor. When set, those files
+   * are handed over instead of being inserted inline — the feedback composer
+   * turns a pasted screenshot into an attachment.
+   */
+  onFiles?: (files: File[]) => void;
+  /** Replaces the formless footer note; `null` hides it. Ignored with `actions`. */
+  footerNote?: ReactNode | null;
+  className?: string;
 };
 
-export function MarkdownDescriptionEditor({ value, onChange, disabled = false, label, id, actions }: MarkdownDescriptionEditorProps) {
+/**
+ * The current placeholder per editor instance. TipTap copies extension
+ * options at creation, so a changed prop cannot reach the Placeholder
+ * extension directly; its placeholder function looks the text up here instead.
+ */
+const livePlaceholders = new WeakMap<Editor, string>();
+
+function filesFrom(transfer: DataTransfer | null | undefined): File[] {
+  if (!transfer) return [];
+  const files = Array.from(transfer.files ?? []);
+  if (files.length) return files;
+  // Some browsers expose a pasted screenshot only as a DataTransferItem.
+  return Array.from(transfer.items ?? [])
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
+}
+
+export function MarkdownDescriptionEditor({ value, onChange, disabled = false, label, id, actions, placeholder = "Write a description…", fill = false, onFiles, footerNote, className }: MarkdownDescriptionEditorProps) {
   const generatedId = useId();
   const editorId = id ?? generatedId;
   const reason = useMemo(() => descriptionSourceOnlyReason(value), [value]);
@@ -43,11 +78,17 @@ export function MarkdownDescriptionEditor({ value, onChange, disabled = false, l
   const [linkError, setLinkError] = useState<string | null>(null);
   const [tableNotice, setTableNotice] = useState(false);
   const lastEmitted = useRef(value);
+  // Read through a ref: TipTap captures editorProps once, at creation, but the
+  // handler may legitimately change afterwards.
+  const onFilesRef = useRef(onFiles);
+  useEffect(() => {
+    onFilesRef.current = onFiles;
+  }, [onFiles]);
   const sourceMode = mode === "markdown" || Boolean(reason);
   const locked = disabled || Boolean(actions?.saving);
 
   const editor = useEditor({
-    extensions: [...createMarkdownEditorExtensions("Write a description…"), DescriptionTableGuard.configure({ onRejected: () => setTableNotice(true) })],
+    extensions: [...createMarkdownEditorExtensions(({ editor: current }) => livePlaceholders.get(current) ?? placeholder), DescriptionTableGuard.configure({ onRejected: () => setTableNotice(true) })],
     content: reason ? "" : value,
     immediatelyRender: false,
     shouldRerenderOnTransaction: true,
@@ -58,7 +99,21 @@ export function MarkdownDescriptionEditor({ value, onChange, disabled = false, l
         role: "textbox",
         "aria-label": label,
         "aria-multiline": "true",
-        class: "min-h-44 p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [overflow-wrap:anywhere] [&_p]:my-2 [&_h1]:my-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:my-2 [&_h3]:text-base [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-muted [&_pre]:p-2 [&_code]:font-mono [&_code]:text-xs [&_a]:text-primary [&_a]:underline [&_hr]:my-4 [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-border [&_th]:bg-muted [&_th]:p-2 [&_td]:border [&_td]:border-border [&_td]:p-2 [&_.tableWrapper]:overflow-x-auto",
+        class: (fill ? "min-h-full " : "min-h-44 ") + "p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [overflow-wrap:anywhere] [&_p]:my-2 [&_h1]:my-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:my-2 [&_h3]:text-base [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-muted [&_pre]:p-2 [&_code]:font-mono [&_code]:text-xs [&_a]:text-primary [&_a]:underline [&_hr]:my-4 [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-border [&_th]:bg-muted [&_th]:p-2 [&_td]:border [&_td]:border-border [&_td]:p-2 [&_.tableWrapper]:overflow-x-auto",
+      },
+      handlePaste: (_view, event) => {
+        const files = onFilesRef.current ? filesFrom(event.clipboardData) : [];
+        if (!files.length) return false;
+        event.preventDefault();
+        onFilesRef.current?.(files);
+        return true;
+      },
+      handleDrop: (_view, event) => {
+        const files = onFilesRef.current ? filesFrom((event as DragEvent).dataTransfer) : [];
+        if (!files.length) return false;
+        event.preventDefault();
+        onFilesRef.current?.(files);
+        return true;
       },
     },
     onUpdate: ({ editor: updatedEditor }) => {
@@ -74,6 +129,14 @@ export function MarkdownDescriptionEditor({ value, onChange, disabled = false, l
     // a source draft with the hidden rich document when a save starts/finishes.
     editor?.setEditable(!locked, false);
   }, [editor, locked]);
+
+  useEffect(() => {
+    // Decorations only recompute on a transaction; nudge one so a changed
+    // placeholder shows without waiting for the next keystroke.
+    if (!editor || editor.isDestroyed || livePlaceholders.get(editor) === placeholder) return;
+    livePlaceholders.set(editor, placeholder);
+    editor.view.dispatch(editor.state.tr.setMeta("placeholder", placeholder));
+  }, [editor, placeholder]);
 
   useEffect(() => {
     if (!editor || sourceMode || value === lastEmitted.current) return;
@@ -125,7 +188,7 @@ export function MarkdownDescriptionEditor({ value, onChange, disabled = false, l
   ] : [];
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-lg border border-input bg-background" aria-busy={locked} onKeyDown={(event) => {
+    <div className={cn("min-w-0 overflow-hidden rounded-lg border border-input bg-background", fill && "flex min-h-0 flex-1 flex-col", className)} aria-busy={locked} onKeyDown={(event) => {
       // The workspace uses Cmd/Ctrl+B for its sidebar. Formatting shortcuts
       // inside this editor belong to TipTap, not the surrounding application.
       if (event.metaKey || event.ctrlKey) event.stopPropagation();
@@ -178,7 +241,7 @@ export function MarkdownDescriptionEditor({ value, onChange, disabled = false, l
       </div>}
       {reason && <p id={`${editorId}-notice`} role="note" className="m-2 rounded-md bg-status-warning/10 p-2 text-xs text-muted-foreground">{reason}</p>}
       {tableNotice && <p role="alert" className="m-2 text-xs text-muted-foreground">Markdown tables support one paragraph per cell. This edit was not applied; your table is unchanged.</p>}
-      {sourceMode ? <Textarea id={editorId} aria-label={`${label} Markdown source`} aria-describedby={reason ? `${editorId}-notice` : undefined} value={value} onChange={(event) => onChange(event.target.value)} disabled={locked} className="min-h-44 max-h-96 resize-y rounded-none border-0 p-3 font-mono text-xs [field-sizing:fixed]" /> : <EditorContent editor={editor} className="max-h-96 min-w-0 overflow-auto" />}
+      {sourceMode ? <Textarea id={editorId} aria-label={`${label} Markdown source`} aria-describedby={reason ? `${editorId}-notice` : undefined} value={value} onChange={(event) => onChange(event.target.value)} onPaste={(event) => { const files = onFiles ? filesFrom(event.clipboardData) : []; if (files.length) { event.preventDefault(); onFiles?.(files); } }} disabled={locked} placeholder={fill ? placeholder : undefined} className={cn("rounded-none border-0 p-3 font-mono text-xs [field-sizing:fixed]", fill ? "min-h-44 flex-1 resize-none" : "min-h-44 max-h-96 resize-y")} /> : <EditorContent editor={editor} className={cn("min-w-0 overflow-auto", fill ? "min-h-0 flex-1 [&>.tiptap]:min-h-full" : "max-h-96")} />}
       {actions ? <div className="space-y-2 border-t bg-muted/30 p-2">
         {actions.error && <p role="alert" className="text-xs text-destructive">{actions.error}</p>}
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -188,7 +251,7 @@ export function MarkdownDescriptionEditor({ value, onChange, disabled = false, l
             <Button type="button" size="sm" disabled={locked || !actions.dirty} onClick={actions.onSave}>{actions.saving ? "Saving…" : "Save"}</Button>
           </div>
         </div>
-      </div> : <p className="border-t bg-muted/30 p-2 text-[10px] text-muted-foreground">Saved with the form’s changes.</p>}
+      </div> : footerNote === null ? null : <p className="border-t bg-muted/30 p-2 text-[10px] text-muted-foreground">{footerNote ?? "Saved with the form’s changes."}</p>}
     </div>
   );
 }

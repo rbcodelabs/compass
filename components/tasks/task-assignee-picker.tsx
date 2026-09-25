@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Combobox, ComboboxContent, ComboboxTrigger, ComboboxValue } from "@/components/ui/combobox";
-import { getTaskAssigneeOptions } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
+import { fetchTaskAssigneeOptions } from "@/lib/task-assignees-client";
 import type { MemberData } from "@/lib/types";
 import type { ResolvedTaskAssignee, TaskAssignee } from "@/lib/task-assignment";
 
@@ -22,7 +22,9 @@ export function useTaskAssignees(members: MemberData[]): { options: ResolvedTask
   useEffect(() => {
     let active = true;
     if (orgSlug && workspaceSlug) {
-      getTaskAssigneeOptions(orgSlug, workspaceSlug).then(result => { if (active) { setOptions(result); setError(null); } }).catch(() => { if (active) setError("Could not load workspace assignees. Reopen to retry."); });
+      // A GET, not a server action: a read queued as an action could commit
+      // the pre-navigation URL and reopen the task panel after navigation.
+      fetchTaskAssigneeOptions(orgSlug, workspaceSlug).then(result => { if (active) { setOptions(result); setError(null); } }).catch(() => { if (active) setError("Could not load workspace assignees. Reopen to retry."); });
     }
     return () => { active = false; };
   }, [orgSlug, workspaceSlug]);
@@ -39,7 +41,7 @@ export function TaskAssigneePicker({ id, members, value, onChange, current, disa
       <ComboboxTrigger id={id} aria-label={id ? undefined : "Assignee"} className={compact ? "h-7 w-full min-w-0 border-0 bg-transparent px-1 text-xs shadow-none" : "w-full min-w-0 [&>[data-slot=combobox-value]]:block"}>
         {compact ? <span className="min-w-0 truncate" title={selected ? `${selected.type === "AGENT" ? "Agent" : "Person"}: ${selected.displayName}${selected.available ? "" : " (unavailable)"}` : undefined}>{selected?.type === "AGENT" ? "Agent · " : ""}{selected?.displayName ?? (value ? "Unavailable assignee" : "Unassigned")}{selected && !selected.available ? " (unavailable)" : ""}</span> : <ComboboxValue placeholder="Unassigned" className="min-w-0 truncate" />}
       </ComboboxTrigger>
-      <ComboboxContent inputPlaceholder="Search people and agents…" className="min-w-0 max-w-[calc(100vw-2rem)] [&_[data-slot=combobox-item]>span:first-child]:min-w-0 [&_[data-slot=combobox-item]>span:first-child]:shrink [&_[data-slot=combobox-item]>span:first-child]:whitespace-normal [&_[data-slot=combobox-item]>span:first-child]:[overflow-wrap:anywhere]" />
+      <ComboboxContent collisionPadding={16} inputPlaceholder="Search people and agents…" className="w-[max(var(--anchor-width),20rem)] min-w-[var(--anchor-width)] max-w-[calc(100vw-2rem)] [&_[data-slot=combobox-item]>span:first-child]:min-w-0 [&_[data-slot=combobox-item]>span:first-child]:shrink [&_[data-slot=combobox-item]>span:first-child]:truncate" />
     </Combobox>
     {error && <p role="status" className="text-xs text-muted-foreground">{error}</p>}
   </div>;

@@ -28,7 +28,6 @@ import {
 import type {
   CustomFieldType,
   CustomFieldObjectType,
-  SelectOption,
   CustomFieldValue,
   WorkspaceRole,
 } from "@/lib/types";
@@ -395,7 +394,7 @@ export async function createFieldDefinition(
     objectType: CustomFieldObjectType;
     name: string;
     fieldType: CustomFieldType;
-    options?: SelectOption[];
+    options?: SelectOptionInput[];
     required?: boolean;
     sharedOptionSetId?: string | null;
   }
@@ -425,7 +424,7 @@ export async function createFieldDefinition(
       options: input.sharedOptionSetId
         ? Prisma.DbNull
         : input.options
-          ? (input.options as unknown as Prisma.InputJsonValue)
+          ? (normalizeSelectOptions(input.options) as unknown as Prisma.InputJsonValue)
           : Prisma.DbNull,
       sharedOptionSetId: input.sharedOptionSetId ?? null,
       required: input.required ?? false,
@@ -456,7 +455,7 @@ export async function updateFieldDefinition(
   fieldId: string,
   input: {
     name?: string;
-    options?: SelectOption[];
+    options?: SelectOptionInput[];
     required?: boolean;
     /** Pass a set id to attach, `null` to detach, omit to leave the link alone. */
     sharedOptionSetId?: string | null;
@@ -498,7 +497,7 @@ export async function updateFieldDefinition(
       ...(input.name !== undefined && { name: input.name }),
       ...(input.options !== undefined && {
         options: input.options
-          ? (input.options as unknown as Prisma.InputJsonValue)
+          ? (normalizeSelectOptions(input.options) as unknown as Prisma.InputJsonValue)
           : Prisma.DbNull,
       }),
       ...(input.required !== undefined && { required: input.required }),

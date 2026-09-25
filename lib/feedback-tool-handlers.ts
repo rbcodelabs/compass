@@ -7,7 +7,7 @@ import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
-import { validateFeedbackInput } from "@/lib/feedback"
+import { feedbackOpportunityLinkData, validateFeedbackInput } from "@/lib/feedback"
 import { ok, fail } from "@/lib/mcp-output"
 import {
   deleteFeedbackBlobs,
@@ -469,10 +469,7 @@ export async function linkFeedbackToOpportunity({
   }
   await prisma.feedbackItem.update({
     where: { id: feedbackId },
-    // Explicit `updatedAt`: DSQL has no trigger support, so the schema uses
-    // `@default(now())` instead of `@updatedAt` and nothing bumps it for us.
-    // The sibling status/type handlers already do this; this one was missed.
-    data: { opportunityId, updatedAt: new Date() },
+    data: feedbackOpportunityLinkData(opportunityId),
   })
   return ok(withUrlLine([
     `Linked feedback '${feedback.title}' to opportunity '${opportunity.title}'.`,

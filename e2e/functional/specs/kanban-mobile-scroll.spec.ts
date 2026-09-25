@@ -106,8 +106,13 @@ for (const board of boards) {
       await expect(first).toBeInViewport();
       await expect(last).not.toBeInViewport();
       await page.mouse.move(170, 550);
-      for (let i = 0; i < 8; i++) {
-        await page.mouse.wheel(0, 650);
+      // Wheel just far enough to bring the last seeded card to mid-viewport.
+      // A fixed wheel budget assumed the column ends at card 18, but the
+      // functional specs share one workspace, so earlier journeys can leave
+      // more cards below it and a fixed overshoot scrolls card 18 back out.
+      const wheelDistance = (await last.boundingBox())!.y - 844 / 2;
+      for (let scrolled = 0; scrolled < wheelDistance; scrolled += 650) {
+        await page.mouse.wheel(0, Math.min(650, wheelDistance - scrolled));
         await page.waitForTimeout(100);
       }
       await expect(last).toBeInViewport();
@@ -156,7 +161,10 @@ for (const board of boards) {
       const header = column.locator("header");
       const headerTop = (await header.boundingBox())!.y;
       await first.hover();
-      await page.mouse.wheel(0, 6000);
+      // Same reasoning as the mobile wheel above: scroll the column by the
+      // distance to card 18, not a fixed 6000px that overshoots it whenever
+      // earlier journeys have left extra cards in this shared column.
+      await page.mouse.wheel(0, (await last.boundingBox())!.y - 800 / 2);
       await expect(last).toBeInViewport();
       expect((await header.boundingBox())!.y).toBeCloseTo(headerTop, 0);
       await page.screenshot({ path: testInfo.outputPath(`${board.route}-desktop-bottom.png`) });

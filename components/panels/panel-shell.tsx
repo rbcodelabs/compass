@@ -31,6 +31,9 @@ import { SolutionPanel } from "./solution-panel";
 import { AssumptionPanel } from "./assumption-panel";
 import { RoadmapItemPanel } from "./roadmap-item-panel";
 import { FeedbackPanel } from "./feedback-panel";
+import { FeedbackComposer } from "@/components/feedback/feedback-composer";
+import { OpportunityComposer } from "@/components/discovery/opportunity-composer";
+import { isComposerPanelType } from "./composer-panel-types";
 import { TaskDetail } from "@/components/tasks/task-detail";
 
 const PANEL_TITLES: Record<string, string> = {
@@ -42,6 +45,8 @@ const PANEL_TITLES: Record<string, string> = {
   experiment: "Experiment",
   roadmapItem: "Roadmap Item",
   feedback: "Feedback",
+  "feedback-new": "New feedback",
+  "opportunity-new": "New opportunity",
   task: "Task",
   "discovery-rail": "Discovery",
 };
@@ -69,9 +74,26 @@ export interface PanelShellProps {
 export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps = {}) {
   const { panel, closePanel, orgSlug, workspaceSlug } = usePanelContext();
   const [hydrated, setHydrated] = useState(false);
-  const { pinned, width, isPinnedMode, togglePinned, commitWidth } = usePanelPin("detail", initialPin);
+  const { pinned, width, viewportAllowsPin, isPinnedMode, togglePinned, commitWidth } = usePanelPin("detail", initialPin);
   const asideRef = useRef<HTMLElement | null>(null);
   const common = { orgSlug, workspaceSlug };
+
+  // A composer (new feedback, new opportunity) always docks as a column on
+  // wide screens, whatever the pin preference: the point of creating in a
+  // panel is that the board stays visible and usable beside it. A modal
+  // overlay would hide it.
+  //
+  // The docking then *sticks* for the rest of that panel session — through the
+  // hand-off to the created item's detail view and any rows opened from the
+  // grid afterwards — and ends when the panel closes. Without that, a submit
+  // would visibly jump the new item from a column into a modal sheet for every
+  // unpinned user. It is session state, never persisted: the saved pin
+  // preference is untouched (see commitWidth in usePanelPin).
+  const isComposer = isComposerPanelType(panel?.type);
+  const [composerSession, setComposerSession] = useState(false);
+  if (isComposer && !composerSession) setComposerSession(true);
+  if (!panel && composerSession) setComposerSession(false);
+  const docked = isPinnedMode || (viewportAllowsPin && (isComposer || composerSession));
 
   // A deep link is already present during SSR. Opening Base UI's modal Sheet
   // before hydration completes applies aria-hidden to the server-rendered
@@ -160,7 +182,12 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
   // own popup, so "Esc closes the select, second Esc closes the panel" falls
   // out for free.
   const handleAsideKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape") closePanel();
+    if (event.key !== "Escape") return;
+    // React bubbles events through portals, so an Esc inside a dialog opened
+    // *from* this panel (the composer's discard confirmation) would otherwise
+    // close the panel underneath it too. Only Esc from the aside's own DOM.
+    if (!(event.target instanceof Node) || !asideRef.current?.contains(event.target)) return;
+    closePanel();
   };
 
   const title = panel ? PANEL_TITLES[panel.type] ?? panel.type : "";
@@ -191,6 +218,8 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
       )}
       {panel?.type === "roadmapItem" && <RoadmapItemPanel id={panel.id} {...common} />}
       {panel?.type === "feedback" && <FeedbackPanel id={panel.id} {...common} />}
+      {panel?.type === "feedback-new" && <FeedbackComposer {...common} />}
+      {panel?.type === "opportunity-new" && <OpportunityComposer composerId={panel.id} {...common} />}
       {panel?.type === "task" && (
         <TaskDetail taskId={panel.id} variant="panel" {...common} />
       )}
@@ -217,7 +246,20 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
     </Button>
   );
 
-  if (isPinnedMode) {
+  // The composer owns its own scrolling (a body that fills the height and a
+  // sticky footer), so it gets a bare flex column instead of the padded,
+  // scrolling body every entity panel shares.
+  const bodyClassName = isComposer
+    ? "flex min-h-0 flex-1 flex-col"
+    : `flex-1 overflow-y-auto ${hasCompactHeader ? "pt-3" : "pt-4"}`;
+
+  const escHint = isComposer ? (
+    <kbd className="hidden rounded border border-border-default bg-surface-inset px-1.5 py-0.5 font-sans text-[10px] font-medium text-text-subtle sm:inline-block" title="Press Esc to close — your draft is kept">
+      Esc
+    </kbd>
+  ) : null;
+
+  if (docked) {
     if (!panel) return null;
 
     return (
@@ -257,7 +299,8 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
           </h2>
           <div className="flex items-center gap-1">
             {fullPageAction}
-            {pinToggle}
+            {escHint}
+            {!isComposer && pinToggle}
             <Button
               variant="ghost"
               size="icon-sm"
@@ -270,7 +313,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
           </div>
         </div>
 
-        <div className={`flex-1 overflow-y-auto ${hasCompactHeader ? "pt-3" : "pt-4"}`}>{body}</div>
+        <div className={bodyClassName}>{body}</div>
       </aside>
     );
   }
@@ -287,7 +330,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
         // Note: never pass `data-slot` here. SheetContent spreads {...props}
         // last, so it would silently replace `sheet-content` — the attribute
         // ~21 functional specs locate this panel by.
-        className="w-full sm:max-w-md flex flex-col gap-0 p-0 z-[60]"
+        className={`w-full ${isComposer ? "sm:max-w-xl" : "sm:max-w-md"} flex flex-col gap-0 p-0 z-[60]`}
         showCloseButton={!hasCompactHeader}
       >
         <SheetHeader className={hasCompactHeader ? "px-5 py-1.5 shrink-0 border-b" : "px-5 pt-5 pb-3 shrink-0 border-b"}>
@@ -301,7 +344,8 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
                 it. */}
             <div className="flex items-center gap-1">
               {fullPageAction}
-              <div className="hidden lg:flex items-center">{pinToggle}</div>
+              {escHint}
+              {!isComposer && <div className="hidden lg:flex items-center">{pinToggle}</div>}
               {hasCompactHeader && (
                 <Button variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close panel" title="Close panel">
                   <PanelRightClose aria-hidden />
@@ -311,7 +355,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
           </div>
         </SheetHeader>
 
-        <div className={`flex-1 overflow-y-auto ${hasCompactHeader ? "pt-3" : "pt-4"}`}>{body}</div>
+        <div className={bodyClassName}>{body}</div>
       </SheetContent>
     </Sheet>
   );

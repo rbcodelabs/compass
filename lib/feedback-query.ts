@@ -9,8 +9,9 @@
  *  - **Every value is allowlist-validated.** Hostile or malformed input
  *    silently falls back to the default. This module never throws, never
  *    signals a 400, and never lets a raw request string reach Prisma.
- *  - Repeated `status` params are a multi-select; every other repeated param
- *    is normalised by taking the **last** value.
+ *  - `status` is a multi-select written as ONE comma-joined param
+ *    (`status=OPEN,UNDER_REVIEW`); legacy repeated `status` params are still
+ *    read. Every other repeated param is normalised by taking the **last** value.
  *  - **Every `orderBy` ends with `{ id: "asc" }`.** `status`, `type` and
  *    `voteCount` are non-unique, so without a unique tiebreak `skip`/`take`
  *    silently duplicates and drops rows across pages.
@@ -188,10 +189,17 @@ export function parseFeedbackQuery(
     q = trimmed.length >= MIN_FEEDBACK_Q_LENGTH ? trimmed : null;
   }
 
-  // status: repeated, independently allowlisted values. Canonical ordering
-  // makes equality and shareable URLs deterministic. No valid selection means
-  // the default (all statuses), including malformed URLs.
-  const requestedStatuses = new Set(readParams(source, "status").filter(isFeedbackStatus));
+  // status: comma-joined (or legacy repeated) allowlisted values. Each param
+  // value is all-or-nothing — one unknown token discards that whole value — so
+  // a tampered list never half-applies. Canonical ordering makes equality and
+  // shareable URLs deterministic. No valid selection means the default (all
+  // statuses), including malformed URLs.
+  const requestedStatuses = new Set(
+    readParams(source, "status").flatMap((value) => {
+      const tokens = value.split(",");
+      return tokens.every(isFeedbackStatus) ? tokens : [];
+    }),
+  );
   const status = requestedStatuses.size > 0
     ? FEEDBACK_STATUSES.filter((value) => requestedStatuses.has(value))
     : [...FEEDBACK_STATUSES];
@@ -391,7 +399,11 @@ export function serializeFeedbackQuery(
   const params = new URLSearchParams();
   if (merged.q) params.set("q", merged.q);
   if (merged.status.length < FEEDBACK_STATUSES.length) {
-    for (const status of merged.status) params.append("status", status);
+    // One param, not one per status. Next 16.2's client router keys a page
+    // segment by Object.fromEntries(searchParams), which keeps only the LAST
+    // value of a repeated key, so two subsets ending in the same status
+    // collided and the router kept the stale page (fixed upstream in 16.3).
+    params.set("status", merged.status.join(","));
   }
   if (merged.type) params.set("type", merged.type);
   if (merged.sort) {

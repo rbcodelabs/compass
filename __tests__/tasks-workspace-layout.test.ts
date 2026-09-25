@@ -25,8 +25,8 @@ afterEach(cleanup);
 // The tasks server-actions module transitively imports next-auth — mock the
 // boundary so EditTaskDialog, TaskAssigneePicker, and TaskBoard render
 // without a real auth/db stack.
+vi.mock("@/lib/task-assignees-client", () => ({ fetchTaskAssigneeOptions: vi.fn() }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
-  getTaskAssigneeOptions: vi.fn(),
   updateTask: vi.fn(),
   moveTaskStatus: vi.fn(),
   updateSortOrder: vi.fn(),
@@ -69,7 +69,7 @@ const members: MemberData[] = [
 ];
 
 describe("Tasks dashboard workspace layout", () => {
-  it("keeps long assignee labels inside the inline field and wraps menu choices", async () => {
+  it("keeps long assignee labels inside the inline field and truncates menu choices", async () => {
     const { InlineAssigneeField } = await import("@/components/tasks/inline-assignee-field");
     render(
       createElement(InlineAssigneeField, {
@@ -97,13 +97,13 @@ describe("Tasks dashboard workspace layout", () => {
     const value = trigger.querySelector(String.raw`[data-slot="combobox-value"]`)!;
     expect(value.className).toContain("min-w-0 truncate");
 
-    // The assignee picker actually rendered and wraps its long labels rather
-    // than overflowing.
+    // The assignee picker keeps long labels on one compact row, truncating
+    // visually rather than wrapping or overflowing.
     fireEvent.click(trigger);
     const popup = await screen.findByPlaceholderText("Search people and agents…");
     const content = popup.closest(String.raw`[data-slot="combobox-content"]`)!;
-    expect(content.className).toContain("[&_[data-slot=combobox-item]>span:first-child]:whitespace-normal");
-    expect(content.className).toContain("[&_[data-slot=combobox-item]>span:first-child]:[overflow-wrap:anywhere]");
+    expect(content.className).toContain("[&_[data-slot=combobox-item]>span:first-child]:truncate");
+    expect(content.className).not.toContain("[&_[data-slot=combobox-item]>span:first-child]:whitespace-normal");
     expect(await screen.findByRole("option", { name: /Ada Lovelace/ })).toBeInTheDocument();
   });
 

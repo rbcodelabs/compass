@@ -17,9 +17,9 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions", () => ({
   linkAnalyticsMetric: actions.link,
   refreshAnalyticsMeasurement: actions.refresh,
 }));
-vi.mock("@/lib/analytics/measurement-reads", () => ({
-  listAnalyticsMetrics: actions.listMetrics,
-  readMeasurements: actions.read,
+// Reads go through GET /api/analytics/measurements, never a server action.
+vi.mock("@/lib/analytics/measurements-client", () => ({
+  loadMeasurements: async () => ({ measurements: await actions.read(), metrics: await actions.listMetrics() }),
 }));
 
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";

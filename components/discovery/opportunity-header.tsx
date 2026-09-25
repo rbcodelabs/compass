@@ -14,6 +14,7 @@ import {
   ComboboxTrigger,
 } from "@/components/ui/combobox";
 import { SquadPicker } from "@/components/squads/squad-picker";
+import { keyResultComboboxItems } from "@/components/discovery/key-result-options";
 import {
   updateOpportunityStatus,
   linkOpportunityToKeyResult,
@@ -198,21 +199,7 @@ export function OpportunityHeader({
 
         {availableKeyResults.length > 0 && (
           <Combobox
-            items={[
-              { value: "__none__", label: "— None —" },
-              ...availableKeyResults.map((kr) => ({
-                value: kr.id,
-                label: kr.title,
-                render: (
-                  <>
-                    <span className="text-muted-foreground text-xs mr-1">
-                      {kr.objectiveTitle} /
-                    </span>
-                    {kr.title}
-                  </>
-                ),
-              })),
-            ]}
+            items={keyResultComboboxItems(availableKeyResults)}
             value={opportunity.linkedKeyResult?.id ?? "__none__"}
             onValueChange={handleKRLink}
             disabled={isPending}

@@ -6,6 +6,7 @@
  *          conclude as Proceed (→ COMPLETE).
  */
 import { test, expect } from "../fixtures/index";
+import { openFullPage } from "../fixtures/full-page";
 
 test.describe("Experiments", () => {
   test(
@@ -34,8 +35,7 @@ test.describe("Experiments", () => {
       // ── 3. Open the panel, then continue to the full detail page ──────────
       await page.getByRole("button", { name: expTitle }).click();
       await expect(page).toHaveURL(/detail=experiment/);
-      await page.getByRole("link", { name: "Open full page" }).click();
-      await page.waitForURL(new RegExp(`${base}/experiments/[0-9a-f-]{36}$`));
+      await openFullPage(page);
 
       // Confirm we're on the detail page
       await expect(page.getByRole("heading", { name: expTitle })).toBeVisible({ timeout: 15_000 });
@@ -105,7 +105,7 @@ test.describe("Experiments", () => {
 
       await page.getByRole("button", { name: expTitle }).click();
       await expect(page).toHaveURL(/detail=experiment/);
-      await page.getByRole("link", { name: "Open full page" }).click();
+      await openFullPage(page);
       await expect(page.getByRole("heading", { name: expTitle })).toBeVisible();
       await expect(page.getByText("Designing").first()).toBeVisible();
 

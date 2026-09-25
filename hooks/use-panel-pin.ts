@@ -29,12 +29,16 @@ export function usePanelPin(
     setPinned(next);
     persist({ pinned: next, width });
   }, [persist, pinned, width]);
+  // Persists the *current* pin flag. A resize used to imply pinned (the handle
+  // only existed on a pinned panel), but the feedback composer also docks as a
+  // column for unpinned users, and resizing it must not silently pin every
+  // detail panel they open afterwards.
   const commitWidth = useCallback((next: number) => {
     const clamped = clampPanelWidth(next);
     setWidth(clamped);
-    persist({ pinned: true, width: clamped });
+    persist({ pinned, width: clamped });
     window.dispatchEvent(new Event("resize"));
-  }, [persist]);
+  }, [persist, pinned]);
   return {
     pinned,
     width,

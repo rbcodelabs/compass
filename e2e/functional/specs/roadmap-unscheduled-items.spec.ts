@@ -20,6 +20,8 @@
  * dragTo (which doesn't reliably trigger pointer-sensor-based DnD).
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
+import { openFullPage } from "../fixtures/full-page";
 import type { Locator, Page } from "@playwright/test";
 
 async function dragTo(page: Page, source: Locator, target: Locator, scrollContainer?: Locator) {
@@ -80,19 +82,13 @@ async function createValidatedSolution(page: Page, base: string, title: string) 
   await page.goto(`${base}/discovery`);
   await page.waitForLoadState("networkidle");
 
-  await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-  await page.getByLabel("Title").fill(oppTitle);
-  await page.getByRole("button", { name: "Create Opportunity" }).click();
+  await createOpportunityFromBoard(page, oppTitle);
   await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: oppTitle, exact: true }).click();
-  const fullPageLink = page.getByRole("link", { name: "Open full page" });
-  const destination = await fullPageLink.getAttribute("href");
-  if (!destination) throw new Error("Opportunity full-page link has no destination");
-  await fullPageLink.click();
   // The outgoing panel has the same heading and controls. Its already-idle
   // document does not prove the client-side navigation has committed.
-  await expect(page).toHaveURL(new URL(destination, page.url()).href);
+  await openFullPage(page);
   const detail = page.locator('[data-slot="opportunity-detail"][data-variant="page"]');
   await expect(detail.getByRole("heading", { name: oppTitle })).toBeVisible();
 
@@ -170,12 +166,17 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // so the feedback toggle is always the second switch on the page.
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
-      const feedbackToggle = page.getByRole("switch").nth(1);
-      const authToggle = page.getByRole("switch").nth(2);
+      // By test id, not position: the auth-required switch only renders once
+      // the portal is public, so `switch.nth(2)` could resolve to a different
+      // switch (and read "unchecked") before it appeared, leaving the portal
+      // requiring sign-in and the anonymous Submit below disabled.
+      const feedbackToggle = page.getByTestId("portal-toggle-feedback");
+      const authToggle = page.getByTestId("portal-toggle-auth-required");
       if ((await feedbackToggle.getAttribute("aria-checked")) !== "true") {
         await feedbackToggle.click();
         await expect(feedbackToggle).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
       }
+      await expect(authToggle).toBeVisible();
       if ((await authToggle.getAttribute("aria-checked")) === "true") {
         await authToggle.click();
         await expect(authToggle).toHaveAttribute("aria-checked", "false", { timeout: 10_000 });
@@ -260,9 +261,17 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await expect(page.getByRole("tab", { name: "Board" })).toHaveAttribute("aria-selected", "true");
       const scheduledCard = page.locator('[data-slot="card"]').filter({ hasText: sol2Title });
       await expect(scheduledCard.getByText(sol2Title).first()).toBeVisible({ timeout: 10_000 });
-      await expect(page.getByTestId("roadmap-unscheduled-column")).toContainText(
-        "No items waiting to be scheduled."
-      );
+      // All three of this journey's candidates have left the unscheduled
+      // column. Don't assert the column is *empty*: the functional specs share
+      // one seeded workspace, and earlier journeys (e.g. discovery swimlanes,
+      // pinned selects) legitimately leave their own validated solutions
+      // unscheduled. The empty state itself is covered by
+      // __tests__/components/unscheduled-items-column.test.tsx.
+      const boardUnscheduled = page.getByTestId("roadmap-unscheduled-column");
+      await expect(boardUnscheduled).toBeVisible();
+      for (const title of [solTitle, sol2Title, bugTitle]) {
+        await expect(boardUnscheduled.locator('[data-slot="card"]').filter({ hasText: title })).toHaveCount(0);
+      }
     }
   );
 });

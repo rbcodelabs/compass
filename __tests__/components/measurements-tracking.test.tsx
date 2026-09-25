@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), metrics: vi.fn(), link: vi.fn(), update: vi.fn(), refresh: vi.fn() }));
-vi.mock("@/lib/analytics/measurement-reads", () => ({ readMeasurements: mocks.read, listAnalyticsMetrics: mocks.metrics }));
+vi.mock("@/lib/analytics/measurements-client", () => ({ loadMeasurements: async () => ({ measurements: await mocks.read(), metrics: await mocks.metrics() }) }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions", () => ({ linkAnalyticsMetric: mocks.link, updateAnalyticsMeasurement: mocks.update, refreshAnalyticsMeasurement: mocks.refresh }));
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
 const metric = { id: "metric", name: "Overall Daily Visitors", unit: "visitors", provider: "vercel", revision: 1, archived: false, query: { metric: "daily_visitors" } };

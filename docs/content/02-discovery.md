@@ -37,14 +37,27 @@ Opportunities move through four columns on the kanban board:
 
 Drag cards between columns to update status. Use **Filters** at the top of the page to filter opportunities by squad, or switch between **Board** and **Tree** views using the view control.
 
-### Grouping: Status or Opportunity
+### Group by: Status, Opportunity, or a custom field
 
-In Board view, use the **Status | Opportunity** toggle next to Filters to switch how cards are grouped:
+In Board view, use the **Group by** picker next to Filters to switch how cards are grouped:
 
 - **Status** (default) — the Opportunity board described above, columns are Opportunity statuses.
+- **A custom field** — every Opportunity single-select custom field with at least one option is listed after the built-in groupings (for example a **MoSCoW** field with Must, Should, Could, and Won't). See [Card sorting by a custom field](#card-sorting-by-a-custom-field) below.
 - **Opportunity** — a swimlane board for Solutions, the middle tier of the OST that otherwise only appears in a flat list inside an Opportunity's detail panel. Each active Opportunity gets its own collapsible lane (click the chevron to collapse or expand it), with five columns for the Solution lifecycle: **Idea**, **Validated**, **In delivery**, **Shipped**, **Killed**. Drag a Solution card to a different column to change its status; drag it to reorder within a column. Use **+ Add Solution** at the bottom of a lane to create a new Solution directly on that Opportunity.
 
 Dragging a Solution card only ever changes its status within its own lane — dropping it on a different Opportunity's lane snaps it back with no change. Re-parenting a Solution to a different Opportunity is a deliberate action from its detail panel, not something a board drag can do by accident.
+
+### Card sorting by a custom field
+
+Grouping by a custom field turns the board into a card-sort exercise. To set one up, create an Opportunity custom field of type **Select** in **Settings → Custom Fields** and give it options (its own, or a shared option set). Multi-select fields aren't offered, because a card can only sit in one column.
+
+- The first column is **Unspecified**. It holds opportunities with no value for the field, plus any whose value no longer matches one of the field's options.
+- The remaining columns are the field's options in the order they're defined, with each option's color and a card count.
+- Drag a card to another column to set the field to that option. Drag it back to **Unspecified** to clear the value. You can also use a card's **⋯** menu (**Move to …** or **Clear …**), which works from the keyboard too.
+- Sorting only changes the field value. It never changes an opportunity's status, its order on the Status board, or whether it's archived. Cards can't be reordered within a column, and there's no **+ Add Opportunity** button in this mode.
+- If a change can't be saved, the card goes back to its previous column and an error message explains what happened.
+
+The grouping is saved in the page URL as `groupBy=field:<field id>`, so you can bookmark or share a card-sort board. If the field is later deleted, changed to another type, or left with no options, the link opens the Status board instead.
 
 ## Discovery Rail
 
@@ -54,14 +67,29 @@ On desktop, the rail runs as a full sidebar alongside the Discovery page — cli
 
 ## Creating Opportunities
 
-Click **+ Add Opportunity** in any column. An opportunity needs:
+Click **+ Add opportunity** at the bottom of any board column, or **New Opportunity** at the bottom of the Discovery Rail. Either one opens the opportunity composer. An opportunity has:
 
 - **Title** — A short customer-centric problem statement (e.g. "Users don't know when their trial is expiring")
 - **Description** — Context from customer interviews, support tickets, or usage data
 - **Squad** — Optional team assignment
-- **Key Result links** — Connect the opportunity to the outcomes it addresses
+- **Key Result link** — The outcome the opportunity is expected to move
 
 Write opportunity titles from the customer's perspective, not from a solution or feature angle. "Users can't find their billing history" is better than "Add billing history page."
+
+### The opportunity composer
+
+The composer opens in the right-hand panel. On wide screens it docks beside the board, so you can keep scanning and searching the board while you write. On narrow screens it opens as a full-width sheet.
+
+- **Title** is large and focused when the composer opens. A character counter appears as you get close to the 255-character limit.
+- **Status** starts as the status of the column you opened it from. From the rail it starts as **Exploring**. You can change it before you submit.
+- **Squad** and **Customer segment** are optional.
+- **Description** supports Markdown, with the same rich editor and Markdown source mode used elsewhere. **Insert opportunity outline** adds *Who's affected*, *Current pain*, *Evidence* and *Desired outcome* headings.
+- **Driving key result** is optional. Search the workspace's Key Results and choose the one this opportunity should move.
+- **Seed from feedback** is optional. Search the workspace's feedback and select every item that points to this opportunity. Selected items appear as a list, and you can remove any of them. Linking works the same way as it does from the feedback board: the item's status doesn't change, and an item that is already linked to another opportunity moves to this one. The composer tells you when that will happen.
+
+Press **⌘/Ctrl + Enter** or select **Submit** to create the opportunity. The opportunity, its Key Result link and its feedback links are saved together. If any part is invalid, for example a Key Result from another workspace, nothing is created and the error appears in the composer. When it succeeds, the new card appears on the board and the composer turns into the new opportunity's panel. Browser Back doesn't return to an empty composer.
+
+Your draft is saved on this device for each workspace as you type. If you close the panel (with **Esc** or the close button), reload, or leave the page, the draft is kept and the composer says **Restored your unsent draft** the next time you open it. **Cancel** asks before discarding a draft.
 
 ## One opportunity view, at every size
 

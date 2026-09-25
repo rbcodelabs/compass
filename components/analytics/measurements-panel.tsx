@@ -8,7 +8,7 @@ import {
   refreshAnalyticsMeasurement,
   updateAnalyticsMeasurement,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions";
-import { listAnalyticsMetrics, readMeasurements } from "@/lib/analytics/measurement-reads";
+import { loadMeasurements, type Measurement } from "@/lib/analytics/measurements-client";
 import { unwrapAnalyticsAction } from "@/lib/analytics/action-result";
 import { DAY_MS, validateWindow, type MetricWindow } from "@/lib/analytics/providers";
 import type { RollingWindow } from "@/lib/analytics/windows";
@@ -19,7 +19,6 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
-type Measurement = { binding: BindingDTO; observations: ObservationDTO[] };
 
 function readableError(error: unknown) {
   const code = error instanceof Error ? error.message : "UNKNOWN";
@@ -83,10 +82,9 @@ export function MeasurementsPanel({ orgSlug, workspaceSlug, target, compact = fa
   const load = useCallback(async () => {
     try {
       setLoadError(null);
-      const [rows, definitions] = await Promise.all([
-        readMeasurements(orgSlug, workspaceSlug, { targetId, targetType }),
-        listAnalyticsMetrics(orgSlug, workspaceSlug),
-      ]);
+      // A GET, not server actions: reads queued as actions could commit the
+      // pre-navigation URL and reopen this panel after the user left it.
+      const { measurements: rows, metrics: definitions } = await loadMeasurements(orgSlug, workspaceSlug, { targetId, targetType });
       setMeasurements(rows);
       setMetrics(definitions.filter((metric) => !metric.archived));
     } catch {

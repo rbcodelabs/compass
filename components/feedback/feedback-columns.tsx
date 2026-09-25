@@ -22,6 +22,7 @@ import {
   formatFeedbackDate,
 } from "@/lib/feedback-meta";
 import type { FeedbackType } from "@/lib/types";
+import { markdownToPlainText } from "@/lib/markdown-plain-text";
 import { FeedbackActionCell } from "./feedback-action-cell";
 
 /**
@@ -121,7 +122,7 @@ export function buildFeedbackColumns({
             </button>
             {item.description && (
               <p className="line-clamp-1 text-xs text-text-subtle">
-                {item.description}
+                {markdownToPlainText(item.description)}
               </p>
             )}
             <FeedbackAttachments attachments={item.attachments} />
