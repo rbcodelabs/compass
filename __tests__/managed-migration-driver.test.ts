@@ -26,3 +26,27 @@ describe("manual managed migration driver", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("managed migration time budget", () => {
+  it("lets the controller outwait the migrate route's function limit", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { MIGRATION_POST_TIMEOUT_MS } = await import("../scripts/preview-automation/managed-driver");
+    const route = readFileSync("app/api/admin/migrate/route.ts", "utf8");
+    const maxDuration = Number(/export const maxDuration = (\d+);/.exec(route)?.[1]);
+    // Async-wait migrations (e.g. 047_research_voice_control_plane) wait on many
+    // ASYNC index jobs in one request; 60s killed the function and orphaned the claim.
+    expect(maxDuration).toBeGreaterThanOrEqual(300);
+    // The client must never abandon a POST the server could still be running.
+    expect(MIGRATION_POST_TIMEOUT_MS).toBeGreaterThan(maxDuration * 1000);
+  });
+
+  it("uses the extended timeout for the migration POST", async () => {
+    const { MIGRATION_POST_TIMEOUT_MS } = await import("../scripts/preview-automation/managed-driver");
+    const spy = vi.spyOn(AbortSignal, "timeout");
+    const status = { schema: target.schema, pending: ["047_research_voice_control_plane"], managed: { owner: { claimed_by: null } } };
+    const fetcher = vi.fn().mockImplementation(async (_url, init) => Response.json(init.method === "POST" ? {} : status));
+    await runManagedMigration(target, "047_research_voice_control_plane", "secret", "bypass", fetcher);
+    expect(spy.mock.calls.map(c => c[0])).toContain(MIGRATION_POST_TIMEOUT_MS);
+    spy.mockRestore();
+  });
+});

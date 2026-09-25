@@ -1,3 +1,5 @@
+/** Must exceed the migrate route maxDuration (300s) so a POST is never abandoned while the server still runs it. */
+export const MIGRATION_POST_TIMEOUT_MS = 310_000;
 type Target = { deploymentId: string; origin: string; schema: string; sha: string; pr: number };
 /** Target must first come from resolveTarget's independent Vercel/GitHub checks. */
 export async function runManagedMigration(target: Target, operation: string, secret: string, bypass: string, fetcher: typeof fetch = fetch) {
@@ -22,7 +24,7 @@ export async function runManagedMigration(target: Target, operation: string, sec
   }
   let response: Response;
   try {
-    response = await fetcher(url, { method: "POST", headers, redirect: "error", signal: AbortSignal.timeout(55_000),
+    response = await fetcher(url, { method: "POST", headers, redirect: "error", signal: AbortSignal.timeout(MIGRATION_POST_TIMEOUT_MS),
       body: JSON.stringify(operation === "initialize" ? { action: "initialize" } : { script: operation }) });
   } catch { throw new Error("Migration POST outcome unknown; inspect status before any further action. No retry attempted"); }
   if (!response.ok) throw new Error(`Migration refused (${response.status}); inspect status before recovery`);

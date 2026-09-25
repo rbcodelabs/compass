@@ -8,7 +8,10 @@ import { createManagedMigrationPool } from "@/lib/preview-automation/managed-dat
 import { initializeManagedPilot, applyManagedMigration, getManagedMigrationStatus } from "@/lib/preview-automation/managed-migrations";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// ASYNC_WAIT migrations (e.g. 047_research_voice_control_plane) create and wait
+// on many ASYNC index jobs within one request. At 60s Vercel killed the function
+// mid-migration, orphaning the managed claim. Keep within the plan limit (300s).
+export const maxDuration = 300;
 
 import { getMigrationStatus, applyMigrations } from "@/lib/migrations/runner";
 export { normalizeConstraintDefinition } from "@/lib/migrations/runner";
