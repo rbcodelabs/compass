@@ -167,12 +167,17 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // so the feedback toggle is always the second switch on the page.
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
-      const feedbackToggle = page.getByRole("switch").nth(1);
-      const authToggle = page.getByRole("switch").nth(2);
+      // By test id, not position: the auth-required switch only renders once
+      // the portal is public, so `switch.nth(2)` could resolve to a different
+      // switch (and read "unchecked") before it appeared, leaving the portal
+      // requiring sign-in and the anonymous Submit below disabled.
+      const feedbackToggle = page.getByTestId("portal-toggle-feedback");
+      const authToggle = page.getByTestId("portal-toggle-auth-required");
       if ((await feedbackToggle.getAttribute("aria-checked")) !== "true") {
         await feedbackToggle.click();
         await expect(feedbackToggle).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
       }
+      await expect(authToggle).toBeVisible();
       if ((await authToggle.getAttribute("aria-checked")) === "true") {
         await authToggle.click();
         await expect(authToggle).toHaveAttribute("aria-checked", "false", { timeout: 10_000 });

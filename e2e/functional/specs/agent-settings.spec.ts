@@ -13,7 +13,13 @@ test("register an account agent, grant workspace access, generate and revoke its
     await page.goto("/settings/agents");
     await page.getByLabel("New agent name").fill(name);
     await page.getByRole("button", { name: "Create agent", exact: true }).click();
-    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+    // Wait out the create round trip (it has exceeded 5s on a cold dev
+    // server). If this gives up while the action is still in flight, the agent
+    // lands after the `finally` cleanup has already run. Agents belong to the
+    // persistent dev user rather than the torn-down org, so that orphan
+    // survives into later runs and breaks oauth-consent.spec.ts, which expects
+    // exactly one grant-less agent.
+    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible({ timeout: 15_000 });
     let card = page.locator("section").filter({ has: page.getByRole("heading", { name, exact: true }) });
     await card.getByLabel("Key name", { exact: true }).fill("Test integration");
     await card.getByRole("button", { name: "Generate agent key" }).click();
