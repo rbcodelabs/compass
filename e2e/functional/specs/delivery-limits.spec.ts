@@ -98,15 +98,7 @@ test.describe.serial("Delivery limits", () => {
         await expect(page.getByText(itemTitle)).toBeVisible();
         // No error/confirmation surface of any kind appeared.
         await expect(page.getByRole("dialog")).toHaveCount(0);
-        // Scope to the app's own DOM. getByText pierces open shadow roots, so an
-        // unscoped match also counts the Next.js dev overlay — a
-        // <nextjs-portal> shadow host that Next mounts under a body-level
-        // <script> — which lists any console error from the page load. After a
-        // few /roadmap renders that includes the dnd-kit `DndDescribedBy-N`
-        // hydration mismatch. That is dev-only tooling, not a limit-related
-        // error surface; every app element (root and portals) is a non-script
-        // child of <body>.
-        await expect(page.locator("body > :not(script)").getByText(/error/i)).toHaveCount(0);
+        await expect(page.getByText(/error/i)).toHaveCount(0);
 
         // ── 5. NOW badge now reads (beforeCount+1)/0 and is visibly warning ─
         const nowBadgeAfter = nowColumn.getByLabel(/of 0 items$/);

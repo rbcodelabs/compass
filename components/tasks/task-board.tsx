@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useCallback, useEffect } from "react";
+import { useState, useTransition, useCallback, useEffect, useId } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -74,6 +74,9 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
 
   const [, startTransition] = useTransition();
 
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = useId();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -234,6 +237,7 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
       )}
 
       <DndContext
+        id={dndId}
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={handleDragStart}
