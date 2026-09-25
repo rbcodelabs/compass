@@ -160,11 +160,12 @@ function ComboboxContent({
   align = "center",
   alignOffset = 0,
   anchor,
+  collisionPadding,
   ...props
 }: Omit<ComboboxPrimitive.Popup.Props, "children"> &
   Pick<
     ComboboxPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset" | "anchor"
+    "align" | "alignOffset" | "side" | "sideOffset" | "anchor" | "collisionPadding"
   > & {
     emptyMessage?: React.ReactNode
     inputPlaceholder?: string
@@ -177,6 +178,7 @@ function ComboboxContent({
         align={align}
         alignOffset={alignOffset}
         anchor={anchor}
+        collisionPadding={collisionPadding}
         // Popup layer (80) — see the stacking-layer ladder in app/globals.css.
         // The Positioner is the portal's fixed-position root, so this value
         // alone decides whether the list paints above or below other overlays.
@@ -208,8 +210,10 @@ function ComboboxContent({
               className="w-full rounded-md bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
             />
           </div>
-          <ComboboxPrimitive.Empty className="px-2.5 py-6 text-center text-sm text-muted-foreground">
-            {emptyMessage}
+          <ComboboxPrimitive.Empty>
+            <div className="px-2.5 py-6 text-center text-sm text-muted-foreground">
+              {emptyMessage}
+            </div>
           </ComboboxPrimitive.Empty>
           <ComboboxPrimitive.List className="scroll-my-1 overflow-x-hidden overflow-y-auto p-1">
             {(item: ComboboxItemData) => (
