@@ -1,6 +1,8 @@
 "use server";
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { randomUUID } from "node:crypto";
 import getPrisma from "@/lib/db";
 import { createPositioningBriefCore } from "@/lib/positioning-brief";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
@@ -157,6 +159,24 @@ export async function createDoc(
   const doc = await createDocument({ workspaceId, parentId, title: "Untitled" }, { ...mutationToken(mutation), authorId: user.id, authorName: user.name ?? user.email ?? "Unknown" });
   revalidatePath(revalidatePathStr);
   return { id: doc.id, title: doc.title, revision: doc.revision };
+}
+
+/**
+ * Empty-state "Create your first page". Pilot (Geode) workspaces require an
+ * operation ID for every create; a fresh one per submission is correct here
+ * because each click is a new create, not a transport retry.
+ */
+export async function createFirstDoc(orgSlug: string, workspaceSlug: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Workspace access denied");
+  const workspace = await getPrisma().workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } },
+    select: { id: true },
+  });
+  if (!workspace) throw new Error("Workspace access denied");
+  const basePath = `/${orgSlug}/${workspaceSlug}/docs`;
+  const doc = await createDoc(workspace.id, null, basePath, { operationId: randomUUID() });
+  redirect(`${basePath}/${doc.id}`);
 }
 
 export async function updateDoc(
