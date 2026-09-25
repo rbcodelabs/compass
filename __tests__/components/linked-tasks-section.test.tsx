@@ -33,7 +33,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
 }));
 
 // TaskAssigneePicker itself fetches workspace assignee options over the
-// network (useTaskAssignees -> getTaskAssigneeOptions) and renders a Base UI
+// network (useTaskAssignees -> fetchTaskAssigneeOptions) and renders a Base UI
 // combobox with no existing interaction-testing precedent in this suite.
 // Stubbed here so the test asserts what matters: that LinkedTasksSection
 // renders *this* component (agent+human capable), not a bare people-only

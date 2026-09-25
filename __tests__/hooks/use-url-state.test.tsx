@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => currentPath,
   useSearchParams: () => new URLSearchParams(currentSearch),
 }));
-vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({ getTaskAssigneeOptions: vi.fn() }));
+vi.mock("@/lib/task-assignees-client", () => ({ fetchTaskAssigneeOptions: vi.fn() }));
 
 import { useUrlState } from "@/hooks/use-url-state";
 import {

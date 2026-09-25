@@ -7,6 +7,7 @@
  * on the internal roadmap Board.
  */
 import { test, expect } from "../fixtures/index";
+import { openFullPage } from "../fixtures/full-page";
 import type { Page } from "@playwright/test";
 
 async function createAndLinkTask(
@@ -29,8 +30,7 @@ async function createAndLinkTask(
   await taskCard.getByRole("button", { name: taskTitle }).click();
   const taskPanel = page.locator('[data-slot="sheet-content"]');
   await expect(taskPanel).toBeVisible({ timeout: 15_000 });
-  await taskPanel.getByRole("link", { name: "Open full page" }).click();
-  await page.waitForURL(/\/tasks\/[0-9a-f-]{36}$/, { timeout: 15_000 });
+  await openFullPage(page, taskPanel);
 
   await page.getByRole("button", { name: "Add link" }).click();
   const linkDialog = page.getByRole("dialog", { name: "Link to another item" });

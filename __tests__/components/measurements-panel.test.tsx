@@ -15,9 +15,11 @@ const actions = vi.hoisted(() => ({
 
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions", () => ({
   linkAnalyticsMetric: actions.link,
-  listAnalyticsMetrics: actions.listMetrics,
-  readMeasurements: actions.read,
   refreshAnalyticsMeasurement: actions.refresh,
+}));
+// Reads go through GET /api/analytics/measurements, never a server action.
+vi.mock("@/lib/analytics/measurements-client", () => ({
+  loadMeasurements: async () => ({ measurements: await actions.read(), metrics: await actions.listMetrics() }),
 }));
 
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";

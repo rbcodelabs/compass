@@ -689,8 +689,10 @@ test("an MCP client registers, survives the login bounce, and the consent screen
         );
         const radio = anonPage.getByRole("radio", { name: new RegExp(SEEDED_AGENT_NAME) });
         await expect(radio, "an existing agent must be offered").toBeVisible();
+        // Scoped to this agent's option: the dev user is shared across specs,
+        // so other grant-less agents may legitimately be listed too.
         await expect(
-          anonPage.getByText(/No workspace access — cannot be used for this connection/)
+          anonPage.locator("label", { has: radio }).getByText(/No workspace access — cannot be used for this connection/)
         ).toBeVisible();
 
         await radio.check();

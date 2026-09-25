@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useId } from "react";
 import {
   DndContext,
   type DragEndEvent,
@@ -77,6 +77,9 @@ export function ObjectivesList({
   const [objectives, setObjectives] = useState(initialObjectives);
   const [, startTransition] = useTransition();
 
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = useId();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -109,6 +112,7 @@ export function ObjectivesList({
 
   return (
     <DndContext
+      id={dndId}
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}
@@ -153,6 +157,9 @@ function ObjectiveRowWithKRSort({
   const [keyResults, setKeyResults] = useState(objective.keyResults);
   const [, startTransition] = useTransition();
 
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = useId();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -185,6 +192,7 @@ function ObjectiveRowWithKRSort({
 
   return (
     <DndContext
+      id={dndId}
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragEnd={handleKRDragEnd}

@@ -1,5 +1,6 @@
 import pg from "pg";
 import { test, expect } from "../fixtures/index";
+import { openFullPage } from "../fixtures/full-page";
 import { isolatedE2EConnectionString } from "../fixtures/isolated-database";
 
 const title = "New teams struggle to reach their first shared insight";
@@ -52,8 +53,7 @@ test("opportunity discussion persists between full page and panel", async ({ pag
   await expect(panelDiscussion.getByText("Test the shared recap this week.", { exact: true })).toBeVisible();
   await panelDiscussion.getByRole("button", { name: /Resolve thread by / }).click();
   await expect(panelDiscussion.getByRole("button", { name: /Expand resolved thread by / })).toBeVisible();
-  await panel.getByRole("link", { name: "Open full page" }).click();
-  await expect(page).toHaveURL(new RegExp(`/discovery/${id}`));
+  expect(await openFullPage(page, panel)).toBe(`${base}/discovery/${id}`);
   await expect(discussion.getByRole("button", { name: /Expand resolved thread by / })).toBeVisible();
   await discussion.getByRole("button", { name: /Reopen thread by / }).click();
   await expect(discussion.getByText("Test the shared recap this week.", { exact: true })).toBeVisible();

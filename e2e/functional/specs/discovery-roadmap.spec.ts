@@ -9,6 +9,7 @@
  * branch (PR #16). Update the horizon to "Shipped" once that branch merges.
  */
 import { test, expect } from "../fixtures/index";
+import { openFullPage } from "../fixtures/full-page";
 
 test.describe("Discovery → Roadmap", () => {
   test(
@@ -37,10 +38,9 @@ test.describe("Discovery → Roadmap", () => {
       await expect(page).toHaveURL(/detail=opportunity/);
 
       // Continue into the full-page editor, where solutions are managed.
-      await page.getByRole("link", { name: "Open full page" }).click();
-      // The outgoing panel already contains the same heading and controls.
-      // Wait for navigation before interacting, or the form can unmount mid-edit.
-      await expect(page).toHaveURL(new RegExp(`${base}/discovery/[0-9a-f-]+$`));
+      // The outgoing panel already contains the same heading and controls, so
+      // wait for the route to replace it before interacting.
+      await openFullPage(page);
       const opportunityPage = page.locator('[data-slot="opportunity-detail"][data-variant="page"]');
       await expect(opportunityPage.getByRole("heading", { name: oppTitle })).toBeVisible();
 

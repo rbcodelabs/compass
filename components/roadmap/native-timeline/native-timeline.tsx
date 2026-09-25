@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, useId } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -126,6 +126,9 @@ export function NativeTimeline(props: TimelineEngineProps & {
   const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
   const [editing, setEditing] = useState<TimelineItemView | null>(null);
   const { openItem, triggerItemId } = useTimelinePanelNavigation();
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = useId();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const packedItems = useMemo(() => packTimelineIntervals(controller.items.map((item) => {
@@ -311,6 +314,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
       <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} groupByValue={groupByValue} groupByOptions={props.groupByOptions} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: controller.jumpToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0 }} />
       <div data-slot="workspace-content" className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:px-4 md:py-3">
         <DndContext
+          id={dndId}
           sensors={sensors}
           collisionDetection={pointerWithin}
           onDragStart={handleDragStart}
