@@ -235,22 +235,31 @@ export function MetricsDashboard({
     dragIdRef.current = null;
     setDropTargetId(null);
     if (!draggedId || draggedId === overId) return;
-    setMetrics((current) => {
-      const fromIndex = current.findIndex((row) => row.metric.id === draggedId);
-      const overIndex = current.findIndex((row) => row.metric.id === overId);
-      if (fromIndex === -1 || overIndex === -1) return current;
-      const next = [...current];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(overIndex, 0, moved);
-      const newVisibleIndex = next.filter((row) => row.dashboardVisible).findIndex((row) => row.metric.id === draggedId);
-      startTransition(async () => {
-        try {
-          unwrapAnalyticsAction(await reorderDashboardMetric(orgSlug, workspaceSlug, draggedId, newVisibleIndex));
-        } catch (cause) {
-          setError(errorMessage(cause));
-        }
-      });
-      return next;
+    // Compute the reordered array from the current `metrics` state and commit
+    // it as a plain, synchronous setMetrics call. The server-persistence call
+    // (startTransition) is a separate statement AFTER that commit, never
+    // nested inside the setMetrics updater -- React invokes updater
+    // functions during the render phase, and calling startTransition from
+    // inside one throws "Cannot call startTransition while rendering" (which
+    // then cascades into a router update-during-render error and trips the
+    // page's error boundary). See the "drag-to-reorder ... without crashing
+    // the page" test in metrics-dashboard.spec.ts for the regression test.
+    const previous = metrics;
+    const fromIndex = previous.findIndex((row) => row.metric.id === draggedId);
+    const overIndex = previous.findIndex((row) => row.metric.id === overId);
+    if (fromIndex === -1 || overIndex === -1) return;
+    const next = [...previous];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(overIndex, 0, moved);
+    const newVisibleIndex = next.filter((row) => row.dashboardVisible).findIndex((row) => row.metric.id === draggedId);
+    setMetrics(next);
+    startTransition(async () => {
+      try {
+        unwrapAnalyticsAction(await reorderDashboardMetric(orgSlug, workspaceSlug, draggedId, newVisibleIndex));
+      } catch (cause) {
+        setMetrics(previous);
+        setError(errorMessage(cause));
+      }
     });
   }
 
@@ -503,6 +512,7 @@ function MetricCard({
       onDrop={onDrop}
     >
       <div
+        data-testid="metric-card-drag-handle"
         className="flex cursor-grab items-start justify-between gap-2 border-b border-border-default px-3 py-2 active:cursor-grabbing"
         draggable
         onDragStart={onDragStart}
@@ -542,7 +552,12 @@ function MetricCard({
       <div className="flex flex-1 flex-col gap-2 px-3 py-2">
         <StatusPill status={row.status} caption={row.statusCaption} />
         {row.value == null ? (
-          <p className="text-sm text-text-subtle">Unavailable — last sync failed</p>
+          // "last sync failed" is only true when the status actually is
+          // failed -- a brand-new "fresh" metric that simply has no
+          // observation yet must not show the same alarming copy next to
+          // its green pill. row.statusCaption already carries the specific
+          // reason and is shown by StatusPill above, so this stays generic.
+          <p className="text-sm text-text-subtle">{row.status === "failed" ? "Unavailable — last sync failed" : "Unavailable"}</p>
         ) : (
           <div className="flex items-baseline gap-2">
             <span className={`text-2xl font-semibold tabular-nums ${row.status === "stale" ? "text-text-subtle" : "text-text-primary"}`}>{row.value}</span>
