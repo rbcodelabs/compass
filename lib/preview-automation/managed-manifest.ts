@@ -7,6 +7,12 @@ import path from "node:path";
  * runtime metadata. Any manifest/file change requires another complete migration
  * audit and an explicit code review of these pins; never refresh automatically.
  * The only runtime SQL exception is runner's exact001 CREATE SCHEMA public skip.
+ *
+ * `062_mcp_connectors` is pinned by the ADR-0018 connector PR and has NOT been
+ * through that audit yet — it is here because `assertReviewedManagedManifest`
+ * pins membership as well as digests, so a new migration cannot be registered
+ * without touching this map. Treat the pin as a review request, not a pass:
+ * re-read the SQL and confirm the digest before merging.
  */
 const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "001_init": "f22fed1ed336c56fbfb3380e0497c45ba355efd14906f0e4c8f4c1a5279eb12e",
@@ -79,7 +85,8 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "058_oauth_authorization_events": "3c9d762d52ed8e0cbe907cb84ab1ae7d38afdbcfbcdfac3b5f092eac018f3ff8",
   "059_geode_document_storage": "6d4b1d6d2ef578cfc313b0eb5e788bfdaf65401e1e740dd7c38e986871d9b628",
   "060_workspace_updates": "3479312bcae3d33fce394a47d05b16223f68fd4c62ac471dc9a4aeea1a90e41f",
-  "061_product_analytics": "5ec89b960a7c08a86e8f37f25c41be2c9f418ff83c2cedb6855bede43911edea"
+  "061_product_analytics": "5ec89b960a7c08a86e8f37f25c41be2c9f418ff83c2cedb6855bede43911edea",
+  "062_mcp_connectors": "7f66846956a857f8e4df816b3a99c35714176193d2619e82b51fc587c195d43d"
 };
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {

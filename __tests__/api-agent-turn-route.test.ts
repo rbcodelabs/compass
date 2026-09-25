@@ -41,6 +41,14 @@ vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => mockCheckLimi
 const mockResolveAgentHandoffContext = vi.fn()
 vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: (...args: unknown[]) => mockResolveAgentHandoffContext(...args) }))
 
+// ADR-0018. Mocked at the store rather than at prisma because what matters here
+// is what the route does with the slugs, and `connectorDefinition` is left real
+// so the catalog itself is part of the assertion.
+const mockListConnectedSlugs = vi.fn()
+vi.mock("@/lib/mcp-connectors/store", () => ({
+  listConnectedSlugs: (...args: unknown[]) => mockListConnectedSlugs(...args),
+}))
+
 import { POST } from "@/app/api/agent/turn/route"
 
 function req(body: unknown): NextRequest {
@@ -66,6 +74,7 @@ beforeEach(() => {
   mockMintKey.mockResolvedValue({ token: "token", apiKeyId: "key-1" })
   mockPreparePacks.mockResolvedValue({ files: [], pluginPaths: [], skillIds: [], provenanceJson: "[]", systemPromptAppendices: [] })
   mockResolveAgentHandoffContext.mockResolvedValue(null)
+  mockListConnectedSlugs.mockResolvedValue([])
 })
 
 describe("agent turn route — guards", () => {
@@ -303,6 +312,78 @@ describe("agent turn route — guards", () => {
       expect(userMessageCall).toBeDefined()
       expect(userMessageCall![0].data.content).toBe("hi")
       expect(userMessageCall![0].data.content).not.toContain("SEED_BLOCK_CANARY")
+    })
+  })
+
+  /**
+   * What the route contributes to ADR-0018 is narrow: resolve which providers this
+   * user has connected, and hand the sandbox their slugs. The security property is
+   * a negative one — the microVM must receive no provider credential — so the
+   * assertions below are mostly about what is *absent* from the env.
+   */
+  describe("third-party MCP connectors (ADR-0018)", () => {
+    function setupRun() {
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", name: "Test", slug: "test", organization: { slug: "org" } })
+      mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+      mockPrisma.agentMessage.findMany.mockResolvedValue([{ role: "user", content: "hi" }])
+      const runCommand = vi.fn().mockResolvedValue({ async *logs() { yield { stream: "stdout", data: 'AGENT_ERROR {"message":"test stop"}\n' } }, wait: vi.fn() })
+      mockBootSandbox.mockResolvedValue({ writeFiles: vi.fn(), runCommand, stop: vi.fn() })
+      return runCommand
+    }
+
+    const turn = async (runCommand: ReturnType<typeof setupRun>) => {
+      await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+      return runCommand.mock.calls[0][0].env as Record<string, string>
+    }
+
+    it("omits the env var entirely when the user has connected nothing", async () => {
+      // A user with no grants must get byte-identical env to before this feature
+      // existed — an empty `[]` would still change the sandbox's input.
+      const env = await turn(setupRun())
+      expect("AGENT_MCP_CONNECTORS" in env).toBe(false)
+    })
+
+    it("passes slugs and display metadata, and no provider credential", async () => {
+      mockListConnectedSlugs.mockResolvedValue(["v0"])
+      const env = await turn(setupRun())
+
+      const connectors = JSON.parse(env.AGENT_MCP_CONNECTORS) as { slug: string; displayName: string; guidance?: string }[]
+      expect(connectors).toHaveLength(1)
+      expect(connectors[0].slug).toBe("v0")
+      expect(connectors[0].displayName).toBeTruthy()
+      // The whole point of the gateway seam: nothing token-shaped may appear here.
+      expect(Object.keys(connectors[0]).sort()).toEqual(["displayName", "guidance", "slug"])
+      expect(env.AGENT_MCP_CONNECTORS).not.toMatch(/access_?token|refresh_?token|client_?secret|Bearer /i)
+    })
+
+    it("drops a slug that is not in the reviewed catalog", async () => {
+      // The catalog is the allowlist. A row that outlived its definition — or was
+      // written by an older deploy — must not reach the sandbox as a live server.
+      mockListConnectedSlugs.mockResolvedValue(["v0", "not-a-real-connector"])
+      const env = await turn(setupRun())
+      const connectors = JSON.parse(env.AGENT_MCP_CONNECTORS) as { slug: string }[]
+      expect(connectors.map(connector => connector.slug)).toEqual(["v0"])
+    })
+
+    it("resolves grants under the trusted Compass origin, not the request's host", async () => {
+      // The gateway resolves the grant under `trustedCompassBaseUrl()`, so the turn
+      // has to agree with it — otherwise a turn reached via some other hostname
+      // would enable a connector the gateway then refuses to serve.
+      mockListConnectedSlugs.mockResolvedValue([])
+      await turn(setupRun())
+      const { trustedCompassBaseUrl } = await import("@/lib/compass-url")
+      expect(mockListConnectedSlugs).toHaveBeenCalledWith("user-1", trustedCompassBaseUrl().origin, expect.anything())
+    })
+
+    it("still runs the turn when the connector lookup throws", async () => {
+      // Connectors are additive. A failure to enumerate them must not cost the
+      // user their turn — the agent is perfectly useful with Compass's catalog.
+      mockListConnectedSlugs.mockRejectedValue(new Error("connector table is missing"))
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      const runCommand = setupRun()
+      const env = await turn(runCommand)
+      expect(runCommand).toHaveBeenCalled()
+      expect("AGENT_MCP_CONNECTORS" in env).toBe(false)
     })
   })
 })
