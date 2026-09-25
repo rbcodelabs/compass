@@ -67,10 +67,24 @@ Attachments upload as soon as they're selected, showing a thumbnail (for images)
 
 You don't have to wait for a customer submission to add something to the queue — your own team can log feedback directly, without going through the public portal:
 
-- **On a workspace's Feedback board**, click **New Feedback** (also available from the empty state) to log an idea or bug against that workspace. It shows up in the board immediately, scoped just like a portal submission.
+- **On a workspace's Feedback board**, click **New Feedback** (also available from the empty state) to log an idea or bug against that workspace. It shows up in the board immediately, scoped just like a portal submission. See [the feedback composer](#the-feedback-composer) below.
 - **From anywhere in Compass** — any org, any workspace — open the account menu under your avatar (bottom of the sidebar on desktop, or **Account** in the mobile header) and choose **Send Feedback about Compass** to report a bug or suggest an improvement about Compass itself. This always lands in the Compass team's own workspace, regardless of which org or workspace you're currently working in, so it reaches the team no matter where you are.
 
 Both flows attach your name and email automatically from your Compass login, so the team knows who to follow up with.
+
+### The feedback composer
+
+**New Feedback** opens a composer in the right-hand panel — the same place a feedback item opens when you click it. On a desktop-width window the composer docks beside the board instead of covering it, so you can keep scrolling, searching and filtering existing feedback while you write (handy for checking for a duplicate first). On a phone or narrow window it opens as a full-width sheet.
+
+- **Type** — choose **Idea** (suggest an improvement) or **Bug** (something isn't working). Use the arrow keys to switch between them.
+- **Title** — a short, scannable summary. The cursor starts here.
+- **Details** — a full Markdown editor with a formatting toolbar (headings, lists, links, code, tables), or switch to **Markdown** to type the source directly. The prompt changes with the type. **Insert bug template** adds *Steps to reproduce / Expected result / Actual result* headings in one click; ideas get a *Problem / Proposed idea / Who benefits* outline.
+- **Attachments** — drop files anywhere on the composer, paste a screenshot straight from your clipboard (into the title or the details), or click to browse. The same limits as the portal apply: PNG, JPEG, GIF, WebP, PDF, TXT or CSV, up to 10MB each, at most 5. Files upload immediately, with a progress bar per file; a file that fails shows the reason and a retry button, and you can remove any file before submitting.
+- **Submit** with the button or **⌘/Ctrl + Enter**. The feedback and all of its attachments are saved together — if anything can't be saved, nothing is created and the problem is pointed out so you can fix it and resubmit.
+
+After you submit, the new item appears in the board and the panel switches to showing it, with your Markdown rendered and attachments displayed, so you can set its status or link it to an opportunity straight away. Click **New Feedback** again to log another.
+
+**Your draft is safe.** Everything you type is saved on this device as you go. Closing the panel (the close button or **Esc**), reloading the page or navigating away keeps the draft, and it's restored the next time you open the composer in that workspace. **Cancel** discards it, after asking you to confirm.
 
 ## Triaging Feedback Internally
 

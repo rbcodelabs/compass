@@ -123,7 +123,6 @@
     "components/experiments/create-experiment-form.tsx::bg-amber-50": 1,
     "components/experiments/create-experiment-form.tsx::border-amber-800": 1,
     "components/experiments/create-experiment-form.tsx::bg-amber-950/20": 1,
-    "components/feedback/create-feedback-dialog.tsx::text-red-600": 1,
     "components/marketing/agent-section.tsx::bg-slate-950": 1,
     "components/marketing/agent-section.tsx::text-slate-400": 5,
     "components/marketing/agent-section.tsx::bg-slate-900": 1,

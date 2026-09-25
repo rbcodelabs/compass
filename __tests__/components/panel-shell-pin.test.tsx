@@ -56,6 +56,7 @@ vi.mock("@/components/panels/assumption-panel", () => ({ AssumptionPanel: () => 
 vi.mock("@/components/panels/experiment-panel", () => ({ ExperimentPanel: () => null }));
 vi.mock("@/components/panels/roadmap-item-panel", () => ({ RoadmapItemPanel: () => null }));
 vi.mock("@/components/panels/feedback-panel", () => ({ FeedbackPanel: () => null }));
+vi.mock("@/components/feedback/feedback-composer", () => ({ FeedbackComposer: () => null }));
 vi.mock("@/components/panels/discovery-rail-panel", () => ({ DiscoveryRailPanel: () => null }));
 vi.mock("@/components/tasks/task-detail", () => ({ TaskDetail: () => null }));
 

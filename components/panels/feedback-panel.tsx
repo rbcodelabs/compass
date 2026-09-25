@@ -21,6 +21,7 @@ import {
   FEEDBACK_STATUS_OPTIONS,
   FEEDBACK_TYPE_OPTIONS,
 } from "@/lib/feedback-meta";
+import { FeedbackAttachments } from "@/components/feedback/feedback-attachments";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
@@ -132,19 +133,7 @@ export function FeedbackPanel({
         {data.attachments.length === 0 ? (
           <p className="text-sm text-muted-foreground">No attachments.</p>
         ) : (
-          <div className="flex flex-col gap-1">
-            {data.attachments.map((a) => (
-              <a
-                key={a.id}
-                href={a.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm text-primary hover:underline truncate"
-              >
-                {a.filename}
-              </a>
-            ))}
-          </div>
+          <FeedbackAttachments attachments={data.attachments} size="lg" />
         )}
       </Section>
 

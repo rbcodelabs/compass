@@ -26,8 +26,27 @@ export const PANEL_ENTITY_TYPES = [
 
 export type EntityPanelType = (typeof PANEL_ENTITY_TYPES)[number];
 
-/** `discovery-rail` is a special mobile nav aid, not an entity detail. */
-export type PanelType = EntityPanelType | "discovery-rail";
+/**
+ * Panels that are not an existing entity's detail view:
+ * - `discovery-rail` is a special mobile nav aid.
+ * - `feedback-new` is the "New feedback" composer. It lives in the same slot
+ *   (and the same `?detail=` param) as entity panels on purpose: after a
+ *   submit the composer is *replaced* by the new item's detail panel, so
+ *   creating and viewing are one continuous surface. Its id is always
+ *   `FEEDBACK_COMPOSER_ID`.
+ */
+export type PanelType = EntityPanelType | "discovery-rail" | "feedback-new";
+
+export const FEEDBACK_COMPOSER_ID = "new";
+
+export type OpenPanelOptions = {
+  /**
+   * Replace the current history entry instead of pushing one. Used when one
+   * panel supersedes another (composer → created item), so Back does not
+   * return to an emptied composer.
+   */
+  replace?: boolean;
+};
 
 export type PanelState = {
   type: PanelType;
@@ -38,7 +57,7 @@ export type PanelState = {
 // shareable, survives refresh, and the browser back button closes it.
 const PANEL_PARAM = "detail";
 
-const VALID_TYPES = new Set<string>([...PANEL_ENTITY_TYPES, "discovery-rail"]);
+const VALID_TYPES = new Set<string>([...PANEL_ENTITY_TYPES, "discovery-rail", "feedback-new"]);
 
 function encodePanel(type: PanelType, id: string): string {
   return `${type}:${id}`;
@@ -68,7 +87,7 @@ type EntityMutationListener = (id: string, patch?: EntityMutationPatch) => void;
 
 type PanelContextValue = {
   panel: PanelState;
-  openPanel: (type: PanelType, id: string) => void;
+  openPanel: (type: PanelType, id: string, options?: OpenPanelOptions) => void;
   closePanel: () => void;
   orgSlug: string;
   workspaceSlug: string;
@@ -109,10 +128,12 @@ export function PanelProvider({
   // panel); hopping between related entities in a panel pushes each hop, so
   // back walks the chain. Preserve any other params already on the URL.
   const openPanel = useCallback(
-    (type: PanelType, id: string) => {
+    (type: PanelType, id: string, options?: OpenPanelOptions) => {
       const params = new URLSearchParams(searchParams.toString());
       params.set(PANEL_PARAM, encodePanel(type, id));
-      router.push(`${pathname}?${params.toString()}`, { scroll: false });
+      const href = `${pathname}?${params.toString()}`;
+      if (options?.replace) router.replace(href, { scroll: false });
+      else router.push(href, { scroll: false });
     },
     [router, pathname, searchParams]
   );
