@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useId } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -357,6 +357,9 @@ export function SolutionSwimlaneBoard({ opportunities, orgSlug, workspaceSlug, w
 
   const [, startTransition] = useTransition();
 
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = useId();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -493,6 +496,7 @@ export function SolutionSwimlaneBoard({ opportunities, orgSlug, workspaceSlug, w
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
       <DndContext
+        id={dndId}
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={handleDragStart}

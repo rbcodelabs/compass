@@ -559,6 +559,9 @@ export function DataGrid<TRow extends GridRowData>({
   }, [mobileMode, visibleColumns]);
 
   // ── Column drag reorder ───────────────────────────────────────────────────
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = React.useId();
   const sensors = useSensors(
     // A small distance threshold lets a plain click reach the sort button
     // inside the header instead of starting a drag.
@@ -721,6 +724,7 @@ export function DataGrid<TRow extends GridRowData>({
       )}
 
       <DndContext
+        id={dndId}
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragEnd={handleDragEnd}

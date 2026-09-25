@@ -16,6 +16,7 @@
  */
 import { test, expect } from "../fixtures/index";
 import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
+import { openFullPage } from "../fixtures/full-page";
 
 test.describe("Assumption ↔ Experiment linking", () => {
   test(
@@ -35,8 +36,7 @@ test.describe("Assumption ↔ Experiment linking", () => {
       await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
       await page.getByRole("button", { name: oppTitle, exact: true }).click();
-      await page.getByRole("link", { name: "Open full page" }).click();
-      await expect(page).toHaveURL(new RegExp(`${base}/discovery/[0-9a-f-]{36}$`));
+      await openFullPage(page);
       await page.waitForLoadState("networkidle");
       await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
 
@@ -107,8 +107,7 @@ test.describe("Assumption ↔ Experiment linking", () => {
       // ── 7. Verify the OST tree now shows the linked experiment ─────────────
       await page.goto(`${base}/discovery`);
       await page.getByRole("button", { name: oppTitle, exact: true }).click();
-      await page.getByRole("link", { name: "Open full page" }).click();
-      await expect(page).toHaveURL(new RegExp(`${base}/discovery/[0-9a-f-]{36}$`));
+      await openFullPage(page);
       await page.waitForLoadState("networkidle");
       await page.getByRole("tab", { name: "OST", exact: true }).click();
 

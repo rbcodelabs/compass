@@ -23,8 +23,8 @@ function setUpNavigation(initialQuery: string) {
   // renders without a real auth/db stack. useParams above returns no
   // org/workspace slugs, so useTaskAssignees never actually calls this and
   // instead falls back to deriving options from the `members` prop directly.
-  vi.doMock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
-    getTaskAssigneeOptions: vi.fn(),
+  vi.doMock("@/lib/task-assignees-client", () => ({
+    fetchTaskAssigneeOptions: vi.fn(),
   }));
   return push;
 }

@@ -47,13 +47,15 @@ test.describe("Entity detail panel", () => {
     await page.getByLabel("Start date").fill("2026-07-01");
     await page.getByLabel("End date").fill("2026-09-30");
     await page.getByRole("button", { name: "Create cycle" }).click();
-    await expect(page.getByText(cycleTitle)).toBeVisible({ timeout: 60_000 });
+    // Scoped to page content: Next 16.3's route announcer (an aria-live region)
+    // repeats the new page's heading, so an unscoped getByText matches twice.
+    await expect(page.getByRole("main").first().getByText(cycleTitle)).toBeVisible({ timeout: 60_000 });
     // Let the modal fully release its aria-hidden background before routing;
     // navigating during the close transition carries the temporary attribute
     // into the next page's hydration snapshot.
     await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 10_000 });
 
-    await page.getByText(cycleTitle).click();
+    await page.getByRole("main").first().getByText(cycleTitle).click();
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: cycleTitle })).toBeVisible();
 
@@ -110,7 +112,7 @@ test.describe("Entity detail panel", () => {
 
     // Persisted: reload and the edited title shows on the OKRs list.
     await page.goto(`${base}/okrs`);
-    await page.getByText(cycleTitle).click();
+    await page.getByRole("main").first().getByText(cycleTitle).click();
     await page.waitForLoadState("networkidle");
     await expect(page.getByText(editedTitle)).toBeVisible({ timeout: 15_000 });
 

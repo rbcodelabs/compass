@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode, useId } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -75,6 +75,9 @@ export function OpportunityFieldBoard({ field, opportunities, orgSlug, workspace
   const latestRequest = useRef(new Map<string, number>());
   const requestCounter = useRef(0);
 
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = useId();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor)
@@ -144,6 +147,7 @@ export function OpportunityFieldBoard({ field, opportunities, orgSlug, workspace
         </div>
       </div>
       <DndContext
+        id={dndId}
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={handleDragStart}

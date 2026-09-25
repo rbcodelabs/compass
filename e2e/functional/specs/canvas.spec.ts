@@ -33,6 +33,7 @@
  */
 import { test, expect } from "../fixtures/index";
 import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
+import { openFullPage } from "../fixtures/full-page";
 
 test.describe("Canvas", () => {
   test("renders the full OST + Roadmap graph with real edges, and supports pan + zoom", async ({
@@ -96,9 +97,11 @@ test.describe("Canvas", () => {
     await page.getByLabel("Start date").fill("2026-07-01");
     await page.getByLabel("End date").fill("2026-09-30");
     await page.getByRole("button", { name: "Create cycle" }).click();
-    await expect(page.getByText(cycleTitle)).toBeVisible({ timeout: 15_000 });
+    // Scoped to page content: Next 16.3's route announcer (an aria-live region)
+    // repeats the new page's heading, so an unscoped getByText matches twice.
+    await expect(page.getByRole("main").first().getByText(cycleTitle)).toBeVisible({ timeout: 15_000 });
 
-    await page.getByText(cycleTitle).click();
+    await page.getByRole("main").first().getByText(cycleTitle).click();
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: cycleTitle })).toBeVisible();
 
@@ -122,7 +125,7 @@ test.describe("Canvas", () => {
     await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: oppTitle, exact: true }).click();
-    await page.getByRole("link", { name: "Open full page" }).click();
+    await openFullPage(page);
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
 
@@ -198,7 +201,7 @@ test.describe("Canvas", () => {
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: oppTitle, exact: true }).click();
-    await page.getByRole("link", { name: "Open full page" }).click();
+    await openFullPage(page);
     await page.waitForLoadState("networkidle");
     // Promote-to-roadmap moved into the solution's sidebar panel along with
     // status (see solution-panel.tsx) — open the panel rather than expanding

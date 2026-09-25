@@ -13,6 +13,7 @@
  */
 import { test, expect } from "../fixtures/index";
 import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
+import { openFullPage } from "../fixtures/full-page";
 
 test.describe("Discovery Rail", () => {
   test("rail lists opportunities, filters by search, and survives navigation", async ({
@@ -53,7 +54,7 @@ test.describe("Discovery Rail", () => {
 
     // ── 2. Open opportunity A's detail page — rail appears ─────────────────
     await page.getByRole("button", { name: oppTitleA, exact: true }).click();
-    await page.getByRole("link", { name: "Open full page" }).click();
+    await openFullPage(page);
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: oppTitleA })).toBeVisible();
 
@@ -113,7 +114,7 @@ test.describe("Discovery Rail", () => {
       await expect(page.getByText(oppTitleB)).toBeVisible({ timeout: 15_000 });
 
       await page.getByRole("button", { name: oppTitleA, exact: true }).click();
-      await page.getByRole("link", { name: "Open full page" }).click();
+      await openFullPage(page);
       await page.waitForLoadState("networkidle");
       await expect(page.getByRole("heading", { name: oppTitleA })).toBeVisible();
 

@@ -5,7 +5,7 @@ vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/workspace", () => ({ getWorkspace: mocks.workspace }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/analytics/service", () => ({ createMetric: mocks.create, saveVercelConnection: mocks.connect, listBindings: mocks.listBindings, listObservations: mocks.observations }));
-import { createAnalyticsMetric, connectAnalytics, readMeasurements, disconnectAnalytics, editAnalyticsMetric, archiveAnalyticsMetric, linkAnalyticsMetric, unlinkAnalyticsMetric, refreshAnalyticsMeasurement, listAnalyticsMetrics, updateAnalyticsMeasurement } from "@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions";
+import { createAnalyticsMetric, connectAnalytics, disconnectAnalytics, editAnalyticsMetric, archiveAnalyticsMetric, linkAnalyticsMetric, unlinkAnalyticsMetric, refreshAnalyticsMeasurement, updateAnalyticsMeasurement } from "@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions";
 import { AnalyticsError } from "@/lib/analytics/providers";
 
 beforeEach(() => {
@@ -33,7 +33,6 @@ describe("analytics server action identity", () => {
     () => updateAnalyticsMeasurement("org", "workspace", "binding", {} as never),
     () => unlinkAnalyticsMetric("org", "workspace", "binding"),
     () => refreshAnalyticsMeasurement("org", "workspace", "binding", "request"),
-    () => listAnalyticsMetrics("org", "workspace"),
   ])("requires a session for each adapter action", async call => {
     mocks.auth.mockResolvedValue(null);
     await expect(call()).rejects.toThrow("Unauthorized");
@@ -53,11 +52,5 @@ describe("analytics server action identity", () => {
     await createAnalyticsMetric("org", "workspace", input);
     expect(mocks.workspace).toHaveBeenCalledWith("org", "workspace", "human-user");
     expect(mocks.create).toHaveBeenCalledWith({ userId: "human-user", purpose: "USER" }, "member-workspace", input);
-  });
-  it("reads observations only for service-authorized bindings", async () => {
-    mocks.listBindings.mockResolvedValue([{ id: "binding" }]);
-    mocks.observations.mockResolvedValue([]);
-    await readMeasurements("org", "workspace", { targetType: "EXPERIMENT", targetId: "experiment" });
-    expect(mocks.observations).toHaveBeenCalledWith({ userId: "human-user", purpose: "USER" }, "member-workspace", "binding");
   });
 });

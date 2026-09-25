@@ -41,11 +41,6 @@ export async function refreshAnalyticsMeasurement(orgSlug: string, workspaceSlug
   return analyticsAction(() => analytics.refreshBinding(actor, workspaceId, bindingId, requestId));
 }
 
-export async function listAnalyticsMetrics(orgSlug: string, workspaceSlug: string) {
-  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
-  return analytics.listMetrics(actor, workspaceId);
-}
-
 export async function listAnalyticsConnections(orgSlug: string, workspaceSlug: string) {
   const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
   return analytics.listConnections(actor, workspaceId);
@@ -71,8 +66,5 @@ export async function connectAnalytics(orgSlug: string, workspaceSlug: string, i
   return analyticsAction(() => analytics.saveVercelConnection(actor, workspaceId, input));
 }
 
-export async function readMeasurements(orgSlug: string, workspaceSlug: string, target: analytics.MetricTarget) {
-  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
-  const bindings = await analytics.listBindings(actor, workspaceId, target);
-  return Promise.all(bindings.map(async binding => ({ binding, observations: await analytics.listObservations(actor, workspaceId, binding.id) })));
-}
+// Reads (bindings, observations, metric catalogue) are served by
+// GET /api/analytics/measurements, not server actions — see that route.

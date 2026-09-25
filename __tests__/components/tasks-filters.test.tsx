@@ -17,8 +17,8 @@ vi.mock("next/navigation", () => ({
 
 // The picker hook replaces its members fallback with this server result, so it
 // has to describe the same person or the option list changes under the test.
-vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
-  getTaskAssigneeOptions: vi.fn().mockResolvedValue([
+vi.mock("@/lib/task-assignees-client", () => ({
+  fetchTaskAssigneeOptions: vi.fn().mockResolvedValue([
     { type: "USER", id: "11111111-1111-1111-1111-111111111111", displayName: "Rick", available: true },
   ]),
 }));

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
-import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, validateTaskLink, validateTaskReferences, type AssignmentInput, type TaskAssignee } from "@/lib/task-assignment";
+import { assignmentUpdate, resolveTaskAssignees, validateTaskLink, validateTaskReferences, type AssignmentInput, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
 
 async function requireTaskWorkspace(workspaceId: string) {
@@ -22,14 +22,6 @@ async function requireTask(taskId: string) {
   if (!task) throw new Error("Not found");
   await requireTaskWorkspace(task.workspaceId);
   return task;
-}
-
-export async function getTaskAssigneeOptions(orgSlug: string, workspaceSlug: string) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
-  if (!workspace) throw new Error("Not found");
-  return eligibleTaskAssignees(workspace.id);
 }
 
 // ─── Add Task ─────────────────────────────────────────────────────────────────
