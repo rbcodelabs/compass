@@ -15,6 +15,7 @@ import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
 import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
+import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { revokeMemberAgentGrants, deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
 import { deleteWorkspaceUpdates } from "@/lib/workspace-updates-cleanup";
@@ -613,6 +614,7 @@ export async function deleteWorkspace(
   workspaceSlug: string
 ): Promise<{ redirectTo: string }> {
   const { prisma, workspaceId, organizationId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+  await assertDocumentPilotCleanupReviewed(prisma, workspaceId);
 
   // Decision/release/capacity aggregates reference Tasks and RoadmapItems.
   // DSQL has no FK cascades, so clear the full child graph first.

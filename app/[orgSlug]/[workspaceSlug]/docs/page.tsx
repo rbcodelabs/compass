@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import { BookOpen } from "lucide-react";
 import getPrisma from "@/lib/db";
-import { createDoc } from "./actions";
+import { createFirstDoc } from "./actions";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/patterns/empty-state";
 
@@ -43,27 +43,10 @@ export default async function DocsIndexPage({ params }: Props) {
   }
 
   // Empty state
-  const basePath = `/${orgSlug}/${workspaceSlug}/docs`;
-
   return (
     <div className="flex h-full min-h-[400px] items-center justify-center p-6">
       <EmptyState className="w-full max-w-xl" icon={<BookOpen className="size-6" />} title="No pages yet" description="Create your first page to start documenting." primaryAction={
-      <form
-        action={async () => {
-          "use server";
-          const prismaInner = getPrisma();
-          const ws = await prismaInner.workspace.findFirst({
-            where: {
-              slug: workspaceSlug,
-              organization: { slug: orgSlug },
-            },
-            select: { id: true },
-          });
-          if (!ws) return;
-          await createDoc(ws.id, null, basePath);
-          redirect(`/${orgSlug}/${workspaceSlug}/docs`);
-        }}
-      >
+      <form action={createFirstDoc.bind(null, orgSlug, workspaceSlug)}>
         <Button type="submit">Create your first page</Button>
       </form>
       } />

@@ -27,6 +27,13 @@ function enablePreviewLogin(code = "test-access-code") {
 }
 
 describe("POST /api/preview-login/start", () => {
+  it("does not expose shared convenience login to managed pilots", async () => {
+    enablePreviewLogin();
+    vi.stubEnv("PREVIEW_DATABASE_MODE", "vercel-managed");
+    const response = await POST(request("code=test-access-code&persona=owner"));
+    expect(response.status).toBe(404);
+    expect(initialize).not.toHaveBeenCalled();
+  });
   afterEach(() => {
     vi.unstubAllEnvs();
     initialize.mockClear();

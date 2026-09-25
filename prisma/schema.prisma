@@ -1759,6 +1759,9 @@ model Doc {
   parentId      String?      @map("parent_id") @db.Uuid
   title         String       @db.VarChar(255)
   content       String?      @db.Text
+  storageProvider String?    @map("storage_provider") @db.VarChar(20)
+  contentRef    String?      @map("content_ref") @db.Text
+  revision      String?      @db.Uuid
   metadata      Json?        @map("metadata") @db.Json
   icon          String?      @db.VarChar(50)
   sortOrder     Int          @default(0) @map("sort_order")
@@ -1829,6 +1832,8 @@ model DocVersion {
   docId         String   @map("doc_id") @db.Uuid
   title         String   @db.VarChar(255)
   content       String?  @db.Text
+  storageProvider String? @map("storage_provider") @db.VarChar(20)
+  contentRef    String?  @map("content_ref") @db.Text
   metadata      Json?    @db.Json
   icon          String?  @db.VarChar(50)
   /// Set only on manual "named" snapshots (bypasses coalescing). Null for
@@ -1841,6 +1846,28 @@ model DocVersion {
 
   @@index([docId, createdAt])
   @@map("doc_versions")
+}
+
+/// Durable idempotency receipt. No Doc relation: deletion must retain retries.
+model DocOperation {
+  id String @id @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  operationId String @map("operation_id") @db.Uuid
+  docId String @map("doc_id") @db.Uuid
+  payloadDigest String @map("payload_digest") @db.VarChar(64)
+  result String @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([workspaceId, operationId])
+  @@map("doc_operations")
+}
+
+/// Write-ahead inventory, not automatic garbage-collection authority.
+model DocStorageObject {
+  id String @id @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  pathname String @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  @@map("doc_storage_objects")
 }
 
 /// Stable identity for a prototype or external deliverable. Content lives in

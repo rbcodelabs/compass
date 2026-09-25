@@ -36,6 +36,7 @@ import { AsyncLocalStorage } from "node:async_hooks"
 import getPrisma from "@/lib/db"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
+import { getManagedPilotContext } from "@/lib/preview-automation/managed-context"
 
 export type McpActor = {
   userId: string | null
@@ -94,6 +95,10 @@ export function isResearchActor(actor: McpActor): boolean {
 }
 
 function assertActorWorkspaceScope(actor: McpActor, workspaceId: string): void {
+  const managed = getManagedPilotContext()
+  if (managed && (actor.purpose !== "USER" || actor.scopeWorkspaceId !== managed.workspaceId || workspaceId !== managed.workspaceId)) {
+    throw new McpAuthzError(`Workspace not found or access denied: ${workspaceId}`)
+  }
   if ((isResearchActor(actor) || actor.purpose === "AGENT_TURN") && actor.scopeWorkspaceId !== workspaceId) {
     throw new McpAuthzError(`Workspace not found or access denied: ${workspaceId}`)
   }
@@ -105,8 +110,8 @@ function assertActorWorkspaceScope(actor: McpActor, workspaceId: string): void {
 
 /** Assert the actor may act within `workspaceId` (any member). */
 export async function assertWorkspaceMember(actor: McpActor, workspaceId: string): Promise<void> {
-  if (isService(actor)) return
   assertActorWorkspaceScope(actor, workspaceId)
+  if (isService(actor)) return
   const prisma = getPrisma()
   const ws = await prisma.workspace.findFirst({
     where: { AND: [{ id: workspaceId }, await agentWorkspaceWhere(actor)] },
@@ -120,9 +125,9 @@ export async function assertWorkspaceMember(actor: McpActor, workspaceId: string
 
 /** Assert the actor is a workspace ADMIN of `workspaceId`. */
 export async function assertWorkspaceAdmin(actor: McpActor, workspaceId: string): Promise<void> {
+  assertActorWorkspaceScope(actor, workspaceId)
   if (isService(actor)) return
   if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") throw new McpAuthzError("Human administrator required.")
-  assertActorWorkspaceScope(actor, workspaceId)
   const prisma = getPrisma()
   const [member, orgMember] = await Promise.all([
     prisma.workspaceMember.findFirst({ where: { workspaceId, userId: actor.userId! }, select: { role: true } }),
@@ -194,6 +199,7 @@ export async function assertOrgAdminBySlug(
   actor: McpActor,
   orgSlug: string
 ): Promise<{ organizationId: string }> {
+  if (getManagedPilotContext()) throw new McpAuthzError("Organization-wide mutations are unavailable in the managed pilot.")
   if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") throw new McpAuthzError("Human administrator required.")
   const prisma = getPrisma()
   if (isService(actor)) {
@@ -377,6 +383,7 @@ export async function assertScoringModelAccess(
   scoringModelId: string,
   opts: { admin?: boolean } = {}
 ): Promise<{ organizationId: string }> {
+  if (opts.admin && getManagedPilotContext()) throw new McpAuthzError("Organization-wide mutations are unavailable in the managed pilot.")
   const prisma = getPrisma()
   if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") {
     if (opts.admin) throw new McpAuthzError("Human administrator required.")

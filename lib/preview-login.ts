@@ -35,6 +35,8 @@ const SESSION_DURATION_MS = 60 * 60 * 1000;
  * must stay off on every preview branch that hasn't explicitly opted in.
  */
 export function isPreviewLoginEnabled(): boolean {
+  // Shared preview login has no signed run/deployment binding.
+  if (process.env.PREVIEW_DATABASE_MODE && process.env.PREVIEW_DATABASE_MODE !== "scoped-role") return false;
   return process.env.VERCEL_ENV === "preview" && process.env.PREVIEW_LOGIN_ENABLED === "1";
 }
 

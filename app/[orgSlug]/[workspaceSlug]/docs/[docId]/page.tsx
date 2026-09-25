@@ -8,6 +8,7 @@ import { DocEditor } from "@/components/docs/doc-editor";
 import { DocDecisionAction } from "@/components/docs/doc-decision-action";
 import { listDocDecisions } from "@/lib/tracked-decisions";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
+import { hydrateDocument } from "@/lib/document-service";
 
 type Props = {
   params: Promise<{
@@ -18,10 +19,12 @@ type Props = {
 };
 
 export async function generateMetadata({ params }: Props) {
-  const { docId } = await params;
+  const session = await auth();
+  if (!session?.user?.id) return { title: "Document" };
+  const { docId, orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
-  const doc = await prisma.doc.findUnique({
-    where: { id: docId },
+  const doc = await prisma.doc.findFirst({
+    where: { id: docId, workspace: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } } },
     select: { title: true },
   });
   return { title: doc?.title ?? "Untitled" };
@@ -45,12 +48,13 @@ export default async function DocPage({ params }: Props) {
 
   if (!workspace) notFound();
 
-  const doc = await prisma.doc.findFirst({
+  const storedDoc = await prisma.doc.findFirst({
     where: { id: docId, workspaceId: workspace.id },
-    select: { id: true, title: true, content: true, icon: true, metadata: true },
+    select: { id: true, title: true, content: true, icon: true, metadata: true, storageProvider: true, contentRef: true, revision: true },
   });
 
-  if (!doc) notFound();
+  if (!storedDoc) notFound();
+  const doc = await hydrateDocument(workspace.id, storedDoc);
 
   // An unavailable lookup is distinct from a document with no decisions.
   const decisions = await listDocDecisions(workspace.id, doc.id).catch(() => null);
@@ -75,6 +79,7 @@ export default async function DocPage({ params }: Props) {
 
   return (
     <DocEditor
+      key={doc.id}
       doc={doc}
       initialCommentsPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsComments"))?.value)}
       initialHistoryPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsHistory"))?.value)}

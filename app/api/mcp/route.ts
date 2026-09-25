@@ -2985,6 +2985,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Doc title"),
+          operationId: z.string().uuid().optional().describe("Stable retry ID; required for Geode pilot documents"),
           content: z.string().optional().describe("Doc body in markdown"),
           parentId: z
             .string()
@@ -3018,6 +3019,8 @@ const _handler = createMcpHandler(
           "Only the fields you provide are changed.",
         inputSchema: {
           docId: z.string().uuid().describe("UUID of the doc to update"),
+          expectedRevision: z.string().uuid().optional().describe("Revision from get_doc; required for Geode pilot documents"),
+          operationId: z.string().uuid().optional().describe("Stable retry ID; reuse only for the identical request"),
           title: z.string().min(1).optional().describe("New title"),
           content: z.string().optional().describe("New markdown content (replaces existing)"),
           icon: z.string().optional().describe("New emoji or icon string"),
@@ -3074,6 +3077,8 @@ const _handler = createMcpHandler(
           "version -- it never gets coalesced away by the 5-minute same-author window.",
         inputSchema: {
           docId: z.string().uuid().describe("UUID of the doc to snapshot"),
+          expectedRevision: z.string().uuid().optional().describe("Revision from get_doc; required for Geode pilot documents"),
+          operationId: z.string().uuid().optional().describe("Stable retry ID for this snapshot"),
           label: z.string().optional().describe("Optional label for this snapshot, e.g. 'Before big rewrite'"),
           authorName: z.string().min(1).describe("Name to attribute this snapshot to"),
         },
@@ -3121,6 +3126,8 @@ const _handler = createMcpHandler(
           "always restore back to what was there before.",
         inputSchema: {
           versionId: z.string().uuid().describe("UUID of the doc version to restore"),
+          expectedRevision: z.string().uuid().optional().describe("Current document revision; required for Geode pilot documents"),
+          operationId: z.string().uuid().optional().describe("Stable retry ID for this restore"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },

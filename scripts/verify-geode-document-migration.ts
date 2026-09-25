@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
 import { spawnSync } from "node:child_process"
 import { Pool } from "pg"
+import { Prisma } from "@prisma/client"
 import getPrisma from "../lib/db"
 import { maybeSnapshotDocVersion, restoreDocVersionCore } from "../lib/doc-versions"
 import { applyMigrations, getMigrationStatus } from "../lib/migrations/runner"
@@ -12,6 +13,9 @@ import { withE2ERunLock } from "./e2e-run-lock.mjs"
 const migration = "059_geode_document_storage"
 
 async function main() {
+  // This prerequisite proof intentionally certifies the pre-integration client.
+  // Run it on the migration-only revision; the pilot branch uses the new client.
+  assert(!Prisma.dmmf.datamodel.models.find(model => model.name === "Doc")?.fields.some(field => field.name === "storageProvider"), "Old-Prisma proof requires the migration-only revision/client; use verify-geode-documents.ts for the integration client")
   const url = new URL(process.env.DATABASE_URL ?? "")
   assert(process.env.E2E_ISOLATED_DATABASE === "1" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) && url.pathname === "/compass_e2e", "Only disposable local compass_e2e is allowed")
   assert(!process.env.VERCEL_ENV && process.env.NODE_ENV !== "production" && process.env.PREVIEW_AUTOMATION_ENABLED !== "1", "Cloud/production execution refused")
@@ -37,7 +41,7 @@ async function main() {
       const workspace = await db.workspace.create({ data: { organizationId: org.id, slug: "legacy-docs", name: "Synthetic legacy docs" } })
       const initial = "\uFEFF legacy 日本語\r\n  whitespace preserved\n"
       const doc = await db.doc.create({ data: { workspaceId: workspace.id, title: "Before migration", content: initial, metadata: { synthetic: true } } })
-      assert(!("storageProvider" in doc), "Proof must use the old production Prisma model")
+      assert(!Object.hasOwn(doc, "storageProvider"), "Proof must use the old production Prisma model")
       await maybeSnapshotDocVersion(doc.id, { authorName: "Synthetic proof", label: "Before migration" })
       const originalVersion = await db.docVersion.findFirstOrThrow({ where: { docId: doc.id } })
       await db.doc.update({ where: { id: doc.id }, data: { content: "Before migration edit", updatedAt: new Date() } })

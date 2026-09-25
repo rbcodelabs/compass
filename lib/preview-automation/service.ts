@@ -6,10 +6,19 @@ import { applyPreviewScenario, DEFAULT_PREVIEW_SCENARIO } from "./scenarios";
 import { getActiveSchema } from "@/lib/schema";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
+import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
+import { getManagedPilotContext } from "./managed-context";
+
+function managedGrant(grant: PreviewGrant) {
+  const context = getManagedPilotContext();
+  if (context && (grant.runId !== context.runId || grant.deploymentId !== context.deploymentId)) throw new Error("Managed pilot grant mismatch");
+  return context;
+}
 
 export { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "./cookies";
 /** Revoke first. Retain the registry tombstone so failures can safely retry exact ownership. */
 export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, deploymentId: string) {
+  if (getManagedPilotContext()) throw new Error("Managed pilot data requires explicit cleanup review");
   const result = { runId, cleaned: true };
   const run = await prisma.previewAutomationRun.findUnique({ where: { id: runId } });
   if (!run) return result;
@@ -19,6 +28,9 @@ export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, 
   const userIds = [run.ownerUserId, run.viewerUserId];
   await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.previewAutomationSession.deleteMany({ where: { runId } });
+  // Revoke access first; preserve both workspaces if either has pilot evidence.
+  await assertDocumentPilotCleanupReviewed(prisma, run.workspaceId);
+  await assertDocumentPilotCleanupReviewed(prisma, run.isolatedWorkspaceId);
   for (const workspaceId of [run.workspaceId, run.isolatedWorkspaceId]) {
     const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId } });
     if (!workspace) continue;
@@ -57,22 +69,30 @@ export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, 
 }
 
 export async function teardownPreviewRun(prisma: AppPrismaClient, grant: PreviewGrant) {
+  const managed = managedGrant(grant);
   await prisma.$transaction(async (tx) => {
     await consume(tx, grant);
     const run = await tx.previewAutomationRun.findUnique({ where: { id: grant.runId } });
     if (run && run.deploymentId !== grant.deploymentId) throw new Error("Preview run deployment mismatch");
-    if (run) await tx.previewAutomationRun.update({ where: { id: run.id }, data: { revokedAt: run.revokedAt ?? new Date() } });
+    if (run) {
+      await tx.previewAutomationRun.update({ where: { id: run.id }, data: { revokedAt: run.revokedAt ?? new Date() } });
+      if (managed) {
+        await tx.session.deleteMany({ where: { userId: { in: [run.ownerUserId, run.viewerUserId] } } });
+        await tx.previewAutomationSession.deleteMany({ where: { runId: run.id } });
+      }
+    }
     else {
       // Cancellation may arrive before bootstrap commits. This same-PK tombstone
       // prevents a delayed bootstrap from creating a live run after teardown succeeds.
       const now = new Date();
       await tx.previewAutomationRun.create({ data: {
-        id: grant.runId, deploymentId: grant.deploymentId, orgId: randomUUID(), workspaceId: randomUUID(),
+        id: grant.runId, deploymentId: grant.deploymentId, orgId: randomUUID(), workspaceId: managed?.workspaceId ?? randomUUID(),
         isolatedWorkspaceId: randomUUID(), ownerUserId: randomUUID(), viewerUserId: randomUUID(),
         expiresAt: now, revokedAt: now, cleanedAt: now,
       } });
     }
   });
+  if (managed) return { runId: grant.runId, revoked: true, retained: true };
   return cleanupPreviewRun(prisma, grant.runId, grant.deploymentId);
 }
 
@@ -80,6 +100,8 @@ async function consume(tx: AppTransactionClient, grant: PreviewGrant) {
   await tx.previewAutomationNonce.create({ data: { nonce: grant.nonce, runId: grant.runId, expiresAt: new Date(grant.exp * 1000) } });
 }
 function requireActive(run: PreviewAutomationRun | null, deploymentId: string, now: Date): asserts run is PreviewAutomationRun {
+  const managed = getManagedPilotContext();
+  if (managed && (run?.id !== managed.runId || run.workspaceId !== managed.workspaceId)) throw new Error("Managed pilot run mismatch");
   if (!run || run.deploymentId !== deploymentId || run.revokedAt || run.expiresAt <= now) throw new Error("Preview run unavailable");
 }
 function describeRun(run: PreviewAutomationRun) {
@@ -88,12 +110,17 @@ function describeRun(run: PreviewAutomationRun) {
 
 /** Nonce + registry + all fixtures commit together; a lost response can retry with a fresh grant. */
 export async function bootstrapPreviewRun(prisma: AppPrismaClient, grant: PreviewGrant, now = new Date()) {
+  const managed = managedGrant(grant);
+  if (managed) {
+    const { assertManagedPilotDeploymentReady } = await import("./managed-database");
+    await assertManagedPilotDeploymentReady(managed);
+  }
   return prisma.$transaction(async (tx) => {
     await consume(tx, grant);
     const existing = await tx.previewAutomationRun.findUnique({ where: { id: grant.runId } });
     if (existing) { requireActive(existing, grant.deploymentId, now); return describeRun(existing); }
     const run = await tx.previewAutomationRun.create({ data: {
-      id: grant.runId, deploymentId: grant.deploymentId, orgId: randomUUID(), workspaceId: randomUUID(),
+      id: grant.runId, deploymentId: grant.deploymentId, orgId: randomUUID(), workspaceId: managed?.workspaceId ?? randomUUID(),
       isolatedWorkspaceId: randomUUID(), ownerUserId: randomUUID(), viewerUserId: randomUUID(),
       expiresAt: new Date(now.getTime() + 3600000), createdAt: now,
     } });
@@ -128,6 +155,7 @@ export async function bootstrapPreviewRun(prisma: AppPrismaClient, grant: Previe
 }
 
 export async function issuePreviewSession(prisma: AppPrismaClient, grant: PreviewGrant, now = new Date()) {
+  managedGrant(grant);
   return prisma.$transaction(async (tx) => {
     await consume(tx, grant);
     const run = await tx.previewAutomationRun.findUnique({ where: { id: grant.runId } });

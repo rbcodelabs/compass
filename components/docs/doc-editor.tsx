@@ -28,7 +28,9 @@ import {
   resolveDocComment,
   deleteDocComment,
   getDocLinkedTasks,
+  restoreDocVersion,
 } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+import { createDocumentSaveQueue } from "@/lib/document-save-queue";
 import { DocProperties, type DocMetadata } from "@/components/docs/doc-properties";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
@@ -57,6 +59,7 @@ interface DocEditorProps {
     title: string;
     content: string | null;
     icon: string | null;
+    revision?: string | null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     metadata: any;
   };
@@ -74,7 +77,11 @@ interface DocEditorProps {
   decisionAction?: React.ReactNode;
 }
 
-type SaveStatus = "idle" | "saving" | "saved";
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+type SaveChange =
+  | { kind: "update"; data: { title?: string; content?: string; icon?: string; metadata?: DocMetadata } }
+  | { kind: "snapshot"; label?: string }
+  | { kind: "restore"; versionId: string; onDone: (result: Awaited<ReturnType<typeof restoreDocVersion>>) => void };
 
 interface PendingAnchor {
   anchorText: string;
@@ -114,6 +121,10 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [restoredMetadata, setRestoredMetadata] = useState<DocMetadata | null | undefined>(undefined);
+  const [propertiesVersion, setPropertiesVersion] = useState(0);
   const [currentContent, setCurrentContent] = useState(doc.content);
   const [activeDocPanel, setActiveDocPanel] = useState<"comments" | "history" | null>(null);
   const [showSaveVersionInput, setShowSaveVersionInput] = useState(false);
@@ -139,23 +150,59 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const [selectionEmpty, setSelectionEmpty] = useState(true);
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingContent = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const saveQueue = useMemo(() => createDocumentSaveQueue<SaveChange>({
+    revision: doc.revision,
+    execute: async (change, token) => {
+      if (change.kind === "snapshot") {
+        await createDocVersion(doc.id, change.label, revalidatePathStr, token);
+        return {};
+      }
+      if (change.kind === "restore") {
+        setIsRestoring(true);
+        try {
+          const restored = await restoreDocVersion(change.versionId, revalidatePathStr, token);
+          change.onDone(restored);
+          return restored;
+        } finally { setIsRestoring(false); }
+      }
+      return updateDoc(doc.id, change.data, revalidatePathStr, token);
+    },
+    onState: (state) => {
+      setSaveStatus(state === "saved" && pendingContent.current !== null ? "saving" : state);
+      setSaveError(state === "error" ? "Changes could not be saved. Your draft is still here. Retry; if another editor changed this page, copy your draft before reloading." : null);
+    },
+  // A server revalidation must not replace the queue's revision or unsaved draft.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [doc.id, revalidatePathStr]);
+
+  const flushContent = useCallback(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = null;
+    if (pendingContent.current === null) return;
+    const content = pendingContent.current;
+    pendingContent.current = null;
+    void saveQueue.enqueue({ kind: "update", data: { content } }).catch(() => {});
+  }, [saveQueue]);
+
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (pendingContent.current !== null || saveQueue.pending()) { event.preventDefault(); event.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => { window.removeEventListener("beforeunload", warn); flushContent(); };
+  }, [saveQueue, flushContent]);
 
   const debouncedSaveContent = useCallback(
     (content: string) => {
+      pendingContent.current = content;
+      setSaveStatus("saving");
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      debounceTimer.current = setTimeout(async () => {
-        setSaveStatus("saving");
-        try {
-          await updateDoc(doc.id, { content }, revalidatePathStr);
-          setSaveStatus("saved");
-          setTimeout(() => setSaveStatus("idle"), 2000);
-        } catch {
-          setSaveStatus("idle");
-        }
-      }, 1200);
+      debounceTimer.current = setTimeout(flushContent, 1200);
     },
-    [doc.id, revalidatePathStr]
+    [flushContent]
   );
 
   // The extension is created once; its initial comment set is the open,
@@ -184,6 +231,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       handleDrop: () => false,
     },
   });
+
+  useEffect(() => { editor?.setEditable(!isRestoring, false); }, [editor, isRestoring]);
 
   // Keep the highlight decorations in sync with the live comment set + focus.
   const openAnchorData = useMemo(() => toAnchorData(comments), [comments]);
@@ -242,20 +291,13 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
   async function handleSaveTitle() {
     if (title === doc.title) return;
-    setSaveStatus("saving");
-    try {
-      await updateDoc(doc.id, { title }, revalidatePathStr);
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 2000);
-    } catch {
-      setSaveStatus("idle");
-    }
+    await saveQueue.enqueue({ kind: "update", data: { title } }).catch(() => {});
   }
 
   async function handleSaveIcon(value: string) {
     setIcon(value);
     setShowIconInput(false);
-    await updateDoc(doc.id, { icon: value }, revalidatePathStr);
+    await saveQueue.enqueue({ kind: "update", data: { icon: value } }).catch(() => {});
   }
 
   function handleImageButtonClick() {
@@ -272,15 +314,18 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   async function handleSaveVersion(label: string) {
     setIsSavingVersion(true);
     try {
-      await createDocVersion(doc.id, label || undefined, revalidatePathStr);
+      flushContent();
+      await saveQueue.enqueue({ kind: "snapshot", label: label || undefined });
       setShowSaveVersionInput(false);
+    } catch {
+      // The queue retains the exact failed operation for the Retry button.
     } finally {
       setIsSavingVersion(false);
     }
   }
 
   function handleRestored(content: string | null, restoredTitle: string) {
-    editor?.commands.setContent(content ?? "");
+    editor?.commands.setContent(content ?? "", { emitUpdate: false });
     setCurrentContent(content);
     setTitle(restoredTitle);
   }
@@ -359,9 +404,10 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     <div className="flex h-full min-h-0 min-w-0">
       <div data-slot="doc-editor-column" className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Save indicator */}
-      <div className="flex justify-end px-8 pt-3 h-7">
+      <div className="flex justify-end px-8 pt-3 min-h-7">
         {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
         {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
+        {saveError && <span role="alert" className="text-xs text-status-danger">{saveError} <button type="button" className="underline" onClick={() => { void saveQueue.retry(); }}>Retry save</button></span>}
       </div>
 
       {/* Icon + title on a single row */}
@@ -369,6 +415,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         {/* Icon picker */}
         <div className="relative shrink-0">
           <button
+            disabled={isRestoring}
             onClick={() => setShowIconInput((v) => !v)}
             className="text-2xl leading-none hover:opacity-70 transition-opacity"
             title="Set icon"
@@ -395,6 +442,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
         {/* Title */}
         <input
+          disabled={isRestoring}
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -583,8 +631,11 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       <div className="flex-1 px-8 py-4 overflow-y-auto">
         {/* Properties — scrolls with the content instead of pinning the viewport */}
         <DocProperties
+          key={propertiesVersion}
+          disabled={isRestoring}
+          onSave={(metadata) => saveQueue.enqueue({ kind: "update", data: { metadata } })}
           docId={doc.id}
-          initialMetadata={(doc.metadata as DocMetadata | null) ?? null}
+          initialMetadata={restoredMetadata === undefined ? (doc.metadata as DocMetadata | null) ?? null : restoredMetadata}
           revalidatePathStr={revalidatePathStr}
         />
 
@@ -631,6 +682,18 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
       </div>
       <DocVersionHistoryPanel
+        restore={async (versionId, content) => {
+          if (pendingContent.current !== null || saveQueue.pending()) throw new Error("Save your current changes before restoring.");
+          let restoredTitle = title;
+          await saveQueue.enqueue({ kind: "restore", versionId, onDone: (result) => {
+            restoredTitle = result.title;
+            handleRestored(content, result.title);
+            setIcon(result.icon ?? "");
+            setRestoredMetadata(result.metadata as DocMetadata | null);
+            setPropertiesVersion(value => value + 1);
+          } });
+          return { title: restoredTitle };
+        }}
         open={activeDocPanel === "history"}
         onOpenChange={(open) => setActiveDocPanel((current) => open ? "history" : current === "history" ? null : current)}
         initialPin={initialHistoryPin}

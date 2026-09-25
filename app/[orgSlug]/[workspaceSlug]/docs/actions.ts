@@ -1,10 +1,13 @@
 "use server";
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { randomUUID } from "node:crypto";
 import getPrisma from "@/lib/db";
 import { createPositioningBriefCore } from "@/lib/positioning-brief";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
-import { maybeSnapshotDocVersion, restoreDocVersionCore } from "@/lib/doc-versions";
+import { Prisma } from "@prisma/client";
+import { createDocument, updateDocument, snapshotDocument, restoreDocument, deleteDocument, hydrateDocument } from "@/lib/document-service";
 import {
   createDocCommentCore,
   listDocCommentsCore,
@@ -37,6 +40,28 @@ async function requireWorkspaceMember(workspaceId: string) {
   });
   if (!workspace) throw new Error("Workspace not found or access denied");
   return session.user;
+}
+
+type Mutation = { expectedRevision?: string; operationId?: string };
+function mutationToken(value: Mutation): Mutation {
+  return { expectedRevision: typeof value.expectedRevision === "string" ? value.expectedRevision : undefined, operationId: typeof value.operationId === "string" ? value.operationId : undefined };
+}
+
+async function requireDocumentMember(docId: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const doc = await getPrisma().doc.findUnique({ where: { id: docId }, select: { workspaceId: true } });
+  if (!doc) throw new Error("Document not found");
+  const user = await requireWorkspaceMember(doc.workspaceId);
+  return { user, workspaceId: doc.workspaceId };
+}
+
+async function requireCommentMember(commentId: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const comment = await getPrisma().docComment.findUnique({ where: { id: commentId }, select: { docId: true } });
+  if (!comment) throw new Error("Comment not found");
+  return requireDocumentMember(comment.docId);
 }
 
 export async function createArtifact(workspaceId: string, formData: FormData, revalidatePathStr: string) {
@@ -127,42 +152,46 @@ export async function unlinkArtifactDecision(workspaceId: string, artifactId: st
 export async function createDoc(
   workspaceId: string,
   parentId: string | null,
-  revalidatePathStr: string
+  revalidatePathStr: string,
+  mutation: Mutation = {}
 ) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-  const prisma = getPrisma();
-  const doc = await prisma.doc.create({
-    data: { workspaceId, parentId, title: "Untitled" },
-  });
+  const user = await requireWorkspaceMember(workspaceId);
+  const doc = await createDocument({ workspaceId, parentId, title: "Untitled" }, { ...mutationToken(mutation), authorId: user.id, authorName: user.name ?? user.email ?? "Unknown" });
   revalidatePath(revalidatePathStr);
-  return doc;
+  return { id: doc.id, title: doc.title, revision: doc.revision };
+}
+
+/**
+ * Empty-state "Create your first page". Pilot (Geode) workspaces require an
+ * operation ID for every create; a fresh one per submission is correct here
+ * because each click is a new create, not a transport retry.
+ */
+export async function createFirstDoc(orgSlug: string, workspaceSlug: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Workspace access denied");
+  const workspace = await getPrisma().workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } },
+    select: { id: true },
+  });
+  if (!workspace) throw new Error("Workspace access denied");
+  const basePath = `/${orgSlug}/${workspaceSlug}/docs`;
+  const doc = await createDoc(workspace.id, null, basePath, { operationId: randomUUID() });
+  redirect(`${basePath}/${doc.id}`);
 }
 
 export async function updateDoc(
   docId: string,
-  data: { title?: string; content?: string; icon?: string },
-  revalidatePathStr: string
+  data: { title?: string; content?: string; icon?: string; metadata?: Record<string, unknown> },
+  revalidatePathStr: string,
+  mutation: Mutation = {}
 ) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-  const prisma = getPrisma();
-
-  // Snapshot the doc's pre-change state before applying the new values —
-  // but only when this call actually changes something (title/content/icon
-  // present), so a no-op call never creates a version.
-  if (data.title !== undefined || data.content !== undefined || data.icon !== undefined) {
-    await maybeSnapshotDocVersion(docId, {
-      authorId: session.user.id,
-      authorName: session.user.name ?? session.user.email ?? "Unknown",
-    });
-  }
-
-  await prisma.doc.update({
-    where: { id: docId },
-    data: { ...data, updatedAt: new Date() },
-  });
+  const { user } = await requireDocumentMember(docId);
+  const { metadata, title, content, icon } = data;
+  if ([title, content, icon].some(value => value !== undefined && typeof value !== "string") || (metadata !== undefined && (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)))) throw new Error("Invalid document change");
+  const change = { ...(title === undefined ? {} : { title }), ...(content === undefined ? {} : { content }), ...(icon === undefined ? {} : { icon }), ...(metadata === undefined ? {} : { metadata: metadata as Prisma.InputJsonValue }) };
+  const doc = await updateDocument(docId, change, { ...mutationToken(mutation), authorId: user.id, authorName: user.name ?? user.email ?? "Unknown" });
   revalidatePath(revalidatePathStr);
+  return { id: doc.id, revision: doc.revision };
 }
 
 /**
@@ -172,14 +201,14 @@ export async function updateDoc(
 export async function createDocVersion(
   docId: string,
   label: string | undefined,
-  revalidatePathStr: string
+  revalidatePathStr: string,
+  mutation: Mutation = {}
 ) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-
-  await maybeSnapshotDocVersion(docId, {
-    authorId: session.user.id,
-    authorName: session.user.name ?? session.user.email ?? "Unknown",
+  const { user } = await requireDocumentMember(docId);
+  await snapshotDocument(docId, {
+    ...mutationToken(mutation),
+    authorId: user.id,
+    authorName: user.name ?? user.email ?? "Unknown",
     label: label?.trim() || "Snapshot",
   });
   revalidatePath(revalidatePathStr);
@@ -188,17 +217,10 @@ export async function createDocVersion(
 export async function updateDocMetadata(
   docId: string,
   metadata: Record<string, unknown>,
-  revalidatePathStr: string
+  revalidatePathStr: string,
+  mutation: Mutation = {}
 ) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-  const prisma = getPrisma();
-  await prisma.doc.update({
-    where: { id: docId },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    data: { metadata: metadata as any, updatedAt: new Date() },
-  });
-  revalidatePath(revalidatePathStr);
+  return updateDoc(docId, { metadata }, revalidatePathStr, mutation);
 }
 
 /**
@@ -211,8 +233,7 @@ export async function createPositioningBrief(
   workspaceId: string,
   revalidatePathStr: string
 ): Promise<{ docId: string }> {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
+  await requireWorkspaceMember(workspaceId);
 
   const result = await createPositioningBriefCore(roadmapItemId, workspaceId);
   if (!result.ok) {
@@ -239,10 +260,10 @@ export async function getDocVersionContent(versionId: string) {
   const prisma = getPrisma();
   const version = await prisma.docVersion.findUnique({
     where: { id: versionId },
-    select: { id: true, title: true, content: true, createdAt: true, label: true, createdByName: true },
   });
   if (!version) throw new Error("Version not found");
-  return version;
+  const { workspaceId } = await requireDocumentMember(version.docId);
+  return hydrateDocument(workspaceId, version);
 }
 
 /**
@@ -250,18 +271,22 @@ export async function getDocVersionContent(versionId: string) {
  * current state is snapshotted first (label "Before restore") so nothing is
  * ever lost by restoring.
  */
-export async function restoreDocVersion(versionId: string, revalidatePathStr: string) {
+export async function restoreDocVersion(versionId: string, revalidatePathStr: string, mutation: Mutation = {}) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
-  const restored = await restoreDocVersionCore(versionId, {
-    authorId: session.user.id,
-    authorName: session.user.name ?? session.user.email ?? "Unknown",
+  const version = await getPrisma().docVersion.findUnique({ where: { id: versionId } });
+  if (!version) throw new Error("Version not found");
+  const { user } = await requireDocumentMember(version.docId);
+  const restored = await restoreDocument(versionId, {
+    ...mutationToken(mutation),
+    authorId: user.id,
+    authorName: user.name ?? user.email ?? "Unknown",
   });
   if (!restored) throw new Error("Version not found");
 
   revalidatePath(revalidatePathStr);
-  return restored;
+  return { ...restored, icon: version.icon, metadata: version.metadata };
 }
 
 /**
@@ -283,16 +308,13 @@ export async function getDocLinkedTasks(workspaceId: string, docId: string) {
   return fetchLinkedTasksBundle(workspaceId, "DOC", docId);
 }
 
-export async function deleteDoc(docId: string, revalidatePathStr: string) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-  const prisma = getPrisma();
-  // DSQL has no FK cascade (relationMode = "prisma" emulates referential
-  // integrity client-side under NoAction) — delete dependent rows first or
-  // the doc.delete below throws on orphaned children.
-  await prisma.docVersion.deleteMany({ where: { docId } });
-  await prisma.docComment.deleteMany({ where: { docId } });
-  await prisma.doc.delete({ where: { id: docId } });
+export async function deleteDoc(docId: string, revalidatePathStr: string, mutation: Mutation & { workspaceId?: string } = {}) {
+  const authorized = mutation.workspaceId ? { user: await requireWorkspaceMember(mutation.workspaceId), workspaceId: mutation.workspaceId } : await requireDocumentMember(docId);
+  if (mutation.workspaceId) {
+    const doc = await getPrisma().doc.findUnique({ where: { id: docId }, select: { workspaceId: true } });
+    if (doc && doc.workspaceId !== authorized.workspaceId) throw new Error("Document not found");
+  }
+  await deleteDocument(docId, { ...mutationToken(mutation), workspaceId: authorized.workspaceId, authorId: authorized.user.id, authorName: authorized.user.name ?? authorized.user.email ?? "Unknown" });
   revalidatePath(revalidatePathStr);
 }
 
@@ -313,13 +335,11 @@ export async function addDocComment(
   },
   revalidatePathStr: string
 ) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-
+  const { user } = await requireDocumentMember(input.docId);
   const result = await createDocCommentCore({
     ...input,
-    authorId: session.user.id,
-    authorName: session.user.name ?? session.user.email ?? "Unknown",
+    authorId: user.id,
+    authorName: user.name ?? user.email ?? "Unknown",
     authorType: "HUMAN",
     source: "UI",
   });
@@ -330,8 +350,7 @@ export async function addDocComment(
 }
 
 export async function listDocComments(docId: string) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
+  await requireDocumentMember(docId);
   return listDocCommentsCore(docId);
 }
 
@@ -340,9 +359,7 @@ export async function resolveDocComment(
   resolved: boolean,
   revalidatePathStr: string
 ) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-
+  await requireCommentMember(commentId);
   const updated = await setDocCommentStatusCore(commentId, resolved ? "RESOLVED" : "OPEN");
   if (!updated) throw new Error("Comment not found");
 
@@ -351,9 +368,7 @@ export async function resolveDocComment(
 }
 
 export async function deleteDocComment(commentId: string, revalidatePathStr: string) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-
+  await requireCommentMember(commentId);
   const result = await deleteDocCommentCore(commentId);
   if (!result) throw new Error("Comment not found");
 

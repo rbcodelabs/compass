@@ -147,3 +147,7 @@ There is no dedicated UI for briefs yet; they appear in the regular Docs tree li
 ## Page Titles
 
 Click the title area at the top of the editor to rename a page. Titles are saved immediately on blur.
+
+## Preview: Geode content storage
+
+An explicitly configured synthetic preview workspace can store new document bodies through the packaged Geode Headless SDK. Existing documents keep their current storage. The editor reports save conflicts and retains unsaved changes for retry; MCP callers supply a stable operation ID and the revision returned by `get_doc` for pilot changes. This preview does not enable production storage or desktop sync. See the repository's `docs/testing/geode-documents-pilot.md` for configuration and verification.

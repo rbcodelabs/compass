@@ -10,6 +10,8 @@ import { updateDocMetadata } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
 export type DocMetadata = Record<string, unknown>;
 
 interface DocPropertiesProps {
+  disabled?: boolean;
+  onSave?: (metadata: DocMetadata) => Promise<void>;
   docId: string;
   initialMetadata: DocMetadata | null;
   revalidatePathStr: string;
@@ -224,6 +226,8 @@ function PropertyRow({
 // ── main component ────────────────────────────────────────────────────────────
 
 export function DocProperties({
+  disabled,
+  onSave,
   docId,
   initialMetadata,
   revalidatePathStr,
@@ -236,15 +240,17 @@ export function DocProperties({
 
   const persist = useCallback(
     (next: DocMetadata) => {
+      if (onSave) { void onSave(next).catch(() => {}); return; }
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         updateDocMetadata(docId, next, revalidatePathStr).catch(console.error);
       }, 800);
     },
-    [docId, revalidatePathStr]
+    [docId, revalidatePathStr, onSave]
   );
 
   function update(next: DocMetadata) {
+    if (disabled) return;
     setMetadata(next);
     persist(next);
   }
