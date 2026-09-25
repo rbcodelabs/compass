@@ -161,6 +161,13 @@ For a USER override, the workspace list is an advisory disclosure rather than
 an exhaustive account-access inventory: organization-level capabilities do not
 always correspond to an individual workspace row.
 
+Everything in this section is about applications reaching **into** Compass. The
+same settings page also has **Connected MCP servers**, which is the reverse: MCP
+servers the Compass in-app agent calls **out** to on your behalf. See
+[Connected MCP servers](/help/23-connected-mcp-servers). The two lists look alike
+and revoke differently, so check which direction an entry describes before
+revoking it.
+
 Because both the approve and decline buttons stay pinned to the bottom of the
 card, a long list scrolls inside the card rather than pushing the buttons off the
 screen. Scroll the details with the mouse, or with the arrow keys once the detail
