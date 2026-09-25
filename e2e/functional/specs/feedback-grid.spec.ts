@@ -124,7 +124,10 @@ function rowFor(page: Page, title: string) {
 const DEFAULT_COLUMN_ORDER = ["feedback", "type", "votes", "status", "submitted", "action"];
 
 async function columnOrder(page: Page): Promise<string[]> {
-  return page.$$eval("[data-testid^='grid-head-']", (nodes) =>
+  // Header cells carry both `grid-head-<columnId>` and `data-col`. The nested
+  // title span inside every header cell is `grid-head-label` (no `data-col`),
+  // so a bare testid-prefix match would count each column twice.
+  return page.$$eval("[data-testid^='grid-head-'][data-col]", (nodes) =>
     nodes.map((n) => (n.getAttribute("data-testid") ?? "").replace("grid-head-", ""))
   );
 }

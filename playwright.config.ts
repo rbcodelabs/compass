@@ -71,6 +71,11 @@ export default defineConfig({
         WORKSPACE_UPDATES_ENABLED: "1",
         COMPASS_RESEARCH_CAPTURE_ENABLED: "1",
         COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED: "1",
+        // pm-interview.spec.ts provisions a synthetic voice session, which the
+        // default-off browser voice gate answers with 409. CI's capture job
+        // sets this in the job env; set it here too so the full local
+        // functional run exercises the same server. No provider is contacted.
+        COMPASS_RESEARCH_BROWSER_VOICE_ENABLED: "1",
         // tasks-agent-assignment.spec.ts needs agent assignment live: without
         // this, eligibleTaskAssignees() (lib/task-assignment.ts) returns people
         // only, no agent option ever renders, and the spec hangs to timeout.

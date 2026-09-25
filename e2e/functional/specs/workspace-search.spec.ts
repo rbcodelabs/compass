@@ -62,7 +62,11 @@ test.describe("Workspace search", () => {
       await expect(page.getByRole("group", { name: group }).getByRole("option", { name: new RegExp(title) })).toBeVisible()
     }
 
-    await page.getByRole("combobox", { name: "Search workspace" }).fill("FOREIGN search")
-    await expect(page.getByText("No results for “FOREIGN search”")).toBeVisible()
+    // The palette also searches the User Guide (#218), whose articles match
+    // ordinary words like "search", so the empty-state probe needs a term that
+    // exists in neither the workspace nor the guide.
+    const unmatched = `zqxforeign${Date.now()}`
+    await page.getByRole("combobox", { name: "Search workspace" }).fill(unmatched)
+    await expect(page.getByText(`No results for “${unmatched}”`)).toBeVisible()
   })
 })

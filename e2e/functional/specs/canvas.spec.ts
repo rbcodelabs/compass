@@ -32,6 +32,7 @@
  * T0 squad-clustering — none of that ships this phase.
  */
 import { test, expect } from "../fixtures/index";
+import { openFullPage } from "../fixtures/full-page";
 
 test.describe("Canvas", () => {
   test("renders the full OST + Roadmap graph with real edges, and supports pan + zoom", async ({
@@ -123,7 +124,7 @@ test.describe("Canvas", () => {
     await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: oppTitle, exact: true }).click();
-    await page.getByRole("link", { name: "Open full page" }).click();
+    await openFullPage(page);
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
 
@@ -199,7 +200,7 @@ test.describe("Canvas", () => {
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: oppTitle, exact: true }).click();
-    await page.getByRole("link", { name: "Open full page" }).click();
+    await openFullPage(page);
     await page.waitForLoadState("networkidle");
     // Promote-to-roadmap moved into the solution's sidebar panel along with
     // status (see solution-panel.tsx) — open the panel rather than expanding

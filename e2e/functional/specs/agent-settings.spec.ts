@@ -61,7 +61,10 @@ test("register an account agent, grant workspace access, generate and revoke its
       await page.setViewportSize({ width: 1280, height: 800 });
     }
     await page.getByRole("button", { name: `Revoke access to ${name}` }).click();
-    await expect(page.getByRole("button", { name: `Revoke access to ${name}` })).toHaveCount(0);
+    // The row disappears only once the revoke server action returns its
+    // revalidated page. In the dev-mode server that round trip has been
+    // observed at 5.1s (trace: POST wait 5112ms), just past the 5s default.
+    await expect(page.getByRole("button", { name: `Revoke access to ${name}` })).toHaveCount(0, { timeout: 15_000 });
     await page.goto("/settings/agents");
     card = page.locator("section").filter({ has: page.getByRole("heading", { name, exact: true }) });
     await card.getByRole("button", { name: "Revoke Test integration" }).click();
