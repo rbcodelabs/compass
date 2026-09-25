@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const mocks = vi.hoisted(() => ({ init: vi.fn(), apply: vi.fn(), status: vi.fn(), end: vi.fn(), pool: vi.fn() }));
+const mocks = vi.hoisted(() => ({ init: vi.fn(), apply: vi.fn(), status: vi.fn(), end: vi.fn(), pool: vi.fn(), release: vi.fn() }));
 vi.mock("@/lib/preview-automation/managed-database", () => ({ createManagedMigrationPool: mocks.pool }));
 vi.mock("@/lib/preview-automation/managed-migrations", () => ({
-  initializeManagedPilot: mocks.init, applyManagedMigration: mocks.apply, getManagedMigrationStatus: mocks.status,
+  initializeManagedPilot: mocks.init, applyManagedMigration: mocks.apply, getManagedMigrationStatus: mocks.status, releaseManagedClaim: mocks.release,
 }));
 import { GET, POST } from "@/app/api/admin/migrate/route";
 const sha = "a".repeat(40);
@@ -50,5 +50,22 @@ describe("managed migration endpoint", () => {
     vi.stubEnv("VERCEL_ENV", "production");
     expect((await POST(request({ action: "initialize" }))).status).toBe(403);
     expect(mocks.pool).not.toHaveBeenCalled();
+  });
+});
+
+describe("managed claim release endpoint", () => {
+  const claim = "33333333-3333-4333-8333-333333333333";
+  it("accepts only the exact release shape", async () => {
+    mocks.release.mockResolvedValue(Response.json({ released: true }));
+    expect((await POST(request({ action: "release-claim", claim, script: "047_research_voice_control_plane" }))).status).toBe(200);
+    expect(mocks.release).toHaveBeenCalledWith(expect.anything(), expect.anything(), claim, "047_research_voice_control_plane");
+  });
+  it("rejects extra keys, bad claim ids and bad names", async () => {
+    for (const body of [
+      { action: "release-claim", claim, script: "047_research_voice_control_plane", force: true },
+      { action: "release-claim", claim: "not-a-uuid", script: "047_research_voice_control_plane" },
+      { action: "release-claim", claim, script: "DROP TABLE x" },
+    ]) expect((await POST(request(body))).status).toBe(400);
+    expect(mocks.release).not.toHaveBeenCalled();
   });
 });

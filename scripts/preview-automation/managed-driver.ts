@@ -27,6 +27,27 @@ export async function runManagedMigration(target: Target, operation: string, sec
     response = await fetcher(url, { method: "POST", headers, redirect: "error", signal: AbortSignal.timeout(MIGRATION_POST_TIMEOUT_MS),
       body: JSON.stringify(operation === "initialize" ? { action: "initialize" } : { script: operation }) });
   } catch { throw new Error("Migration POST outcome unknown; inspect status before any further action. No retry attempted"); }
-  if (!response.ok) throw new Error(`Migration refused (${response.status}); inspect status before recovery`);
+  if (!response.ok) throw new Error(`Migration refused (${response.status}); inspect status before recovery.${await failureDetail(response)}`);
   return { httpStatus: response.status, result: await response.json(), status: await status() };
+}
+
+/** Server error text and the last runner log lines; never headers or credentials. */
+async function failureDetail(response: Response) {
+  const body = await response.json().catch(() => null) as { error?: unknown; log?: unknown } | null;
+  if (!body) return "";
+  const error = typeof body.error === "string" ? ` Error: ${body.error.slice(0, 500)}` : "";
+  const log = typeof body.log === "string" ? ` Log tail: ${body.log.split("\n").slice(-15).join(" | ").slice(0, 2000)}` : "";
+  return error + log;
+}
+
+/** Reviewed recovery: release a retained claim only when status shows that exact claim on that exact migration. */
+export async function releaseManagedClaim(target: Target, script: string, claim: string, secret: string, bypass: string, fetcher: typeof fetch = fetch) {
+  const before = await runManagedMigration(target, "status", secret, bypass, fetcher);
+  const owner = before.status.managed.owner;
+  if (owner?.claimed_by !== claim || owner?.claim_script !== script || before.status.pending[0] !== script) throw new Error("Status does not show that exact claim on the first pending migration; nothing released");
+  const headers = { "x-migration-secret": secret, "x-vercel-protection-bypass": bypass, "x-preview-deployment-id": target.deploymentId, "content-type": "application/json" };
+  const response = await fetcher(`${target.origin}/api/admin/migrate`, { method: "POST", headers, redirect: "error", signal: AbortSignal.timeout(55_000), body: JSON.stringify({ action: "release-claim", claim, script }) });
+  if (!response.ok) throw new Error(`Claim release refused (${response.status}).${await failureDetail(response)}`);
+  const after = await runManagedMigration(target, "status", secret, bypass, fetcher);
+  return { httpStatus: response.status, result: await response.json(), status: after.status };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { runManagedMigration } from "../scripts/preview-automation/managed-driver";
+import { runManagedMigration, releaseManagedClaim } from "../scripts/preview-automation/managed-driver";
 const target = { deploymentId: "dpl_Test", origin: "https://immutable.vercel.app", sha: "a".repeat(40), schema: "compass_pr_276_aaaaaaaaaaaa", pr: 276 };
 describe("manual managed migration driver", () => {
   it("refuses another PR before sending migration credentials", async () => {
@@ -48,5 +48,30 @@ describe("managed migration time budget", () => {
     await runManagedMigration(target, "047_research_voice_control_plane", "secret", "bypass", fetcher);
     expect(spy.mock.calls.map(c => c[0])).toContain(MIGRATION_POST_TIMEOUT_MS);
     spy.mockRestore();
+  });
+});
+
+describe("managed controller diagnostics and recovery", () => {
+  const claim = "33333333-3333-4333-8333-333333333333";
+  it("surfaces the server error and log tail on a refused migration", async () => {
+    const status = { schema: target.schema, pending: ["047_research_voice_control_plane"], managed: { owner: { claimed_by: null } } };
+    const fetcher = vi.fn().mockImplementation(async (_url, init) => init.method === "POST"
+      ? Response.json({ error: "Query read timeout", log: "line1\n  ✗ Error: Query read timeout" }, { status: 500 })
+      : Response.json(status));
+    await expect(runManagedMigration(target, "047_research_voice_control_plane", "secret", "bypass", fetcher)).rejects.toThrow(/500[\s\S]*Query read timeout/);
+  });
+  it("releases only a claim status shows on that exact migration", async () => {
+    const held = { schema: target.schema, pending: ["047_research_voice_control_plane"], managed: { owner: { claimed_by: claim, claim_script: "047_research_voice_control_plane" } } };
+    const fetcher = vi.fn().mockImplementation(async (_url, init) => init.method === "POST" ? Response.json({ released: true }) : Response.json(held));
+    const result = await releaseManagedClaim(target, "047_research_voice_control_plane", claim, "secret", "bypass", fetcher);
+    expect(fetcher.mock.calls.map(c => c[1].method)).toEqual(["GET", "POST", "GET"]);
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({ action: "release-claim", claim, script: "047_research_voice_control_plane" });
+    expect(result.httpStatus).toBe(200);
+  });
+  it("does not post a release when status shows a different claim", async () => {
+    const held = { schema: target.schema, pending: ["047_research_voice_control_plane"], managed: { owner: { claimed_by: "other", claim_script: "047_research_voice_control_plane" } } };
+    const fetcher = vi.fn().mockResolvedValue(Response.json(held));
+    await expect(releaseManagedClaim(target, "047_research_voice_control_plane", claim, "secret", "bypass", fetcher)).rejects.toThrow(/claim/i);
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });

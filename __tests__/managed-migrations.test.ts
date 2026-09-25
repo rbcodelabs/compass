@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Pool } from "pg";
-import { initializeManagedPilot, getManagedMigrationStatus, applyManagedMigration } from "@/lib/preview-automation/managed-migrations";
+import { initializeManagedPilot, getManagedMigrationStatus, applyManagedMigration, releaseManagedClaim } from "@/lib/preview-automation/managed-migrations";
 const m = vi.hoisted(() => ({ query: vi.fn(), release: vi.fn(), status: vi.fn(), apply: vi.fn() }));
 vi.mock("@/lib/migrations/runner", () => ({
   assertManagedMigrationManifest: () => {},
@@ -62,5 +62,34 @@ describe("managed migration ownership", () => {
   it("refuses readiness on an uncertain claim even with empty pending", async () => {
     m.query.mockResolvedValueOnce({ rows: [{ ...owner, claimed_by: "claim" }] }).mockResolvedValueOnce({ rows: [] });
     expect((await (await getManagedMigrationStatus(pool, context)).json()).managed.ready).toBe(false);
+  });
+});
+
+describe("reviewed managed claim release", () => {
+  const claim = "33333333-3333-4333-8333-333333333333";
+  const claimed = { ...owner, claimed_by: claim, claim_script: "001_init" };
+  it("releases only the exact stale claim on the first pending migration", async () => {
+    m.query.mockResolvedValueOnce({ rows: [claimed] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    const result = await releaseManagedClaim(pool, context, claim, "001_init");
+    expect(result.status).toBe(200);
+    const [sql, params] = m.query.mock.calls[2];
+    expect(sql).toMatch(/UPDATE[\s\S]*_managed_pilot_owner[\s\S]*claimed_by=NULL/);
+    expect(sql).toMatch(/claimed_at < CURRENT_TIMESTAMP - INTERVAL '6 minutes'/);
+    expect(params).toEqual([claim, "001_init"]);
+    expect(m.apply).not.toHaveBeenCalled();
+  });
+  it("refuses a different claim id without writing", async () => {
+    m.query.mockResolvedValueOnce({ rows: [{ ...claimed, claimed_by: "44444444-4444-4444-8444-444444444444" }] });
+    await expect(releaseManagedClaim(pool, context, claim, "001_init")).rejects.toThrow(/claim/i);
+    expect(m.query.mock.calls.some(([sql]) => /UPDATE/.test(sql))).toBe(false);
+  });
+  it("refuses a claim that is not on the first pending migration", async () => {
+    m.query.mockResolvedValueOnce({ rows: [{ ...claimed, claim_script: "002_custom_fields" }] }).mockResolvedValueOnce({ rows: [] });
+    await expect(releaseManagedClaim(pool, context, claim, "002_custom_fields")).rejects.toThrow(/first pending/i);
+    expect(m.query.mock.calls.some(([sql]) => /UPDATE/.test(sql))).toBe(false);
+  });
+  it("refuses a claim that could still belong to a running request", async () => {
+    m.query.mockResolvedValueOnce({ rows: [claimed] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    await expect(releaseManagedClaim(pool, context, claim, "001_init")).rejects.toThrow(/recent|not released/i);
   });
 });

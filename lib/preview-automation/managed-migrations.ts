@@ -104,3 +104,25 @@ export async function applyManagedMigration(pool: Pool, context: ManagedPilotCon
     return result;
   } finally { client.release(); }
 }
+
+/**
+ * Reviewed recovery for a claim a failed or killed request retained. Only the
+ * exact claim id on the current first pending migration is released, and only
+ * once it is older than any request could run (route maxDuration is 300s), so a
+ * still-running request can never lose its claim. The runner decides on the
+ * next explicit POST whether partial work is admissible.
+ */
+export async function releaseManagedClaim(pool: Pool, context: ManagedPilotContext, claim: string, script: string): Promise<Response> {
+  assertManagedMigrationManifest(context.schema);
+  const client = await pool.connect();
+  try {
+    const owner = await requireOwner(client, context);
+    if (!owner.claimed_by || owner.claimed_by !== claim || owner.claim_script !== script) throw new Error("Managed claim does not match the requested claim");
+    const applied = await client.query<{ migration_name: string }>(`SELECT migration_name FROM "${context.schema}"._prisma_migrations WHERE finished_at IS NOT NULL`);
+    const first = partitionPendingMigrations(context.schema, new Set(applied.rows.map(row => row.migration_name))).pending[0];
+    if (first?.name !== script) throw new Error("Only a claim on the first pending migration may be released");
+    const released = await client.query(`UPDATE ${table(context)} SET claimed_by=NULL, claim_script=NULL, claimed_at=NULL WHERE id=1 AND claimed_by=$1 AND claim_script=$2 AND claimed_at < CURRENT_TIMESTAMP - INTERVAL '6 minutes'`, [claim, script]);
+    if (released.rowCount !== 1) throw new Error("Managed claim not released: it is too recent or changed");
+    return Response.json({ schema: context.schema, released: true, claim, script });
+  } finally { client.release(); }
+}
