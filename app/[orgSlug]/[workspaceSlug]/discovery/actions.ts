@@ -3,7 +3,8 @@
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
-import { requireProductEntity, requireProductWorkspace } from "@/lib/product-action-auth";
+import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
+import { OpportunityCreateError, createOpportunityWithLinks, type NewOpportunityInput } from "@/lib/opportunity-create";
 import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
 import { Prisma } from "@prisma/client";
 import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat";
@@ -22,35 +23,108 @@ import type {
   EvidenceConfidence,
   CommentType,
   PlanStatus,
+  SquadData,
 } from "@/lib/types";
 
 // Types live in @/lib/types — import from there directly.
 
-export async function createOpportunity(
-  workspaceId: string,
-  data: {
-    title: string;
-    description?: string;
-    customerSegment?: string;
-    status?: OpportunityStatus;
-    squadId?: string | null;
-  }
-) {
+/**
+ * Creates an opportunity, optionally with its Key Result and the feedback
+ * items that seeded it, in one transaction (see lib/opportunity-create.ts).
+ * Throws on invalid input or a link outside the workspace.
+ */
+export async function createOpportunity(workspaceId: string, data: NewOpportunityInput) {
   await requireProductWorkspace(workspaceId);
-  const prisma = getPrisma();
-  if (data.squadId && !await prisma.squad.findFirst({ where: { id: data.squadId, workspaceId }, select: { id: true } })) throw new Error("Squad not found in workspace");
-  const opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", "UI", undefined, tx => tx.opportunity.create({
-    data: {
-      workspaceId,
-      title: data.title,
-      description: data.description,
-      customerSegment: data.customerSegment,
-      status: data.status ?? "EXPLORING",
-      squadId: data.squadId ?? null,
-    },
-  }));
+  const opportunity = await createOpportunityWithLinks(getPrisma(), workspaceId, data);
   revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "page");
   return opportunity;
+}
+
+export type CreateOpportunityFromComposerResult =
+  | { ok: true; opportunity: { id: string; title: string } }
+  | { ok: false; error: string };
+
+/**
+ * The "New opportunity" composer's submit. Addressed by slug (the panel only
+ * knows the URL) with membership resolved server-side, and it reports
+ * failures as values so the composer can show them inline and keep the draft.
+ * Nothing is written unless the opportunity and every link are valid.
+ */
+export async function createOpportunityFromComposer(
+  orgSlug: string,
+  workspaceSlug: string,
+  data: NewOpportunityInput
+): Promise<CreateOpportunityFromComposerResult> {
+  let workspaceId: string;
+  try {
+    workspaceId = await requireProductWorkspaceBySlug(orgSlug, workspaceSlug);
+  } catch {
+    return { ok: false, error: "Workspace not found or you no longer have access to it." };
+  }
+  try {
+    const opportunity = await createOpportunityWithLinks(getPrisma(), workspaceId, data);
+    revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "layout");
+    if (data.feedbackIds?.length) revalidatePath(`/${orgSlug}/${workspaceSlug}/feedback`);
+    return { ok: true, opportunity: { id: opportunity.id, title: opportunity.title } };
+  } catch (error) {
+    if (error instanceof OpportunityCreateError) return { ok: false, error: error.message };
+    throw error;
+  }
+}
+
+export type OpportunityComposerOptions = {
+  squads: SquadData[];
+  keyResults: { id: string; title: string; objectiveTitle: string }[];
+  feedback: {
+    id: string;
+    title: string;
+    type: string;
+    status: string;
+    opportunity: { id: string; title: string } | null;
+  }[];
+};
+
+/** How many recent feedback items the composer's "Seed from feedback" picker searches. */
+const COMPOSER_FEEDBACK_LIMIT = 500;
+
+/**
+ * What the composer's pickers choose from: the workspace's squads, its Key
+ * Results (same query and shape as the opportunity panel's KR picker) and its
+ * most recent feedback, each with the opportunity it is already linked to.
+ */
+export async function loadOpportunityComposerOptions(
+  orgSlug: string,
+  workspaceSlug: string
+): Promise<{ ok: true; options: OpportunityComposerOptions } | { ok: false; error: string }> {
+  let workspaceId: string;
+  try {
+    workspaceId = await requireProductWorkspaceBySlug(orgSlug, workspaceSlug);
+  } catch {
+    return { ok: false, error: "Workspace not found or you no longer have access to it." };
+  }
+  const prisma = getPrisma();
+  const [squads, keyResults, feedback] = await Promise.all([
+    prisma.squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
+    prisma.keyResult.findMany({
+      where: { objective: { cycle: { workspaceId } } },
+      select: { id: true, title: true, objective: { select: { title: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.feedbackItem.findMany({
+      where: { workspaceId },
+      select: { id: true, title: true, type: true, status: true, opportunity: { select: { id: true, title: true } } },
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      take: COMPOSER_FEEDBACK_LIMIT,
+    }),
+  ]);
+  return {
+    ok: true,
+    options: {
+      squads,
+      keyResults: keyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })),
+      feedback,
+    },
+  };
 }
 
 export async function updateOpportunityStatus(

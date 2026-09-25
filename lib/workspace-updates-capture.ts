@@ -92,9 +92,19 @@ export async function retryUpdatesTransaction<T>(
   }
 }
 
+export type WorkspaceUpdatesOptions = {
+  /**
+   * Run the callback in a transaction even when update capture is off. Set by
+   * multi-row writes that must commit together (an opportunity plus its
+   * feedback links); a single-row write does not need the extra round trip.
+   */
+  atomic?: boolean;
+};
+
 export async function withWorkspaceUpdates<T>(
   prisma: AppPrismaClient,
   callback: (tx: AppTransactionClient, capture: boolean) => Promise<T>,
+  options: WorkspaceUpdatesOptions = {},
 ): Promise<T> {
   // A PM tool may already run inside its receipt transaction. Reuse that
   // transaction (and its commit-scoped analytics), never nest or replay it.
@@ -103,6 +113,8 @@ export async function withWorkspaceUpdates<T>(
     return callback(getMcpActivityPrisma(), enabled);
   }
   if (!(await workspaceUpdatesAvailable(prisma)))
-    return callback(prisma, false);
+    return options.atomic
+      ? retryUpdatesTransaction(prisma, (tx) => callback(tx, false))
+      : callback(prisma, false);
   return retryUpdatesTransaction(prisma, (tx) => callback(tx, true));
 }
