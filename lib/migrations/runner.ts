@@ -21,6 +21,7 @@ import { assertProductAnalyticsMigration } from "@/lib/migrations/product-analyt
 import { assertGeodeDocumentStorageMigration, getGeodeDocumentStorageHealth } from "@/lib/migrations/geode-document-storage";
 import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-updates";
 import { assertMcpConnectorsMigration } from "@/lib/migrations/mcp-connectors";
+import { assertMetricsDashboardMigration } from "@/lib/migrations/metrics-dashboard";
 import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest";
 
 
@@ -379,6 +380,10 @@ const MIGRATIONS: readonly MigrationEntry[] = [
   {
     name: "062_mcp_connectors",
     filePath: path.join(process.cwd(), "prisma/migrations/062_mcp_connectors/migration.sql"),
+  },
+  {
+    name: "063_metrics_dashboard",
+    filePath: path.join(process.cwd(), "prisma/migrations/063_metrics_dashboard/migration.sql"),
   },
 ];
 
@@ -1825,6 +1830,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "057_oauth_forced_reconsent") await assertOAuthForcedReconsentMigration(client, schema)
       if (migration.name === "058_oauth_authorization_events") await assertOAuthAuthorizationEventsMigration(client, schema)
       if (migration.name === "061_product_analytics") await assertProductAnalyticsMigration(client, schema)
+      if (migration.name === "063_metrics_dashboard") await assertMetricsDashboardMigration(client, schema)
       if (migration.name === "059_geode_document_storage") await assertGeodeDocumentStorageMigration(client, schema)
       if (migration.name === "060_workspace_updates") await assertWorkspaceUpdatesMigration(client, schema)
       if (migration.name === "062_mcp_connectors") await assertMcpConnectorsMigration(client, schema)

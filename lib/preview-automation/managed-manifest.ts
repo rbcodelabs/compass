@@ -86,7 +86,8 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "059_geode_document_storage": "6d4b1d6d2ef578cfc313b0eb5e788bfdaf65401e1e740dd7c38e986871d9b628",
   "060_workspace_updates": "3479312bcae3d33fce394a47d05b16223f68fd4c62ac471dc9a4aeea1a90e41f",
   "061_product_analytics": "5ec89b960a7c08a86e8f37f25c41be2c9f418ff83c2cedb6855bede43911edea",
-  "062_mcp_connectors": "7f66846956a857f8e4df816b3a99c35714176193d2619e82b51fc587c195d43d"
+  "062_mcp_connectors": "7f66846956a857f8e4df816b3a99c35714176193d2619e82b51fc587c195d43d",
+  "063_metrics_dashboard": "06d66304c5b88e7ef7f57a2e0d8d401e0bb5b2267281604ef4d841df21869947"
 };
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {

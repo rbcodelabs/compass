@@ -2690,6 +2690,16 @@ model MetricDefinition {
   archived Boolean @default(false)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @map("updated_at")
+  /// Metrics dashboard layout (062_metrics_dashboard). Nullable because DSQL
+  /// rejects a DEFAULT clause on ALTER TABLE ADD COLUMN -- every existing row
+  /// was backfilled by the migration's UPDATE, and every reader treats NULL
+  /// as this same default (see the `?? <default>` coalesce in service.ts and
+  /// dashboard.ts). @default() here is Prisma-client-side only, applied to
+  /// new create() calls; it is not a DB constraint.
+  dashboardVisible Boolean? @default(true) @map("dashboard_visible")
+  dashboardCol Int? @default(2) @map("dashboard_col")
+  dashboardRow Int? @default(4) @map("dashboard_row")
+  dashboardSortOrder Int? @default(0) @map("dashboard_sort_order")
   @@index([workspaceId, archived], map: "idx_metric_definition_workspace")
   @@map("metric_definitions")
 }
