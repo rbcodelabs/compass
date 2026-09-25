@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -167,14 +168,43 @@ function useMeasurement(
     // there is no resize listener here. jsdom has no ResizeObserver and several
     // specs render this tree, so the one-shot measurement above has to be
     // enough on its own when the constructor is missing.
-    if (typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(update)
-    observer.observe(wrapper)
-    for (const selector of ['[data-slot="sidebar-gap"]', '[data-slot="pinned-panel"]']) {
-      const element = wrapper.querySelector(selector)
-      if (element instanceof HTMLElement) observer.observe(element)
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update)
+    const observeSizes = () => {
+      if (!resizeObserver) return
+      resizeObserver.disconnect()
+      resizeObserver.observe(wrapper)
+      for (const selector of ['[data-slot="sidebar-gap"]', '[data-slot="pinned-panel"]']) {
+        const element = wrapper.querySelector(selector)
+        if (element instanceof HTMLElement) resizeObserver.observe(element)
+      }
     }
-    return () => observer.disconnect()
+    observeSizes()
+
+    // The detail panel column can appear or vanish with no change to
+    // `detailPanelKey`: PanelShell's "Pin panel" swaps the *same* panel from a
+    // portaled Sheet to an in-flow `pinned-panel` aside (and back) without
+    // touching `?detail=`, and crossing the 1024px pin threshold does the same.
+    // Watching the wrapper's direct children catches every one of those, from
+    // the DOM this function already measures, rather than mirroring PanelShell's
+    // internal pin state into shared context. Direct children only: the aside
+    // is a sibling of main content, so there is no need to see into the page.
+    const mutationObserver = new MutationObserver((records) => {
+      const detailPanelChanged = records.some((record) =>
+        [...record.addedNodes, ...record.removedNodes].some(
+          (node) => node instanceof HTMLElement && node.dataset.slot === "pinned-panel",
+        ),
+      )
+      if (!detailPanelChanged) return
+      observeSizes()
+      update()
+    })
+    mutationObserver.observe(wrapper, { childList: true })
+
+    return () => {
+      resizeObserver?.disconnect()
+      mutationObserver.disconnect()
+    }
   }, [enabled, detailPanelKey, railRef])
 
   return measurement
@@ -220,6 +250,12 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
   // the fetch on the return trip too, and the rail would show an empty
   // transcript for a conversation that has one.
   const adopted = useRef(new Set<string>())
+
+  // Mirrors AgentChat's own streaming state. Closing the rail unmounts the chat
+  // and aborts its turn, so anything that closes it *implicitly* (Esc, expand)
+  // is held off while this is true. The explicit X button is not.
+  const [streaming, setStreaming] = useState(false)
+  const expandHintId = useId()
 
   // Derived rather than stored, so it is never possible for the transcript on
   // screen to belong to a different thread than the selected one.
@@ -313,11 +349,17 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
   }, [selectConversation])
 
   const expandToPage = useCallback(() => {
+    // The button is disabled mid-turn; this is the belt to that brace. Closing
+    // would abort the turn, and for a new chat the id does not exist until the
+    // turn completes, so the page would open empty.
+    if (streaming) return
     // Closing is not optional: leaving the rail mounted would put two live
-    // AgentChat instances on the agent page, each with its own stream.
+    // AgentChat instances on the agent page, each with its own stream. (The
+    // provider also hides the rail on that route, which covers every other way
+    // of getting there.)
     closeRail()
     router.push(conversationId ? `${basePath}/agent?c=${conversationId}` : `${basePath}/agent`)
-  }, [basePath, closeRail, conversationId, router])
+  }, [basePath, closeRail, conversationId, router, streaming])
 
   const resolveMaxWidth = useCallback(
     // Falling back to the absolute maximum rather than the current width: a
@@ -331,8 +373,27 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
   // events that bubbled out of the rail via React's synthetic tree, so Esc in a
   // main-content field cannot close it. No stopPropagation, so a Select or
   // Popover inside the rail still gets first refusal on the key.
+  //
+  // Closing unmounts the chat, so Esc only closes when that costs nothing:
+  //  - not if something inside already used the key (`defaultPrevented`);
+  //  - not from portaled content (the conversation switcher menu, tooltips):
+  //    React bubbles a portal's events through this handler even though the
+  //    element is outside the aside, and Esc there means "dismiss that popup";
+  //  - not while a turn is streaming, which closing would abort;
+  //  - not from a text field holding an unsent draft, which closing would lose.
+  // The X button still closes unconditionally — that is an explicit request.
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape") closeRail()
+    if (event.key !== "Escape" || event.defaultPrevented) return
+    const target = event.target
+    if (!(target instanceof Node) || !event.currentTarget.contains(target)) return
+    if (streaming) return
+    if (
+      (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) &&
+      target.value.trim() !== ""
+    ) {
+      return
+    }
+    closeRail()
   }
 
   // Built as a flat string map rather than inline in the JSX: an object literal
@@ -446,11 +507,20 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
           variant="ghost"
           size="icon-sm"
           onClick={expandToPage}
+          disabled={streaming}
           aria-label="Open in full page"
-          title="Open in full page"
+          // Disabled buttons get no pointer events, so this native title is the
+          // explanation sighted users get; aria-describedby carries it to AT.
+          title={streaming ? "Available when the response finishes" : "Open in full page"}
+          aria-describedby={streaming ? expandHintId : undefined}
         >
           <Maximize2 aria-hidden="true" />
         </Button>
+        {streaming && (
+          <span id={expandHintId} className="sr-only">
+            Open in full page is available when the response finishes.
+          </span>
+        )}
 
         <Button
           variant="ghost"
@@ -473,6 +543,7 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
           initialMessages={messages}
           userInitials={userInitials}
           onConversationCreated={handleConversationCreated}
+          onStreamingChange={setStreaming}
         />
       </div>
     </aside>

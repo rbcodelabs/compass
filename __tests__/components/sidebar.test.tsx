@@ -3,8 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within, cleanup, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
+let pathname = "/rbcodelabs/compass/okrs";
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/rbcodelabs/compass/okrs",
+  usePathname: () => pathname,
   useRouter: () => ({ push: vi.fn() }),
 }));
 
@@ -47,6 +48,7 @@ describe("Sidebar", () => {
     vi.clearAllMocks();
     document.cookie = "sidebar_state=; max-age=0; path=/";
     document.cookie = "compass_panel_agent=; max-age=0; path=/";
+    pathname = "/rbcodelabs/compass/okrs";
   });
 
   afterEach(() => {
@@ -199,6 +201,23 @@ describe("Sidebar", () => {
       // "Don't touch nav at all": opening the rail must not collapse the nav
       // out from under the user.
       expect(sidebar).toHaveAttribute("data-state", "expanded");
+    });
+
+    it("is absent on the full-page Agent screen, so it cannot open a second live chat", () => {
+      pathname = "/rbcodelabs/compass/agent";
+      render(
+        <TooltipProvider>
+          <SidebarProvider>
+            <AgentRailProvider initialPin={{ pinned: true, width: 448 }}>
+              <Sidebar {...baseProps} isOrgAdmin researchCaptureEnabled />
+            </AgentRailProvider>
+          </SidebarProvider>
+        </TooltipProvider>,
+      );
+      expect(screen.queryByRole("button", { name: /agent panel/i })).not.toBeInTheDocument();
+      // The Agent link itself is still there — it is the page you are on.
+      const mainNav = screen.getByRole("navigation", { name: "Main navigation" });
+      expect(within(mainNav).getByRole("link", { name: "Agent" })).toBeInTheDocument();
     });
   });
 });

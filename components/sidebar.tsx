@@ -100,7 +100,9 @@ const baseNavItems = [
  */
 function AgentRailToggle() {
   const rail = useAgentRailOptional()
-  if (!rail) return null
+  // Also absent on the full-page agent screen: the rail is unavailable there,
+  // since that page already runs its own live chat.
+  if (!rail?.available) return null
 
   const Icon = rail.open ? PanelLeftClose : PanelLeftOpen
 

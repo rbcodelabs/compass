@@ -6,8 +6,15 @@
  * scope.
  */
 
+import { z } from "zod"
+
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
+
+// `AgentConversation.id` is `@db.Uuid`. A malformed id would otherwise reach
+// Postgres as a failed cast and surface as a Prisma 500; it names no
+// conversation the caller could own, so it gets the same 404 as any other.
+const conversationIdSchema = z.string().uuid()
 
 export async function GET(
   request: Request,
@@ -20,6 +27,9 @@ export async function GET(
   if (!workspaceId) return new Response("Workspace required", { status: 400 })
 
   const { conversationId } = await params
+  if (!conversationIdSchema.safeParse(conversationId).success) {
+    return new Response("Not found", { status: 404 })
+  }
   const userId = session.user.id
   const prisma = getPrisma()
 

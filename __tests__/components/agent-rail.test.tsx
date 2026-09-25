@@ -23,6 +23,7 @@
  */
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
@@ -32,8 +33,10 @@ import { PANEL_WIDTH_DEFAULT, parsePanelPin } from "@/lib/panel-pin";
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const push = vi.fn();
+let pathname = "/acme/product/roadmap";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => pathname,
 }));
 
 let panelState: { type: string; id: string } | null = null;
@@ -62,6 +65,33 @@ vi.mock("@/components/agent/agent-chat", () => ({
     }, []);
     return (
       <div data-testid="agent-chat">
+        {/* Stand-ins for the real composer, and for a widget inside the chat
+            that handles Esc itself and so marks the event as consumed. */}
+        <textarea aria-label="stub-composer" defaultValue="" />
+        {createPortal(<button type="button">portaled-control</button>, document.body)}
+        <div
+          data-testid="swallows-esc"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") event.preventDefault();
+          }}
+        />
+        <button
+          type="button"
+          onClick={() =>
+            (props.onStreamingChange as ((streaming: boolean) => void) | undefined)?.(true)
+          }
+        >
+          fire-streaming-start
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            (props.onStreamingChange as ((streaming: boolean) => void) | undefined)?.(false)
+          }
+        >
+          fire-streaming-end
+        </button>
         <button
           type="button"
           onClick={() =>
@@ -167,6 +197,7 @@ async function selectThread(title: string) {
 
 beforeEach(() => {
   push.mockClear();
+  pathname = "/acme/product/roadmap";
   panelState = null;
   lastChatProps = {};
   chatMounts = 0;
@@ -385,5 +416,162 @@ describe("conversation handling", () => {
     // AgentChat re-seeds on a change of *identity*, so a fresh [] per render
     // would wipe the thread on every parent render.
     expect(lastChatProps.initialMessages).toBe(first);
+  });
+});
+
+// ── Detail panel pinned/unpinned in place ────────────────────────────────────
+
+describe("re-measuring when the same detail panel is pinned or unpinned", () => {
+  /**
+   * PanelShell's "Pin panel" flips the *same* panel from a portaled Sheet to an
+   * in-flow `[data-slot="pinned-panel"]` column without changing `?detail=`, so
+   * nothing the rail reads from panel context changes. The rail has to notice
+   * the column arriving (and leaving) in the DOM itself.
+   */
+  function tree(withDetailPanel: boolean) {
+    return (
+      <Harness withDetailPanel={withDetailPanel}>
+        <AgentRailProvider initialPin={{ pinned: true, width: PANEL_WIDTH_DEFAULT }}>
+          <AgentRail workspaceId="ws-1" basePath="/acme/product" userInitials="RB" />
+        </AgentRailProvider>
+      </Harness>
+    );
+  }
+
+  it("demotes to overlay when an open overlay panel is pinned, and docks again when unpinned", async () => {
+    // 1440px laptop, overlay detail panel open: the Sheet is portaled, so the
+    // wrapper holds no pinned column and the rail has 740px — docked.
+    panelState = { type: "objective", id: "obj-1" };
+    stubLayout({ wrapper: 1440, nav: 220, detail: 448 });
+    const { rerender } = render(tree(false));
+    expect(rail()).toHaveAttribute("data-mode", "docked");
+    const mountsBefore = chatMounts;
+
+    // "Pin panel": same type and id, but now a 448px in-flow column. Staying
+    // docked would squeeze main content to 292px, under its 480px floor.
+    rerender(tree(true));
+    await vi.waitFor(() => expect(rail()).toHaveAttribute("data-mode", "overlay"));
+
+    // "Unpin panel": room again, so the rail must not stay floating.
+    rerender(tree(false));
+    await vi.waitFor(() => expect(rail()).toHaveAttribute("data-mode", "docked"));
+
+    // Mode flips never remount the chat (that would abort a streaming turn).
+    expect(chatMounts).toBe(mountsBefore);
+  });
+});
+
+// ── Keyboard ─────────────────────────────────────────────────────────────────
+
+describe("Escape handling", () => {
+  it("ignores an Esc that something inside the rail already handled", () => {
+    renderRail();
+    fireEvent.keyDown(screen.getByTestId("swallows-esc"), { key: "Escape" });
+    expect(rail()).not.toBeNull();
+  });
+
+  it("ignores an Esc from portaled content, such as the conversation switcher menu", async () => {
+    renderRail();
+    fireEvent.click(screen.getByRole("button", { name: "Switch conversation" }));
+    const item = await screen.findByText("First chat");
+    // The menu is portaled out of the aside, but React still bubbles its
+    // synthetic events through the rail's onKeyDown.
+    expect(rail()?.contains(item)).toBe(false);
+    fireEvent.keyDown(item, { key: "Escape" });
+    expect(rail()).not.toBeNull();
+  });
+
+  it("ignores an Esc from any React portal rendered under the rail", () => {
+    // A portal that does not itself handle Esc, so only the containment guard
+    // can keep the rail open (the menu above may consume the key on its own).
+    renderRail();
+    const portaled = screen.getByRole("button", { name: "portaled-control" });
+    expect(rail()?.contains(portaled)).toBe(false);
+    fireEvent.keyDown(portaled, { key: "Escape" });
+    expect(rail()).not.toBeNull();
+  });
+
+  it("does not close while a turn is streaming, since closing aborts it", () => {
+    renderRail();
+    fireEvent.click(screen.getByRole("button", { name: "fire-streaming-start" }));
+    fireEvent.keyDown(rail() as HTMLElement, { key: "Escape" });
+    expect(rail()).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "fire-streaming-end" }));
+    fireEvent.keyDown(rail() as HTMLElement, { key: "Escape" });
+    expect(rail()).toBeNull();
+  });
+
+  it("does not close from a composer holding an unsent draft, but does from an empty one", () => {
+    renderRail();
+    const composer = screen.getByRole("textbox", { name: "stub-composer" });
+    fireEvent.change(composer, { target: { value: "half-written question" } });
+    fireEvent.keyDown(composer, { key: "Escape" });
+    expect(rail()).not.toBeNull();
+
+    fireEvent.change(composer, { target: { value: "" } });
+    fireEvent.keyDown(composer, { key: "Escape" });
+    expect(rail()).toBeNull();
+  });
+});
+
+describe("Cmd/Ctrl+J", () => {
+  it("toggles the rail, and ignores auto-repeat from a held key", () => {
+    renderRail({ pinned: false });
+    fireEvent.keyDown(window, { key: "j", metaKey: true });
+    expect(rail()).not.toBeNull();
+
+    // Holding the chord would otherwise flap the rail open/closed and unmount
+    // the chat on every other repeat.
+    fireEvent.keyDown(window, { key: "j", metaKey: true, repeat: true });
+    expect(rail()).not.toBeNull();
+
+    fireEvent.keyDown(window, { key: "j", ctrlKey: true });
+    expect(rail()).toBeNull();
+  });
+});
+
+// ── Expand while streaming ───────────────────────────────────────────────────
+
+describe("expand to full page while a turn is streaming", () => {
+  it("is disabled mid-turn, says why, and re-enables when the turn ends", () => {
+    renderRail();
+    fireEvent.click(screen.getByRole("button", { name: "fire-streaming-start" }));
+
+    const expand = screen.getByRole("button", { name: /open in full page/i });
+    expect(expand).toBeDisabled();
+    expect(expand).toHaveAttribute("title", expect.stringMatching(/response finishes/i));
+    fireEvent.click(expand);
+    expect(push).not.toHaveBeenCalled();
+    expect(rail()).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "fire-streaming-end" }));
+    expect(screen.getByRole("button", { name: "Open in full page" })).toBeEnabled();
+  });
+});
+
+// ── The full-page agent route ────────────────────────────────────────────────
+
+describe("on the full-page Agent route", () => {
+  it("renders no rail even when the cookie says open, so only one chat is live", () => {
+    pathname = "/acme/product/agent";
+    renderRail();
+    expect(rail()).toBeNull();
+    expect(screen.queryByTestId("agent-chat")).not.toBeInTheDocument();
+  });
+
+  it("ignores Cmd+J there, and keeps the saved preference for other screens", () => {
+    pathname = "/acme/product/agent";
+    renderRail();
+    fireEvent.keyDown(window, { key: "j", metaKey: true });
+    expect(rail()).toBeNull();
+    // Not toggled closed behind the user's back: the cookie is untouched.
+    expect(railCookie()).toBeNull();
+  });
+
+  it("does not treat a similarly named route as the Agent page", () => {
+    pathname = "/acme/product/agents-overview";
+    renderRail();
+    expect(rail()).not.toBeNull();
   });
 });

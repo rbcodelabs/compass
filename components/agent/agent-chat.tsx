@@ -62,6 +62,14 @@ type Props = {
    * would open an empty thread.
    */
   onConversationCreated?: (conversationId: string) => void
+  /**
+   * Called whenever a turn starts or stops streaming.
+   *
+   * The rail needs it because closing the rail unmounts this component, which
+   * aborts the turn: it uses it to keep Esc and "expand to full page" from
+   * doing that implicitly mid-turn. The page does not pass it.
+   */
+  onStreamingChange?: (streaming: boolean) => void
 }
 
 type StreamPhase = "idle" | "booting" | "running"
@@ -86,6 +94,7 @@ export function AgentChat({
   suggestedInstruction,
   variant = "page",
   onConversationCreated,
+  onStreamingChange,
 }: Props) {
   const isRail = variant === "rail"
   const router = useRouter()
@@ -122,6 +131,16 @@ export function AgentChat({
   const selfCreated = useRef(new Set<string>())
 
   const isStreaming = phase !== "idle"
+
+  // Through a ref for the same reason as onConversationCreated: an inline arrow
+  // from the parent must not re-fire this on every render, only on a change.
+  const onStreamingChangeRef = useRef(onStreamingChange)
+  useEffect(() => {
+    onStreamingChangeRef.current = onStreamingChange
+  }, [onStreamingChange])
+  useEffect(() => {
+    onStreamingChangeRef.current?.(isStreaming)
+  }, [isStreaming])
   const composerBlocked = processingLoading || Boolean(processing && (!processing.canContinue || processing.status === "RUNNING" || processing.status === "PENDING"))
 
   useEffect(() => () => {

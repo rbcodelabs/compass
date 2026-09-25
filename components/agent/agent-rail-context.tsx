@@ -8,6 +8,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { usePathname } from "next/navigation";
 
 import {
   DEFAULT_PANEL_PIN,
@@ -58,9 +59,34 @@ import {
 
 const AGENT_RAIL_SHORTCUT = "j";
 
+/**
+ * Whether `pathname` is the full-page agent screen,
+ * `/[orgSlug]/[workspaceSlug]/agent` (or anything under it).
+ *
+ * The rail is unavailable there. That page already runs its own live
+ * `AgentChat`, and two chats over one conversation means two streams writing
+ * one thread. Matched on the whole third segment, so a sibling route whose
+ * name merely starts with "agent" is not caught by it.
+ */
+export function isAgentPagePath(pathname: string | null): boolean {
+  if (!pathname) return false;
+  const segments = pathname.split("/").filter(Boolean);
+  return segments[2] === "agent";
+}
+
 type AgentRailContextValue = {
-  /** Whether the rail is docked open. Not whether it is currently a column — see AgentRail for the space-driven overlay demote. */
+  /**
+   * Whether the rail is docked open. Not whether it is currently a column — see
+   * AgentRail for the space-driven overlay demote. Always `false` on the
+   * full-page agent screen (see `available`), whatever the saved preference.
+   */
   open: boolean;
+  /**
+   * `false` on the full-page agent screen, where the rail is hidden and cannot
+   * be toggled. The saved preference is left alone, so the rail comes back as
+   * it was on the next screen.
+   */
+  available: boolean;
   /** Open the rail, optionally jumping straight to a thread (or `null` for a fresh chat). */
   openRail: (options?: { conversationId?: string | null }) => void;
   closeRail: () => void;
@@ -86,7 +112,12 @@ export function AgentRailProvider({
    */
   initialPin?: PanelPin;
 }) {
-  const [open, setOpen] = useState(initialPin.pinned);
+  // `wantsOpen` is the user's preference; `open` is what is actually shown.
+  // Kept apart so visiting the agent page hides the rail without rewriting the
+  // preference, which would otherwise close it on every screen afterwards.
+  const [wantsOpen, setOpen] = useState(initialPin.pinned);
+  const available = !isAgentPagePath(usePathname());
+  const open = available && wantsOpen;
   const [width, setWidth] = useState(() => clampPanelWidth(initialPin.width));
   const [conversationId, setConversationId] = useState<string | null>(null);
 
@@ -99,13 +130,14 @@ export function AgentRailProvider({
 
   const openRail = useCallback(
     (options?: { conversationId?: string | null }) => {
+      if (!available) return;
       if (options && "conversationId" in options) {
         setConversationId(options.conversationId ?? null);
       }
       setOpen(true);
       persist({ pinned: true, width });
     },
-    [persist, width],
+    [available, persist, width],
   );
 
   const closeRail = useCallback(() => {
@@ -114,12 +146,13 @@ export function AgentRailProvider({
   }, [persist, width]);
 
   const toggleRail = useCallback(() => {
+    if (!available) return;
     // Computed outside the updater: updaters must stay pure, and StrictMode
     // double-invokes them in development.
     const next = !open;
     setOpen(next);
     persist({ pinned: next, width });
-  }, [open, persist, width]);
+  }, [available, open, persist, width]);
 
   const commitWidth = useCallback(
     (next: number) => {
@@ -150,16 +183,23 @@ export function AgentRailProvider({
       ) {
         return;
       }
+      // Left to the browser on the agent page, where there is no rail to toggle.
+      if (!available) return;
       event.preventDefault();
+      // A held chord auto-repeats; toggling on each repeat would flap the rail
+      // and unmount the chat (aborting its turn) on every other one. Still
+      // preventDefault'ed above so the repeats do not reach the browser either.
+      if (event.repeat) return;
       toggleRail();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [toggleRail]);
+  }, [available, toggleRail]);
 
   const value = useMemo(
     () => ({
       open,
+      available,
       openRail,
       closeRail,
       toggleRail,
@@ -170,6 +210,7 @@ export function AgentRailProvider({
     }),
     [
       open,
+      available,
       openRail,
       closeRail,
       toggleRail,
