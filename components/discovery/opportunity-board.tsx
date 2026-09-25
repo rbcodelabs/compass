@@ -23,13 +23,13 @@ import {
 import { Lightbulb } from "lucide-react";
 import { Board, BoardColumn, EmptyState } from "@/components/patterns";
 import { OpportunityCard, type OpportunityCardData } from "./opportunity-card";
-import { CreateOpportunityForm } from "./create-opportunity-form";
+import { NewOpportunityButton } from "./new-opportunity-button";
 import {
   moveOpportunity,
   reorderOpportunity,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { orderCards, planDragEnd } from "@/lib/discovery-board-ordering";
-import type { OpportunityStatus, SquadData } from "@/lib/types";
+import type { OpportunityStatus } from "@/lib/types";
 
 const COLUMNS: { status: OpportunityStatus; label: string; accent: "neutral" | "info" | "warning" | "success" }[] = [
   { status: "EXPLORING", label: "Exploring", accent: "neutral" },
@@ -83,8 +83,6 @@ function DiscoveryColumn({
   items,
   orgSlug,
   workspaceSlug,
-  workspaceId,
-  squads,
   showScore,
   dragEnabled,
 }: {
@@ -94,8 +92,6 @@ function DiscoveryColumn({
   items: OpportunityCardData[];
   orgSlug: string;
   workspaceSlug: string;
-  workspaceId: string;
-  squads: SquadData[];
   showScore: boolean;
   dragEnabled: boolean;
 }) {
@@ -134,7 +130,7 @@ function DiscoveryColumn({
       className="w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"
       bodyRef={setNodeRef}
       bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`}
-      footer={<CreateOpportunityForm workspaceId={workspaceId} defaultStatus={status} squads={squads} />}
+      footer={<NewOpportunityButton variant="column" status={status} />}
     >
         {dragEnabled ? (
           <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
@@ -154,7 +150,6 @@ type Props = {
   orgSlug: string;
   workspaceSlug: string;
   workspaceId: string;
-  squads?: SquadData[];
   /** True when the workspace has an active scoring model. */
   hasActiveScoringModel?: boolean;
   /** "Sort by score" view mode. Never persisted — see planDragEnd. */
@@ -166,7 +161,6 @@ export function OpportunityBoard({
   orgSlug,
   workspaceSlug,
   workspaceId,
-  squads = [],
   hasActiveScoringModel = false,
   sortByScore = false,
 }: Props) {
@@ -320,8 +314,6 @@ export function OpportunityBoard({
                 items={visibleColumns[status]}
                 orgSlug={orgSlug}
                 workspaceSlug={workspaceSlug}
-                workspaceId={workspaceId}
-                squads={squads}
                 showScore={hasActiveScoringModel}
                 dragEnabled={dragEnabled}
               />

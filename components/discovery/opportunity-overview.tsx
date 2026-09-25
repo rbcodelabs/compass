@@ -17,6 +17,7 @@ import {
   ComboboxValue,
 } from "@/components/ui/combobox";
 import { updateOpportunityStatus, linkOpportunityToKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
+import { keyResultComboboxItems } from "@/components/discovery/key-result-options";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { SquadPicker } from "@/components/squads/squad-picker";
 import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evidence-list";
@@ -157,19 +158,7 @@ export function OpportunityOverview({
       {availableKeyResults.length > 0 && (
         <Field label="Linked Key Result">
           <Combobox
-            items={[
-              { value: "__none__", label: "— None —" },
-              ...availableKeyResults.map((kr) => ({
-                value: kr.id,
-                label: kr.title,
-                render: (
-                  <>
-                    <span className="text-muted-foreground text-xs mr-1">{kr.objectiveTitle} /</span>
-                    {kr.title}
-                  </>
-                ),
-              })),
-            ]}
+            items={keyResultComboboxItems(availableKeyResults)}
             value={opportunity.linkedKeyResult?.id ?? "__none__"}
             onValueChange={handleKRLink}
             disabled={isPending}

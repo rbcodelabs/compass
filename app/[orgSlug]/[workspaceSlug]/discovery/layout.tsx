@@ -63,9 +63,7 @@ export default async function DiscoveryLayout({ children, params }: DiscoveryLay
     <DiscoveryShell
       orgSlug={orgSlug}
       workspaceSlug={workspaceSlug}
-      workspaceId={workspace.id}
       opportunities={opportunities}
-      squads={squads}
     >
       {children}
     </DiscoveryShell>

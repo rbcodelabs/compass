@@ -61,8 +61,6 @@ export function DiscoveryRailPanel({
       opportunities={data.opportunities}
       orgSlug={orgSlug}
       workspaceSlug={workspaceSlug}
-      workspaceId={data.workspaceId}
-      squads={data.squads}
       activeOpportunityId={activeOpportunityId || null}
       onNavigate={closePanel}
     />

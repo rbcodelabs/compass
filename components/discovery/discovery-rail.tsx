@@ -2,15 +2,14 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Search, TrendingUp, PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import { CreateOpportunityForm } from "@/components/discovery/create-opportunity-form";
+import { NewOpportunityButton } from "@/components/discovery/new-opportunity-button";
 import {
   ACTIVE_OPPORTUNITY_STATUS_ORDER,
   filterOpportunitiesByTitle,
   groupOpportunitiesByStatus,
 } from "@/lib/discovery-rail";
-import type { OpportunityStatus, SquadData } from "@/lib/types";
+import type { OpportunityStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,8 +38,6 @@ type DiscoveryRailProps = {
   opportunities: DiscoveryRailOpportunity[];
   orgSlug: string;
   workspaceSlug: string;
-  workspaceId: string;
-  squads: SquadData[];
   activeOpportunityId?: string | null;
   onNavigate?: () => void;
 };
@@ -50,12 +47,9 @@ export function DiscoveryRail({
   opportunities,
   orgSlug,
   workspaceSlug,
-  workspaceId,
-  squads,
   activeOpportunityId = null,
   onNavigate,
 }: DiscoveryRailProps) {
-  const router = useRouter();
   const [query, setQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState(false);
 
@@ -182,14 +176,7 @@ export function DiscoveryRail({
 
       {/* New opportunity */}
       <div className="shrink-0 border-t border-border-default p-2">
-        <CreateOpportunityForm
-          workspaceId={workspaceId}
-          squads={squads}
-          onCreated={(id) => {
-            onNavigate?.();
-            router.push(`${base}/${id}`);
-          }}
-        />
+        <NewOpportunityButton variant="rail" />
       </div>
     </div>
   );

@@ -23,6 +23,7 @@
  * dragTo — same approach as e2e/functional/specs/roadmap-unscheduled-items.spec.ts.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 import type { Locator, Page } from "@playwright/test";
 
 async function dragTo(page: Page, source: Locator, target: Locator) {
@@ -54,9 +55,7 @@ async function groupBoardBy(page: Page, grouping: string) {
 }
 
 async function createOpportunity(page: Page, title: string) {
-  await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-  await page.getByLabel("Title").fill(title);
-  await page.getByRole("button", { name: "Create Opportunity" }).click();
+  await createOpportunityFromBoard(page, title);
   await expect(page.getByRole("button", { name: title, exact: true })).toBeVisible({ timeout: 15_000 });
 }
 

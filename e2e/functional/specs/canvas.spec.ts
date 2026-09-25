@@ -32,6 +32,7 @@
  * T0 squad-clustering — none of that ships this phase.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 import { openFullPage } from "../fixtures/full-page";
 
 test.describe("Canvas", () => {
@@ -120,9 +121,7 @@ test.describe("Canvas", () => {
     // ── 2. Create an Opportunity ─────────────────────────────────────────────
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-    await page.getByLabel("Title").fill(oppTitle);
-    await page.getByRole("button", { name: "Create Opportunity" }).click();
+    await createOpportunityFromBoard(page, oppTitle);
     await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: oppTitle, exact: true }).click();
