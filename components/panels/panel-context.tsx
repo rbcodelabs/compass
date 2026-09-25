@@ -4,6 +4,7 @@ import React, { createContext, useContext, useCallback, useMemo, useRef } from "
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type { Horizon } from "@/lib/types";
 import type { TaskCardData } from "@/components/tasks/task-card";
+import { COMPOSER_PANEL_TYPES, isComposerPanelType, type ComposerPanelType } from "./composer-panel-types";
 
 /**
  * The nine OST/roadmap/delivery entity types a detail panel can show. These
@@ -34,8 +35,13 @@ export type EntityPanelType = (typeof PANEL_ENTITY_TYPES)[number];
  *   submit the composer is *replaced* by the new item's detail panel, so
  *   creating and viewing are one continuous surface. Its id is always
  *   `FEEDBACK_COMPOSER_ID`.
+ * - `opportunity-new` is the "New opportunity" composer, on the same terms.
+ *   Its id is `new`, or `new-<status>` when a board column presets the
+ *   starting status (see lib/opportunity-draft.ts).
  */
-export type PanelType = EntityPanelType | "discovery-rail" | "feedback-new";
+export { COMPOSER_PANEL_TYPES, isComposerPanelType, type ComposerPanelType };
+
+export type PanelType = EntityPanelType | "discovery-rail" | ComposerPanelType;
 
 export const FEEDBACK_COMPOSER_ID = "new";
 
@@ -57,7 +63,7 @@ export type PanelState = {
 // shareable, survives refresh, and the browser back button closes it.
 const PANEL_PARAM = "detail";
 
-const VALID_TYPES = new Set<string>([...PANEL_ENTITY_TYPES, "discovery-rail", "feedback-new"]);
+const VALID_TYPES = new Set<string>([...PANEL_ENTITY_TYPES, "discovery-rail", ...COMPOSER_PANEL_TYPES]);
 
 function encodePanel(type: PanelType, id: string): string {
   return `${type}:${id}`;

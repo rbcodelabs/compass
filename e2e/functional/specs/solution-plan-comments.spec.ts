@@ -13,6 +13,7 @@
  * this panel, matching every other entity's detail-panel pattern.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 import pg from "pg";
 
 const S = process.env.PGSCHEMA ? `${process.env.PGSCHEMA}_dev` : "compass_dev";
@@ -32,9 +33,7 @@ test.describe("Solution Current Plan + shared Discussion", () => {
       await page.waitForLoadState("networkidle");
 
       // ── 2. Create an opportunity ────────────────────────────────────────────
-      await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-      await page.getByLabel("Title").fill(oppTitle);
-      await page.getByRole("button", { name: "Create Opportunity" }).click();
+      await createOpportunityFromBoard(page, oppTitle);
 
       await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 

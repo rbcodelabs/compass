@@ -9,6 +9,7 @@
  * branch (PR #16). Update the horizon to "Shipped" once that branch merges.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 
 test.describe("Discovery → Roadmap", () => {
   test(
@@ -25,9 +26,7 @@ test.describe("Discovery → Roadmap", () => {
       // ── 2. Create an opportunity in the EXPLORING column ──────────────────
       // The "Add opportunity" inline button is inside the EXPLORING column.
       // Click the first "Add opportunity" button (column-embedded mode).
-      await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-      await page.getByLabel("Title").fill(oppTitle);
-      await page.getByRole("button", { name: "Create Opportunity" }).click();
+      await createOpportunityFromBoard(page, oppTitle);
 
       // Opportunity card appears in the board
       await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });

@@ -26,6 +26,7 @@
 import type { Page } from "@playwright/test";
 
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -59,9 +60,7 @@ async function clearPinCookie(page: Page) {
 async function createOpportunity(page: Page, base: string, title: string) {
   await page.goto(`${base}/discovery`);
   await page.waitForLoadState("networkidle");
-  await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-  await page.getByLabel("Title").fill(title);
-  await page.getByRole("button", { name: "Create Opportunity" }).click();
+  await createOpportunityFromBoard(page, title);
   await expect(
     page.getByRole("button", { name: title, exact: true }),
   ).toBeVisible({ timeout: 30_000 });

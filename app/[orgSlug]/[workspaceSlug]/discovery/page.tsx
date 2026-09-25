@@ -351,7 +351,6 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           workspaceId={workspace.id}
-          squads={squads}
           hasActiveScoringModel={hasActiveScoringModel}
           sortByScore={sort === "score"}
         />

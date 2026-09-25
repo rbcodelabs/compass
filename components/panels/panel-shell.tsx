@@ -32,6 +32,8 @@ import { AssumptionPanel } from "./assumption-panel";
 import { RoadmapItemPanel } from "./roadmap-item-panel";
 import { FeedbackPanel } from "./feedback-panel";
 import { FeedbackComposer } from "@/components/feedback/feedback-composer";
+import { OpportunityComposer } from "@/components/discovery/opportunity-composer";
+import { isComposerPanelType } from "./composer-panel-types";
 import { TaskDetail } from "@/components/tasks/task-detail";
 
 const PANEL_TITLES: Record<string, string> = {
@@ -44,6 +46,7 @@ const PANEL_TITLES: Record<string, string> = {
   roadmapItem: "Roadmap Item",
   feedback: "Feedback",
   "feedback-new": "New feedback",
+  "opportunity-new": "New opportunity",
   task: "Task",
   "discovery-rail": "Discovery",
 };
@@ -75,9 +78,10 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
   const asideRef = useRef<HTMLElement | null>(null);
   const common = { orgSlug, workspaceSlug };
 
-  // The composer always docks as a column on wide screens, whatever the pin
-  // preference: the point of creating feedback in a panel is that the board
-  // stays visible and usable beside it. A modal overlay would hide it.
+  // A composer (new feedback, new opportunity) always docks as a column on
+  // wide screens, whatever the pin preference: the point of creating in a
+  // panel is that the board stays visible and usable beside it. A modal
+  // overlay would hide it.
   //
   // The docking then *sticks* for the rest of that panel session — through the
   // hand-off to the created item's detail view and any rows opened from the
@@ -85,7 +89,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
   // would visibly jump the new item from a column into a modal sheet for every
   // unpinned user. It is session state, never persisted: the saved pin
   // preference is untouched (see commitWidth in usePanelPin).
-  const isComposer = panel?.type === "feedback-new";
+  const isComposer = isComposerPanelType(panel?.type);
   const [composerSession, setComposerSession] = useState(false);
   if (isComposer && !composerSession) setComposerSession(true);
   if (!panel && composerSession) setComposerSession(false);
@@ -215,6 +219,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
       {panel?.type === "roadmapItem" && <RoadmapItemPanel id={panel.id} {...common} />}
       {panel?.type === "feedback" && <FeedbackPanel id={panel.id} {...common} />}
       {panel?.type === "feedback-new" && <FeedbackComposer {...common} />}
+      {panel?.type === "opportunity-new" && <OpportunityComposer composerId={panel.id} {...common} />}
       {panel?.type === "task" && (
         <TaskDetail taskId={panel.id} variant="panel" {...common} />
       )}

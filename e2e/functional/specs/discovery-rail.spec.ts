@@ -12,6 +12,7 @@
  * opened from the mobile header's "Browse" trigger.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 
 test.describe("Discovery Rail", () => {
   test("rail lists opportunities, filters by search, and survives navigation", async ({
@@ -27,19 +28,13 @@ test.describe("Discovery Rail", () => {
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
 
-    await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-    await page.getByLabel("Title").fill(oppTitleA);
-    await page.getByRole("button", { name: "Create Opportunity" }).click();
+    await createOpportunityFromBoard(page, oppTitleA);
     await expect(page.getByText(oppTitleA)).toBeVisible({ timeout: 15_000 });
 
-    await page.getByRole("button", { name: /Add opportunity/i }).nth(1).click();
-    await page.getByLabel("Title").fill(oppTitleB);
-    await page.getByRole("button", { name: "Create Opportunity" }).click();
+    await createOpportunityFromBoard(page, oppTitleB, { column: 1 });
     await expect(page.getByText(oppTitleB)).toBeVisible({ timeout: 15_000 });
 
-    await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-    await page.getByLabel("Title").fill(oppTitleC);
-    await page.getByRole("button", { name: "Create Opportunity" }).click();
+    await createOpportunityFromBoard(page, oppTitleC);
     await expect(page.getByText(oppTitleC)).toBeVisible({ timeout: 15_000 });
 
     // Archive opportunity C via its board card menu so the rail has a
@@ -111,14 +106,10 @@ test.describe("Discovery Rail", () => {
       await page.goto(`${base}/discovery`);
       await page.waitForLoadState("networkidle");
 
-      await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-      await page.getByLabel("Title").fill(oppTitleA);
-      await page.getByRole("button", { name: "Create Opportunity" }).click();
+      await createOpportunityFromBoard(page, oppTitleA);
       await expect(page.getByText(oppTitleA)).toBeVisible({ timeout: 15_000 });
 
-      await page.getByRole("button", { name: /Add opportunity/i }).nth(1).click();
-      await page.getByLabel("Title").fill(oppTitleB);
-      await page.getByRole("button", { name: "Create Opportunity" }).click();
+      await createOpportunityFromBoard(page, oppTitleB, { column: 1 });
       await expect(page.getByText(oppTitleB)).toBeVisible({ timeout: 15_000 });
 
       await page.getByRole("button", { name: oppTitleA, exact: true }).click();
