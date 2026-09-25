@@ -32,6 +32,8 @@ Field definitions are workspace-scoped and appear on all objects of that type ac
 
 Custom field values appear in the detail panel of any object that has field definitions for its type. Click any field value to edit it inline. Values are saved immediately.
 
+For an Opportunity single-select field, you can also set values in bulk by grouping the Discovery board by that field and dragging cards between its columns. See [Card sorting by a custom field](/help/02-discovery#card-sorting-by-a-custom-field).
+
 Fields with no value set display a placeholder. Fields are always optional — an empty custom field does not affect the object in any way.
 
 ## Supported Object Types

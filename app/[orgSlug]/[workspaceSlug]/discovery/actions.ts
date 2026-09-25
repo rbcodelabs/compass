@@ -8,6 +8,8 @@ import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
 import { Prisma } from "@prisma/client";
 import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat";
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring";
+import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
+import { validateOpportunityFieldMove } from "@/lib/opportunity-field-board";
 import type {
   OpportunityStatus,
   SolutionStatus,
@@ -218,6 +220,46 @@ export async function reorderOpportunity(
     data: { sortOrder },
   }));
   revalidatePath(revalidatePathStr);
+}
+
+// ─── Set Opportunity field value (card-sort board move) ───────────────────────
+// The "Group by <field>" board's cross-column drag. Only the CustomFieldValue
+// row changes: status, sortOrder and archive state are deliberately untouched,
+// so sorting cards into MoSCoW buckets never moves them through the funnel.
+// `null` clears the value (the Unspecified column).
+
+export async function setOpportunityFieldValue(
+  opportunityId: string,
+  fieldId: string,
+  value: string | null,
+  workspaceId: string,
+  revalidatePathStr: string
+): Promise<{ value: string | null }> {
+  await requireProductEntity("opportunity", opportunityId, workspaceId);
+  const prisma = getPrisma();
+
+  // Scoped by workspace, so a field id from another tenant reads as missing.
+  const row = await prisma.customFieldDefinition.findFirst({
+    where: { id: fieldId, workspaceId },
+    include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
+  });
+  if (!row) throw new Error("Field not found in this workspace");
+
+  // Resolves shared option sets, so `options` is the field's effective list.
+  const validationError = validateOpportunityFieldMove(toCustomFieldDefinitionData(row), value);
+  if (validationError) throw new Error(validationError);
+
+  if (value === null) {
+    await prisma.customFieldValue.deleteMany({ where: { fieldId, objectId: opportunityId } });
+  } else {
+    await prisma.customFieldValue.upsert({
+      where: { fieldId_objectId: { fieldId, objectId: opportunityId } },
+      create: { fieldId, objectId: opportunityId, value },
+      update: { value, updatedAt: new Date() },
+    });
+  }
+  revalidatePath(revalidatePathStr);
+  return { value };
 }
 
 // ─── Move Solution (cross-column status change within its own Opportunity) ────

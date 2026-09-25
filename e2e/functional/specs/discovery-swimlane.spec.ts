@@ -48,6 +48,11 @@ async function dragTo(page: Page, source: Locator, target: Locator) {
   await page.mouse.up();
 }
 
+async function groupBoardBy(page: Page, grouping: string) {
+  await page.getByLabel("Group board by").click();
+  await page.getByRole("option", { name: grouping, exact: true }).click();
+}
+
 async function createOpportunity(page: Page, title: string) {
   await page.getByRole("button", { name: /Add opportunity/i }).first().click();
   await page.getByLabel("Title").fill(title);
@@ -98,10 +103,10 @@ test.describe("Discovery swimlane (group by Opportunity)", () => {
     await addSolutionViaPanel(page, opportunityTitle, solutionTitle);
 
     // ── Switch into "Group by: Opportunity" ────────────────────────────────
-    await expect(page.getByRole("tab", { name: "Status" })).toHaveAttribute("aria-selected", "true");
-    await page.getByRole("tab", { name: "Opportunity" }).click();
+    await expect(page.getByLabel("Group board by")).toContainText("Status");
+    await groupBoardBy(page, "Opportunity");
     await expect(page).toHaveURL(/groupBy=opportunity/);
-    await expect(page.getByRole("tab", { name: "Opportunity" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByLabel("Group board by")).toContainText("Opportunity");
 
     const lane = laneFor(page, opportunityTitle);
     await expect(lane).toBeVisible();
@@ -149,7 +154,7 @@ test.describe("Discovery swimlane (group by Opportunity)", () => {
     await createOpportunity(page, opportunityBTitle);
     await addSolutionViaPanel(page, opportunityATitle, solutionTitle);
 
-    await page.getByRole("tab", { name: "Opportunity" }).click();
+    await groupBoardBy(page, "Opportunity");
     await expect(page).toHaveURL(/groupBy=opportunity/);
 
     const laneA = laneFor(page, opportunityATitle);

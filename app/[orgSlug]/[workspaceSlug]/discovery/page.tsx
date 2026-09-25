@@ -6,7 +6,8 @@ import { OpportunityBoard } from "@/components/discovery/opportunity-board";
 import { DiscoveryFilters } from "@/components/discovery/discovery-filters";
 import { DiscoveryTableView, type DiscoveryTableOpportunity } from "@/components/discovery/discovery-table-view";
 import { DiscoveryViewToggle, type DiscoveryView } from "@/components/discovery/discovery-view-toggle";
-import { DiscoveryGroupByToggle, type DiscoveryGroupBy } from "@/components/discovery/discovery-group-by-toggle";
+import { DiscoveryGroupByToggle } from "@/components/discovery/discovery-group-by-toggle";
+import { OpportunityFieldBoard, type FieldBoardOpportunity } from "@/components/discovery/opportunity-field-board";
 import { DiscoverySortToggle, type DiscoverySort } from "@/components/discovery/discovery-sort-toggle";
 import { SolutionSwimlaneBoard, type SwimlaneOpportunity } from "@/components/discovery/solution-swimlane-board";
 import { resolveWorkspaceScoringModel, toScoreSummary } from "@/lib/scoring-model";
@@ -23,6 +24,13 @@ import {
   resolveCustomFieldFilter,
 } from "@/lib/custom-field-filter";
 import { solutionSwimlaneKey } from "@/lib/discovery-filters";
+import { loadCustomFieldValuesForObjects } from "@/lib/custom-field-values-batch";
+import {
+  columnValueFor,
+  groupableOpportunityFields,
+  groupByFieldId,
+  resolveDiscoveryGroupBy,
+} from "@/lib/opportunity-field-board";
 
 export const metadata = {
   title: "Discovery",
@@ -61,7 +69,6 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     fieldValue: fieldValueParam,
   } = await searchParams;
   const view: DiscoveryView = requestedView === "table" ? "table" : "board";
-  const groupBy: DiscoveryGroupBy = requestedGroupBy === "opportunity" ? "opportunity" : "status";
   const sort: DiscoverySort = requestedSort === "score" ? "score" : "manual";
   const prisma = getPrisma();
 
@@ -89,6 +96,13 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     }),
   ]);
   const customFieldGroups = buildCustomFieldFilterGroups(discoveryFieldDefs);
+  // Stale or ineligible field ids fall back to Status (see resolveDiscoveryGroupBy).
+  const groupableFields = groupableOpportunityFields(discoveryFieldDefs);
+  const groupBy = resolveDiscoveryGroupBy(requestedGroupBy, groupableFields);
+  const groupByFieldIdValue = view === "board" ? groupByFieldId(groupBy) : null;
+  const groupField = groupByFieldIdValue
+    ? (groupableFields.find((field) => field.id === groupByFieldIdValue) ?? null)
+    : null;
   const opportunityIdFilter =
     customFieldFilter?.objectType === "OPPORTUNITY"
       ? { id: { in: customFieldFilter.objectIds } }
@@ -164,6 +178,14 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   ]);
 
   const hasActiveScoringModel = scoringModel !== null;
+
+  // Only the card-sort board needs this field's values; one batched query.
+  const groupFieldValues = groupField
+    ? await loadCustomFieldValuesForObjects(prisma, {
+        fieldId: groupField.id,
+        objectIds: opportunities.map((opportunity) => opportunity.id),
+      })
+    : null;
 
   /** Drops solutions that do not carry the active Solution-level tag. */
   function visibleSolutions<T extends { id: string }>(solutions: T[]): T[] {
@@ -261,6 +283,18 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     })),
   }));
 
+  const fieldBoardOpportunities: FieldBoardOpportunity[] =
+    groupField && groupFieldValues
+      ? opportunities.map((opportunity) => ({
+          id: opportunity.id,
+          title: opportunity.title,
+          customerSegment: opportunity.customerSegment,
+          squad: opportunity.squadId ? (squadMap.get(opportunity.squadId) ?? null) : null,
+          _count: opportunity._count,
+          value: columnValueFor(groupFieldValues.get(opportunity.id), groupField.options ?? []),
+        }))
+      : [];
+
   return (
     <WorkspacePage
       title="Discovery"
@@ -269,7 +303,10 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         <Suspense>
           <div className="flex items-center gap-2">
             <DiscoveryViewToggle view={view} />
-            {view === "board" && <DiscoveryGroupByToggle groupBy={groupBy} />}
+            {view === "board" && <DiscoveryGroupByToggle
+                groupBy={groupBy}
+                fieldOptions={groupableFields.map((field) => ({ id: field.id, label: field.name }))}
+              />}
             {view === "board" && groupBy === "status" && hasActiveScoringModel && (
               <DiscoverySortToggle sort={sort} />
             )}
@@ -284,6 +321,17 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     >
       {view === "table" ? (
         <DiscoveryTableView opportunities={tableOpportunities} />
+      ) : groupField ? (
+        <OpportunityFieldBoard
+          // Keyed on the field and the opportunity set, never on values: a
+          // revalidation after a move must not discard optimistic state.
+          key={`${groupField.id}:${opportunities.map((o) => o.id).join(",")}`}
+          field={{ id: groupField.id, name: groupField.name, options: groupField.options ?? [] }}
+          opportunities={fieldBoardOpportunities}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          workspaceId={workspace.id}
+        />
       ) : groupBy === "opportunity" ? (
         <SolutionSwimlaneBoard
           // Keyed on what is rendered, not on the pre-filter query: a
