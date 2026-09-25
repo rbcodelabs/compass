@@ -16,6 +16,7 @@ import Link from "next/link"
 import { SessionAnalysisResults, SynthesisResults } from "@/components/research/analysis-results"
 import { guideFingerprint, parseResearchPage } from "@/lib/research-analysis"
 import { deserializeResearchGuide } from "@/lib/research"
+import { ExperimentResearchLinksSection } from "@/components/research/experiment-research-links-section"
 
 export default async function StudyPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; studyId: string }>; searchParams: Promise<{ token?: string; page?: string; synthesisPage?: string; turnId?: string }> }) {
   if (!isResearchCaptureEnabled()) notFound()
@@ -114,6 +115,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
         {guided && study.appUrl && <div className="min-w-0"><span className="text-text-muted">Product</span><div><a className="break-all font-medium underline" href={study.appUrl} rel="noopener noreferrer" target="_blank">{study.appUrl}</a></div></div>}
         {guided && linkedArtifact && artifactHref && <div className="min-w-0"><span className="text-text-muted">Prototype artifact</span><div><Link className="break-all font-medium underline" href={artifactHref}>{linkedArtifact.title}</Link></div></div>}
       </section>
+      <ExperimentResearchLinksSection orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ type: "study", id: study.id }} />
       <section className="max-w-3xl rounded-xl border bg-surface-panel p-5">
         <h2 className="font-semibold">Participant link</h2>
         {shareUrl ? <><Input aria-label="Participant link" className="mt-3" readOnly value={shareUrl} /><p className="mt-2 text-xs text-text-muted">Save this link now. Compass stores only its secure hash.</p></> : <p className="mt-2 text-sm text-text-subtle">For security, Compass cannot display an existing link again. {study.participantTokens.length ? `${study.participantTokens.length} active link${study.participantTokens.length === 1 ? " is" : "s are"} available.` : "There is no active participant link."}</p>}

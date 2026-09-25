@@ -28,7 +28,7 @@
  * it.
  */
 import getPrisma from "@/lib/db";
-import { isPmInterviewEnabled } from "@/lib/research-feature";
+import { isPmInterviewEnabled, isResearchCaptureEnabled } from "@/lib/research-feature";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
@@ -318,7 +318,7 @@ async function fetchExperiment(id: string, workspaceId: string) {
     pmInterviewHistory(workspaceId, "EXPERIMENT", id),
     fetchLinkedTasksBundle(workspaceId, "EXPERIMENT", id),
   ]);
-  return { ...item, ...linkedTasks, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews };
+  return { ...item, ...linkedTasks, researchCaptureEnabled: isResearchCaptureEnabled(), pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews };
 }
 
 async function fetchRoadmapItem(id: string, workspaceId: string) {

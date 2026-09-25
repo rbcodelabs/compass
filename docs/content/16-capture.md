@@ -152,6 +152,18 @@ Compass saves each finalized participant and interviewer turn as the session pro
 
 Public sessions have bounded message size, duration, turn count, attachment size/count/rate, and request rate. A participant link grants no access to workspace feedback, documents, opportunities, or other internal tools. Both Chat and Voice use server-authored prompts and models with no Compass tools or workspace credentials.
 
+## Linking studies to experiments
+
+A study's **Experiments** section shows the experiments it informs. Choose **Link existing** to search experiments in the same workspace, then open or unlink them from this section. The relationship also appears under **Research studies** on each experiment's detail panel and full page.
+
+A study can inform several experiments, and an experiment can use several studies. Draft, active, and closed customer interviews and usability studies accept new links. Archived studies retain their existing links for review and removal; PM interviews are excluded.
+
+Relationships can change after participant sessions begin because they do not alter the locked research protocol. Linking does not activate a study, issue a participant link, record results, or validate an assumption. Unlinking preserves both records and all research.
+
+![Experiments linked to a research study](/screenshots/docs/research-study-experiment-links-desktop.png)
+
+[View linked experiments on mobile](/screenshots/docs/research-study-experiment-links-mobile.png).
+
 ## Research results
 
 Open a study to review session status, dates, saved-turn counts, summaries and transcripts. **View full interview and attachments** opens a paginated transcript; evidence links jump to the page containing the referenced turn. Study lists, sessions, transcript turns, attachments and synthesis history are paginated, so older research remains accessible. **View archived studies** opens retained archived records.

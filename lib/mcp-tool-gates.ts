@@ -147,6 +147,14 @@ export const TOOL_GATES: Record<string, Gate> = {
   get_metric_observation: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_pm_interview: async () => {},
   update_experiment: async (a, x) => void (await assertEntityAccess(a, "experiment", x.experimentId)),
+  link_experiment_to_research_study: async (a, x) => {
+    await assertChildInDeclaredWorkspace(a, "experiment", x.experimentId, x.workspaceId)
+    await assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId)
+  },
+  unlink_experiment_from_research_study: async (a, x) => {
+    await assertChildInDeclaredWorkspace(a, "experiment", x.experimentId, x.workspaceId)
+    await assertChildInDeclaredWorkspace(a, "researchStudy", x.studyId, x.workspaceId)
+  },
   get_current_identity: async () => {},
   list_task_assignees: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   generate_research_guide: (a, x) => assertWorkspaceMember(a, x.workspaceId),
@@ -528,6 +536,7 @@ const READ_TOOLS = [
  *    `get_opportunity_score` only reads one back.
  */
 const WRITE_TOOLS = [
+  "link_experiment_to_research_study", "unlink_experiment_from_research_study",
   "create_metric", "update_metric", "archive_metric", "link_metric", "update_metric_binding", "unlink_metric", "refresh_metric_binding",
   "activate_research_study", "add_assumption", "add_comment", "add_doc_comment",
   "add_evidence", "add_feedback_attachment", "add_key_result", "add_solution",
@@ -591,6 +600,8 @@ export function scopesSatisfy(granted: readonly string[], required: ToolScope): 
 
 // Every operation is explicitly classified. Unlisted tools fail closed for agents.
 export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Object.fromEntries([
+  ["link_experiment_to_research_study", "WRITE"],
+  ["unlink_experiment_from_research_study", "WRITE"],
   ...["list_analytics_connections", "list_metrics", "get_metric", "list_metric_bindings", "get_metric_binding", "list_metric_observations", "get_metric_observation"].map(name => [name, "READ"]),
   ...["create_metric", "update_metric", "archive_metric", "link_metric", "update_metric_binding", "unlink_metric", "refresh_metric_binding"].map(name => [name, "WRITE"]),
   ["get_pm_interview", "READ"],

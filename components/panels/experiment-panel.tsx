@@ -13,12 +13,14 @@ import { EditableText, StatusSelect, type EditContext } from "./panel-parts";
 import { MarkdownContent } from "@/components/markdown-content";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
+import { ExperimentResearchLinksSection } from "@/components/research/experiment-research-links-section";
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
 
 type ExperimentData = {
   id: string;
   pmInterviews: Array<{ id: string; disposition: string; generationState: string; createdAt: string }>;
   pmInterviewEnabled?: boolean;
+  researchCaptureEnabled?: boolean;
   title: string;
   status: string;
   hypothesis: string;
@@ -234,6 +236,8 @@ export function ExperimentPanel({
         </p>
         <MarkdownContent className="text-foreground/80">{data.method}</MarkdownContent>
       </div>
+
+      {data.researchCaptureEnabled && <ExperimentResearchLinksSection orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ type: "experiment", id: experimentId }} />}
 
       {/* Kill condition body (inactive experiments) */}
       {!isActive && (

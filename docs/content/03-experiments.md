@@ -44,6 +44,18 @@ Click **+ Add Experiment** on the Experiments page, or click **Test this assumpt
 - **Squad** — Optional team assignment
 - **Linked assumption** — Connect the experiment to the specific assumption from Discovery that it's testing
 
+## Linking Research Studies
+
+Open an experiment's detail panel or full page and find **Research studies** below its method. Choose **Link existing** to search for a customer interview or usability study in the same workspace. Linked studies show their status and let you open the study or unlink it. You can also manage the relationship from the study's **Experiments** section in Capture.
+
+One experiment can link to several studies, and the same study can support several experiments. Draft, active, and closed studies can be linked; archived studies keep existing links but cannot receive new ones. PM interviews are separate and do not appear in this picker. Research must be enabled for these controls to appear.
+
+A link records relevance, not validation. It does not create a study, change its participant guide, activate it, record an experiment result, or update an assumption. Links remain editable after participant sessions start and at every experiment status. Unlinking removes only the relationship, not the study or its research.
+
+![Research studies linked to an experiment](/screenshots/docs/experiment-research-links-desktop.png)
+
+[View the relationship controls on mobile](/screenshots/docs/experiment-research-links-mobile.png).
+
 ## Recording Results
 
 Once an experiment is COMPLETE or KILLED, open the detail panel and click **+ Add Result**. Record what you observed: the actual metrics, any qualitative findings, and unexpected outcomes.

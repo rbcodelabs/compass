@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-const m = vi.hoisted(() => ({ workspace: vi.fn(), study: vi.fn(), list: vi.fn(), lock: vi.fn(), update: vi.fn(), count: vi.fn(), token: vi.fn(), issue: vi.fn(), revoke: vi.fn(), create: vi.fn(), agent: vi.fn(), artifact: vi.fn() }))
+const m = vi.hoisted(() => ({ workspace: vi.fn(), study: vi.fn(), list: vi.fn(), lock: vi.fn(), update: vi.fn(), count: vi.fn(), token: vi.fn(), issue: vi.fn(), revoke: vi.fn(), create: vi.fn(), agent: vi.fn(), artifact: vi.fn(), experiments: vi.fn() }))
 vi.mock("@/lib/research-agent", () => ({ runResearchInterviewAgent: m.agent }))
 vi.mock("@/lib/db", () => ({ default: () => {
   const db = { workspace: { findFirst: m.workspace }, researchStudy: { findFirst: m.study, findMany: m.list, updateMany: m.lock, update: m.update, create: m.create }, researchSession: { count: m.count }, researchParticipantToken: { findFirst: m.token, create: m.issue, updateMany: m.revoke }, artifact: { findFirst: m.artifact } }
-  return { ...db, $transaction: async (fn: unknown) => typeof fn === "function" ? fn(db) : Promise.all(fn as Promise<unknown>[]) }
+  return { ...db, experiment: { findMany: m.experiments }, $transaction: async (fn: unknown) => typeof fn === "function" ? fn(db) : Promise.all(fn as Promise<unknown>[]) }
 } }))
 import { createResearchStudy, generateResearchGuide, getResearchStudy, issueResearchLink, listResearchStudies, updateResearchStudy } from "@/lib/research-study-service"
 const scope = { workspaceId: "00000000-0000-4000-8000-000000000001" }
@@ -11,7 +11,8 @@ const actor = { userId: "member" }
 beforeEach(() => {
   vi.clearAllMocks()
   m.workspace.mockResolvedValue({ id: scope.workspaceId })
-  m.study.mockResolvedValue({ id: "study", status: "ACTIVE", name: "Study", guide: "[]", _count: { sessions: 0 } })
+  m.experiments.mockResolvedValue([])
+  m.study.mockResolvedValue({ id: "study", workspaceId: scope.workspaceId, status: "ACTIVE", name: "Study", guide: "[]", _count: { sessions: 0 } })
   m.list.mockResolvedValue([]); m.lock.mockResolvedValue({ count: 1 }); m.token.mockResolvedValue(null)
   m.count.mockResolvedValue(0)
   m.agent.mockResolvedValue(JSON.stringify(["One", "Two", "Three", "Four", "Five"]))
@@ -66,7 +67,10 @@ describe("shared research study service", () => {
     expect(m.list).not.toHaveBeenCalled()
   })
   it("get reads metadata only and preserves study tenancy", async () => {
-    await getResearchStudy(scope, actor, "study")
+    m.experiments.mockResolvedValue([{ id: "experiment", title: "Discovery", status: "RUNNING" }])
+    const result = await getResearchStudy(scope, actor, "study")
+    expect(result.experiments).toEqual([{ id: "experiment", title: "Discovery", status: "RUNNING" }])
+    expect(m.experiments).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: scope.workspaceId, researchStudyLinks: { some: { workspaceId: scope.workspaceId, studyId: "study" } } } }))
     expect(m.study.mock.calls[0][0].where).toMatchObject({ id: "study", workspace: { id: scope.workspaceId, members: { some: { userId: "member" } } } })
     expect(m.study.mock.calls[0][0]).not.toHaveProperty("include.sessions")
   })

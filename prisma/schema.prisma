@@ -291,6 +291,7 @@ model ResearchStudy {
   participantTokens ResearchParticipantToken[]
   attachments       ResearchAttachment[]
   pmInterview       PMInterview?
+  experimentLinks   ExperimentResearchStudyLink[]
 
   @@index([workspaceId, status])
   @@map("research_studies")
@@ -992,12 +993,30 @@ model Experiment {
   squad         Squad?             @relation(fields: [squadId], references: [id])
   assumption    Assumption?        @relation(fields: [assumptionId], references: [id])
   results       ExperimentResult[]
+  researchStudyLinks ExperimentResearchStudyLink[]
   roadmapItems  RoadmapItem[]
   createdById   String?            @map("created_by_id") @db.Uuid
   updatedById   String?            @map("updated_by_id") @db.Uuid
   source        String             @default("UI") @map("source") @db.VarChar(20)
 
   @@map("experiments")
+}
+
+model ExperimentResearchStudyLink {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId  String        @map("workspace_id") @db.Uuid
+  experimentId String        @map("experiment_id") @db.Uuid
+  studyId      String        @map("study_id") @db.Uuid
+  createdAt    DateTime      @default(now()) @map("created_at")
+  createdById  String?       @map("created_by_id") @db.Uuid
+  source       String        @default("UI") @db.VarChar(20)
+  experiment   Experiment    @relation(fields: [experimentId], references: [id])
+  study        ResearchStudy @relation(fields: [studyId], references: [id])
+
+  @@unique([experimentId, studyId], map: "idx_experiment_study_links_pair")
+  @@index([workspaceId], map: "idx_experiment_study_links_workspace")
+  @@index([studyId], map: "idx_experiment_study_links_study")
+  @@map("experiment_research_study_links")
 }
 
 model ExperimentResult {

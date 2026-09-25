@@ -21,6 +21,7 @@ vi.mock("@/components/comments/discussion", () => ({ Discussion: () => null }));
 vi.mock("@/components/decisions/request-decision-link", () => ({ RequestDecisionLink: () => null }));
 vi.mock("@/components/research/flesh-this-out-link", () => ({ FleshThisOutLink: () => null }));
 vi.mock("@/components/research/pm-interview-history", () => ({ PmInterviewHistory: () => null }));
+vi.mock("@/components/research/experiment-research-links-section", () => ({ ExperimentResearchLinksSection: () => null }));
 vi.mock("@/components/tasks/linked-tasks-section", () => ({ LinkedTasksSection: () => null }));
 vi.mock("@/components/panels/launch-tier-picker", () => ({ LaunchTierPicker: () => null }));
 vi.mock("@/components/panels/launch-checklist", () => ({ LaunchChecklist: () => null }));

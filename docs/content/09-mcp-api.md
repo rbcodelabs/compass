@@ -388,7 +388,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | Tool | Description |
 |---|---|
 | `list_experiments` | Fetch experiments with optional status, squad, logged-result-presence, `updatedSince`, and recorded `endBefore` filters; summaries include dates, timestamps, result count/latest-result time, and stable Assumption/Solution/Opportunity IDs |
-| `get_experiment` | Return full details for a single experiment: hypothesis, method, kill condition, linked assumption, all logged results, and conclusion |
+| `get_experiment` | Return full details for a single experiment: hypothesis, method, kill condition, linked assumption, all logged results, conclusion, and linked research study summaries when Research Capture is enabled |
 | `create_experiment` | Create a new experiment with hypothesis and method (starts in DESIGNING status) |
 | `log_experiment_result` | Record an observation or data point for a running experiment |
 | `conclude_experiment` | Conclude an experiment with PROCEED, KILL, ITERATE, or NOT_PURSUED (deliberately never run — e.g. the feature already shipped); automatically updates the linked Assumption's status (PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED, NOT_PURSUED → UNTESTED). NOT_PURSUED requires a `reason` and lands on its own terminal status distinct from KILLED, so a deliberate non-pursuit is never mistaken for an evidence-based kill |
@@ -546,7 +546,9 @@ Research tools use the same validation, protocol-locking and link transactions a
 | `generate_research_guide` | Draft 5–8 editable questions or usability tasks from a goal, study type and duration; does not create a study. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
 | `create_research_study` | Create a study with a reviewed guide; defaults to ACTIVE and returns its new participant link once, or pass `status: "DRAFT"` to stage it — protocol fields stay editable — with no link issued. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
 | `list_research_studies` | Page through study settings and session counts in one workspace; no transcripts or participant identities |
-| `get_research_study` | Read one study’s settings, guide and session count in its declared workspace |
+| `get_research_study` | Read one study’s settings, guide, session count, and linked experiment summaries in its declared workspace |
+| `link_experiment_to_research_study` | Link an existing experiment and customer interview or usability study in the same workspace; safe to retry |
+| `unlink_experiment_from_research_study` | Remove only the relationship between an experiment and study; safe to retry |
 | `update_research_study` | Update the name and supplied settings; omitted protocol fields are preserved, and protocol changes are locked after the first session |
 | `activate_research_study` | Activate a draft or closed study and return a fresh participant link once |
 | `close_research_study` | Close an active study and revoke PRIMARY participant links |
@@ -565,6 +567,10 @@ All tools require `workspaceId`; single-study operations also require `studyId`.
 List results use `{items, count, nextCursor}` with a default page size of 20 and maximum of 100, ordered newest first by creation time and ID. Pass `nextCursor` unchanged with the same workspace and status filter. Archived studies are excluded by default; request `status: "ARCHIVED"` to inspect them. Cursors do not authorize access and are rejected when malformed or reused with different scope. Concurrent edits may change metadata between pages; this is not a point-in-time export.
 
 Successful mutation text includes `ID: <uuid>` on its own line and structured output contains the same ID. Newly issued links appear as `participantUrl` only in that operation’s response: store them securely. Only hashes are persisted. No tool here can recover a link, expose its hash, or return private attachment paths. Transcript text is readable only through `get_research_session`, and only for a study in a workspace the caller belongs to; the study, session and synthesis reads never return participant names, email addresses, recordings, resume or participant-token material. PM interview studies are excluded from every tool in this section and stay reachable only through their own owner-scoped path. A lost response to a link mutation is ambiguous: inspect study state and use explicit rotation if a replacement is needed, rather than assuming the mutation failed.
+
+Experiment–study relationship tools require `workspaceId`, `experimentId`, and `studyId`. Their mutation result includes both endpoint IDs and `changed`: `true` when a relationship was added or removed, `false` when the requested state already held. Both endpoints must belong to the declared workspace, including for trusted service callers. A study may inform several experiments, and an experiment may link several studies. Draft, active, and closed studies accept new links; archived links remain readable and removable. PM interviews are excluded. Experiment status and the study's protocol lock do not prevent relationship edits.
+
+Relationship summaries contain navigation metadata, not transcripts, participant credentials, or private research attachments. These writes require OAuth write scope and delegated-agent WRITE permission; participant, scoped PM-interview, and scoped research-synthesis credentials cannot use them. Linking changes neither lifecycle nor results and does not validate an assumption. Research Capture must be enabled.
 
 Guide generation uses a tool-free runtime with a 45-second work deadline and bounded cleanup inside the existing MCP request budget. A timeout does not create a study. These tools do not change model or voice rollout flags.
 
