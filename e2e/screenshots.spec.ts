@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import path from "path";
 import fs from "fs";
+import { randomUUID } from "node:crypto";
+import pg from "pg";
 import {
   GUIDED_UX_SCREENSHOT_TOKEN,
   buildScreenshotCases,
@@ -31,6 +33,12 @@ type StandardScreenshotCase = {
 };
 
 const STANDARD_PAGES: StandardScreenshotCase[] = [
+  ...[
+    { file: "discovery-board-mobile.png", route: "discovery" },
+    { file: "roadmap-mobile.png", route: "roadmap" },
+    { file: "tasks-mobile.png", route: "tasks" },
+    { file: "experiments-mobile.png", route: "experiments" },
+  ].map(({ file, route }) => ({ file, url: `${WORKSPACE_BASE}/${route}?view=board`, viewport: { width: 390, height: 844 } })),
   ...(FUNCTIONAL || process.env.DOCS_SESSION_FILE
     ? [{ file: "marketing-authenticated.png", url: "/" }]
     : []),
@@ -142,6 +150,31 @@ async function prepareScreenshot(
 }
 
 test.describe("docs screenshots", () => {
+  const screenshotTaskId = randomUUID();
+  const screenshotRoadmapId = randomUUID();
+  let screenshotPool: pg.Pool | undefined;
+
+  test.beforeAll(async () => {
+    if (!FUNCTIONAL) return;
+    const database = new URL(process.env.DATABASE_URL!);
+    if (!["localhost", "127.0.0.1"].includes(database.hostname) || database.pathname !== "/compass_e2e") {
+      throw new Error("Synthetic screenshot cards require the dedicated local compass_e2e database");
+    }
+    screenshotPool = new pg.Pool({ connectionString: database.toString() });
+    const { rows: [workspace] } = await screenshotPool.query("SELECT w.id FROM compass_dev.workspaces w JOIN compass_dev.organizations o ON w.organization_id=o.id WHERE w.slug='e2e-workspace' AND o.slug='e2e-test-org'");
+    await screenshotPool.query("INSERT INTO compass_dev.tasks (id,workspace_id,title,status,sort_order) VALUES ($1,$2,'Prepare customer interview questions','BACKLOG',-100)", [screenshotTaskId, workspace.id]);
+    await screenshotPool.query("INSERT INTO compass_dev.roadmap_items (id,workspace_id,title,horizon,sort_order) VALUES ($1,$2,'Simplify the first workspace setup','NOW',-100)", [screenshotRoadmapId, workspace.id]);
+  });
+
+  test.afterAll(async () => {
+    if (!screenshotPool) return;
+    try {
+      await screenshotPool.query("DELETE FROM compass_dev.tasks WHERE id=$1", [screenshotTaskId]);
+      await screenshotPool.query("DELETE FROM compass_dev.roadmap_items WHERE id=$1", [screenshotRoadmapId]);
+    } finally {
+      await screenshotPool.end();
+    }
+  });
   test.use({
     storageState: process.env.DOCS_SESSION_FILE
       ? process.env.DOCS_SESSION_FILE

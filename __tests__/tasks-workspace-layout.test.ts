@@ -137,7 +137,7 @@ describe("Tasks dashboard workspace layout", () => {
     expect(track.className).toContain("px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3");
 
     const column = container.querySelector('[data-task-column="TODO"]')!;
-    expect(column.className).toContain('min-w-[280px] flex-1 md:h-full');
+    expect(column).toHaveClass('w-[calc(100cqw-1.5rem)]', 'min-w-0', 'flex-none', 'sm:w-[calc(100cqw-2rem)]', 'md:w-72', 'md:min-w-[280px]', 'md:flex-1', 'md:h-full');
     // The column must NOT clip its own overflow: a card's drag shadow and focus
     // ring render outside the card box and were being sliced off at the column
     // edge. The board is still the sole horizontal scroller — the column simply

@@ -122,7 +122,7 @@ export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, o
   const hasDates = Boolean(item.startDate || item.endDate);
 
   return (
-    <div ref={setNodeRef} style={style} className="touch-none group">
+    <div ref={setNodeRef} style={style} className="group">
       <EntityCard
         interactive
         className="w-full p-3 data-[pending]:opacity-60 data-[dragging=true]:shadow-[var(--shadow-panel)] data-[dragging=true]:ring-2 data-[dragging=true]:ring-ring/30"

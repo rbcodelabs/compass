@@ -53,6 +53,13 @@ function cardFor(title: string) {
 // out — see solution-swimlane-board.tsx.
 
 describe("SolutionCard status badge", () => {
+  it("leaves card content pannable while reserving touch handling for the drag handle", () => {
+    renderCard();
+    const card = cardFor("Guided setup wizard");
+    expect(card.parentElement).not.toHaveClass("touch-none");
+    expect(within(card).getByRole("button", { name: "Drag to reorder" })).toHaveClass("touch-none");
+  });
+
   it("renders the status badge by default, so the panel's flat list keeps today's behavior", () => {
     renderCard();
     expect(within(cardFor("Guided setup wizard")).getByText("Idea")).toBeInTheDocument();
