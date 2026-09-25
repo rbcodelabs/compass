@@ -2,18 +2,20 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import { del, head, put } from "@vercel/blob"
 import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client"
 
-export const FEEDBACK_ATTACHMENT_MAX_COUNT = 5
-export const FEEDBACK_ATTACHMENT_MAX_FILE_BYTES = 10 * 1024 * 1024
+import {
+  FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES,
+  FEEDBACK_ATTACHMENT_MAX_COUNT,
+  FEEDBACK_ATTACHMENT_MAX_FILE_BYTES,
+} from "@/lib/feedback-attachment-rules"
+
+// Re-exported so existing server-side importers keep one import site; the
+// values themselves live in the client-safe rules module.
+export {
+  FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES,
+  FEEDBACK_ATTACHMENT_MAX_COUNT,
+  FEEDBACK_ATTACHMENT_MAX_FILE_BYTES,
+}
 export const MCP_INLINE_ATTACHMENT_MAX_TOTAL_BYTES = 3 * 1024 * 1024
-export const FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "application/pdf",
-  "text/plain",
-  "text/csv",
-] as const
 
 const allowedMimeTypes = new Set<string>(FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES)
 const DIRECT_UPLOAD_TTL_MS = 10 * 60 * 1000
@@ -179,7 +181,23 @@ export function createFeedbackUploadReceipt(payload: UploadReceiptPayload): stri
   return `${encoded}.${signReceiptPayload(encoded)}`
 }
 
-export function verifyFeedbackUploadReceipt(receipt: string): UploadReceiptPayload {
+export type VerifyUploadReceiptOptions = {
+  /**
+   * How long after the receipt's `expiresAt` it is still accepted, in ms.
+   * Defaults to 0 (the MCP contract). The expiry exists to bound the window in
+   * which the *client token* can be used to upload; the receipt itself stays
+   * HMAC-bound to one workspace, pathname, type and size, and the finished blob
+   * is re-checked with `head()`. A human composing feedback can easily spend
+   * longer than the 10-minute token window writing after attaching a file, so
+   * the in-app composer accepts receipts for a bounded period after expiry.
+   */
+  graceMs?: number
+}
+
+export function verifyFeedbackUploadReceipt(
+  receipt: string,
+  { graceMs = 0 }: VerifyUploadReceiptOptions = {},
+): UploadReceiptPayload {
   const [encoded, signature, extra] = receipt.split(".")
   if (!encoded || !signature || extra) throw new Error("Invalid upload receipt.")
   const expected = Buffer.from(signReceiptPayload(encoded))
@@ -202,7 +220,7 @@ export function verifyFeedbackUploadReceipt(receipt: string): UploadReceiptPaylo
     typeof payload.fileType !== "string" ||
     typeof payload.fileSize !== "number" ||
     typeof payload.expiresAt !== "number" ||
-    payload.expiresAt < Date.now()
+    payload.expiresAt + Math.max(0, graceMs) < Date.now()
   ) {
     throw new Error("Upload receipt has expired or is invalid.")
   }
@@ -232,12 +250,43 @@ export async function prepareFeedbackAttachmentUpload(input: {
   return { clientToken, receipt, pathname, expiresAt, attachmentId }
 }
 
-export async function verifyCompletedFeedbackUpload(input: {
-  workspaceId: string
-  url: string
-  receipt: string
-}): Promise<FeedbackAttachmentMetadata & { attachmentId: string }> {
-  const payload = verifyFeedbackUploadReceipt(input.receipt)
+/**
+ * Checks — without touching Blob — that `url` is the upload a receipt was
+ * issued for, in this workspace's configured store. Used before deleting a
+ * blob on the user's behalf, so a caller can only ever delete a pathname the
+ * server itself minted for their workspace.
+ */
+export function verifyFeedbackUploadOwnership(
+  input: { workspaceId: string; url: string; receipt: string },
+  options: VerifyUploadReceiptOptions = {},
+): UploadReceiptPayload {
+  const payload = verifyFeedbackUploadReceipt(input.receipt, options)
+  if (payload.workspaceId !== input.workspaceId) throw new Error("Upload receipt does not belong to this workspace.")
+  let parsed: URL
+  try {
+    parsed = new URL(input.url)
+  } catch {
+    throw new Error("Upload URL is invalid.")
+  }
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname !== configuredBlobStoreHostname() ||
+    decodeURIComponent(parsed.pathname) !== `/${payload.pathname}`
+  ) {
+    throw new Error("Upload URL does not match its receipt.")
+  }
+  return payload
+}
+
+export async function verifyCompletedFeedbackUpload(
+  input: {
+    workspaceId: string
+    url: string
+    receipt: string
+  },
+  options: VerifyUploadReceiptOptions = {},
+): Promise<FeedbackAttachmentMetadata & { attachmentId: string }> {
+  const payload = verifyFeedbackUploadReceipt(input.receipt, options)
   if (payload.workspaceId !== input.workspaceId) throw new Error("Upload receipt does not belong to this workspace.")
   let uploadedUrl: URL
   try {
