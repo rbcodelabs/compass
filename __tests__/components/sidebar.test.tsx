@@ -19,6 +19,7 @@ vi.mock("@/lib/meta-feedback-actions", () => ({
 import { Sidebar } from "@/components/sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AgentRailProvider } from "@/components/agent/agent-rail-context";
 
 const baseProps = {
   orgSlug: "rbcodelabs",
@@ -45,6 +46,7 @@ describe("Sidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     document.cookie = "sidebar_state=; max-age=0; path=/";
+    document.cookie = "compass_panel_agent=; max-age=0; path=/";
   });
 
   afterEach(() => {
@@ -152,4 +154,51 @@ describe("Sidebar", () => {
       .toHaveAttribute("href", "/rbcodelabs/compass/feedback")
     expect(within(mainNav).queryByRole("link", { name: "Capture" })).not.toBeInTheDocument()
   })
+
+  /**
+   * The agent rail's toggle. It lives in this nav rather than as a trailing
+   * action on the Agent row because `SidebarMenuAction` is hidden in icon mode,
+   * which would hide the control from precisely the users who collapse the nav
+   * to make room for the rail.
+   */
+  describe("agent panel toggle", () => {
+    it("is absent outside a workspace, where there is no rail to toggle", () => {
+      // The settings tree renders this sidebar with no AgentRailProvider.
+      renderSidebar(true);
+      expect(screen.queryByRole("button", { name: /agent panel/i })).not.toBeInTheDocument();
+      // The Agent *link* is untouched either way — both surfaces are keepers.
+      const mainNav = screen.getByRole("navigation", { name: "Main navigation" });
+      expect(within(mainNav).getByRole("link", { name: "Agent" })).toHaveAttribute(
+        "href",
+        "/rbcodelabs/compass/agent",
+      );
+    });
+
+    it("toggles the rail without touching the nav's own collapsed state", () => {
+      render(
+        <TooltipProvider>
+          <SidebarProvider>
+            <AgentRailProvider>
+              <Sidebar {...baseProps} isOrgAdmin researchCaptureEnabled />
+            </AgentRailProvider>
+          </SidebarProvider>
+        </TooltipProvider>,
+      );
+
+      const sidebar = document.querySelector('[data-slot="sidebar"][data-state]');
+      const toggle = screen.getByRole("button", { name: "Agent panel" });
+      expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+      fireEvent.click(toggle);
+
+      expect(screen.getByRole("button", { name: "Agent panel" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(document.cookie).toContain("compass_panel_agent=1");
+      // "Don't touch nav at all": opening the rail must not collapse the nav
+      // out from under the user.
+      expect(sidebar).toHaveAttribute("data-state", "expanded");
+    });
+  });
 });

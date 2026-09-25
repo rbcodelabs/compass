@@ -32,11 +32,21 @@ export interface PanelResizeHandleProps {
   resolveMaxWidth: () => number;
   /** Called once per gesture, on release, and on every keyboard step. */
   onCommit: (width: number) => void;
+  /**
+   * Which side of the viewport the panel this handle belongs to is docked on —
+   * i.e. which of its edges faces main content, and therefore where the handle
+   * sits and which drag direction grows it.
+   *
+   * Defaults to `"right"`, the original and only behaviour before the agent
+   * rail existed, so every existing call site is unchanged by omission.
+   */
+  side?: "left" | "right";
   className?: string;
 }
 
 /**
- * A vertical drag handle on the left edge of a right-hand panel.
+ * A vertical drag handle on the inward-facing edge of a docked panel — the left
+ * edge of a right-hand panel, or the right edge of a left-hand one.
  *
  * Hand-rolled rather than pulling in `react-resizable-panels`: that library
  * wants to own both sides of the divider, has no cookie persistence, and would
@@ -76,8 +86,15 @@ export function PanelResizeHandle({
   surfaceRef,
   resolveMaxWidth,
   onCommit,
+  side = "right",
   className,
 }: PanelResizeHandleProps) {
+  // Which way the pointer has to travel to make the panel wider, as a sign:
+  // toward the centre of the viewport. For a right-hand panel that is leftward
+  // (decreasing clientX, hence -1); for a left-hand rail it is rightward. Every
+  // direction-dependent branch below reduces to this one number, so the drag and
+  // the keyboard cannot drift out of agreement.
+  const growSign = side === "right" ? -1 : 1;
   // All drag bookkeeping lives in a ref: none of it should cause a render.
   const dragRef = React.useRef<{
     pointerId: number;
@@ -150,8 +167,9 @@ export function PanelResizeHandle({
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
 
-    // Right-hand panel: dragging *left* (a decreasing clientX) makes it wider.
-    const raw = drag.startWidth + (drag.startX - event.clientX);
+    // Dragging toward the centre of the viewport makes the panel wider, in
+    // whichever direction that is for this side (see `growSign`).
+    const raw = drag.startWidth + growSign * (event.clientX - drag.startX);
     drag.latest = Math.round(Math.min(drag.maxWidth, Math.max(PANEL_WIDTH_MIN, raw)));
 
     if (drag.frame !== null) return; // a write is already queued for this frame
@@ -178,9 +196,12 @@ export function PanelResizeHandle({
     const step = event.shiftKey ? STEP_LARGE : STEP;
     let next: number | null = null;
 
-    // Mirrors the drag: left grows a right-hand panel, right shrinks it.
-    if (event.key === "ArrowLeft") next = width + step;
-    else if (event.key === "ArrowRight") next = width - step;
+    // Mirrors the drag exactly: the arrow that points the same way a widening
+    // drag would travel grows the panel, and the opposite one shrinks it. So
+    // Left grows a right-hand panel and Right grows a left-hand rail, with no
+    // second source of truth for the direction.
+    const arrow = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+    if (arrow !== 0) next = width + (arrow === growSign ? step : -step);
     else if (event.key === "Home") next = PANEL_WIDTH_MIN;
     else if (event.key === "End") next = max;
     if (next === null) return;
@@ -219,8 +240,14 @@ export function PanelResizeHandle({
         // The visible divider is 1px, but `after:` widens the hit target to a
         // comfortable 9px without adding any layout width — a 1px drag target
         // is unusable with a mouse and impossible with a trackpad.
-        "absolute inset-y-0 left-0 z-10 w-px cursor-col-resize touch-none select-none bg-border-default",
-        "after:absolute after:inset-y-0 after:-left-1 after:w-[9px] after:content-['']",
+        "absolute inset-y-0 z-10 w-px cursor-col-resize touch-none select-none bg-border-default",
+        "after:absolute after:inset-y-0 after:w-[9px] after:content-['']",
+        // Emitted as one side or the other, never both: tailwind-merge treats
+        // `left-0` and `right-0` as different properties and would happily keep
+        // both, stretching the handle across the panel.
+        side === "right"
+          ? "left-0 after:-left-1"
+          : "right-0 after:-right-1",
         "hover:bg-border-interactive focus-visible:bg-border-interactive focus-visible:outline-none",
         className,
       )}

@@ -14,6 +14,8 @@ import {
   Map,
   MessageSquare,
   MessageSquareCheck,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   Sparkles,
   Target,
@@ -48,6 +50,7 @@ import { SendCompassFeedbackDialog } from "@/components/feedback/send-compass-fe
 import { signOutAction } from "@/lib/actions/auth-actions"
 import { getWorkspaceSwitchPath } from "@/lib/workspace-nav"
 import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
+import { useAgentRailOptional } from "@/components/agent/agent-rail-context"
 
 interface SidebarProps {
   orgSlug: string
@@ -74,6 +77,51 @@ const baseNavItems = [
   { label: "Canvas", path: "canvas", Icon: Waypoints },
   { label: "Agent", path: "agent", Icon: Sparkles },
 ]
+
+/**
+ * Opens/closes the agent rail.
+ *
+ * ## Why a row of its own, and not a trailing button on the Agent row
+ *
+ * The Agent row has to stay a plain link to the full-page agent screen — both
+ * surfaces are keepers, and the page is the one that survives a refresh and a
+ * shared URL. That leaves `SidebarMenuAction` as the obvious home for a toggle,
+ * except its class list carries `group-data-[collapsible=icon]:hidden`: it
+ * disappears the moment the nav collapses to icons. The users who collapse the
+ * nav are *exactly* the ones making room for this rail, so that placement would
+ * hide the control from its own audience and leave them nothing but ⌘J.
+ *
+ * A sibling menu row survives the collapse as an icon with a tooltip, so the
+ * affordance is visible in both nav states. The cost is two agent-ish entries
+ * in the nav, which the distinct label and icon carry.
+ *
+ * Returns `null` outside a workspace — this sidebar also renders in the settings
+ * tree, which mounts no `AgentRailProvider` and has no rail to toggle.
+ */
+function AgentRailToggle() {
+  const rail = useAgentRailOptional()
+  if (!rail) return null
+
+  const Icon = rail.open ? PanelLeftClose : PanelLeftOpen
+
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        onClick={rail.toggleRail}
+        // Not `isActive`: that styling means "this is the page you are on", and
+        // is already spoken for by the Agent row when you are on the agent
+        // screen. Open-ness is a pressed state, which is what screen readers
+        // will announce here.
+        aria-pressed={rail.open}
+        tooltip={rail.open ? "Hide agent panel (⌘J)" : "Show agent panel (⌘J)"}
+        className="relative h-9 rounded-lg text-text-secondary"
+      >
+        <Icon className={rail.open ? "text-primary" : "text-text-subtle"} aria-hidden="true" />
+        <span>Agent panel</span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  )
+}
 
 function getInitials(name: string): string {
   return name
@@ -250,6 +298,7 @@ export function Sidebar({
                   </SidebarMenuItem>
                 )
               })}
+              <AgentRailToggle />
               </SidebarMenu>
             </nav>
           </SidebarGroupContent>

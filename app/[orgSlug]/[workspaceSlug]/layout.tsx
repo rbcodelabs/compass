@@ -7,6 +7,9 @@ import { BottomNav } from "@/components/bottom-nav"
 import { MobileHeader } from "@/components/mobile-header"
 import { PanelProvider } from "@/components/panels/panel-context"
 import { PanelShell } from "@/components/panels/panel-shell"
+import { AgentRailProvider } from "@/components/agent/agent-rail-context"
+import { AgentRail } from "@/components/agent/agent-rail"
+import { initialsOf } from "@/lib/user-initials"
 import { WorkspaceThemeStyle } from "@/components/branding/workspace-theme-style"
 import { resolveWorkspaceBranding } from "@/lib/branding"
 import { cookies } from "next/headers"
@@ -53,6 +56,13 @@ export default async function WorkspaceLayout({
   const initialPanelPin = parsePanelPin(
     cookieStore.get(panelPinCookieName("detail"))?.value
   )
+  // Same contract again for the agent rail, where `pinned` means "docked open".
+  // Seeding it here is what lets a returning user's rail be present in the first
+  // painted frame — and, more importantly, lets AgentRail measure the real
+  // layout before paint instead of after.
+  const initialAgentPin = parsePanelPin(
+    cookieStore.get(panelPinCookieName("agent"))?.value
+  )
   const researchCaptureEnabled = isResearchCaptureEnabled()
   const updatesEnabled = await workspaceUpdatesAvailable(getPrisma())
 
@@ -63,6 +73,13 @@ export default async function WorkspaceLayout({
       <ThemeProvider>
         <div className="workspace-theme-scope contents">
         <PanelProvider orgSlug={orgSlug} workspaceSlug={workspaceSlug}>
+        {/* Inside PanelProvider, because the rail measures around the detail
+            panel and so reads that context; and at layout level rather than
+            inside a page, because the layout is the only thing that survives
+            navigation between workspace screens — which is the entire point of
+            the rail over the full-page agent screen. A streaming turn keeps
+            streaming while the user moves to the Roadmap. */}
+        <AgentRailProvider initialPin={initialAgentPin}>
         {/* Mobile header — shown on small screens only (hidden on md+) */}
         <MobileHeader
           orgSlug={orgSlug}
@@ -77,7 +94,15 @@ export default async function WorkspaceLayout({
         <TooltipProvider>
           <SidebarProvider
             defaultOpen={sidebarDefaultOpen}
-            className="h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden md:h-screen"
+            // `relative` is here for the agent rail's overlay mode, which
+            // positions itself `absolute` against this wrapper (offset by the
+            // live nav width) when there is not enough room to dock it as a
+            // column. Without it the rail would resolve against the viewport
+            // and sit under the nav. It changes nothing else: every other
+            // absolutely positioned descendant already resolves against a
+            // closer positioned ancestor (SidebarInset, or the fixed sidebar
+            // container), and `relative` does not capture `fixed` children.
+            className="relative h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden md:h-screen"
             style={{
               "--sidebar-width": "13.75rem",
               "--sidebar-width-icon": "3.5rem",
@@ -94,6 +119,17 @@ export default async function WorkspaceLayout({
               isOrgAdmin={isOrgAdmin}
               researchCaptureEnabled={researchCaptureEnabled}
               updatesEnabled={updatesEnabled}
+            />
+
+            {/* Between the nav and main content, so the docked rail is a real
+                second column in the same flex row — main content yields to it
+                rather than scrolling under it. The detail panel stays where it
+                is, on the far right, which is the constraint that put the agent
+                on this side in the first place. */}
+            <AgentRail
+              workspaceId={workspace.id}
+              basePath={`/${orgSlug}/${workspaceSlug}`}
+              userInitials={initialsOf(user.name ?? user.email)}
             />
 
             {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}
@@ -113,6 +149,7 @@ export default async function WorkspaceLayout({
 
         {/* Mobile bottom nav — shown on small screens only */}
         <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} researchCaptureEnabled={researchCaptureEnabled} updatesEnabled={updatesEnabled} />
+        </AgentRailProvider>
         </PanelProvider>
         </div>
       </ThemeProvider>
