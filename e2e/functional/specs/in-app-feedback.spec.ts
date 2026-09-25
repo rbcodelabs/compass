@@ -2,7 +2,8 @@
  * In-App Feedback Submission functional spec.
  *
  * Part A: workspace-scoped "New Feedback" creation directly on a workspace's
- *         own Feedback board (components/feedback/feedback-grid.tsx)
+ *         own Feedback board (components/feedback/feedback-grid.tsx), via the
+ *         docked composer panel
  *         — previously this board was triage-only (view/status-change
  *         existing items), with no way to create a new item in-app.
  *
@@ -36,20 +37,25 @@ test.describe("In-App Feedback Submission", () => {
       .locator('[data-slot="workspace-header"]')
       .getByRole("button", { name: "New Feedback" })
       .click();
-    await page.getByLabel("Title").fill(title);
-    await page.getByLabel("Description (optional)").fill("Created via the New Feedback dialog.");
+    // The composer panel (components/feedback/feedback-composer.tsx) replaced
+    // the old modal; feedback-composer.spec.ts covers it in depth.
+    const composer = page.locator('[data-slot="feedback-composer"]');
+    await composer.getByLabel("Title").fill(title);
+    await composer.getByRole("button", { name: "Markdown", exact: true }).click();
+    await composer
+      .getByLabel("Details Markdown source")
+      .fill("Created via the New Feedback composer.");
     // `exact: true` matters here: Playwright's `name` option is a
     // case-insensitive SUBSTRING match by default, and the DataGrid's
     // "Submitted" column header renders a sort button named "Sort by
     // Submitted" — which contains "Submit". Without `exact`, this locator
-    // resolves to both the dialog's submit button and a column header.
-    await page.getByRole("button", { name: "Submit", exact: true }).click();
+    // resolves to both the composer's submit button and a column header.
+    await composer.getByRole("button", { name: "Submit", exact: true }).click();
 
-    // The dialog closes (no full page reload — the board updates from the
-    // server action's response) and the new item appears in the board.
-    await expect(
-      page.getByRole("button", { name: "Submit", exact: true })
-    ).toHaveCount(0);
+    // The composer hands its slot to the new item (no full page reload — the
+    // board updates from the server action's response) and the new item
+    // appears in the board.
+    await expect(page.locator('[data-slot="feedback-composer"]')).toHaveCount(0);
     await expect(
       page.getByTestId("grid-row").filter({ hasText: title })
     ).toHaveCount(1, { timeout: 10_000 });

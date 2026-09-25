@@ -205,3 +205,70 @@ describe("direct feedback attachment uploads", () => {
     })).rejects.toThrow(/does not match/)
   })
 })
+
+describe("receipt expiry grace (in-app composer)", () => {
+  async function prepareAt(now: number) {
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+    mockGenerateClientToken.mockResolvedValue("client-token")
+    return attachmentModule.prepareFeedbackAttachmentUpload({
+      workspaceId: WS_ID, filename: "screenshot.png", fileType: "image/png", fileSize: 3,
+    })
+  }
+
+  it("keeps the MCP default: an expired receipt is rejected", async () => {
+    const prepared = await prepareAt(Date.UTC(2026, 0, 1))
+    vi.setSystemTime(prepared.expiresAt + 1)
+    expect(() => attachmentModule.verifyFeedbackUploadReceipt(prepared.receipt)).toThrow(/expired/)
+  })
+
+  it("accepts an expired receipt inside the caller's grace window, and not after it", async () => {
+    const prepared = await prepareAt(Date.UTC(2026, 0, 1))
+    vi.setSystemTime(prepared.expiresAt + 60_000)
+    expect(attachmentModule.verifyFeedbackUploadReceipt(prepared.receipt, { graceMs: 120_000 }).pathname)
+      .toBe(prepared.pathname)
+    vi.setSystemTime(prepared.expiresAt + 120_001)
+    expect(() => attachmentModule.verifyFeedbackUploadReceipt(prepared.receipt, { graceMs: 120_000 }))
+      .toThrow(/expired/)
+  })
+})
+
+describe("verifyFeedbackUploadOwnership", () => {
+  async function prepared() {
+    mockGenerateClientToken.mockResolvedValue("client-token")
+    return attachmentModule.prepareFeedbackAttachmentUpload({
+      workspaceId: WS_ID, filename: "screenshot.png", fileType: "image/png", fileSize: 3,
+    })
+  }
+
+  it("accepts the exact URL the receipt minted, in the configured store", async () => {
+    const upload = await prepared()
+    const url = `https://test.public.blob.vercel-storage.com/${upload.pathname}`
+    expect(attachmentModule.verifyFeedbackUploadOwnership({ workspaceId: WS_ID, url, receipt: upload.receipt }).pathname)
+      .toBe(upload.pathname)
+    expect(mockHead).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["another pathname", "https://test.public.blob.vercel-storage.com/feedback/someone-else.png"],
+    ["another store", "PATH_ON_FOREIGN_STORE"],
+    ["plain http", "PATH_OVER_HTTP"],
+  ])("rejects %s", async (_label, variant) => {
+    const upload = await prepared()
+    const url = variant === "PATH_ON_FOREIGN_STORE"
+      ? `https://foreign.public.blob.vercel-storage.com/${upload.pathname}`
+      : variant === "PATH_OVER_HTTP"
+        ? `http://test.public.blob.vercel-storage.com/${upload.pathname}`
+        : variant
+    expect(() => attachmentModule.verifyFeedbackUploadOwnership({ workspaceId: WS_ID, url, receipt: upload.receipt }))
+      .toThrow(/does not match its receipt/)
+  })
+
+  it("rejects a receipt minted for a different workspace", async () => {
+    const upload = await prepared()
+    const url = `https://test.public.blob.vercel-storage.com/${upload.pathname}`
+    expect(() => attachmentModule.verifyFeedbackUploadOwnership({
+      workspaceId: "44444444-4444-4444-4444-444444444444", url, receipt: upload.receipt,
+    })).toThrow(/does not belong to this workspace/)
+  })
+})

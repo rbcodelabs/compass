@@ -1,4 +1,5 @@
 import { File as FileIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export type FeedbackAttachmentData = {
   id: string;
@@ -9,6 +10,12 @@ export type FeedbackAttachmentData = {
 
 interface Props {
   attachments: FeedbackAttachmentData[];
+  /**
+   * `sm` (default) is the dense strip used in grid rows and portal cards.
+   * `lg` is for the detail panel, where there is room to actually see a
+   * screenshot and read file names.
+   */
+  size?: "sm" | "lg";
 }
 
 /**
@@ -17,11 +24,12 @@ interface Props {
  * blob URL in a new tab. Shared between the public portal list and the
  * internal triage board so attachment presentation stays consistent.
  */
-export function FeedbackAttachments({ attachments }: Props) {
+export function FeedbackAttachments({ attachments, size = "sm" }: Props) {
   if (attachments.length === 0) return null;
+  const large = size === "lg";
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+    <div className={cn("flex flex-wrap items-center", large ? "gap-2" : "gap-1.5 mt-1")}>
       {attachments.map((a) =>
         a.fileType.startsWith("image/") ? (
           <a
@@ -29,7 +37,10 @@ export function FeedbackAttachments({ attachments }: Props) {
             href={a.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block rounded-md border border-border-default overflow-hidden w-10 h-10 shrink-0 hover:border-border-strong transition-colors"
+            className={cn(
+              "block rounded-md border border-border-default overflow-hidden shrink-0 hover:border-border-strong transition-colors",
+              large ? "w-24 h-24" : "w-10 h-10",
+            )}
             title={a.filename}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -41,7 +52,10 @@ export function FeedbackAttachments({ attachments }: Props) {
             href={a.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 rounded-md border border-border-default bg-surface-app px-2 py-1 text-xs text-text-secondary hover:bg-surface-inset hover:border-border-strong transition-colors max-w-[10rem]"
+            className={cn(
+              "flex items-center gap-1 rounded-md border border-border-default bg-surface-app px-2 py-1 text-xs text-text-secondary hover:bg-surface-inset hover:border-border-strong transition-colors",
+              large ? "max-w-full" : "max-w-[10rem]",
+            )}
             title={a.filename}
           >
             <FileIcon className="w-3 h-3 shrink-0 text-text-subtle" />

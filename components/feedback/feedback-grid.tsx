@@ -6,8 +6,8 @@ import { Bug, Lightbulb } from "lucide-react";
 
 import { DataGrid } from "@/components/data-grid";
 import type { GridRowState } from "@/components/data-grid";
-import { CreateFeedbackDialog } from "@/components/feedback/create-feedback-dialog";
 import { FeedbackAttachments } from "@/components/feedback/feedback-attachments";
+import { NewFeedbackButton } from "@/components/feedback/new-feedback-button";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { usePanelContext } from "@/components/panels/panel-context";
@@ -28,6 +28,7 @@ import {
   formatFeedbackDate,
 } from "@/lib/feedback-meta";
 import { cn } from "@/lib/utils";
+import { markdownToPlainText } from "@/lib/markdown-plain-text";
 import {
   buildFeedbackColumns,
   type FeedbackOpportunityOption,
@@ -51,9 +52,11 @@ import { FeedbackActionCell } from "./feedback-action-cell";
  * revalidate path (see `RevalidateTarget` in the feedback actions module);
  * callers without an optimistic overlay still pass a real path.
  *
- * `router.refresh()` appears exactly twice below: behind the stale strip's
- * explicit "Refresh" button, and after a create — both deliberate, user-
- * initiated reconciliations, never a side effect of editing a cell.
+ * `router.refresh()` appears once below, behind the stale strip's explicit
+ * "Refresh" button. Creating feedback is the other deliberate reconciliation,
+ * and it now lives in the composer panel (components/feedback/
+ * feedback-composer.tsx), which refreshes after a successful submit — never a
+ * side effect of editing a cell.
  */
 
 /** Search params this screen owns. Anything else on the URL is preserved. */
@@ -96,7 +99,6 @@ export function FeedbackGrid({
   const { openPanel } = usePanelContext();
   const urlState = useUrlState();
 
-  const feedbackPath = `/${orgSlug}/${workspaceSlug}/feedback`;
   const roadmapPath = `/${orgSlug}/${workspaceSlug}/roadmap`;
 
   /**
@@ -172,7 +174,9 @@ export function FeedbackGrid({
         </div>
 
         {row.description && (
-          <p className="line-clamp-2 text-xs text-text-subtle">{row.description}</p>
+          <p className="line-clamp-2 text-xs text-text-subtle">
+            {markdownToPlainText(row.description)}
+          </p>
         )}
 
         <FeedbackAttachments attachments={row.attachments} />
@@ -223,15 +227,7 @@ export function FeedbackGrid({
       <EmptyState
         title="No feedback submitted yet"
         description="Enable the public feedback portal in Settings to start collecting submissions, or log one yourself below."
-        primaryAction={
-          <CreateFeedbackDialog
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-            revalidatePathStr={feedbackPath}
-            onCreated={() => router.refresh()}
-            variant="empty-state"
-          />
-        }
+        primaryAction={<NewFeedbackButton variant="empty-state" />}
       />
     );
   }

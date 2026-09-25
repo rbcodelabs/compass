@@ -5,14 +5,33 @@ const mockFeedbackItem = {
   create: vi.fn(),
 };
 
+const mockFeedbackAttachment = {
+  findFirst: vi.fn(),
+};
+
 const mockWorkspace = {
   findFirst: vi.fn(),
 };
 
 const mockPrisma = {
   feedbackItem: mockFeedbackItem,
+  feedbackAttachment: mockFeedbackAttachment,
   workspace: mockWorkspace,
 };
+
+const { mockVerifyCompleted, mockVerifyOwnership, mockPrepareUpload, mockDeleteBlobs } = vi.hoisted(() => ({
+  mockVerifyCompleted: vi.fn(),
+  mockVerifyOwnership: vi.fn(),
+  mockPrepareUpload: vi.fn(),
+  mockDeleteBlobs: vi.fn(),
+}));
+
+vi.mock("@/lib/feedback-attachments", () => ({
+  verifyCompletedFeedbackUpload: mockVerifyCompleted,
+  verifyFeedbackUploadOwnership: mockVerifyOwnership,
+  prepareFeedbackAttachmentUpload: mockPrepareUpload,
+  deleteFeedbackBlobs: mockDeleteBlobs,
+}));
 
 vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),
@@ -31,6 +50,8 @@ import {
   linkFeedbackToOpportunity,
   updateFeedbackType,
   createFeedback,
+  prepareFeedbackAttachment,
+  discardFeedbackAttachment,
 } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 
 const mockAuth = vi.mocked(auth);
@@ -238,8 +259,13 @@ describe("createFeedback", () => {
       "/acme/widgets/feedback"
     );
 
+    // Membership, not just a session: a server action is a public endpoint.
     expect(mockWorkspace.findFirst).toHaveBeenCalledWith({
-      where: { slug: "widgets", organization: { slug: "acme" } },
+      where: {
+        slug: "widgets",
+        organization: { slug: "acme" },
+        members: { some: { userId: "user-1" } },
+      },
       select: { id: true },
     });
     expect(mockFeedbackItem.create).toHaveBeenCalledWith(
@@ -322,5 +348,188 @@ describe("createFeedback", () => {
     await expect(
       createFeedback("acme", "widgets", { title: "Idea", description: "", type: "IDEA" }, "/path")
     ).rejects.toThrow("DB error");
+  });
+});
+
+describe("createFeedback with attachments", () => {
+  const upload = (n: number) => ({
+    url: `https://store.public.blob.vercel-storage.com/feedback/ws-1/${n}.png`,
+    receipt: `receipt-${n}`,
+  });
+
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({
+      user: { id: "user-1", name: "Dev User", email: "dev@localhost.dev" },
+    } as ReturnType<typeof auth> extends Promise<infer T> ? T : never);
+    mockVerifyCompleted.mockImplementation(async ({ url, receipt }: { url: string; receipt: string }) => ({
+      attachmentId: `att-${receipt}`,
+      url,
+      filename: "shot.png",
+      fileType: "image/png",
+      fileSize: 42,
+    }));
+  });
+
+  it("verifies each upload against this workspace with a grace window, then creates item + rows in one write", async () => {
+    const result = await createFeedback(
+      "acme",
+      "widgets",
+      { title: "Bug", description: "## Steps", type: "BUG", attachments: [upload(1), upload(2)] },
+      "/acme/widgets/feedback"
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockVerifyCompleted).toHaveBeenCalledTimes(2);
+    expect(mockVerifyCompleted).toHaveBeenCalledWith(
+      { workspaceId: "ws-1", url: upload(1).url, receipt: "receipt-1" },
+      { graceMs: 24 * 60 * 60 * 1000 },
+    );
+    expect(mockFeedbackItem.create).toHaveBeenCalledTimes(1);
+    expect(mockFeedbackItem.create.mock.calls[0][0].data).toMatchObject({
+      description: "## Steps",
+      type: "BUG",
+      attachments: {
+        create: [
+          { id: "att-receipt-1", url: upload(1).url, filename: "shot.png", fileType: "image/png", fileSize: 42 },
+          { id: "att-receipt-2", url: upload(2).url, filename: "shot.png", fileType: "image/png", fileSize: 42 },
+        ],
+      },
+    });
+  });
+
+  it("creates nothing and names the failing upload when one cannot be verified", async () => {
+    mockVerifyCompleted
+      .mockResolvedValueOnce({ attachmentId: "a1", url: upload(1).url, filename: "a", fileType: "image/png", fileSize: 1 })
+      .mockRejectedValueOnce(new Error("Completed upload does not match its receipt."));
+
+    const result = await createFeedback(
+      "acme",
+      "widgets",
+      { title: "Bug", description: "", type: "BUG", attachments: [upload(1), upload(2)] },
+      "/path"
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: expect.stringMatching(/could not be verified/),
+      attachmentUrl: upload(2).url,
+    });
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
+  });
+
+  it("de-duplicates the same receipt submitted twice", async () => {
+    await createFeedback(
+      "acme",
+      "widgets",
+      { title: "Bug", description: "", type: "BUG", attachments: [upload(1), upload(1)] },
+      "/path"
+    );
+    expect(mockFeedbackItem.create.mock.calls[0][0].data.attachments.create).toHaveLength(1);
+  });
+
+  it("refuses more than five attachments before touching storage or the DB", async () => {
+    const result = await createFeedback(
+      "acme",
+      "widgets",
+      { title: "Bug", description: "", type: "BUG", attachments: [1, 2, 3, 4, 5, 6].map(upload) },
+      "/path"
+    );
+    expect(result).toEqual({ ok: false, error: "Attach at most 5 files." });
+    expect(mockVerifyCompleted).not.toHaveBeenCalled();
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown type rather than persisting it", async () => {
+    const result = await createFeedback(
+      "acme",
+      "widgets",
+      { title: "Bug", description: "", type: "QUESTION" as never },
+      "/path"
+    );
+    expect(result).toEqual({ ok: false, error: "Type must be Idea or Bug" });
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("prepareFeedbackAttachment", () => {
+  const png = { filename: "shot.png", fileType: "image/png", fileSize: 1024 };
+
+  beforeEach(() => {
+    process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_store_secret";
+    mockPrepareUpload.mockResolvedValue({
+      clientToken: "client-token",
+      receipt: "receipt",
+      pathname: "feedback/ws-1/x-shot.png",
+      expiresAt: 123,
+      attachmentId: "att-1",
+    });
+  });
+
+  it("mints an upload for a member's workspace", async () => {
+    const result = await prepareFeedbackAttachment("acme", "widgets", png);
+    expect(result).toEqual({
+      ok: true,
+      upload: { clientToken: "client-token", receipt: "receipt", pathname: "feedback/ws-1/x-shot.png", expiresAt: 123 },
+    });
+    expect(mockPrepareUpload).toHaveBeenCalledWith({ workspaceId: "ws-1", ...png });
+  });
+
+  it.each([
+    ["an unsupported type", { ...png, fileType: "application/zip" }, /unsupported file type/],
+    ["an oversize file", { ...png, fileSize: 11 * 1024 * 1024 }, /larger than 10 MB/],
+    ["an empty file", { ...png, fileSize: 0 }, /is empty/],
+  ])("rejects %s without minting a token", async (_label, file, message) => {
+    const result = await prepareFeedbackAttachment("acme", "widgets", file);
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(message) });
+    expect(mockPrepareUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses non-members", async () => {
+    mockWorkspace.findFirst.mockResolvedValue(null);
+    expect(await prepareFeedbackAttachment("acme", "widgets", png)).toEqual({ ok: false, error: "Workspace not found" });
+    expect(mockPrepareUpload).not.toHaveBeenCalled();
+  });
+
+  it("returns a result instead of throwing when signed out", async () => {
+    mockAuth.mockResolvedValue(null as never);
+    expect(await prepareFeedbackAttachment("acme", "widgets", png)).toEqual({ ok: false, error: "You are not signed in." });
+  });
+
+  it("explains when Blob storage is not configured", async () => {
+    delete process.env.BLOB_READ_WRITE_TOKEN;
+    const result = await prepareFeedbackAttachment("acme", "widgets", png);
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/not available|aren’t available/) });
+  });
+});
+
+describe("discardFeedbackAttachment", () => {
+  const upload = { url: "https://store.public.blob.vercel-storage.com/feedback/ws-1/x.png", receipt: "r" };
+
+  beforeEach(() => {
+    mockVerifyOwnership.mockReturnValue({ pathname: "feedback/ws-1/x.png" });
+    mockFeedbackAttachment.findFirst.mockResolvedValue(null);
+  });
+
+  it("deletes an unlinked blob the server minted for this workspace", async () => {
+    expect(await discardFeedbackAttachment("acme", "widgets", upload)).toEqual({ ok: true });
+    expect(mockVerifyOwnership).toHaveBeenCalledWith(
+      { workspaceId: "ws-1", url: upload.url, receipt: "r" },
+      { graceMs: 24 * 60 * 60 * 1000 },
+    );
+    expect(mockDeleteBlobs).toHaveBeenCalledWith([upload.url]);
+  });
+
+  it("never deletes a blob that is already linked to a feedback item", async () => {
+    mockFeedbackAttachment.findFirst.mockResolvedValue({ id: "att-1" });
+    const result = await discardFeedbackAttachment("acme", "widgets", upload);
+    expect(result.ok).toBe(false);
+    expect(mockDeleteBlobs).not.toHaveBeenCalled();
+  });
+
+  it("never deletes when the receipt does not match", async () => {
+    mockVerifyOwnership.mockImplementation(() => { throw new Error("Upload URL does not match its receipt."); });
+    const result = await discardFeedbackAttachment("acme", "widgets", upload);
+    expect(result).toEqual({ ok: false, error: "Upload URL does not match its receipt." });
+    expect(mockDeleteBlobs).not.toHaveBeenCalled();
   });
 });
