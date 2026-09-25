@@ -1,10 +1,16 @@
 # Publicly accessible, element-anchored artifact comments
 
-**Status:** Proposed — RFC, seeking maintainer agreement on shape before any implementation.
+**Status:** Proposed — RFC **v2**, revised in response to maintainer review on #298.
+Phase 1 implementation is proceeding on the strength of that review; this document
+is the shape it is being built to.
 **Author:** External contributor
 **Date:** 2026-09-25
-**Verified against:** `upstream/main` @ `e534bf81`, re-checked at `483245a7`
-**Revision:** sixth draft. Every factual claim re-checked against source. The
+**Verified against:** `upstream/main` @ `e534bf81`, re-checked at `483245a7`, and
+again at `8875bd91` for v2
+**Revision:** seventh draft (**RFC v2**). Drafts one through six were pre-review
+self-correction; v2 is the first revision driven by someone else's reading. What
+that review changed, and why each change is structural rather than cosmetic, is
+in [the maintainer review](#what-the-maintainer-review-changed-rfc-v2). The
 corrections made to each previous draft are listed in the appendix rather than
 applied silently — [third pass](#what-the-third-pass-found),
 [fourth pass](#what-the-fourth-pass-found),
@@ -25,6 +31,15 @@ trust the symbol.
 re-confirmed to still resolve at `483245a7`; migration `062` is also still free.
 Stating both hashes is deliberate: the first is where the claims were read, the
 second is where they were last confirmed.
+
+And it moved again between the review and this revision — `483245a7` →
+`8875bd91`, 74 files. Exactly **one** of the 46 files cited here is among them:
+`app/[orgSlug]/[workspaceSlug]/settings/actions.ts`, whose portal-settings block
+shifted three lines (`858-881` → `857-880`). The claim it supports — four
+optional booleans, each conditionally spread, so an omitted flag fails silently
+rather than failing to compile — is unchanged, and the citation now names
+`updatePortalSettings` so the next shift is survivable. Migration `062` is still
+free at `8875bd91`.
 
 ---
 
@@ -99,8 +114,16 @@ keeping it cheap.
 
 ## Non-goals
 
-- **Not** a general-purpose website annotation tool. Scope is prototypes an
-  `Artifact` points at.
+- **Phase 1 ships the artifact-bound path; the credential and anchor models must
+  not assume an `Artifact` exists.** This replaces an earlier non-goal that read
+  *"not a general-purpose website annotation tool — scope is prototypes an
+  `Artifact` points at"*, which was wrong and is withdrawn. Working on any
+  website — a v0 build, a staging deploy, eventually a production app — is a
+  requirement, not a later idea, and a schema that reaches it only by migration
+  is a schema that failed. What is *scoped out of Phase 1* is the delivery of the
+  unbound path, not its possibility: see
+  [Routing by binding](#routing-by-binding--one-widget-two-destinations) for the
+  model and [Phasing](#phasing) for what actually gets built first.
 - **Not** a change to how existing artifact comments behave. The anchor is
   additive and nullable; a comment without one is exactly what #275 shipped.
 - **Not** a new triage lifecycle. Anchored comments are discussion. Anything
@@ -285,34 +308,74 @@ uses "pin" for docking a side panel, `PANEL_IDS` already contains
 `artifactComments`, and the literal on-screen control beside the artifact
 preview is **"Pin panel"**. Shipping a second meaning of "pin" onto that exact
 screen would be a lasting readability tax. This document uses **"anchored
-comment"** throughout, and names the model `ArtifactCommentAnchor` to sit
+comment"** throughout, and names the model `CommentElementAnchor` to sit
 beside `DocCommentAnchor`.
 
 ---
 
 ## Data model
 
-**Three new tables** — an anchor, an identity extension, and a token — plus one
-new workspace column and one widened TypeScript union. No new comment target
-type, no new `PanelId`, and no change to any existing column on `Comment`.
+**Five new tables** — a feedback source, its credential, two element anchors, and
+an identity extension — plus one new workspace column and two widened TypeScript
+unions. No new comment target type, no new `PanelId`, and no change to any
+existing column on `Comment` or `FeedbackItem`.
 
-Two of the three are 1:1 extensions keyed on `Comment.id`, which makes them the
-**third and fourth** instances of a pattern the repository already uses twice
-(`DocCommentAnchor`, `SolutionPlanProposal`).
+That is two tables more than the previous draft proposed, and the growth is
+entirely the cost of [not assuming an `Artifact` exists](#non-goals). The
+credential splits in two so a site can rotate its token without losing its
+identity and origin allowlist, and the anchor splits in two so the same element
+data can hang off either a `Comment` or a `FeedbackItem`. Both splits are stated
+as costs rather than presented as free: five tables is a lot for one feature, and
+a maintainer who would rather pay a migration later than two tables now is making
+a defensible trade — see [Alternatives](#alternatives-considered).
+
+Three of the five are 1:1 extensions keyed on the parent's primary key, which
+makes them the **third, fourth and fifth** instances of a pattern the repository
+already uses twice (`DocCommentAnchor`, `SolutionPlanProposal`).
 
 Prisma requires the opposite side of every relation to be declared, so `Comment`
-gains `artifactAnchor ArtifactCommentAnchor?` and `externalAuthor
-CommentExternalAuthor?`, and `Artifact` gains `embedTokens ArtifactEmbedToken[]`.
-None of those adds a column; `Comment.docAnchor` and `Comment.solutionPlanProposal`
-already do exactly this.
+gains `elementAnchor CommentElementAnchor?` and `externalAuthor
+CommentExternalAuthor?`, `FeedbackItem` gains `elementAnchor
+FeedbackElementAnchor?`, `Workspace` gains `feedbackSources FeedbackSource[]`, and
+`Artifact` gains `feedbackSources FeedbackSource[]`. None of those adds a column;
+`Comment.docAnchor` and `Comment.solutionPlanProposal` already do exactly this.
 
-### `ArtifactCommentAnchor` — where on the prototype the comment points
+### Routing by binding — one widget, two destinations
+
+The widget, the anchor shape, the screenshot handling and the CORS rules are
+**identical** in both cases. The only thing that differs is where the submission
+lands, and that is decided by one nullable column on the source rather than by
+anything the page sends:
+
+| `FeedbackSource.artifactId` | What the page is | What a submission becomes |
+| --- | --- | --- |
+| set | a prototype Compass already tracks as an `Artifact` | an anchored artifact `Comment` (`source: "WIDGET"`) plus a `CommentElementAnchor` — discussion, promoted to triage only if it earns it |
+| `null` | any other site: a v0 build, a staging deploy, a production app | a `FeedbackItem` (`source: "WIDGET"`) plus a `FeedbackElementAnchor` — enters normal triage immediately |
+
+The asymmetry is deliberate and is the point. A comment on a prototype is a
+conversation with people who are already in the room; a report from a real
+application is an inbound item from someone who may never come back, and
+`FeedbackItem` is the model that already knows how to hold one of those — it has
+`status`, `voteCount`, `type`, `opportunityId`, submitter fields, and a grid built
+to triage it. Routing a production bug report into a comment thread on an artifact
+nobody has opened since March would be the wrong answer even though it is the
+cheaper one.
+
+Because the destination is a property of the *source row*, not of the request,
+a page cannot choose it. Re-binding a source to an artifact later changes where
+its future submissions go and touches none of its history.
+
+### `CommentElementAnchor` — where on the page the comment points
 
 A 1:1 extension keyed on the parent's primary key, following `DocCommentAnchor`:
 
 ```prisma
-model ArtifactCommentAnchor {
+model CommentElementAnchor {
   commentId          String   @id @map("comment_id") @db.Uuid
+  /// Denormalized from the source's binding to serve the widget's hot query.
+  /// Non-null here BY CONSTRUCTION: this table only ever holds anchors for a
+  /// source that is bound to an Artifact. The unbound case uses
+  /// FeedbackElementAnchor, which has no artifact column at all.
   artifactId         String   @map("artifact_id") @db.Uuid
   /// Provenance, not scope: which revision the comment was placed on.
   /// Nullable — the comment still belongs to the Artifact across revisions.
@@ -326,16 +389,42 @@ model ArtifactCommentAnchor {
   comment            Comment  @relation(fields: [commentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([artifactId, pageUrl])
-  @@map("artifact_comment_anchors")
+  @@map("comment_element_anchors")
 }
 ```
 
-One deliberate departure from `DocCommentAnchor`, which declares **no `@@index`
-at all** and no denormalized parent-scope column: the widget's hot query is
-"every anchored comment for this artifact on this page", which wants
-`artifactId` denormalized onto the anchor and `@@index([artifactId, pageUrl])`
-to serve it. On DSQL that is an async index build and a real cost, so it is
-called out rather than folded into "mirrors the existing pattern".
+### `FeedbackElementAnchor` — the same shape, on a triage item
+
+```prisma
+model FeedbackElementAnchor {
+  feedbackItemId     String       @id @map("feedback_item_id") @db.Uuid
+  /// Which source produced it. There is no artifact column: by definition this
+  /// table only holds anchors from sources with no artifact binding.
+  feedbackSourceId   String       @map("feedback_source_id") @db.Uuid
+  pageUrl            String       @map("page_url") @db.Text
+  pagePath           String       @map("page_path") @db.Text
+  elementSelector    String?      @map("element_selector") @db.Text
+  elementFingerprint Json?        @map("element_fingerprint")
+  feedbackItem       FeedbackItem @relation(fields: [feedbackItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([feedbackSourceId, pageUrl])
+  @@map("feedback_element_anchors")
+}
+```
+
+The five anchor columns are **deliberately identical** in both tables, validated
+by one shared parser and read through one shared TypeScript type, so the widget
+and the re-anchoring logic never learn which destination they are feeding. Two
+tables with the same columns is the cost of keeping the 1:1-on-parent-PK pattern
+and staying out of a second polymorphic relation; the alternative shapes, and why
+they lose, are in [Alternatives](#alternatives-considered).
+
+**On the departure from `DocCommentAnchor`**, which declares **no `@@index` at
+all** and no denormalized parent-scope column: the widget's hot query is "every
+anchored comment for this page", which wants the scope column denormalized onto
+the anchor and an index to serve it. On DSQL that is an async index build and a
+real cost, so it is called out rather than folded into "mirrors the existing
+pattern".
 
 **Why an extension table rather than columns on `comments`.** Six nullable
 widget-only columns would tax all 13 registered comment target types for a
@@ -402,7 +491,61 @@ authoritative — any client-supplied email is ignored,* so a signed-in visitor
 cannot claim an address they did not verify. `PortalAccount` also gains a
 back-relation `externalComments CommentExternalAuthor[]`.
 
-### `ArtifactEmbedToken` — the credential in the `<script>` tag
+### `FeedbackSource` — the site, and what it is allowed to do
+
+The credential does **not** name an artifact. It names a *source*: one site or
+application that is allowed to submit feedback into one workspace. Whether that
+source happens to be bound to an `Artifact` is one nullable column on it, and that
+column is the routing switch described above — not part of the credential's
+identity.
+
+```prisma
+model FeedbackSource {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  /// Null = a real site or app; submissions become FeedbackItems.
+  /// Set  = a prototype Compass tracks; submissions become anchored Comments.
+  artifactId     String?   @map("artifact_id") @db.Uuid
+  name           String    @db.VarChar(255)
+  /// Exact origins ("https://app.example.com"), never patterns, never "*".
+  /// Empty array = the source is configured but cannot post from anywhere yet.
+  allowedOrigins Json      @map("allowed_origins")
+  enabled        Boolean   @default(true)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @map("updated_at")
+  createdById    String?   @map("created_by_id") @db.Uuid
+  workspace      Workspace @relation(fields: [workspaceId], references: [id])
+  artifact       Artifact? @relation(fields: [artifactId], references: [id])
+  tokens         FeedbackSourceToken[]
+
+  @@index([workspaceId, enabled])
+  @@index([artifactId])
+  @@map("feedback_sources")
+}
+```
+
+`allowedOrigins` is the single most important column in this RFC and it is worth
+being blunt about why: **the embed token is public by definition.** It ships inside
+a `<script>` tag on a page anyone can view-source. Treating it as a secret is a
+category error. What makes it safe is not that nobody can read it but that reading
+it buys nothing — a submission is accepted only when the request's `Origin` is an
+exact string match against this array, so a copied token pasted into a different
+site is refused. Origins only, never patterns: `*.example.com` invites a subdomain
+takeover to become a feedback-injection vector, and the whole value of the column
+is that matching it is an equality test a reviewer can reason about.
+
+An empty array is a valid, deliberately useless state — a source can be created
+before anyone knows where it will be deployed, and it simply cannot post until an
+origin is added.
+
+### `FeedbackSourceToken` — the credential in the `<script>` tag
+
+Separating the credential from the source is what makes **rotation** possible: a
+production application cannot have its feedback silently break because a token was
+withdrawn, so a source holds many tokens, an old one can be revoked after the new
+one is deployed, and the source's identity, binding, origin allowlist and history
+all survive the swap. A single-table design where the token *is* the source makes
+rotation indistinguishable from "create a second site", which is wrong.
 
 Modelled on the *pattern* of two existing tables, but they contribute different
 parts of it and the difference matters. **Both** `ResearchParticipantToken` and
@@ -458,31 +601,47 @@ consistently. `label` is an addition with no counterpart, for telling two live
 snippets apart in an admin list.
 
 ```prisma
-model ArtifactEmbedToken {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  artifactId     String    @map("artifact_id") @db.Uuid
-  tokenHash      String    @unique(map: "idx_artifact_embed_tokens_hash") @map("token_hash") @db.VarChar(64)
-  kind           String    @default("PRIMARY") @db.VarChar(30)
-  label          String?   @db.VarChar(255)
-  expiresAt      DateTime  @map("expires_at")
-  revokedAt      DateTime? @map("revoked_at")
-  lastUsedAt     DateTime? @map("last_used_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  createdById    String?   @map("created_by_id") @db.Uuid
-  readWindowAt   DateTime? @map("read_window_at")
-  readCount      Int?      @map("read_count")
-  submitWindowAt DateTime? @map("submit_window_at")
-  submitCount    Int?      @map("submit_count")
-  artifact       Artifact  @relation(fields: [artifactId], references: [id])
+model FeedbackSourceToken {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  feedbackSourceId String         @map("feedback_source_id") @db.Uuid
+  tokenHash        String         @unique(map: "idx_feedback_source_tokens_hash") @map("token_hash") @db.VarChar(64)
+  /// First 8 chars of the plaintext, for telling live snippets apart in a list
+  /// without storing anything that can be replayed.
+  tokenPrefix      String         @map("token_prefix") @db.VarChar(16)
+  label            String?        @db.VarChar(255)
+  /// Nullable, UNLIKE every token precedent in the repo. A production page's
+  /// snippet cannot be allowed to expire silently; expiry is opt-in per token.
+  expiresAt        DateTime?      @map("expires_at")
+  revokedAt        DateTime?      @map("revoked_at")
+  lastUsedAt       DateTime?      @map("last_used_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  createdById      String?        @map("created_by_id") @db.Uuid
+  readWindowAt     DateTime?      @map("read_window_at")
+  readCount        Int?           @map("read_count")
+  submitWindowAt   DateTime?      @map("submit_window_at")
+  submitCount      Int?           @map("submit_count")
+  feedbackSource   FeedbackSource @relation(fields: [feedbackSourceId], references: [id])
 
-  @@index([artifactId, kind, revokedAt], map: "idx_artifact_embed_tokens_artifact_kind")
-  @@map("artifact_embed_tokens")
+  @@index([feedbackSourceId, revokedAt], map: "idx_feedback_source_tokens_source")
+  @@map("feedback_source_tokens")
 }
 ```
 
-The omitted `onDelete`/`onUpdate` on `artifact` is deliberate, not an oversight, even
-though this RFC's other three proposed relations all specify
-`onDelete: Restrict, onUpdate: Restrict`. It mirrors the model this one is copied
+**`expiresAt` is nullable, and that is a genuine departure worth challenging.**
+Every token precedent in the repository — `ResearchParticipantToken`,
+`PortalSession`, the OAuth codes — has a mandatory expiry, and for a research
+session or a login that is obviously right. For a snippet embedded in a production
+application it inverts: a hard expiry means feedback collection stops working on a
+Tuesday for a reason nobody on the host team can see, and the failure is silent
+because the widget's whole job is to fail quietly rather than break the host page.
+The mitigations that replace expiry are revocation, the origin allowlist, and the
+rate-limit counters. A maintainer who wants a mandatory maximum instead should say
+so — it is one column and one validation, but it changes the operational story for
+real apps considerably.
+
+The omitted `onDelete`/`onUpdate` on `feedbackSource` is deliberate, not an
+oversight, even though this RFC's anchor relations all specify
+`onDelete: Restrict, onUpdate: Restrict`. It mirrors the models this one is copied
 from: `ResearchParticipantToken.study`, `PortalSession.portalAccount`,
 `Artifact.workspace`, and `ArtifactRevision.artifact` all omit them too. Maintainers
 who would rather have consistency within this RFC than fidelity to its precedent
@@ -535,13 +694,21 @@ recommendation here is not this RFC's invention, and not an argument resting on
 Compass precedent alone; it is the conclusion the prior art arrived at
 independently, after operating the stateless version.
 
-**Scoping.** The token *is* the tenant context: token → `Artifact` →
+**Scoping.** The token *is* the tenant context: token → `FeedbackSource` →
 `workspaceId`, mirroring token → `ResearchStudy` → `workspaceId` exactly,
 including the rule that there is no cookie and no membership check on the public
-path. Note the source service's token payload optionally carries a third segment
-scoping a token to a single **page**; the Compass analogue would be a nullable
-`artifactRevisionId` on the token. Not proposed for Phase 1 (`EXTERNAL_LINK`-only,
-revisions do not yet vary per snippet) but cheaper to add now than to backfill.
+path. The artifact, when there is one, hangs off the source and is read *after*
+the tenant is established — so an unbound source resolves a workspace by exactly
+the same code path, with one fewer join. That is the structural reason this
+generalises cleanly: `Artifact` was never load-bearing for authorization, only for
+routing.
+
+Note the source service's token payload optionally carries a third segment scoping
+a token to a single **page**. The Compass analogue is a nullable `pagePathPrefix` on
+the token, which is more useful here than it was there — a single production
+application is one source, but its checkout flow and its marketing pages may want
+different snippets. Not proposed for Phase 1, but cheaper to add now than to
+backfill.
 
 ### Everything else is reuse
 
@@ -553,7 +720,7 @@ revisions do not yet vary per snippet) but cheaper to add now than to backfill.
 | Replies | `Comment` with `parentId` — the existing one-level threading, no new plumbing |
 | Resolved / unresolved | `Comment.status` (`OPEN` / `RESOLVED`) — the existing semantics |
 | Thread UI, in-app | `<Discussion targetType="ARTIFACT">` with `DocPanelShell panelId="artifactComments"` supplied as its `render` prop — **already shipped by #275** |
-| Where it points | `ArtifactCommentAnchor` (new) |
+| Where it points | `CommentElementAnchor` (new), or `FeedbackElementAnchor` for an unbound source |
 | Who left it | `Comment.authorName` + `CommentExternalAuthor` (new) |
 | Element screenshot | See Open question 1 — this is the one attachment question, and `Comment` has no attachment relation today |
 | The prototype | `Artifact`, `sourceType: "EXTERNAL_LINK"` in Phase 1, URL in `ArtifactRevision.externalUrl` |
@@ -607,7 +774,8 @@ existing four explicitly, neither of which is inferred from the schema:
 
 - `components/settings/portal-settings-panel.tsx:52` — a closed union of
   literal field names, `"feedbackEnabled" | "roadmapPublic" | "portalAuthRequired" | "ssoEnabled"`.
-- `app/[orgSlug]/[workspaceSlug]/settings/actions.ts:858-881` — an input type of
+- `app/[orgSlug]/[workspaceSlug]/settings/actions.ts:857-880`
+  (`updatePortalSettings`) — an input type of
   four optional booleans, each spread into the update conditionally
   (`...(input.feedbackEnabled !== undefined && { feedbackEnabled: input.feedbackEnabled })`).
   This is a repeated per-field line, not a union, so a flag omitted here fails
@@ -628,7 +796,7 @@ which is a good outcome for prototype review and requires nothing new here.
 ### DSQL obligations
 
 `relationMode = "prisma"` means no FK constraints, so deletes are hand-rolled.
-Deleting an anchored comment must delete, in order: its `ArtifactCommentAnchor`,
+Deleting an anchored comment must delete, in order: its `CommentElementAnchor`,
 its `CommentExternalAuthor`, its replies, then the comment. There are **three**
 sites that remove a `Comment` row, not one, and all three must be extended:
 
@@ -654,7 +822,7 @@ target type** — `docAnchor` is rejected unless `targetType === "DOC"`, `soluti
 unless `targetType === "SOLUTION"` — so at most one extension create can run, and if
 that one is the one that threw there is nothing left over.
 
-This RFC proposes two extensions (`ArtifactCommentAnchor` and
+This RFC proposes two extensions (`CommentElementAnchor` and
 `CommentExternalAuthor`) that both apply to the **same `ARTIFACT` comment**. That
 removes the guarantee. If the anchor create succeeds and the external-author create
 fails, the compensating delete removes the comment and leaves the anchor row
@@ -719,7 +887,7 @@ fix it — but the new tables must be added to the preview-automation list, and
 raising with maintainers** rather than quietly adding two more tables to a list
 in the wrong file.
 
-Migrations land as `prisma/migrations/062_artifact_comment_anchors`. **`062` is
+Migrations land as `prisma/migrations/062_embed_feedback_sources`. **`062` is
 the next free prefix** — the highest existing is `061_product_analytics` — and
 picking it matters more than it looks, because the repository already
 carries duplicate prefixes at **024, 034, 047 (three), 049, 050, 051, 054
@@ -1043,7 +1211,7 @@ Additions:
 | Tool | Notes |
 | --- | --- |
 | `issue_artifact_embed_token` | Returns the plaintext **once**, following `issueResearchLinkTool`'s `"Participant link (shown only now): …"` convention |
-| `revoke_artifact_embed_tokens` | Mirrors `revokeResearchLinksTool` |
+| `revoke_feedback_source_tokens` | Mirrors `revokeResearchLinksTool` |
 | `promote_artifact_comment_to_feedback` | The triage entry point; mirrors the existing `promote_*` family |
 | `list_anchored_artifact_comments` | Distinct from `list_comments` only by joining the anchor — arguably an `includeAnchor` flag on the existing tool instead, which maintainers may prefer |
 
@@ -1081,9 +1249,9 @@ the standalone service to be retired.
 | --- | --- |
 | A tracked prototype | `Artifact` (`sourceType: "EXTERNAL_LINK"`), workspace chosen at migration time |
 | A hosted prototype page | `Artifact` + `ArtifactRevision` — blocked on Open question 3 |
-| A root comment | `Comment` (`targetType: "ARTIFACT"`, `source: "MIGRATION"`) + `ArtifactCommentAnchor` |
+| A root comment | `Comment` (`targetType: "ARTIFACT"`, `source: "MIGRATION"`) + `CommentElementAnchor` |
 | A reply | `Comment` with `parentId` — the same table, one level deep |
-| Element selector + re-anchoring fingerprint | `ArtifactCommentAnchor` columns, 1:1 |
+| Element selector + re-anchoring fingerprint | `CommentElementAnchor` / `FeedbackElementAnchor` columns, 1:1 |
 | Element screenshot pointer | **Re-upload required.** Private blob pointers in the source store are not portable |
 | Resolved flag (boolean) | `Comment.status`: `false → "OPEN"`, `true → "RESOLVED"` — a 1:1 mapping |
 | Author identity (OIDC subject + email) | `PortalAccount` matched by email into `CommentExternalAuthor`; name into `Comment.authorName` |
@@ -1114,10 +1282,11 @@ Each phase is independently reviewable and shippable.
 | Phase | Contents | Verified by |
 | --- | --- | --- |
 | **0** | This RFC — agreement on shape | Maintainer review |
-| **1** | Schema (all three tables, `source: "WIDGET"`, `artifactFeedbackPublic`, migration `062`, **all three** comment-mutation paths — `deleteComment`, `deleteBrowserComment`, and `createComment`'s rollback — plus `validateExtensions`, `resolveCommentAuthors`, and the preview-automation cascade list), token mint/revoke, embed CORS headers (factoring per the [CORS](#cors) section — maintainers' choice between a shared `lib/cors.ts` and an `EMBED_CORS_HEADERS` constant beside the OAuth one), `GET`/`POST /api/embed/comments`, `route-access` entry | Route-level vitest + `curl`; no UI |
+| **1** | Schema (**all five tables** — including `FeedbackElementAnchor`, which Phase 1 creates and does not yet write — `source: "WIDGET"` on both unions, `artifactFeedbackPublic`, migration `062`, **all three** comment-mutation paths — `deleteComment`, `deleteBrowserComment`, and `createComment`'s rollback — plus `validateExtensions`, `resolveCommentAuthors`, and the preview-automation cascade list), source + token mint/revoke with origin allowlist enforcement, embed CORS headers (factoring per the [CORS](#cors) section — maintainers' choice between a shared `lib/cors.ts` and an `EMBED_CORS_HEADERS` constant beside the OAuth one), `GET`/`POST /api/embed/comments` for **bound** sources, `route-access` entry | Route-level vitest + `curl`; no UI |
 | **2** | The widget script, Shadow DOM UI, anchor rendering, re-anchoring, screenshot capture | Playwright, including an opaque-origin case |
 | **3** | In-app surfacing — anchored comments in the existing `artifactComments` panel with page/element/screenshot context and a stale-anchor state; `promote_artifact_comment_to_feedback` | Functional + screenshot E2E, full UI-system checklist |
-| **4** | Migration tooling from the standalone service | Dry-run against a copy |
+| **4** | **The unbound path** — `POST /api/embed/feedback` writing a `FeedbackItem` + `FeedbackElementAnchor`, the anchor surfaced in the existing Feedback grid, and whichever real-app identity answer [Open question 6](#open-questions-for-maintainers) settles on | Route vitest + a functional E2E against a non-artifact origin |
+| **5** | Migration tooling from the standalone service | Dry-run against a copy |
 
 Phase 1 is deliberately useful on its own — an agent can mint a token and read
 and write comments over MCP before any widget exists — **but with one honest
@@ -1130,6 +1299,20 @@ stronger one for free.
 
 Phase 3 is materially smaller than in the earlier draft because the panel, the
 thread component, and the `PanelId` all already exist.
+
+**Why the unbound path is Phase 4 and not Phase 1.** Because it is the *delivery*
+that is deferred, never the *possibility* — Phase 1 creates
+`FeedbackElementAnchor`, makes `FeedbackSource.artifactId` nullable, and widens
+`FeedbackItem.source`, so reaching Phase 4 is new route code against a schema that
+already fits. Shipping a table Phase 1 does not write is unusual and deliberate:
+it is the cheapest available proof that the artifact-bound path did not quietly
+bake an `Artifact` into the foundations, and it costs one empty table.
+
+A maintainer who would rather not carry an unwritten table for three phases can
+move the unbound route forward to Phase 1 — the schema is the same either way, and
+that choice is genuinely open. What must *not* happen is Phase 1 landing with a
+non-null `artifactId`, because that is the version that needs a migration and a
+rewrite to reach real applications.
 
 ---
 
@@ -1183,7 +1366,7 @@ Genuine forks in the design, not rhetorical.
    today, so unlike the earlier `FeedbackItem` framing there is no "just reuse
    `FeedbackAttachment`" option — that model's FK is `feedbackItemId`. The
    choices are a small `CommentAttachment` table, a nullable blob pointer on
-   `ArtifactCommentAnchor` (one screenshot per anchor is arguably the true
+   the element anchor (one screenshot per anchor is arguably the true
    cardinality), or promotion-time-only attachments. Element screenshots of an
    internal prototype can contain unreleased UI and real customer data, so
    whichever is chosen should be **private**, reached through a
@@ -1262,15 +1445,64 @@ Genuine forks in the design, not rhetorical.
    an artifact needs element anchors. If the deliverable framing later proves
    load-bearing, the anchor table is keyed on the comment, not the artifact, so
    moving the subject is a migration rather than a redesign.
+6. **Can a real application hand the widget a Portal SSO Identify JWT, given that
+   `compass_portal_session` is `SameSite=Lax` and cannot travel cross-origin?**
+   Raised in review. The short answer is **yes, and the cookie never enters into
+   it** — but the reason is worth stating precisely, because it inverts the shape
+   of the problem.
+
+   **Compass does not mint that JWT. It only verifies one.** The host
+   application's own backend signs it — `lib/portal-sso.ts:1-11` says so outright,
+   and the only `SignJWT` calls in the repository are in tests
+   (`__tests__/lib/portal-sso.test.ts`, `e2e/functional/specs/portal-sso.spec.ts`).
+   `verifySsoToken` (`lib/portal-sso.ts:35-57`) checks HS256 against the
+   per-workspace `Workspace.ssoSecretEncrypted` — 32 random bytes, AES-256-GCM at
+   rest under `SSO_SECRET_ENCRYPTION_KEY` (`lib/crypto-secrets.ts:14-19`,
+   `:37-40`) — requires only `email`, `iat` and `exp`
+   (`lib/portal-sso.ts:38-42`), and fails closed to `null` on anything wrong
+   (`:54-56`).
+
+   So the identity credential a real app needs is one it **already knows how to
+   produce**, and it is a bearer token rather than a cookie. The widget takes it
+   in-page from the host application, sends it on the embed request, and the embed
+   route calls `verifySsoToken` with the secret resolved through
+   `FeedbackSource → workspaceId`. `SameSite=Lax` is irrelevant because no cookie
+   is involved: today's SSO exchange route
+   (`app/api/portal/[orgSlug]/[workspaceSlug]/sso/route.ts`) is `GET`-only and
+   exists purely to *convert* that JWT into the cookie, and
+   `getPortalSession` reads the cookie and nothing else — there is no
+   `Authorization` path anywhere in `lib/portal-auth.ts:78-115`. The embed path
+   would simply skip the conversion.
+
+   Three real costs, which are what actually need deciding:
+
+   - **`maxTokenAge` is 5 minutes** (`lib/portal-sso.ts:16`). Fine for a redirect,
+     awkward for a reviewer who leaves a tab open for an hour. Either the widget
+     asks the host page for a fresh token on demand — which requires the host to
+     expose a callback and is a documented integration burden — or the embed route
+     exchanges the JWT **once** for its own longer-lived bearer scoped to the
+     source.
+   - **It is the same secret as portal login.** A JWT captured off an embed request
+     is also a portal sign-in. That argues for the exchange above rather than
+     replaying the same token on every request, and it is the strongest reason not
+     to take the cheap path.
+   - **It only works where SSO is already configured.** Workspaces without
+     `ssoEnabled` and a secret have no such token, so this can never be the *only*
+     identity route — anonymous and magic-link stay.
+
+   **Recommendation: design for it, defer it to the unbound phase, and prefer the
+   one-time exchange over replay.** Phase 1 needs nothing for this, which is the
+   point of recording it now.
 
 ## Risks
 
 - **A new public, unauthenticated-by-session, CORS-enabled write endpoint** is
   the largest item here and it is a real widening of the attack surface.
-  Mitigations: `artifactFeedbackPublic` **off by default**, token → artifact →
-  workspace scoping, per-token rate-limit counters, no `Allow-Credentials`,
-  `portalAuthRequired` respected unchanged, and `normalizeResearchAppUrl` reused
-  for any stored external URL.
+  Mitigations: `artifactFeedbackPublic` **off by default**, token →
+  `FeedbackSource` → workspace scoping, the per-source origin allowlist,
+  per-token rate-limit counters, no `Allow-Credentials`, `portalAuthRequired`
+  respected unchanged, and `normalizeResearchAppUrl` reused for any stored
+  external URL.
 - **Anonymous writes invite spam**, and this is the honest cost of the feature's
   core value. The per-token counters are the first line; revoking a single
   snippet is the second. A workspace that cannot tolerate it sets
@@ -1304,6 +1536,67 @@ Genuine forks in the design, not rhetorical.
   right axis; it is not free.
 - **Async index builds on DSQL** mean the existing comment queries must not
   regress while `062` builds.
+
+### Real applications — the risks Phase 1 must not design away
+
+Raised in review, and out of Phase 1's *delivery* but not out of its *schema*.
+Collected here rather than scattered, because several of them interact and because
+the honest summary is that each one is cheap to accommodate now and expensive to
+retrofit.
+
+- **Strict CSP on the host site.** A production application that sets
+  `script-src 'self'` will not load the widget at all, and one that sets
+  `connect-src 'self'` will load it and then fail every request — the second
+  failure is worse because it looks like a Compass outage from the host's side.
+  There is no way around a host-side allowlist entry; what *is* in Compass's
+  control is that the failure be loud in the right direction. The widget must
+  surface a one-line diagnostic naming the directive it needs, and must never
+  retry a `connect-src` rejection in a loop. A `nonce`-based integration is not
+  possible for a third-party script the host did not render, so document the two
+  directives and stop pretending there is a clever answer.
+- **Client-side route changes in single-page applications.** The `pagePath` a
+  comment anchors to is captured at submit time, but in an SPA the URL changes
+  without a navigation, so a widget that reads the path once at load will
+  mis-attribute every comment after the first route change. `history.pushState`
+  and `replaceState` must be patched, `popstate` listened to, and the current path
+  re-read per submission rather than cached. This is the single most likely source
+  of silently-wrong data in the whole feature, and it is invisible in testing
+  against a prototype that has one page.
+- **Re-anchoring on dynamic DOM.** The document-relative ratio scheme described
+  in [Element re-anchoring](#element-re-anchoring) was designed against
+  static-ish prototypes. A real application re-renders, virtualizes long lists,
+  lazy-loads below the fold, and mounts content after the widget has already
+  measured. Ratios captured before a lazy-loaded hero image resolves will point
+  somewhere else once it does. The mitigation is not a better selector — it is
+  admitting anchors go stale, storing enough to *say so* (the selector, the
+  fingerprint, and the element's text), and rendering an explicit stale state
+  instead of a confidently wrong pin. Compass already has the honest version of
+  this problem in `DocCommentAnchor`'s prefix/suffix/offset triple.
+- **The embed token is public, and on a production page it is public to
+  everyone.** This is the one that genuinely changes with real apps: a prototype
+  URL is shared with a dozen people, a production page is crawled. Per-source
+  origin allowlisting stops replay from another site and per-token counters cap
+  the damage from abuse at the origin itself, and **both must be in Phase 1** —
+  they are the reason the credential is source-scoped rather than
+  artifact-scoped. It is worth naming the precedent this deliberately does *not*
+  follow: the portal's own attachment upload
+  (`app/api/portal/[orgSlug]/[workspaceSlug]/feedback/upload/route.ts:73-75`)
+  writes a 10 MB `access: "public"` blob with **no throttle of any kind** on a
+  workspace with `portalAuthRequired` off. That is a gap in the shipped product,
+  not a pattern to copy, and a new public write path should not arrive matching
+  it.
+- **Customer personal data in element screenshots.** A screenshot of an element
+  in an internal prototype may contain unreleased UI. A screenshot of an element
+  in a production application may contain a real customer's name, balance, or
+  address — captured by a third-party script, stored in Compass, and visible to
+  everyone in the workspace. This is materially more serious than the prototype
+  case and is the strongest argument for the private-store recommendation in
+  [Open question 1](#open-questions-for-maintainers). Two further controls belong
+  to the unbound path specifically: capture must be **opt-in per source**, not on
+  by default, and the widget should support a host-declared redaction selector
+  (`[data-compass-redact]`) that is blanked before the raster. Neither is hard;
+  both are much harder to add after the first screenshot containing a real
+  account number is already stored.
 
 ## Appendix — provenance
 
@@ -1622,8 +1915,10 @@ already fixed once.
 - **A cited range that excluded the thing it described.**
   `settings/actions.ts:872-886` was given for "an input type of four optional
   booleans"; the input type is at `:861-866` and the range ran fourteen lines into an
-  unrelated function. Now `:858-881`. Same class of error as the fifth pass's
-  `:83-104`.
+  unrelated function. Now `:857-880`. Same class of error as the fifth pass's
+  `:83-104`. That corrected range then drifted three lines of its own accord when
+  `main` moved to `8875bd91` — it is the only one of the 46 that did — which is
+  the whole argument for citing `updatePortalSettings` by name alongside it.
 - **Four internal links were dead** — em dashes in headings produce a *double* hyphen
   in GitHub's anchor slug, and the RFC wrote single. Two distinct targets, four link
   sites.
@@ -1653,6 +1948,65 @@ checked roughly 215 distinct claims in total. It did **not** execute the propose
 against a DSQL cluster, and did not render the document on GitHub to confirm the
 anchor fix.
 
+### What the maintainer review changed (RFC v2)
+
+Six passes of self-review found facts that were wrong. The seventh input came from
+a maintainer reading #298, and it found something none of the six could: a
+**scope** assumption that was internally consistent and still wrong. Recorded here
+with the same discipline as the error passes, because a reader who only sees v2
+cannot tell which parts were argued for and which were conceded.
+
+The review's governing sentence, which set the size of the response: *"I don't
+need all of this built in Phase 1. I need Phase 1 not to close it off."* Every
+change below is the cheapest thing that satisfies the second half without doing
+the first.
+
+- **The non-goal that scoped this to prototypes is withdrawn, not softened.**
+  Drafts one through six said the feature was for "prototypes an `Artifact` points
+  at". The maintainer's position is that Phase 1 may *ship* only the
+  artifact-bound path but the credential and anchor models must not *assume* an
+  `Artifact` exists. That is the whole of the change; everything else in this list
+  follows from it mechanically.
+- **The credential split in two, and the table count went from three to five.**
+  An artifact-independent credential cannot be `ArtifactEmbedToken`. Separating
+  the site (`FeedbackSource`) from the credential (`FeedbackSourceToken`) is what
+  makes rotation possible on a production page — you cannot ask a customer to
+  redeploy to rotate a secret — and the anchor had to split the same way
+  (`CommentElementAnchor` for the bound path, `FeedbackElementAnchor` for the
+  unbound one) because a `FeedbackItem` has no artifact to hang an anchor off.
+  Five tables is more surface than three and this document does not pretend
+  otherwise; maintainers who would rather pay a migration later than carry two
+  anchor tables now should read [Alternatives](#alternatives-considered), which
+  argues the other side.
+- **Destination became a property of the source row, not of the request.** See
+  [Routing by binding](#routing-by-binding--one-widget-two-destinations). This is
+  the design's answer to "one widget, two destinations" and it is deliberately not
+  a request parameter: a caller must not be able to choose whether its writes land
+  as artifact comments or as triage items.
+- **`FeedbackElementAnchor` is created in Phase 1 and written in Phase 4.** An
+  empty table is an odd thing to ship. It is also the only way to satisfy "don't
+  close it off" without building the unbound path now, and creating it late would
+  mean a second migration touching a table the first one should have made.
+- **The unbound path became Phase 4 rather than being folded into Phase 1**, which
+  is the one place this revision pushes back on doing more. Reasoning is under
+  [Phasing](#phasing).
+- **Real-application risks got their own section**, listed rather than implied:
+  [Real applications](#real-applications--the-risks-phase-1-must-not-design-away).
+  Two of the five — origin allowlisting and rate limiting — are pulled *forward*
+  into Phase 1, because they are the reason the credential is source-scoped at
+  all.
+- **One review question had a better answer than the question assumed, and that is
+  worth stating plainly rather than burying as agreement.** Asked how a real
+  application's logged-in identity would reach the widget given that `SameSite=Lax`
+  cookies never travel cross-site: Compass **never mints** the portal SSO JWT — the
+  host's own backend does (`lib/portal-sso.ts:1-11`) — and `verifySsoToken`
+  (`:35-57`) needs only `email`, `iat`, and `exp`, HS256 against the per-workspace
+  secret. So a real application hands the widget, in-page, the token it already
+  mints, as a bearer credential, and the cookie problem does not arise. Three real
+  costs come with it and are recorded in [Open question 6](#open-questions-for-maintainers):
+  the 5-minute `maxTokenAge` (`:16`), the fact that the token doubles as a portal
+  login, and that it only works where `ssoEnabled`.
+
 ### The trend, stated honestly
 
 18 findings, then 1, then 21, then 16, then 4, then 11. It is **not** converging
@@ -1667,5 +2021,13 @@ N−1 — `deleteBrowserComment` (fourth), the `deleteComment` call-shape disagr
 pattern, not bad luck, and it is the specific thing a maintainer should be most
 sceptical of in this document. **If you read one section adversarially, make it
 [DSQL obligations](#dsql-obligations).**
+
+The maintainer review does not extend that sequence, because it is not the same
+kind of finding: it produced **zero** factual corrections and one scope change.
+Which is the more useful lesson of the two. Six self-review passes drove the error
+count from 18 to 11 without ever questioning the premise, because a document
+checking itself checks the claims it already decided to make. The first outside
+reader changed the shape in one pass. That asymmetry is an argument for shipping a
+smaller Phase 1 and asking earlier — which is what is now happening.
 
 If you find a further error, that is the review working as intended — please flag it.
