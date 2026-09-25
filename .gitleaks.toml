@@ -86,6 +86,46 @@ id = "curl-auth-header"
   regexes = ['''(?i)your_[a-z0-9_]*_here''']
 
 # ---------------------------------------------------------------------------
+# vercel-protection-bypass (custom rule)
+#
+# A Vercel deployment-protection bypass secret is a bare alphanumeric string
+# with no distinguishing prefix, and the header that carries it
+# (`x-vercel-protection-bypass`) contains none of the keywords the default
+# `generic-api-key` rule looks for. The result is that gitleaks with only the
+# default ruleset does NOT flag a hardcoded bypass secret — verified by running
+# the default ruleset against the fixtures in
+# __tests__/gitleaks-vercel-bypass-rule.test.ts and getting zero findings.
+#
+# That combination — a high-value credential that the default ruleset is blind
+# to — is what this rule exists to close.
+# __tests__/playwright-config-security.test.ts already guards one file against
+# it; this rule generalises the same protection to the whole repo and to every
+# future commit.
+#
+# Matches the header form and the env-var-name form when either is assigned a
+# quoted literal. The correct pattern — reading
+# process.env.VERCEL_AUTOMATION_BYPASS_SECRET — has no quoted literal and so
+# does not match.
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "vercel-protection-bypass"
+description = "Vercel deployment-protection bypass secret assigned as a literal"
+regex = '''(?i)(?:x-vercel-protection-bypass|vercel[_-]?automation[_-]?bypass[_-]?secret)["'\s]*[:=]\s*["']([A-Za-z0-9]{20,64})["']'''
+secretGroup = 1
+keywords = [
+  "x-vercel-protection-bypass",
+  "vercel_automation_bypass",
+  "VERCEL_AUTOMATION_BYPASS",
+]
+
+# NOTE: this rule carries no value-specific allowlist, so a full-history scan
+# (`pnpm scan:secrets`) will report any commit that ever carried a literal
+# bypass secret, not just new ones. If a historical finding is triaged and its
+# value confirmed dead, silence that one value with a
+# `[[rules.allowlists]]` entry using `regexTarget = "secret"` pinned to it —
+# never by weakening the regex, which would disarm the rule for new values too.
+
+# ---------------------------------------------------------------------------
 # Repo-wide allowlist
 # ---------------------------------------------------------------------------
 [allowlist]
