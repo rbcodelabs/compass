@@ -300,7 +300,11 @@ export function ManageFieldsPanel({
   sharedOptionSets,
 }: Props) {
   const router = useRouter();
-  const [fields, setFields] = useState(initialFields);
+  // Render the server's list (refreshed via router.refresh() after an add) and
+  // only overlay optimistic deletes — copying initialFields into state froze
+  // the list at mount, so a newly added field never appeared until a reload.
+  const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const fields = initialFields.filter((f) => !deletedIds.has(f.id));
   const [isPending, startTransition] = useTransition();
 
   const byObjectType = OBJECT_TYPES.reduce(
@@ -314,7 +318,7 @@ export function ManageFieldsPanel({
   function handleDelete(fieldId: string) {
     startTransition(async () => {
       await deleteFieldDefinition(orgSlug, workspaceSlug, fieldId);
-      setFields((prev) => prev.filter((f) => f.id !== fieldId));
+      setDeletedIds((prev) => new Set(prev).add(fieldId));
       router.refresh();
     });
   }
