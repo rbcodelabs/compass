@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { getWorkspace } from "@/lib/workspace"
 import type { McpActor } from "@/lib/mcp-authz"
+import { AnalyticsError } from "@/lib/analytics/providers"
 
 /**
  * Shared session + membership gate for the analytics read routes. Reads go
@@ -26,4 +27,10 @@ export async function analyticsReadContext(request: Request): Promise<
 
 export function json(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "private, no-store" } })
+}
+
+/** Access-denied and missing targets are 404s, not server faults. */
+export function readFailure(error: unknown, message: string) {
+  if (error instanceof AnalyticsError && error.code === "NOT_FOUND_OR_ACCESS_DENIED") return json({ error: "Not found" }, 404)
+  return json({ error: message }, 500)
 }

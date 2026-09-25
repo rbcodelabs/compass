@@ -79,3 +79,22 @@ describe("GET /api/analytics/metrics", () => {
     expect(service.listMetrics).toHaveBeenCalledWith({ userId: "user-1", purpose: "USER" }, "ws-1")
   })
 })
+
+describe("analytics read route failures", () => {
+  it("maps service access denial to 404", async () => {
+    const { AnalyticsError } = await import("@/lib/analytics/providers")
+    service.listBindings.mockRejectedValue(new AnalyticsError("NOT_FOUND_OR_ACCESS_DENIED"))
+    const res = await getMeasurements(req("measurements", { ...scope, targetType: "ROADMAP_ITEM", targetId: TARGET_ID }))
+    expect(res.status).toBe(404)
+  })
+
+  it("returns 500 for unexpected service failures", async () => {
+    service.listMetrics.mockRejectedValue(new Error("db down"))
+    expect((await getMetrics(req("metrics", scope))).status).toBe(500)
+  })
+
+  it("returns 404 on /metrics for a non-member", async () => {
+    mockGetWorkspace.mockResolvedValue(null)
+    expect((await getMetrics(req("metrics", scope))).status).toBe(404)
+  })
+})

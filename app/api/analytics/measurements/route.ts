@@ -1,5 +1,5 @@
 import * as analytics from "@/lib/analytics/service"
-import { analyticsReadContext, json } from "@/lib/analytics/read-route"
+import { analyticsReadContext, json, readFailure } from "@/lib/analytics/read-route"
 
 export async function GET(request: Request) {
   const context = await analyticsReadContext(request)
@@ -15,7 +15,7 @@ export async function GET(request: Request) {
       binding,
       observations: await analytics.listObservations(context.actor, context.workspaceId, binding.id),
     }))))
-  } catch {
-    return json({ error: "Measurements could not be loaded" }, 500)
+  } catch (error) {
+    return readFailure(error, "Measurements could not be loaded")
   }
 }
