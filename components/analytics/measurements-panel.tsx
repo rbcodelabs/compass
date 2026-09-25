@@ -5,11 +5,10 @@ import { PlusIcon, RefreshCwIcon } from "lucide-react";
 import type { BindingDTO, MetricDTO, MetricTarget, ObservationDTO } from "@/lib/analytics/service";
 import {
   linkAnalyticsMetric,
-  listAnalyticsMetrics,
-  readMeasurements,
   refreshAnalyticsMeasurement,
   updateAnalyticsMeasurement,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions";
+import { listAnalyticsMetrics, readMeasurements } from "@/lib/analytics/measurement-reads";
 import { unwrapAnalyticsAction } from "@/lib/analytics/action-result";
 import { DAY_MS, validateWindow, type MetricWindow } from "@/lib/analytics/providers";
 import type { RollingWindow } from "@/lib/analytics/windows";

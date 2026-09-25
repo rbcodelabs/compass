@@ -15,9 +15,11 @@ const actions = vi.hoisted(() => ({
 
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions", () => ({
   linkAnalyticsMetric: actions.link,
+  refreshAnalyticsMeasurement: actions.refresh,
+}));
+vi.mock("@/lib/analytics/measurement-reads", () => ({
   listAnalyticsMetrics: actions.listMetrics,
   readMeasurements: actions.read,
-  refreshAnalyticsMeasurement: actions.refresh,
 }));
 
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
