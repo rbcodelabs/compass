@@ -386,6 +386,10 @@ export default async function globalTeardown() {
         `DELETE FROM "${S}".custom_field_definitions WHERE workspace_id = $1`,
         [wsId]
       );
+      await pool.query(
+        `DELETE FROM "${S}".shared_field_option_sets WHERE workspace_id = $1`,
+        [wsId]
+      );
       // NOTE: api_keys are user-scoped (no workspace_id column) — seeder
       // doesn't create any, so nothing to clean here.
       await pool.query(

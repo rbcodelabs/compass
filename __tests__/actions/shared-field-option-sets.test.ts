@@ -266,3 +266,46 @@ describe("updateFieldDefinition attach / detach", () => {
     expect(data.name).toBe("Renamed");
   });
 });
+
+/**
+ * The option-list editor sends existing options with their stored value and
+ * colour and new ones label-only. Both write paths must keep a supplied value
+ * (a rename must never re-slug it) and colour, and must derive a slug for a
+ * label-only option rather than storing an option with no value at all.
+ */
+describe("option lists sent by the option-list editor", () => {
+  const edited = [
+    { label: " Minor ", value: "low", color: "#16a34a" },
+    { label: "Brand New" },
+    { label: "   " },
+  ];
+  const expected = [
+    { label: "Minor", value: "low", color: "#16a34a" },
+    { label: "Brand New", value: "brand_new" },
+  ];
+
+  it("updateSharedFieldOptionSet keeps a renamed option's value and colour", async () => {
+    await updateSharedFieldOptionSet("org", "ws", "set-1", { options: edited });
+    expect(mockSharedFieldOptionSet.update.mock.calls[0][0].data.options).toEqual(expected);
+  });
+
+  it("createSharedFieldOptionSet keeps colours and slugs label-only options", async () => {
+    await createSharedFieldOptionSet("org", "ws", { name: "Priority", options: edited });
+    expect(mockSharedFieldOptionSet.create.mock.calls[0][0].data.options).toEqual(expected);
+  });
+
+  it("createFieldDefinition normalizes local options instead of storing them raw", async () => {
+    await createFieldDefinition("org", "ws", {
+      objectType: "TASK",
+      name: "Priority",
+      fieldType: "SELECT",
+      options: edited,
+    });
+    expect(mockCustomFieldDefinition.create.mock.calls[0][0].data.options).toEqual(expected);
+  });
+
+  it("updateFieldDefinition normalizes local options instead of storing them raw", async () => {
+    await updateFieldDefinition("org", "ws", "field-1", { options: edited });
+    expect(mockCustomFieldDefinition.update.mock.calls[0][0].data.options).toEqual(expected);
+  });
+});

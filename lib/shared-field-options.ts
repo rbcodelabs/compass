@@ -47,6 +47,14 @@ function slugify(label: string): string {
 export type SelectOptionInput = { label: string; value?: string | null; color?: string | null }
 
 /**
+ * The value an option will be stored under: its own value when it already has
+ * one (so renaming a label never changes it), otherwise the slug of its label.
+ */
+export function effectiveOptionValue(entry: SelectOptionInput): string {
+  return (entry.value ?? "").trim() || slugify(entry.label ?? "")
+}
+
+/**
  * Canonicalizes user-entered options before they are written: trims labels,
  * derives a slug value when the caller did not supply one, drops blank labels,
  * and de-duplicates by value so one picklist can never offer the same value
@@ -58,17 +66,13 @@ export function normalizeSelectOptions(input: readonly SelectOptionInput[]): Sel
   for (const entry of input) {
     const label = (entry?.label ?? "").trim()
     if (!label) continue
-    const value = (entry.value ?? "").trim() || slugify(label)
+    const value = effectiveOptionValue({ ...entry, label })
     if (!value || seen.has(value)) continue
     seen.add(value)
     const color = (entry.color ?? "").trim()
     options.push(color ? { label, value, color } : { label, value })
   }
   return options
-}
-
-export function optionsFromCommaList(raw: string): SelectOption[] {
-  return normalizeSelectOptions(raw.split(",").map((label) => ({ label })))
 }
 
 /**

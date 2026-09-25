@@ -11,7 +11,9 @@ import {
   updateSharedFieldOptionSet,
   deleteSharedFieldOptionSet,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
-import { optionsFromCommaList } from "@/lib/shared-field-options";
+import { OptionListEditor } from "@/components/custom-fields/option-list-editor";
+import { hasOptionListIssues } from "@/lib/option-list";
+import type { SelectOptionInput } from "@/lib/shared-field-options";
 import type { CustomFieldObjectType, SharedFieldOptionSetData } from "@/lib/types";
 
 const OBJECT_TYPE_LABELS: Record<CustomFieldObjectType, string> = {
@@ -59,18 +61,24 @@ function SetRow({
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(set.name);
-  const [optionText, setOptionText] = useState(set.options.map((o) => o.label).join(", "));
+  const [options, setOptions] = useState<SelectOptionInput[]>(set.options);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function save(event: React.FormEvent) {
     event.preventDefault();
+    if (hasOptionListIssues(options)) {
+      setError("Fix the highlighted options before saving.");
+      return;
+    }
     setError(null);
     startTransition(async () => {
       try {
         await updateSharedFieldOptionSet(orgSlug, workspaceSlug, set.id, {
           name,
-          options: optionsFromCommaList(optionText),
+          // Existing options carry their stored value and colour, so a renamed
+          // label keeps pointing at the same stored CustomFieldValues.
+          options,
         });
         setEditing(false);
         router.refresh();
@@ -112,16 +120,12 @@ function SetRow({
               required
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`set-options-${set.id}`}>Options (comma-separated)</Label>
-            <Input
-              id={`set-options-${set.id}`}
-              value={optionText}
-              onChange={(event) => setOptionText(event.target.value)}
-              placeholder="e.g. Payments, Billing, Growth"
-              disabled={isPending}
-            />
-          </div>
+          <OptionListEditor
+            label="Options"
+            value={options}
+            onChange={setOptions}
+            disabled={isPending}
+          />
           <div className="flex items-center gap-2">
             <Button type="submit" size="sm" disabled={isPending}>
               {isPending ? "Saving..." : "Save"}
@@ -134,7 +138,7 @@ function SetRow({
               onClick={() => {
                 setEditing(false);
                 setName(set.name);
-                setOptionText(set.options.map((o) => o.label).join(", "));
+                setOptions(set.options);
                 setError(null);
               }}
             >
@@ -151,7 +155,12 @@ function SetRow({
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <button
-                onClick={() => setEditing(true)}
+                onClick={() => {
+                  // Start from what is saved now, not a stale copy from an earlier edit.
+                  setName(set.name);
+                  setOptions(set.options);
+                  setEditing(true);
+                }}
                 disabled={isPending}
                 className="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
                 aria-label={`Edit ${set.name}`}
@@ -191,22 +200,26 @@ function AddSetForm({ orgSlug, workspaceSlug }: { orgSlug: string; workspaceSlug
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  const [optionText, setOptionText] = useState("");
+  const [options, setOptions] = useState<SelectOptionInput[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (hasOptionListIssues(options)) {
+      setError("Fix the highlighted options before creating the set.");
+      return;
+    }
     setError(null);
     startTransition(async () => {
       try {
         await createSharedFieldOptionSet(orgSlug, workspaceSlug, {
           name,
-          options: optionsFromCommaList(optionText),
+          options,
         });
         setOpen(false);
         setName("");
-        setOptionText("");
+        setOptions([]);
         router.refresh();
       } catch (caught) {
         setError(errorMessage(caught));
@@ -241,16 +254,12 @@ function AddSetForm({ orgSlug, workspaceSlug }: { orgSlug: string; workspaceSlug
           disabled={isPending}
         />
       </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="new-set-options">Options (comma-separated)</Label>
-        <Input
-          id="new-set-options"
-          value={optionText}
-          onChange={(event) => setOptionText(event.target.value)}
-          placeholder="e.g. Payments, Billing, Growth"
-          disabled={isPending}
-        />
-      </div>
+      <OptionListEditor
+        label="Options"
+        value={options}
+        onChange={setOptions}
+        disabled={isPending}
+      />
       {error && (
         <p role="alert" className="text-xs text-destructive">
           {error}
