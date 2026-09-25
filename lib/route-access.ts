@@ -52,6 +52,14 @@ export function isPublicPath(pathname: string): boolean {
     // Public portal routes — no auth, workspace settings control access
     pathname.startsWith("/portal/") ||
     pathname.startsWith("/api/portal/") ||
+    // Embedded feedback widget API. Called by `fetch` from a page Compass does
+    // not serve, so a 302 to /login would be unreadable to the caller — it has
+    // to reach the handler and get a JSON 401. The handler authenticates an
+    // `Authorization: Bearer cmpfb_…` embed token and separately checks the
+    // request's Origin against the source's exact-match allowlist; neither check
+    // consults a session, and no Compass cookie travels here (SameSite=Lax, and
+    // Access-Control-Allow-Credentials is never set).
+    pathname.startsWith("/api/embed/") ||
     // Participant research routes use a hashed, expiring study token. Their
     // API handlers validate the token and session-to-study scope themselves.
     pathname.startsWith("/research/") ||

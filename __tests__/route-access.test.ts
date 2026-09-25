@@ -24,6 +24,14 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/portal/rbcodelabs/compass/feedback")).toBe(true);
   });
 
+  it("allows the embedded feedback widget API (embed-token auth handled by the route itself)", () => {
+    // Called by fetch from a page Compass does not serve, so a 302 to /login
+    // would be unreadable to the caller — it has to reach the handler and get a
+    // JSON 401.
+    expect(isPublicPath("/api/embed/comments")).toBe(true);
+    expect(isPublicPath("/api/embed")).toBe(false);
+  });
+
   it("allows token-authenticated participant research routes", () => {
     expect(isPublicPath("/research/opaque-participant-token")).toBe(true);
     expect(isPublicPath("/api/research/start")).toBe(true);
