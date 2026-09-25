@@ -18,7 +18,9 @@ import {
   deleteFieldDefinition,
   updateFieldDefinition,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
-import { optionsFromCommaList, supportsSharedOptionSet } from "@/lib/shared-field-options";
+import { OptionListEditor } from "@/components/custom-fields/option-list-editor";
+import { hasOptionListIssues } from "@/lib/option-list";
+import { supportsSharedOptionSet, type SelectOptionInput } from "@/lib/shared-field-options";
 import type {
   CustomFieldDefinitionData,
   CustomFieldObjectType,
@@ -77,7 +79,7 @@ function AddFieldForm({
 }) {
   const [open, setOpen] = useState(false);
   const [fieldType, setFieldType] = useState<CustomFieldType>("TEXT");
-  const [selectOptions, setSelectOptions] = useState("");
+  const [selectOptions, setSelectOptions] = useState<SelectOptionInput[]>([]);
   const [optionSource, setOptionSource] = useState<string>(LOCAL_OPTIONS);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -90,6 +92,11 @@ function AddFieldForm({
     e.preventDefault();
     const name = nameRef.current?.value.trim() ?? "";
     if (!name) return;
+    const usesLocalOptions = isPicklist && !usesSharedSet;
+    if (usesLocalOptions && hasOptionListIssues(selectOptions)) {
+      setError("Fix the highlighted options before adding the field.");
+      return;
+    }
     setError(null);
 
     startTransition(async () => {
@@ -98,12 +105,12 @@ function AddFieldForm({
           objectType,
           name,
           fieldType,
-          options: isPicklist && !usesSharedSet ? optionsFromCommaList(selectOptions) : undefined,
+          options: usesLocalOptions ? selectOptions : undefined,
           sharedOptionSetId: usesSharedSet ? optionSource : null,
         });
         setOpen(false);
         setFieldType("TEXT");
-        setSelectOptions("");
+        setSelectOptions([]);
         setOptionSource(LOCAL_OPTIONS);
         onAdded();
       } catch (caught) {
@@ -188,16 +195,12 @@ function AddFieldForm({
       )}
 
       {isPicklist && !usesSharedSet && (
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`field-options-${objectType}`}>Options (comma-separated)</Label>
-          <Input
-            id={`field-options-${objectType}`}
-            placeholder="e.g. Low, Medium, High"
-            value={selectOptions}
-            onChange={(e) => setSelectOptions(e.target.value)}
-            disabled={isPending}
-          />
-        </div>
+        <OptionListEditor
+          label="Options"
+          value={selectOptions}
+          onChange={setSelectOptions}
+          disabled={isPending}
+        />
       )}
 
       {error && (
