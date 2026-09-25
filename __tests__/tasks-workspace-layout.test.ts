@@ -25,8 +25,8 @@ afterEach(cleanup);
 // The tasks server-actions module transitively imports next-auth — mock the
 // boundary so EditTaskDialog, TaskAssigneePicker, and TaskBoard render
 // without a real auth/db stack.
+vi.mock("@/lib/task-assignees-client", () => ({ fetchTaskAssigneeOptions: vi.fn() }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
-  getTaskAssigneeOptions: vi.fn(),
   updateTask: vi.fn(),
   moveTaskStatus: vi.fn(),
   updateSortOrder: vi.fn(),

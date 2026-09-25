@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Combobox, ComboboxContent, ComboboxTrigger, ComboboxValue } from "@/components/ui/combobox";
-import { getTaskAssigneeOptions } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
+import { fetchTaskAssigneeOptions } from "@/lib/task-assignees-client";
 import type { MemberData } from "@/lib/types";
 import type { ResolvedTaskAssignee, TaskAssignee } from "@/lib/task-assignment";
 
@@ -22,7 +22,9 @@ export function useTaskAssignees(members: MemberData[]): { options: ResolvedTask
   useEffect(() => {
     let active = true;
     if (orgSlug && workspaceSlug) {
-      getTaskAssigneeOptions(orgSlug, workspaceSlug).then(result => { if (active) { setOptions(result); setError(null); } }).catch(() => { if (active) setError("Could not load workspace assignees. Reopen to retry."); });
+      // A GET, not a server action: a read queued as an action could commit
+      // the pre-navigation URL and reopen the task panel after navigation.
+      fetchTaskAssigneeOptions(orgSlug, workspaceSlug).then(result => { if (active) { setOptions(result); setError(null); } }).catch(() => { if (active) setError("Could not load workspace assignees. Reopen to retry."); });
     }
     return () => { active = false; };
   }, [orgSlug, workspaceSlug]);
