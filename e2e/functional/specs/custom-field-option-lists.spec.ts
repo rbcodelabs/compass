@@ -10,9 +10,11 @@
  *
  * Journey:
  *   1. Create a Task SELECT field with three options entered one by one with
- *      Enter; the stored options carry derived slugs in entry order.
+ *      Enter, drag the last to the top; the stored options carry derived slugs
+ *      in the dragged order.
  *   2. Create a shared set by pasting a multi-line list into "Add option".
- *   3. Edit it: colour one option, move one up, rename another, save.
+ *   3. Edit it: colour one option, drag one to the top by its grip handle,
+ *      move another with the keyboard (Space, ArrowUp, Space), rename it, save.
  *   4. Reload: the renamed option kept its original value, the colour and the
  *      new order persisted, and the reopened editor shows the same state.
  *
@@ -20,7 +22,7 @@
  * workspace.
  */
 import pg from "pg";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../fixtures/index";
 
 const S = process.env.PGSCHEMA ? `${process.env.PGSCHEMA}_dev` : "compass_dev";
@@ -61,6 +63,30 @@ async function pasteInto(page: Page, label: string, text: string) {
   }, text);
 }
 
+/**
+ * Drags an option row by its grip handle onto another row with real pointer
+ * events, stepping the moves so dnd-kit's 4px activation distance is crossed
+ * and the sortable animation runs as it would for a person.
+ */
+async function dragHandle(page: Page, scope: Locator, from: string, onto: string) {
+  const handle = scope.getByRole("button", { name: `Reorder ${from}`, exact: true });
+  const target = scope.getByRole("button", { name: `Reorder ${onto}`, exact: true });
+  const start = await handle.boundingBox();
+  const end = await target.boundingBox();
+  if (!start || !end) throw new Error("drag handles have no bounding box");
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2 + 6, { steps: 4 });
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 15 });
+  await page.mouse.up();
+}
+
+async function labels(scope: Locator): Promise<string[]> {
+  return scope.getByLabel(/^Option \d+ label$/).evaluateAll((inputs) =>
+    inputs.map((input) => (input as HTMLInputElement).value),
+  );
+}
+
 /** The innermost <section> headed by `title` (object-type sections nest inside "Custom Fields"). */
 const section = (page: Page, title: string) =>
   page.locator("section").filter({ has: page.getByRole("heading", { name: title, exact: true }) }).last();
@@ -86,6 +112,10 @@ test.describe.serial("Option-list editor", () => {
       await expect(add).toHaveValue("");
     }
     await expect(tasks.getByLabel("Option 3 label")).toHaveValue("High");
+
+    // Drag High to the top by its grip handle; the drag must not submit the form.
+    await dragHandle(page, tasks, "High", "Low");
+    await expect.poll(() => labels(tasks)).toEqual(["High", "Low", "Medium"]);
     expect(await fieldOptions(fieldName)).toBeNull();
 
     await tasks.getByRole("button", { name: "Add Field" }).click();
@@ -93,9 +123,9 @@ test.describe.serial("Option-list editor", () => {
     await expect
       .poll(() => fieldOptions(fieldName))
       .toEqual([
+        { label: "High", value: "high" },
         { label: "Low", value: "low" },
         { label: "Medium", value: "medium" },
-        { label: "High", value: "high" },
       ]);
   });
 
@@ -120,26 +150,39 @@ test.describe.serial("Option-list editor", () => {
     await sets.getByRole("button", { name: `Edit ${setName}` }).click();
     await sets.getByRole("button", { name: "Color for Payments" }).click();
     await sets.getByRole("button", { name: "Blue", exact: true }).click();
-    await sets.getByRole("button", { name: "Move Growth up" }).click();
-    await sets.getByLabel("Option 3 label").fill("Invoicing");
+    // Pointer: drag Growth to the top.
+    await dragHandle(page, sets, "Growth", "Payments");
+    await expect.poll(() => labels(sets)).toEqual(["Growth", "Payments", "Billing"]);
+    // Keyboard: pick Billing up with Space, move it up one, drop with Space.
+    const billing = sets.getByRole("button", { name: "Reorder Billing", exact: true });
+    await billing.focus();
+    await page.keyboard.press("Space");
+    await expect(page.getByText("Picked up Billing.")).toBeAttached();
+    // dnd-kit starts listening for arrow keys and measures the rows on the
+    // frames after pick-up; a person never presses the next key within 1ms.
+    await page.waitForTimeout(150);
+    await page.keyboard.press("ArrowUp");
+    await expect(page.getByText("Moved Billing to position 2 of 3.")).toBeAttached();
+    await page.keyboard.press("Space");
+    await expect.poll(() => labels(sets)).toEqual(["Growth", "Billing", "Payments"]);
+    await expect(page.getByText("Dropped Billing at position 2 of 3.")).toBeAttached();
+    await sets.getByLabel("Option 2 label").fill("Invoicing");
     await sets.getByRole("button", { name: "Save" }).click();
 
     await expect
       .poll(() => setOptions(setName))
       .toEqual([
-        { label: "Payments", value: "payments", color: "#2563eb" },
         { label: "Growth", value: "growth" },
         // Renamed, but still the value stored CustomFieldValues point at.
         { label: "Invoicing", value: "billing" },
+        { label: "Payments", value: "payments", color: "#2563eb" },
       ]);
 
     await page.reload();
     const reloaded = section(page, "Shared option sets");
     await expect(reloaded.getByText("Invoicing", { exact: true })).toBeVisible();
     await reloaded.getByRole("button", { name: `Edit ${setName}` }).click();
-    await expect(reloaded.getByLabel("Option 1 label")).toHaveValue("Payments");
-    await expect(reloaded.getByLabel("Option 2 label")).toHaveValue("Growth");
-    await expect(reloaded.getByLabel("Option 3 label")).toHaveValue("Invoicing");
+    await expect.poll(() => labels(reloaded)).toEqual(["Growth", "Invoicing", "Payments"]);
     await reloaded.getByRole("button", { name: "Color for Payments" }).click();
     await expect(reloaded.getByRole("button", { name: "Blue", exact: true })).toHaveAttribute("aria-pressed", "true");
   });

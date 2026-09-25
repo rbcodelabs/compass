@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { useState } from "react"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { OptionListEditor } from "@/components/custom-fields/option-list-editor"
 import type { SelectOptionInput } from "@/lib/shared-field-options"
@@ -13,7 +13,39 @@ import type { SelectOptionInput } from "@/lib/shared-field-options"
  * could not hold a label containing a comma.
  */
 
-afterEach(cleanup)
+/**
+ * jsdom lays nothing out, so every rect is zero and dnd-kit's keyboard
+ * coordinates could never find a "next" row. Give each sortable row a stacked
+ * 40px slot by its position in the list so the sensor behaves as in a browser.
+ */
+const ROW_HEIGHT = 40
+beforeEach(() => {
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    // The list itself spans all its rows — the drag is clamped to it.
+    if (this.querySelector(":scope > [data-option-row]")) {
+      const height = this.children.length * ROW_HEIGHT
+      return { x: 0, y: 0, top: 0, left: 0, width: 300, height, right: 300, bottom: height, toJSON() {} } as DOMRect
+    }
+    const row = this.closest("[data-option-row]")
+    const index = row?.parentElement ? Array.from(row.parentElement.children).indexOf(row) : 0
+    const top = row ? index * ROW_HEIGHT : 0
+    const height = row ? ROW_HEIGHT - 4 : 0
+    return { x: 0, y: top, top, left: 0, width: row ? 300 : 0, height, right: row ? 300 : 0, bottom: top + height, toJSON() {} } as DOMRect
+  })
+})
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
+
+/** dnd-kit's keyboard sensor reads event.code and moves on the following frame. */
+async function press(element: Element | Window, code: string) {
+  await act(async () => {
+    fireEvent.keyDown(element, { code, key: code === "Space" ? " " : code })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  })
+}
 
 function Harness({
   initial,
@@ -61,9 +93,10 @@ describe("OptionListEditor", () => {
     expect(screen.getByLabelText("Option 1 label")).toHaveValue("Low")
     expect(screen.getByLabelText("Option 3 label")).toHaveValue("High")
     expect(screen.getByRole("button", { name: "Remove Low" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Move Low up" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Move High down" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Move Medium up" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Reorder Low" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Reorder High" })).toBeInTheDocument()
+    // Reordering is by the drag handle now; the arrow buttons are gone.
+    expect(screen.queryByRole("button", { name: /^Move / })).not.toBeInTheDocument()
   })
 
   it("keeps an existing option's value and colour when its label is renamed", () => {
@@ -72,10 +105,33 @@ describe("OptionListEditor", () => {
     expect(state()[0]).toEqual({ label: "Minor", value: "low", color: "#16a34a" })
   })
 
-  it("reorders with the move buttons", () => {
+  it("reorders with the keyboard through the drag handle and announces it by label", async () => {
+    const onSubmit = vi.fn()
+    render(<Harness initial={priorities} onSubmit={onSubmit} />)
+    const handle = screen.getByRole("button", { name: "Reorder Low" })
+    handle.focus()
+
+    await press(handle, "Space")
+    expect(document.body).toHaveTextContent("Picked up Low.")
+    await press(handle, "ArrowDown")
+    expect(document.body).toHaveTextContent("Moved Low to position 2 of 3.")
+    await press(handle, "Space")
+
+    expect(state().map((o) => o.value)).toEqual(["medium", "low", "high"])
+    expect(document.body).toHaveTextContent("Dropped Low at position 2 of 3.")
+    // Picking up and dropping inside the form must never submit it.
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("cancels a keyboard drag with Escape and leaves the order alone", async () => {
     render(<Harness initial={priorities} />)
-    fireEvent.click(screen.getByRole("button", { name: "Move High up" }))
-    expect(state().map((o) => o.value)).toEqual(["low", "high", "medium"])
+    const handle = screen.getByRole("button", { name: "Reorder Low" })
+    handle.focus()
+    await press(handle, "Space")
+    await press(handle, "ArrowDown")
+    await press(handle, "Escape")
+    expect(state().map((o) => o.value)).toEqual(["low", "medium", "high"])
+    expect(document.body).toHaveTextContent("Reordering cancelled. Low returned to position 1.")
   })
 
   it("reorders with Alt+Arrow from a label input", () => {

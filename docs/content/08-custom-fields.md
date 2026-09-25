@@ -36,7 +36,7 @@ SELECT and MULTI_SELECT options — on a new field, or in a **Shared option set*
 - **Add several at once** — Paste a list into the **Add option** box, one option per line (list bullets are stripped) or comma-separated on one line. Each entry becomes its own option.
 - **Rename** — Edit the label in place. Renaming never changes the option's stored value, so every record already tagged with it keeps its tag.
 - **Color** — Click the dot at the start of a row to pick a color, or **No color**. Colored options show as colored chips.
-- **Reorder** — Use the up/down arrows, or press **Alt+↑ / Alt+↓** while editing a label.
+- **Reorder** — Drag a row by its grip handle (⋮⋮) at the left. With the keyboard, focus the handle, press **Space** to pick the option up, **↑ / ↓** to move it, and **Space** to drop it (**Esc** cancels). You can also press **Alt+↑ / Alt+↓** while editing a label. On a phone, press and hold the handle briefly before dragging.
 - **Remove** — Click the **×** at the end of a row.
 
 Blank labels and duplicates (compared case-insensitively) are flagged inline and must be fixed before saving, rather than being silently dropped.
