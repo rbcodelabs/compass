@@ -29,6 +29,16 @@ files and continued the pattern instead of consulting the configured routing
 `decision_records` to the `compass_decisions` provider). That is the behaviour
 this README exists to stop.
 
+**It caught two more agents while this PR sat open and unmerged.** ADR 0016
+("Workspace Updates and Explicit Catch-up State", PR #284, 2026-09-24) was
+committed here as a full file, the same mistake ADR 0014 made — because with
+this PR unmerged, the directory still looked like 16 tidy files to follow. It
+has now been migrated to Compass and stubbed below. Separately, the draft for
+what became ADR 0017 (Compass GitHub App) was also first written to this
+directory before being moved to Compass directly; it never merged here, so
+there is no stub for it. Both are additional evidence the directory itself
+was the trap, not any one agent's judgment.
+
 ## Index
 
 | Stub | Decision |
@@ -49,9 +59,15 @@ this README exists to stop.
 | [`0012-research-processing-in-the-core-agent.md`](./0012-research-processing-in-the-core-agent.md) | [ADR 0012 — Research Processing in the Core Agent](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/a8190aa6-bebf-4287-b360-7c64a3443c40) |
 | [`0013-custom-field-value-mcp-management.md`](./0013-custom-field-value-mcp-management.md) | [ADR 0013 — MCP Read/Write Access to Custom Field Values](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/47540dc3-6d32-42bf-a656-aa2d6431585d) |
 | [`0014-compass-is-its-own-oauth-authorization-server.md`](./0014-compass-is-its-own-oauth-authorization-server.md) | [ADR 0014 — Compass Is Its Own OAuth Authorization Server](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/99822ac1-19dc-4399-9af1-98bdc9350064) |
+| [`0015-agent-scoped-oauth-tokens.md`](./0015-agent-scoped-oauth-tokens.md) | [ADR 0015 — Agent-Scoped OAuth Tokens](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/5a9b08d8-3426-4045-ba2f-a5a466a0e5f5) |
+| [`0016-workspace-updates-catch-up.md`](./0016-workspace-updates-catch-up.md) | [ADR 0016 — Workspace Updates and Explicit Catch-up State](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/a6c1a3df-67a6-4775-b34b-c6ecab3bbea9) |
 
 Not an ADR, migrated separately to a root-level Compass doc:
 [`research-guided-chat-parity-plan.md`](./research-guided-chat-parity-plan.md).
+
+Never had a repo file (written directly to Compass): [ADR 0016 — Membership-Scoped
+Read Resolver for Cross-Workspace Views](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/23133262-1ef0-4ea7-aa93-aff97fe44631)
+and [ADR 0017 — Compass GitHub App](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/ff39bdf0-9b04-4f3f-aace-26575cfdfb32).
 
 ## Numbering is broken — on purpose, preserved
 
@@ -62,6 +78,9 @@ because existing citations depend on the numbers as-is:
 - **0004** — does not exist in this repo (ADR 0005's "Obsidian ADR-0004" is a vault-side document)
 - **0008** — two unrelated ADRs (Authenticated Preview Validation; Declarative Agent Capability Packs)
 - **0009** — two unrelated ADRs (Personal Agents and Task Assignment; Preview Login)
+- **0016** — two unrelated ADRs (Membership-Scoped Read Resolver; Workspace Updates
+  catch-up), added independently by two later PRs with no repo copy of each
+  other to notice the clash against
 
-A citation of "ADR-0008" or "ADR-0009" is therefore ambiguous on the number
-alone — check the subject.
+A citation of "ADR-0008", "ADR-0009" or "ADR-0016" is therefore ambiguous on
+the number alone — check the subject.

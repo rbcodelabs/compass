@@ -20,6 +20,10 @@ parent doc in the `rbcodelabs/compass` workspace. This is what
   migrated to Compass on 2026-09-19; the files remain as stubs solely so the
   ~85 existing references across the codebase keep resolving. **Do not add new
   files to that directory**, and do not expand a stub back into a full record.
+  This has already been violated twice while the migrating PR sat unmerged
+  (ADR 0015 got it right; ADR 0016 "Workspace Updates" and the ADR 0017 draft
+  did not, and were fixed after the fact) — this line existing in `main` is
+  the fix, so trust it over any full ADR file you find in the directory.
 
 ## Secrets
 
