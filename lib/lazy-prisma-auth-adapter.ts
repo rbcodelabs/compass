@@ -81,7 +81,13 @@ export function createLazyPrismaAuthAdapter(
       if (!row) return null;
       const deadline = await automationDeadline(row);
       if (deadline === null) return null;
-      return adapter.updateSession!({ ...data, ...(deadline ? { expires: new Date(Math.min(data.expires?.getTime() ?? deadline.getTime(), deadline.getTime())) } : {}) });
+      const target = new Date(Math.min(data.expires?.getTime() ?? deadline.getTime(), deadline.getTime()));
+      // Automation sessions only ever shorten. A render calls auth() several times
+      // in parallel; writing an unchanged (capped) expiry on each call made those
+      // UPDATEs conflict under Aurora DSQL optimistic concurrency, surfacing as
+      // AdapterError and random sign-outs. Skip the write unless it shortens.
+      if (row.expires.getTime() <= target.getTime()) return row;
+      return adapter.updateSession!({ ...data, expires: target });
     },
   };
 }

@@ -98,8 +98,26 @@ describe("createLazyPrismaAuthAdapter", () => {
       const row = { sessionToken: "preview_test", previewAutomationRunId: "run", userId: "owner", expires: expiresAt };
       const client = { previewAutomationSession: { findUnique: vi.fn().mockResolvedValue({ runId: "run" }) }, session: { findUnique: vi.fn().mockResolvedValue(row), update: vi.fn().mockResolvedValue(row) }, previewAutomationRun: { findUnique: vi.fn().mockResolvedValue({ id: "run", deploymentId: "deployment", expiresAt, revokedAt: null, ownerUserId: "owner", viewerUserId: "viewer" }) } };
       const adapter = createLazyPrismaAuthAdapter(() => client as unknown as AppPrismaClient);
-      await adapter.updateSession!({ sessionToken: "preview_test", expires: new Date(Date.now() + 30 * 86400_000) });
-      expect(client.session.update).toHaveBeenCalledWith({ where: { sessionToken: "preview_test" }, data: { sessionToken: "preview_test", expires: expiresAt } });
+      const refreshed = await adapter.updateSession!({ sessionToken: "preview_test", expires: new Date(Date.now() + 30 * 86400_000) });
+      // Already at the deadline: nothing to write. Concurrent auth() calls in one
+      // render would otherwise race on this row (Aurora DSQL OCC) and sign users out.
+      expect(client.session.update).not.toHaveBeenCalled();
+      expect(refreshed?.expires).toEqual(expiresAt);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("never writes an automation session concurrently rendered auth() calls would race on", async () => {
+    vi.stubEnv("PREVIEW_AUTOMATION_ENABLED", "1");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "deployment");
+    try {
+      const expiresAt = new Date(Date.now() + 60_000);
+      const row = { sessionToken: "preview_test", previewAutomationRunId: "run", userId: "owner", expires: expiresAt };
+      const client = { previewAutomationSession: { findUnique: vi.fn().mockResolvedValue({ runId: "run" }) }, session: { findUnique: vi.fn().mockResolvedValue(row), update: vi.fn().mockRejectedValue(new Error("OC000 change conflicts with another transaction")) }, previewAutomationRun: { findUnique: vi.fn().mockResolvedValue({ id: "run", deploymentId: "deployment", expiresAt, revokedAt: null, ownerUserId: "owner", viewerUserId: "viewer" }) } };
+      const adapter = createLazyPrismaAuthAdapter(() => client as unknown as AppPrismaClient);
+      const refreshes = await Promise.all(Array.from({ length: 5 }, () => adapter.updateSession!({ sessionToken: "preview_test", expires: new Date(Date.now() + 30 * 86400_000) })));
+      expect(refreshes.every(r => r?.expires.getTime() === expiresAt.getTime())).toBe(true);
+      expect(client.session.update).not.toHaveBeenCalled();
     } finally { vi.unstubAllEnvs(); }
   });
 });
