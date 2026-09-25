@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # Compass — Project Notes
 
 ## Secrets
