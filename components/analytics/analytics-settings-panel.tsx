@@ -1,15 +1,12 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { ArchiveIcon, PencilIcon, PlusIcon, TriangleIcon } from "lucide-react";
-import type { ConnectionDTO, MetricDTO, MetricInput } from "@/lib/analytics/service";
+import { useState, useTransition } from "react";
+import { TriangleIcon } from "lucide-react";
+import type { ConnectionDTO } from "@/lib/analytics/service";
 import { unwrapAnalyticsAction } from "@/lib/analytics/action-result";
 import {
-  archiveAnalyticsMetric,
   connectAnalytics,
-  createAnalyticsMetric,
   disconnectAnalytics,
-  editAnalyticsMetric,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,11 +35,8 @@ type Props = {
   orgSlug: string;
   workspaceSlug: string;
   initialConnections: ConnectionDTO[];
-  initialMetrics: MetricDTO[];
   canManage: boolean;
 };
-
-type MetricKind = "pageviews" | "daily_visitors" | "event_count";
 
 function errorMessage(error: unknown) {
   const code = error instanceof Error ? error.message : "UNKNOWN";
@@ -53,37 +47,26 @@ function errorMessage(error: unknown) {
     ANALYTICS_DISABLED: "Web Analytics is not enabled for that project.",
     PLAN_REQUIRED: "This query requires a Vercel plan with Web Analytics access.",
     PROJECT_IDENTITY_IMMUTABLE: "Disconnecting does not change project identity. Reconnect the same project or create a new workspace connection.",
-    REVISION_CONFLICT: "This metric changed elsewhere. Reload before editing it again.",
     ENCRYPTION_NOT_CONFIGURED: "Analytics credential storage is not configured. Contact your Compass administrator.",
-    INVALID_INPUT: "Check the metric or connection fields and try again.",
+    INVALID_INPUT: "Check the connection fields and try again.",
     RATE_LIMITED: "Vercel rate-limited this request. Try again later.",
     PROVIDER_UNAVAILABLE: "Vercel is temporarily unavailable. Try again later.",
   };
   return known[code] ?? "The analytics change could not be saved. Try again.";
 }
 
-function metricKind(metric?: MetricDTO): MetricKind {
-  const value = metric?.query.metric;
-  return value === "daily_visitors" || value === "event_count" ? value : "pageviews";
-}
-
-export function AnalyticsSettingsPanel({ orgSlug, workspaceSlug, initialConnections, initialMetrics, canManage }: Props) {
+/**
+ * Connection management only. Metric create/edit/archive live on the
+ * standalone Metrics page (app/[orgSlug]/[workspaceSlug]/metrics) — see
+ * components/analytics/metrics-dashboard.tsx.
+ */
+export function AnalyticsSettingsPanel({ orgSlug, workspaceSlug, initialConnections, canManage }: Props) {
   const [connections, setConnections] = useState(initialConnections);
-  const [metrics, setMetrics] = useState(initialMetrics);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
-  const [metricOpen, setMetricOpen] = useState(false);
-  const [editingMetric, setEditingMetric] = useState<MetricDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const vercel = connections.find((connection) => connection.provider === "vercel");
-  const activeMetrics = useMemo(() => metrics.filter((metric) => !metric.archived), [metrics]);
-
-  function openMetric(metric: MetricDTO | null) {
-    setEditingMetric(metric);
-    setError(null);
-    setMetricOpen(true);
-  }
 
   function saveConnection(formData: FormData) {
     setError(null);
@@ -112,51 +95,6 @@ export function AnalyticsSettingsPanel({ orgSlug, workspaceSlug, initialConnecti
           ? { ...connection, enabled: false, health: "DISCONNECTED", generation: connection.generation + 1 }
           : connection));
         setDisconnectOpen(false);
-      } catch (cause) {
-        setError(errorMessage(cause));
-      }
-    });
-  }
-
-  function saveMetric(formData: FormData) {
-    if (!vercel?.enabled) return;
-    const kind = String(formData.get("measure")) as MetricKind;
-    const eventName = String(formData.get("eventName") ?? "").trim();
-    const action = String(formData.get("action") ?? "").trim();
-    const path = String(formData.get("path") ?? "").trim();
-    const query: MetricInput["query"] = {
-      metric: kind,
-      ...(kind === "event_count" && eventName ? { eventName } : {}),
-      ...(kind !== "event_count" && path ? { path } : {}),
-      ...(kind === "event_count" && action ? { eventProperties: { action } } : {}),
-    };
-    const input: MetricInput = {
-      name: String(formData.get("name") ?? ""),
-      unit: String(formData.get("unit") ?? ""),
-      provider: "vercel",
-      connectionId: vercel.id,
-      query,
-    };
-    setError(null);
-    startTransition(async () => {
-      try {
-        const saved = unwrapAnalyticsAction(editingMetric
-          ? await editAnalyticsMetric(orgSlug, workspaceSlug, editingMetric.id, { ...input, expectedRevision: editingMetric.revision })
-          : await createAnalyticsMetric(orgSlug, workspaceSlug, input));
-        setMetrics((current) => [saved, ...current.filter((metric) => metric.id !== saved.id)]);
-        setMetricOpen(false);
-      } catch (cause) {
-        setError(errorMessage(cause));
-      }
-    });
-  }
-
-  function archive(metric: MetricDTO) {
-    setError(null);
-    startTransition(async () => {
-      try {
-        unwrapAnalyticsAction(await archiveAnalyticsMetric(orgSlug, workspaceSlug, metric.id));
-        setMetrics((current) => current.map((item) => item.id === metric.id ? { ...item, archived: true } : item));
       } catch (cause) {
         setError(errorMessage(cause));
       }
@@ -196,24 +134,11 @@ export function AnalyticsSettingsPanel({ orgSlug, workspaceSlug, initialConnecti
         </div>
       </div>
 
-      <div>
-        <div className="mb-3 flex items-start justify-between gap-4">
-          <div><h3 className="font-semibold text-text-primary">Metrics</h3><p className="mt-1 text-sm text-text-subtle">Define once. Reuse across experiments, launches, and key results.</p></div>
-          {canManage && <Button onClick={() => openMetric(null)} disabled={!vercel?.enabled}><PlusIcon />Create metric</Button>}
-        </div>
-        <div className="overflow-hidden rounded-xl border border-border-default bg-surface-panel">
-          {activeMetrics.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-text-subtle">No metrics defined yet. Connect Vercel, then create a reusable measurement.</p>
-          ) : activeMetrics.map((metric, index) => (
-            <div key={metric.id} className={`flex items-center gap-3 px-4 py-4 ${index ? "border-t border-border-default" : ""}`}>
-              <div className="min-w-0 flex-1"><p className="font-medium text-text-primary">{metric.name}</p><p className="mt-1 text-xs text-text-subtle">{metric.provider === "vercel" ? "Vercel" : "Compass"} · {metric.query.metric.replaceAll("_", " ")} · Revision {metric.revision}</p></div>
-              <Badge variant="outline">{metric.unit}</Badge>
-              {canManage && <>{metric.provider === "vercel" && <Button size="icon-sm" variant="ghost" aria-label={`Edit ${metric.name}`} onClick={() => openMetric(metric)} disabled={!vercel?.enabled}><PencilIcon /></Button>}<Button size="icon-sm" variant="ghost" aria-label={`Archive ${metric.name}`} onClick={() => archive(metric)}><ArchiveIcon /></Button></>}
-            </div>
-          ))}
-        </div>
-        <p className="mt-3 text-xs leading-5 text-text-subtle">Editing creates a new revision. Existing measurements keep the definition they were linked to.</p>
-      </div>
+      <p className="text-sm text-text-subtle">
+        Metrics defined on this connection are managed from the{" "}
+        <a href={`/${orgSlug}/${workspaceSlug}/metrics`} className="font-medium text-primary underline underline-offset-2">Metrics</a>{" "}
+        page, alongside every metric&apos;s dashboard widget.
+      </p>
 
       <Dialog open={connectionOpen} onOpenChange={setConnectionOpen}>
         <DialogContent>
@@ -230,8 +155,6 @@ export function AnalyticsSettingsPanel({ orgSlug, workspaceSlug, initialConnecti
         </DialogContent>
       </Dialog>
 
-      {metricOpen && <MetricDialog open onOpenChange={setMetricOpen} metric={editingMetric} pending={isPending} error={error} onSubmit={saveMetric} />}
-
       <AlertDialog open={disconnectOpen} onOpenChange={setDisconnectOpen}>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Disconnect Vercel?</AlertDialogTitle><AlertDialogDescription>Credentials will be removed. Existing observations remain available as evidence.</AlertDialogDescription></AlertDialogHeader>
@@ -239,28 +162,5 @@ export function AnalyticsSettingsPanel({ orgSlug, workspaceSlug, initialConnecti
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
-}
-
-function MetricDialog({ open, onOpenChange, metric, pending, error, onSubmit }: { open: boolean; onOpenChange: (open: boolean) => void; metric: MetricDTO | null; pending: boolean; error: string | null; onSubmit: (formData: FormData) => void }) {
-  const [kind, setKind] = useState<MetricKind>(metricKind(metric ?? undefined));
-  const key = metric ? `${metric.id}:${metric.revision}` : "new";
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent key={key} className="sm:max-w-md">
-        <form action={onSubmit} className="contents">
-          <DialogHeader><DialogTitle>{metric ? "Edit metric" : "Create metric"}</DialogTitle><DialogDescription>Only allowlisted aggregate fields are sent to the provider.</DialogDescription></DialogHeader>
-          <div className="grid gap-4">
-            <div className="grid gap-1.5"><Label htmlFor={`metric-name-${key}`}>Name</Label><Input id={`metric-name-${key}`} name="name" required defaultValue={metric?.name ?? ""} /></div>
-            <div className="grid gap-1.5"><Label htmlFor={`metric-unit-${key}`}>Unit</Label><Input id={`metric-unit-${key}`} name="unit" required defaultValue={metric?.unit ?? "views"} /></div>
-            <div className="grid gap-1.5"><Label htmlFor={`metric-measure-${key}`}>Measure</Label><select id={`metric-measure-${key}`} name="measure" value={kind} onChange={(event) => setKind(event.target.value as MetricKind)} className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm"><option value="pageviews">Pageviews</option><option value="daily_visitors">Daily visitors</option><option value="event_count">Custom event count</option></select></div>
-            {kind === "event_count" ? <><div className="grid gap-1.5"><Label htmlFor={`metric-event-${key}`}>Event name</Label><Input id={`metric-event-${key}`} name="eventName" required defaultValue={metric?.query.eventName ?? ""} /></div><div className="grid gap-1.5"><Label htmlFor={`metric-action-${key}`}>Action filter (optional)</Label><Input id={`metric-action-${key}`} name="action" defaultValue={metric?.query.eventProperties?.action ?? ""} /></div></> : <div className="grid gap-1.5"><Label htmlFor={`metric-path-${key}`}>Path filter (optional)</Label><Input id={`metric-path-${key}`} name="path" placeholder="/roadmap" defaultValue={metric?.query.path ?? ""} /></div>}
-            <p className="text-xs leading-5 text-text-subtle">No user identifiers or free-text product content are supported.</p>
-          </div>
-          {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
-          <DialogFooter><Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save metric"}</Button></DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }
