@@ -6,6 +6,14 @@
  *    and `session.snapshot()` it, so agent turns can boot warm (~200ms) instead
  *    of paying the ~10s cold install every turn.
  *  - `bootSandboxFromSnapshot()` — the warm boot path used by the turn service.
+ *  - `deleteGoldenSnapshot()` — delete a golden snapshot from Vercel Sandbox
+ *    storage. Every rebuild leaves the *previous* golden snapshot orphaned
+ *    unless the caller explicitly deletes it (see
+ *    POST /api/admin/rebuild-agent-snapshot, which does this after the new
+ *    snapshot is confirmed persisted) — each one is ~450MB, and left
+ *    unattended these silently accumulate until the team's Snapshot Storage
+ *    quota is exceeded and Vercel starts rejecting ALL sandbox creation
+ *    account-wide with a 402.
  *
  * DESIGN NOTE — only DEPENDENCIES are baked into the snapshot, not the agent
  * entry script. The entry script is written per-turn (cheap) in Phase 3, so
@@ -19,7 +27,7 @@
  */
 
 import { createHash } from "node:crypto"
-import { Sandbox } from "@vercel/sandbox"
+import { Sandbox, Snapshot } from "@vercel/sandbox"
 
 export const SANDBOX_RUNTIME = "node24"
 const SANDBOX_TIMEOUT_MS = 5 * 60_000
@@ -124,4 +132,23 @@ export async function buildGoldenSnapshot(opts?: {
  */
 export async function bootSandboxFromSnapshot(snapshotId: string): Promise<Sandbox> {
   return Sandbox.create({ source: { type: "snapshot", snapshotId }, timeout: SANDBOX_TIMEOUT_MS })
+}
+
+/**
+ * Delete a golden snapshot from Vercel Sandbox storage.
+ *
+ * Callers MUST only invoke this for a snapshot that is no longer referenced
+ * by AgentRuntimeConfig.goldenSnapshotId — deleting the *current* golden
+ * snapshot would leave the agent runtime with nothing to boot from. The
+ * rebuild route enforces this by persisting the new snapshot id first and
+ * only deleting the previous one afterward.
+ *
+ * Uses the same OIDC/token credential resolution as `Sandbox.create()`
+ * (no explicit team/project/token wiring needed here or in production).
+ * Throws on failure — callers that consider deletion best-effort (the
+ * rebuild route does) should catch and log rather than fail the request.
+ */
+export async function deleteGoldenSnapshot(snapshotId: string): Promise<void> {
+  const snapshot = await Snapshot.get({ snapshotId })
+  await snapshot.delete()
 }
