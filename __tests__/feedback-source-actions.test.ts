@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   resolveWorkspaceAdmin: vi.fn(),
   feedbackSource: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   feedbackSourceToken: { create: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn() },
+  embedVisitorSession: { updateMany: vi.fn() },
   artifact: { findFirst: vi.fn() },
   workspace: { update: vi.fn() },
 }));
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
 const mockPrisma = {
   feedbackSource: mocks.feedbackSource,
   feedbackSourceToken: mocks.feedbackSourceToken,
+  embedVisitorSession: mocks.embedVisitorSession,
   artifact: mocks.artifact,
   workspace: mocks.workspace,
 };
@@ -66,6 +68,7 @@ beforeEach(() => {
   mocks.feedbackSourceToken.create.mockResolvedValue({ id: "token-1" });
   mocks.feedbackSourceToken.findFirst.mockResolvedValue({ id: "token-1" });
   mocks.feedbackSourceToken.updateMany.mockResolvedValue({ count: 1 });
+  mocks.embedVisitorSession.updateMany.mockResolvedValue({ count: 0 });
   mocks.workspace.update.mockResolvedValue({});
 });
 
@@ -294,6 +297,18 @@ describe("updateFeedbackSource", () => {
       updateFeedbackSource("org", "ws", "source-1", { authMode: "INTERNAL_SSO" })
     ).resolves.toMatchObject({ ok: true, authMode: "INTERNAL_SSO" });
     expect(mocks.feedbackSource.update.mock.calls[0][0].data).toMatchObject({ authMode: "INTERNAL_SSO" });
+    // A real mode change: any visitor session minted under the old PORTAL mode
+    // must not keep working under the new one for the rest of its 12-hour TTL.
+    expect(mocks.embedVisitorSession.updateMany).toHaveBeenCalledWith({
+      where: { feedbackSourceId: "source-1", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+
+    mocks.embedVisitorSession.updateMany.mockClear();
+    // The mocked row does not actually flip to INTERNAL_SSO between calls (this
+    // fixture does not model persistence), so the second call below still reads
+    // the original PORTAL row — which is exactly the "unrelated field changed,
+    // mode did not" case this second half of the test is for.
 
     // Omitted on a later edit: the stored PORTAL survives rather than being reset
     // to the create-time default by an unrelated origin change.
@@ -301,6 +316,8 @@ describe("updateFeedbackSource", () => {
       updateFeedbackSource("org", "ws", "source-1", { allowedOrigins: [] })
     ).resolves.toMatchObject({ ok: true, authMode: "PORTAL" });
     expect(mocks.feedbackSource.update.mock.calls[1][0].data).toMatchObject({ authMode: "PORTAL" });
+    // No mode change this time: nothing to revoke.
+    expect(mocks.embedVisitorSession.updateMany).not.toHaveBeenCalled();
   });
 
   it("refuses an unrecognized mode without touching the stored row", async () => {

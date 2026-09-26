@@ -319,38 +319,52 @@ async function retryDsql<T>(operation: () => Promise<T>, attempts = 3): Promise<
  * believing they were under the limit.
  */
 export async function consumeEmbedRate(tokenId: string, kind: "READ" | "SUBMIT"): Promise<void> {
-  await retryDsql(async () => {
-    const prisma = getPrisma()
-    const token = await prisma.feedbackSourceToken.findUnique({
-      where: { id: tokenId },
-      select: { readWindowAt: true, readCount: true, submitWindowAt: true, submitCount: true },
+  try {
+    await retryDsql(async () => {
+      const prisma = getPrisma()
+      const token = await prisma.feedbackSourceToken.findUnique({
+        where: { id: tokenId },
+        select: { readWindowAt: true, readCount: true, submitWindowAt: true, submitCount: true },
+      })
+      if (!token) throw new EmbedSourceError(401, "Invalid embed token")
+      const now = new Date()
+      const windowAt = kind === "READ" ? token.readWindowAt : token.submitWindowAt
+      const stored = kind === "READ" ? token.readCount : token.submitCount
+      const limit = kind === "READ" ? MAX_EMBED_READS_PER_MINUTE : MAX_EMBED_SUBMITS_PER_MINUTE
+      const active = Boolean(windowAt && now.getTime() - windowAt.getTime() < 60_000)
+      const count = active ? (stored ?? 0) : 0
+      if (count >= limit) throw new EmbedSourceError(429, "Too many requests. Please wait and try again.")
+      const updated = await prisma.feedbackSourceToken.updateMany({
+        where:
+          kind === "READ"
+            ? { id: tokenId, readWindowAt: token.readWindowAt, readCount: token.readCount }
+            : { id: tokenId, submitWindowAt: token.submitWindowAt, submitCount: token.submitCount },
+        data:
+          kind === "READ"
+            ? active
+              ? { readCount: count + 1 }
+              : { readWindowAt: now, readCount: 1 }
+            : active
+              ? { submitCount: count + 1 }
+              : { submitWindowAt: now, submitCount: 1 },
+      })
+      if (updated.count !== 1) {
+        throw Object.assign(new Error("Concurrent embed quota update"), { code: "P2034" })
+      }
     })
-    if (!token) throw new EmbedSourceError(401, "Invalid embed token")
-    const now = new Date()
-    const windowAt = kind === "READ" ? token.readWindowAt : token.submitWindowAt
-    const stored = kind === "READ" ? token.readCount : token.submitCount
-    const limit = kind === "READ" ? MAX_EMBED_READS_PER_MINUTE : MAX_EMBED_SUBMITS_PER_MINUTE
-    const active = Boolean(windowAt && now.getTime() - windowAt.getTime() < 60_000)
-    const count = active ? (stored ?? 0) : 0
-    if (count >= limit) throw new EmbedSourceError(429, "Too many requests. Please wait and try again.")
-    const updated = await prisma.feedbackSourceToken.updateMany({
-      where:
-        kind === "READ"
-          ? { id: tokenId, readWindowAt: token.readWindowAt, readCount: token.readCount }
-          : { id: tokenId, submitWindowAt: token.submitWindowAt, submitCount: token.submitCount },
-      data:
-        kind === "READ"
-          ? active
-            ? { readCount: count + 1 }
-            : { readWindowAt: now, readCount: 1 }
-          : active
-            ? { submitCount: count + 1 }
-            : { submitWindowAt: now, submitCount: 1 },
-    })
-    if (updated.count !== 1) {
-      throw Object.assign(new Error("Concurrent embed quota update"), { code: "P2034" })
+  } catch (error) {
+    // Retries exhausted on a genuine compare-and-set race. This used to escape as
+    // the raw synthetic P2034 Error, which every route's catch-all does not
+    // special-case (only EmbedSourceError is mapped to a CORS-headered JSON
+    // response) — so it surfaced to the widget's `fetch()` as an opaque 500 with
+    // no CORS headers at all, indistinguishable from a network failure. Wrapping
+    // it here routes it through the same errorResponse/embedError path as every
+    // other embed failure, with a status the widget can treat as retryable.
+    if (errorCode(error) === "P2034") {
+      throw new EmbedSourceError(503, "This feedback source is busy. Please try again in a moment.")
     }
-  })
+    throw error
+  }
 }
 
 /**

@@ -25,6 +25,7 @@
  * this module writes to.
  */
 import { put } from "@vercel/blob"
+import { configuredBlobStoreHostname } from "@/lib/feedback-attachments"
 
 /**
  * 400 KiB decoded. The widget caps its own capture at 480px wide JPEG at quality
@@ -150,11 +151,17 @@ export async function storeEmbedScreenshot(input: {
  * Whether a URL submitted alongside a comment is one this module produced.
  *
  * Three checks, each closing a different door. HTTPS rules out a plaintext fetch
- * from an internal page. The blob-host suffix rules out an arbitrary origin —
- * which is the tracking-pixel case, and the reason this function exists. The
- * prefix rules out a URL pointing at some other part of Compass's own blob store,
- * so a widget cannot use this field to surface, say, an artifact bundle or a
- * branding asset as though it were a screenshot of a click.
+ * from an internal page. The exact hostname match — against
+ * {@link configuredBlobStoreHostname}, the same helper
+ * lib/feedback-attachments.ts uses for its own upload-ownership checks — rules
+ * out an arbitrary origin, which is the tracking-pixel case and the reason this
+ * function exists. This used to be a `.endsWith(".public.blob.vercel-storage.com")`
+ * suffix match, which only proves a URL is hosted on *some* Vercel Blob public
+ * store, not this deployment's own; the exact-hostname comparison is what
+ * actually confines it to Compass's configured store. The prefix rules out a URL
+ * pointing at some other part of that same store, so a widget cannot use this
+ * field to surface, say, an artifact bundle or a branding asset as though it
+ * were a screenshot of a click.
  *
  * Note what is deliberately NOT checked: that the object exists, or that it
  * belongs to the same workspace. Both would need a network round trip on every
@@ -167,7 +174,9 @@ export function isEmbedScreenshotUrl(value: unknown): value is string {
   try {
     const parsed = new URL(value)
     if (parsed.protocol !== "https:") return false
-    if (!parsed.hostname.endsWith(".public.blob.vercel-storage.com")) return false
+    // If the store cannot be determined (misconfigured deployment), fail closed
+    // rather than accepting a URL there is nothing trustworthy to compare it to.
+    if (parsed.hostname !== configuredBlobStoreHostname()) return false
     return parsed.pathname.startsWith(`/${EMBED_SCREENSHOT_PREFIX}/`)
   } catch {
     return false

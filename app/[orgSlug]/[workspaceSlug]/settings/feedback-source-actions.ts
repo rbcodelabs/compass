@@ -244,6 +244,19 @@ export async function updateFeedbackSource(
       data: { name, allowedOrigins, enabled, authMode, updatedAt: new Date() },
     });
 
+    // A visitor session minted under the OLD mode keeps working under it for up
+    // to its remaining 12-hour TTL otherwise: the write routes only re-check
+    // workspace membership for an INTERNAL-kind visitor, they never re-check
+    // `source.authMode` against `visitor.kind` on every write. Revoking on an
+    // actual mode change forces every existing visitor to sign in again under
+    // whichever mode is now in effect.
+    if (authMode !== resolveEmbedAuthMode(existing.authMode)) {
+      await prisma.embedVisitorSession.updateMany({
+        where: { feedbackSourceId: existing.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+
     revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
     return { ok: true as const, name, allowedOrigins, enabled, authMode };
   });

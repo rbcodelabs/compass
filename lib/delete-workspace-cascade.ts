@@ -195,8 +195,30 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   }
   await prisma.oKRCycle.deleteMany({ where: { workspaceId } });
 
-  // 11b. Embed feedback sources. Tokens first (Restrict toward the source), and
-  //      the whole pair before artifacts, since a bound source references one.
+  // 11b. Embed feedback sources. Visitor sessions and auth handoffs first (both
+  //      Restrict toward the source, and easy to miss since a widget visitor
+  //      only ever produces them once someone actually signs in or starts to),
+  //      then tokens (also Restrict toward the source), and the whole group
+  //      before artifacts, since a bound source references one.
+  await prisma.embedVisitorSession.deleteMany({
+    where: { feedbackSource: { workspaceId } },
+  });
+  await prisma.embedAuthHandoff.deleteMany({
+    where: { feedbackSource: { workspaceId } },
+  });
+  // CommentExternalAuthor.embedTokenId is a bare uuid column with no @relation to
+  // FeedbackSourceToken, so it is never covered by Restrict emulation and would
+  // dangle once tokens are deleted below — null it out first rather than leaving
+  // a comment's external-author row pointing at a token that no longer exists.
+  const tokenIds = await ids(
+    prisma.feedbackSourceToken.findMany({ where: { feedbackSource: { workspaceId } }, select: { id: true } })
+  );
+  if (tokenIds.length > 0) {
+    await prisma.commentExternalAuthor.updateMany({
+      where: { embedTokenId: { in: tokenIds } },
+      data: { embedTokenId: null },
+    });
+  }
   await prisma.feedbackSourceToken.deleteMany({
     where: { feedbackSource: { workspaceId } },
   });

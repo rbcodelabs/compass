@@ -51,24 +51,44 @@
  *    `safeCallbackUrl` (lib/safe-callback-url.ts), and `/embed/signin` is already an
  *    exact-path public route in lib/route-access.ts — so a same-origin path
  *    round-trips as-is.
- * 4. Once signed in, this action deposits the handoff and the popup closes. The
- *    widget then claims the nonce for a scoped visitor token.
+ * 4. Once signed in, this action deposits AND claims the handoff in the same
+ *    call — see "Why deposit and claim happen together" below — and the popup
+ *    delivers the resulting token to the widget over `postMessage`, then closes.
  *
- * Nothing claimable crosses back through this action's return value — see
- * lib/embed-visitor.ts. The token is minted at claim time, on the widget's own
- * authenticated request.
+ * ## Why deposit and claim happen together
+ *
+ * They did not always: the widget used to claim the nonce itself, by POSTing it
+ * to the public `/api/embed/session` route with no further credential. That was
+ * the vulnerability this shape closes. The nonce is chosen by whoever constructs
+ * this popup's URL — normally the widget, but nothing before this change stopped
+ * an attacker from picking their own nonce, getting a target to load this page
+ * (the target's `SameSite=Lax` portal or Compass session cookie rides along on
+ * that top-level navigation), and then claiming the resulting token themselves
+ * with a bare curl to the public route — no browser, no click, required. Folding
+ * the claim into this same-origin, cookie-authenticated call means the only
+ * thing ever reachable from outside is a deposit gated by this action's own
+ * checks (including the origin check below), and the only way to receive the
+ * minted token is to be the window this popup's `postMessage` is addressed to.
  */
 
 import { auth } from "@/auth";
 import { getPortalSession } from "@/lib/portal-auth";
-import { EmbedSourceError, consumeEmbedRate, resolveEmbedToken } from "@/lib/embed-sources";
-import { depositEmbedAuthHandoff } from "@/lib/embed-visitor";
+import { EmbedSourceError, consumeEmbedRate, isOriginAllowed, resolveEmbedToken } from "@/lib/embed-sources";
+import { claimEmbedAuthHandoff, depositEmbedAuthHandoff } from "@/lib/embed-visitor";
 import { isWorkspaceMember } from "@/lib/workspace";
 import type { EmbedAuthMode } from "@/lib/embed-auth-mode";
 
 export type EmbedSignInResult =
-  /** The handoff is deposited. The widget's claim will now succeed exactly once. */
-  | { status: "deposited"; email: string }
+  /**
+   * The handoff is deposited AND claimed, in this one call — see the module
+   * header for why those two steps used to be split across this action and a
+   * publicly reachable route, and why that was the vulnerability. The credential
+   * travels back to the widget over `postMessage` from the popup, never through
+   * this return value's caller (a server action's response is not observable by
+   * the widget at all), so carrying it here is safe: only the popup itself reads
+   * this result.
+   */
+  | { status: "deposited"; email: string; token: string; expiresAt: string; origin: string }
   /**
    * No usable session yet. `mode` tells the popup which affordance to render —
    * a magic-link form or an SSO link — and is why this carries a payload at all.
@@ -120,6 +140,14 @@ function isUniqueViolation(error: unknown): boolean {
 export async function depositEmbedSignIn(input: {
   token: string;
   nonce: string;
+  /**
+   * The origin the widget itself is running on — see the module header's "Why
+   * deposit and claim happen together". Checked against the source's own
+   * allowed-origins list before anything is written, which is what stops a
+   * target from being bound to a nonce an attacker chose: the popup can only
+   * complete for an origin the operator already told Compass to trust.
+   */
+  origin: string;
 }): Promise<EmbedSignInResult> {
   // Hoisted out of the try so the duplicate-deposit branch in the catch can tell
   // which session to re-read. Null there means the failure happened at or before
@@ -135,6 +163,17 @@ export async function depositEmbedSignIn(input: {
     // ceiling but is not free, and an unmetered loop reachable by anyone holding a
     // public embed token is exactly the shape of an accidental amplifier.
     await consumeEmbedRate(source.tokenId, "READ");
+
+    // Fail closed, before any deposit write. An origin that is not on this
+    // source's own allowlist has no business completing a sign-in for it — see
+    // the module header.
+    if (!isOriginAllowed(source.allowedOrigins, input.origin)) {
+      return {
+        status: "unavailable",
+        error:
+          "This sign-in cannot be completed from an unrecognized origin. Ask whoever embedded this prototype to add your origin to its allowed list.",
+      };
+    }
 
     if (source.authMode === "INTERNAL_SSO") {
       // NextAuth types `user` and both of these fields as optional, so they are
@@ -171,7 +210,20 @@ export async function depositEmbedSignIn(input: {
         identity: { userId: actor.id },
       });
 
-      return { status: "deposited", email: actor.email };
+      // Claimed in the same call as the deposit, immediately, rather than left
+      // for the widget to redeem separately — see the module header. This
+      // should always succeed: the row was just created above, under the same
+      // request, for the same source.
+      const minted = await claimEmbedAuthHandoff({ nonce: input.nonce, feedbackSourceId: source.sourceId });
+      if (!minted) return { status: "unavailable", error: "Something went wrong. Please try again." };
+
+      return {
+        status: "deposited",
+        email: actor.email,
+        token: minted.token,
+        expiresAt: minted.expiresAt.toISOString(),
+        origin: input.origin,
+      };
     }
 
     const identity = await getPortalSession();
@@ -186,21 +238,34 @@ export async function depositEmbedSignIn(input: {
       identity: { portalAccountId: identity.portalAccountId },
     });
 
-    return { status: "deposited", email: identity.email };
+    // See the INTERNAL_SSO branch above: same atomic claim, same reasoning.
+    const minted = await claimEmbedAuthHandoff({ nonce: input.nonce, feedbackSourceId: source.sourceId });
+    if (!minted) return { status: "unavailable", error: "Something went wrong. Please try again." };
+
+    return {
+      status: "deposited",
+      email: identity.email,
+      token: minted.token,
+      expiresAt: minted.expiresAt.toISOString(),
+      origin: input.origin,
+    };
   } catch (error) {
     // A second deposit of the same nonce. The nonce is 32 CSPRNG bytes chosen by
     // one widget instance and never reused, so this is the same popup arriving
-    // twice — two polls overlapping, or a double-mounted client — and not two
-    // parties racing for one slot. Reported as success because the state the
-    // caller asked for now holds.
+    // twice — two polls overlapping, or a double-mounted client racing React 19's
+    // double-invoked effect — and not two parties racing for one slot.
+    //
+    // Deposit and claim now happen atomically in this one call, so unlike the
+    // previous split-across-two-calls design there is no "re-read whichever
+    // session deposited it and report deposited again" to do here: the winning
+    // call has already deposited, claimed, and deleted the handoff row, so a
+    // second claim against the same nonce would find nothing to claim. Reporting
+    // `signin_required` is non-terminal — the popup's poll loop stays alive and
+    // naturally retries in ~2.5s, by which point the winning call has finished
+    // and this same popup's next attempt (a fresh nonce) or a reload will pick
+    // up the resulting session, rather than surfacing a dead end to the visitor.
     if (isUniqueViolation(error)) {
-      if (resolvedMode === "INTERNAL_SSO") {
-        const actor = await resolveSsoActor();
-        if (actor) return { status: "deposited", email: actor.email };
-      } else if (resolvedMode === "PORTAL") {
-        const identity = await getPortalSession();
-        if (identity) return { status: "deposited", email: identity.email };
-      }
+      return { status: "signin_required", mode: resolvedMode ?? "INTERNAL_SSO" };
     }
     // Every EmbedSourceError in this path carries a message meant for a person: an
     // invalid credential, a disabled source, an unbound source, a tripped quota,

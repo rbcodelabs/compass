@@ -258,7 +258,14 @@ describe("consumeEmbedRate", () => {
   it("gives up after repeated contention rather than looping", async () => {
     mockToken.findUnique.mockResolvedValue({ readWindowAt: null, readCount: null, submitWindowAt: null, submitCount: null });
     mockToken.updateMany.mockResolvedValue({ count: 0 });
-    await expect(consumeEmbedRate("token-1", "SUBMIT")).rejects.toMatchObject({ code: "P2034" });
+    // Not the raw synthetic P2034 Error: every route's catch-all only maps an
+    // EmbedSourceError to a CORS-headered response, so the raw error used to
+    // escape as an opaque 500 with no CORS headers — indistinguishable from a
+    // network failure to the widget's fetch(). See lib/embed-sources.ts.
+    const error = await consumeEmbedRate("token-1", "SUBMIT").catch((e) => e);
+    expect(error).toBeInstanceOf(EmbedSourceError);
+    expect((error as EmbedSourceError).status).toBe(503);
+    expect((error as EmbedSourceError).message).toBe("This feedback source is busy. Please try again in a moment.");
     expect(mockToken.updateMany).toHaveBeenCalledTimes(3);
   });
 

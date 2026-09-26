@@ -31,6 +31,12 @@ const BLOB_HOST = "https://examplestore.public.blob.vercel-storage.com";
 beforeEach(() => {
   vi.clearAllMocks();
   mockPut.mockResolvedValue({ url: `${BLOB_HOST}/${EMBED_SCREENSHOT_PREFIX}/ws-1/source-1/capture-abc.jpg` });
+  // `isEmbedScreenshotUrl` now compares against the deployment's own configured
+  // store (lib/feedback-attachments.ts's `configuredBlobStoreHostname`, derived
+  // from this token's third `_`-separated segment) rather than a generic
+  // `.public.blob.vercel-storage.com` suffix — this is what makes "examplestore"
+  // the *configured* store in every test below, not merely *a* Vercel Blob store.
+  process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_examplestore_secret";
 });
 
 /** Asserts the thrown value is an EmbedScreenshotError carrying `status`. */
@@ -187,8 +193,17 @@ describe("isEmbedScreenshotUrl", () => {
     expect(isEmbedScreenshotUrl(`${BLOB_HOST}/${EMBED_SCREENSHOT_PREFIX}/ws-1/source-1/capture-abc.jpg`)).toBe(true);
   });
 
-  it("accepts any store subdomain, since the store id varies by environment", () => {
-    expect(isEmbedScreenshotUrl(`https://otherstore.public.blob.vercel-storage.com/${EMBED_SCREENSHOT_PREFIX}/a.jpg`)).toBe(true);
+  it("rejects a different Vercel Blob store even though the suffix still matches", () => {
+    // The regression test for the fix: a suffix match alone only proves the URL
+    // is hosted on *some* Vercel Blob public store, not this deployment's own
+    // configured one ("examplestore", per BLOB_READ_WRITE_TOKEN in beforeEach).
+    // "otherstore" is a different store id and must be rejected outright now.
+    expect(isEmbedScreenshotUrl(`https://otherstore.public.blob.vercel-storage.com/${EMBED_SCREENSHOT_PREFIX}/a.jpg`)).toBe(false);
+  });
+
+  it("fails closed when the deployment's own store cannot be determined", () => {
+    delete process.env.BLOB_READ_WRITE_TOKEN;
+    expect(isEmbedScreenshotUrl(`${BLOB_HOST}/${EMBED_SCREENSHOT_PREFIX}/ws-1/source-1/capture-abc.jpg`)).toBe(false);
   });
 
   // Each of the three checks, failed on its own, with the other two satisfied.

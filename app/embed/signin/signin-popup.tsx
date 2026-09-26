@@ -20,9 +20,13 @@
  *
  * The interval is metered server-side on the source's read quota.
  *
- * The popup never receives a credential. The action's success only says a handoff
- * is waiting; the widget that opened this window is what exchanges it, on its own
- * authenticated request.
+ * The popup DOES now receive the credential — a `deposited` result carries the
+ * minted visitor token, not merely news that a handoff is waiting. See
+ * app/embed/signin/actions.ts's module header for why the deposit and the claim
+ * happen together, in one authenticated call, rather than split so the widget
+ * could exchange the nonce itself against a public route. This popup then hands
+ * the token onward to the widget over `postMessage` and never through anything a
+ * non-browser client could intercept or redeem on its own.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -43,10 +47,13 @@ type State = { status: "checking" } | EmbedSignInResult | { status: "abandoned" 
 export function EmbedSignInPopup({
   token,
   nonce,
+  origin,
   ssoHref,
 }: {
   token: string;
   nonce: string;
+  /** The widget's own origin, shape-checked in page.tsx and allowlist-checked in the action. */
+  origin: string;
   /** Built server-side in page.tsx, because the choice depends on the auth strategy. */
   ssoHref: string;
 }) {
@@ -54,10 +61,10 @@ export function EmbedSignInPopup({
   const startedAt = useRef<number | null>(null);
 
   const check = useCallback(async () => {
-    const result = await depositEmbedSignIn({ token, nonce });
+    const result = await depositEmbedSignIn({ token, nonce, origin });
     setState(result);
     return result.status;
-  }, [token, nonce]);
+  }, [token, nonce, origin]);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +96,27 @@ export function EmbedSignInPopup({
       if (timer) clearTimeout(timer);
     };
   }, [check]);
+
+  // Delivers the minted credential to the widget. `postMessage` is browser-enforced
+  // origin delivery — see app/embed/signin/actions.ts's module header for why this
+  // replaced the widget claiming the nonce itself against a public route. Targeted
+  // at `state.origin` (the same origin the action just allowlist-checked), never
+  // `"*"`: a wildcard target would hand the token to whichever page happens to be
+  // at the other end of `window.opener`, which is exactly the credential leak this
+  // is supposed to avoid.
+  useEffect(() => {
+    if (state.status !== "deposited") return;
+    try {
+      window.opener?.postMessage(
+        { type: "compass-embed-signin", nonce, token: state.token, expiresAt: state.expiresAt, email: state.email },
+        state.origin
+      );
+    } catch (err) {
+      // The opener may already be gone (closed, navigated away). The "Close this
+      // window" affordance below is the fallback for exactly this case.
+      void err;
+    }
+  }, [state, nonce]);
 
   if (state.status === "checking") {
     return <Shell>Checking your sign-in…</Shell>;

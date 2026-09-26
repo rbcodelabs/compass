@@ -9,10 +9,13 @@
  * wrap is not a sign-in screen the visitor can trust, and it also sends no
  * referrer, because this URL carries the handoff nonce.
  *
- * Both query parameters are checked for shape here, before anything touches the
- * database. `assertWellFormedNonce` in lib/embed-visitor.ts is the real gate and
- * runs again server-side; this one exists so a visitor who lands on a mangled URL
- * gets an explanation instead of a spinner over a doomed poll.
+ * Three query parameters are checked for shape here, before anything touches the
+ * database. `assertWellFormedNonce` in lib/embed-visitor.ts is the real gate for
+ * the nonce and runs again server-side; `origin` is only shape-checked here too —
+ * the real allowlist check is `isOriginAllowed` inside the server action, since
+ * that is the one place that can read the source's actual allowlist. This page's
+ * checks exist so a visitor who lands on a mangled URL gets an explanation instead
+ * of a spinner over a doomed poll.
  *
  * This is also where the internal-SSO entry href is built, from the two parameters
  * this page has just shape-checked rather than from anything the popup would have to
@@ -35,17 +38,19 @@ export const metadata: Metadata = {
 const NONCE_RE = /^[0-9a-f]{64}$/;
 
 type Props = {
-  searchParams: Promise<{ token?: string; nonce?: string }>;
+  searchParams: Promise<{ token?: string; nonce?: string; origin?: string }>;
 };
 
 export default async function EmbedSignInPage({ searchParams }: Props) {
-  const { token, nonce } = await searchParams;
+  const { token, nonce, origin } = await searchParams;
 
   const wellFormed =
     typeof token === "string" &&
     token.startsWith(EMBED_TOKEN_PREFIX) &&
     typeof nonce === "string" &&
-    NONCE_RE.test(nonce);
+    NONCE_RE.test(nonce) &&
+    typeof origin === "string" &&
+    origin.length > 0;
 
   if (!wellFormed) {
     return (
@@ -60,7 +65,7 @@ export default async function EmbedSignInPage({ searchParams }: Props) {
     );
   }
 
-  return <EmbedSignInPopup token={token} nonce={nonce} ssoHref={buildSsoHref(token, nonce)} />;
+  return <EmbedSignInPopup token={token} nonce={nonce} origin={origin} ssoHref={buildSsoHref(token, nonce)} />;
 }
 
 /**

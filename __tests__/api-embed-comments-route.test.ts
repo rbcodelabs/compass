@@ -152,6 +152,12 @@ beforeEach(() => {
     id: "comment-1",
     createdAt: new Date("2026-01-01T00:00:00Z"),
   } as unknown as Awaited<ReturnType<typeof createComment>>);
+  // `isEmbedScreenshotUrl` (lib/embed-screenshots.ts, not mocked here) now
+  // compares a submitted screenshot URL's host against this deployment's own
+  // configured Blob store rather than a generic suffix — see
+  // __tests__/embed-screenshots.test.ts. "examplestore" is what BLOB_HOST below
+  // names, so the token has to derive that same store id.
+  process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_examplestore_secret";
 });
 
 describe("OPTIONS /api/embed/comments", () => {

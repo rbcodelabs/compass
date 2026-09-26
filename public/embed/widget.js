@@ -377,10 +377,8 @@
     options = options || {};
     var headers = { Authorization: "Bearer " + embedToken };
     if (options.body !== undefined) headers["Content-Type"] = "application/json";
-    if (!options.anonymous) {
-      var visitor = visitorToken();
-      if (visitor) headers["X-Compass-Visitor"] = visitor;
-    }
+    var visitor = visitorToken();
+    if (visitor) headers["X-Compass-Visitor"] = visitor;
 
     var init = { method: options.method || "GET", headers: headers };
     if (options.body !== undefined) init.body = JSON.stringify(options.body);
@@ -406,13 +404,7 @@
           // A PORTAL_AUTH_REQUIRED 401 from any endpoint means the same thing — the
           // visitor is not signed in here — and the recovery is always to forget the
           // token and offer sign-in.
-          //
-          // The nonce poll is the one caller that opts out via `ignoreAuthCode`,
-          // because on POST /api/embed/session that same code means "this nonce is
-          // not claimable (yet)", which is the normal answer while the visitor is
-          // still reading their email. Treating it as a session failure there would
-          // abort every sign-in on its first poll.
-          if (result.authRequired && !options.ignoreAuthCode) {
+          if (result.authRequired) {
             clearStored();
             state.identity = null;
           }
@@ -1388,6 +1380,53 @@
   var pendingIntent = null;
 
   /**
+   * Delivers the minted credential from the first-party popup once the visitor has
+   * signed in. This is what completes a sign-in now — see the note above
+   * `pollSignIn`: the popup used to be claimed by polling a public route with just
+   * the nonce, which was also reachable by any non-browser client that guessed or
+   * intercepted it. `postMessage` is browser-enforced origin delivery instead: only
+   * a script actually running on the Compass origin can be the sender, so this
+   * listener only has to check that it is, and that the message names the nonce
+   * this attempt itself drew — a message from a superseded attempt arriving late
+   * is not this one's answer.
+   *
+   * Registered once, here, rather than inside `beginSignIn`: this whole file only
+   * evaluates once per page (see the `GLOBAL_KEY` guard near the top), so there is
+   * no second registration to guard against.
+   */
+  var onSignInMessage = guarded("signin-message", function (event) {
+    if (event.origin !== API_BASE) return;
+    var data = event.data;
+    if (!data || data.type !== "compass-embed-signin") return;
+    if (!signIn.nonce || data.nonce !== signIn.nonce) return;
+    if (typeof data.token !== "string") return;
+
+    // Returned exactly once — persisted before anything else can throw.
+    writeStored(data.token, data.expiresAt);
+    state.identity = { email: data.email, name: data.name };
+    try {
+      if (signIn.popup) signIn.popup.close();
+    } catch (err) {
+      // Closing a window we opened but do not own is best-effort.
+      void err;
+    }
+    cancelSignIn();
+    renderIdentity();
+    setMessage("Signed in. " + (state.identity.email || ""), "info");
+
+    // A member of this workspace may now read a thread that was refused to
+    // them anonymously, so the latched 403 is stale. Fire-and-forget: the
+    // resumed intent below must not wait on it.
+    rereadThread();
+
+    // Pick up whatever they were trying to do when we interrupted them.
+    var resume = pendingIntent;
+    pendingIntent = null;
+    if (resume) resume();
+  });
+  window.addEventListener("message", onSignInMessage);
+
+  /**
    * 32 CSPRNG bytes as 64 lowercase hex characters, which is what the server's
    * `/^[0-9a-f]{64}$/` demands.
    *
@@ -1443,9 +1482,20 @@
      * into a page with a Compass address bar and the embedding page never sees their
      * address or their magic link. No visitor token goes here — there isn't one yet,
      * and this is exactly the request that mints it.
+     *
+     * `origin` is this page's own origin, so the popup's server action can refuse
+     * to complete the sign-in unless it is in this source's allowed-origins list —
+     * otherwise anyone who can get a target to open this same URL with a nonce of
+     * their own choosing could bind the target's session to it.
      */
     var url =
-      API_BASE + "/embed/signin?token=" + encodeURIComponent(embedToken) + "&nonce=" + encodeURIComponent(nonce);
+      API_BASE +
+      "/embed/signin?token=" +
+      encodeURIComponent(embedToken) +
+      "&nonce=" +
+      encodeURIComponent(nonce) +
+      "&origin=" +
+      encodeURIComponent(window.location.origin);
 
     try {
       // No `noopener`: we need the handle back, because `popup.closed` is the only
@@ -1488,6 +1538,21 @@
     }
   }
 
+  /**
+   * A watchdog, not a claim mechanism. Completion arrives solely through
+   * `onSignInMessage` above — this function's only job is to give up on an
+   * attempt that has run past its ceiling or whose popup was abandoned.
+   *
+   * It used to also POST a claim with the nonce to `/api/embed/session`, which
+   * `beginSignIn`'s doc comment above described as the whole reason the popup
+   * flow exists: that endpoint minted a token for *any* caller presenting a
+   * valid nonce, including a non-browser client, so a nonce chosen by whoever
+   * constructed the popup URL — not necessarily this widget — was directly
+   * redeemable by curl. Removing the network call here is half of closing
+   * that: the other half is the popup's own action now minting and delivering
+   * the credential itself, to `window.opener`, rather than leaving anything
+   * for a public route to hand out.
+   */
   function pollSignIn() {
     var nonce = signIn.nonce;
     if (!nonce) return;
@@ -1510,52 +1575,7 @@
       }
     }
 
-    request("/session", {
-      method: "POST",
-      body: { nonce: nonce },
-      anonymous: true,
-      // See the note in `request`: here PORTAL_AUTH_REQUIRED means "not yet".
-      ignoreAuthCode: true
-    }).then(
-      guarded("signin-claim", function (result) {
-        // A nonce change means a newer attempt superseded this one mid-flight.
-        if (signIn.nonce !== nonce) return;
-
-        if (result.ok && result.data && typeof result.data.token === "string") {
-          // Returned exactly once — persisted before anything else can throw.
-          writeStored(result.data.token, result.data.expiresAt);
-          state.identity = { email: result.data.email, name: result.data.name };
-          try {
-            if (signIn.popup) signIn.popup.close();
-          } catch (err) {
-            // Closing a window we opened but do not own is best-effort.
-            void err;
-          }
-          cancelSignIn();
-          renderIdentity();
-          setMessage("Signed in. " + (state.identity.email || ""), "info");
-
-          // A member of this workspace may now read a thread that was refused to
-          // them anonymously, so the latched 403 is stale. Fire-and-forget: the
-          // resumed intent below must not wait on it.
-          rereadThread();
-
-          // Pick up whatever they were trying to do when we interrupted them.
-          var resume = pendingIntent;
-          pendingIntent = null;
-          if (resume) resume();
-          return;
-        }
-
-        if (result.rateLimited) {
-          // Back off a whole extra interval rather than hammering a closed door.
-          signIn.timer = window.setTimeout(guarded("signin-poll", pollSignIn), POLL_INTERVAL_MS * 2);
-          return;
-        }
-
-        scheduleSignInPoll();
-      })
-    );
+    scheduleSignInPoll();
   }
 
   function signOut() {

@@ -278,6 +278,41 @@ function storedVisitor(embedToken = TOKEN) {
   return window.localStorage.getItem(storageKey(embedToken))
 }
 
+/** The nonce the stubbed CSPRNG produces on its Nth draw, N counting from 0. */
+function expectedNonce(draw: number) {
+  let hex = ""
+  for (let i = 0; i < 32; i++) hex += ((draw * 31 + i) % 256 + 0x100).toString(16).slice(1)
+  return hex
+}
+
+/**
+ * Simulates the first-party popup's delivery of the minted visitor credential.
+ *
+ * The popup used to be claimed by POSTing the nonce to `/api/embed/session` —
+ * reachable by any HTTP client, which was the vulnerability. It is now claimed
+ * only by receiving a `message` event from the popup, addressed to the Compass
+ * origin and naming the nonce this attempt itself drew, so every sign-in test
+ * simulates that delivery with this helper rather than mocking a fetch response.
+ * Defaults to the first nonce draw (`expectedNonce(0)`), the correct origin, and
+ * a full credential payload; override individual fields to test a rejection.
+ */
+function signInMessage(overrides: Partial<Json> = {}, origin = ORIGIN) {
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      origin,
+      data: {
+        type: "compass-embed-signin",
+        nonce: expectedNonce(0),
+        token: VISITOR,
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        email: "ada@example.com",
+        name: "Ada",
+        ...overrides,
+      },
+    })
+  )
+}
+
 /* ------------------------------------------------------------------ *
  * Fixtures
  * ------------------------------------------------------------------ */
@@ -698,20 +733,15 @@ describe("rendering a thread", () => {
         ? { status: 200, data: { artifactId: "art_1", comments: [] } }
         : { status: 403, data: { error: "Feedback on this workspace's artifacts is not publicly readable." } }
     )
-    on("POST /api/embed/session", () => {
-      signedIn = true
-      return {
-        status: 201,
-        data: { token: VISITOR, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), email: "ada@example.com", name: "Ada" },
-      }
-    })
 
     await mount()
     expect(maybePart("read-blocked")).not.toBeNull()
     expect(callsTo("GET /api/embed/comments")).toHaveLength(1)
 
     click(part("signin"))
-    await vi.advanceTimersByTimeAsync(2500)
+    signedIn = true
+    signInMessage()
+    await flush()
 
     // Exactly one extra read: the latch is dropped by the identity change, not by a
     // timer, so a signed-in member does not poll a published-or-not answer.
@@ -1087,14 +1117,7 @@ describe("pins over anchored comments", () => {
  * ------------------------------------------------------------------ */
 
 describe("sign-in", () => {
-  /** The nonce the stubbed CSPRNG produces on its Nth draw, N counting from 0. */
-  function expectedNonce(draw: number) {
-    let hex = ""
-    for (let i = 0; i < 32; i++) hex += ((draw * 31 + i) % 256 + 0x100).toString(16).slice(1)
-    return hex
-  }
-
-  it("opens a popup on the Compass origin carrying the token and a fresh nonce", async () => {
+  it("opens a popup on the Compass origin carrying the token, a fresh nonce, and this page's own origin", async () => {
     await mount()
     click(part("signin"))
 
@@ -1106,6 +1129,10 @@ describe("sign-in", () => {
     expect(url.pathname).toBe("/embed/signin")
     expect(url.searchParams.get("token")).toBe(TOKEN)
     expect(url.searchParams.get("nonce")).toBe(expectedNonce(0))
+    // The popup's server action refuses to complete unless this origin is on the
+    // source's own allowlist — see actions.ts. Read from window.location, never
+    // hard-coded, so it is right on whatever page actually embedded the widget.
+    expect(url.searchParams.get("origin")).toBe(window.location.origin)
   })
 
   it("draws 64 lowercase hex characters from the CSPRNG, never Math.random", async () => {
@@ -1137,7 +1164,9 @@ describe("sign-in", () => {
     // must start over rather than be ignored.
     expect(seen.size).toBe(4)
     expect(openCalls).toHaveLength(4)
-    // Nothing has been claimed yet: the first poll is one interval out, not immediate.
+    // The widget never claims via a network call at all now — completion arrives
+    // solely through the popup's postMessage. See the "postMessage delivery" block
+    // below.
     expect(callsTo("POST /api/embed/session")).toHaveLength(0)
   })
 
@@ -1148,97 +1177,122 @@ describe("sign-in", () => {
     expect(part("message").textContent).toContain("pop-ups")
   })
 
-  it("keeps polling through a PORTAL_AUTH_REQUIRED, then claims the token", async () => {
+  it("completes sign-in when the popup delivers the credential over postMessage", async () => {
     vi.useFakeTimers()
-    let attempt = 0
-    on("POST /api/embed/session", () => {
-      attempt++
-      // The documented deviation: on this one endpoint PORTAL_AUTH_REQUIRED means
-      // "this nonce is not claimable yet", which is the normal answer while the
-      // visitor is still reading their email. Treating it as a session failure would
-      // abort every sign-in on its first poll.
-      if (attempt < 3) return { status: 401, data: { error: "This sign-in has expired.", code: "PORTAL_AUTH_REQUIRED" } }
-      return {
-        status: 201,
-        data: { token: VISITOR, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), email: "ada@example.com", name: "Ada" },
-      }
-    })
-
     await mount()
     click(part("signin"))
-    await vi.advanceTimersByTimeAsync(2500)
-    expect(callsTo("POST /api/embed/session")).toHaveLength(1)
-    await vi.advanceTimersByTimeAsync(2500)
-    await vi.advanceTimersByTimeAsync(2500)
-    expect(callsTo("POST /api/embed/session")).toHaveLength(3)
+
+    signInMessage()
+    await flush()
 
     // Returned exactly once, so it is persisted before anything else can throw.
     expect(JSON.parse(storedVisitor() as string).token).toBe(VISITOR)
     expect(part("who").textContent).toContain("Ada")
     expect(maybePart("signout")).not.toBeNull()
 
-    // The poll stops once it has what it came for.
+    // Never claimed via the network at all — this is the regression test for the
+    // vulnerability the postMessage delivery replaced.
+    expect(callsTo("POST /api/embed/session")).toHaveLength(0)
+
+    // The watchdog poll keeps running on its own timer but has nothing left to do;
+    // cancelSignIn already stopped it once the message was accepted.
     await vi.advanceTimersByTimeAsync(10_000)
-    expect(callsTo("POST /api/embed/session")).toHaveLength(3)
+    expect(callsTo("POST /api/embed/session")).toHaveLength(0)
   })
 
-  it("polls anonymously and never puts a nonce anywhere but the popup URL and the body", async () => {
-    vi.useFakeTimers()
-    on("POST /api/embed/session", reply(401, { error: "expired", code: "PORTAL_AUTH_REQUIRED" }))
-    storeVisitor()
+  it("ignores a message from any origin other than the Compass origin", async () => {
     await mount()
     click(part("signin"))
-    await vi.advanceTimersByTimeAsync(2500)
 
-    const poll = lastCall("POST /api/embed/session")
-    expect((poll.body as Json).nonce).toBe(expectedNonce(0))
-    // Anonymous on purpose: this is the request that mints an identity, so presenting
-    // a stale one would be meaningless and could get it cleared.
-    expect(poll.headers["X-Compass-Visitor"]).toBeUndefined()
-    expect(poll.url.search).toBe("")
+    signInMessage({}, "https://evil.example.com")
+    await flush()
+
+    expect(storedVisitor()).toBeNull()
+    expect(maybePart("signout")).toBeNull()
   })
 
-  it("gives up at the ten-minute ceiling", async () => {
+  it("ignores a message whose type does not name this handoff", async () => {
+    await mount()
+    click(part("signin"))
+
+    signInMessage({ type: "something-else" })
+    await flush()
+
+    expect(storedVisitor()).toBeNull()
+  })
+
+  it("ignores a message whose nonce does not match the attempt currently in flight", async () => {
+    await mount()
+    click(part("signin"))
+
+    // A message from a superseded attempt (a stale popup) arriving late — not this
+    // one's answer.
+    signInMessage({ nonce: "0".repeat(64) })
+    await flush()
+
+    expect(storedVisitor()).toBeNull()
+    expect(maybePart("signout")).toBeNull()
+  })
+
+  it("ignores a message once no sign-in attempt is in flight", async () => {
+    await mount()
+    // No click(part("signin")) at all — signIn.nonce is null.
+    signInMessage()
+    await flush()
+
+    expect(storedVisitor()).toBeNull()
+  })
+
+  it("gives up at the ten-minute ceiling without ever having polled the network", async () => {
     vi.useFakeTimers()
-    on("POST /api/embed/session", reply(401, { error: "expired", code: "PORTAL_AUTH_REQUIRED" }))
     await mount()
     click(part("signin"))
 
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 5000)
-    const afterCeiling = callsTo("POST /api/embed/session").length
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(callsTo("POST /api/embed/session")).toHaveLength(afterCeiling)
     expect(part("message").textContent).toContain("timed out")
+    expect(callsTo("POST /api/embed/session")).toHaveLength(0)
+
+    // A message arriving after the attempt has already been given up on must not
+    // resurrect it.
+    signInMessage()
+    await flush()
+    expect(storedVisitor()).toBeNull()
   })
 
   it("does not treat a closed popup as instant failure", async () => {
     vi.useFakeTimers()
-    on("POST /api/embed/session", reply(401, { error: "expired", code: "PORTAL_AUTH_REQUIRED" }))
     // Closed from the outset: the visitor may well have signed in and then closed it,
-    // in which case the handoff is already waiting for the very next poll.
+    // in which case the handoff message is already on its way.
     popupClosed = true
     await mount()
     click(part("signin"))
 
-    await vi.advanceTimersByTimeAsync(2500)
-    expect(callsTo("POST /api/embed/session")).toHaveLength(1)
+    // Still inside the grace period: no failure message yet, and the watchdog is
+    // still willing to accept a message.
     await vi.advanceTimersByTimeAsync(10_000)
-    expect(callsTo("POST /api/embed/session").length).toBeGreaterThan(2)
+    expect(part("message").textContent).not.toContain("cancelled")
+    signInMessage()
+    await flush()
+    expect(part("who").textContent).toContain("Ada")
+  })
 
-    // But it does stop after the grace period rather than polling for ten minutes.
+  it("stops accepting the attempt once the closed-popup grace period elapses", async () => {
+    vi.useFakeTimers()
+    popupClosed = true
+    await mount()
+    click(part("signin"))
+
+    // Past the grace period: the watchdog itself has given up.
     await vi.advanceTimersByTimeAsync(60_000)
-    const settled = callsTo("POST /api/embed/session").length
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(callsTo("POST /api/embed/session")).toHaveLength(settled)
     expect(part("message").textContent).toContain("cancelled")
+
+    signInMessage()
+    await flush()
+    expect(storedVisitor()).toBeNull()
   })
 
   it("resumes the interrupted submit once sign-in completes", async () => {
     vi.useFakeTimers()
-    on("POST /api/embed/session", () => ({
-      status: 201,
-      data: { token: VISITOR, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), email: "ada@example.com", name: "Ada" },
-    }))
     on("POST /api/embed/comments", reply(201, { comment: { id: "cmt_new", createdAt: new Date().toISOString() } }))
     await mount()
 
@@ -1250,8 +1304,11 @@ describe("sign-in", () => {
     expect(part("message").textContent).toContain("Sign in")
     expect((part("composer-body") as HTMLTextAreaElement).value).toBe("Worth keeping.")
 
+    // requireSignIn (above) draws no nonce of its own, so this click is still the
+    // first draw.
     click(part("signin"))
-    await vi.advanceTimersByTimeAsync(2500)
+    signInMessage()
+    await flush()
 
     const submitted = lastCall("POST /api/embed/comments")
     expect((submitted.body as Json).body).toBe("Worth keeping.")
@@ -1309,15 +1366,12 @@ describe("sign-in", () => {
     vi.spyOn(window.localStorage, "setItem").mockImplementation(denied)
     vi.spyOn(window.localStorage, "removeItem").mockImplementation(denied)
 
-    on("POST /api/embed/session", () => ({
-      status: 201,
-      data: { token: VISITOR, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), email: "ada@example.com", name: "Ada" },
-    }))
     on("POST /api/embed/comments", reply(201, { comment: { id: "cmt_new", createdAt: new Date().toISOString() } }))
 
     await mount()
     click(part("signin"))
-    await vi.advanceTimersByTimeAsync(2500)
+    signInMessage()
+    await flush()
     expect(part("who").textContent).toContain("Ada")
 
     type(part("composer-body"), "Stored nowhere but memory.")
