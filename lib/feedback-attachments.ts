@@ -163,7 +163,14 @@ function receiptSecret(): string {
   return secret
 }
 
-function configuredBlobStoreHostname(): string {
+/**
+ * Exported for lib/embed-screenshots.ts, which validates a widget-submitted
+ * screenshot URL against this same exact hostname rather than a generic
+ * `.public.blob.vercel-storage.com` suffix — see the note on
+ * `isEmbedScreenshotUrl` for why a suffix match there was too permissive: it
+ * proves a URL is hosted on *some* Vercel Blob public store, not this one.
+ */
+export function configuredBlobStoreHostname(): string {
   const token = process.env.BLOB_READ_WRITE_TOKEN
   const storeId = token?.split("_")[3]
   if (!storeId || !/^[a-zA-Z0-9-]+$/.test(storeId)) {
