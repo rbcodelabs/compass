@@ -385,6 +385,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "063_metrics_dashboard",
     filePath: path.join(process.cwd(), "prisma/migrations/063_metrics_dashboard/migration.sql"),
   },
+  {
+    // Adds the Solution scoring slot next to 019_scoring_models's Opportunity
+    // one — see that migration's header comment for the shared conventions.
+    name: "064_solution_scoring",
+    filePath: path.join(process.cwd(), "prisma/migrations/064_solution_scoring/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));

@@ -755,6 +755,7 @@ model Solution {
   source        String            @default("UI") @map("source") @db.VarChar(20)
   evidence      Evidence[]
   comments      SolutionComment[]
+  score         SolutionScore?
 
   @@map("solutions")
 }
@@ -857,10 +858,13 @@ model Assumption {
 }
 
 // ─── Scoring Models ───────────────────────────────────────────────────────────
-// Org-level scoring model templates (RICE-style and similar), selected per
-// workspace, scoring Opportunities only in v1. See lib/scoring.ts for the
-// formula computation semantics. ADR context: Products/Compass/Brainstorm —
-// Scoring Models for Discovery Objects — 2026-07-16.md.
+// Org-level scoring model templates (RICE-style and similar), shared across
+// entity types — a workspace independently picks one active model for
+// Opportunities and one for Solutions (WorkspaceScoringConfig has two FKs to
+// this table; either slot can point at any template, no per-template entity
+// tagging). See lib/scoring.ts for the formula computation semantics. ADR
+// context: Products/Compass/Brainstorm — Scoring Models for Discovery
+// Objects — 2026-07-16.md (Solution scoring added after that v1 decision).
 
 model ScoringModel {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -882,10 +886,12 @@ model ScoringModel {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @default(now()) @map("updated_at")
 
-  organization     Organization             @relation(fields: [organizationId], references: [id])
-  metrics          ScoringModelMetric[]
-  workspaceConfigs WorkspaceScoringConfig[]
-  scores           OpportunityScore[]
+  organization                Organization             @relation(fields: [organizationId], references: [id])
+  metrics                      ScoringModelMetric[]
+  workspaceOpportunityConfigs WorkspaceScoringConfig[] @relation("WorkspaceOpportunityScoringModel")
+  workspaceSolutionConfigs    WorkspaceScoringConfig[] @relation("WorkspaceSolutionScoringModel")
+  scores                       OpportunityScore[]
+  solutionScores               SolutionScore[]
 
   @@index([organizationId])
   @@map("scoring_models")
@@ -921,14 +927,23 @@ model ScoringModelMetric {
 }
 
 model WorkspaceScoringConfig {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId    String   @unique @map("workspace_id") @db.Uuid
-  scoringModelId String?  @map("scoring_model_id") @db.Uuid
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @default(now()) @map("updated_at")
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @unique @map("workspace_id") @db.Uuid
+  /// The workspace's active model for scoring Opportunities. Prisma field
+  /// renamed from `scoringModelId` when Solution scoring was added — still
+  /// mapped to the original `scoring_model_id` column so no DSQL column
+  /// rename was needed.
+  opportunityScoringModelId String?  @map("scoring_model_id") @db.Uuid
+  /// The workspace's active model for scoring Solutions. Independent of
+  /// opportunityScoringModelId — either slot may point at any org-level
+  /// ScoringModel template (no per-template entity tagging).
+  solutionScoringModelId    String?  @map("solution_scoring_model_id") @db.Uuid
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @default(now()) @map("updated_at")
 
-  workspace    Workspace     @relation(fields: [workspaceId], references: [id])
-  scoringModel ScoringModel? @relation(fields: [scoringModelId], references: [id])
+  workspace               Workspace     @relation(fields: [workspaceId], references: [id])
+  opportunityScoringModel ScoringModel? @relation("WorkspaceOpportunityScoringModel", fields: [opportunityScoringModelId], references: [id])
+  solutionScoringModel    ScoringModel? @relation("WorkspaceSolutionScoringModel", fields: [solutionScoringModelId], references: [id])
 
   @@map("workspace_scoring_configs")
 }
@@ -962,6 +977,30 @@ model OpportunityScore {
 
   @@index([scoringModelId])
   @@map("opportunity_scores")
+}
+
+/// Structural mirror of OpportunityScore, scoped to Solutions instead. See
+/// that model's field comments — the semantics (frozen formula snapshot,
+/// modelVersion staleness check) are identical.
+model SolutionScore {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  solutionId      String   @unique @map("solution_id") @db.Uuid
+  scoringModelId  String   @map("scoring_model_id") @db.Uuid
+  modelVersion    Int      @map("model_version")
+  formulaSnapshot Json     @map("formula_snapshot")
+  rawValues       Json     @map("raw_values")
+  rawScore        Float    @map("raw_score")
+  normalizedScore Float    @map("normalized_score")
+  scoredAt        DateTime @default(now()) @map("scored_at")
+  scoredByUserId  String?  @map("scored_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @map("updated_at")
+
+  solution     Solution     @relation(fields: [solutionId], references: [id])
+  scoringModel ScoringModel @relation(fields: [scoringModelId], references: [id])
+
+  @@index([scoringModelId])
+  @@map("solution_scores")
 }
 
 // ─── Experiments ──────────────────────────────────────────────────────────────
