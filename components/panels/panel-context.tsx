@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useCallback, useMemo, useRef } from "react";
+import React, { createContext, useContext, useCallback, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type { Horizon } from "@/lib/types";
 import type { TaskCardData } from "@/components/tasks/task-card";
@@ -91,6 +91,37 @@ export type EntityMutationPatch = { horizon?: Horizon; updatedAt?: string; task?
 
 type EntityMutationListener = (id: string, patch?: EntityMutationPatch) => void;
 
+/**
+ * How much horizontal room the detail panel is *actually* claiming as an
+ * in-flow column right now — `docked: false` whenever it is rendered as an
+ * overlay Sheet (or not open at all), so a consumer never has to also check
+ * whether `panel` is non-null.
+ *
+ * This exists so the agent rail (`components/agent/agent-rail.tsx`) can react
+ * to the detail panel docking or undocking without inferring it from the DOM.
+ * An earlier version had the rail watch for a `[data-slot="pinned-panel"]`
+ * element appearing/disappearing among its layout ancestor's children via a
+ * `MutationObserver` — PanelShell's "Pin panel" toggle swaps *the same* panel
+ * between a portaled Sheet and an in-flow aside without changing anything
+ * about the open panel's identity (`?detail=` is untouched), so nothing the
+ * rail already subscribed to told it this had happened. The DOM sniffing
+ * technically worked in the layouts it was tested against, but it depended on
+ * `[data-slot="pinned-panel"]` uniquely identifying the *right* aside — and it
+ * doesn't: `components/docs/doc-panel-shell.tsx` renders the same data-slot
+ * for the Docs Comments/History panels, nested inside main content rather
+ * than as a sibling, so `wrapper.querySelector('[data-slot="pinned-panel"]')`
+ * can resolve to the wrong element whenever both are pinned at once (several
+ * `e2e/functional` specs already have to disambiguate with a second
+ * `[data-panel-id]` attribute for exactly this reason). Reporting the state
+ * PanelShell already computes, through the context both components already
+ * share, removes the DOM as an intermediary entirely: no selector to get
+ * wrong, no ancestor to mis-identify, and no observer wiring whose ordering
+ * has to be reasoned about by hand.
+ */
+export type DetailPanelDock = { docked: boolean; width: number };
+
+const NO_DETAIL_PANEL_DOCK: DetailPanelDock = Object.freeze({ docked: false, width: 0 });
+
 type PanelContextValue = {
   panel: PanelState;
   openPanel: (type: PanelType, id: string, options?: OpenPanelOptions) => void;
@@ -107,6 +138,14 @@ type PanelContextValue = {
    */
   notifyEntityMutated: (type: EntityPanelType, id: string, patch?: EntityMutationPatch) => void;
   subscribeEntityMutated: (type: EntityPanelType, listener: EntityMutationListener) => () => void;
+  /** How much width the detail panel currently claims as an in-flow column. */
+  detailPanelDock: DetailPanelDock;
+  /**
+   * PanelShell is the only writer. Optional so a test that mocks this context
+   * for an unrelated component (there are dozens — none of them render
+   * PanelShell) does not also have to stub a setter it will never call.
+   */
+  setDetailPanelDock?: (dock: DetailPanelDock) => void;
 };
 
 const PanelContext = createContext<PanelContextValue | null>(null);
@@ -179,6 +218,14 @@ export function PanelProvider({
     []
   );
 
+  // Reported by PanelShell (see DetailPanelDock's doc comment above). Starts
+  // at "not docked" rather than guessing from a cookie: PanelShell itself
+  // seeds correctly from the server-read pin preference and reports its real
+  // computed value on its very first render, before the agent rail's own
+  // layout effect ever reads this, so there is no flash to avoid here the way
+  // there is for the pin preference itself.
+  const [detailPanelDock, setDetailPanelDock] = useState<DetailPanelDock>(NO_DETAIL_PANEL_DOCK);
+
   const value = useMemo(
     () => ({
       panel,
@@ -188,8 +235,19 @@ export function PanelProvider({
       workspaceSlug,
       notifyEntityMutated,
       subscribeEntityMutated,
+      detailPanelDock,
+      setDetailPanelDock,
     }),
-    [panel, openPanel, closePanel, orgSlug, workspaceSlug, notifyEntityMutated, subscribeEntityMutated]
+    [
+      panel,
+      openPanel,
+      closePanel,
+      orgSlug,
+      workspaceSlug,
+      notifyEntityMutated,
+      subscribeEntityMutated,
+      detailPanelDock,
+    ]
   );
 
   return <PanelContext.Provider value={value}>{children}</PanelContext.Provider>;

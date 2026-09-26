@@ -28,6 +28,9 @@ vi.mock("@/components/panels/panel-context", () => ({
     openPanel: vi.fn(),
     orgSlug: "acme",
     workspaceSlug: "product",
+    // PanelShell reports its docked/width to this on every render (see
+    // panel-context.tsx's DetailPanelDock); nothing here asserts on it.
+    setDetailPanelDock: vi.fn(),
   }),
 }));
 

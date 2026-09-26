@@ -43,6 +43,12 @@ vi.mock("@/components/panels/panel-context", () => ({
     workspaceSlug: "product",
     notifyEntityMutated: vi.fn(),
     subscribeEntityMutated: () => () => undefined,
+    // PanelShell reports its own docked/width to this on every render (see
+    // panel-context.tsx's DetailPanelDock). Nothing here asserts on it, so a
+    // no-op is enough — omitting it entirely would also be safe, since the
+    // real call site guards with `?.()`, but a stub is cheaper to reason about
+    // than "why does this field not exist" the next time someone reads this.
+    setDetailPanelDock: vi.fn(),
   }),
 }));
 
