@@ -51,3 +51,17 @@ export function validateFeedbackInput(input: FeedbackInput): FeedbackValidationR
     data: { title, description: description || null },
   };
 }
+
+/**
+ * The write that links a feedback item to an opportunity (or unlinks it, with
+ * null). Every entry point — the grid's opportunity cell, MCP's
+ * link_feedback_to_opportunity and the opportunity composer's "Seed from
+ * feedback" — uses this, so linking has the same side effects everywhere.
+ *
+ * Explicit `updatedAt`: DSQL has no trigger support, so the schema uses
+ * `@default(now())` instead of `@updatedAt` and nothing bumps it for us.
+ * Linking deliberately does not change the feedback item's status.
+ */
+export function feedbackOpportunityLinkData(opportunityId: string | null, now: Date = new Date()) {
+  return { opportunityId, updatedAt: now };
+}

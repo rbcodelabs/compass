@@ -1,4 +1,5 @@
 import { test, expect } from "../fixtures/index"
+import { openFullPage } from "../fixtures/full-page"
 
 test.describe("Artifacts", () => {
   test("blocks parse-time script navigation before showing attacker content", async ({ page, base }) => {
@@ -40,7 +41,7 @@ test.describe("Artifacts", () => {
 
     await page.goto(`${base}/discovery`)
     await page.getByRole("button", { name: "E2E Baseline Opportunity", exact: true }).click()
-    await page.getByRole("link", { name: "Open full page" }).click()
+    await openFullPage(page)
     await page.getByRole("button", { name: "Add Solution" }).click()
     await page.getByLabel("Title").fill(solutionTitle)
     await page.getByRole("button", { name: "Add Solution" }).last().click()
@@ -70,7 +71,7 @@ test.describe("Artifacts", () => {
 
     await page.goto(`${base}/discovery`)
     await page.getByRole("button", { name: "E2E Baseline Opportunity", exact: true }).click()
-    await page.getByRole("link", { name: "Open full page" }).click()
+    await openFullPage(page)
     await page.getByRole("button", { name: solutionTitle, exact: true }).click()
     await page.getByRole("button", { name: "Artifacts (1)", exact: true }).click()
     await expect(page.getByRole("link", { name: artifactTitle })).toBeVisible()

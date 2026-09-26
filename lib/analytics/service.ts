@@ -9,6 +9,8 @@ import { AnalyticsError, fetchVercelObservation, validateQuery, querySchema, win
 import { analyticsFetch, validateVercelProject } from "./transport"
 import { ANALYTICS_PROVIDERS, effectiveObservationWindow, type ProviderContext } from "./registry"
 import { decodeBindingWindows, followupPolicySchema, resolveFollowupWindow, type BindingWindows } from "./windows"
+import { clampLayout, dashboardLayoutInputSchema, dashboardSortOrderSchema, DEFAULT_DASHBOARD_STATE, type DashboardLayoutInput } from "./dashboard-layout"
+import { computeCardStatus, computeDelta, headlineValue, type CardStatus, type CardDelta } from "./dashboard-status"
 
 export const metricInputSchema = z.object({ name: z.string().trim().min(1).max(255), unit: z.string().trim().min(1).max(80), provider: z.enum(["vercel", "compass_activation"]), connectionId: z.string().uuid().optional(), query: querySchema }).strict()
 export type MetricInput = z.infer<typeof metricInputSchema>
@@ -311,6 +313,155 @@ export async function refreshBinding(actor: McpActor, workspaceId: string, bindi
     await db.metricBinding.updateMany({ where: { id: bindingId, workspaceId, lastAttemptId: attemptId }, data: { lastError: code, updatedAt: new Date() } })
     throw new AnalyticsError(code)
   }
+}
+
+// ─── Metrics dashboard (standalone /metrics page) ──────────────────────────
+// Layout (visible/col/row/sortOrder) is workspace-level, not per-user -- see
+// MetricDefinition.dashboardVisible et al in schema.prisma. Every reader
+// coalesces a NULL layout column to the same default DASHBOARD default the
+// 063_metrics_dashboard backfill used, since DSQL forbids a DB-level DEFAULT
+// on ALTER TABLE ADD COLUMN.
+export type DashboardLayoutDTO = { id: string; dashboardVisible: boolean; dashboardCol: number; dashboardRow: number; dashboardSortOrder: number }
+export type DashboardBindingDTO = { id: string; targetType: MetricTarget["targetType"]; targetId: string; targetTitle: string }
+export type DashboardMetricDTO = DashboardLayoutDTO & {
+  metric: MetricDTO
+  status: CardStatus
+  statusCaption: string
+  value: number | null
+  delta: CardDelta | null
+  sparkline: (number | null)[]
+  bindings: DashboardBindingDTO[]
+}
+function layoutDTO(definition: MetricDefinition): DashboardLayoutDTO {
+  return {
+    id: definition.id,
+    dashboardVisible: definition.dashboardVisible ?? DEFAULT_DASHBOARD_STATE.visible,
+    dashboardCol: definition.dashboardCol ?? DEFAULT_DASHBOARD_STATE.col,
+    dashboardRow: definition.dashboardRow ?? DEFAULT_DASHBOARD_STATE.row,
+    dashboardSortOrder: definition.dashboardSortOrder ?? DEFAULT_DASHBOARD_STATE.sortOrder,
+  }
+}
+export async function listDashboardMetrics(actor: McpActor, workspaceId: string): Promise<DashboardMetricDTO[]> {
+  await authorize(actor, workspaceId)
+  const db = getToolPrisma()
+  const definitions = await db.metricDefinition.findMany({ where: { workspaceId, archived: false }, orderBy: { createdAt: "asc" }, take: 200 })
+  if (!definitions.length) return []
+  const revisions = await db.metricRevision.findMany({ where: { workspaceId, id: { in: definitions.map(d => d.currentRevisionId) } } })
+  const rows = definitions.flatMap(d => { const r = revisions.find(r => r.id === d.currentRevisionId); return r ? [{ definition: d, metric: metricDTO(d, r) }] : [] })
+    // In-memory sort (not orderBy) so a not-yet-backfilled NULL sorts the same
+    // way the rest of this module treats it -- as 0 -- rather than however
+    // Postgres/DSQL happens to place NULLs in an ORDER BY.
+    .sort((a, b) => (a.definition.dashboardSortOrder ?? 0) - (b.definition.dashboardSortOrder ?? 0))
+  const metricIds = rows.map(r => r.metric.id)
+  const bindings = await db.metricBinding.findMany({ where: { workspaceId, active: true, metricId: { in: metricIds } }, orderBy: { updatedAt: "desc" } })
+  const observations = bindings.length ? await db.metricObservation.findMany({ where: { workspaceId, bindingId: { in: bindings.map(b => b.id) } }, orderBy: { retrievedAt: "desc" }, take: bindings.length * 6 + 6 }) : []
+  const connections = await db.analyticsConnection.findMany({ where: { workspaceId } })
+  const experimentIds = [...new Set(bindings.filter(b => b.targetType === "EXPERIMENT").map(b => b.targetId))]
+  const roadmapIds = [...new Set(bindings.filter(b => b.targetType === "ROADMAP_ITEM").map(b => b.targetId))]
+  const keyResultIds = [...new Set(bindings.filter(b => b.targetType === "KEY_RESULT").map(b => b.targetId))]
+  const [experiments, roadmapItems, keyResults] = await Promise.all([
+    experimentIds.length ? db.experiment.findMany({ where: { id: { in: experimentIds }, workspaceId }, select: { id: true, title: true } }) : Promise.resolve([]),
+    roadmapIds.length ? db.roadmapItem.findMany({ where: { id: { in: roadmapIds }, workspaceId }, select: { id: true, title: true } }) : Promise.resolve([]),
+    keyResultIds.length ? db.keyResult.findMany({ where: { id: { in: keyResultIds }, objective: { cycle: { workspaceId } } }, select: { id: true, title: true } }) : Promise.resolve([]),
+  ])
+  const targetTitle = (targetType: string, targetId: string): string =>
+    (targetType === "EXPERIMENT" ? experiments.find(e => e.id === targetId)?.title
+      : targetType === "ROADMAP_ITEM" ? roadmapItems.find(r => r.id === targetId)?.title
+      : keyResults.find(k => k.id === targetId)?.title) ?? "Unknown item"
+  const now = new Date()
+  return rows.map(({ definition, metric }) => {
+    const myBindings = bindings.filter(b => b.metricId === metric.id)
+    // Bindings are already ordered updatedAt desc; prefer an ongoing tracking
+    // binding for the card's headline value/sparkline, falling back to the
+    // most recently touched comparison binding.
+    const representative = myBindings.find(b => decodeBindingWindows(JSON.parse(b.baselineJson), JSON.parse(b.followupJson)).mode === "tracking") ?? myBindings[0] ?? null
+    const myObservations = representative ? observations.filter(o => o.bindingId === representative.id) : []
+    const followups = myObservations.filter(o => o.windowKind === "FOLLOWUP")
+    const baselines = myObservations.filter(o => o.windowKind === "BASELINE")
+    const latest = followups[0] ?? null
+    const latestData = latest ? (JSON.parse(latest.dataJson) as ObservationData) : null
+    const value = latestData ? headlineValue(metric.query, latestData) : null
+    const sparkline = latestData?.series.map(point => point.value) ?? []
+    let delta: CardDelta | null = null
+    if (representative && latestData) {
+      const mode = decodeBindingWindows(JSON.parse(representative.baselineJson), JSON.parse(representative.followupJson)).mode
+      if (mode === "tracking") {
+        const previous = followups[1] ? headlineValue(metric.query, JSON.parse(followups[1].dataJson) as ObservationData) : null
+        delta = computeDelta(value, previous)
+      } else {
+        const baseline = baselines[0] ? headlineValue(metric.query, JSON.parse(baselines[0].dataJson) as ObservationData) : null
+        delta = computeDelta(value, baseline)
+      }
+    }
+    const connection = metric.provider === "vercel" ? connections.find(c => c.id === metric.connectionId) ?? null : null
+    const connectionHealthy = metric.provider === "vercel" ? Boolean(connection?.enabled && connection.health === "CONNECTED") : null
+    const { status, caption } = computeCardStatus({
+      hasActiveBinding: myBindings.length > 0,
+      connectionHealthy,
+      lastError: representative?.lastError ?? null,
+      lastAttemptAt: representative?.lastAttemptAt ?? null,
+      latestObservationAt: latest?.retrievedAt ?? null,
+      now,
+    })
+    return {
+      ...layoutDTO(definition),
+      metric,
+      status,
+      statusCaption: caption,
+      value,
+      delta,
+      sparkline,
+      bindings: myBindings.map(b => ({ id: b.id, targetType: b.targetType as MetricTarget["targetType"], targetId: b.targetId, targetTitle: targetTitle(b.targetType, b.targetId) })),
+    }
+  })
+}
+export async function getDashboardMetric(actor: McpActor, workspaceId: string, metricId: string): Promise<DashboardMetricDTO> {
+  const found = (await listDashboardMetrics(actor, workspaceId)).find(row => row.metric.id === metricId)
+  if (!found) throw denied()
+  return found
+}
+export async function updateMetricDashboardLayout(actor: McpActor, workspaceId: string, metricId: string, raw: DashboardLayoutInput): Promise<DashboardLayoutDTO> {
+  await authorize(actor, workspaceId, true)
+  const { col, row } = clampLayout(dashboardLayoutInputSchema.parse(raw))
+  const db = getToolPrisma()
+  const existing = await db.metricDefinition.findFirst({ where: { id: metricId, workspaceId, archived: false } })
+  if (!existing) throw denied()
+  const updated = await db.metricDefinition.updateMany({ where: { id: metricId, workspaceId, archived: false }, data: { dashboardCol: col, dashboardRow: row, updatedAt: new Date() } })
+  if (!updated.count) throw denied()
+  return { ...layoutDTO(existing), dashboardCol: col, dashboardRow: row }
+}
+export async function setMetricDashboardVisible(actor: McpActor, workspaceId: string, metricId: string, visible: boolean): Promise<DashboardLayoutDTO> {
+  await authorize(actor, workspaceId, true)
+  const db = getToolPrisma()
+  const existing = await db.metricDefinition.findFirst({ where: { id: metricId, workspaceId, archived: false } })
+  if (!existing) throw denied()
+  // Re-adding a hidden metric resets it to the default medium size and
+  // appends it after whatever is currently on the dashboard, mirroring the
+  // approved design prototype's "Add widget" behavior.
+  const data: { dashboardVisible: boolean; updatedAt: Date; dashboardCol?: number; dashboardRow?: number; dashboardSortOrder?: number } = { dashboardVisible: visible, updatedAt: new Date() }
+  if (visible) {
+    // Sibling rows may still carry a NULL sortOrder pre-backfill; coalesce the
+    // same way listDashboardMetrics does so "append to the end" is correct
+    // even against an unmigrated or partially migrated row.
+    const rows = await db.metricDefinition.findMany({ where: { workspaceId, archived: false }, select: { dashboardSortOrder: true } })
+    const maxSortOrder = rows.reduce((max, row) => Math.max(max, row.dashboardSortOrder ?? DEFAULT_DASHBOARD_STATE.sortOrder), -1)
+    data.dashboardCol = DEFAULT_DASHBOARD_STATE.col
+    data.dashboardRow = DEFAULT_DASHBOARD_STATE.row
+    data.dashboardSortOrder = maxSortOrder + 1
+  }
+  const updated = await db.metricDefinition.updateMany({ where: { id: metricId, workspaceId, archived: false }, data })
+  if (!updated.count) throw denied()
+  return { ...layoutDTO(existing), dashboardVisible: visible, ...(visible ? { dashboardCol: data.dashboardCol!, dashboardRow: data.dashboardRow!, dashboardSortOrder: data.dashboardSortOrder! } : {}) }
+}
+export async function reorderDashboardMetric(actor: McpActor, workspaceId: string, metricId: string, sortOrder: number): Promise<DashboardLayoutDTO> {
+  await authorize(actor, workspaceId, true)
+  const parsed = dashboardSortOrderSchema.parse(sortOrder)
+  const db = getToolPrisma()
+  const existing = await db.metricDefinition.findFirst({ where: { id: metricId, workspaceId, archived: false } })
+  if (!existing) throw denied()
+  const updated = await db.metricDefinition.updateMany({ where: { id: metricId, workspaceId, archived: false }, data: { dashboardSortOrder: parsed, updatedAt: new Date() } })
+  if (!updated.count) throw denied()
+  return { ...layoutDTO(existing), dashboardSortOrder: parsed }
 }
 
 /** Call inside the existing workspace/organization deletion transaction. */

@@ -17,6 +17,7 @@
  *      dead end, even though solution → opportunity already worked.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 
 test.describe("Opportunity panel — solutions", () => {
   test("add a solution from the panel, list and count update, row opens the solution panel", async ({
@@ -31,9 +32,7 @@ test.describe("Opportunity panel — solutions", () => {
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
 
-    await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-    await page.getByLabel("Title").fill(oppTitle);
-    await page.getByRole("button", { name: "Create Opportunity" }).click();
+    await createOpportunityFromBoard(page, oppTitle);
     await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
     // ── 2. Open its sidebar panel ─────────────────────────────────────────

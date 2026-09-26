@@ -12,9 +12,16 @@ test("owner creates and updates an opportunity, solution and linked task with pe
   const task = `Preview task ${suffix}`;
 
   await page.goto(`${base}/discovery`);
+  // "Add opportunity" opens the docked composer; submitting hands its slot to
+  // the new opportunity. Close that so the rest of the flow starts from the
+  // board, as it did with the old inline form.
   await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-  await page.getByLabel("Title", { exact: true }).fill(opportunity);
-  await page.getByRole("button", { name: "Create Opportunity", exact: true }).click();
+  const composer = page.locator('[data-slot="opportunity-composer"]');
+  await composer.getByLabel("Title", { exact: true }).fill(opportunity);
+  await composer.getByRole("button", { name: "Submit", exact: true }).click();
+  await expect(page).toHaveURL(/detail=opportunity%3A/);
+  await page.getByRole("button", { name: "Close panel" }).first().click();
+  await expect(page).not.toHaveURL(/detail=/);
   await page.getByRole("button", { name: opportunity, exact: true }).click();
   const panel = page.locator('[data-slot="sheet-content"]');
   await panel.getByText(opportunity, { exact: true }).click();

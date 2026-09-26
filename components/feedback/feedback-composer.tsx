@@ -25,8 +25,16 @@ import {
 } from "lucide-react";
 
 import { createFeedback } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
-import { MarkdownDescriptionEditor } from "@/components/markdown-description-editor";
-import { ConfirmDialog } from "@/components/patterns/confirm-dialog";
+import {
+  ComposerFooter,
+  ComposerMarkdownField,
+  ComposerRestoredNotice,
+  ComposerTitleField,
+  appendTemplate,
+  isSubmitShortcut,
+  useFocusOnOpen,
+  useRestoredDraft,
+} from "@/components/composer/composer-parts";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { Button } from "@/components/ui/button";
 import { FEEDBACK_DESCRIPTION_MAX_LENGTH, FEEDBACK_TITLE_MAX_LENGTH } from "@/lib/feedback";
@@ -80,15 +88,6 @@ export const FEEDBACK_COMPOSER_COPY: Record<
 
 const TYPE_ICON = { IDEA: Lightbulb, BUG: Bug } as const;
 
-function useSubmitShortcutLabel() {
-  // Rendered on the server too, so start neutral and refine after mount.
-  const [label, setLabel] = useState("Ctrl");
-  useEffect(() => {
-    if (/Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent)) setLabel("⌘");
-  }, []);
-  return label;
-}
-
 function hasFiles(event: DragEvent) {
   return Array.from(event.dataTransfer?.types ?? []).includes("Files");
 }
@@ -110,10 +109,7 @@ export type FeedbackComposerProps = {
  */
 export function FeedbackComposer({ orgSlug, workspaceSlug, transport }: FeedbackComposerProps) {
   const draftKey = feedbackDraftKey(orgSlug, workspaceSlug);
-  const [initial, setInitial] = useState<{ draft: FeedbackDraft | null } | null>(null);
-  useEffect(() => {
-    setInitial({ draft: loadFeedbackDraft(draftKey) });
-  }, [draftKey]);
+  const initial = useRestoredDraft(draftKey, loadFeedbackDraft);
 
   if (!initial) return <div className="flex-1" aria-busy="true" />;
   return (
@@ -155,7 +151,6 @@ function ComposerForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typeRefs = useRef<Partial<Record<FeedbackTypeValue, HTMLButtonElement | null>>>({});
   const ids = useId();
-  const shortcut = useSubmitShortcutLabel();
 
   const transport = useMemo(
     () => transportOverride ?? defaultAttachmentTransport(orgSlug, workspaceSlug),
@@ -174,20 +169,10 @@ function ComposerForm({
     saveFeedbackDraft(draftKey, { type, title, description, attachments: savedAttachments });
   }, [draftKey, type, title, description, savedAttachments]);
 
-  useEffect(() => {
-    // After the panel's own open animation/focus handling, put the caret in
-    // the title — the first thing everyone types.
-    const frame = requestAnimationFrame(() => {
-      const input = titleRef.current;
-      if (!input) return;
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, []);
+  useFocusOnOpen(titleRef);
 
   const insertTemplate = () => {
-    setDescription((current) => (current.trim() ? `${current.trimEnd()}\n\n${copy.template}` : copy.template));
+    setDescription((current) => appendTemplate(current, copy.template));
   };
 
   const selectType = (next: FeedbackTypeValue, focus = false) => {
@@ -286,7 +271,7 @@ function ComposerForm({
   const onKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
     // The Markdown editor handles its own ⌘/Ctrl+Enter (and stops the event);
     // this covers the title field and every other control in the panel.
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    if (isSubmitShortcut(event)) {
       event.preventDefault();
       submit();
     }
@@ -324,15 +309,7 @@ function ComposerForm({
     uploads.add(event.dataTransfer.files);
   };
 
-  const titleCountVisible = title.length > FEEDBACK_TITLE_MAX_LENGTH - 55;
-  const descriptionCountVisible = description.length > FEEDBACK_DESCRIPTION_MAX_LENGTH * 0.9;
   const atAttachmentLimit = uploads.items.length >= FEEDBACK_ATTACHMENT_MAX_COUNT;
-
-  const cancelButton = (
-    <Button type="button" variant="ghost" size="sm" disabled={isPending}>
-      Cancel
-    </Button>
-  );
 
   return (
     <form
@@ -349,11 +326,7 @@ function ComposerForm({
       data-slot="feedback-composer"
     >
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pt-4 pb-5">
-        {restored && (
-          <p role="status" className="-mb-2 text-xs text-text-subtle">
-            Restored your unsent draft.
-          </p>
-        )}
+        {restored && <ComposerRestoredNotice />}
 
         <div
           role="radiogroup"
@@ -416,87 +389,36 @@ function ComposerForm({
           })}
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor={`${ids}-title`} className="sr-only">
-            Title
-          </label>
-          <input
-            ref={titleRef}
-            id={`${ids}-title`}
-            name="title"
-            value={title}
-            onChange={(event) => {
-              setTitle(event.target.value);
-              if (titleInvalid && event.target.value.trim()) {
-                setTitleInvalid(false);
-                setError(null);
-              }
-            }}
-            maxLength={FEEDBACK_TITLE_MAX_LENGTH}
-            placeholder={type === "BUG" ? "What's broken?" : "What would make this better?"}
-            aria-invalid={titleInvalid || undefined}
-            aria-describedby={titleInvalid ? `${ids}-error` : undefined}
-            disabled={isPending}
-            autoComplete="off"
-            className={cn(
-              "w-full border-0 bg-transparent p-0 text-xl font-semibold leading-tight text-text-primary",
-              "placeholder:text-text-disabled focus:outline-none focus-visible:outline-none",
-              "disabled:opacity-60",
-            )}
-          />
-          <div
-            aria-hidden
-            className={cn(
-              "h-px w-full transition-colors",
-              titleInvalid ? "bg-status-danger" : "bg-border-default",
-            )}
-          />
-          {titleCountVisible && (
-            <p className="text-right text-[11px] text-text-subtle" aria-live="polite">
-              {title.length}/{FEEDBACK_TITLE_MAX_LENGTH}
-            </p>
-          )}
-        </div>
+        <ComposerTitleField
+          inputRef={titleRef}
+          id={`${ids}-title`}
+          value={title}
+          onChange={(value) => {
+            setTitle(value);
+            if (titleInvalid && value.trim()) {
+              setTitleInvalid(false);
+              setError(null);
+            }
+          }}
+          maxLength={FEEDBACK_TITLE_MAX_LENGTH}
+          placeholder={type === "BUG" ? "What's broken?" : "What would make this better?"}
+          invalid={titleInvalid}
+          errorId={`${ids}-error`}
+          disabled={isPending}
+        />
 
-        <div className="flex min-h-72 flex-1 flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <span id={`${ids}-details`} className="text-xs font-medium text-text-secondary">
-              Details <span className="font-normal text-text-subtle">· Markdown supported</span>
-            </span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={insertTemplate}
-              disabled={isPending}
-              className="text-text-secondary"
-            >
-              <FileText aria-hidden />
-              {copy.templateLabel}
-            </Button>
-          </div>
-          <MarkdownDescriptionEditor
-            value={description}
-            onChange={setDescription}
-            label="Details"
-            placeholder={copy.placeholder}
-            disabled={isPending}
-            fill
-            onFiles={uploads.add}
-            footerNote={null}
-          />
-          {descriptionCountVisible && (
-            <p
-              className={cn(
-                "text-right text-[11px]",
-                description.length > FEEDBACK_DESCRIPTION_MAX_LENGTH ? "text-status-danger" : "text-text-subtle",
-              )}
-              aria-live="polite"
-            >
-              {description.length.toLocaleString()}/{FEEDBACK_DESCRIPTION_MAX_LENGTH.toLocaleString()}
-            </p>
-          )}
-        </div>
+        <ComposerMarkdownField
+          labelId={`${ids}-details`}
+          label="Details"
+          value={description}
+          onChange={setDescription}
+          placeholder={copy.placeholder}
+          disabled={isPending}
+          templateLabel={copy.templateLabel}
+          onInsertTemplate={insertTemplate}
+          maxLength={FEEDBACK_DESCRIPTION_MAX_LENGTH}
+          onFiles={uploads.add}
+        />
 
         <section aria-labelledby={`${ids}-attachments`} className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
@@ -578,54 +500,21 @@ function ComposerForm({
         </section>
       </div>
 
-      <footer className="shrink-0 border-t border-border-default bg-surface-inset px-5 py-3">
-        {error && (
-          <p id={`${ids}-error`} role="alert" className="mb-2 flex items-start gap-1.5 text-xs text-status-danger">
-            <AlertCircle aria-hidden className="mt-px size-3.5 shrink-0" />
-            {error}
-          </p>
-        )}
-        <div className="flex items-center justify-between gap-3">
-          <p className="min-w-0 truncate text-[11px] text-text-subtle" aria-live="polite">
-            {isPending ? (
-              "Submitting…"
-            ) : blockedReason && !error ? (
-              blockedReason
-            ) : (
-              <>
-                <kbd className="font-sans">{shortcut}</kbd>
-                <span aria-hidden>+</span>
-                <kbd className="font-sans">Enter</kbd> to submit
-                {!draftEmpty && <span className="hidden sm:inline"> · Draft saved</span>}
-              </>
-            )}
-          </p>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {draftEmpty ? (
-              <Button type="button" variant="ghost" size="sm" disabled={isPending} onClick={closePanel}>
-                Cancel
-              </Button>
-            ) : (
-              <ConfirmDialog
-                trigger={cancelButton}
-                title="Discard this draft?"
-                description={
-                  uploads.items.length
-                    ? `Your title, details and ${uploads.items.length} attachment${uploads.items.length === 1 ? "" : "s"} will be deleted. Closing the panel instead keeps the draft.`
-                    : "Your title and details will be deleted. Closing the panel instead keeps the draft."
-                }
-                confirmLabel="Discard draft"
-                cancelLabel="Keep editing"
-                destructive
-                onConfirm={discardDraft}
-              />
-            )}
-            <Button type="submit" size="sm" disabled={isPending || uploads.uploading}>
-              {isPending ? "Submitting…" : "Submit"}
-            </Button>
-          </div>
-        </div>
-      </footer>
+      <ComposerFooter
+        error={error}
+        errorId={`${ids}-error`}
+        isPending={isPending}
+        statusNote={blockedReason}
+        draftEmpty={draftEmpty}
+        onClose={closePanel}
+        discardDescription={
+          uploads.items.length
+            ? `Your title, details and ${uploads.items.length} attachment${uploads.items.length === 1 ? "" : "s"} will be deleted. Closing the panel instead keeps the draft.`
+            : "Your title and details will be deleted. Closing the panel instead keeps the draft."
+        }
+        onDiscard={discardDraft}
+        submitDisabled={isPending || uploads.uploading}
+      />
 
       {dragging && (
         <div

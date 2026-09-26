@@ -27,7 +27,7 @@ The in-app runtime compiles enabled skill instructions directly into each turn's
 
 Compilation uses more context per turn than loading a skill on demand, but does not require granting filesystem or shell access. The runtime checks stored artifact digests and compilation limits again before each turn. To recover from an unavailable artifact, disable the pack.
 
-Capability packs add instructions, not authority. They cannot add shell or filesystem access, external websites, secrets, hooks, commands, subagents, or MCP servers. Compass remains the only tool provider and applies the signed-in user's existing workspace permissions to every action.
+Capability packs add instructions, not authority. They cannot add shell or filesystem access, external websites, secrets, hooks, commands, subagents, or MCP servers. Compass applies the signed-in user's existing workspace permissions to every action a pack's instructions lead to. The only way to give the agent a tool provider other than Compass is for the signed-in user to connect one themselves — see [Connected MCP servers](/help/23-connected-mcp-servers) — which a pack cannot do on their behalf.
 
 ## Agentic PM Playbook pack interface
 

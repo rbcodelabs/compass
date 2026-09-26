@@ -9,6 +9,8 @@
  * branch (PR #16). Update the horizon to "Shipped" once that branch merges.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
+import { openFullPage } from "../fixtures/full-page";
 
 test.describe("Discovery → Roadmap", () => {
   test(
@@ -23,11 +25,8 @@ test.describe("Discovery → Roadmap", () => {
       await page.waitForLoadState("networkidle");
 
       // ── 2. Create an opportunity in the EXPLORING column ──────────────────
-      // The "Add opportunity" inline button is inside the EXPLORING column.
-      // Click the first "Add opportunity" button (column-embedded mode).
-      await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-      await page.getByLabel("Title").fill(oppTitle);
-      await page.getByRole("button", { name: "Create Opportunity" }).click();
+      // The first column's "Add opportunity" opens the composer with EXPLORING preset.
+      await createOpportunityFromBoard(page, oppTitle);
 
       // Opportunity card appears in the board
       await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
@@ -37,10 +36,9 @@ test.describe("Discovery → Roadmap", () => {
       await expect(page).toHaveURL(/detail=opportunity/);
 
       // Continue into the full-page editor, where solutions are managed.
-      await page.getByRole("link", { name: "Open full page" }).click();
-      // The outgoing panel already contains the same heading and controls.
-      // Wait for navigation before interacting, or the form can unmount mid-edit.
-      await expect(page).toHaveURL(new RegExp(`${base}/discovery/[0-9a-f-]+$`));
+      // The outgoing panel already contains the same heading and controls, so
+      // wait for the route to replace it before interacting.
+      await openFullPage(page);
       const opportunityPage = page.locator('[data-slot="opportunity-detail"][data-variant="page"]');
       await expect(opportunityPage.getByRole("heading", { name: oppTitle })).toBeVisible();
 

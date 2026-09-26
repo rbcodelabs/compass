@@ -85,10 +85,11 @@ export async function seedE2E(
   const { rows: [ws] } = await pool.query<{ id: string }>(`
     INSERT INTO "${S}".workspaces
       (id, organization_id, slug, name, roadmap_public, feedback_enabled, created_at, updated_at)
-    VALUES (gen_random_uuid(), $1, $2, 'E2E Workspace', false, false, NOW(), NOW())
+    VALUES (COALESCE($3::uuid, gen_random_uuid()), $1, $2, 'E2E Workspace', false, false, NOW(), NOW())
     ON CONFLICT (organization_id, slug) DO UPDATE SET name = EXCLUDED.name
     RETURNING id
-  `, [org.id, E2E_WORKSPACE_SLUG]);
+  `, [org.id, E2E_WORKSPACE_SLUG, process.env.GEODE_DOCS_PILOT_WORKSPACE_ID || null]);
+  if (process.env.GEODE_DOCS_PILOT_WORKSPACE_ID && ws.id !== process.env.GEODE_DOCS_PILOT_WORKSPACE_ID) throw new Error("Pilot fixture workspace ID conflicts with existing seed");
 
   await pool.query(`
     INSERT INTO "${S}".workspace_members (id, workspace_id, user_id, role, created_at)

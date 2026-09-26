@@ -417,11 +417,11 @@ describe("serializeFeedbackQuery: page reset invariant", () => {
 });
 
 describe("serializeFeedbackQuery: output shape", () => {
-  it("writes status subsets as repeated params and omits the all-selected default", () => {
+  it("writes a status subset as one comma-joined param and omits the all-selected default", () => {
     const subset = serializeFeedbackQuery(DEFAULT_FEEDBACK_QUERY, {
       status: ["OPEN", "UNDER_REVIEW"],
     });
-    expect(subset.getAll("status")).toEqual(["OPEN", "UNDER_REVIEW"]);
+    expect(subset.getAll("status")).toEqual(["OPEN,UNDER_REVIEW"]);
     expect(
       serializeFeedbackQuery(query({ status: ["OPEN"] }), {
         status: FEEDBACK_STATUSES,
@@ -494,5 +494,36 @@ describe("nextSortDirection", () => {
     expect(nextSortDirection(query({ sort: "title", dir: "asc" }), "title")).toBe("desc");
     expect(nextSortDirection(query({ sort: "title", dir: "desc" }), "title")).toBe("asc");
     expect(nextSortDirection(query({ sort: "title", dir: "desc" }), "votes")).toBe("desc");
+  });
+});
+
+describe("status subsets in the URL (Next 16.2 page-segment key)", () => {
+  // Next 16.2's client router keys a page segment by
+  // JSON.stringify(Object.fromEntries(new URLSearchParams(search))), which
+  // keeps only the LAST value of a repeated key. Two different status subsets
+  // that end in the same status therefore collided, and the router reused the
+  // old page instead of rendering the new server result: the grid stopped
+  // updating after the first status change.
+  const segmentKey = (params: URLSearchParams) => JSON.stringify(Object.fromEntries(params));
+
+  it("encodes a status subset as a single param", () => {
+    const params = serializeFeedbackQuery(query(), { status: ["OPEN", "UNDER_REVIEW", "DECLINED"] });
+    expect(params.getAll("status")).toEqual(["OPEN,UNDER_REVIEW,DECLINED"]);
+  });
+
+  it("gives subsets that share their last status distinct segment keys", () => {
+    const five = serializeFeedbackQuery(query(), { status: ["OPEN", "UNDER_REVIEW", "IN_PROGRESS", "COMPLETED", "DECLINED"] });
+    const four = serializeFeedbackQuery(query(), { status: ["OPEN", "UNDER_REVIEW", "COMPLETED", "DECLINED"] });
+    expect(segmentKey(five)).not.toEqual(segmentKey(four));
+  });
+
+  it("round-trips the single-param form", () => {
+    const params = serializeFeedbackQuery(query(), { status: ["UNDER_REVIEW", "OPEN"] });
+    expect(parseFeedbackQuery(params).status).toEqual(["OPEN", "UNDER_REVIEW"]);
+    expect(fromUrl(params.toString()).status).toEqual(["OPEN", "UNDER_REVIEW"]);
+  });
+
+  it("still reads legacy repeated params from shared links", () => {
+    expect(fromUrl("status=OPEN&status=UNDER_REVIEW").status).toEqual(["OPEN", "UNDER_REVIEW"]);
   });
 });

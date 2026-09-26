@@ -124,7 +124,10 @@ function rowFor(page: Page, title: string) {
 const DEFAULT_COLUMN_ORDER = ["feedback", "type", "votes", "status", "submitted", "action"];
 
 async function columnOrder(page: Page): Promise<string[]> {
-  return page.$$eval("[data-testid^='grid-head-']", (nodes) =>
+  // Header cells carry both `grid-head-<columnId>` and `data-col`. The nested
+  // title span inside every header cell is `grid-head-label` (no `data-col`),
+  // so a bare testid-prefix match would count each column twice.
+  return page.$$eval("[data-testid^='grid-head-'][data-col]", (nodes) =>
     nodes.map((n) => (n.getAttribute("data-testid") ?? "").replace("grid-head-", ""))
   );
 }
@@ -255,12 +258,13 @@ test.describe("Feedback DataGrid", () => {
       await expect(item).toHaveAttribute("aria-checked", "false");
     }
 
-    await expect(page).toHaveURL(/status=OPEN.*status=UNDER_REVIEW/);
+    // A subset is one comma-joined param (URL-encoded comma), see lib/feedback-query.ts.
+    await expect(page).toHaveURL(/status=OPEN%2CUNDER_REVIEW(&|$)/);
     await expect(rows(page)).toHaveCount(25);
 
     // Narrow once more to prove each checkbox independently changes the SQL query.
     await page.getByRole("menuitemcheckbox", { name: "Open", exact: true }).click();
-    await expect(page).toHaveURL(/status=UNDER_REVIEW/);
+    await expect(page).toHaveURL(/status=UNDER_REVIEW(&|$)/);
     await expect(rows(page)).toHaveCount(UNDER_REVIEW_INDEXES.length);
     await expect(page.getByTestId("grid-pagination-summary")).toContainText(
       `of ${UNDER_REVIEW_INDEXES.length} results`,

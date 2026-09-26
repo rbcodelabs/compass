@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
-import { validateFeedbackInput } from "@/lib/feedback";
+import { feedbackOpportunityLinkData, validateFeedbackInput } from "@/lib/feedback";
 import {
   deleteFeedbackBlobs,
   prepareFeedbackAttachmentUpload,
@@ -373,7 +373,7 @@ export async function linkFeedbackToOpportunity(
 
     await prisma.feedbackItem.update({
       where: { id: feedbackId },
-      data: { opportunityId, updatedAt: new Date() },
+      data: feedbackOpportunityLinkData(opportunityId),
     });
 
     // `null` = the caller owns an optimistic overlay; see RevalidateTarget.

@@ -1,4 +1,5 @@
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 
 test.describe("Discovery table", () => {
   test("switches views, expands solutions, and opens both detail panels", async ({ page, base }) => {
@@ -9,9 +10,7 @@ test.describe("Discovery table", () => {
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
 
-    await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-    await page.getByLabel("Title").fill(opportunityTitle);
-    await page.getByRole("button", { name: "Create Opportunity" }).click();
+    await createOpportunityFromBoard(page, opportunityTitle);
     await expect(page.getByRole("button", { name: opportunityTitle, exact: true })).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: opportunityTitle, exact: true }).click();

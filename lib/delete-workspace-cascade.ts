@@ -6,6 +6,7 @@ import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
 import { deleteWorkspaceUpdates } from "@/lib/workspace-updates-cleanup";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
+import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 
 /**
@@ -21,6 +22,7 @@ import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
  * FeedbackAttachment, CanvasNodePosition).
  */
 export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceId: string, options: { skipBlobCleanup?: boolean } = {}) {
+  await assertDocumentPilotCleanupReviewed(prisma, workspaceId);
   const ids = async (
     rows: Promise<{ id: string }[]>
   ): Promise<string[]> => (await rows).map((r) => r.id);

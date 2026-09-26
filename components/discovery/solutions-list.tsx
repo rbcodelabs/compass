@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useTransition, useId } from "react";
 import {
   DndContext,
   type DragEndEvent,
@@ -35,6 +35,9 @@ export function SolutionsList({
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { setSolutions(initialSolutions); }, [initialSolutions]);
 
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = useId();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -74,6 +77,7 @@ export function SolutionsList({
 
   return (
     <DndContext
+      id={dndId}
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}

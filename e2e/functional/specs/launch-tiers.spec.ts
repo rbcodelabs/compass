@@ -71,9 +71,15 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
       // The card menu has no "Launch" item, and no launch progress chip.
       await card.hover();
       await card.getByLabel("Card actions").click();
-      await expect(page.getByRole("menuitem", { name: "Launch" })).toHaveCount(0);
+      // Wait for the menu to actually open. Asserting "no Launch item" against
+      // a menu that hasn't rendered yet passes vacuously, and an Escape sent
+      // before it opens is lost — the menu then opens late and covers the card.
+      const cardMenu = page.getByRole("menu");
+      await expect(cardMenu.getByRole("menuitem", { name: "Edit" })).toBeVisible();
+      await expect(cardMenu.getByRole("menuitem", { name: "Launch" })).toHaveCount(0);
       // Close the menu before opening the panel below.
       await page.keyboard.press("Escape");
+      await expect(cardMenu).toHaveCount(0);
 
       // Open the panel directly (there's no "Launch" menu action to reach it
       // by anymore) and confirm the Launch section itself is gone too.

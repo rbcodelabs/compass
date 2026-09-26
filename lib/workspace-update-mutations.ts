@@ -3,6 +3,7 @@ import { getMcpActor } from "@/lib/mcp-authz";
 import {
   recordWorkspaceUpdate,
   withWorkspaceUpdates,
+  type WorkspaceUpdatesOptions,
 } from "@/lib/workspace-updates-capture";
 
 const types = {
@@ -95,6 +96,7 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
   source: "UI" | "MCP" | UpdateActor,
   id: string | undefined,
   mutate: (tx: AppTransactionClient) => Promise<T>,
+  options?: WorkspaceUpdatesOptions,
 ): Promise<T> {
   return withWorkspaceUpdates(prisma, async (tx, enabled) => {
     if (!enabled) return mutate(tx);
@@ -166,5 +168,5 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
         });
     }
     return result;
-  });
+  }, options);
 }

@@ -161,6 +161,13 @@ For a USER override, the workspace list is an advisory disclosure rather than
 an exhaustive account-access inventory: organization-level capabilities do not
 always correspond to an individual workspace row.
 
+Everything in this section is about applications reaching **into** Compass. The
+same settings page also has **Connected MCP servers**, which is the reverse: MCP
+servers the Compass in-app agent calls **out** to on your behalf. See
+[Connected MCP servers](/help/23-connected-mcp-servers). The two lists look alike
+and revoke differently, so check which direction an entry describes before
+revoking it.
+
 Because both the approve and decline buttons stay pinned to the bottom of the
 card, a long list scrolls inside the card rather than pushing the buttons off the
 screen. Scroll the details with the mouse, or with the arrow keys once the detail
@@ -597,6 +604,8 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 | `restore_doc_version` | Restore a doc's live content to a previously saved version. Param: `versionId`. The doc's current state is snapshotted first (labeled "Before restore"), so restoring never loses data |
 
 Every `update_doc` call also automatically snapshots the doc's pre-change state before applying the new values (coalesced to one snapshot per 5-minute window per author, so an agent making several quick edits in a row doesn't flood the history) — you don't need to call `create_doc_version` yourself unless you want a deliberately named checkpoint.
+
+In the explicitly enabled Geode preview workspace, `get_doc` also returns `revision` and `storageProvider`. `create_doc` requires an `operationId` UUID. `update_doc`, `create_doc_version`, and `restore_doc_version` require both `operationId` and `expectedRevision` (the current document revision from `get_doc`). Reuse the exact operation ID and payload after a lost response; a changed payload or authenticated actor is rejected. A revision conflict requires a fresh read and a new intentional edit. These parameters remain optional for existing database-backed documents. Content references and private Blob paths are never returned. This pilot does not enable production document storage.
 
 To add a local screenshot, call `prepare_doc_image_upload` with its exact filename, MIME type, and byte size. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: fileType })` from `@vercel/blob/client`, then place the returned `markdown` in `create_doc` or `update_doc`. The token expires after ten minutes and is bound to one random workspace-prefixed pathname, MIME type, and maximum size; it cannot overwrite an existing blob. The saved Markdown contains only a relative Compass read URL, never the storage pathname or token. Image reads require a signed-in member of the owning workspace.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { FileText, Plus, ChevronRight } from "lucide-react";
@@ -35,16 +35,24 @@ export function DocTreeSidebar({
   const revalidatePathStr = basePath;
 
   const [isPending, startTransition] = useTransition();
+  const operation = useRef<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   function handleNewPage() {
     startTransition(async () => {
-      const doc = await createDoc(workspaceId, null, revalidatePathStr);
-      router.push(`${basePath}/${doc.id}`);
+      operation.current ??= crypto.randomUUID();
+      try {
+        const doc = await createDoc(workspaceId, null, revalidatePathStr, { operationId: operation.current });
+        operation.current = null;
+        setError(null);
+        router.push(`${basePath}/${doc.id}`);
+      } catch { setError("Could not create this page. Click New to retry."); }
     });
   }
 
   return (
     <div className="flex flex-col h-full">
+      {error && <p role="alert" className="text-xs text-status-danger">{error}</p>}
       <div className="flex items-center justify-between px-2 pb-2">
         <span className="text-xs font-semibold text-text-subtle uppercase tracking-wider">
           Pages
@@ -135,6 +143,8 @@ function DocTreeNode({
   const [isExpanded, setIsExpanded] = useState(true);
   const [isPending, startTransition] = useTransition();
   const [isHovered, setIsHovered] = useState(false);
+  const operation = useRef<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const href = `${basePath}/${doc.id}`;
   const isActive = pathname === href;
@@ -142,13 +152,19 @@ function DocTreeNode({
 
   function handleAddChild() {
     startTransition(async () => {
-      const newDoc = await createDoc(workspaceId, doc.id, basePath);
-      router.push(`${basePath}/${newDoc.id}`);
+      operation.current ??= crypto.randomUUID();
+      try {
+        const newDoc = await createDoc(workspaceId, doc.id, basePath, { operationId: operation.current });
+        operation.current = null;
+        setError(null);
+        router.push(`${basePath}/${newDoc.id}`);
+      } catch { setError("Could not create child page. Try again."); }
     });
   }
 
   return (
     <li>
+      {error && <p role="alert" className="text-xs text-status-danger">{error}</p>}
       <div
         className={cn(
           "group flex items-center gap-1 rounded-md py-1 px-2 text-sm transition-colors",

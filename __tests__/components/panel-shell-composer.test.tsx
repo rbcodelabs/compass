@@ -28,6 +28,9 @@ vi.mock("@/components/panels/panel-context", () => ({
     openPanel: vi.fn(),
     orgSlug: "acme",
     workspaceSlug: "product",
+    // PanelShell reports its docked/width to this on every render (see
+    // panel-context.tsx's DetailPanelDock); nothing here asserts on it.
+    setDetailPanelDock: vi.fn(),
   }),
 }));
 
@@ -44,7 +47,14 @@ vi.mock("@/components/panels/feedback-panel", () => ({
 }));
 vi.mock("@/components/panels/objective-panel", () => ({ ObjectivePanel: () => null }));
 vi.mock("@/components/panels/key-result-panel", () => ({ KeyResultPanel: () => null }));
-vi.mock("@/components/panels/opportunity-panel", () => ({ OpportunityPanel: () => null }));
+vi.mock("@/components/panels/opportunity-panel", () => ({
+  OpportunityPanel: ({ opportunityId }: { opportunityId: string }) => <div data-testid="opportunity-body">{opportunityId}</div>,
+}));
+vi.mock("@/components/discovery/opportunity-composer", () => ({
+  OpportunityComposer: ({ composerId }: { composerId: string }) => (
+    <div data-testid="opportunity-composer-body">{composerId}</div>
+  ),
+}));
 vi.mock("@/components/panels/solution-panel", () => ({ SolutionPanel: () => null }));
 vi.mock("@/components/panels/assumption-panel", () => ({ AssumptionPanel: () => null }));
 vi.mock("@/components/panels/experiment-panel", () => ({ ExperimentPanel: () => null }));
@@ -146,5 +156,35 @@ describe("PanelShell — feedback composer", () => {
 
     fireEvent.keyDown(screen.getByLabelText("Title"), { key: "Escape" });
     expect(closePanel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PanelShell — opportunity composer", () => {
+  beforeEach(() => {
+    panelState = { type: "opportunity-new", id: "new-validating" };
+  });
+
+  it("docks like the feedback composer, titled New opportunity, and passes the column preset through", () => {
+    render(<PanelShell initialPin={unpinned} />);
+    expect(aside()).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "New opportunity" })).toBeInTheDocument();
+    expect(screen.getByTestId("opportunity-composer-body")).toHaveTextContent("new-validating");
+    expect(screen.getByText("Esc")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Pin panel|Unpin panel/ })).toBeNull();
+  });
+
+  it("falls back to a full-width sheet below the pin breakpoint", async () => {
+    setViewportAllowsPin(false);
+    render(<PanelShell initialPin={unpinned} />);
+    const body = await screen.findByTestId("opportunity-composer-body", {}, { timeout: 2000 });
+    expect(body.closest('[data-slot="sheet-content"]')).toHaveClass("w-full", "sm:max-w-xl");
+  });
+
+  it("keeps the created opportunity docked after the hand-off", () => {
+    const { rerender } = render(<PanelShell initialPin={unpinned} />);
+    panelState = { type: "opportunity", id: "opp-1" };
+    rerender(<PanelShell initialPin={unpinned} />);
+    expect(aside()).not.toBeNull();
+    expect(screen.getByTestId("opportunity-body")).toHaveTextContent("opp-1");
   });
 });

@@ -18,12 +18,12 @@ import { ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates"
 import { maybeSnapshotDocVersion } from "@/lib/doc-versions"
+import { createDocument, hydrateDocument, updateDocument } from "@/lib/document-service"
+import { isDocumentPilotWorkspace } from "@/lib/document-storage"
+import { documentMcpActor } from "@/lib/document-mcp-actor"
 
-// MCP callers have no session-derived identity to snapshot under (unlike the
-// UI's updateDoc server action, which uses session.user.id/name) —
-// validateMcpAuth only gates the request once at the route level, not a
-// per-user identity carried into handlers. Mirrors how SolutionComment
-// distinguishes MCP callers via a fixed default rather than a resolved user.
+// Keep the legacy history display label. Pilot receipts additionally bind the
+// trusted request actor carried by mcp-authz's AsyncLocalStorage.
 const MCP_AUTHOR_NAME = "MCP Agent"
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -40,9 +40,9 @@ function toJsonInput(data: DocMetadata): Prisma.InputJsonValue {
  * Returns { body, metadata } where body is the clean markdown text
  * and metadata is the parsed frontmatter key-value pairs (or null if none).
  */
-function parseContent(raw: string): { body: string; metadata: DocMetadata | null } {
+function parseContent(raw: string, preserveWhitespace = false): { body: string; metadata: DocMetadata | null } {
   const parsed = matter(raw)
-  const body = parsed.content.trimStart()
+  const body = preserveWhitespace ? (parsed.matter ? parsed.content : raw) : parsed.content.trimStart()
   const metadata =
     parsed.data && Object.keys(parsed.data).length > 0
       ? (parsed.data as DocMetadata)
@@ -192,7 +192,8 @@ export async function getDoc({ docId }: { docId: string }) {
 
   // Re-serialize metadata + body so agents see the full frontmatter document
   const metadata = doc.metadata as DocMetadata | null
-  const fullContent = serializeWithFrontmatter(doc.content, metadata)
+  const hydrated = await hydrateDocument(doc.workspaceId, doc)
+  const fullContent = serializeWithFrontmatter(hydrated.content, metadata)
 
   const lines: string[] = [
     `# ${doc.icon ? doc.icon + " " : ""}${doc.title}`,
@@ -226,6 +227,8 @@ export async function getDoc({ docId }: { docId: string }) {
     title: doc.title,
     content: fullContent,
     properties: metadata,
+    revision: doc.revision,
+    storageProvider: doc.storageProvider ?? "DATABASE",
   })
 }
 
@@ -239,6 +242,7 @@ export async function createDoc({
   icon,
   roadmapItemId,
   docType,
+  operationId,
 }: {
   workspaceId: string
   title: string
@@ -247,6 +251,7 @@ export async function createDoc({
   icon?: string
   roadmapItemId?: string | null
   docType?: "STANDARD" | "GTM_POSITIONING_BRIEF"
+  operationId?: string
 }) {
   const prisma = getPrisma()
 
@@ -262,22 +267,23 @@ export async function createDoc({
     return fail(`No workspace found with id "${workspaceId}".`)
   }
 
-  if (parentId) {
+  const pilot = isDocumentPilotWorkspace(workspaceId)
+  if (parentId && !pilot) {
     const parent = await prisma.doc.findUnique({
       where: { id: parentId },
-      select: { id: true },
+      select: { id: true, workspaceId: true },
     })
-    if (!parent) {
+    if (!parent || (parent.workspaceId && parent.workspaceId !== workspaceId)) {
       return fail(`Parent doc "${parentId}" not found.`)
     }
   }
 
-  if (roadmapItemId) {
+  if (roadmapItemId && !pilot) {
     const roadmapItem = await prisma.roadmapItem.findUnique({
       where: { id: roadmapItemId },
-      select: { id: true, title: true },
+      select: { id: true, title: true, workspaceId: true },
     })
-    if (!roadmapItem) {
+    if (!roadmapItem || (roadmapItem.workspaceId && roadmapItem.workspaceId !== workspaceId)) {
       return fail(`Roadmap item "${roadmapItemId}" not found.`)
     }
 
@@ -304,10 +310,9 @@ export async function createDoc({
     content ?? (effectiveDocType === "GTM_POSITIONING_BRIEF" ? GTM_POSITIONING_BRIEF_TEMPLATE : undefined)
 
   const { body, metadata } =
-    effectiveContent != null ? parseContent(effectiveContent) : { body: null, metadata: null }
+    effectiveContent != null ? parseContent(effectiveContent, pilot) : { body: null, metadata: null }
 
-  const doc = await prisma.doc.create({
-    data: {
+  const data = {
       workspaceId,
       parentId: parentId ?? null,
       title: title.trim(),
@@ -317,8 +322,10 @@ export async function createDoc({
       sortOrder: lastSibling ? lastSibling.sortOrder + 1 : 0,
       roadmapItemId: roadmapItemId ?? null,
       docType: effectiveDocType,
-    },
-  })
+    }
+  const doc = pilot
+    ? await createDocument(data, { operationId, ...documentMcpActor() })
+    : await prisma.doc.create({ data })
 
   // This used to emit a *relative* `/{org}/{ws}/docs` — the docs index, not the
   // doc just created, and with no origin for an MCP client to resolve it
@@ -346,6 +353,8 @@ export async function createDoc({
       id: doc.id,
       title: doc.title,
       url,
+      revision: doc.revision,
+      storageProvider: doc.storageProvider ?? "DATABASE",
     }
   )
 }
@@ -357,29 +366,33 @@ export async function updateDoc({
   title,
   content,
   icon,
+  expectedRevision,
+  operationId,
 }: {
   docId: string
   title?: string
   content?: string
   icon?: string
+  expectedRevision?: string
+  operationId?: string
 }) {
   const prisma = getPrisma()
 
   const existing = await prisma.doc.findUnique({
     where: { id: docId },
-    select: { title: true },
+    select: { title: true, storageProvider: true },
   })
   if (!existing) {
     return fail(`Doc "${docId}" not found.`)
   }
 
   const { body, metadata } =
-    content !== undefined ? parseContent(content) : { body: undefined, metadata: undefined }
+    content !== undefined ? parseContent(content, existing.storageProvider === "GEODE") : { body: undefined, metadata: undefined }
 
   // Snapshot the doc's pre-change state before applying the new values —
   // but only when this call actually changes something, so a no-op call
   // never creates a version.
-  if (title !== undefined || content !== undefined || icon !== undefined) {
+  if (existing.storageProvider !== "GEODE" && (title !== undefined || content !== undefined || icon !== undefined)) {
     await maybeSnapshotDocVersion(docId, { authorName: MCP_AUTHOR_NAME })
   }
 
@@ -391,7 +404,12 @@ export async function updateDoc({
   if (metadata !== undefined) updateData.metadata = metadata != null ? toJsonInput(metadata) : null
   if (icon !== undefined) updateData.icon = icon.trim()
 
-  const updated = await prisma.doc.update({
+  const updated = existing.storageProvider === "GEODE" ? await updateDocument(docId, {
+    ...(title !== undefined ? { title: title.trim() } : {}),
+    ...(body !== undefined ? { content: body } : {}),
+    ...(metadata !== undefined ? { metadata: metadata === null ? Prisma.JsonNull : toJsonInput(metadata) } : {}),
+    ...(icon !== undefined ? { icon: icon.trim() } : {}),
+  }, { expectedRevision, operationId, ...documentMcpActor() }) : await prisma.doc.update({
     where: { id: docId },
     data: updateData,
   })
@@ -407,6 +425,7 @@ export async function updateDoc({
       title: updated.title,
       icon: updated.icon,
       updatedAt: updated.updatedAt.toISOString(),
+      revision: updated.revision,
     }
   )
 }
@@ -416,21 +435,27 @@ export async function updateDoc({
 export async function updateDocMetadata({
   docId,
   metadata,
+  expectedRevision,
+  operationId,
 }: {
   docId: string
   metadata: DocMetadata
+  expectedRevision?: string
+  operationId?: string
 }) {
   const prisma = getPrisma()
 
   const existing = await prisma.doc.findUnique({
     where: { id: docId },
-    select: { title: true },
+    select: { title: true, storageProvider: true },
   })
   if (!existing) {
     return fail(`Doc "${docId}" not found.`)
   }
 
-  const updated = await prisma.doc.update({
+  const updated = existing.storageProvider === "GEODE"
+    ? await updateDocument(docId, { metadata: toJsonInput(metadata) }, { expectedRevision, operationId, ...documentMcpActor() })
+    : await prisma.doc.update({
     where: { id: docId },
     data: { metadata: toJsonInput(metadata), updatedAt: new Date() },
   })
@@ -442,6 +467,7 @@ export async function updateDocMetadata({
     {
       id: updated.id,
       properties: Object.keys(metadata),
+      revision: updated.revision,
     }
   )
 }

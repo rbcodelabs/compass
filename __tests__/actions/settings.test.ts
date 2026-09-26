@@ -92,7 +92,9 @@ const mockWorkspaceMember = {
   delete: vi.fn(),
   count: vi.fn(),
 };
-const mockDoc = { deleteMany: vi.fn() };
+const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn() };
+const mockDocStorageObject = { findFirst: vi.fn() };
+const mockDocOperation = { findFirst: vi.fn() };
 const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactLink = { deleteMany: vi.fn() };
@@ -156,6 +158,8 @@ const mockPrisma = {
   solutionComment: mockSolutionComment,
   workspaceMember: mockWorkspaceMember,
   doc: mockDoc,
+  docStorageObject: mockDocStorageObject,
+  docOperation: mockDocOperation,
   artifact: mockArtifact,
   artifactRevision: mockArtifactRevision,
   artifactLink: mockArtifactLink,
@@ -312,6 +316,9 @@ beforeEach(() => {
   mockWorkspaceMember.deleteMany.mockResolvedValue({ count: 0 });
   mockSquad.deleteMany.mockResolvedValue({ count: 0 });
   mockDoc.deleteMany.mockResolvedValue({ count: 0 });
+  mockDoc.findFirst.mockResolvedValue(null);
+  mockDocStorageObject.findFirst.mockResolvedValue(null);
+  mockDocOperation.findFirst.mockResolvedValue(null);
 
   // Workspace member management defaults
   mockUser.upsert.mockResolvedValue({ id: "user-2", email: "new@example.com" });
@@ -858,6 +865,13 @@ describe("updateWorkspaceLimits", () => {
 // ─── deleteWorkspace ──────────────────────────────────────────────────────────
 
 describe("deleteWorkspace", () => {
+  it("preserves pilot inventory and all workspace data for explicit cleanup", async () => {
+    mockDocStorageObject.findFirst.mockResolvedValueOnce({ id: "object" });
+    await expect(deleteWorkspace("org", "ws")).rejects.toThrow("explicit cleanup review");
+    expect(mockWorkspace.delete).not.toHaveBeenCalled();
+    expect(mockDoc.deleteMany).not.toHaveBeenCalled();
+    expect(mockObjective.updateMany).not.toHaveBeenCalled();
+  });
   it("requires a workspace administrator before deleting analytics or any domain data", async () => {
     mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "MEMBER" }], organization: { members: [{ role: "MEMBER" }] } });
     await expect(deleteWorkspace("org", "ws")).rejects.toThrow("workspace admin required");

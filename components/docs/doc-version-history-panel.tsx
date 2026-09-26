@@ -21,6 +21,7 @@ export interface DocVersionListItem {
 }
 
 interface DocVersionHistoryPanelProps {
+  restore?: (versionId: string, content: string | null) => Promise<{ title: string }>;
   initialPin?: PanelPin
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -42,6 +43,7 @@ interface LoadedVersion {
 }
 
 export function DocVersionHistoryPanel({
+  restore,
   initialPin,
   open,
   onOpenChange,
@@ -78,8 +80,8 @@ export function DocVersionHistoryPanel({
     startTransition(async () => {
       setError(null)
       try {
-        const restored = await restoreDocVersion(versionId, revalidatePathStr)
-        onRestored?.(selected?.content ?? null, restored.title)
+        const restored = restore ? await restore(versionId, selected?.content ?? null) : await restoreDocVersion(versionId, revalidatePathStr)
+        if (!restore) onRestored?.(selected?.content ?? null, restored.title)
         if (!pinned) onOpenChange(false)
         setSelected(null)
       } catch {
