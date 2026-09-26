@@ -4,16 +4,27 @@
  * path segment (e.g. an opportunityId, docId, experiment id, or OKR cycle
  * id) is scoped to a specific workspace's data and will not exist in a
  * different workspace.
+ *
+ * Only sections that render a page at their own root belong here (e.g.
+ * "reviews" has only a [requestId] route, so it is deliberately absent).
+ * __tests__/lib/workspace-nav.test.ts fails if this set drifts from the
+ * route tree.
  */
-const TOP_LEVEL_SECTIONS = new Set([
-  "okrs",
-  "discovery",
-  "experiments",
-  "roadmap",
-  "feedback",
+export const TOP_LEVEL_SECTIONS: ReadonlySet<string> = new Set([
+  "agent",
+  "canvas",
   "capture",
+  "decisions",
+  "discovery",
   "docs",
+  "experiments",
+  "feedback",
+  "metrics",
+  "okrs",
+  "roadmap",
   "settings",
+  "tasks",
+  "updates",
 ]);
 
 /**
