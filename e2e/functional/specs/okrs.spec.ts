@@ -31,10 +31,12 @@ test.describe("OKRs", () => {
     await page.getByRole("button", { name: "Create cycle" }).click();
 
     // Cycle card visible on the list page
-    await expect(page.getByText(cycleTitle)).toBeVisible({ timeout: 15_000 });
+    // Scoped to page content: Next 16.3's route announcer (an aria-live region)
+    // repeats the new page's heading, so an unscoped getByText matches twice.
+    await expect(page.getByRole("main").first().getByText(cycleTitle)).toBeVisible({ timeout: 15_000 });
 
     // ── 3. Open the cycle ────────────────────────────────────────────────────
-    await page.getByText(cycleTitle).click();
+    await page.getByRole("main").first().getByText(cycleTitle).click();
     await page.waitForLoadState("networkidle");
     // Confirm we're on the cycle detail page
     await expect(page.getByRole("heading", { name: cycleTitle })).toBeVisible();
@@ -134,8 +136,8 @@ test.describe("OKRs", () => {
       await page.getByLabel("Start date").fill(start);
       await page.getByLabel("End date").fill(end);
       await page.getByRole("button", { name: "Create cycle" }).click();
-      await expect(page.getByText(title)).toBeVisible({ timeout: 15_000 });
-      await page.getByText(title).click();
+      await expect(page.getByRole("main").first().getByText(title)).toBeVisible({ timeout: 15_000 });
+      await page.getByRole("main").first().getByText(title).click();
       await page.waitForLoadState("networkidle");
     };
 

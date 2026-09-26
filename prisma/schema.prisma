@@ -2,6 +2,42 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model WorkspaceUpdateEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  revision    Int
+  entityType  String   @map("entity_type") @db.VarChar(40)
+  entityId    String   @map("entity_id") @db.Uuid
+  groupType   String   @map("group_type") @db.VarChar(40)
+  groupId     String   @map("group_id") @db.Uuid
+  kind        String   @db.VarChar(40)
+  actorType   String   @map("actor_type") @db.VarChar(20)
+  actorId     String?  @map("actor_id") @db.Uuid
+  before      String?  @db.VarChar(80)
+  after       String?  @db.VarChar(80)
+  createdAt   DateTime @default(now()) @map("created_at")
+  @@unique([workspaceId, revision], map: "workspace_update_events_revision_key")
+  @@map("workspace_update_events")
+}
+
+model WorkspaceUpdatesState {
+  workspaceId String @id @map("workspace_id") @db.Uuid
+  revision    Int @default(0)
+  @@map("workspace_updates_state")
+}
+
+model WorkspaceUpdatesReadState {
+  id                 String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String @map("workspace_id") @db.Uuid
+  userId             String @map("user_id") @db.Uuid
+  caughtUpRevision   Int @default(0) @map("caught_up_revision")
+  previousRevision   Int? @map("previous_revision")
+  version            String @db.Uuid
+  baselineAt         DateTime @map("baseline_at")
+  @@unique([workspaceId, userId], map: "workspace_updates_read_state_user_key")
+  @@map("workspace_updates_read_state")
+}
+
 datasource db {
   provider     = "postgresql"
   relationMode = "prisma"
@@ -27,6 +63,7 @@ model User {
   workspaceMembers    WorkspaceMember[]
   apiKeys             ApiKey[]
   agentConversations  AgentConversation[]
+  authenticators      Authenticator[]
 
   @@map("users")
 }
@@ -102,6 +139,30 @@ model VerificationToken {
   @@map("verification_tokens")
 }
 
+// Auth.js's Passkey/WebAuthn provider. @auth/prisma-adapter drives
+// createAuthenticator/getAuthenticator/listAuthenticatorsByUserId/
+// updateAuthenticatorCounter against this model by its Prisma field names
+// (credentialID, userId, counter) once it exists — no adapter code changes
+// needed. Own synthetic UUID `id` PK for house-style consistency; credentialID
+// (the base64url WebAuthn credential id from the browser) is the adapter's
+// actual lookup key and stays a separate unique column, matching Auth.js's
+// documented model shape.
+model Authenticator {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  credentialID         String   @unique @map("credential_id") @db.VarChar(512)
+  userId               String   @map("user_id") @db.Uuid
+  user                 User     @relation(fields: [userId], references: [id])
+  providerAccountId    String   @map("provider_account_id") @db.VarChar(255)
+  credentialPublicKey  String   @map("credential_public_key")
+  counter              Int
+  credentialDeviceType String   @map("credential_device_type") @db.VarChar(50)
+  credentialBackedUp   Boolean  @map("credential_backed_up")
+  transports           String?  @db.VarChar(255)
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@map("authenticators")
+}
+
 // ─── Multi-tenancy ────────────────────────────────────────────────────────────
 
 model Organization {
@@ -137,6 +198,12 @@ model Workspace {
   description          String?                 @db.Text
   feedbackEnabled      Boolean?                @default(false) @map("feedback_enabled")
   roadmapPublic        Boolean?                @default(false) @map("roadmap_public")
+  // WIP limits for the NOW/NEXT roadmap columns — purely visual/advisory
+  // (see docs/decisions/0005 and 0006, which retired the old runtime
+  // enforcement machinery). Null means "no limit set"; there is
+  // deliberately no default limit.
+  nowLimit             Int?                    @map("now_limit")
+  nextLimit            Int?                    @map("next_limit")
   portalAuthRequired   Boolean?                @default(false) @map("portal_auth_required")
   brandingPaletteId    String?                 @map("branding_palette_id") @db.VarChar(50)
   brandingPrimaryHex   String?                 @map("branding_primary_hex") @db.VarChar(7)
@@ -144,6 +211,14 @@ model Workspace {
   brandingFontFamily   String?                 @map("branding_font_family") @db.VarChar(100)
   brandingLogoUrl      String?                 @map("branding_logo_url") @db.Text
   ssoEnabled           Boolean?                @default(false) @map("sso_enabled")
+  // Gates the entire marketing-launch surface: launch tiers/checklists, the
+  // LAUNCHING/LAUNCHED roadmap horizons, the roadmap-item panel's Launch
+  // section, the roadmap card's launch chip/menu item, positioning briefs
+  // (Doc.docType GTM_POSITIONING_BRIEF), and the related MCP tools. Default
+  // off for every workspace — most teams don't run a marketing-launch
+  // workflow and found the always-on surface noisy. See
+  // Claude/2026-07-21-compass-gtm-planning-design.md for original context.
+  launchWorkflowEnabled Boolean?               @default(false) @map("launch_workflow_enabled")
   // Ciphertext of the raw SSO shared secret (reversible AES-256-GCM
   // encryption via lib/crypto-secrets.ts, not a hash) — Compass must be
   // able to decrypt it to verify inbound customer-signed JWTs. The
@@ -200,6 +275,7 @@ model ResearchStudy {
   guide             String                     @db.Text
   targetMinutes     Int                        @default(15) @map("target_minutes")
   appUrl            String?                    @map("app_url") @db.Text
+  artifactId        String?                    @map("artifact_id") @db.Uuid
   shareTokenHash    String?                    @unique @map("share_token_hash") @db.VarChar(64)
   shareExpiresAt    DateTime?                  @map("share_expires_at")
   status            String                     @default("DRAFT") @db.VarChar(20)
@@ -209,6 +285,7 @@ model ResearchStudy {
   updatedById       String?                    @map("updated_by_id") @db.Uuid
   source            String                     @default("UI") @db.VarChar(20)
   workspace         Workspace                  @relation(fields: [workspaceId], references: [id])
+  artifact          Artifact?                  @relation(fields: [artifactId], references: [id])
   sessions          ResearchSession[]
   syntheses         ResearchSynthesis[]
   participantTokens ResearchParticipantToken[]
@@ -1682,6 +1759,9 @@ model Doc {
   parentId      String?      @map("parent_id") @db.Uuid
   title         String       @db.VarChar(255)
   content       String?      @db.Text
+  storageProvider String?    @map("storage_provider") @db.VarChar(20)
+  contentRef    String?      @map("content_ref") @db.Text
+  revision      String?      @db.Uuid
   metadata      Json?        @map("metadata") @db.Json
   icon          String?      @db.VarChar(50)
   sortOrder     Int          @default(0) @map("sort_order")
@@ -1752,6 +1832,8 @@ model DocVersion {
   docId         String   @map("doc_id") @db.Uuid
   title         String   @db.VarChar(255)
   content       String?  @db.Text
+  storageProvider String? @map("storage_provider") @db.VarChar(20)
+  contentRef    String?  @map("content_ref") @db.Text
   metadata      Json?    @db.Json
   icon          String?  @db.VarChar(50)
   /// Set only on manual "named" snapshots (bypasses coalescing). Null for
@@ -1764,6 +1846,28 @@ model DocVersion {
 
   @@index([docId, createdAt])
   @@map("doc_versions")
+}
+
+/// Durable idempotency receipt. No Doc relation: deletion must retain retries.
+model DocOperation {
+  id String @id @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  operationId String @map("operation_id") @db.Uuid
+  docId String @map("doc_id") @db.Uuid
+  payloadDigest String @map("payload_digest") @db.VarChar(64)
+  result String @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([workspaceId, operationId])
+  @@map("doc_operations")
+}
+
+/// Write-ahead inventory, not automatic garbage-collection authority.
+model DocStorageObject {
+  id String @id @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  pathname String @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  @@map("doc_storage_objects")
 }
 
 /// Stable identity for a prototype or external deliverable. Content lives in
@@ -1787,6 +1891,7 @@ model Artifact {
   revisions         ArtifactRevision[] @relation("ArtifactRevisions")
   currentRevision   ArtifactRevision?  @relation("CurrentArtifactRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   links             ArtifactLink[]
+  researchStudies   ResearchStudy[]
 
   @@index([workspaceId, status, updatedAt])
   @@map("artifacts")
@@ -2056,7 +2161,16 @@ model AgentToolCall {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   agentId String @map("agent_id") @db.Uuid
   userId String @map("user_id") @db.Uuid
+  /// Polymorphic: an ApiKey.id when credentialType is "API_KEY", an
+  /// OAuthToken.id when it is "OAUTH". Read `credentialType` first — a bare
+  /// uuid join against api_keys will silently miss every OAuth-issued call.
   credentialId String @map("credential_id") @db.Uuid
+  /// "API_KEY" | "OAUTH". The discriminator for credentialId, added by ADR 0015
+  /// when an agent-bound OAuth token became a second source of agent identity.
+  /// Nullable because DSQL rejects a DEFAULT on ALTER TABLE ADD COLUMN; rows
+  /// predating migration 056 are backfilled to "API_KEY", which is what they
+  /// all were. New rows get the value from Prisma's ORM-layer default.
+  credentialType String? @default("API_KEY") @map("credential_type") @db.VarChar(10)
   toolName String @map("tool_name") @db.VarChar(100)
   workspaceId String? @map("workspace_id") @db.Uuid
   status String @default("STARTED") @db.VarChar(20)
@@ -2251,4 +2365,402 @@ model AgentAuditLog {
   @@index([workspaceId, createdAt])
   @@index([userId, createdAt])
   @@map("agent_audit_log")
+}
+
+// ─── OAuth authorization server (MCP) ─────────────────────────────────────────
+// Compass is its own OAuth 2.1 authorization server for its MCP endpoint —
+// issuer, resource server and identity provider all on one origin. See
+// docs/design/mcp-oauth-discovery.md.
+//
+// DSQL constraints applied throughout:
+//   - UUID PKs via gen_random_uuid()
+//   - No @updatedAt (no triggers on DSQL)
+//   - No FK constraints (relationMode = "prisma"), and deliberately no Prisma
+//     relation fields either: these tables are written by unauthenticated DCR
+//     and by the token endpoint, both of which resolve ids explicitly. Same
+//     shape as AgentAuditLog.
+//   - redirectUris / grantTypes are Json, not Postgres arrays — the schema
+//     already uses Json in several places and it sidesteps an array-type
+//     question on DSQL.
+
+/// One dynamically registered OAuth client (RFC 7591). DCR is the only
+/// registration path, so every row here is dynamic and unverified — expect one
+/// row per Geode install, all named "Agent Threads". `lastUsedAt` is what TTL
+/// pruning keys off.
+model OAuthClient {
+  id                          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId                    String    @unique(map: "idx_oauth_clients_client_id") @map("client_id") @db.VarChar(64)
+  /// Null for public clients, which is every client today (loopback clients
+  /// cannot hold a secret; Geode registers token_endpoint_auth_method "none").
+  clientSecretHash            String?   @map("client_secret_hash") @db.VarChar(64)
+  clientName                  String    @map("client_name") @db.VarChar(255)
+  /// JSON array of registered redirect URIs. Matched by lib/oauth/redirect-uri.ts.
+  redirectUris                Json      @map("redirect_uris")
+  /// JSON array of granted grant types, e.g. ["authorization_code","refresh_token"].
+  grantTypes                  Json      @map("grant_types")
+  scope                       String    @db.VarChar(255)
+  tokenEndpointAuthMethod     String    @map("token_endpoint_auth_method") @db.VarChar(30)
+  logoUri                     String?   @map("logo_uri") @db.Text
+  clientUri                   String?   @map("client_uri") @db.Text
+  softwareId                  String?   @map("software_id") @db.VarChar(255)
+  registrationAccessTokenHash String?   @map("registration_access_token_hash") @db.VarChar(64)
+  createdAt                   DateTime  @default(now()) @map("created_at")
+  lastUsedAt                  DateTime? @map("last_used_at")
+
+  @@index([lastUsedAt], map: "idx_oauth_clients_last_used")
+  @@map("oauth_clients")
+}
+
+/// A single-use authorization code, 60 s TTL. Consumed atomically with a
+/// conditional updateMany on (codeHash, consumedAt: null) — never read-then-write.
+model OAuthAuthorizationCode {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codeHash            String    @unique(map: "idx_oauth_authorization_codes_hash") @map("code_hash") @db.VarChar(64)
+  clientId            String    @map("client_id") @db.VarChar(64)
+  userId              String    @map("user_id") @db.Uuid
+  redirectUri         String    @map("redirect_uri") @db.Text
+  codeChallenge       String    @map("code_challenge") @db.VarChar(128)
+  codeChallengeMethod String    @map("code_challenge_method") @db.VarChar(10)
+  scope               String    @db.VarChar(255)
+  /// RFC 8707 audience. Defaulted to the canonical MCP resource URI when the
+  /// client omits `resource`, which the Geode broker and mcp-remote both do.
+  resource            String    @db.Text
+  /// "AGENT" | "USER" (ADR 0015). Explicit rather than inferred from
+  /// `agentId IS NULL`, because a null agentId must not be ambiguous between
+  /// "the user elected the admin override" and "this row predates agent
+  /// binding". Read as a closed two-value parser: only exact "AGENT" and
+  /// "USER" are accepted; null or unknown values fail closed. Nullable in the
+  /// database (DSQL rejects a DEFAULT on ALTER TABLE ADD COLUMN); migration 056
+  /// backfills legacy rows to "USER".
+  authorizationMode   String?   @default("USER") @map("authorization_mode") @db.VarChar(10)
+  /// Non-null iff authorizationMode is "AGENT". An Agent.id owned by userId —
+  /// re-validated at every use, never trusted from issuance.
+  agentId             String?   @map("agent_id") @db.Uuid
+  expiresAt           DateTime  @map("expires_at")
+  consumedAt          DateTime? @map("consumed_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  @@index([expiresAt], map: "idx_oauth_authorization_codes_expires")
+  @@map("oauth_authorization_codes")
+}
+
+/// An issued access or refresh token, stored only as a SHA-256 hash.
+/// `familyId` + `parentTokenId` carry refresh-rotation lineage so replay of a
+/// rotated refresh token can revoke the whole family (phase 2).
+model OAuthToken {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tokenHash        String    @unique(map: "idx_oauth_tokens_hash") @map("token_hash") @db.VarChar(64)
+  /// "ACCESS" | "REFRESH" — a VarChar, matching every other status-like column
+  /// in this schema (Prisma enums are not used here).
+  type             String    @db.VarChar(10)
+  clientId         String    @map("client_id") @db.VarChar(64)
+  userId           String    @map("user_id") @db.Uuid
+  scope            String    @db.VarChar(255)
+  resource         String    @db.Text
+  /// **Superseded by agentId + AgentWorkspaceGrant; always null** (ADR 0015).
+  /// It was reserved for a workspace picker, but it is not a complete boundary
+  /// as built — assertActorWorkspaceScope (lib/mcp-authz.ts) fires only for
+  /// RESEARCH and AGENT_TURN, and assertWorkspaceAdmin / assertOrgMemberBySlug
+  /// / assertOrgAdminBySlug never consult it — and it expresses one workspace
+  /// with no access level where a grant set expresses many with per-workspace
+  /// READ/WRITE. Grants strictly dominate. Kept only because dropping a column
+  /// on DSQL helps nobody. Do not resurrect it.
+  scopeWorkspaceId String?   @map("scope_workspace_id") @db.Uuid
+  /// "AGENT" | "USER" (ADR 0015) — see OAuthAuthorizationCode.authorizationMode.
+  /// This is the column validateOAuthAccessToken branches on to decide whether
+  /// the token resolves to purpose "AGENT" or purpose "USER".
+  authorizationMode String? @default("USER") @map("authorization_mode") @db.VarChar(10)
+  /// Non-null iff authorizationMode is "AGENT". Carried forward across refresh
+  /// rotation so a refresh can never silently widen an agent token into a user
+  /// token.
+  agentId          String?   @map("agent_id") @db.Uuid
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  familyId         String    @map("family_id") @db.Uuid
+  parentTokenId    String?   @map("parent_token_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+  lastUsedAt       DateTime? @map("last_used_at")
+
+  @@index([agentId], map: "idx_oauth_tokens_agent")
+  @@index([familyId], map: "idx_oauth_tokens_family")
+  @@index([userId, clientId], map: "idx_oauth_tokens_user_client")
+  @@index([expiresAt], map: "idx_oauth_tokens_expires")
+  @@map("oauth_tokens")
+}
+
+/// A prior grant, so a returning user re-approving the same client with the
+/// same scopes skips the consent screen.
+model OAuthConsent {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  clientId  String   @map("client_id") @db.VarChar(64)
+  scope     String   @db.VarChar(255)
+  /// "AGENT" | "USER" (ADR 0015) — see OAuthAuthorizationCode.authorizationMode.
+  /// The unique key stays (userId, clientId): one connection has one binding,
+  /// and the binding is data on the row rather than part of its identity, so a
+  /// returning client replays the remembered binding instead of being offered a
+  /// second one.
+  authorizationMode String? @default("USER") @map("authorization_mode") @db.VarChar(10)
+  /// Non-null iff authorizationMode is "AGENT".
+  agentId   String?  @map("agent_id") @db.Uuid
+  grantedAt DateTime @default(now()) @map("granted_at")
+
+  @@unique([userId, clientId], map: "idx_oauth_consents_user_client")
+  @@map("oauth_consents")
+}
+
+/// Immutable, secret-free evidence that a human explicitly authorized USER
+/// credentials. Agent-bound authorizations use the existing per-call audit.
+model OAuthAuthorizationEvent {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventType            String   @map("event_type") @db.VarChar(50)
+  source               String   @db.VarChar(30)
+  authorizationCodeId  String   @unique(map: "idx_oauth_authorization_events_code") @map("authorization_code_id") @db.Uuid
+  userId               String   @map("user_id") @db.Uuid
+  clientId             String   @map("client_id") @db.VarChar(64)
+  clientNameSnapshot   String   @map("client_name_snapshot") @db.VarChar(255)
+  redirectOrigin       String   @map("redirect_origin") @db.Text
+  authorizationMode    String   @map("authorization_mode") @db.VarChar(10)
+  agentId              String?  @map("agent_id") @db.Uuid
+  scope                String   @db.VarChar(255)
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt], map: "idx_oauth_authorization_events_user_created")
+  @@index([clientId, createdAt], map: "idx_oauth_authorization_events_client_created")
+  @@map("oauth_authorization_events")
+}
+
+// ─── Outbound OAuth: third-party MCP connectors (ADR-0018) ────────────────────
+//
+// Everything above is Compass acting as an authorization SERVER for its own
+// /api/mcp, so Claude.ai can connect *to* Compass. The three models below are
+// the opposite direction: Compass as an OAuth *client* of somebody else's MCP
+// server, so the cloud agent can call out to it. v0 is the first one.
+//
+// Why these cannot reuse OAuthToken: that model stores `tokenHash` and nothing
+// else, because an authorization server only ever needs to RECOGNISE a token it
+// issued. An outbound client must REPLAY the token on every proxied call, which
+// demands reversible encryption. Same word, different requirement, different
+// table — this asymmetry is the whole reason ADR-0018 adds storage rather than
+// extending what is here.
+
+/// A remote MCP server Compass can connect to, plus the Dynamic Client
+/// Registration (RFC 7591) Compass holds with it.
+///
+/// Keyed by (slug, origin), not slug alone: OAuth `redirect_uri` validation is
+/// exact string matching, so production and every preview URL each need their
+/// own registration. Rows are created lazily on the first connect attempt from
+/// an origin. Registrations do not self-expire at v0 (`client_secret_expires_at`
+/// is null), so they accumulate per origin — cleanup is a known open item.
+model McpConnector {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Stable short name used in the proxy path and the agent's tool prefix:
+  /// "v0" → /api/integrations/mcp/v0 → mcp__v0__*.
+  slug String @db.VarChar(40)
+  /// The Compass origin whose redirect_uri this registration was made for.
+  origin String @db.VarChar(255)
+  displayName String @map("display_name") @db.VarChar(120)
+  /// The remote MCP endpoint, e.g. https://v0.app/api/mcp.
+  serverUrl String @map("server_url") @db.Text
+  /// RFC 8707 audience. Must be sent identically on authorize, token exchange
+  /// AND refresh — v0 hard-rejects its absence with 400 invalid_target, while
+  /// Vercel's own MCP server ignores it entirely.
+  resource String @db.Text
+  /// Discovered from AS metadata (RFC 8414) at registration time and frozen, so
+  /// a provider silently moving an endpoint cannot redirect a live grant.
+  authorizationEndpoint String @map("authorization_endpoint") @db.Text
+  tokenEndpoint String @map("token_endpoint") @db.Text
+  revocationEndpoint String? @map("revocation_endpoint") @db.Text
+  /// Space-delimited. Resolved from resource metadata, falling back to AS
+  /// metadata — v0's resource document reports scopes_supported: null while its
+  /// AS advertises ["mcp"], so that fallback is load-bearing, not defensive.
+  scope String @db.VarChar(255)
+  /// From DCR. There is deliberately NO client-secret column: v0 issues a
+  /// public client (verified live — 201, token_endpoint_auth_method "none", no
+  /// secret in the response), so PKCE alone carries the exchange. A
+  /// confidential-client provider would need a schema change, which is exactly
+  /// why every new connector gets probed before its catalogue entry is added.
+  clientId String @map("client_id") @db.VarChar(255)
+  enabled Boolean @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  @@unique([slug, origin], map: "idx_mcp_connectors_slug_origin")
+  @@map("mcp_connectors")
+}
+
+/// One user's authorization to one connector.
+///
+/// Per-USER, not per-workspace. A workspace-shared token would let user A act as
+/// user B inside the provider, and the provider has no concept of a Compass
+/// actor to distinguish them. Per-user also composes with any long-running or
+/// detached turn, where the `cmp_` key still resolves to a user well after the
+/// browser closed.
+model McpConnectorGrant {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  connectorId String @map("connector_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  /// AES-256-GCM via lib/crypto-secrets.ts under
+  /// MCP_CONNECTOR_SECRET_ENCRYPTION_KEY. Reversible by necessity — see the
+  /// block comment above this model group.
+  accessTokenEncrypted String @map("access_token_encrypted") @db.Text
+  /// Null when the provider issues no refresh token. The grant then simply
+  /// expires and the user reconnects, rather than silently failing mid-run.
+  refreshTokenEncrypted String? @map("refresh_token_encrypted") @db.Text
+  accessTokenExpiresAt DateTime? @map("access_token_expires_at")
+  scope String @db.VarChar(255)
+  /// "ACTIVE" | "REVOKED" | "NEEDS_REAUTH" — a VarChar, matching every other
+  /// status-like column in this schema (Prisma enums are not used here).
+  status String @default("ACTIVE") @db.VarChar(20)
+  /// Optimistic-concurrency counter for token refresh. Two concurrent
+  /// invocations may both try to refresh; the loser's conditional update matches
+  /// zero rows, and it re-reads and adopts the winner's token instead of
+  /// clobbering it. Same pattern as AnalyticsConnection.generation
+  /// (lib/analytics/service.ts:75) — DSQL has no advisory locks, and the
+  /// in-process promise map this ports from Agent Threads is meaningless when
+  /// each request is a separate invocation.
+  generation Int @default(1)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  @@unique([connectorId, userId], map: "idx_mcp_connector_grants_connector_user")
+  @@index([userId], map: "idx_mcp_connector_grants_user")
+  @@map("mcp_connector_grants")
+}
+
+/// Transient state for one in-flight authorization.
+///
+/// This model exists purely because the authorize step and the OAuth callback
+/// are two separate serverless invocations that share no memory: the PKCE
+/// verifier and `state` cannot live in a closure the way they do in a
+/// long-lived desktop process. `expiresAt` replaces what would otherwise be a
+/// setTimeout.
+///
+/// Consumed atomically with a conditional updateMany on (state, consumedAt:
+/// null) — never read-then-write. Same idiom OAuthAuthorizationCode documents.
+model McpConnectorAuthRequest {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  state String @unique(map: "idx_mcp_connector_auth_requests_state") @db.VarChar(64)
+  connectorId String @map("connector_id") @db.Uuid
+  /// The session user who started the dance. The callback MUST compare this
+  /// against its own session. An unbound `state` is a login-CSRF: an attacker
+  /// who can deliver their own authorization code to a victim's callback grafts
+  /// their provider account onto the victim's Compass account.
+  userId String @map("user_id") @db.Uuid
+  /// Plaintext, deliberately. The verifier is worthless without the matching
+  /// authorization code, the row is single-use with a minutes-long TTL, and
+  /// anyone who can read this table can already read the encrypted grants'
+  /// key material's blast radius. Revisit if the TTL ever grows.
+  codeVerifier String @map("code_verifier") @db.VarChar(128)
+  /// Stored rather than rebuilt from request headers at callback time, because
+  /// redirect_uri validation is exact string matching and a forwarded-host
+  /// header is attacker-influenced.
+  redirectUri String @map("redirect_uri") @db.Text
+  /// Where to send the user once the grant is stored.
+  returnTo String? @map("return_to") @db.Text
+  expiresAt DateTime @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([expiresAt], map: "idx_mcp_connector_auth_requests_expires")
+  @@map("mcp_connector_auth_requests")
+}
+
+model AnalyticsConnection {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  provider String @db.VarChar(40)
+  projectId String @map("project_id") @db.VarChar(255)
+  teamId String? @map("team_id") @db.VarChar(255)
+  secretEncrypted String? @map("secret_encrypted") @db.Text
+  generation Int @default(1)
+  enabled Boolean @default(true)
+  health String @default("CONNECTED") @db.VarChar(40)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@unique([workspaceId, provider], map: "idx_analytics_connection_workspace_provider")
+  @@map("analytics_connections")
+}
+
+model MetricDefinition {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  currentRevisionId String @map("current_revision_id") @db.Uuid
+  revision Int @default(1)
+  archived Boolean @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  /// Metrics dashboard layout (063_metrics_dashboard). Nullable because DSQL
+  /// rejects a DEFAULT clause on ALTER TABLE ADD COLUMN -- every existing row
+  /// was backfilled by the migration's UPDATE, and every reader treats NULL
+  /// as this same default (see the `?? <default>` coalesce in service.ts and
+  /// dashboard.ts). @default() here is Prisma-client-side only, applied to
+  /// new create() calls; it is not a DB constraint.
+  dashboardVisible Boolean? @default(true) @map("dashboard_visible")
+  dashboardCol Int? @default(2) @map("dashboard_col")
+  dashboardRow Int? @default(4) @map("dashboard_row")
+  dashboardSortOrder Int? @default(0) @map("dashboard_sort_order")
+  @@index([workspaceId, archived], map: "idx_metric_definition_workspace")
+  @@map("metric_definitions")
+}
+
+model MetricRevision {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  metricId String @map("metric_id") @db.Uuid
+  revision Int
+  name String @db.VarChar(255)
+  unit String @db.VarChar(80)
+  provider String @db.VarChar(40)
+  connectionId String? @map("connection_id") @db.Uuid
+  queryJson String @map("query_json") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([metricId, revision], map: "idx_metric_revision_number")
+  @@index([workspaceId, connectionId], map: "idx_metric_revision_workspace")
+  @@map("metric_revisions")
+}
+
+model MetricBinding {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  metricId String @map("metric_id") @db.Uuid
+  revisionId String @map("revision_id") @db.Uuid
+  targetType String @map("target_type") @db.VarChar(30)
+  targetId String @map("target_id") @db.Uuid
+  baselineJson String @map("baseline_json") @db.Text
+  followupJson String @map("followup_json") @db.Text
+  targetValue Float? @map("target_value")
+  active Boolean @default(true)
+  lastError String? @map("last_error") @db.VarChar(80)
+  lastAttemptAt DateTime? @map("last_attempt_at")
+  lastAttemptId String? @map("last_attempt_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@index([workspaceId, targetType, targetId], map: "idx_metric_binding_target")
+  @@index([workspaceId, metricId], map: "idx_metric_binding_metric")
+  @@map("metric_bindings")
+}
+
+model MetricObservation {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  bindingId String @map("binding_id") @db.Uuid
+  revisionId String @map("revision_id") @db.Uuid
+  refreshKey String @unique(map: "idx_metric_observation_refresh") @map("refresh_key") @db.VarChar(64)
+  windowKind String @map("window_kind") @db.VarChar(12)
+  snapshotJson String @map("snapshot_json") @db.Text
+  dataJson String @map("data_json") @db.Text
+  retrievedAt DateTime @default(now()) @map("retrieved_at")
+  @@index([workspaceId, bindingId, retrievedAt], map: "idx_metric_observation_binding")
+  @@map("metric_observations")
+}
+
+model WorkspaceActivationState {
+  workspaceId String @id @map("workspace_id") @db.Uuid
+  collectionStartedAt DateTime @map("collection_started_at")
+  discoveryAt DateTime? @map("discovery_at")
+  deliveryAt DateTime? @map("delivery_at")
+  learningAt DateTime? @map("learning_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@map("workspace_activation_states")
 }

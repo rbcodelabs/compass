@@ -1,11 +1,22 @@
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { PrismaClient } from "@prisma/client";
 import type { AppPrismaClient } from "@/lib/db";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createLazyPrismaAuthAdapter } from "@/lib/lazy-prisma-auth-adapter";
 
 describe("createLazyPrismaAuthAdapter", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it("managed pilots reject ordinary and convenience sessions before database access", async () => {
+    vi.stubEnv("PREVIEW_DATABASE_MODE", "vercel-managed");
+    const initialize = vi.fn();
+    const adapter = createLazyPrismaAuthAdapter(initialize);
+    for (const sessionToken of ["ordinary", "previewlogin_test"]) {
+      expect(await adapter.getSessionAndUser!(sessionToken)).toBeNull();
+      expect(await adapter.updateSession!({ sessionToken })).toBeNull();
+    }
+    expect(initialize).not.toHaveBeenCalled();
+  });
   it("does not initialize Prisma while constructing the adapter", () => {
     const getClient = vi.fn();
 
@@ -87,8 +98,26 @@ describe("createLazyPrismaAuthAdapter", () => {
       const row = { sessionToken: "preview_test", previewAutomationRunId: "run", userId: "owner", expires: expiresAt };
       const client = { previewAutomationSession: { findUnique: vi.fn().mockResolvedValue({ runId: "run" }) }, session: { findUnique: vi.fn().mockResolvedValue(row), update: vi.fn().mockResolvedValue(row) }, previewAutomationRun: { findUnique: vi.fn().mockResolvedValue({ id: "run", deploymentId: "deployment", expiresAt, revokedAt: null, ownerUserId: "owner", viewerUserId: "viewer" }) } };
       const adapter = createLazyPrismaAuthAdapter(() => client as unknown as AppPrismaClient);
-      await adapter.updateSession!({ sessionToken: "preview_test", expires: new Date(Date.now() + 30 * 86400_000) });
-      expect(client.session.update).toHaveBeenCalledWith({ where: { sessionToken: "preview_test" }, data: { sessionToken: "preview_test", expires: expiresAt } });
+      const refreshed = await adapter.updateSession!({ sessionToken: "preview_test", expires: new Date(Date.now() + 30 * 86400_000) });
+      // Already at the deadline: nothing to write. Concurrent auth() calls in one
+      // render would otherwise race on this row (Aurora DSQL OCC) and sign users out.
+      expect(client.session.update).not.toHaveBeenCalled();
+      expect(refreshed?.expires).toEqual(expiresAt);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("never writes an automation session concurrently rendered auth() calls would race on", async () => {
+    vi.stubEnv("PREVIEW_AUTOMATION_ENABLED", "1");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "deployment");
+    try {
+      const expiresAt = new Date(Date.now() + 60_000);
+      const row = { sessionToken: "preview_test", previewAutomationRunId: "run", userId: "owner", expires: expiresAt };
+      const client = { previewAutomationSession: { findUnique: vi.fn().mockResolvedValue({ runId: "run" }) }, session: { findUnique: vi.fn().mockResolvedValue(row), update: vi.fn().mockRejectedValue(new Error("OC000 change conflicts with another transaction")) }, previewAutomationRun: { findUnique: vi.fn().mockResolvedValue({ id: "run", deploymentId: "deployment", expiresAt, revokedAt: null, ownerUserId: "owner", viewerUserId: "viewer" }) } };
+      const adapter = createLazyPrismaAuthAdapter(() => client as unknown as AppPrismaClient);
+      const refreshes = await Promise.all(Array.from({ length: 5 }, () => adapter.updateSession!({ sessionToken: "preview_test", expires: new Date(Date.now() + 30 * 86400_000) })));
+      expect(refreshes.every(r => r?.expires.getTime() === expiresAt.getTime())).toBe(true);
+      expect(client.session.update).not.toHaveBeenCalled();
     } finally { vi.unstubAllEnvs(); }
   });
 });

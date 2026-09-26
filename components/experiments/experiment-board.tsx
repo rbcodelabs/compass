@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useId } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -82,7 +82,7 @@ function ExperimentColumn({
       title={label}
       count={items.length}
       accent={accent}
-      className="min-w-[280px] flex-1 overflow-hidden md:h-full"
+      className="w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"
       bodyRef={setNodeRef}
       bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`}
     >
@@ -128,6 +128,9 @@ export function ExperimentBoard({
 
   const [, startTransition] = useTransition();
 
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = useId();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -239,6 +242,7 @@ export function ExperimentBoard({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
       <DndContext
+        id={dndId}
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={handleDragStart}

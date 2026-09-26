@@ -9,6 +9,8 @@ import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
 import { ManageMembersPanel } from "@/components/settings/manage-members-panel";
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
+import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel";
+import { LaunchWorkflowSettingsPanel } from "@/components/settings/launch-workflow-settings-panel";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { DeleteWorkspacePanel } from "@/components/settings/delete-workspace-panel";
 import { WorkspaceScoringPanel } from "@/components/scoring-models/workspace-scoring-panel";
@@ -28,6 +30,8 @@ import { ThemePreferenceControl } from "@/components/theme/theme-preference-cont
 import { WorkspaceAgentsPanel } from "@/components/settings/workspace-agents-panel";
 import { AgentActivity } from "@/components/settings/agent-activity";
 import { agentsEnabled } from "@/lib/agent-access";
+import { AnalyticsSettingsPanel } from "@/components/analytics/analytics-settings-panel";
+import { listConnections } from "@/lib/analytics/service";
 
 export const metadata = { title: "Workspace Settings" };
 
@@ -51,8 +55,11 @@ export default async function SettingsPage({ params }: Props) {
       name: true,
       feedbackEnabled: true,
       roadmapPublic: true,
+      nowLimit: true,
+      nextLimit: true,
       portalAuthRequired: true,
       ssoEnabled: true,
+      launchWorkflowEnabled: true,
       ssoSecretEncrypted: true,
       ssoSecretUpdatedAt: true,
       brandingPaletteId: true,
@@ -154,6 +161,8 @@ export default async function SettingsPage({ params }: Props) {
     rawMembers.find((m) => m.userId === session.user?.id)?.id ?? null;
   const currentWorkspaceRole = rawMembers.find((m) => m.userId === session.user?.id)?.role;
   const canManageCapabilityPacks = normalizeWorkspaceRole(currentWorkspaceRole) === "ADMIN" || isOrgAdminRole(workspace.organization.members[0]?.role);
+  const analyticsActor = { userId: session.user.id, purpose: "USER" as const };
+  const analyticsConnections = await listConnections(analyticsActor, workspace.id);
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: workspace.id, revokedAt: null } });
   const workspaceAgents = await prisma.agent.findMany({ where: canManageCapabilityPacks ? { OR: [{ ownerUserId: { in: rawMembers.map((m) => m.userId) } }, { id: { in: grants.map((g) => g.agentId) } }] } : { id: { in: grants.map((g) => g.agentId) } }, orderBy: { name: "asc" } });
   const agentActivity = canManageCapabilityPacks ? await prisma.agentToolCall.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "desc" }, take: 25 }) : [];
@@ -230,6 +239,15 @@ export default async function SettingsPage({ params }: Props) {
         />
       </SettingsSection>
 
+      <SettingsSection title="Analytics" description="Bring aggregate usage evidence into product decisions without exposing credentials or customer identities.">
+        <AnalyticsSettingsPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          initialConnections={analyticsConnections}
+          canManage={canManageCapabilityPacks}
+        />
+      </SettingsSection>
+
       <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace. Assignment does not grant access or start execution.">
         <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} enabled={agentsEnabled()} canManage={canManageCapabilityPacks} agents={workspaceAgents.map((a) => ({ id: a.id, name: a.name, status: a.status, ownerName: rawMembers.find((m) => m.userId === a.ownerUserId)?.user.name ?? rawMembers.find((m) => m.userId === a.ownerUserId)?.user.email ?? "Former member", eligible: rawMembers.some((m) => m.userId === a.ownerUserId), access: grants.find((g) => g.agentId === a.id)?.access ?? null }))} />
       </SettingsSection>
@@ -238,6 +256,15 @@ export default async function SettingsPage({ params }: Props) {
       {canManageCapabilityPacks && <SettingsSection title="Agent capability packs" description="Install validated skills-only packs for the in-app agent. Packs add instructions, never tools or credentials.">
         <CapabilityPacksPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} initialPacks={capabilityPacks} />
       </SettingsSection>}
+
+      <SettingsSection title="Delivery limits" description="Optional WIP limits for the NOW and NEXT roadmap columns.">
+        <DeliveryLimitsPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          nowLimit={workspace.nowLimit ?? null}
+          nextLimit={workspace.nextLimit ?? null}
+        />
+      </SettingsSection>
 
       <SettingsSection title="Portal" description="Control which parts of this workspace are publicly accessible without login.">
         <PortalSettingsPanel
@@ -249,6 +276,22 @@ export default async function SettingsPage({ params }: Props) {
           ssoEnabled={workspace.ssoEnabled ?? false}
           ssoSecretConfigured={Boolean(workspace.ssoSecretEncrypted)}
           ssoSecretUpdatedAt={workspace.ssoSecretUpdatedAt}
+        />
+      </SettingsSection>
+
+      {/*
+        Placed after Portal, not before: several functional E2E specs
+        (feedback-attachments, feedback-bug-roadmap, roadmap-unscheduled-items)
+        select Portal's toggles by positional index
+        (page.getByRole("switch").nth(1), etc.) since PortalSettingsPanel's
+        toggles have no stable accessible name. Inserting a new switch above
+        Portal would silently shift those indices and break those specs.
+      */}
+      <SettingsSection title="Marketing launch" description="Turn on launch tiers, checklists, and positioning briefs for teams that run a formal marketing-launch process.">
+        <LaunchWorkflowSettingsPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
         />
       </SettingsSection>
 

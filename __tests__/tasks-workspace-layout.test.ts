@@ -25,8 +25,8 @@ afterEach(cleanup);
 // The tasks server-actions module transitively imports next-auth — mock the
 // boundary so EditTaskDialog, TaskAssigneePicker, and TaskBoard render
 // without a real auth/db stack.
+vi.mock("@/lib/task-assignees-client", () => ({ fetchTaskAssigneeOptions: vi.fn() }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
-  getTaskAssigneeOptions: vi.fn(),
   updateTask: vi.fn(),
   moveTaskStatus: vi.fn(),
   updateSortOrder: vi.fn(),
@@ -69,7 +69,7 @@ const members: MemberData[] = [
 ];
 
 describe("Tasks dashboard workspace layout", () => {
-  it("keeps long assignee labels inside the inline field and wraps menu choices", async () => {
+  it("keeps long assignee labels inside the inline field and truncates menu choices", async () => {
     const { InlineAssigneeField } = await import("@/components/tasks/inline-assignee-field");
     render(
       createElement(InlineAssigneeField, {
@@ -97,13 +97,13 @@ describe("Tasks dashboard workspace layout", () => {
     const value = trigger.querySelector(String.raw`[data-slot="combobox-value"]`)!;
     expect(value.className).toContain("min-w-0 truncate");
 
-    // The assignee picker actually rendered and wraps its long labels rather
-    // than overflowing.
+    // The assignee picker keeps long labels on one compact row, truncating
+    // visually rather than wrapping or overflowing.
     fireEvent.click(trigger);
     const popup = await screen.findByPlaceholderText("Search people and agents…");
     const content = popup.closest(String.raw`[data-slot="combobox-content"]`)!;
-    expect(content.className).toContain("[&_[data-slot=combobox-item]>span:first-child]:whitespace-normal");
-    expect(content.className).toContain("[&_[data-slot=combobox-item]>span:first-child]:[overflow-wrap:anywhere]");
+    expect(content.className).toContain("[&_[data-slot=combobox-item]>span:first-child]:truncate");
+    expect(content.className).not.toContain("[&_[data-slot=combobox-item]>span:first-child]:whitespace-normal");
     expect(await screen.findByRole("option", { name: /Ada Lovelace/ })).toBeInTheDocument();
   });
 
@@ -137,7 +137,7 @@ describe("Tasks dashboard workspace layout", () => {
     expect(track.className).toContain("px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3");
 
     const column = container.querySelector('[data-task-column="TODO"]')!;
-    expect(column.className).toContain('min-w-[280px] flex-1 md:h-full');
+    expect(column).toHaveClass('w-[calc(100cqw-1.5rem)]', 'min-w-0', 'flex-none', 'sm:w-[calc(100cqw-2rem)]', 'md:w-72', 'md:min-w-[280px]', 'md:flex-1', 'md:h-full');
     // The column must NOT clip its own overflow: a card's drag shadow and focus
     // ring render outside the card box and were being sliced off at the column
     // edge. The board is still the sole horizontal scroller — the column simply

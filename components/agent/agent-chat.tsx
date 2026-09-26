@@ -36,6 +36,40 @@ type Props = {
   /** "Send to agent" hand-off (lib/agent-context.ts) — only ever set for a brand-new chat. */
   seedEntity?: SeedEntity
   suggestedInstruction?: string
+  /**
+   * Which surface this chat is rendered on.
+   *
+   * `"page"` (the default, so every existing call site is unchanged) is the
+   * full-width agent screen: it owns its own card chrome and shows the
+   * conversation list as an inline left column.
+   *
+   * `"rail"` is the docked left rail. It drops both of those: the rail supplies
+   * the surrounding chrome itself, and a 320–560px column has no room for a
+   * 256px conversation list beside the thread — so the rail hosts the
+   * new-chat/thread-switcher controls in its own header and this component
+   * renders the thread and composer only.
+   */
+  variant?: "page" | "rail"
+  /**
+   * Called when turn 1 of a brand-new chat comes back with the id the server
+   * assigned to it.
+   *
+   * The page does not need this: it learns the id from the `?c=<id>` it rewrites
+   * the URL to. The rail has no URL to read — it owns the active thread in React
+   * state — so this callback is the only way it finds out which conversation the
+   * transcript on screen now belongs to. Without it, the next "new chat" click
+   * would be indistinguishable from the current one and "expand to full page"
+   * would open an empty thread.
+   */
+  onConversationCreated?: (conversationId: string) => void
+  /**
+   * Called whenever a turn starts or stops streaming.
+   *
+   * The rail needs it because closing the rail unmounts this component, which
+   * aborts the turn: it uses it to keep Esc and "expand to full page" from
+   * doing that implicitly mid-turn. The page does not pass it.
+   */
+  onStreamingChange?: (streaming: boolean) => void
 }
 
 type StreamPhase = "idle" | "booting" | "running"
@@ -58,7 +92,11 @@ export function AgentChat({
   userInitials,
   seedEntity,
   suggestedInstruction,
+  variant = "page",
+  onConversationCreated,
+  onStreamingChange,
 }: Props) {
+  const isRail = variant === "rail"
   const router = useRouter()
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   // Prefilled (editable) composer instruction from a "Send to agent" hand-off
@@ -80,8 +118,29 @@ export function AgentChat({
   const started = useRef(new Set<string>())
   const sending = useRef(false)
   const streamController = useRef<AbortController | null>(null)
+  // Kept in a ref so a parent passing an inline arrow can't change `send`'s
+  // identity on every render — `send` is what the handoff auto-dispatch effect
+  // reads through `sendRef`, and churning it there is how you get a double
+  // dispatch.
+  const onConversationCreatedRef = useRef(onConversationCreated)
+  useEffect(() => {
+    onConversationCreatedRef.current = onConversationCreated
+  }, [onConversationCreated])
+  // Conversations *this* component created, awaiting one re-seed skip each. See
+  // the re-seed effect below for what that is protecting.
+  const selfCreated = useRef(new Set<string>())
 
   const isStreaming = phase !== "idle"
+
+  // Through a ref for the same reason as onConversationCreated: an inline arrow
+  // from the parent must not re-fire this on every render, only on a change.
+  const onStreamingChangeRef = useRef(onStreamingChange)
+  useEffect(() => {
+    onStreamingChangeRef.current = onStreamingChange
+  }, [onStreamingChange])
+  useEffect(() => {
+    onStreamingChangeRef.current?.(isStreaming)
+  }, [isStreaming])
   const composerBlocked = processingLoading || Boolean(processing && (!processing.canContinue || processing.status === "RUNNING" || processing.status === "PENDING"))
 
   useEffect(() => () => {
@@ -89,7 +148,27 @@ export function AgentChat({
     sending.current = false
   }, [activeConversationId])
 
+  // Re-seed the transcript whenever the selected conversation changes — with one
+  // exception, consumed exactly once.
+  //
+  // Turn 1 of a new chat ends with the server's new conversation id being
+  // adopted, which changes `activeConversationId` from null to that id. On the
+  // page that arrives together with the server-loaded transcript, so re-seeding
+  // is a no-op swap of identical content. The rail has no server render to
+  // piggyback on: it adopts the id in place and deliberately does *not* refetch
+  // messages it already has on screen, so `initialMessages` is still the empty
+  // array the chat started with — and re-seeding from it would erase the turn
+  // the user just watched stream in.
+  //
+  // The flag is removed as it is used, which is the part that matters. Leaving
+  // it set would mean that switching to another thread and back to this one
+  // skipped the re-seed a second time, leaving the *other* thread's messages on
+  // screen under this thread's id.
   useEffect(() => {
+    if (activeConversationId && selfCreated.current.has(activeConversationId)) {
+      selfCreated.current.delete(activeConversationId)
+      return
+    }
     setMessages(initialMessages)
     setStreamingText("")
     setLiveToolSteps([])
@@ -214,10 +293,23 @@ export function AgentChat({
       setStreamingText("")
       setLiveToolSteps([])
       setPhase("idle")
-      if (newConversationId && newConversationId !== activeConversationId) {
-        router.replace(`${basePath}/agent?c=${newConversationId}`)
-        router.refresh()
-      } else {
+      const createdId = newConversationId && newConversationId !== activeConversationId ? newConversationId : null
+      if (createdId) {
+        selfCreated.current.add(createdId)
+        onConversationCreatedRef.current?.(createdId)
+      }
+      // Both router calls are page-only, and for the same underlying reason: the
+      // page *is* the route, so re-rendering it is how its server-loaded
+      // conversation list and `?c=` selection stay true. The rail is mounted in
+      // the workspace layout, above whichever route the user happens to be on.
+      // `router.replace` from there would navigate them to the agent screen
+      // mid-stream — the precise interruption the rail exists to remove — and
+      // `router.refresh()` would re-render a screen they are reading to refresh
+      // data the rail does not consume. The rail keeps its own list current by
+      // refetching it (see AgentRail), which costs one query instead of a
+      // whole route.
+      if (!isRail) {
+        if (createdId) router.replace(`${basePath}/agent?c=${createdId}`)
         router.refresh()
       }
     } catch (err) {
@@ -229,7 +321,7 @@ export function AgentChat({
     } finally {
       if (streamController.current === controller) sending.current = false
     }
-  }, [input, workspaceId, activeConversationId, basePath, router, processing?.canContinue, pendingSeedEntity])
+  }, [input, workspaceId, activeConversationId, basePath, router, isRail, processing?.canContinue, pendingSeedEntity])
 
   const sendRef = useRef(send)
   useEffect(() => { sendRef.current = send }, [send])
@@ -269,8 +361,17 @@ export function AgentChat({
   }, [phase, streamingText, liveToolSteps.length])
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-default bg-surface-panel">
-      {/* Conversation list */}
+    <div
+      className={`flex min-h-0 flex-1 overflow-hidden bg-surface-panel ${
+        // The rail draws its own border and header, so a second rounded card
+        // inside it would read as a box in a box.
+        isRail ? "" : "rounded-xl border border-default"
+      }`}
+    >
+      {/* Conversation list — page only; in the rail these controls live in the
+          rail header instead, because 256px of list plus a readable thread does
+          not fit in a 320–560px column. */}
+      {!isRail && (
       <aside className="hidden w-64 shrink-0 flex-col border-r border-default bg-surface-inset md:flex">
         <div className="p-3">
           <Button variant="outline" size="sm" className="w-full justify-start gap-2" render={<Link href={`${basePath}/agent`} />}>
@@ -303,6 +404,7 @@ export function AgentChat({
           </ul>
         </ScrollArea>
       </aside>
+      )}
 
       {/* Thread + composer.
           min-w-0 is load-bearing: as a flex item this column defaults to
@@ -315,7 +417,10 @@ export function AgentChat({
           any width below ~1000px. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ScrollArea className="min-h-0 flex-1">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4 sm:p-6">
+          {/* `sm:p-6` is dropped in the rail: the breakpoint tracks the
+              viewport, not this column, so a 360px rail on a wide screen would
+              otherwise spend 48px of its width on padding. */}
+          <div className={`mx-auto flex w-full max-w-3xl flex-col gap-4 ${isRail ? "p-3" : "p-4 sm:p-6"}`}>
             {processing && (processing.kind === "RESEARCH_SYNTHESIS"
               // ADR-0012 step 4. This handoff has no target item and no field
               // receipt — its durable artifact is the ResearchSynthesis snapshot
@@ -371,7 +476,7 @@ export function AgentChat({
           </div>
         </ScrollArea>
 
-        <div className="border-t border-default bg-surface-panel p-3 sm:p-4">
+        <div className={`border-t border-default bg-surface-panel ${isRail ? "p-3" : "p-3 sm:p-4"}`}>
           {pendingSeedEntity && (
             <div className="mb-2">
               <SeedContextChip

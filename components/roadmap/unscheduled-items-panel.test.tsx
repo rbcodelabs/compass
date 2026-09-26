@@ -10,6 +10,11 @@ vi.mock("@dnd-kit/core", () => ({
   }),
 }));
 
+const openPanel = vi.fn();
+vi.mock("@/components/panels/panel-context", () => ({
+  usePanelContext: () => ({ openPanel }),
+}));
+
 import { UnscheduledItemsPanel } from "./unscheduled-items-panel";
 
 const item = { kind: "feedback" as const, id: "feedback-1", title: "Backlog item" };
@@ -24,6 +29,13 @@ describe("UnscheduledItemsPanel native-safe extension", () => {
     expect(screen.getByText("Add to Now")).toBeInTheDocument();
     expect(screen.getByText("Add to Next")).toBeInTheDocument();
     expect(screen.getByText("Add to Later")).toBeInTheDocument();
+  });
+
+  it("opens the feedback detail panel when the card title is clicked", () => {
+    openPanel.mockClear();
+    render(<UnscheduledItemsPanel items={[item]} onQuickAdd={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Backlog item" }));
+    expect(openPanel).toHaveBeenCalledWith("feedback", "feedback-1");
   });
 
   it("limits destinations, exposes pending state, and keeps touch scrolling outside intentional handles", () => {
@@ -42,6 +54,7 @@ describe("UnscheduledItemsPanel native-safe extension", () => {
     expect(card).toHaveClass("touch-pan-y");
     expect(screen.getByRole("button", { name: "Drag to schedule" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Drag to schedule" })).toHaveClass("size-11");
+    expect(screen.getByRole("button", { name: "Backlog item" })).toBeDisabled();
     expect(screen.getByText("Scheduling…")).toBeInTheDocument();
   });
 

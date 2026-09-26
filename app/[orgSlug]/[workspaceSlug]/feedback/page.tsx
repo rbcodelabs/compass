@@ -44,7 +44,7 @@ export default async function FeedbackPage({ params, searchParams }: Props) {
       title="Feedback"
       actions={(
         <Suspense>
-          <FeedbackHeaderActions orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
+          <FeedbackHeaderActions />
         </Suspense>
       )}
     >

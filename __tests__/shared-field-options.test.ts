@@ -4,7 +4,6 @@ import {
   supportsSharedOptionSet,
   parseSelectOptions,
   normalizeSelectOptions,
-  optionsFromCommaList,
   resolveEffectiveOptions,
   customFieldValueMatches,
 } from "@/lib/shared-field-options";
@@ -98,20 +97,6 @@ describe("normalizeSelectOptions", () => {
     expect(normalizeSelectOptions([{ label: "A", color: "#123456" }])).toEqual([
       { label: "A", value: "a", color: "#123456" },
     ]);
-  });
-});
-
-describe("optionsFromCommaList", () => {
-  it("splits, trims and slugs a comma separated list", () => {
-    expect(optionsFromCommaList("Low, Medium , High")).toEqual([
-      { label: "Low", value: "low" },
-      { label: "Medium", value: "medium" },
-      { label: "High", value: "high" },
-    ]);
-  });
-
-  it("returns an empty list for an empty string", () => {
-    expect(optionsFromCommaList("   ")).toEqual([]);
   });
 });
 

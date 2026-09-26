@@ -75,14 +75,21 @@ export async function seedE2E(
     ON CONFLICT (organization_id, user_id) DO NOTHING
   `, [org.id, user.id]);
 
+  // An interrupted prior run may have left observations and encrypted fixture
+  // credentials. Only this just-claimed test organization's workspaces qualify.
+  for (const table of ["metric_observations", "metric_bindings", "metric_revisions", "metric_definitions", "analytics_connections", "workspace_activation_states"]) {
+    await pool.query(`DELETE FROM "${S}"."${table}" WHERE workspace_id IN (SELECT id FROM "${S}".workspaces WHERE organization_id = $1)`, [org.id]);
+  }
+
   // ── Workspace ─────────────────────────────────────────────────────────────
   const { rows: [ws] } = await pool.query<{ id: string }>(`
     INSERT INTO "${S}".workspaces
       (id, organization_id, slug, name, roadmap_public, feedback_enabled, created_at, updated_at)
-    VALUES (gen_random_uuid(), $1, $2, 'E2E Workspace', false, false, NOW(), NOW())
+    VALUES (COALESCE($3::uuid, gen_random_uuid()), $1, $2, 'E2E Workspace', false, false, NOW(), NOW())
     ON CONFLICT (organization_id, slug) DO UPDATE SET name = EXCLUDED.name
     RETURNING id
-  `, [org.id, E2E_WORKSPACE_SLUG]);
+  `, [org.id, E2E_WORKSPACE_SLUG, process.env.GEODE_DOCS_PILOT_WORKSPACE_ID || null]);
+  if (process.env.GEODE_DOCS_PILOT_WORKSPACE_ID && ws.id !== process.env.GEODE_DOCS_PILOT_WORKSPACE_ID) throw new Error("Pilot fixture workspace ID conflicts with existing seed");
 
   await pool.query(`
     INSERT INTO "${S}".workspace_members (id, workspace_id, user_id, role, created_at)

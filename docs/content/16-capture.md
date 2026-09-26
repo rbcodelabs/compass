@@ -75,13 +75,15 @@ next steps in this version.
 
 ## Studies
 
-Open **Capture** and choose **New study** to create either a customer interview or a guided usability test. Customer interviews use open-ended discussion questions. Guided usability tests add an HTTPS product URL, a 10, 15, 20, or 30 minute target, and five to eight editable participant tasks. Compass can draft realistic tasks from the research goal and product URL; review, edit, add, or remove them before creating the study.
+Open **Capture** and choose **New study** to create either a customer interview or a guided usability test. Customer interviews use open-ended discussion questions. Guided usability tests add a test target, a 10, 15, 20, or 30 minute target, and five to eight editable participant tasks. Compass can draft realistic tasks from the research goal and test target; review, edit, add, or remove them before creating the study.
+
+A guided usability test's target is either an **External URL** or a **Compass Artifact**. External URL takes an HTTPS product URL that Compass never fetches — participants open it beside the moderator or in a separate tab. Compass Artifact instead lets you pick an existing active HTML-upload artifact from this workspace (create one from Docs first); participants see it rendered in a sandboxed preview pane in place of the live-product iframe, with the same neutral moderator beside it. Only active HTML-upload artifacts appear in the picker.
 
 Choose a target duration for either study type. Compass can generate an editable set of 5–8 neutral discussion questions for a customer interview or realistic tasks for a usability test. Review and edit every generated item before activating the study.
 
 After creating the study, Compass shows a secure participant link. Share that link with participants so they can complete the interview without a Compass account. Links expire after 30 days and Compass stores only a secure hash, so save the displayed link when it is created. You can rotate the link, which immediately revokes the previous link, or revoke all active links without creating a replacement.
 
-Study settings remain editable until the first participant session starts. After that point Compass locks the research goal, study type, duration, product URL, and guide so every session uses the same protocol; the study name can still be changed. Close a study to revoke its links while keeping it available for review, reactivate it to issue a fresh participant link, or archive it to remove it from the normal Capture list while retaining its research record.
+Study settings remain editable until the first participant session starts. After that point Compass locks the research goal, study type, duration, test target (External URL or Compass Artifact), and guide so every session uses the same protocol; the study name can still be changed. Close a study to revoke its links while keeping it available for review, reactivate it to issue a fresh participant link, or archive it to remove it from the normal Capture list while retaining its research record.
 
 ![Guided usability study creation](/screenshots/docs/guided-study-create.png)
 
@@ -91,9 +93,9 @@ Voice conversations in both study types give participants time to think. Compass
 
 **Finish session** immediately mutes your microphone, then briefly waits for any final caption to be saved before completing. If the caption cannot finish within ten seconds, Compass stops the connection and reports that the session was not completed.
 
-For guided usability tests, the live product appears beside the neutral moderator on desktop and uses a constrained stacked layout on smaller screens. An **Open product** action is always available when a site blocks embedding. The moderator presents one task at a time, asks the participant to think aloud, and probes expectations without identifying controls or rescuing them.
+For guided usability tests, the test target appears beside the neutral moderator on desktop and uses a constrained stacked layout on smaller screens. For an External URL target, the live product loads in an iframe and an **Open product** action is always available when a site blocks embedding. For a Compass Artifact target, the uploaded HTML renders in a sandboxed preview pane instead — the same sandboxing mechanism used for the artifact viewer in Docs, with no top-level navigation and no external fallback link, since the artifact is served from Compass rather than a third-party site. The moderator presents one task at a time, asks the participant to think aloud, and probes expectations without identifying controls or rescuing them.
 
-The product pane and external fallback remain available when voice is disabled.
+The test-target pane (product iframe or artifact preview) and external fallback remain available when voice is disabled.
 In chat, use **Enter** to send or **Shift+Enter** for a new line. Interviewer text
 appears as a clearly labeled draft while it is generated; it becomes part of the
 saved transcript only after Compass confirms the final reply. If the connection

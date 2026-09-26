@@ -10,7 +10,11 @@
  *
  * Examples with PGSCHEMA=compass: compass_dev, compass_preview, compass_prod
  */
+import { getManagedPilotContext } from "./preview-automation/managed-context";
+
 export function getActiveSchema(): string {
+  const managed = getManagedPilotContext();
+  if (managed) return managed.schema;
   if (process.env.PREVIEW_AUTOMATION_ENABLED === "1") {
     const pr = process.env.VERCEL_GIT_PULL_REQUEST_ID ?? "";
     const sha = process.env.VERCEL_GIT_COMMIT_SHA ?? "";

@@ -5,6 +5,7 @@ import { createOrganizationAndWorkspace, type OnboardingState } from "./actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { FormField } from "@/components/patterns/form-field"
+import { deriveSlug } from "@/lib/slug"
 
 const initialState: OnboardingState = {}
 
@@ -22,11 +23,7 @@ export function OnboardingForm() {
   function handleOrgNameChange(value: string) {
     setOrgName(value)
     // Auto-derive slug from org name if user hasn't manually edited it
-    const derived = value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-    setOrgSlug(derived)
+    setOrgSlug(deriveSlug(value))
   }
 
   const hasStep1Errors =

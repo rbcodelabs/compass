@@ -17,6 +17,7 @@ import {
   resolvePmInterviewApplyInput,
 } from "@/lib/pm-interview-contracts"
 import { isPmInterviewEnabled } from "@/lib/research-feature"
+import { instrumentActivityClient } from "@/lib/analytics/activity"
 
 export class PmInterviewError extends Error {
   constructor(message: string, readonly status = 422) { super(message) }
@@ -324,7 +325,7 @@ export async function applyPmInterview(scope: PmInterviewScope, actor: PmIntervi
   try { selection = resolvePmInterviewApplyInput(targetType, proposal, input) }
   catch (error) { throw new PmInterviewError(error instanceof Error ? error.message : "Apply request is invalid", 400) }
   try {
-    const outcome = await prisma.$transaction(async tx => {
+    const outcome = await instrumentActivityClient(prisma, "ui", async () => ({ userId: actor.userId, purpose: "USER" })).$transaction(async tx => {
     const membership = await tx.workspaceMember.findFirst({ where: { workspaceId: interview.workspaceId, userId: actor.userId }, select: { id: true } })
     if (!membership) throw new PmInterviewError("PM interview not found", 404)
     const locked = await tx.pMInterview.findUnique({ where: { id: interview.id } })

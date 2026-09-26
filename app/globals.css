@@ -323,6 +323,41 @@ html[data-panel-resizing] * {
   );
 }
 
+/* ── Agent rail (left) ────────────────────────────────────────────────────
+   See components/agent/agent-rail.tsx.
+
+   Same job as .panel-pinned-surface — turn the imperative --panel-w channel
+   into a legal width — but the bound arrives differently, and the reason is
+   worth stating because it looks like a needless divergence.
+
+   The detail panel is the only docked column on its side, so its upper bound is
+   pure arithmetic over values CSS can already see: 100vw, --sidebar-width, and
+   a constant. The rail is not: it has to leave room for whatever the detail
+   panel is *currently* occupying, and that width lives in a --panel-w on the
+   detail panel's own element — a sibling, not an ancestor, so it does not
+   inherit here and no CSS expression can reach it.
+
+   So the rail's upper bound is measured in JS and handed in as
+   --agent-rail-max (see measureAvailableWidth in agent-rail.tsx), which also
+   accounts for the sidebar's *live* gap rather than the conservative
+   --sidebar-width the rule above has to settle for. The clamp still lives in
+   CSS because that is what keeps the drag imperative: the handle writes
+   --panel-w on every frame and the browser recomputes width without React. */
+.agent-rail-surface {
+  /* Mirrors PANEL_WIDTH_MIN / PANEL_WIDTH_MAX / PANEL_WIDTH_DEFAULT in
+     lib/panel-pin.ts, exactly as .panel-pinned-surface above does. */
+  --agent-rail-w-min: 320px;
+  width: clamp(
+    var(--agent-rail-w-min),
+    var(--panel-w, 448px),
+    /* max() so a measured bound below the minimum floors at the minimum
+       instead of inverting the clamp. When that happens there is genuinely not
+       enough room to dock, and the rail renders as an overlay instead — this
+       is only the backstop for the frame before JS has measured. */
+    max(var(--agent-rail-w-min), var(--agent-rail-max, 720px))
+  );
+}
+
 /* ── Tiptap / ProseMirror editor prose styles ────────────────────────── */
 .ProseMirror {
   outline: none;

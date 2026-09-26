@@ -111,6 +111,9 @@ export default async function globalTeardown() {
 
     for (const { id: wsId } of wsRows) {
       // ── Delete in strict dependency order (no DB-level cascades) ──────────
+      for (const table of ["metric_observations", "metric_bindings", "metric_revisions", "metric_definitions", "analytics_connections", "workspace_activation_states"]) {
+        await pool.query(`DELETE FROM "${S}"."${table}" WHERE workspace_id = $1`, [wsId]);
+      }
       await pool.query(`DELETE FROM "${S}".research_participant_voice_events WHERE workspace_id = $1`, [wsId]);
 
       // research_blob_cleanups / research_attachments / research_voice_events / research_requests → research_turns → research_sessions /
@@ -381,6 +384,10 @@ export default async function globalTeardown() {
       );
       await pool.query(
         `DELETE FROM "${S}".custom_field_definitions WHERE workspace_id = $1`,
+        [wsId]
+      );
+      await pool.query(
+        `DELETE FROM "${S}".shared_field_option_sets WHERE workspace_id = $1`,
         [wsId]
       );
       // NOTE: api_keys are user-scoped (no workspace_id column) — seeder

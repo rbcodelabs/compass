@@ -7,7 +7,7 @@
  * every other existing MCP tool.
  */
 
-import getPrisma from "@/lib/db"
+import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import type { LaunchTier } from "@/lib/types"
 import { setLaunchTierCore, updateChecklistItemCore } from "@/lib/launch-checklist"
 import { ok, fail } from "@/lib/mcp-output"
@@ -167,7 +167,7 @@ export async function setLaunchTier({
     name: template.name,
     tier: template.tier,
     items: template.items.map((i) => ({ label: i.label, description: i.description, order: i.order })),
-  })
+  }, item.workspaceId, prisma, "MCP")
 
   return ok(
     `**Launch tier set:** ${tier}\n` +

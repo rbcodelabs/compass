@@ -17,6 +17,7 @@
  *      dead end, even though solution → opportunity already worked.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 
 test.describe("Opportunity panel — solutions", () => {
   test("add a solution from the panel, list and count update, row opens the solution panel", async ({
@@ -31,9 +32,7 @@ test.describe("Opportunity panel — solutions", () => {
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
 
-    await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-    await page.getByLabel("Title").fill(oppTitle);
-    await page.getByRole("button", { name: "Create Opportunity" }).click();
+    await createOpportunityFromBoard(page, oppTitle);
     await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
     // ── 2. Open its sidebar panel ─────────────────────────────────────────
@@ -55,9 +54,9 @@ test.describe("Opportunity panel — solutions", () => {
 
     // ── 4. The panel refetches — no reopen needed ─────────────────────────
     await expect(panel.getByText(solTitle)).toBeVisible({ timeout: 15_000 });
-    // Section count reflects the new solution. This is the assertion that
+    // The shared Solutions tab reflects the new solution. This assertion
     // fails if onAdded/refresh is ever dropped.
-    await expect(panel.getByText("(1)", { exact: true })).toBeVisible({
+    await expect(panel.getByRole("tab", { name: "Solutions (1)", exact: true })).toBeVisible({
       timeout: 10_000,
     });
     await expect(panel.getByText("No solutions yet.")).not.toBeVisible();

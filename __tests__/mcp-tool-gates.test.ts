@@ -19,6 +19,7 @@ const mockPrisma = {
   organizationMember: { findFirst: vi.fn() },
   opportunity: { findUnique: vi.fn(), update: vi.fn() },
   solution: { findUnique: vi.fn(), update: vi.fn() },
+  roadmapItem: { findUnique: vi.fn(), update: vi.fn() },
   artifact: { findUnique: vi.fn() },
   feedbackItem: { findUnique: vi.fn() },
   doc: { findUnique: vi.fn() },
@@ -27,6 +28,11 @@ const mockPrisma = {
   researchStudy: { findUnique: vi.fn() },
   agent: { findFirst: vi.fn() },
   agentWorkspaceGrant: { findMany: vi.fn() },
+  agentToolCall: { create: vi.fn(), update: vi.fn() },
+  task: { findUnique: vi.fn() },
+  keyResult: { findUnique: vi.fn() },
+  squad: { findUnique: vi.fn() },
+  customFieldDefinition: { findMany: vi.fn(), findUnique: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
@@ -41,7 +47,15 @@ vi.mock("mcp-handler", () => ({
 vi.mock("@/lib/mcp-auth", () => ({ validateMcpAuth: vi.fn().mockResolvedValue({ valid: true, userId: "u1" }) }))
 
 await import("@/app/api/mcp/route")
-import { AGENT_TOOL_POLICY, RESEARCH_TOOL_ALLOWLIST, TOOL_GATES, applyToolGate } from "@/lib/mcp-tool-gates"
+import {
+  AGENT_TOOL_POLICY,
+  RESEARCH_TOOL_ALLOWLIST,
+  TOOL_GATES,
+  TOOL_SCOPES,
+  applyToolGate,
+  requiredToolScope,
+  scopesSatisfy,
+} from "@/lib/mcp-tool-gates"
 import { runWithMcpActor } from "@/lib/mcp-authz"
 
 const MEMBER = { userId: "user-1" }
@@ -53,6 +67,71 @@ const callTool = (name: string, actor: { userId: string | null }, args: any) =>
   runWithMcpActor(actor, () => (registeredTools[name] as (a: unknown) => Promise<unknown>)(args))
 
 beforeEach(() => vi.clearAllMocks())
+
+describe("update_roadmap_item source-workspace link boundaries", () => {
+  const targets = [
+    ["keyResultId", "keyResult", (workspaceId: string) => ({ objective: { cycle: { workspaceId } } })],
+    ["opportunityId", "opportunity", (workspaceId: string) => ({ workspaceId })],
+    ["solutionId", "solution", (workspaceId: string) => ({ opportunity: { workspaceId } })],
+    ["squadId", "squad", (workspaceId: string) => ({ workspaceId })],
+  ] as const
+
+  for (const purpose of ["USER", "AGENT"] as const) {
+    const actor = () => ({ userId: "user-1", purpose, ...(purpose === "AGENT" ? { agentId: "agent-1", credentialId: "credential-1" } : {}) })
+    beforeEach(() => {
+      mockPrisma.roadmapItem.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+      // Membership in BOTH workspaces must not allow cross-workspace linkage.
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "member-workspace" })
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1" })
+      mockPrisma.agentToolCall.create.mockResolvedValue({ id: "activity-1" })
+      mockPrisma.agentToolCall.update.mockResolvedValue({})
+      mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }, { workspaceId: "ws-2" }])
+    })
+    for (const [field, model, row] of targets) {
+      it(`${purpose} accepts same-workspace ${field}`, async () => {
+        vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+        try {
+          mockPrisma[model].findUnique.mockResolvedValue(row("ws-1"))
+          await expect(applyToolGate("update_roadmap_item", actor(), { itemId: "item-1", [field]: "target" })).resolves.toBeUndefined()
+          expect(mockPrisma[model].findUnique).toHaveBeenCalled()
+        } finally { vi.unstubAllEnvs() }
+      })
+      it(`${purpose} rejects foreign ${field} through the registered wrapper without writing`, async () => {
+        vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+        try {
+          mockPrisma[model].findUnique.mockResolvedValue(row("ws-2"))
+          await expect(callTool("update_roadmap_item", actor(), {
+            itemId: "item-1", [field]: "target", title: "must not write", workspaceId: "ws-2",
+          })).rejects.toThrow(/does not belong to workspace/)
+          expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+          expect(mockPrisma.roadmapItem.findUnique).toHaveBeenCalledTimes(1)
+        } finally { vi.unstubAllEnvs() }
+      })
+      it(`${purpose} rejects missing ${field}`, async () => {
+        vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+        try {
+          mockPrisma[model].findUnique.mockResolvedValue(null)
+          await expect(applyToolGate("update_roadmap_item", actor(), { itemId: "item-1", [field]: "missing" })).rejects.toThrow(/not found or access denied/)
+        } finally { vi.unstubAllEnvs() }
+      })
+    }
+    it(`${purpose} allows null and omitted links without target lookups`, async () => {
+      vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+      try {
+        await expect(applyToolGate("update_roadmap_item", actor(), { itemId: "item-1", keyResultId: null, solutionId: null })).resolves.toBeUndefined()
+        for (const [, model] of targets) expect(mockPrisma[model].findUnique).not.toHaveBeenCalled()
+      } finally { vi.unstubAllEnvs() }
+    })
+    it(`${purpose} cannot clear links without access to the source item`, async () => {
+      vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+      try {
+        mockPrisma.workspace.findFirst.mockResolvedValue(null)
+        await expect(callTool("update_roadmap_item", actor(), { itemId: "item-1", squadId: null })).rejects.toThrow(/not found or access denied/)
+        expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+      } finally { vi.unstubAllEnvs() }
+    })
+  }
+})
 
 describe("Decision Artifact mutation boundaries", () => {
   for (const tool of ["link_artifact_to_decision", "unlink_artifact_from_decision"]) {
@@ -171,6 +250,57 @@ describe("TOOL_GATES completeness", () => {
   })
 })
 
+/**
+ * The same fail-closed completeness contract TOOL_GATES has, for the OAuth
+ * read/write classification. Without it a tool added after this phase would
+ * silently inherit `requiredToolScope`'s `mcp:write` default — safe, but a
+ * write-scope demand nobody chose, on a tool that might be a pure read.
+ */
+describe("TOOL_SCOPES completeness", () => {
+  it("classifies every registered tool as read or write", () => {
+    const missing = Object.keys(registeredTools).filter((name) => !(name in TOOL_SCOPES))
+    expect(missing).toEqual([])
+  })
+
+  it("has no scope entries for tools that are not registered", () => {
+    const dead = Object.keys(TOOL_SCOPES).filter((name) => !(name in registeredTools))
+    expect(dead).toEqual([])
+  })
+
+  it("classifies exactly the whole catalog, with no third value", () => {
+    expect(Object.keys(TOOL_SCOPES).length).toBe(Object.keys(registeredTools).length)
+    expect([...new Set(Object.values(TOOL_SCOPES))].sort()).toEqual(["mcp:read", "mcp:write"])
+  })
+
+  it("keeps the read/write split aligned with the obvious naming conventions", () => {
+    // Not a tautology against the map: it re-derives the expectation from the
+    // tool NAMES, so a get_*/list_* tool silently classified as a write (or a
+    // create_*/update_*/delete_* one as a read) fails here.
+    const misread = Object.keys(registeredTools).filter(
+      (name) => /^(get|list|search)_/.test(name) && TOOL_SCOPES[name] !== "mcp:read",
+    )
+    const miswritten = Object.keys(registeredTools).filter(
+      (name) =>
+        /^(create|update|delete|add|remove|archive|link|unlink|promote|set|move|assign|revoke|rotate|issue|close|reopen|resolve|approve|reject|conclude|restore|score|log)_/.test(name) &&
+        TOOL_SCOPES[name] !== "mcp:write",
+    )
+    expect({ misread, miswritten }).toEqual({ misread: [], miswritten: [] })
+  })
+
+  it("demands the stronger scope for a tool it has never heard of", () => {
+    expect(requiredToolScope("totally_new_tool")).toBe("mcp:write")
+  })
+
+  it("treats mcp:write as covering reads, and read alone as not covering writes", () => {
+    expect(scopesSatisfy(["mcp:read"], "mcp:read")).toBe(true)
+    expect(scopesSatisfy(["mcp:read"], "mcp:write")).toBe(false)
+    expect(scopesSatisfy(["mcp:write"], "mcp:read")).toBe(true)
+    expect(scopesSatisfy(["mcp:write"], "mcp:write")).toBe(true)
+    expect(scopesSatisfy(["offline_access"], "mcp:read")).toBe(false)
+    expect(scopesSatisfy([], "mcp:read")).toBe(false)
+  })
+})
+
 describe("applyToolGate", () => {
   it.each(["get_research_study", "update_research_study", "activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links", "list_research_sessions", "get_research_session"])("%s rejects a study outside the declared workspace", async tool => {
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "declared" })
@@ -266,6 +396,64 @@ describe("applyToolGate", () => {
     ).rejects.toThrow(/does not belong to workspace/)
   })
 
+  it("update_roadmap_item rejects a missing or inaccessible Solution before writing", async () => {
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    mockPrisma.solution.findUnique.mockResolvedValue(null)
+
+    await expect(callTool("update_roadmap_item", MEMBER, {
+      itemId: "item-1",
+      solutionId: "missing-solution",
+    })).rejects.toThrow(/solution not found or access denied/)
+
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("update_roadmap_item rejects a cross-workspace Solution before writing", async () => {
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-2" } })
+
+    await expect(callTool("update_roadmap_item", MEMBER, {
+      itemId: "item-1",
+      solutionId: "foreign-solution",
+    })).rejects.toThrow(/does not belong to workspace ws-1/)
+
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("update_roadmap_item authorizes same-workspace targets and forwards solutionId to the handler", async () => {
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({
+      id: "item-1",
+      workspaceId: "ws-1",
+      title: "Roadmap item",
+      horizon: "NEXT",
+      status: "ACTIVE",
+    })
+    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    mockPrisma.roadmapItem.update.mockResolvedValue({
+      id: "item-1",
+      title: "Roadmap item",
+      horizon: "NEXT",
+      status: "ACTIVE",
+      solutionId: "solution-1",
+      isPrivate: false,
+      startDate: null,
+      endDate: null,
+    })
+
+    await expect(callTool("update_roadmap_item", MEMBER, {
+      itemId: "item-1",
+      solutionId: "solution-1",
+    })).resolves.toBeDefined()
+
+    expect(mockPrisma.roadmapItem.update).toHaveBeenCalledWith({
+      where: { id: "item-1" },
+      data: { solutionId: "solution-1", updatedAt: expect.any(Date) },
+    })
+  })
+
   it("link_artifact_to_solution: rejects cross-workspace targets", async () => {
     mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-2" } })
@@ -300,6 +488,43 @@ describe("applyToolGate", () => {
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
     await expect(applyToolGate(tool, MEMBER, { feedbackId: "feedback-1" }))
       .rejects.toThrow(/not found or access denied/)
+  })
+
+  describe("custom field tools", () => {
+    it("list_custom_field_definitions is workspace-member gated", async () => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate("list_custom_field_definitions", MEMBER, { workspaceId: "ws-1" }))
+        .rejects.toThrow(/not found or access denied/)
+    })
+
+    it.each(["get_custom_field_values", "set_custom_field_value"])(
+      "%s denies a non-member of the object's workspace",
+      async (tool) => {
+        mockPrisma.task.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+        mockPrisma.workspace.findFirst.mockResolvedValue(null)
+        await expect(
+          applyToolGate(tool, MEMBER, { objectType: "TASK", objectId: "task-1", fieldId: "field-1", value: "x" })
+        ).rejects.toThrow(/not found or access denied/)
+      }
+    )
+
+    it.each(["get_custom_field_values", "set_custom_field_value"])(
+      "%s rejects an unknown objectType before touching the database",
+      async (tool) => {
+        await expect(
+          applyToolGate(tool, MEMBER, { objectType: "NOT_A_TYPE", objectId: "task-1", fieldId: "field-1", value: "x" })
+        ).rejects.toThrow(/Unknown objectType/)
+        expect(mockPrisma.task.findUnique).not.toHaveBeenCalled()
+      }
+    )
+
+    it("set_custom_field_value allows a member and reaches the handler's own field-level checks", async () => {
+      mockPrisma.task.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      await expect(
+        applyToolGate("set_custom_field_value", MEMBER, { objectType: "TASK", objectId: "task-1", fieldId: "field-1", value: "x" })
+      ).resolves.toBeUndefined()
+    })
   })
 })
 

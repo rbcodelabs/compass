@@ -116,6 +116,14 @@ test.describe("Tasks", () => {
       await expect(page).toHaveURL(/detail=task/, { timeout: 15_000 });
       await expect(panel).toBeVisible({ timeout: 15_000 });
       await expect(panel.getByRole("button", { name: taskTitle })).toBeVisible({ timeout: 15_000 });
+      await expect(panel.getByText("No subtasks yet.")).toHaveCount(0);
+      await expect(panel.getByText("Subtasks", { exact: true })).toHaveCount(0);
+      await expect(panel.getByRole("button", { name: "Add subtask" })).toBeVisible();
+      await expect(panel.getByRole("button", { name: "More properties" })).toHaveAttribute("aria-expanded", "false");
+      const fullPageLink = panel.getByRole("link", { name: "Open full page" });
+      const linkBox = await fullPageLink.boundingBox();
+      const titleBox = await panel.getByRole("button", { name: taskTitle }).boundingBox();
+      expect(linkBox!.y + linkBox!.height).toBeLessThanOrEqual(titleBox!.y);
 
       // Wait for the URL to actually change before asserting on content —
       // a client-side Next.js Link navigation can resolve "networkidle"
@@ -133,10 +141,10 @@ test.describe("Tasks", () => {
       await page.getByRole("button", { name: "Add link" }).click();
       const linkDialog = page.getByRole("dialog", { name: "Link to another item" });
 
-      // Type defaults to Opportunity — pick the seeded baseline opportunity.
-      await linkDialog.getByRole("combobox", { name: "Opportunity" }).click();
-      await page.getByRole("option", { name: "E2E Baseline Opportunity" }).click();
-      await linkDialog.getByRole("button", { name: "Link" }).click();
+      // Search the universal picker and choose the seeded baseline opportunity.
+      await linkDialog.getByRole("combobox", { name: "Search linkable items" }).fill("E2E Baseline Opportunity");
+      await linkDialog.getByRole("option", { name: "E2E Baseline Opportunity Opportunity" }).click();
+      await linkDialog.getByRole("button", { name: "Link item" }).click();
 
       await expect(linkDialog).toBeHidden();
       await expect(page.getByText("E2E Baseline Opportunity")).toBeVisible({ timeout: 10_000 });
@@ -147,9 +155,13 @@ test.describe("Tasks", () => {
       await expect(page.getByText("E2E Baseline Opportunity")).toBeVisible({ timeout: 10_000 });
 
       // ── 6. Add a subtask and confirm the partial hierarchy renders it ──────
-      // "Story points" used to live behind the Overview tab; it is now stacked
-      // on the same surface as everything else.
+      await page.getByRole("button", { name: "More properties" }).click();
       await expect(page.getByText("Story points")).toBeVisible();
+      await page.getByRole("button", { name: "Add points…" }).click();
+      await page.getByRole("spinbutton", { name: "Edit storyPoints" }).fill("5");
+      await page.getByRole("spinbutton", { name: "Edit storyPoints" }).press("Enter");
+      await expect(page.getByRole("button", { name: "5", exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "More properties" }).click();
 
       await page.getByRole("button", { name: "Add subtask" }).click();
       await page.getByPlaceholder("Subtask title").fill(subtaskTitle);

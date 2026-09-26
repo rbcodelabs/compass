@@ -9,8 +9,8 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
   updateTask: vi.fn(),
   cancelTask: vi.fn(),
   addTask: vi.fn(),
-  getTaskAssigneeOptions: vi.fn().mockResolvedValue([]),
 }));
+vi.mock("@/lib/task-assignees-client", () => ({ fetchTaskAssigneeOptions: vi.fn().mockResolvedValue([]) }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/rbcodelabs/compass/tasks",

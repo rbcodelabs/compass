@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition, useId } from "react";
 import {
   DndContext,
   type DragEndEvent,
@@ -22,15 +22,22 @@ import { reorderSolution } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actio
 type Props = {
   solutions: SolutionCardData[];
   revalidatePathStr: string;
+  onChanged?: () => void;
 };
 
 export function SolutionsList({
   solutions: initialSolutions,
   revalidatePathStr,
+  onChanged,
 }: Props) {
   const [solutions, setSolutions] = useState(initialSolutions);
   const [, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { setSolutions(initialSolutions); }, [initialSolutions]);
 
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = useId();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -54,7 +61,14 @@ export function SolutionsList({
       setSolutions(reordered);
 
       startTransition(async () => {
-        await reorderSolution(activeId, newIndex, revalidatePathStr);
+        setError(null);
+        try {
+          await reorderSolution(activeId, newIndex, revalidatePathStr);
+          onChanged?.();
+        } catch {
+          setSolutions(initialSolutions);
+          setError("Could not reorder solutions. Please try again.");
+        }
       });
     }
   }
@@ -63,17 +77,20 @@ export function SolutionsList({
 
   return (
     <DndContext
+      id={dndId}
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}
     >
       <SortableContext items={solutionIds} strategy={verticalListSortingStrategy}>
         <div className="flex flex-col gap-3">
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           {solutions.map((solution) => (
             <SolutionCard
               key={solution.id}
               solution={solution}
               revalidatePathStr={revalidatePathStr}
+              onChanged={onChanged}
             />
           ))}
         </div>

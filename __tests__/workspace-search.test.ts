@@ -96,6 +96,9 @@ describe("workspace search", () => {
     expect(result.groups.map((group) => group.type)).toEqual([
       "opportunity", "solution", "experiment", "roadmapItem", "task", "feedback", "doc", "help",
     ])
+    expect(result.groups.map((group) => group.label)).toEqual([
+      "Opportunities", "Solutions", "Experiments", "Roadmap", "Tasks", "Feedback", "Docs", "User Guide",
+    ])
     expect(result.groups.flatMap((group) => group.items)).toEqual([
       { type: "opportunity", id: "opp-1", title: "Plan onboarding", context: "ACTIVE", href: "/Acme%20Org/Product%2FOne/discovery/opp-1" },
       { type: "solution", id: "sol-1", title: "Planning wizard", context: "VALIDATED · Onboarding", href: "/Acme%20Org/Product%2FOne/discovery/opp-1?detail=solution%3Asol-1" },

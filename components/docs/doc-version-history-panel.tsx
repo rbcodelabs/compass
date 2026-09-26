@@ -3,12 +3,8 @@
 import { useState, useTransition } from "react"
 import { RotateCcw } from "lucide-react"
 import diff_match_patch from "diff-match-patch"
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+import { DocPanelShell } from "@/components/docs/doc-panel-shell"
+import type { PanelPin } from "@/lib/panel-pin"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { relativeTime } from "@/lib/relative-time"
@@ -25,6 +21,8 @@ export interface DocVersionListItem {
 }
 
 interface DocVersionHistoryPanelProps {
+  restore?: (versionId: string, content: string | null) => Promise<{ title: string }>;
+  initialPin?: PanelPin
   open: boolean
   onOpenChange: (open: boolean) => void
   currentTitle: string
@@ -45,6 +43,8 @@ interface LoadedVersion {
 }
 
 export function DocVersionHistoryPanel({
+  restore,
+  initialPin,
   open,
   onOpenChange,
   currentTitle,
@@ -71,7 +71,7 @@ export function DocVersionHistoryPanel({
     }
   }
 
-  function handleRestore(versionId: string) {
+  function handleRestore(versionId: string, pinned: boolean) {
     const confirmed = window.confirm(
       "Restore this version? Your current content will be saved as a new version first, so nothing is lost."
     )
@@ -80,9 +80,9 @@ export function DocVersionHistoryPanel({
     startTransition(async () => {
       setError(null)
       try {
-        const restored = await restoreDocVersion(versionId, revalidatePathStr)
-        onRestored?.(selected?.content ?? null, restored.title)
-        onOpenChange(false)
+        const restored = restore ? await restore(versionId, selected?.content ?? null) : await restoreDocVersion(versionId, revalidatePathStr)
+        if (!restore) onRestored?.(selected?.content ?? null, restored.title)
+        if (!pinned) onOpenChange(false)
         setSelected(null)
       } catch {
         setError("Couldn't restore that version. Try again.")
@@ -91,14 +91,8 @@ export function DocVersionHistoryPanel({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col">
-          <SheetHeader className="px-4 pt-4 pb-2 border-b border-border-default shrink-0">
-            <SheetTitle className="text-sm font-semibold text-text-primary">
-              Version History
-            </SheetTitle>
-          </SheetHeader>
-
+    <DocPanelShell panelId="docsHistory" title="Version History" open={open} onOpenChange={onOpenChange} initialPin={initialPin}>
+      {(pinned) => (
           <div className="flex-1 overflow-y-auto min-h-0">
             {error && (
               <p className="px-4 pt-3 text-xs text-status-danger" role="alert">
@@ -111,7 +105,7 @@ export function DocVersionHistoryPanel({
                 version={selected}
                 currentContent={currentContent}
                 onBack={() => setSelected(null)}
-                onRestore={() => handleRestore(selected.id)}
+                onRestore={() => handleRestore(selected.id, pinned)}
                 isRestoring={isPending}
               />
             ) : (
@@ -123,8 +117,8 @@ export function DocVersionHistoryPanel({
               />
             )}
           </div>
-        </SheetContent>
-      </Sheet>
+      )}
+    </DocPanelShell>
   )
 }
 

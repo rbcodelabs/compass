@@ -64,10 +64,11 @@ function AccountMenu({ viewer }: { viewer: Exclude<MarketingViewer, { kind: "sig
           <LayoutDashboard aria-hidden="true" />
           {primaryLabel}
         </MenuLink>
+        <MenuLink href="/settings/profile">Profile</MenuLink>
         <MenuLink href="/settings/agents">My agents</MenuLink>
         <MenuLink href="/help">
           <HelpCircle aria-hidden="true" />
-          Help
+          User Guide
         </MenuLink>
         <DropdownMenuSeparator />
         <DropdownMenuItem className="cursor-pointer p-0">

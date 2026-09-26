@@ -103,7 +103,7 @@ export function OpportunityCard({
   }
 
   return (
-    <div ref={setNodeRef} style={style} className="touch-none group">
+    <div ref={setNodeRef} style={style} className="group">
       <EntityCard
         interactive
         title={

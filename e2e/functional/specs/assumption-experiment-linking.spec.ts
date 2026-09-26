@@ -15,6 +15,8 @@
  * picker at all.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
+import { openFullPage } from "../fixtures/full-page";
 
 test.describe("Assumption ↔ Experiment linking", () => {
   test(
@@ -30,13 +32,11 @@ test.describe("Assumption ↔ Experiment linking", () => {
       await page.goto(`${base}/discovery`);
       await page.waitForLoadState("networkidle");
 
-      await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-      await page.getByLabel("Title").fill(oppTitle);
-      await page.getByRole("button", { name: "Create Opportunity" }).click();
+      await createOpportunityFromBoard(page, oppTitle);
       await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
       await page.getByRole("button", { name: oppTitle, exact: true }).click();
-      await page.getByRole("link", { name: "Open full page" }).click();
+      await openFullPage(page);
       await page.waitForLoadState("networkidle");
       await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
 
@@ -74,8 +74,8 @@ test.describe("Assumption ↔ Experiment linking", () => {
 
       await page.reload();
       await page.waitForLoadState("networkidle");
-      await page.getByRole("tab", { name: "OST Tree" }).click();
-      await expect(page.getByLabel("OST Tree").getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
+      await page.getByRole("tab", { name: "OST", exact: true }).click();
+      await expect(page.getByRole("tabpanel", { name: "OST", exact: true }).getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
 
       // "No experiments yet" + the new CTA should be visible for this
       // brand-new, unlinked assumption.
@@ -107,9 +107,9 @@ test.describe("Assumption ↔ Experiment linking", () => {
       // ── 7. Verify the OST tree now shows the linked experiment ─────────────
       await page.goto(`${base}/discovery`);
       await page.getByRole("button", { name: oppTitle, exact: true }).click();
-      await page.getByRole("link", { name: "Open full page" }).click();
+      await openFullPage(page);
       await page.waitForLoadState("networkidle");
-      await page.getByRole("tab", { name: "OST Tree" }).click();
+      await page.getByRole("tab", { name: "OST", exact: true }).click();
 
       await expect(page.getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
       await expect(page.getByRole("link", { name: expTitle })).toBeVisible({

@@ -1,0 +1,16 @@
+{
+  "name": "compass",
+  "description": "Claude Code plugins published from the Compass product discovery app, kept in lockstep with the MCP tools they document.",
+  "owner": {
+    "name": "Rick Bowman",
+    "url": "https://github.com/rbcodelabs"
+  },
+  "plugins": [
+    {
+      "name": "compass",
+      "source": "./plugins/compass",
+      "description": "How to use Compass — data model, URL structure, MCP tool catalog, and end-to-end product discovery workflows.",
+      "version": "1.0.0"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
 import { BoardColumn, EmptyState } from "@/components/patterns";
+import { usePanelContext } from "@/components/panels/panel-context";
 import { HORIZON_META, QUICK_ADD_HORIZONS } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
 
@@ -76,7 +77,7 @@ export function UnscheduledItemsPanel({
     <div id="unscheduled-items-panel" className="rounded-xl ring-1 ring-border bg-muted/30 p-3 sm:p-4 shrink-0">
       <div className="flex items-center gap-2 mb-1">
         <h2 className="text-sm font-semibold text-text-secondary">Not yet on the roadmap</h2>
-        <span className="text-xs font-medium text-text-subtle bg-slate-200/60 rounded-full px-2 py-0.5 tabular-nums">
+        <span className="text-xs font-medium text-text-subtle bg-surface-inset rounded-full px-2 py-0.5 tabular-nums">
           {items.length}
         </span>
       </div>
@@ -112,7 +113,7 @@ export function UnscheduledItemsColumn({
       count={items.length}
       accent="neutral"
       data-testid="roadmap-unscheduled-column"
-      className="min-w-[280px] flex-1 overflow-hidden md:h-full"
+      className="w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"
       bodyId="unscheduled-items-column"
       bodyClassName="min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"
     >
@@ -155,6 +156,7 @@ function UnscheduledItemCard({
     data: { unscheduledItem: item },
     disabled: pending,
   });
+  const { openPanel } = usePanelContext();
 
   const style: React.CSSProperties = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, zIndex: 50 }
@@ -185,7 +187,16 @@ function UnscheduledItemCard({
             <GripVertical className="size-3.5" />
           </button>
 
-          <CardTitle className="flex-1 text-sm leading-snug">{item.title}</CardTitle>
+          <CardTitle className="flex-1 text-sm leading-snug">
+            <button
+              type="button"
+              onClick={() => openPanel(item.kind, item.id)}
+              disabled={pending}
+              className="text-left hover:underline underline-offset-2 disabled:cursor-wait disabled:no-underline"
+            >
+              {item.title}
+            </button>
+          </CardTitle>
 
           {pending ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground">Scheduling…</span> : null}
 
@@ -236,7 +247,7 @@ function UnscheduledItemBody({ item }: { item: UnscheduledItem }) {
 export function UnscheduledItemPreview({ item }: { item: UnscheduledItem }) {
   return (
     <div className="w-56 rotate-1 scale-105">
-      <Card size="sm" className="w-full bg-surface-panel shadow-xl ring-2 ring-indigo-200">
+      <Card size="sm" className="w-full bg-surface-panel shadow-xl ring-2 ring-ring/50">
         <CardHeader className="flex-row items-start gap-2 pr-2">
           <GripVertical className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50" />
           <CardTitle className="flex-1 text-sm leading-snug">{item.title}</CardTitle>

@@ -41,6 +41,18 @@ Uploaded HTML runs in an opaque-origin preview with the exact `allow-scripts` sa
 
 Replacing an Artifact creates an immutable revision and advances the current preview without changing the Artifact ID or breaking its Solution links. The detail screen shows revision history and lets workspace members edit metadata, link or unlink Solutions, replace the current revision, or archive the Artifact. Archived Artifacts disappear from the default navigator while their history and links remain preserved.
 
+### Artifact comments
+
+Open **Comments** on an Artifact to discuss the whole prototype or external reference. Comments support Markdown, one-level replies, editing, deletion, and resolving/reopening threads. Human and agent authors are identified. Comments stay with the Artifact across revisions; they are not pinned to coordinates or a particular revision, and never constitute approval or authorization. Existing discussions remain available on archived Artifacts.
+
+On a wide screen, choose **Pin panel** to keep the discussion beside the preview. Drag the divider or use its arrow keys to resize it. Artifact Comments remembers its own pin preference and width independently of Page Comments, Version History, and object detail panels. Narrow viewports—or a content row too narrow to leave 480px for the preview—use an overlay without changing that preference.
+
+Closing, reopening, pinning, or changing screen size preserves unfinished comments and replies while you remain on the same Artifact. Reopening refreshes the discussion. Navigating to another Artifact or reloading the page clears unsent drafts. Escape cancels an active edit or reply first; otherwise it closes the focused panel. Interacting with the preview does not dismiss a pinned discussion.
+
+![Artifact discussion pinned beside an interactive preview](/screenshots/docs/artifact-comments-desktop.png)
+
+![Artifact Comments overlay on a phone](/screenshots/docs/artifact-comments-mobile.png)
+
 ## The Editor
 
 Docs uses a Tiptap-powered rich-text editor. Supported formatting includes:
@@ -64,7 +76,9 @@ The count includes only pending decisions whose primary subject is this page, no
 
 Click the **image icon** in the toolbar to upload a screenshot. You can also paste an image from the clipboard directly into the editor — Compass will upload it automatically and embed it inline.
 
-Images are stored in Vercel Blob storage and served via a CDN. They are always private — only workspace members can view them.
+New uploads accept PNG, JPEG, GIF, or WebP images up to 10 MiB. Compass stores them in the private Artifact Blob store and serves them through a workspace-authorized Compass URL, so the viewer must be signed in as a member of that workspace. Deployments must configure `ARTIFACT_BLOB_READ_WRITE_TOKEN`; Compass does not fall back to the public Blob store.
+
+Images uploaded before workspace-private storage was introduced keep their existing public Vercel Blob URLs so old documents continue to render. Those legacy URLs remain accessible to anyone who has the URL. This upgrade does not copy or delete blobs or rewrite existing documents; retroactively privatizing them requires a separately planned migration.
 
 ## Page Properties
 
@@ -94,6 +108,18 @@ Every page keeps a history of past versions, so you can always see what changed 
 
 Version history is also available over MCP — see [MCP API](/help/09-mcp-api) for `create_doc_version`, `list_doc_versions`, `get_doc_version`, and `restore_doc_version`.
 
+## Pinning Docs panels
+
+Comments and Version History open as overlays by default. On a wide screen, use **Pin panel** in either header to dock it alongside the editable page. Only one Docs panel opens at a time; opening the other replaces it. **Unpin panel** returns to the overlay.
+
+Drag the left divider to resize a pinned panel, or focus the divider and use the arrow keys (Shift for larger steps), Home, or End. Each panel remembers its own pin preference and width across reloads. Panels range from 320–720px, while the editor keeps at least 480px. If the window is below 1024px or the Docs row cannot fit both, the panel temporarily becomes an overlay; widening the window restores the preference.
+
+Use **Close panel**, or press Escape while focused inside a pinned panel, to close it. Escape in the editor leaves the docked panel open. Restoring a version keeps pinned History open; an overlay closes after restoration.
+
+![Comments docked beside the editor, with long text contained](/screenshots/docs/docs-pin-comments-desktop.png)
+
+![Version History uses a full-width overlay on a phone](/screenshots/docs/docs-pin-history-mobile.png)
+
 ## Inline Comments
 
 Leave Google-Docs-style comments anchored to a specific span of a page, so discussion stays attached to the exact text it's about.
@@ -114,10 +140,14 @@ Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api)
 
 ## Positioning & Messaging Briefs
 
-A Positioning & Messaging Brief is a Doc linked one-to-one to a Roadmap Item, used to nail down the story before a launch: problem statement, target audience, core message, proof points, and competitive differentiation. Create one via the MCP API's create_doc tool with docType set to GTM_POSITIONING_BRIEF and roadmapItemId set to the roadmap item it belongs to; if you do not pass explicit content, Compass fills in a five-section starter template you can edit like any other doc. Attempting to link a second brief to the same roadmap item is rejected, since the relationship is one-to-one.
+A Positioning & Messaging Brief is a Doc linked one-to-one to a Roadmap Item, used to nail down the story before a launch: problem statement, target audience, core message, proof points, and competitive differentiation. Part of the marketing-launch workflow — see [Roadmap](/help/04-roadmap) — so it's only available once a workspace admin turns on **Settings → Marketing launch** (off by default). With it on, create one from the roadmap item's panel Launch section, or via the MCP API's create_doc tool with docType set to GTM_POSITIONING_BRIEF and roadmapItemId set to the roadmap item it belongs to; if you do not pass explicit content, Compass fills in a five-section starter template you can edit like any other doc. Attempting to link a second brief to the same roadmap item is rejected, since the relationship is one-to-one.
 
 There is no dedicated UI for briefs yet; they appear in the regular Docs tree like any other page, and get_doc surfaces the linked roadmap item and doc type so an agent can discover the linkage.
 
 ## Page Titles
 
 Click the title area at the top of the editor to rename a page. Titles are saved immediately on blur.
+
+## Preview: Geode content storage
+
+An explicitly configured synthetic preview workspace can store new document bodies through the packaged Geode Headless SDK. Existing documents keep their current storage. The editor reports save conflicts and retains unsaved changes for retry; MCP callers supply a stable operation ID and the revision returned by `get_doc` for pilot changes. This preview does not enable production storage or desktop sync. See the repository's `docs/testing/geode-documents-pilot.md` for configuration and verification.

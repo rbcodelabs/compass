@@ -1,0 +1,19 @@
+{
+  "name": "compass",
+  "version": "1.0.0",
+  "description": "How to use Compass — the product discovery app at https://compass.rbcodelabs.com. Covers the data model, URL structure, MCP tool catalog, and common end-to-end workflows for OKRs, opportunity trees, experiments, roadmaps, research, docs, and customer feedback.",
+  "author": {
+    "name": "Rick Bowman",
+    "url": "https://github.com/rbcodelabs"
+  },
+  "repository": "https://github.com/rbcodelabs/compass",
+  "license": "MIT",
+  "keywords": [
+    "compass",
+    "product-discovery",
+    "okr",
+    "roadmap",
+    "opportunity-solution-tree",
+    "mcp"
+  ]
+}

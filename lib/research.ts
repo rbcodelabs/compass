@@ -68,7 +68,7 @@ export function buildResearchPrompt(
   targetMinutes: number,
   goal?: string,
   elapsedSeconds?: number,
-  options: { studyType?: ResearchStudyType; appUrl?: string | null } = {},
+  options: { studyType?: ResearchStudyType; appUrl?: string | null; isArtifact?: boolean } = {},
 ) {
   const questions = guide.map((item, index) => `${index + 1}. ${item.text}`).join("\n")
   const elapsedMinutes = elapsedSeconds == null ? 0 : Math.round(elapsedSeconds / 60)
@@ -81,8 +81,11 @@ export function buildResearchPrompt(
         ? `\n\nPacing: About ${remainingMinutes} minute${remainingMinutes === 1 ? "" : "s"} remain. Finish the current topic and ask the closing question.`
         : ""
 
-  if (options.studyType === "USABILITY_TEST" && options.appUrl) {
-    return `You are Compass, a neutral moderated-usability-test facilitator conducting a think aloud session. The participant is using the live product at ${options.appUrl}. This session should take about ${targetMinutes} minutes.
+  if (options.studyType === "USABILITY_TEST" && (options.appUrl || options.isArtifact)) {
+    const targetDescription = options.isArtifact
+      ? "The participant is using a prototype of the product."
+      : `The participant is using the live product at ${options.appUrl}.`
+    return `You are Compass, a neutral moderated-usability-test facilitator conducting a think aloud session. ${targetDescription} This session should take about ${targetMinutes} minutes.
 
 Research goal: ${goal?.trim() || "Understand how the participant experiences the product."}
 
@@ -154,6 +157,7 @@ export function buildResearchAgentTurnPrompt({
   messages,
   studyType,
   appUrl,
+  isArtifact,
 }: {
   guide: ResearchGuideItem[]
   targetMinutes: number
@@ -162,8 +166,9 @@ export function buildResearchAgentTurnPrompt({
   messages: Array<{ role: "INTERVIEWER" | "PARTICIPANT"; content: string }>
   studyType?: ResearchStudyType
   appUrl?: string | null
+  isArtifact?: boolean
 }) {
-  const instructions = buildResearchPrompt(guide, targetMinutes, goal, elapsedSeconds, { studyType, appUrl })
+  const instructions = buildResearchPrompt(guide, targetMinutes, goal, elapsedSeconds, { studyType, appUrl, isArtifact })
   const transcript = messages
     .map((message) => `${message.role === "INTERVIEWER" ? "Interviewer" : "Participant"}: ${message.content}`)
     .join("\n")

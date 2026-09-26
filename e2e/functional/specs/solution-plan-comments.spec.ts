@@ -13,6 +13,7 @@
  * this panel, matching every other entity's detail-panel pattern.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 import pg from "pg";
 
 const S = process.env.PGSCHEMA ? `${process.env.PGSCHEMA}_dev` : "compass_dev";
@@ -32,9 +33,7 @@ test.describe("Solution Current Plan + shared Discussion", () => {
       await page.waitForLoadState("networkidle");
 
       // ── 2. Create an opportunity ────────────────────────────────────────────
-      await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-      await page.getByLabel("Title").fill(oppTitle);
-      await page.getByRole("button", { name: "Create Opportunity" }).click();
+      await createOpportunityFromBoard(page, oppTitle);
 
       await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
@@ -60,6 +59,7 @@ test.describe("Solution Current Plan + shared Discussion", () => {
 
       // Specialized plans and ordinary shared comments are distinct surfaces.
       await expect(panel.getByText("Current Plan", { exact: true })).toBeVisible();
+      await panel.getByRole("button", { name: "Current Plan", exact: true }).click();
       await expect(panel.getByText("No plan yet.")).toBeVisible();
       await expect(panel.getByRole("heading", { name: "Discussion" })).toBeVisible();
       await expect(panel.getByText("No comments yet.")).toBeVisible();

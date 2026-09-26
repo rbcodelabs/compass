@@ -9,6 +9,8 @@
  * branch (PR #16). Update the horizon to "Shipped" once that branch merges.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
+import { openFullPage } from "../fixtures/full-page";
 
 test.describe("Discovery → Roadmap", () => {
   test(
@@ -23,11 +25,8 @@ test.describe("Discovery → Roadmap", () => {
       await page.waitForLoadState("networkidle");
 
       // ── 2. Create an opportunity in the EXPLORING column ──────────────────
-      // The "Add opportunity" inline button is inside the EXPLORING column.
-      // Click the first "Add opportunity" button (column-embedded mode).
-      await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-      await page.getByLabel("Title").fill(oppTitle);
-      await page.getByRole("button", { name: "Create Opportunity" }).click();
+      // The first column's "Add opportunity" opens the composer with EXPLORING preset.
+      await createOpportunityFromBoard(page, oppTitle);
 
       // Opportunity card appears in the board
       await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
@@ -37,21 +36,24 @@ test.describe("Discovery → Roadmap", () => {
       await expect(page).toHaveURL(/detail=opportunity/);
 
       // Continue into the full-page editor, where solutions are managed.
-      await page.getByRole("link", { name: "Open full page" }).click();
-      await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
+      // The outgoing panel already contains the same heading and controls, so
+      // wait for the route to replace it before interacting.
+      await openFullPage(page);
+      const opportunityPage = page.locator('[data-slot="opportunity-detail"][data-variant="page"]');
+      await expect(opportunityPage.getByRole("heading", { name: oppTitle })).toBeVisible();
 
       // ── 4. Add a solution ─────────────────────────────────────────────────
-      await page.getByRole("button", { name: "Add Solution" }).click();
-      await page.getByLabel("Title").fill(solTitle);
-      await page.getByRole("button", { name: "Add Solution" }).last().click();
+      await opportunityPage.getByRole("button", { name: "Add Solution" }).click();
+      await opportunityPage.getByLabel("Title").fill(solTitle);
+      await opportunityPage.getByRole("button", { name: "Add Solution" }).last().click();
 
       // Solution card appears
-      await expect(page.getByText(solTitle)).toBeVisible({ timeout: 10_000 });
+      await expect(opportunityPage.getByText(solTitle)).toBeVisible({ timeout: 10_000 });
 
       // ── 5. Open the solution's sidebar panel ────────────────────────────────
       // Status changes and Promote-to-Roadmap both moved off the (now
       // compact, non-expanding) solution card into the Solution panel.
-      await page.getByRole("button", { name: solTitle, exact: true }).click();
+      await opportunityPage.getByRole("button", { name: solTitle, exact: true }).click();
       const panel = page.locator('[data-slot="sheet-content"]');
       await expect(panel).toBeVisible();
 
@@ -72,6 +74,7 @@ test.describe("Discovery → Roadmap", () => {
 
       // ── 7. Promote to roadmap ─────────────────────────────────────────────
       // The "→ Promote to Roadmap" button appears when status is VALIDATED or IN_DELIVERY
+      await panel.getByRole("button", { name: "Roadmap", exact: true }).click();
       await panel.getByRole("button", { name: /Promote to Roadmap/i }).click();
 
       // Direct creation in NOW is intentionally guarded. Create the delivery

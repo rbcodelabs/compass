@@ -11,8 +11,11 @@
  * general-purpose entity editor.
  */
 import getPrisma from "@/lib/db";
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations";
+import { getHumanActivityPrisma } from "@/lib/analytics/activity";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
-import { SETTABLE_HORIZONS } from "@/lib/roadmap";
+import { SETTABLE_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
+import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { assignmentUpdate, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -88,7 +91,7 @@ export async function updateEntityField(
   // Task has ~9 editable fields (two enums, a relation, a date, a number) —
   // dispatched to its own allowlist rather than forcing EDIT_CONFIG's
   // title/description/one-enum shape to fit it. See updateTaskField.
-  if (type === "task") return updateTaskField(id, workspaceId, field, value);
+  if (type === "task") return updateTaskField(id, workspaceId, field, value, _actor);
 
   const config = EDIT_CONFIG[type];
 
@@ -110,7 +113,34 @@ export async function updateEntityField(
     }
     const trimmed = typeof value === "string" ? value.trim() : "";
     data = { description: trimmed.length > 0 ? trimmed : null };
+  } else if (type === "opportunity" && (field === "squadId" || field === "linkedKeyResultId")) {
+    if (value !== null && (typeof value !== "string" || !value.trim())) {
+      return { ok: false, status: 400, error: `${field} must be a nonempty string or null` };
+    }
+    if (typeof value === "string") {
+      const prisma = getPrisma();
+      const target = field === "squadId"
+        ? await prisma.squad.findFirst({ where: { id: value, workspaceId }, select: { id: true } })
+        : await prisma.keyResult.findFirst({ where: { id: value, objective: { cycle: { workspaceId } } }, select: { id: true } });
+      if (!target) return { ok: false, status: 404, error: "Not found" };
+    }
+    data = { [field]: value };
   } else if (config.enum && field === config.enum.field) {
+    // The whole marketing-launch surface (including the LAUNCHING/LAUNCHED
+    // horizons) is opt-in per workspace. When it's off, a direct attempt to
+    // set either launch horizon gets the disabled-feature message instead of
+    // the "use a launch tier" message below, which presumes the feature is
+    // on. Checked before the LAUNCHING-specific guard so the more relevant
+    // message wins.
+    if (type === "roadmapItem" && field === "horizon" && typeof value === "string" && isLaunchHorizon(value)) {
+      const workspace = await getPrisma().workspace.findUnique({
+        where: { id: workspaceId },
+        select: { launchWorkflowEnabled: true },
+      });
+      if (!workspace?.launchWorkflowEnabled) {
+        return { ok: false, status: 400, error: LAUNCH_WORKFLOW_DISABLED_MESSAGE };
+      }
+    }
     // Load-bearing guard: LAUNCHING may only be entered via setLaunchTier,
     // which creates the launch checklist in the same transaction. A bare
     // horizon write here would flip the item to LAUNCHING with no checklist,
@@ -138,15 +168,22 @@ export async function updateEntityField(
   // updateMany's where doesn't support the relation filters the indirect
   // entities need, so verify with the scoped findFirst first, then update by
   // id. Same access boundary as reads (entityScopeWhere).
+  const mutationClient = _actor.kind === "USER" ? getHumanActivityPrisma() : getPrisma();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const model = (getPrisma() as any)[config.model];
+  const model = (mutationClient as any)[config.model];
   const exists = await model.findFirst({
     where: entityScopeWhere(type, id, workspaceId),
     select: { id: true },
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
 
-  await model.update({ where: { id }, data });
+  if (type === "opportunity" || type === "solution" || type === "assumption" || type === "experiment" || type === "roadmapItem") {
+    await captureWorkspaceMutation(mutationClient, type, "update", { actorType: _actor.kind === "USER" ? "USER" : "SYSTEM", actorId: _actor.id }, id, async tx => {
+      // The editable model has already been selected and validated above.
+      const delegate = tx[config.model as typeof type] as unknown as { update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<{ id: string }> };
+      return delegate.update({ where: { id }, data });
+    });
+  } else await model.update({ where: { id }, data });
   return { ok: true };
 }
 
@@ -173,7 +210,8 @@ async function updateTaskField(
   id: string,
   workspaceId: string,
   field: string,
-  value: unknown
+  value: unknown,
+  actor: MutationActor,
 ): Promise<UpdateResult> {
   let data: Record<string, unknown>;
 
@@ -301,6 +339,6 @@ async function updateTaskField(
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
 
-  await prisma.task.update({ where: { id }, data });
+  await captureWorkspaceMutation(prisma, "task", "update", { actorType: actor.kind === "USER" ? "USER" : "SYSTEM", actorId: actor.id }, id, tx => tx.task.update({ where: { id }, data }));
   return { ok: true };
 }

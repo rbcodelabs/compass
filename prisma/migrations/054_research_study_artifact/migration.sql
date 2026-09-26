@@ -1,0 +1,28 @@
+-- Migration 054: research study artifact target
+--
+-- Lets a USABILITY_TEST ResearchStudy point at a Compass Artifact (an
+-- uploaded, sandboxed HTML prototype) instead of requiring a live, publicly
+-- reachable appUrl. Mirrors how appUrl already works on this table: a study
+-- has at most one target, and application code (lib/research-study-service.ts)
+-- enforces that exactly one of appUrl/artifactId is set for USABILITY_TEST.
+--
+-- Deliberately NOT the generic ArtifactLink table (SOLUTION/REVIEW_REQUEST
+-- linkedType) — that models a loose many-to-many documentation
+-- cross-reference, not this required 1:1 relationship that drives runtime
+-- participant-facing behavior.
+--
+-- DSQL rules followed (see 053_shared_field_option_sets for the same rules
+-- applied to a comparable additive change):
+--   - No FK constraint from research_studies.artifact_id to artifacts —
+--     relationMode=prisma, validated in app code, consistent with every
+--     other cross-table reference in this schema.
+--   - ADD COLUMN is nullable, no DEFAULT, no backfill: every existing
+--     research_studies row gets NULL, meaning "external URL target,
+--     unchanged" — exactly today's behavior.
+--   - No new index: nothing queries by artifact_id yet (decided as YAGNI in
+--     the design pass for this feature; add one later if a lookup pattern
+--     actually needs it).
+--   - Single DDL statement; the runner gives each statement its own
+--     transaction.
+
+ALTER TABLE research_studies ADD COLUMN IF NOT EXISTS artifact_id UUID;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { TrendingUp } from "lucide-react";
 import {
   Select,
@@ -14,6 +14,7 @@ import {
   ComboboxTrigger,
 } from "@/components/ui/combobox";
 import { SquadPicker } from "@/components/squads/squad-picker";
+import { keyResultComboboxItems } from "@/components/discovery/key-result-options";
 import {
   updateOpportunityStatus,
   linkOpportunityToKeyResult,
@@ -21,6 +22,7 @@ import {
 import type { OpportunityStatus, SquadData } from "@/lib/types";
 import { MarkdownContent } from "@/components/markdown-content";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { EditableText, patchEntityField, type EditContext } from "@/components/panels/panel-parts";
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   EXPLORING: "Exploring",
@@ -43,6 +45,9 @@ type KR = {
   id: string;
   title: string;
   objective: { title: string };
+  current?: number;
+  target?: number;
+  unit?: string | null;
 };
 
 type AvailableKR = {
@@ -64,6 +69,8 @@ type Props = {
   availableKeyResults: AvailableKR[];
   squads: SquadData[];
   revalidatePathStr: string;
+  edit?: EditContext;
+  onChanged?: () => void;
 };
 
 export function OpportunityHeader({
@@ -71,28 +78,39 @@ export function OpportunityHeader({
   availableKeyResults,
   squads,
   revalidatePathStr,
+  edit,
+  onChanged,
 }: Props) {
   const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
   const { openPanel } = usePanelContext();
+
+  async function saveField(field: string, value: string | null) {
+    if (!edit) return;
+    const result = await patchEntityField(edit.type, edit.id, edit.orgSlug, edit.workspaceSlug, field, value);
+    edit.onSaved(result.data);
+  }
 
   function handleStatusChange(value: string | null) {
     if (!value) return;
     startTransition(async () => {
-      await updateOpportunityStatus(
-        opportunity.id,
-        value as OpportunityStatus,
-        revalidatePathStr
-      );
+      setError(null);
+      try {
+        if (edit) { await saveField("status", value); return; }
+        await updateOpportunityStatus(opportunity.id, value as OpportunityStatus, revalidatePathStr);
+        onChanged?.();
+      } catch (err) { setError(err instanceof Error ? err.message : "Could not update status."); }
     });
   }
 
   function handleKRLink(value: string | null) {
     startTransition(async () => {
-      await linkOpportunityToKeyResult(
-        opportunity.id,
-        value === "__none__" ? null : value,
-        revalidatePathStr
-      );
+      setError(null);
+      try {
+        if (edit) { await saveField("linkedKeyResultId", value === "__none__" ? null : value); return; }
+        await linkOpportunityToKeyResult(opportunity.id, value === "__none__" ? null : value, revalidatePathStr);
+        onChanged?.();
+      } catch (err) { setError(err instanceof Error ? err.message : "Could not link key result."); }
     });
   }
 
@@ -136,17 +154,21 @@ export function OpportunityHeader({
             currentSquadId={opportunity.squadId}
             squads={squads}
             revalidatePathStr={revalidatePathStr}
+            onChanged={onChanged}
+            onAssign={edit ? (value) => saveField("squadId", value) : undefined}
           />
         )}
       </div>
 
       {/* Title */}
       <h1 className="text-2xl font-bold tracking-tight text-text-primary leading-tight">
-        {opportunity.title}
+        {edit ? <EditableText value={opportunity.title} field="title" edit={edit} className="w-full" /> : opportunity.title}
       </h1>
 
       {/* Description */}
-      {opportunity.description ? (
+      {edit ? (
+        <EditableText value={opportunity.description} field="description" edit={edit} multiline placeholder="Add a description…" className="text-muted-foreground max-w-3xl" />
+      ) : opportunity.description ? (
         <MarkdownContent className="text-muted-foreground max-w-2xl">{opportunity.description}</MarkdownContent>
       ) : (
         <p className="text-sm text-muted-foreground/50 italic">
@@ -155,7 +177,9 @@ export function OpportunityHeader({
       )}
 
       {/* KR row */}
-      <div className="flex flex-wrap items-center gap-2 min-h-[20px]">
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border-default bg-surface-inset p-3">
+        <p className="w-full text-xs font-medium text-text-subtle">Driving Key Result</p>
         {opportunity.linkedKeyResult ? (
           <div className="flex flex-wrap items-center gap-1.5 min-w-0">
             <TrendingUp className="size-3.5 shrink-0 text-indigo-500" />
@@ -171,25 +195,11 @@ export function OpportunityHeader({
               {opportunity.linkedKeyResult.title}
             </button>
           </div>
-        ) : null}
+        ) : <p className="text-xs text-muted-foreground">No key result linked.</p>}
 
         {availableKeyResults.length > 0 && (
           <Combobox
-            items={[
-              { value: "__none__", label: "— None —" },
-              ...availableKeyResults.map((kr) => ({
-                value: kr.id,
-                label: kr.title,
-                render: (
-                  <>
-                    <span className="text-muted-foreground text-xs mr-1">
-                      {kr.objectiveTitle} /
-                    </span>
-                    {kr.title}
-                  </>
-                ),
-              })),
-            ]}
+            items={keyResultComboboxItems(availableKeyResults)}
             value={opportunity.linkedKeyResult?.id ?? "__none__"}
             onValueChange={handleKRLink}
             disabled={isPending}
@@ -201,6 +211,12 @@ export function OpportunityHeader({
             </ComboboxTrigger>
             <ComboboxContent />
           </Combobox>
+        )}
+        {opportunity.linkedKeyResult?.current !== undefined && opportunity.linkedKeyResult.target !== undefined && (
+          <div className="flex w-full items-center gap-2">
+            {opportunity.linkedKeyResult.target > 0 && <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{ width: `${Math.max(0, Math.min(100, opportunity.linkedKeyResult.current / opportunity.linkedKeyResult.target * 100))}%` }} /></div>}
+            <span className="shrink-0 text-xs tabular-nums text-text-subtle">{opportunity.linkedKeyResult.current}/{opportunity.linkedKeyResult.target}{opportunity.linkedKeyResult.unit ? ` ${opportunity.linkedKeyResult.unit}` : ""}</span>
+          </div>
         )}
       </div>
     </div>

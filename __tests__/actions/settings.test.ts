@@ -92,7 +92,9 @@ const mockWorkspaceMember = {
   delete: vi.fn(),
   count: vi.fn(),
 };
-const mockDoc = { deleteMany: vi.fn() };
+const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn() };
+const mockDocStorageObject = { findFirst: vi.fn() };
+const mockDocOperation = { findFirst: vi.fn() };
 const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactLink = { deleteMany: vi.fn() };
@@ -115,6 +117,15 @@ const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
 
 const mockPrisma = {
+  workspaceUpdateEvent: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  workspaceUpdatesReadState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  workspaceUpdatesState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  analyticsConnection: { deleteMany: vi.fn() },
+  metricDefinition: { deleteMany: vi.fn() },
+  metricRevision: { deleteMany: vi.fn() },
+  metricBinding: { deleteMany: vi.fn() },
+  metricObservation: { deleteMany: vi.fn() },
+  workspaceActivationState: { deleteMany: vi.fn() },
   agentMessage: { deleteMany: vi.fn() },
   agentAuditLog: { deleteMany: vi.fn() },
   agentConversation: { deleteMany: vi.fn() },
@@ -147,6 +158,8 @@ const mockPrisma = {
   solutionComment: mockSolutionComment,
   workspaceMember: mockWorkspaceMember,
   doc: mockDoc,
+  docStorageObject: mockDocStorageObject,
+  docOperation: mockDocOperation,
   artifact: mockArtifact,
   artifactRevision: mockArtifactRevision,
   artifactLink: mockArtifactLink,
@@ -205,6 +218,7 @@ import {
   revokeApiKey,
   updatePortalSettings,
   updateWorkspaceBranding,
+  updateWorkspaceLimits,
   deleteWorkspace,
   addWorkspaceMember,
   updateWorkspaceMemberRole,
@@ -302,6 +316,9 @@ beforeEach(() => {
   mockWorkspaceMember.deleteMany.mockResolvedValue({ count: 0 });
   mockSquad.deleteMany.mockResolvedValue({ count: 0 });
   mockDoc.deleteMany.mockResolvedValue({ count: 0 });
+  mockDoc.findFirst.mockResolvedValue(null);
+  mockDocStorageObject.findFirst.mockResolvedValue(null);
+  mockDocOperation.findFirst.mockResolvedValue(null);
 
   // Workspace member management defaults
   mockUser.upsert.mockResolvedValue({ id: "user-2", email: "new@example.com" });
@@ -783,9 +800,85 @@ describe("updateWorkspaceBranding", () => {
   });
 });
 
+// ─── updateWorkspaceLimits ──────────────────────────────────────────────────
+
+describe("updateWorkspaceLimits", () => {
+  it("persists a NOW limit", async () => {
+    await updateWorkspaceLimits("org", "ws", { nowLimit: 4 });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.nowLimit).toBe(4);
+  });
+
+  it("persists a NEXT limit", async () => {
+    await updateWorkspaceLimits("org", "ws", { nextLimit: 10 });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.nextLimit).toBe(10);
+  });
+
+  it("allows 0 as a valid limit", async () => {
+    await updateWorkspaceLimits("org", "ws", { nowLimit: 0 });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.nowLimit).toBe(0);
+  });
+
+  it("clears a limit when explicitly set to null", async () => {
+    await updateWorkspaceLimits("org", "ws", { nowLimit: null });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.nowLimit).toBeNull();
+  });
+
+  it("omits fields that are undefined rather than overwriting with null", async () => {
+    await updateWorkspaceLimits("org", "ws", { nowLimit: 5 });
+    const data = mockWorkspace.update.mock.calls[0][0].data;
+    expect(data.nextLimit).toBeUndefined();
+  });
+
+  it("revalidates both settings and roadmap paths", async () => {
+    await updateWorkspaceLimits("org", "ws", { nowLimit: 4 });
+    expect(revalidatePath).toHaveBeenCalledWith("/org/ws/settings");
+    expect(revalidatePath).toHaveBeenCalledWith("/org/ws/roadmap");
+  });
+
+  it("rejects a negative NOW limit and does not write to the DB", async () => {
+    await expect(
+      updateWorkspaceLimits("org", "ws", { nowLimit: -1 })
+    ).rejects.toThrow(/nowLimit/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-integer NEXT limit and does not write to the DB", async () => {
+    await expect(
+      updateWorkspaceLimits("org", "ws", { nextLimit: 2.5 })
+    ).rejects.toThrow(/nextLimit/i);
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("throws Unauthorized when session is missing", async () => {
+    mockAuth.mockResolvedValue(null as never);
+    await expect(
+      updateWorkspaceLimits("org", "ws", { nowLimit: 4 })
+    ).rejects.toThrow("Unauthorized");
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+});
+
 // ─── deleteWorkspace ──────────────────────────────────────────────────────────
 
 describe("deleteWorkspace", () => {
+  it("preserves pilot inventory and all workspace data for explicit cleanup", async () => {
+    mockDocStorageObject.findFirst.mockResolvedValueOnce({ id: "object" });
+    await expect(deleteWorkspace("org", "ws")).rejects.toThrow("explicit cleanup review");
+    expect(mockWorkspace.delete).not.toHaveBeenCalled();
+    expect(mockDoc.deleteMany).not.toHaveBeenCalled();
+    expect(mockObjective.updateMany).not.toHaveBeenCalled();
+  });
+  it("requires a workspace administrator before deleting analytics or any domain data", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "MEMBER" }], organization: { members: [{ role: "MEMBER" }] } });
+    await expect(deleteWorkspace("org", "ws")).rejects.toThrow("workspace admin required");
+    expect(mockPrisma.metricObservation.deleteMany).not.toHaveBeenCalled();
+    expect(mockWorkspace.delete).not.toHaveBeenCalled();
+    expect(mockOpportunity.deleteMany).not.toHaveBeenCalled();
+  });
   it("throws Unauthorized when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
     await expect(deleteWorkspace("org", "ws")).rejects.toThrow("Unauthorized");
@@ -801,7 +894,7 @@ describe("deleteWorkspace", () => {
 
   it("deletes the workspace and all related data when authenticated", async () => {
     // Set up workspace with data to delete
-    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
 
     // Roadmap items exist
     mockRoadmapItem.findMany.mockResolvedValue([{ id: "ri-1" }]);
@@ -827,6 +920,9 @@ describe("deleteWorkspace", () => {
     mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
 
     const result = await deleteWorkspace("org", "ws");
+
+    expect(mockPrisma.metricObservation.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: { in: ["ws-1"] } } });
+    expect(mockPrisma.analyticsConnection.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: { in: ["ws-1"] } } });
 
     expect(mockApiKey.deleteMany).toHaveBeenCalledWith({ where: { scopeWorkspaceId: "ws-1", scopeConversationId: { not: null } } });
     expect(mockResearchDelete.updateMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, data: { agentConversationId: null } });
@@ -913,7 +1009,7 @@ describe("deleteWorkspace", () => {
   });
 
   it("deletes the org when no workspaces remain after deletion", async () => {
-    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
     // No remaining workspaces after deletion
     mockWorkspace.findMany.mockResolvedValue([]);
 
@@ -927,7 +1023,7 @@ describe("deleteWorkspace", () => {
   });
 
   it("does not delete the org when other workspaces remain", async () => {
-    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1" });
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
     mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
 
     await deleteWorkspace("org", "ws");

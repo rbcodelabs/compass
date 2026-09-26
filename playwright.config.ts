@@ -68,14 +68,28 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       env: {
         PORT: String(FUNCTIONAL_PORT),
+        WORKSPACE_UPDATES_ENABLED: "1",
         COMPASS_RESEARCH_CAPTURE_ENABLED: "1",
         COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED: "1",
+        // pm-interview.spec.ts provisions a synthetic voice session, which the
+        // default-off browser voice gate answers with 409. CI's capture job
+        // sets this in the job env; set it here too so the full local
+        // functional run exercises the same server. No provider is contacted.
+        COMPASS_RESEARCH_BROWSER_VOICE_ENABLED: "1",
         // tasks-agent-assignment.spec.ts needs agent assignment live: without
         // this, eligibleTaskAssignees() (lib/task-assignment.ts) returns people
         // only, no agent option ever renders, and the spec hangs to timeout.
         COMPASS_AGENTS_ENABLED: "1",
+        // passkeys.spec.ts needs the /login button and /settings/passkeys
+        // panel visible. The underlying Passkey provider itself is only ever
+        // registered in auth.ts's production/preview branch though — `pnpm
+        // dev` always runs NODE_ENV=development, so the WebAuthn ceremony
+        // portion of that spec self-skips even with this flag on. See the
+        // spec file for the exact capability check and why.
+        COMPASS_PASSKEYS_ENABLED: "1",
         // Deterministic test-only key; production must provide its own secret.
         SSO_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        ANALYTICS_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
       },
       timeout: 120_000,
     },

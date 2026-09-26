@@ -67,6 +67,9 @@ export function SolutionAssumptions({
   const [, startReorderTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = React.useId();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -116,7 +119,7 @@ export function SolutionAssumptions({
         <p className="text-sm text-muted-foreground">No assumptions yet.</p>
       )}
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={assumptionIds} strategy={verticalListSortingStrategy}>
           {assumptions.map((a) => (
             <AssumptionItem

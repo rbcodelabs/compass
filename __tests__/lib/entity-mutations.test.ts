@@ -20,6 +20,8 @@ const models = {
 
 const database = {
   ...models,
+  squad: { findFirst: vi.fn() },
+  workspace: { findUnique: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
   portfolioCapacityPlan: { updateMany: vi.fn() },
   $transaction: vi.fn(),
@@ -42,6 +44,11 @@ beforeEach(() => {
   // default: entity is in the workspace
   for (const m of Object.values(models)) m.findFirst.mockResolvedValue({ id: "e1" });
   models.roadmapItem.findUnique.mockResolvedValue({ id: "e1", horizon: "NEXT", status: "ACTIVE" });
+  // Default the fixture workspace to the launch workflow being on, so the
+  // existing LAUNCHING/LAUNCHED tests below exercise the pre-existing
+  // validation rather than the new disabled-feature gate (which gets its own
+  // describe block).
+  database.workspace.findUnique.mockResolvedValue({ launchWorkflowEnabled: true });
   database.portfolioCapacityReservation.findUnique.mockResolvedValue(null);
   database.$transaction.mockImplementation((fn: (value: typeof database) => unknown) => fn(database));
 });
@@ -52,6 +59,31 @@ describe("EDIT_CONFIG", () => {
   });
   it("uses horizon (not status) as the roadmap item's enum field", () => {
     expect(EDIT_CONFIG.roadmapItem.enum?.field).toBe("horizon");
+  });
+});
+
+describe("opportunity relationship edits", () => {
+  it.each(["squadId", "linkedKeyResultId"])("sets and clears %s only inside the workspace", async (field) => {
+    database.squad.findFirst.mockResolvedValue({ id: "target" });
+    models.keyResult.findFirst.mockResolvedValue({ id: "target" });
+    expect(await updateEntityField("opportunity", "e1", WS, field, "target")).toEqual({ ok: true });
+    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { [field]: "target", updatedAt: expect.any(Date) } });
+    const targetQuery = field === "squadId" ? database.squad.findFirst : models.keyResult.findFirst;
+    expect(targetQuery).toHaveBeenCalledWith({ where: field === "squadId" ? { id: "target", workspaceId: WS } : { id: "target", objective: { cycle: { workspaceId: WS } } }, select: { id: true } });
+    expect(await updateEntityField("opportunity", "e1", WS, field, null)).toEqual({ ok: true });
+  });
+  it.each(["squadId", "linkedKeyResultId"])("rejects a missing or foreign %s and invalid values", async (field) => {
+    database.squad.findFirst.mockResolvedValue(null);
+    models.keyResult.findFirst.mockResolvedValue(null);
+    expect(await updateEntityField("opportunity", "e1", WS, field, "foreign")).toMatchObject({ ok: false, status: 404 });
+    for (const value of ["", 42, {}, undefined]) expect(await updateEntityField("opportunity", "e1", WS, field, value)).toMatchObject({ ok: false, status: 400 });
+    expect(models.opportunity.update).not.toHaveBeenCalled();
+  });
+  it.each(["squadId", "linkedKeyResultId"])("refuses %s edits on a foreign opportunity", async (field) => {
+    models.opportunity.findFirst.mockResolvedValue(null);
+    expect(await updateEntityField("opportunity", "foreign", WS, field, null)).toMatchObject({ ok: false, status: 404 });
+    expect(models.opportunity.findFirst).toHaveBeenCalledWith({ where: { id: "foreign", workspaceId: WS }, select: { id: true } });
+    expect(models.opportunity.update).not.toHaveBeenCalled();
   });
 });
 
@@ -124,6 +156,30 @@ describe("updateEntityField — validation", () => {
     const r = await updateEntityField("opportunity", "e1", WS, "workspaceId", "other-ws");
     expect(r).toEqual({ ok: false, status: 400, error: 'Field "workspaceId" is not editable' });
     expect(models.opportunity.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateEntityField — launch horizon gated by Workspace.launchWorkflowEnabled", () => {
+  it("rejects LAUNCHING with the disabled-feature message (not the 'use a launch tier' message) when the workspace's launch workflow is off", async () => {
+    database.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    const r = await updateEntityField("roadmapItem", "e1", WS, "horizon", "LAUNCHING");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/launch workflow is disabled/i);
+    expect(models.roadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects LAUNCHED with the disabled-feature message when the workspace's launch workflow is off", async () => {
+    database.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    const r = await updateEntityField("roadmapItem", "e1", WS, "horizon", "LAUNCHED");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/launch workflow is disabled/i);
+    expect(models.roadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("still accepts LAUNCHED when the workspace's launch workflow is on", async () => {
+    database.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: true });
+    const r = await updateEntityField("roadmapItem", "e1", WS, "horizon", "LAUNCHED");
+    expect(r.ok).toBe(true);
   });
 });
 

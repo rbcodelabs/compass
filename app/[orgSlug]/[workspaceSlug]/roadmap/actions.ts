@@ -1,10 +1,14 @@
 "use server";
 
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
+import { workspaceUpdatesAvailable, recordWorkspaceUpdate, retryUpdatesTransaction } from "@/lib/workspace-updates-capture"
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
-import getPrisma from "@/lib/db";
+import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
 import type { Horizon } from "@/lib/types";
 import { isLaunchHorizon } from "@/lib/roadmap";
+import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 
 type Database = ReturnType<typeof getPrisma>;
 const ROADMAP_ITEM_NOT_FOUND = "Roadmap item not found";
@@ -48,10 +52,25 @@ function revalidateRoadmap(): void {
   revalidatePath("/", "layout");
 }
 
-function assertDirectLaunchWriteBlocked(horizon: Horizon): void {
-  if (isLaunchHorizon(horizon)) {
-    throw new Error("Use a launch tier to enter LAUNCHING/LAUNCHED");
+/**
+ * LAUNCHING/LAUNCHED can never be entered through these generic write paths
+ * (only setLaunchTier may create the LAUNCHING checklist transaction). The
+ * message differs by workspace state: a workspace with the launch workflow
+ * on gets pointed at the real fix (set a launch tier); a workspace with it
+ * off gets told the feature is off rather than a message that presumes it's
+ * available.
+ */
+async function assertDirectLaunchWriteBlocked(workspaceId: string, horizon: Horizon): Promise<void> {
+  if (!isLaunchHorizon(horizon)) return;
+
+  const workspace = await getPrisma().workspace.findUnique({
+    where: { id: workspaceId },
+    select: { launchWorkflowEnabled: true },
+  });
+  if (!workspace?.launchWorkflowEnabled) {
+    throw new Error(LAUNCH_WORKFLOW_DISABLED_MESSAGE);
   }
+  throw new Error("Use a launch tier to enter LAUNCHING/LAUNCHED");
 }
 
 function validateInclusiveDates(startDate: Date | null, endDate: Date | null): void {
@@ -68,7 +87,7 @@ export async function addRoadmapItem(
   },
 ) {
   await requireWorkspaceMember(workspaceId);
-  assertDirectLaunchWriteBlocked(data.horizon);
+  await assertDirectLaunchWriteBlocked(workspaceId, data.horizon);
   validateInclusiveDates(data.startDate ?? null, data.endDate ?? null);
   const prisma = getPrisma();
   await validateRoadmapRelations(prisma, workspaceId, data);
@@ -79,7 +98,7 @@ export async function addRoadmapItem(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  const item = await prisma.roadmapItem.create({ data: {
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, tx => tx.roadmapItem.create({ data: {
       workspaceId,
       title: data.title,
       description: data.description,
@@ -92,7 +111,7 @@ export async function addRoadmapItem(
       startDate: data.startDate,
       endDate: data.endDate,
       isPrivate: data.isPrivate ?? false,
-    } });
+    } }));
 
   revalidateRoadmap();
   return { ...item, horizon: data.horizon };
@@ -115,7 +134,7 @@ export async function updateRoadmapItem(
   if (data.startDate !== undefined) updateData.startDate = data.startDate;
   if (data.endDate !== undefined) updateData.endDate = data.endDate;
   if (data.isPrivate !== undefined) updateData.isPrivate = data.isPrivate;
-  const item = await prisma.roadmapItem.update({ where: { id: itemId }, data: updateData });
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "UI", itemId, tx => tx.roadmapItem.update({ where: { id: itemId }, data: updateData }));
   revalidateRoadmap();
   return item;
 }
@@ -131,7 +150,7 @@ export async function editRoadmapItem(
   workspaceId: string,
   data: {
     title?: string;
-    description?: string;
+    description?: string | null;
     startDate?: Date | null;
     endDate?: Date | null;
     isPrivate?: boolean;
@@ -176,7 +195,7 @@ export async function editRoadmapItem(
 
   const updateData: {
     title?: string;
-    description?: string;
+    description?: string | null;
     startDate?: Date | null;
     endDate?: Date | null;
     isPrivate?: boolean;
@@ -190,28 +209,28 @@ export async function editRoadmapItem(
   if (data.isPrivate !== undefined) updateData.isPrivate = data.isPrivate;
   if (opportunityChanged) updateData.opportunityId = data.opportunityId;
 
-  const updated = await prisma.roadmapItem.update({
+  const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "UI", current.id, tx => tx.roadmapItem.update({
     where: { id: current.id },
     data: updateData,
-  });
+  }));
   revalidateRoadmap();
   return { ...updated, opportunity };
 }
 
 export async function moveItem(itemId: string, horizon: Horizon, workspaceId: string) {
   await requireWorkspaceMember(workspaceId);
-  assertDirectLaunchWriteBlocked(horizon);
+  await assertDirectLaunchWriteBlocked(workspaceId, horizon);
   const prisma = getPrisma();
   await requireRoadmapItem(prisma, itemId, workspaceId);
   const lastItem = await prisma.roadmapItem.findFirst({ where: { workspaceId, horizon, status: "ACTIVE", NOT: { id: itemId } }, orderBy: [{ sortOrder: "desc" }, { id: "desc" }], select: { sortOrder: true } });
-  await prisma.roadmapItem.update({ where: { id: itemId }, data: { horizon, sortOrder: lastItem ? lastItem.sortOrder + 1 : 0, updatedAt: new Date() } });
+  await captureWorkspaceMutation(prisma, "roadmapItem", "update", "UI", itemId, tx => tx.roadmapItem.update({ where: { id: itemId }, data: { horizon, sortOrder: lastItem ? lastItem.sortOrder + 1 : 0, updatedAt: new Date() } }));
   revalidateRoadmap();
 }
 
 export async function archiveItem(itemId: string, workspaceId: string) {
   await requireWorkspaceMember(workspaceId);
   await requireRoadmapItem(getPrisma(), itemId, workspaceId);
-  await getPrisma().roadmapItem.update({ where: { id: itemId }, data: { status: "ARCHIVED", updatedAt: new Date() } });
+  await captureWorkspaceMutation(getPrisma(), "roadmapItem", "update", "UI", itemId, tx => tx.roadmapItem.update({ where: { id: itemId }, data: { status: "ARCHIVED", updatedAt: new Date() } }));
   revalidateRoadmap();
 }
 
@@ -220,7 +239,7 @@ export async function promoteToRoadmap(
   opportunityId: string | null, dates?: { startDate?: Date; endDate?: Date }, isPrivate?: boolean,
 ) {
   await requireWorkspaceMember(workspaceId);
-  assertDirectLaunchWriteBlocked(horizon);
+  await assertDirectLaunchWriteBlocked(workspaceId, horizon);
   validateInclusiveDates(dates?.startDate ?? null, dates?.endDate ?? null);
   const prisma = getPrisma();
 
@@ -238,7 +257,7 @@ export async function promoteToRoadmap(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  const item = await prisma.roadmapItem.create({ data: {
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, tx => tx.roadmapItem.create({ data: {
       workspaceId,
       title: solution.title,
       horizon,
@@ -249,7 +268,7 @@ export async function promoteToRoadmap(
       startDate: dates?.startDate,
       endDate: dates?.endDate,
       isPrivate: isPrivate ?? false,
-    } });
+    } }));
 
   revalidateRoadmap();
   return { ...item, horizon };
@@ -260,7 +279,7 @@ export async function promoteFeedbackToRoadmap(
   dates?: { startDate?: Date; endDate?: Date }, isPrivate?: boolean,
 ) {
   await requireWorkspaceMember(workspaceId);
-  assertDirectLaunchWriteBlocked(horizon);
+  await assertDirectLaunchWriteBlocked(workspaceId, horizon);
   validateInclusiveDates(dates?.startDate ?? null, dates?.endDate ?? null);
   const prisma = getPrisma();
   const feedback = await prisma.feedbackItem.findFirst({ where: { id: feedbackId, workspaceId }, select: { title: true } });
@@ -270,7 +289,7 @@ export async function promoteFeedbackToRoadmap(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  const item = await prisma.roadmapItem.create({ data: {
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, tx => tx.roadmapItem.create({ data: {
       workspaceId,
       title: feedback.title,
       horizon,
@@ -279,7 +298,7 @@ export async function promoteFeedbackToRoadmap(
       startDate: dates?.startDate,
       endDate: dates?.endDate,
       isPrivate: isPrivate ?? false,
-    } });
+    } }));
 
   revalidateRoadmap();
   return { ...item, horizon };
@@ -289,7 +308,7 @@ export async function updateSortOrder(itemId: string, workspaceId: string, sortO
   await requireWorkspaceMember(workspaceId);
   const prisma = getPrisma();
   await requireRoadmapItem(prisma, itemId, workspaceId);
-  await prisma.roadmapItem.update({ where: { id: itemId }, data: { sortOrder, updatedAt: new Date() } });
+  await captureWorkspaceMutation(prisma, "roadmapItem", "update", "UI", itemId, tx => tx.roadmapItem.update({ where: { id: itemId }, data: { sortOrder, updatedAt: new Date() } }));
   revalidateRoadmap();
 }
 
@@ -298,10 +317,12 @@ export async function rescheduleRoadmapItem(
   data: { horizon: Horizon; startDate: Date | null; endDate: Date | null },
 ) {
   await requireWorkspaceMember(workspaceId);
-  assertDirectLaunchWriteBlocked(data.horizon);
+  await assertDirectLaunchWriteBlocked(workspaceId, data.horizon);
   validateInclusiveDates(data.startDate, data.endDate);
   const prisma = getPrisma();
-  const item = await prisma.$transaction(async (tx) => {
+  const capture = await workspaceUpdatesAvailable(prisma);
+  const actor = capture ? await workspaceMutationActor("UI") : null;
+  const item = await retryUpdatesTransaction(prisma, async (tx) => {
     const database = tx as unknown as Database;
     const current = await requireRoadmapItem(database, itemId, workspaceId);
     if (current.status !== "ACTIVE") throw new Error(ROADMAP_ITEM_NOT_FOUND);
@@ -313,11 +334,13 @@ export async function rescheduleRoadmapItem(
       });
       sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
     }
-    return database.roadmapItem.update({
+    const updated = await database.roadmapItem.update({
       where: { id: current.id },
       data: { horizon: data.horizon, startDate: data.startDate, endDate: data.endDate,
         sortOrder, updatedAt: new Date() },
     });
+    if (capture && actor) await recordWorkspaceUpdate(tx, { workspaceId, entityType: "ROADMAP_ITEM", entityId: itemId, kind: "STATUS_CHANGED", before: current.horizon, after: updated.horizon, ...actor });
+    return updated;
   });
   revalidateRoadmap();
   return {

@@ -34,9 +34,21 @@ try {
 const prismaUrl = new URL(connectionString);
 prismaUrl.searchParams.set("schema", E2E_SCHEMA);
 
+// --accept-data-loss: this is the disposable, sandboxed e2e fixture database
+// (the guard above already refuses any target but local compass_e2e), so a
+// destructive diff — e.g. a new UNIQUE constraint added to the Prisma schema
+// after this database was first provisioned — is exactly the kind of change
+// this script exists to apply, not something to block on. Without this flag,
+// `db push` exits 1 and refuses to run at all, which is what was actually
+// happening on main as of 2026-09-17: `compass_e2e` predated the unique
+// constraint added on `evidence(workspace_id, finding_key)`, so every local
+// `pnpm test:e2e:functional` invocation failed here before a single test
+// ran, with no code path ever reaching the isolated-database or run-lock
+// guards. Never applies to production or preview — those go through
+// `lib/migrations/runner.ts`, not this script.
 const prisma = spawnSync(
   process.execPath,
-  ["node_modules/prisma/build/index.js", "db", "push"],
+  ["node_modules/prisma/build/index.js", "db", "push", "--accept-data-loss"],
   {
     cwd: process.cwd(),
     env: { ...process.env, DATABASE_URL: prismaUrl.toString() },

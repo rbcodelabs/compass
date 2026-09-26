@@ -6,6 +6,11 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { runWithMcpActor } from "@/lib/mcp-authz"
+const updateCapture = vi.hoisted(() => ({ record: vi.fn(), enabled: false }))
+vi.mock("@/lib/workspace-updates-capture", () => ({
+  withWorkspaceUpdates: (db: unknown, callback: (db: unknown, enabled: boolean) => unknown) => callback(db, updateCapture.enabled),
+  recordWorkspaceUpdate: updateCapture.record,
+}))
 
 // --- Prisma mock setup -------------------------------------------------------
 
@@ -69,12 +74,20 @@ const WORKSPACE_ID = "ws-1"
 const TASK_ID = "task-1"
 const OPP_ID = "opp-1"
 
+it("captures MCP task status changes with the actual actor and previous state", async () => {
+  updateCapture.enabled = true
+  mockTask.update.mockResolvedValue({ id: TASK_ID, workspaceId: WORKSPACE_ID, status: "DONE", parentTaskId: "parent" })
+  await runWithMcpActor({ userId: "owner", purpose: "AGENT", agentId: "agent-1" }, () => moveTaskStatus({ taskId: TASK_ID, status: "DONE" }))
+  expect(updateCapture.record).toHaveBeenCalledWith(mockPrisma, expect.objectContaining({ entityType: "TASK", entityId: TASK_ID, groupId: "parent", before: "TODO", after: "DONE", actorType: "AGENT", actorId: "agent-1" }))
+})
+
 function textOf(result: { content: { text: string }[] }) {
   return result.content[0].text
 }
 
 beforeEach(() => {
   vi.resetAllMocks()
+  updateCapture.enabled = false
   mockPrisma.workspaceMember.findFirst.mockResolvedValue({ id: "member" })
   mockPrisma.squad.findFirst.mockResolvedValue({ id: "squad" })
   vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
@@ -190,6 +203,22 @@ describe("createTask", () => {
     const text = textOf(result)
     expect(text).toContain(`ID: ${TASK_ID}`)
     expect(text).not.toContain("**ID:**")
+  })
+
+  it("appends a deeplink to the task's own page when workspace slugs resolve", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ id: WORKSPACE_ID, slug: "compass", organization: { slug: "rbcodelabs" } })
+
+    const result = await createTask({ workspaceId: WORKSPACE_ID, title: "Ship payments" })
+
+    expect(textOf(result)).toContain(`URL: http://localhost:3000/rbcodelabs/compass/tasks/${TASK_ID}`)
+  })
+
+  it("still creates the task, with no URL line, when workspace slugs are unavailable", async () => {
+    const result = await createTask({ workspaceId: WORKSPACE_ID, title: "Ship payments" })
+
+    expect(mockTask.create).toHaveBeenCalled()
+    expect(textOf(result)).toContain(`ID: ${TASK_ID}`)
+    expect(textOf(result)).not.toContain("URL:")
   })
 
   it("places the task after the last item in its status column", async () => {

@@ -17,6 +17,8 @@ import {
   resolveCustomFieldFilter,
 } from "@/lib/custom-field-filter";
 import { roadmapBoardFilterKey } from "@/lib/roadmap-filters";
+import { parseGroupByParam, resolveRoadmapGroupBy } from "@/lib/roadmap-group-by";
+import { loadCustomFieldValuesForObjects } from "@/lib/custom-field-values-batch";
 
 export const metadata = {
   title: "Roadmap",
@@ -24,7 +26,7 @@ export const metadata = {
 
 interface RoadmapPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string; view?: string; field?: string; fieldValue?: string }>;
+  searchParams: Promise<{ squad?: string; view?: string; field?: string; fieldValue?: string; groupBy?: string }>;
 }
 
 export default async function RoadmapPage({ params, searchParams }: RoadmapPageProps) {
@@ -37,6 +39,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     view: viewParam,
     field: fieldParam,
     fieldValue: fieldValueParam,
+    groupBy: groupByParam,
   } = await searchParams;
   const view = viewParam === "timeline" ? "timeline" : "board";
   const prisma = getPrisma();
@@ -62,6 +65,13 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     }),
   ]);
   const customFieldGroups = buildCustomFieldFilterGroups(roadmapFieldDefs);
+  // Only SELECT-type fields are groupable — MULTI_SELECT is out of scope
+  // (an item could belong to more than one group, which breaks
+  // one-row-per-item lane packing on the timeline).
+  const resolvedGroupBy = resolveRoadmapGroupBy(parseGroupByParam(groupByParam), roadmapFieldDefs);
+  const groupByOptions = roadmapFieldDefs
+    .filter((field) => field.fieldType === "SELECT")
+    .map((field) => ({ id: field.id, label: field.name }));
 
   const [rawSquads, items, rawKRs, rawSolutions, rawOpportunities, rawExperiments, unscheduledSolutions, unscheduledBugs] = await Promise.all([
     prisma.squad.findMany({
@@ -165,6 +175,15 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       orderBy: { voteCount: "desc" },
     }),
   ]);
+
+  const customFieldValuesByItemId = resolvedGroupBy.mode === "customField"
+    ? Object.fromEntries(
+        (await loadCustomFieldValuesForObjects(prisma, {
+          fieldId: resolvedGroupBy.field.id,
+          objectIds: items.map((item) => item.id),
+        })).entries(),
+      )
+    : undefined;
 
   const taskLinks = items.length === 0
     ? []
@@ -287,6 +306,11 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
             activeCustomFieldId={customFieldFilter?.fieldId ?? null}
             workspaceId={workspace.id}
             unscheduledItems={unscheduledItems}
+            groupBy={resolvedGroupBy.mode}
+            groupByField={resolvedGroupBy.mode === "customField" ? { id: resolvedGroupBy.field.id, name: resolvedGroupBy.field.name, options: resolvedGroupBy.field.options ?? [] } : undefined}
+            customFieldValuesByItemId={customFieldValuesByItemId}
+            groupByOptions={groupByOptions}
+            launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
           />
         </Suspense>
       ) : (
@@ -311,6 +335,9 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
               availableExperiments={availableExperiments}
               unscheduledItems={unscheduledItems}
               squads={squads}
+              nowLimit={workspace.nowLimit}
+              nextLimit={workspace.nextLimit}
+              launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
             />
           </div>
         </div>

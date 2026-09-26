@@ -13,9 +13,12 @@ import { generateSsoSecret } from "@/lib/portal-sso";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
+import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
+import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { revokeMemberAgentGrants, deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
+import { deleteWorkspaceUpdates } from "@/lib/workspace-updates-cleanup";
 import {
   normalizeSelectOptions,
   parseSelectOptions,
@@ -25,7 +28,6 @@ import {
 import type {
   CustomFieldType,
   CustomFieldObjectType,
-  SelectOption,
   CustomFieldValue,
   WorkspaceRole,
 } from "@/lib/types";
@@ -392,7 +394,7 @@ export async function createFieldDefinition(
     objectType: CustomFieldObjectType;
     name: string;
     fieldType: CustomFieldType;
-    options?: SelectOption[];
+    options?: SelectOptionInput[];
     required?: boolean;
     sharedOptionSetId?: string | null;
   }
@@ -422,7 +424,7 @@ export async function createFieldDefinition(
       options: input.sharedOptionSetId
         ? Prisma.DbNull
         : input.options
-          ? (input.options as unknown as Prisma.InputJsonValue)
+          ? (normalizeSelectOptions(input.options) as unknown as Prisma.InputJsonValue)
           : Prisma.DbNull,
       sharedOptionSetId: input.sharedOptionSetId ?? null,
       required: input.required ?? false,
@@ -453,7 +455,7 @@ export async function updateFieldDefinition(
   fieldId: string,
   input: {
     name?: string;
-    options?: SelectOption[];
+    options?: SelectOptionInput[];
     required?: boolean;
     /** Pass a set id to attach, `null` to detach, omit to leave the link alone. */
     sharedOptionSetId?: string | null;
@@ -495,7 +497,7 @@ export async function updateFieldDefinition(
       ...(input.name !== undefined && { name: input.name }),
       ...(input.options !== undefined && {
         options: input.options
-          ? (input.options as unknown as Prisma.InputJsonValue)
+          ? (normalizeSelectOptions(input.options) as unknown as Prisma.InputJsonValue)
           : Prisma.DbNull,
       }),
       ...(input.required !== undefined && { required: input.required }),
@@ -611,23 +613,8 @@ export async function deleteWorkspace(
   orgSlug: string,
   workspaceSlug: string
 ): Promise<{ redirectTo: string }> {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-
-  const prisma = getPrisma();
-
-  const workspace = await prisma.workspace.findFirst({
-    where: {
-      slug: workspaceSlug,
-      organization: { slug: orgSlug },
-    },
-    select: { id: true, organizationId: true },
-  });
-
-  if (!workspace) throw new Error("Workspace not found");
-
-  const workspaceId = workspace.id;
-  const organizationId = workspace.organizationId;
+  const { prisma, workspaceId, organizationId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+  await assertDocumentPilotCleanupReviewed(prisma, workspaceId);
 
   // Decision/release/capacity aggregates reference Tasks and RoadmapItems.
   // DSQL has no FK cascades, so clear the full child graph first.
@@ -779,6 +766,7 @@ export async function deleteWorkspace(
   await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
   await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
   await deleteWorkspaceAgentData(prisma, workspaceId);
+  await deleteWorkspaceUpdates(prisma, workspaceId);
 
   // ── Step 16: Delete WorkspaceMembers ────────────────────────────────────────
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
@@ -790,7 +778,10 @@ export async function deleteWorkspace(
   await prisma.doc.deleteMany({ where: { workspaceId } });
 
   // ── Step 19: Delete the Workspace itself ────────────────────────────────────
-  await prisma.workspace.delete({ where: { id: workspaceId } });
+  await prisma.$transaction(async tx => {
+    await tx.workspace.delete({ where: { id: workspaceId } });
+    await deleteWorkspaceAnalytics(tx, workspaceId);
+  });
 
   // ── Step 20: If the org has no remaining workspaces, delete it too ───────────
   const remainingWorkspaces = await prisma.workspace.findMany({
@@ -1004,4 +995,66 @@ export async function updateWorkspaceBranding(
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
   revalidatePath(`/${orgSlug}/${workspaceSlug}`, "layout");
   revalidatePath(`/portal/${orgSlug}/${workspaceSlug}`, "layout");
+}
+
+// ─── Roadmap WIP Limits ────────────────────────────────────────────────────────
+
+/**
+ * Updates the workspace's NOW/NEXT roadmap WIP limits. `undefined` leaves a
+ * field untouched; explicit `null` clears it back to "no limit". Purely
+ * advisory display settings — see docs/decisions/0005 and 0006 (both
+ * Superseded) for why this must never grow into enforcement.
+ */
+export async function updateWorkspaceLimits(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: {
+    nowLimit?: number | null;
+    nextLimit?: number | null;
+  }
+) {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  for (const [field, value] of Object.entries(input) as [keyof typeof input, number | null | undefined][]) {
+    if (value !== undefined && value !== null && (!Number.isInteger(value) || value < 0)) {
+      throw new Error(`Invalid ${field} — must be a non-negative whole number or empty`);
+    }
+  }
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: {
+      ...(input.nowLimit !== undefined && { nowLimit: input.nowLimit }),
+      ...(input.nextLimit !== undefined && { nextLimit: input.nextLimit }),
+    },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/roadmap`);
+}
+
+// ─── Marketing launch workflow ─────────────────────────────────────────────────
+
+/**
+ * Toggles the workspace-level marketing-launch surface (launch tiers,
+ * checklists, LAUNCHING/LAUNCHED roadmap horizons, positioning briefs, and
+ * the related MCP tools). Default off; see prisma/schema.prisma comment on
+ * Workspace.launchWorkflowEnabled and Compass solution 8303c3df-498d-4503-
+ * b92b-c7fd7a0fa62d for the product rationale. Revalidates both settings and
+ * roadmap so the board reflects the change without a hard refresh.
+ */
+export async function updateLaunchWorkflowSettings(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: { launchWorkflowEnabled: boolean }
+) {
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: { launchWorkflowEnabled: input.launchWorkflowEnabled },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/roadmap`);
 }

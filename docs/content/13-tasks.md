@@ -14,6 +14,10 @@ Tasks is Compass's standalone delivery/tracking entity. It's built to scale from
 
 ![Tasks](/screenshots/docs/tasks.png)
 
+On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
+
+![Tasks on mobile](/screenshots/docs/tasks-mobile.png)
+
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
 
 ## Status Vocabulary
@@ -28,10 +32,12 @@ Cancelled tasks are collapsed behind a **Show cancelled** toggle above the board
 
 Toggle between **Board** and **List** at the top of the Tasks page — `?view=list` in the URL takes you straight there.
 
-- **Board** — the familiar column-per-status kanban. Drag a card to a new column to change its status; drag within a column to reorder (order communicates relative priority, same as the Roadmap).
+- **Board** — the familiar column-per-status kanban. Drag a card to a new column to change its status; drag within a column to reorder. That priority order is persisted for the whole column, including when you reorder a filtered view, and is visible to every workspace member.
 - **List** — a flat, filterable table with one row per task, indented by hierarchy depth. This is the better view for the "PM tracking a handful of initiatives" use case, where a full kanban is more structure than the work needs.
 
 Both views read the same underlying data — there's no separate "lite" data model for the list view.
+
+On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
 
 ## Creating and Assigning Tasks
 
@@ -44,6 +50,22 @@ Click **Add task** at the bottom of any column (or **Add subtask** on a task's d
 - **Squad** — the owning team, same convention as Objectives, Opportunities, and Roadmap Items
 - **Story points** and **Due date** — optional estimation/scheduling fields
 - **Iteration** — a freeform sprint label (e.g. "Sprint 24") for teams that want lightweight grouping without a full Sprint entity
+
+## Task details
+
+Task details put the editable title first, followed by a compact row for status,
+priority, assignee, and due date. The description and subtasks follow immediately.
+Use the **Open full page** icon in the panel toolbar to open the same detail view
+on its own page. On narrow screens, the summary controls wrap to fit.
+
+Expand **More properties** below subtasks to edit story points, iteration, squad,
+or an external owner. Properties and custom fields use simple label/value rows;
+the panel remembers whether you left More properties open. A task with no children
+shows only **Add subtask** until you create its first subtask.
+
+![Compact task detail panel](/screenshots/docs/task-compact-overlay-desktop.png)
+
+![Task details on mobile](/screenshots/docs/task-compact-overlay-mobile.png)
 
 ## Discussion
 
@@ -77,6 +99,11 @@ Linking works from either side:
 
 - **From the task** — the **Links** section of its detail panel links to (or unlinks from) any of those object types.
 - **From the object** — an Opportunity, Solution, Experiment, Objective, Key Result, Feedback Item, or Doc's own detail panel has a **Delivery tasks** section where you can create a new task inline (title, optional assignee) or link an existing unlinked task, without leaving the panel or navigating to the Tasks board first. A Roadmap Item's sidebar had this first; it now works identically everywhere else a task can point.
+
+When you add a link from a task, one search field looks across every supported
+item type in the workspace. Use the type chips to narrow a broad result set,
+then select a result to review its title and linking context before confirming.
+The picker supports the arrow keys to move through results and Enter to select.
 
 A task's owning **Squad** is not part of this link system — it's a first-class field on the task itself (same as Opportunities and Roadmap Items), so squad-based board filtering stays a simple, exact match.
 

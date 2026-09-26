@@ -3,12 +3,14 @@ import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { getActiveSchema } from "./schema";
 import { injectUpdatedAtExtension } from "./prisma-updated-at";
+import { getManagedPilotContext } from "./preview-automation/managed-context";
 
 declare global {
   var __prisma: AppPrismaClient | undefined;
 }
 
 export function getDatabaseUser(): string {
+  if (getManagedPilotContext()) return process.env.PGUSER ?? "admin";
   return process.env.PREVIEW_AUTOMATION_ENABLED === "1" ? `${getActiveSchema()}_runtime` : process.env.PGUSER ?? "admin";
 }
 
@@ -67,7 +69,7 @@ export function createBasePrismaClient(): PrismaClient {
     host,
     user: getDatabaseUser(),
     database: process.env.PGDATABASE ?? "postgres",
-    password: () => automationPreview ? signer.getDbConnectAuthToken() : signer.getDbConnectAdminAuthToken(),
+    password: () => automationPreview && !getManagedPilotContext() ? signer.getDbConnectAuthToken() : signer.getDbConnectAdminAuthToken(),
     port: 5432,
     ssl: true,
     max: 20,

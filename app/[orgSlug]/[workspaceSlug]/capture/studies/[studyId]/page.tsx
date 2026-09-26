@@ -100,6 +100,10 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
   const close = closeResearchStudy.bind(null, orgSlug, workspaceSlug, study.id)
   const archive = archiveResearchStudy.bind(null, orgSlug, workspaceSlug, study.id)
   const guided = study.studyType === "USABILITY_TEST"
+  const linkedArtifact = study.artifactId
+    ? await prisma.artifact.findFirst({ where: { id: study.artifactId }, select: { id: true, title: true } })
+    : null
+  const artifactHref = linkedArtifact ? `/${orgSlug}/${workspaceSlug}/docs/artifacts/${linkedArtifact.id}` : null
   return (
     <main className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8">
       <PageHeader title={study.name} description={study.goal} />
@@ -108,6 +112,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
         <div><span className="text-text-muted">Target</span><div className="font-medium">{study.targetMinutes} minutes</div></div>
         <div><span className="text-text-muted">Status</span><div className="font-medium capitalize">{study.status.toLowerCase()}</div></div>
         {guided && study.appUrl && <div className="min-w-0"><span className="text-text-muted">Product</span><div><a className="break-all font-medium underline" href={study.appUrl} rel="noopener noreferrer" target="_blank">{study.appUrl}</a></div></div>}
+        {guided && linkedArtifact && artifactHref && <div className="min-w-0"><span className="text-text-muted">Prototype artifact</span><div><Link className="break-all font-medium underline" href={artifactHref}>{linkedArtifact.title}</Link></div></div>}
       </section>
       <section className="max-w-3xl rounded-xl border bg-surface-panel p-5">
         <h2 className="font-semibold">Participant link</h2>
@@ -116,7 +121,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
       </section>
       {study.status === "ARCHIVED"
         ? <p className="max-w-3xl rounded-xl border bg-surface-panel p-5 text-sm text-text-muted">This study is archived and retained for research review.</p>
-        : <StudySettings action={update} protocolLocked={study._count.sessions > 0} study={study} />}
+        : <StudySettings action={update} protocolLocked={study._count.sessions > 0} study={study} linkedArtifact={linkedArtifact} artifactHref={artifactHref} />}
       <StudyLifecycleControls activate={activate} archive={archive} close={close} status={study.status} />
       <SynthesisResults snapshots={study.syntheses.slice(0, 10)} studyId={study.id} studyUrl={studyUrl} completedSessionIds={completedSessions.map(item => item.id)} currentGuideFingerprint={guideFingerprint(study.goal, guide)} />
       <nav aria-label="Synthesis history pages" className="flex gap-4 text-sm">{synthesisPage > 1 && <Link className="underline" href={`${studyUrl}?page=${page}&synthesisPage=${synthesisPage - 1}`}>Newer synthesis snapshots</Link>}{study.syntheses.length > 10 && <Link className="underline" href={`${studyUrl}?page=${page}&synthesisPage=${synthesisPage + 1}`}>Older synthesis snapshots</Link>}</nav>

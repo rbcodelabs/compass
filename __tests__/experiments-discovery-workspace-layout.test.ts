@@ -30,6 +30,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({
   archiveOpportunity: vi.fn(),
   moveOpportunity: vi.fn(),
   reorderOpportunity: vi.fn(),
+  setOpportunityFieldValue: vi.fn(),
 }));
 vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({ openPanel: vi.fn() }),
@@ -37,6 +38,7 @@ vi.mock("@/components/panels/panel-context", () => ({
 
 import { ExperimentBoard } from "@/components/experiments/experiment-board";
 import { OpportunityBoard } from "@/components/discovery/opportunity-board";
+import { OpportunityFieldBoard } from "@/components/discovery/opportunity-field-board";
 import type { OpportunityStatus } from "@/lib/types";
 
 function emptyOpportunitiesByStatus(): Record<OpportunityStatus, never[]> {
@@ -73,6 +75,23 @@ describe("Experiments and Discovery board layout", () => {
           }),
         ),
     },
+    {
+      // The card-sort board must keep the same #290 mobile scroll/touch-pan
+      // layout as the Status board it replaces when grouped by a field.
+      name: "opportunity field",
+      track: "opportunity-field-board-track",
+      boardLabel: "Opportunity board grouped by MoSCoW",
+      renderBoard: () =>
+        render(
+          h(OpportunityFieldBoard, {
+            field: { id: "moscow", name: "MoSCoW", options: [{ label: "Must", value: "must" }] },
+            opportunities: [],
+            orgSlug: "acme",
+            workspaceSlug: "core",
+            workspaceId: "ws-1",
+          }),
+        ),
+    },
   ])(
     "makes the $name board the sole horizontal scroller with inset full-height columns",
     ({ track, boardLabel, renderBoard }) => {
@@ -93,7 +112,8 @@ describe("Experiments and Discovery board layout", () => {
 
       // Each column insets itself and fills the track height...
       const column = container.querySelector("section");
-      expect(column?.className).toContain("min-w-[280px] flex-1 overflow-hidden md:h-full");
+      expect(column).toHaveClass("w-[calc(100cqw-1.5rem)]", "min-w-0", "flex-none", "sm:w-[calc(100cqw-2rem)]", "md:w-72", "md:min-w-[280px]", "md:flex-1", "md:overflow-hidden", "md:h-full");
+      expect(column).not.toHaveClass("overflow-hidden");
 
       // ...while only ITS OWN body (not the column) scrolls vertically.
       const body = column?.querySelector(":scope > div");

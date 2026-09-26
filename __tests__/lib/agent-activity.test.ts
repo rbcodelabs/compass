@@ -23,3 +23,16 @@ it("preserves a successful result when final logging fails", async () => {
   expect(operation).toHaveBeenCalledTimes(1)
   log.mockRestore()
 })
+it("labels the audit row with the credential kind that produced the actor", async () => {
+  // credential_id is polymorphic across api_keys.id and oauth_tokens.id (ADR
+  // 0015), so a row without this discriminator cannot be joined back to
+  // anything with confidence.
+  await withAgentActivity({ ...actor, credentialType: "OAUTH" as const }, "create_task", true, async () => {}, async () => ok("Created", {}))
+  expect(calls.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ credentialType: "OAUTH" }) }))
+})
+it("falls back to API_KEY when an actor predates the discriminator", async () => {
+  // Every row written before ADR 0015 was an API key, so that is what an
+  // absent value means. A null would be a third value with no meaning.
+  await withAgentActivity(actor, "create_task", true, async () => {}, async () => ok("Created", {}))
+  expect(calls.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ credentialType: "API_KEY" }) }))
+})

@@ -4,6 +4,9 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(), admin: vi.fn(), enabled: vi.fn(),
   agent: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   apiKey: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+  oAuthConsent: { findFirst: vi.fn(), deleteMany: vi.fn() },
+  oAuthAuthorizationCode: { deleteMany: vi.fn() },
+  oAuthToken: { updateMany: vi.fn() },
   workspaceMember: { findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   $transaction: vi.fn(),
   agentWorkspaceGrant: { upsert: vi.fn(), updateMany: vi.fn() },
@@ -13,7 +16,7 @@ vi.mock("@/lib/db", () => ({ default: () => mocks }));
 vi.mock("@/lib/permissions", () => ({ resolveWorkspaceAdmin: mocks.admin }));
 vi.mock("@/lib/agent-access", () => ({ agentsEnabled: mocks.enabled }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-import { createAgent, updateAgent, createAgentKey, revokeAgentKey, grantWorkspaceAgent, revokeWorkspaceAgent } from "@/app/settings/agents/actions";
+import { createAgent, updateAgent, createAgentKey, revokeAgentKey, grantWorkspaceAgent, revokeWorkspaceAgent, reconnectOAuthConnection, revokeOAuthConnection } from "@/app/settings/agents/actions";
 import { validateMcpAuth } from "@/lib/mcp-auth";
 
 beforeEach(() => {
@@ -26,6 +29,10 @@ beforeEach(() => {
   mocks.workspaceMember.updateMany.mockResolvedValue({ count: 1 });
   mocks.$transaction.mockImplementation((operation) => operation(mocks));
   mocks.apiKey.create.mockResolvedValue({ id: "persisted-key" });
+  mocks.oAuthConsent.findFirst.mockResolvedValue({ id: "consent", clientId: "cmp_oc_client" });
+  mocks.oAuthConsent.deleteMany.mockResolvedValue({ count: 1 });
+  mocks.oAuthAuthorizationCode.deleteMany.mockResolvedValue({ count: 1 });
+  mocks.oAuthToken.updateMany.mockResolvedValue({ count: 2 });
 });
 
 describe("agent account and workspace management", () => {
@@ -101,5 +108,51 @@ describe("agent account and workspace management", () => {
     mocks.workspaceMember.updateMany.mockResolvedValue({ count: 0 });
     await expect(grantWorkspaceAgent("org", "ws", "agent", "READ")).rejects.toThrow("Membership changed");
     expect(mocks.agentWorkspaceGrant.upsert).not.toHaveBeenCalled();
+  });
+
+  it("revokes every live token family for the signed-in account connection", async () => {
+    await revokeOAuthConnection("consent");
+
+    expect(mocks.oAuthConsent.findFirst).toHaveBeenCalledWith({
+      where: { id: "consent", userId: "owner" },
+      select: { id: true, clientId: true },
+    });
+    expect(mocks.oAuthToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: "owner", clientId: "cmp_oc_client", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(mocks.oAuthAuthorizationCode.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "owner", clientId: "cmp_oc_client", consumedAt: null },
+    });
+    expect(mocks.oAuthConsent.deleteMany).toHaveBeenCalledWith({
+      where: { id: "consent", userId: "owner", clientId: "cmp_oc_client" },
+    });
+  });
+
+  it("forgets the binding and revokes live token families before reconnecting", async () => {
+    await reconnectOAuthConnection("consent");
+
+    expect(mocks.oAuthToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: "owner", clientId: "cmp_oc_client", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(mocks.oAuthAuthorizationCode.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "owner", clientId: "cmp_oc_client", consumedAt: null },
+    });
+    expect(mocks.oAuthConsent.deleteMany).toHaveBeenCalledWith({
+      where: { id: "consent", userId: "owner", clientId: "cmp_oc_client" },
+    });
+  });
+
+  it.each([
+    ["revoke", revokeOAuthConnection],
+    ["reconnect", reconnectOAuthConnection],
+  ])("does not let another user %s an OAuth connection", async (_label, action) => {
+    mocks.oAuthConsent.findFirst.mockResolvedValue(null);
+
+    await expect(action("another-users-consent")).rejects.toThrow("Connection not found");
+    expect(mocks.oAuthToken.updateMany).not.toHaveBeenCalled();
+    expect(mocks.oAuthAuthorizationCode.deleteMany).not.toHaveBeenCalled();
+    expect(mocks.oAuthConsent.deleteMany).not.toHaveBeenCalled();
   });
 });

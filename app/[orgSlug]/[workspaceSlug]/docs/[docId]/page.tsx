@@ -1,10 +1,14 @@
 import { auth } from "@/auth";
+import { listDocCommentsCore } from "@/lib/doc-comments";
+import { cookies } from "next/headers";
+import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin";
 import { redirect, notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { DocEditor } from "@/components/docs/doc-editor";
 import { DocDecisionAction } from "@/components/docs/doc-decision-action";
 import { listDocDecisions } from "@/lib/tracked-decisions";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
+import { hydrateDocument } from "@/lib/document-service";
 
 type Props = {
   params: Promise<{
@@ -15,10 +19,12 @@ type Props = {
 };
 
 export async function generateMetadata({ params }: Props) {
-  const { docId } = await params;
+  const session = await auth();
+  if (!session?.user?.id) return { title: "Document" };
+  const { docId, orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
-  const doc = await prisma.doc.findUnique({
-    where: { id: docId },
+  const doc = await prisma.doc.findFirst({
+    where: { id: docId, workspace: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } } },
     select: { title: true },
   });
   return { title: doc?.title ?? "Untitled" };
@@ -42,12 +48,13 @@ export default async function DocPage({ params }: Props) {
 
   if (!workspace) notFound();
 
-  const doc = await prisma.doc.findFirst({
+  const storedDoc = await prisma.doc.findFirst({
     where: { id: docId, workspaceId: workspace.id },
-    select: { id: true, title: true, content: true, icon: true, metadata: true },
+    select: { id: true, title: true, content: true, icon: true, metadata: true, storageProvider: true, contentRef: true, revision: true },
   });
 
-  if (!doc) notFound();
+  if (!storedDoc) notFound();
+  const doc = await hydrateDocument(workspace.id, storedDoc);
 
   // An unavailable lookup is distinct from a document with no decisions.
   const decisions = await listDocDecisions(workspace.id, doc.id).catch(() => null);
@@ -63,32 +70,19 @@ export default async function DocPage({ params }: Props) {
 
   // All inline comments (open + resolved) for the doc — the editor highlights
   // the open/anchored ones and the sidebar filters resolved behind a toggle.
-  const comments = await prisma.docComment.findMany({
-    where: { docId },
-    orderBy: { createdAt: "asc" },
-    select: {
-      id: true,
-      parentId: true,
-      body: true,
-      status: true,
-      anchorText: true,
-      anchorStart: true,
-      anchorEnd: true,
-      anchorPrefix: true,
-      anchorSuffix: true,
-      authorName: true,
-      authorType: true,
-      createdAt: true,
-    },
-  });
+  const comments = await listDocCommentsCore(docId);
 
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/docs/${docId}`;
 
   const linkedTasks = await fetchLinkedTasksBundle(workspace.id, "DOC", doc.id);
+  const cookieStore = await cookies();
 
   return (
     <DocEditor
+      key={doc.id}
       doc={doc}
+      initialCommentsPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsComments"))?.value)}
+      initialHistoryPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsHistory"))?.value)}
       versions={versions}
       comments={comments}
       revalidatePathStr={revalidatePathStr}

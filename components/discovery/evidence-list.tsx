@@ -37,7 +37,7 @@ const SOURCE_TYPE_LABELS: Record<EvidenceSourceType, string> = {
 const CONFIDENCE_CLASSES: Record<EvidenceConfidence, string> = {
   high: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
   medium: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-  low: "bg-surface-inset text-text-secondary dark:bg-slate-800/50 dark:text-text-subtle",
+  low: "bg-surface-inset text-text-secondary",
 };
 
 type Props = {
@@ -47,6 +47,7 @@ type Props = {
    * inside an `/[orgSlug]/[workspaceSlug]/` route, so both are always known. */
   orgSlug: string;
   workspaceSlug: string;
+  onMutated?: () => void;
 };
 
 /**
@@ -113,6 +114,7 @@ export function EvidenceList({
   revalidatePathStr,
   orgSlug,
   workspaceSlug,
+  onMutated,
 }: Props) {
   const [evidence, setEvidence] = useState(initialEvidence);
   const [isPending, startTransition] = useTransition();
@@ -125,6 +127,7 @@ export function EvidenceList({
     setEvidence((prev) => prev.filter((e) => e.id !== id));
     startTransition(async () => {
       await deleteEvidence(id, revalidatePathStr);
+      onMutated?.();
     });
   }
 

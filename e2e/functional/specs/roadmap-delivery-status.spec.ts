@@ -7,6 +7,7 @@
  * on the internal roadmap Board.
  */
 import { test, expect } from "../fixtures/index";
+import { openFullPage } from "../fixtures/full-page";
 import type { Page } from "@playwright/test";
 
 async function createAndLinkTask(
@@ -26,16 +27,16 @@ async function createAndLinkTask(
 
   const taskCard = column.locator('[data-slot="card"]').filter({ hasText: taskTitle });
   await expect(taskCard).toBeVisible({ timeout: 10_000 });
-  await taskCard.getByRole("link", { name: taskTitle }).click();
-  await page.waitForURL(/\/tasks\/[0-9a-f-]{36}$/, { timeout: 15_000 });
+  await taskCard.getByRole("button", { name: taskTitle }).click();
+  const taskPanel = page.locator('[data-slot="sheet-content"]');
+  await expect(taskPanel).toBeVisible({ timeout: 15_000 });
+  await openFullPage(page, taskPanel);
 
-  await page.getByRole("tab", { name: /Links/ }).click();
   await page.getByRole("button", { name: "Add link" }).click();
-  await page.getByLabel("Type").click();
-  await page.getByRole("option", { name: "Roadmap Item" }).click();
-  await page.getByLabel("Roadmap Item").click();
-  await page.getByRole("option", { name: roadmapTitle }).click();
-  await page.getByRole("button", { name: "Link", exact: true }).click();
+  const linkDialog = page.getByRole("dialog", { name: "Link to another item" });
+  await linkDialog.getByRole("combobox", { name: "Search linkable items" }).fill(roadmapTitle);
+  await linkDialog.getByRole("option", { name: `${roadmapTitle} Roadmap Item` }).click();
+  await linkDialog.getByRole("button", { name: "Link item" }).click();
 
   // The selected combobox label is already visible while the action is pending.
   // This dialog closes only after linkTask has successfully persisted the link.
@@ -44,7 +45,6 @@ async function createAndLinkTask(
   // the task detail experience before the roadmap consumes it.
   await expect(page.getByText(roadmapTitle)).toBeVisible({ timeout: 10_000 });
   await page.reload();
-  await page.getByRole("tab", { name: /Links/ }).click();
   await expect(page.getByText(roadmapTitle)).toBeVisible({ timeout: 10_000 });
 }
 

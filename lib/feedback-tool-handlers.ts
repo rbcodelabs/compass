@@ -3,10 +3,11 @@
  * Extracted into this module so they can be unit-tested without the MCP server layer.
  */
 
-import getPrisma from "@/lib/db"
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
-import { validateFeedbackInput } from "@/lib/feedback"
+import { feedbackOpportunityLinkData, validateFeedbackInput } from "@/lib/feedback"
 import { ok, fail } from "@/lib/mcp-output"
 import {
   deleteFeedbackBlobs,
@@ -16,7 +17,7 @@ import {
   uploadInlineFeedbackAttachments,
   verifyCompletedFeedbackUpload,
 } from "@/lib/feedback-attachments"
-import { CompassUrlNotConfiguredError, feedbackItemUrl } from "@/lib/compass-url"
+import { CompassUrlNotConfiguredError, feedbackItemUrl, safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { FEEDBACK_STATUSES, type FeedbackStatus } from "@/lib/feedback-meta"
 
 const feedbackCursorSchema = z.object({
@@ -54,11 +55,6 @@ function canonicalFeedbackUrl(workspace: FeedbackWorkspace, feedbackId: string):
     if (error instanceof CompassUrlNotConfiguredError) return null
     throw error
   }
-}
-
-/** Appends a `URL:` line to a tool's human-readable message when a link is available. */
-function withUrlLine(text: string, url: string | null): string {
-  return url ? `${text}\nURL: ${url}` : text
 }
 
 const MAX_FEEDBACK_ATTACHMENTS = 5
@@ -473,10 +469,7 @@ export async function linkFeedbackToOpportunity({
   }
   await prisma.feedbackItem.update({
     where: { id: feedbackId },
-    // Explicit `updatedAt`: DSQL has no trigger support, so the schema uses
-    // `@default(now())` instead of `@updatedAt` and nothing bumps it for us.
-    // The sibling status/type handlers already do this; this one was missed.
-    data: { opportunityId, updatedAt: new Date() },
+    data: feedbackOpportunityLinkData(opportunityId),
   })
   return ok(withUrlLine([
     `Linked feedback '${feedback.title}' to opportunity '${opportunity.title}'.`,
@@ -685,7 +678,15 @@ export async function promoteFeedbackToRoadmap({
   const prisma = getPrisma()
   const feedback = await prisma.feedbackItem.findUnique({
     where: { id: feedbackId },
-    select: { id: true, title: true, type: true },
+    // The workspace slugs ride along on the lookup this handler already makes,
+    // so the roadmap deeplink below costs no extra round trip.
+    select: {
+      id: true,
+      title: true,
+      type: true,
+      workspaceId: true,
+      workspace: { select: { slug: true, organization: { select: { slug: true } } } },
+    },
   })
   if (!feedback) {
     return fail(`Feedback item "${feedbackId}" not found.`)
@@ -698,14 +699,14 @@ export async function promoteFeedbackToRoadmap({
   })
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0
 
-  const item = await prisma.roadmapItem.create({ data: {
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "MCP", undefined, tx => tx.roadmapItem.create({ data: {
       workspaceId,
       title: feedback.title,
       horizon,
       sortOrder,
       feedbackId,
       isPrivate: isPrivate ?? false,
-    } })
+    } }))
 
   const lines = [
     `**Promoted to roadmap (${horizon})**`,
@@ -714,7 +715,18 @@ export async function promoteFeedbackToRoadmap({
     ...(item.isPrivate ? [`Private: yes (hidden from public portal)`] : []),
     `Linked Feedback: ${feedback.title} [${feedback.type}]`,
   ]
-  return ok(lines.join("\n"), {
+  // The roadmap item is created in `workspaceId`, which need not be the
+  // feedback's own workspace — only link when the slugs we have describe the
+  // workspace the item actually landed in.
+  const url = feedback.workspaceId === workspaceId
+    ? safeEntityUrl({
+        orgSlug: feedback.workspace?.organization?.slug,
+        workspaceSlug: feedback.workspace?.slug,
+        type: "roadmapItem",
+        id: item.id,
+      })
+    : null
+  return ok(withUrlLine(lines.join("\n"), url), {
     id: item.id,
     title: item.title,
     horizon,

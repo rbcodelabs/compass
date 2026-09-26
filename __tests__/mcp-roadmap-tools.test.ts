@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { runWithMcpActor } from "@/lib/mcp-authz"
+import { z } from "zod"
 
 // ── Prisma mock ─────────────────────────────────────────────────────────────
 
@@ -52,15 +53,20 @@ vi.mock("@/lib/db", () => ({
 
 // ── Fake McpServer that captures every registered tool callback ─────────────
 
-type ToolCallback = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>
+type ToolCallback = (args: Record<string, unknown>) => Promise<{
+  content: Array<{ type: string; text: string }>
+  structuredContent?: { data: unknown }
+}>
 
 const registeredTools: Record<string, ToolCallback> = {}
+const registeredSchemas: Record<string, Record<string, z.ZodType>> = {}
 
 vi.mock("mcp-handler", () => ({
   createMcpHandler: (setup: (server: { registerTool: (name: string, meta: unknown, cb: ToolCallback) => void }) => void) => {
     setup({
       registerTool(name, _meta, cb) {
         registeredTools[name] = cb
+        registeredSchemas[name] = (_meta as { inputSchema: Record<string, z.ZodType> }).inputSchema
       },
     })
     return () => new Response("ok")
@@ -206,6 +212,62 @@ describe("add_to_roadmap MCP tool — isPrivate", () => {
   })
 })
 
+describe("update_roadmap_item MCP tool — optional links", () => {
+  const fields = ["keyResultId", "opportunityId", "solutionId", "squadId"] as const
+  const targetId = "11111111-1111-4111-8111-111111111111"
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({
+      id: "item-1", workspaceId: "ws-1", title: "Item", horizon: "LATER", status: "ACTIVE",
+    })
+    mockPrisma.roadmapItem.update.mockImplementation(async ({ data }) => ({
+      id: "item-1", title: "Item", horizon: "LATER", status: "ACTIVE", ...data,
+    }))
+  })
+
+  it.each(fields)("validates %s as optional nullable UUID", (field) => {
+    const schema = registeredSchemas.update_roadmap_item[field]
+    expect(schema, field).toBeDefined()
+    for (const value of [undefined, null, targetId]) expect(schema.safeParse(value).success).toBe(true)
+    for (const value of ["", "not-a-uuid", 123]) expect(schema.safeParse(value).success).toBe(false)
+  })
+
+  it.each(fields)("sets and explicitly clears %s", async (field) => {
+    for (const value of [targetId, null]) {
+      const result = await getHandler("update_roadmap_item")({ itemId: "item-1", [field]: value })
+      expect(mockPrisma.roadmapItem.update).toHaveBeenLastCalledWith({
+        where: { id: "item-1" }, data: { [field]: value, updatedAt: expect.any(Date) },
+      })
+      expect(textOf(result)).toContain("ID: item-1")
+    }
+  })
+
+  it("preserves omitted links in a mixed update while retaining ordinary fields", async () => {
+    await getHandler("update_roadmap_item")({
+      itemId: "item-1", keyResultId: targetId, solutionId: null, title: " Updated ",
+      horizon: "NEXT", status: "ACTIVE", isPrivate: false, startDate: "2026-09-01",
+    })
+    const data = mockPrisma.roadmapItem.update.mock.calls[0][0].data
+    expect(data).toEqual({
+      keyResultId: targetId, solutionId: null, title: "Updated", horizon: "NEXT",
+      status: "ACTIVE", isPrivate: false, startDate: new Date("2026-09-01"), updatedAt: expect.any(Date),
+    })
+    expect(data).not.toHaveProperty("opportunityId")
+    expect(data).not.toHaveProperty("squadId")
+  })
+
+  it("preserves the linked Solution response contract when setting and clearing links", async () => {
+    const linked = await getHandler("update_roadmap_item")({ itemId: "item-1", solutionId: targetId })
+    expect(textOf(linked)).toContain(`Linked Solution: ${targetId}`)
+    expect(linked.structuredContent?.data).toMatchObject({ solutionId: targetId })
+
+    const cleared = await getHandler("update_roadmap_item")({ itemId: "item-1", solutionId: null })
+    expect(textOf(cleared)).not.toContain("Linked Solution:")
+    expect(cleared.structuredContent?.data).toMatchObject({ solutionId: null })
+  })
+})
+
 describe("update_roadmap_item MCP tool — dates", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -317,28 +379,116 @@ describe("update_roadmap_item MCP tool — isPrivate", () => {
   })
 })
 
-describe("update_roadmap_item MCP tool — launch horizon guard", () => {
+describe("update_roadmap_item MCP tool — Solution link", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({
+      id: "item-1",
+      workspaceId: "ws-1",
+      title: "Ship payments",
+      horizon: "NOW",
+      status: "ACTIVE",
+    })
   })
 
-  it("rejects horizon: LAUNCHING with no DB read or write, pointing at set_launch_tier", async () => {
-    const handler = getHandler("update_roadmap_item")
-    const result = await handler({ itemId: "item-1", horizon: "LAUNCHING" })
-    const text = textOf(result)
+  it("attaches or replaces the linked Solution and returns its ID", async () => {
+    mockPrisma.roadmapItem.update.mockResolvedValue({
+      id: "item-1",
+      title: "Ship payments",
+      horizon: "NOW",
+      status: "ACTIVE",
+      solutionId: "solution-2",
+      isPrivate: false,
+      startDate: null,
+      endDate: null,
+    })
 
-    expect(text).toContain("set_launch_tier")
-    expect(mockPrisma.roadmapItem.findUnique).not.toHaveBeenCalled()
+    const result = await getHandler("update_roadmap_item")({
+      itemId: "item-1",
+      solutionId: "solution-2",
+    })
+
+    expect(mockPrisma.roadmapItem.update).toHaveBeenCalledWith({
+      where: { id: "item-1" },
+      data: { solutionId: "solution-2", updatedAt: expect.any(Date) },
+    })
+    expect(textOf(result)).toContain("Linked Solution: solution-2")
+    expect(result.structuredContent?.data).toMatchObject({ solutionId: "solution-2" })
+  })
+
+  it("preserves the existing Solution link when solutionId is omitted", async () => {
+    mockPrisma.roadmapItem.update.mockResolvedValue({
+      id: "item-1",
+      title: "Renamed",
+      horizon: "NOW",
+      status: "ACTIVE",
+      solutionId: "existing-solution",
+      isPrivate: false,
+      startDate: null,
+      endDate: null,
+    })
+
+    await getHandler("update_roadmap_item")({ itemId: "item-1", title: "Renamed" })
+
+    expect(mockPrisma.roadmapItem.update.mock.calls[0][0].data.solutionId).toBeUndefined()
+  })
+})
+
+describe("update_roadmap_item MCP tool — launch horizon guard", () => {
+  // The handler now needs one read (the item, to resolve its workspace) to
+  // decide which rejection message applies — the disabled-feature message
+  // when the workspace's launch workflow is off, or the old "use
+  // set_launch_tier" / "not implemented" messages when it's on. It never
+  // writes in either case.
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({
+      id: "item-1", workspaceId: "ws-1", title: "Item", horizon: "NOW", status: "ACTIVE",
+    })
+  })
+
+  it("returns a not-found message and writes nothing for a missing item", async () => {
+    mockPrisma.roadmapItem.findUnique.mockResolvedValueOnce(null)
+    const handler = getHandler("update_roadmap_item")
+    const result = await handler({ itemId: "missing-item", horizon: "LAUNCHING" })
+
+    expect(textOf(result)).toContain("not found")
     expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
   })
 
-  it("rejects horizon: LAUNCHED with no DB read or write", async () => {
+  it("rejects horizon: LAUNCHING with the disabled-feature message when the workspace's launch workflow is off, without writing", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false })
+    const handler = getHandler("update_roadmap_item")
+    const result = await handler({ itemId: "item-1", horizon: "LAUNCHING" })
+
+    expect(textOf(result)).toMatch(/launch workflow is disabled/i)
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects horizon: LAUNCHED with the disabled-feature message when off, without writing", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false })
     const handler = getHandler("update_roadmap_item")
     const result = await handler({ itemId: "item-1", horizon: "LAUNCHED" })
-    const text = textOf(result)
 
-    expect(text).toMatch(/implemented yet/i)
-    expect(mockPrisma.roadmapItem.findUnique).not.toHaveBeenCalled()
+    expect(textOf(result)).toMatch(/launch workflow is disabled/i)
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects horizon: LAUNCHING pointing at set_launch_tier when the launch workflow is on, without writing", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: true })
+    const handler = getHandler("update_roadmap_item")
+    const result = await handler({ itemId: "item-1", horizon: "LAUNCHING" })
+
+    expect(textOf(result)).toContain("set_launch_tier")
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects horizon: LAUNCHED when the launch workflow is on, without writing", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: true })
+    const handler = getHandler("update_roadmap_item")
+    const result = await handler({ itemId: "item-1", horizon: "LAUNCHED" })
+
+    expect(textOf(result)).toMatch(/implemented yet/i)
     expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
   })
 })

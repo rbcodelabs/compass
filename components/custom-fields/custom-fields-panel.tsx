@@ -21,6 +21,7 @@ interface Props {
    * displaying as its pre-save one until the panel was reopened.
    */
   onSaved?: () => void | Promise<unknown>;
+  compact?: boolean;
 }
 
 const PICKLIST_TYPES = ["SELECT", "MULTI_SELECT"] as const;
@@ -38,11 +39,13 @@ function FieldValue({
   objectId,
   revalidatePathStr,
   onSaved,
+  compact = false,
 }: {
   field: CustomFieldDefinitionData & { currentValue: CustomFieldValue };
   objectId: string;
   revalidatePathStr: string;
   onSaved?: () => void | Promise<unknown>;
+  compact?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [localVal, setLocalVal] = useState<string>(
@@ -101,7 +104,7 @@ function FieldValue({
     (Array.isArray(displayValue) && (displayValue as string[]).length === 0);
 
   const label = (
-    <span className="text-xs text-muted-foreground w-32 shrink-0 pt-0.5 font-medium">
+    <span className={`text-xs text-muted-foreground shrink-0 pt-0.5 font-medium ${compact ? "w-28 min-w-0 break-words" : "w-32"}`}>
       {field.name}
       {field.required && <span className="text-red-500 ml-0.5">*</span>}
     </span>
@@ -120,13 +123,13 @@ function FieldValue({
           first and second option of a multi-select. The optimistic value keeps
           the row truthful and `persist` serialises the writes behind it.
         */}
-        <FieldValuePicker
+        <div className={compact ? "min-w-0 flex-1" : "contents"}><FieldValuePicker
           fieldName={field.name}
           fieldType={field.fieldType}
           options={field.options}
           value={shownValue}
           onChange={persist}
-        />
+        /></div>
       </div>
     );
   }
@@ -136,7 +139,7 @@ function FieldValue({
       {label}
 
       {editing ? (
-        <div className="flex items-center gap-1.5 flex-1">
+        <div className={`flex items-center gap-1.5 flex-1 ${compact ? "min-w-0 [&>input]:min-w-0 [&>select]:min-w-0" : ""}`}>
           {field.fieldType === "BOOLEAN" ? (
             <select
               className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
@@ -190,7 +193,7 @@ function FieldValue({
         </div>
       ) : (
         <button
-          className="flex-1 text-left text-sm min-h-[1.25rem] rounded px-1 -mx-1 hover:bg-muted/50 transition-colors"
+          className={`${compact ? "min-w-0 break-words " : ""}flex-1 text-left text-sm min-h-[1.25rem] rounded px-1 -mx-1 hover:bg-muted/50 transition-colors`}
           onClick={() => setEditing(true)}
         >
           {isEmpty ? (
@@ -223,6 +226,7 @@ export function CustomFieldsPanel({
   objectId,
   revalidatePathStr,
   onSaved,
+  compact,
 }: Omit<Props, "orgSlug" | "workspaceSlug">) {
   if (fields.length === 0) return null;
 
@@ -235,6 +239,7 @@ export function CustomFieldsPanel({
           objectId={objectId}
           revalidatePathStr={revalidatePathStr}
           onSaved={onSaved}
+          compact={compact}
         />
       ))}
     </div>

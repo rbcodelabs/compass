@@ -32,6 +32,8 @@
  * T0 squad-clustering — none of that ships this phase.
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
+import { openFullPage } from "../fixtures/full-page";
 
 test.describe("Canvas", () => {
   test("renders the full OST + Roadmap graph with real edges, and supports pan + zoom", async ({
@@ -95,9 +97,11 @@ test.describe("Canvas", () => {
     await page.getByLabel("Start date").fill("2026-07-01");
     await page.getByLabel("End date").fill("2026-09-30");
     await page.getByRole("button", { name: "Create cycle" }).click();
-    await expect(page.getByText(cycleTitle)).toBeVisible({ timeout: 15_000 });
+    // Scoped to page content: Next 16.3's route announcer (an aria-live region)
+    // repeats the new page's heading, so an unscoped getByText matches twice.
+    await expect(page.getByRole("main").first().getByText(cycleTitle)).toBeVisible({ timeout: 15_000 });
 
-    await page.getByText(cycleTitle).click();
+    await page.getByRole("main").first().getByText(cycleTitle).click();
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: cycleTitle })).toBeVisible();
 
@@ -117,13 +121,11 @@ test.describe("Canvas", () => {
     // ── 2. Create an Opportunity ─────────────────────────────────────────────
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-    await page.getByLabel("Title").fill(oppTitle);
-    await page.getByRole("button", { name: "Create Opportunity" }).click();
+    await createOpportunityFromBoard(page, oppTitle);
     await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: oppTitle, exact: true }).click();
-    await page.getByRole("link", { name: "Open full page" }).click();
+    await openFullPage(page);
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
 
@@ -178,8 +180,8 @@ test.describe("Canvas", () => {
     // unscoped getByText(assumptionTitle) matches both the still-expanded
     // Solutions-tab card and the OST tree — a pre-existing ambiguity also
     // present in assumption-experiment-linking.spec.ts.
-    await page.getByRole("tab", { name: "OST Tree" }).click();
-    const ostTreePanel = page.getByLabel("OST Tree");
+    await page.getByRole("tab", { name: "OST", exact: true }).click();
+    const ostTreePanel = page.getByRole("tabpanel", { name: "OST", exact: true });
     await expect(ostTreePanel.getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
     await ostTreePanel.getByRole("link", { name: "Test this assumption →" }).click();
     await page.waitForLoadState("networkidle");
@@ -199,7 +201,7 @@ test.describe("Canvas", () => {
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: oppTitle, exact: true }).click();
-    await page.getByRole("link", { name: "Open full page" }).click();
+    await openFullPage(page);
     await page.waitForLoadState("networkidle");
     // Promote-to-roadmap moved into the solution's sidebar panel along with
     // status (see solution-panel.tsx) — open the panel rather than expanding
@@ -207,6 +209,7 @@ test.describe("Canvas", () => {
     await page.getByRole("button", { name: solTitle, exact: true }).click();
     const promotePanel = page.locator('[data-slot="sheet-content"]');
     await expect(promotePanel).toBeVisible();
+    await promotePanel.getByRole("button", { name: "Roadmap", exact: true }).click();
     await promotePanel.getByRole("button", { name: /Promote to Roadmap/i }).click();
     await promotePanel.getByRole("combobox").filter({ hasText: "Now" }).click();
     await page.getByRole("option", { name: "Next" }).click();

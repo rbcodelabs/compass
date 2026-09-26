@@ -10,17 +10,12 @@
  * __tests__/doc-editor-markdown-tables.test.ts.
  */
 
-import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
-import Link from "@tiptap/extension-link";
-import Placeholder from "@tiptap/extension-placeholder";
-import { TableKit } from "@tiptap/extension-table";
-import { Markdown } from "tiptap-markdown";
 import {
   CommentHighlight,
   type CommentAnchorData,
 } from "@/components/docs/comment-highlight-extension";
-import { MarkdownAlignedTable } from "@/components/docs/markdown-table-serialization";
+import { createMarkdownEditorExtensions } from "@/components/markdown-editor-extensions";
 
 /**
  * Build the editor's extension list.
@@ -30,23 +25,8 @@ import { MarkdownAlignedTable } from "@/components/docs/markdown-table-serializa
  */
 export function createDocEditorExtensions(commentAnchors: CommentAnchorData[]) {
   return [
-    StarterKit,
+    ...createMarkdownEditorExtensions(),
     Image.configure({ inline: false }),
-    Link.configure({ openOnClick: false }),
-    Placeholder.configure({ placeholder: "Start writing…" }),
-    // GitHub-flavored pipe tables. Without a table node in the schema,
-    // tiptap-markdown parses the pipe syntax but has nowhere to put it and
-    // flattens the whole table into one paragraph. `resizable` stays off (the
-    // default): column-drag handles are an authoring affordance we don't need,
-    // and leaving it off keeps the plain TableView node view, whose
-    // `.tableWrapper` div is what gives wide tables their horizontal scroll.
-    //
-    // The kit's own table node is swapped for MarkdownAlignedTable so pipes in
-    // cells are escaped and column alignment survives serialization; the
-    // cell/row/header nodes are unchanged.
-    TableKit.configure({ table: false }),
-    MarkdownAlignedTable,
-    Markdown.configure({ html: false, transformCopiedText: true }),
     CommentHighlight.configure({ comments: commentAnchors, activeId: null }),
   ];
 }

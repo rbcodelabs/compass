@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
-import { PanelRightClose, Pin, PinOff } from "lucide-react";
+import { ExternalLink, PanelRightClose, Pin, PinOff } from "lucide-react";
+import Link from "next/link";
 
 import {
   Sheet,
@@ -10,16 +11,13 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Button } from "@/components/ui/button";
-import { useMediaQuery } from "@/hooks/use-media-query";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { usePanelPin } from "@/hooks/use-panel-pin";
 import {
   DEFAULT_PANEL_PIN,
   PANEL_MIN_MAIN,
-  PANEL_PIN_MEDIA_QUERY,
   PANEL_WIDTH_MAX,
   PANEL_WIDTH_MIN,
-  clampPanelWidth,
-  panelPinCookieString,
   type PanelPin,
 } from "@/lib/panel-pin";
 import { PANEL_WIDTH_PROPERTY, PanelResizeHandle } from "./panel-resize-handle";
@@ -33,6 +31,9 @@ import { SolutionPanel } from "./solution-panel";
 import { AssumptionPanel } from "./assumption-panel";
 import { RoadmapItemPanel } from "./roadmap-item-panel";
 import { FeedbackPanel } from "./feedback-panel";
+import { FeedbackComposer } from "@/components/feedback/feedback-composer";
+import { OpportunityComposer } from "@/components/discovery/opportunity-composer";
+import { isComposerPanelType } from "./composer-panel-types";
 import { TaskDetail } from "@/components/tasks/task-detail";
 
 const PANEL_TITLES: Record<string, string> = {
@@ -44,6 +45,8 @@ const PANEL_TITLES: Record<string, string> = {
   experiment: "Experiment",
   roadmapItem: "Roadmap Item",
   feedback: "Feedback",
+  "feedback-new": "New feedback",
+  "opportunity-new": "New opportunity",
   task: "Task",
   "discovery-rail": "Discovery",
 };
@@ -54,6 +57,14 @@ const PANEL_TITLES: Record<string, string> = {
  * from opening immediately, long enough to let the idle callback win normally.
  */
 const HYDRATION_DEADLINE_MS = 200;
+
+/**
+ * `useLayoutEffect` warns when a client component is server-rendered, and
+ * PanelShell is — its pin state comes from a cookie the layout reads. See the
+ * same pattern (and the fuller explanation) in `components/agent/agent-rail.tsx`.
+ */
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 export interface PanelShellProps {
   /**
@@ -69,24 +80,55 @@ export interface PanelShellProps {
 }
 
 export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps = {}) {
-  const { panel, closePanel, orgSlug, workspaceSlug } = usePanelContext();
+  const { panel, closePanel, orgSlug, workspaceSlug, setDetailPanelDock } = usePanelContext();
   const [hydrated, setHydrated] = useState(false);
-  const [pinned, setPinned] = useState(initialPin.pinned);
-  const [width, setWidth] = useState(() => clampPanelWidth(initialPin.width));
+  const { pinned, width, viewportAllowsPin, isPinnedMode, togglePinned, commitWidth } = usePanelPin("detail", initialPin);
   const asideRef = useRef<HTMLElement | null>(null);
   const common = { orgSlug, workspaceSlug };
 
-  // Seeded with `pinned`, not `false` — see the `serverSnapshot` note in
-  // hooks/use-media-query.ts. A pinned user's server render and hydration
-  // render both produce the pinned column, so there is no overlay to flash.
-  // The guess is only safe because the aside is *also* CSS-gated below.
-  const viewportAllowsPin = useMediaQuery(PANEL_PIN_MEDIA_QUERY, pinned);
+  // A composer (new feedback, new opportunity) always docks as a column on
+  // wide screens, whatever the pin preference: the point of creating in a
+  // panel is that the board stays visible and usable beside it. A modal
+  // overlay would hide it.
+  //
+  // The docking then *sticks* for the rest of that panel session — through the
+  // hand-off to the created item's detail view and any rows opened from the
+  // grid afterwards — and ends when the panel closes. Without that, a submit
+  // would visibly jump the new item from a column into a modal sheet for every
+  // unpinned user. It is session state, never persisted: the saved pin
+  // preference is untouched (see commitWidth in usePanelPin).
+  const isComposer = isComposerPanelType(panel?.type);
+  const [composerSession, setComposerSession] = useState(false);
+  if (isComposer && !composerSession) setComposerSession(true);
+  if (!panel && composerSession) setComposerSession(false);
+  const docked = isPinnedMode || (viewportAllowsPin && (isComposer || composerSession));
+  // `docked` alone isn't "is there an aside on screen claiming width right
+  // now" — see the early return a few lines below the JSX split: `docked &&
+  // !panel` renders nothing. Reporting that distinction up is what lets a
+  // consumer (the agent rail) trust this value without also re-deriving
+  // "is a panel even open" for itself.
+  const actuallyDocked = docked && panel !== null;
 
-  // The preference is the user's; the suspension is the environment's. A
-  // narrow viewport demotes to overlay but deliberately does NOT rewrite the
-  // cookie, so widening the window restores the pinned layout with no
-  // re-click.
-  const isPinnedMode = pinned && viewportAllowsPin;
+  // The one and only writer of DetailPanelDock (see its doc comment in
+  // panel-context.tsx for why this replaced watching the DOM for a
+  // `[data-slot="pinned-panel"]` element).
+  //
+  // A *layout* effect, not a plain one: PanelShell and AgentRail are siblings,
+  // and AgentRail reads `detailPanelDock` in its own layout effect to measure
+  // before the browser paints. React flushes every layout effect in the tree
+  // before any passive `useEffect` runs, but PanelShell is later in render
+  // order than AgentRail (see the workspace layout), so on the very first
+  // commit AgentRail's layout effect still runs before this one has had a
+  // chance to report the real value. The `setDetailPanelDock` call below is
+  // itself made from a layout effect, so React re-flushes layout effects
+  // synchronously — including AgentRail's — before paint, correcting that
+  // first read in the same tick. Were this a plain `useEffect` instead, the
+  // correction would land one frame late: a rail whose cookie says open and a
+  // detail panel already pinned via cookie would render docked for one frame,
+  // wide enough to squeeze main content, before snapping to overlay.
+  useIsomorphicLayoutEffect(() => {
+    setDetailPanelDock?.({ docked: actuallyDocked, width });
+  }, [actuallyDocked, width, setDetailPanelDock]);
 
   // A deep link is already present during SSR. Opening Base UI's modal Sheet
   // before hydration completes applies aria-hidden to the server-rendered
@@ -141,35 +183,6 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
     };
   }, []);
 
-  const persist = useCallback((next: PanelPin) => {
-    // Written from event handlers only — never in render and never in a mount
-    // effect, so the server-seeded value is the only thing that decides the
-    // first paint and a client write can never race hydration.
-    document.cookie = panelPinCookieString("detail", next);
-  }, []);
-
-  const togglePinned = useCallback(() => {
-    // Computed outside the state updater on purpose: an updater must stay
-    // pure, and StrictMode double-invokes it in development.
-    const next = !pinned;
-    setPinned(next);
-    persist({ pinned: next, width });
-  }, [persist, pinned, width]);
-
-  const commitWidth = useCallback(
-    (next: number) => {
-      const clamped = clampPanelWidth(next);
-      setWidth(clamped);
-      persist({ pinned: true, width: clamped });
-      // Some widgets measure their container once and cache it — the roadmap
-      // Gantt is the one that actually does. A commit is rare (once per
-      // gesture, or per keyboard step), so this is cheap insurance against a
-      // resized panel leaving a stale-width chart beside it.
-      window.dispatchEvent(new Event("resize"));
-    },
-    [persist],
-  );
-
   /**
    * The gesture's upper bound, measured from the live layout rather than
    * assumed: whatever room main content has beyond PANEL_MIN_MAIN is room the
@@ -204,10 +217,27 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
   // own popup, so "Esc closes the select, second Esc closes the panel" falls
   // out for free.
   const handleAsideKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape") closePanel();
+    if (event.key !== "Escape") return;
+    // React bubbles events through portals, so an Esc inside a dialog opened
+    // *from* this panel (the composer's discard confirmation) would otherwise
+    // close the panel underneath it too. Only Esc from the aside's own DOM.
+    if (!(event.target instanceof Node) || !asideRef.current?.contains(event.target)) return;
+    closePanel();
   };
 
   const title = panel ? PANEL_TITLES[panel.type] ?? panel.type : "";
+  const fullPageRoute = panel?.type === "task" ? "tasks" : panel?.type === "opportunity" ? "discovery" : null;
+  const hasCompactHeader = fullPageRoute !== null;
+  const fullPageAction = fullPageRoute && panel ? (
+    <Link
+      className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+      href={`/${orgSlug}/${workspaceSlug}/${fullPageRoute}/${panel.id}`}
+      aria-label="Open full page"
+      title="Open full page"
+    >
+      <ExternalLink aria-hidden />
+    </Link>
+  ) : null;
 
   const body = (
     <>
@@ -223,6 +253,8 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
       )}
       {panel?.type === "roadmapItem" && <RoadmapItemPanel id={panel.id} {...common} />}
       {panel?.type === "feedback" && <FeedbackPanel id={panel.id} {...common} />}
+      {panel?.type === "feedback-new" && <FeedbackComposer {...common} />}
+      {panel?.type === "opportunity-new" && <OpportunityComposer composerId={panel.id} {...common} />}
       {panel?.type === "task" && (
         <TaskDetail taskId={panel.id} variant="panel" {...common} />
       )}
@@ -249,7 +281,20 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
     </Button>
   );
 
-  if (isPinnedMode) {
+  // The composer owns its own scrolling (a body that fills the height and a
+  // sticky footer), so it gets a bare flex column instead of the padded,
+  // scrolling body every entity panel shares.
+  const bodyClassName = isComposer
+    ? "flex min-h-0 flex-1 flex-col"
+    : `flex-1 overflow-y-auto ${hasCompactHeader ? "pt-3" : "pt-4"}`;
+
+  const escHint = isComposer ? (
+    <kbd className="hidden rounded border border-border-default bg-surface-inset px-1.5 py-0.5 font-sans text-[10px] font-medium text-text-subtle sm:inline-block" title="Press Esc to close — your draft is kept">
+      Esc
+    </kbd>
+  ) : null;
+
+  if (docked) {
     if (!panel) return null;
 
     return (
@@ -283,12 +328,14 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
           onCommit={commitWidth}
         />
 
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b px-5 py-3">
+        <div className={`flex shrink-0 items-center justify-between gap-2 border-b px-5 ${hasCompactHeader ? "py-1.5" : "py-3"}`}>
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             {title}
           </h2>
           <div className="flex items-center gap-1">
-            {pinToggle}
+            {fullPageAction}
+            {escHint}
+            {!isComposer && pinToggle}
             <Button
               variant="ghost"
               size="icon-sm"
@@ -301,7 +348,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto pt-4">{body}</div>
+        <div className={bodyClassName}>{body}</div>
       </aside>
     );
   }
@@ -318,11 +365,11 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
         // Note: never pass `data-slot` here. SheetContent spreads {...props}
         // last, so it would silently replace `sheet-content` — the attribute
         // ~21 functional specs locate this panel by.
-        className="w-full sm:max-w-md flex flex-col gap-0 p-0 z-[60]"
-        showCloseButton
+        className={`w-full ${isComposer ? "sm:max-w-xl" : "sm:max-w-md"} flex flex-col gap-0 p-0 z-[60]`}
+        showCloseButton={!hasCompactHeader}
       >
-        <SheetHeader className="px-5 pt-5 pb-3 shrink-0 border-b">
-          <div className="flex items-center justify-between gap-2 pr-8">
+        <SheetHeader className={hasCompactHeader ? "px-5 py-1.5 shrink-0 border-b" : "px-5 pt-5 pb-3 shrink-0 border-b"}>
+          <div className={`flex items-center justify-between gap-2 ${hasCompactHeader ? "" : "pr-8"}`}>
             <SheetTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
               {title}
             </SheetTitle>
@@ -330,11 +377,20 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
                 below lg because pinning is suspended there anyway — offering a
                 control that visibly does nothing is worse than not offering
                 it. */}
-            <div className="hidden lg:flex items-center">{pinToggle}</div>
+            <div className="flex items-center gap-1">
+              {fullPageAction}
+              {escHint}
+              {!isComposer && <div className="hidden lg:flex items-center">{pinToggle}</div>}
+              {hasCompactHeader && (
+                <Button variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close panel" title="Close panel">
+                  <PanelRightClose aria-hidden />
+                </Button>
+              )}
+            </div>
           </div>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto pt-4">{body}</div>
+        <div className={bodyClassName}>{body}</div>
       </SheetContent>
     </Sheet>
   );

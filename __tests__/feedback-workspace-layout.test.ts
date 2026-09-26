@@ -21,8 +21,12 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+const openPanel = vi.fn();
+let currentPanel: { type: string; id: string } | null = null;
+
 vi.mock("@/components/panels/panel-context", () => ({
-  usePanelContext: () => ({ openPanel: vi.fn() }),
+  FEEDBACK_COMPOSER_ID: "new",
+  usePanelContext: () => ({ openPanel, panel: currentPanel }),
 }));
 
 // Both reach for Prisma / revalidatePath at import time — stub the whole
@@ -39,7 +43,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({
 
 import { FeedbackGrid } from "@/components/feedback/feedback-grid";
 import { FeedbackHeaderActions } from "@/components/feedback/feedback-header-actions";
-import { CreateFeedbackDialog } from "@/components/feedback/create-feedback-dialog";
+import { NewFeedbackButton } from "@/components/feedback/new-feedback-button";
 import { DataGrid } from "@/components/data-grid/data-grid";
 import { DEFAULT_FEEDBACK_QUERY } from "@/lib/feedback-query";
 
@@ -99,6 +103,8 @@ describe("Feedback workspace layout", () => {
   beforeEach(() => {
     push.mockClear();
     refresh.mockClear();
+    openPanel.mockClear();
+    currentPanel = null;
     installLocalStorage();
     setViewport(false);
   });
@@ -108,7 +114,7 @@ describe("Feedback workspace layout", () => {
       h(
         "div",
         null,
-        h(FeedbackHeaderActions, { orgSlug: "acme", workspaceSlug: "core" }),
+        h(FeedbackHeaderActions),
         h(FeedbackGrid, feedbackGridProps()),
       ),
     );
@@ -134,16 +140,9 @@ describe("Feedback workspace layout", () => {
     );
   });
 
-  describe("CreateFeedbackDialog trigger variants", () => {
+  describe("NewFeedbackButton trigger variants", () => {
     it("renders an icon-only, ARIA-labeled trigger for the toolbar variant", () => {
-      render(
-        h(CreateFeedbackDialog, {
-          orgSlug: "acme",
-          workspaceSlug: "core",
-          revalidatePathStr: "/acme/core/feedback",
-          onCreated: vi.fn(),
-        }),
-      );
+      render(h(NewFeedbackButton));
 
       const button = screen.getByRole("button", { name: "New Feedback" });
       expect(button).toHaveAttribute("aria-label", "New Feedback");
@@ -151,19 +150,27 @@ describe("Feedback workspace layout", () => {
     });
 
     it("renders a visible-label call-to-action trigger for the empty-state variant", () => {
-      render(
-        h(CreateFeedbackDialog, {
-          orgSlug: "acme",
-          workspaceSlug: "core",
-          revalidatePathStr: "/acme/core/feedback",
-          onCreated: vi.fn(),
-          variant: "empty-state",
-        }),
-      );
+      render(h(NewFeedbackButton, { variant: "empty-state" }));
 
       const button = screen.getByRole("button", { name: "New Feedback" });
       expect(button).not.toHaveAttribute("aria-label");
       expect(within(button).getByText("New Feedback")).not.toHaveClass("hidden");
+    });
+
+    it("opens the composer in the shared detail-panel slot instead of a modal", () => {
+      render(h(NewFeedbackButton));
+      fireEvent.click(screen.getByRole("button", { name: "New Feedback" }));
+      expect(openPanel).toHaveBeenCalledWith("feedback-new", "new");
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("does not reopen (and push history) when the composer is already open", () => {
+      currentPanel = { type: "feedback-new", id: "new" };
+      render(h(NewFeedbackButton));
+      const button = screen.getByRole("button", { name: "New Feedback" });
+      expect(button).toHaveAttribute("aria-expanded", "true");
+      fireEvent.click(button);
+      expect(openPanel).not.toHaveBeenCalled();
     });
   });
 
@@ -172,7 +179,7 @@ describe("Feedback workspace layout", () => {
       h(
         "div",
         null,
-        h(FeedbackHeaderActions, { orgSlug: "acme", workspaceSlug: "core" }),
+        h(FeedbackHeaderActions),
         h(FeedbackGrid, feedbackGridProps({ query: { ...DEFAULT_FEEDBACK_QUERY, type: "IDEA" } })),
       ),
     );

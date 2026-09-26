@@ -26,6 +26,13 @@ export type TimelineEngineProps = {
   squads: Array<{ id: string; name: string; color: string }>;
   workspaceId: string;
   unscheduledItems: import("../unscheduled-items-panel").UnscheduledItem[];
+  // Gates the LAUNCHING/LAUNCHED horizon rows. Any item still in a launch
+  // horizon while this is off folds into the SHIPPED row rather than
+  // disappearing — see internalBucketFor in lib/roadmap.ts. Optional and
+  // defaults to true (today's unrestricted behavior) so existing tests that
+  // don't pass it are unaffected; real page call sites always pass the
+  // workspace's actual flag explicitly.
+  launchWorkflowEnabled?: boolean;
 };
 
 export function TimelineToolbar({
@@ -83,6 +90,7 @@ export function TimelineCard({
   onOpen,
   onEditDates,
   overlapCount = 1,
+  groupBadge = null,
   children,
   className = "",
   editControlClassName = "mr-1",
@@ -94,6 +102,8 @@ export function TimelineCard({
   onOpen: () => void;
   onEditDates: () => void;
   overlapCount?: number;
+  /** The active custom-field grouping's value for this item, if any — shown as a small pill so grouping by a custom field stays legible per card. */
+  groupBadge?: { label: string; color: string | null } | null;
   children?: ReactNode;
   className?: string;
   editControlClassName?: string;
@@ -127,6 +137,12 @@ export function TimelineCard({
           {ROADMAP_DELIVERY_STATUS_LABELS[item.deliveryStatus]}
         </span>
         <span data-timeline-title className="min-w-0 flex-1 truncate">{item.title}</span>
+        {groupBadge ? (
+          <span className="hidden shrink-0 items-center gap-1 rounded-full border border-white/50 px-1.5 py-0.5 text-[10px] text-white @[160px]/timeline-card:inline-flex" aria-label={`${groupBadge.label} (grouping field)`}>
+            {groupBadge.color ? <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: groupBadge.color }} /> : null}
+            {groupBadge.label}
+          </span>
+        ) : null}
         {overlapCount > 1 ? <span className="hidden shrink-0 rounded border border-white/60 px-1 text-[10px] @[240px]/timeline-card:inline-flex">{overlapCount} overlapping</span> : null}
       </span>
       {editable ? <button

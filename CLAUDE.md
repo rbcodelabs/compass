@@ -1,4 +1,29 @@
+@AGENTS.md
+
 # Compass — Project Notes
+
+## Architecture decisions live in Compass, not the repo
+
+**Compass Docs is the authoritative home for Compass ADRs.** They sit under the
+[**Architecture Decisions**](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/57218788-1db1-4148-b954-b98fb7055c62)
+parent doc in the `rbcodelabs/compass` workspace. This is what
+`Products/Compass/pm-config.md` already routes to — both `review_requests` and
+`decision_records` resolve to the `compass_decisions` provider.
+
+- **To record a new architecture decision:** create a child Doc under that
+  parent, then route it for approval with `request_decision` using
+  `subjectType: "DOC"`.
+- **Never self-certify.** Do not write `Status: Accepted` on your own record.
+  Approval is an event that comes back from the provider; if it did not come
+  back, the decision is not approved.
+- **`docs/decisions/` holds pointer stubs only.** The 16 historical ADRs were
+  migrated to Compass on 2026-09-19; the files remain as stubs solely so the
+  ~85 existing references across the codebase keep resolving. **Do not add new
+  files to that directory**, and do not expand a stub back into a full record.
+  This has already been violated twice while the migrating PR sat unmerged
+  (ADR 0015 got it right; ADR 0016 "Workspace Updates" and the ADR 0017 draft
+  did not, and were fixed after the fact) — this line existing in `main` is
+  the fix, so trust it over any full ADR file you find in the directory.
 
 ## Secrets
 
@@ -12,9 +37,16 @@
   - To rotate: `vercel env rm REPAIR_SECRET production` then `vercel env add REPAIR_SECRET production` (paste the 1Password value, no trailing newline), then **redeploy**.
   - Verify without mutating real data: `POST` with a garbage `orgSlug` (e.g. `__verify-probe__`) — a correct secret returns `404 "No org found with slug ..."`; a wrong/stale secret returns `401 Unauthorized`.
 
+- **`COMPASS_VERCEL_BYPASS_SECRET`** — Vercel Deployment Protection bypass for this project's `*.vercel.app` preview and production URLs. **Read it from the agent-harness env var; do not go looking for it in 1Password.**
+  - Pass as the header `x-vercel-protection-bypass: $COMPASS_VERCEL_BYPASS_SECRET`. Without it, preview URLs answer **302 → `vercel.com/sso-api`** and nothing else works.
+  - It clears *Vercel's* SSO gate only — it is **not** app auth. NextAuth login is still required for any authenticated page.
+  - Unlike the secrets above, this one is not consumed by the app at runtime, so there is nothing to redeploy after changing it.
+
 **Standing rule for any secret in this project:** the moment you rotate a value in Vercel, save it to 1Password *before* doing anything else with it (before testing, before moving to the next step) — a dropped connection or a session that dies mid-task should never mean losing the value again. If a saved 1Password copy no longer matches what's live in Vercel (write-only vars can't be read back to confirm), treat it as an incident: rotate fresh, save immediately, redeploy, and verify live — don't assume the stale copy might still work.
 
 ### Reading a secret: the only correct order
+
+This ordering is about the **app-consumed** secrets above (`MIGRATION_SECRET`, `REPAIR_SECRET`). It does **not** apply to `COMPASS_VERCEL_BYPASS_SECRET`, which is read straight from the harness env var — see its entry above.
 
 Vercel env values are **write-only**. `vercel env pull` and `vercel env ls` will happily return a var as present-but-blank, and that tells you **nothing** about the value the running deployment actually has.
 

@@ -8,19 +8,36 @@ import { AgentActivity } from "@/components/settings/agent-activity";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
 import { ownerAgentActivityWhere } from "@/lib/agent-activity-visibility";
+import { ConnectedAppsPanel } from "@/components/settings/connected-apps-panel";
+import { getConnectedAppsForUser } from "@/lib/oauth/connected-apps";
+import { McpConnectorsPanel } from "@/components/settings/mcp-connectors-panel";
+import { trustedCompassBaseUrl } from "@/lib/compass-url";
+import { CONNECTOR_DEFINITIONS } from "@/lib/mcp-connectors/config";
+// Shared with the callback route that produces these params, so the two cannot
+// disagree about their names again (ADR-0018).
+import { readConnectorNotice } from "@/lib/mcp-connectors/notice";
+import { listConnectedSlugs, mcpConnectorsAvailable } from "@/lib/mcp-connectors/store";
 
 export const metadata = { title: "My agents" };
 
-export default async function AgentsPage() {
+export default async function AgentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const prisma = getPrisma();
   const userId = session.user.id;
-  const [agents, workspaces, keys] = await Promise.all([
+  const params = await searchParams;
+  const [agents, workspaces, keys, connectedApps, connectorsAvailable] = await Promise.all([
     prisma.agent.findMany({ where: { ownerUserId: userId }, orderBy: { createdAt: "asc" } }),
     prisma.workspace.findMany({ where: { members: { some: { userId } } }, select: { id: true, name: true, slug: true, organization: { select: { slug: true } } } }),
     prisma.apiKey.findMany({ where: { userId, purpose: "AGENT" }, select: { id: true, agentId: true, name: true, keyPrefix: true, expiresAt: true, revokedAt: true }, orderBy: { createdAt: "desc" } }),
+    getConnectedAppsForUser(userId),
+    mcpConnectorsAvailable(),
   ]);
+  // Origin-scoped: a grant registered on production is a different OAuth client
+  // from one registered on a preview branch, so a preview must not show it.
+  const connectedConnectorSlugs = connectorsAvailable
+    ? new Set(await listConnectedSlugs(userId, trustedCompassBaseUrl().origin, prisma))
+    : new Set<string>();
   const workspaceIds = workspaces.map((w) => w.id);
   const agentIds = agents.map((a) => a.id);
   const [grants, activity] = await Promise.all([
@@ -31,6 +48,17 @@ export default async function AgentsPage() {
     <Link href="/dashboard" className="text-sm text-text-subtle underline">Back to Compass</Link>
     <PageHeader title="My agents" description="Account-wide identities. Use one agent key across workspaces where administrators have enabled access." />
     <AccountAgentsPanel enabled={agentsEnabled()} agents={agents.map((a) => ({ ...a, keys: keys.filter((k) => k.agentId === a.id), grants: grants.filter((g) => g.agentId === a.id).map((g) => { const w = workspaces.find((w) => w.id === g.workspaceId)!; return { id: g.id, name: w.name, href: `/${w.organization.slug}/${w.slug}/settings`, access: g.access, revoked: !!g.revokedAt }; }) }))} />
+    <ConnectedAppsPanel connections={connectedApps} />
+    <McpConnectorsPanel
+      available={connectorsAvailable}
+      notice={readConnectorNotice(params)}
+      connectors={CONNECTOR_DEFINITIONS.map((definition) => ({
+        slug: definition.slug,
+        displayName: definition.displayName,
+        serverUrl: definition.serverUrl,
+        connected: connectedConnectorSlugs.has(definition.slug),
+      }))}
+    />
     <SettingsSection title="Recent agent activity" description="Latest 50 operations in accessible workspaces, including attempts without a recorded workspace. Success means the operation completed, not that the underlying task is finished."><AgentActivity rows={activity.map((r) => ({ ...r, agentName: agents.find((a) => a.id === r.agentId)?.name ?? "Agent", workspaceName: workspaces.find((w) => w.id === r.workspaceId)?.name ?? "Workspace not recorded" }))} /></SettingsSection>
   </main>;
 }

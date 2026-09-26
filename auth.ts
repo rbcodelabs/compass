@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Resend from "next-auth/providers/resend";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
+import Passkey from "next-auth/providers/passkey";
 import getPrisma from "@/lib/db";
 import { authConfig } from "@/auth.config";
 import { createLazyPrismaAuthAdapter } from "@/lib/lazy-prisma-auth-adapter";
@@ -17,8 +18,12 @@ import { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "@/lib/preview-a
  *     provider, auth.js won't complain about MissingAdapter.
  *
  * PRODUCTION (Vercel preview / prod):
- *   • Resend (magic-link email) + Google (OAuth) + PrismaAdapter (database sessions).
+ *   • Resend (magic-link email) + Google (OAuth) + Passkey (WebAuthn) + PrismaAdapter (database sessions).
  *   • Credentials provider is absent — never ships in production.
+ *   • Passkey registration/sign-in UI is additionally gated by
+ *     lib/passkeys.ts's passkeysEnabled() — the provider itself is always
+ *     registered here so /api/auth/webauthn-options exists whenever the flag
+ *     is flipped on without a redeploy.
  *
  * Portal sessions and Auth.js sessions are intentionally non-interoperable.
  * Do not attempt to unify them. Portal accounts (public feedback/roadmap
@@ -70,6 +75,14 @@ export const { handlers, auth, signIn, signOut } = isDev
         async session({ session, token }) {
           if (token?.id && session.user) {
             session.user.id = token.id as string;
+            // JWT claims survive profile edits; use the account as the identity source.
+            const profile = await getPrisma().user.findUnique({
+              where: { id: session.user.id }, select: { name: true, email: true },
+            });
+            if (profile) {
+              session.user.name = profile.name;
+              session.user.email = profile.email;
+            }
           }
           return session;
         },
@@ -90,8 +103,10 @@ export const { handlers, auth, signIn, signOut } = isDev
           // OAuthAccountNotLinked — safe because Google verifies email ownership.
           allowDangerousEmailAccountLinking: true,
         }),
+        Passkey,
       ],
       adapter: createLazyPrismaAuthAdapter(),
+      experimental: { enableWebAuthn: true },
       ...(process.env.VERCEL_ENV === "preview" && process.env.PREVIEW_AUTOMATION_ENABLED === "1" ? {
         cookies: { sessionToken: { name: PREVIEW_SESSION_COOKIE, options: PREVIEW_SESSION_OPTIONS } },
       } : {}),

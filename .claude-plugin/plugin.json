@@ -1,0 +1,6 @@
+{
+  "name": "compass",
+  "displayName": "Compass",
+  "description": "How to use Compass — data model, URL structure, MCP tool catalog, and end-to-end product discovery workflows.",
+  "skills": "plugins/compass/skills"
+}

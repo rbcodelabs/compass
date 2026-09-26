@@ -12,6 +12,10 @@ export const authConfig: NextAuthConfig = {
     verifyRequest: "/login?check-email=1",
   },
   callbacks: {
+    signIn() {
+      // Managed pilot identities are issued only by deployment-bound signed grants.
+      return !process.env.PREVIEW_DATABASE_MODE || process.env.PREVIEW_DATABASE_MODE === "scoped-role";
+    },
     authorized({ auth }) {
       return !!auth?.user;
     },

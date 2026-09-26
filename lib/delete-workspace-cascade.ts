@@ -4,7 +4,10 @@ import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
+import { deleteWorkspaceUpdates } from "@/lib/workspace-updates-cleanup";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
+import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
+import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 
 /**
  * Deletes a single workspace and every row that hangs off it, children before
@@ -19,6 +22,7 @@ import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
  * FeedbackAttachment, CanvasNodePosition).
  */
 export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceId: string, options: { skipBlobCleanup?: boolean } = {}) {
+  await assertDocumentPilotCleanupReviewed(prisma, workspaceId);
   const ids = async (
     rows: Promise<{ id: string }[]>
   ): Promise<string[]> => (await rows).map((r) => r.id);
@@ -195,6 +199,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   // 13. Workspace-scoped singletons (both Restrict toward Workspace).
   await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
   await deleteWorkspaceAgentData(prisma, workspaceId);
+  await deleteWorkspaceUpdates(prisma, workspaceId);
   await prisma.workspaceScoringConfig.deleteMany({ where: { workspaceId } });
   await prisma.canvasNodePosition.deleteMany({ where: { workspaceId } });
 
@@ -202,5 +207,8 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
   await prisma.squad.deleteMany({ where: { workspaceId } });
   await prisma.doc.deleteMany({ where: { workspaceId } });
-  await prisma.workspace.delete({ where: { id: workspaceId } });
+  await prisma.$transaction(async tx => {
+    await tx.workspace.delete({ where: { id: workspaceId } });
+    await deleteWorkspaceAnalytics(tx, workspaceId);
+  });
 }

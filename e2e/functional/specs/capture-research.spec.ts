@@ -344,4 +344,64 @@ test.describe("Capture — research study", () => {
     await expect(page.getByText("I expected the comparison to explain the tradeoffs.")).toBeVisible()
     await expect(page.getByRole("link", { name: "test-image.png" })).toBeVisible()
   })
+
+  test("runs a guided usability test against a Compass Artifact target", async ({ page, base, browser, baseURL }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    const stamp = Date.now()
+    const artifactTitle = `E2E Research Artifact ${stamp}`
+    const studyName = `E2E artifact target ${stamp}`
+
+    // Create an HTML_UPLOAD artifact via the UI, reusing the exact
+    // Docs → New artifact flow from artifacts.spec.ts.
+    await page.goto(`${base}/docs/artifacts/new`)
+    await page.getByLabel("Title").fill(artifactTitle)
+    await page.getByLabel("Self-contained HTML file").setInputFiles({
+      name: "research-prototype.html",
+      mimeType: "text/html",
+      buffer: Buffer.from(`<!doctype html><html><body style="font-family:system-ui;padding:24px"><h1>Prototype checkout</h1><p>Research fixture artifact</p></body></html>`),
+    })
+    await page.getByRole("button", { name: "Create artifact" }).click()
+    await page.waitForURL(/\/docs\/artifacts\/[0-9a-f-]+$/)
+
+    // Create a USABILITY_TEST study whose target is that artifact rather
+    // than an external URL.
+    await page.goto(`${base}/capture/new`)
+    await page.getByLabel("Guided usability test").check()
+    await page.getByLabel("Study name").fill(studyName)
+    await page.getByLabel("What are you trying to learn?").fill("Learn whether people can complete checkout in the prototype")
+    await page.getByLabel("Compass Artifact").check()
+    await page.getByRole("combobox", { name: "Artifact to test" }).click()
+    await page.getByRole("option", { name: artifactTitle }).click()
+    await page.getByLabel("Target duration").selectOption("15")
+    await page.getByRole("textbox", { name: "Task 1", exact: true }).fill("Find the checkout button and complete a purchase.")
+    await page.getByRole("button", { name: "Create and activate study" }).click()
+
+    await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
+    // The artifact title/link is rendered twice on this page: once in the
+    // summary section and once in the read-only "Prototype artifact" field of
+    // the settings form below it. Either instance proves the target linked
+    // correctly, so assert on the first match rather than requiring a unique one.
+    await expect(page.getByRole("link", { name: artifactTitle }).first()).toBeVisible()
+    const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
+
+    const anonymous = await browser.newContext({ storageState: undefined })
+    const participant = await anonymous.newPage()
+    await participant.setViewportSize({ width: 390, height: 844 })
+    await participant.goto(shareUrl.replace(/^https?:\/\/[^/]+/, baseURL!))
+    await expect(participant.getByText(/Please think aloud/)).toBeVisible()
+    await participant.getByRole("button", { name: /Use chat/ }).click()
+
+    await expect(participant.getByRole("heading", { name: "Prototype" })).toBeVisible()
+    // The sandboxed frame shows "Loading preview…" until the srcdoc iframe's
+    // injected handshake script posts back a READY message (see
+    // components/artifact-sandboxed-frame.tsx). Assert the loading state
+    // resolves rather than asserting readiness immediately, since the
+    // handshake can complete before this assertion runs.
+    await expect(participant.getByText("Loading preview…")).toBeHidden({ timeout: 10_000 })
+    await expect(
+      participant.frameLocator(`iframe[title="Prototype for ${studyName} preview"]`).getByRole("heading", { name: "Prototype checkout" }),
+    ).toBeVisible()
+
+    await anonymous.close()
+  })
 })

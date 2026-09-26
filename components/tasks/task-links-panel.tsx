@@ -131,7 +131,14 @@ export function TaskLinksPanel({ taskId, initialLinks, revalidatePathStr, linkab
         onOpenChange={setDialogOpen}
         revalidatePathStr={revalidatePathStr}
         linkableTargets={linkableTargets}
-        onLinked={(link) => setLinks((prev) => [...prev, link])}
+        onLinked={(link) => setLinks((prev) => {
+          const duplicateIndex = prev.findIndex((existing) =>
+            existing.id === link.id ||
+            (existing.linkedType === link.linkedType && existing.linkedId === link.linkedId)
+          );
+          if (duplicateIndex === -1) return [...prev, link];
+          return prev.map((existing, index) => index === duplicateIndex ? link : existing);
+        })}
       />
     </div>
   );

@@ -2,13 +2,14 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Target, Lightbulb, FlaskConical, Map, MessageSquare, ListChecks, MessageSquareCheck } from "lucide-react"
+import { Target, Lightbulb, FlaskConical, Map, MessageSquare, ListChecks, MessageSquareCheck, Clock3, BarChart3 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface BottomNavProps {
   orgSlug: string
   workspaceSlug: string
   researchCaptureEnabled?: boolean
+  updatesEnabled?: boolean
 }
 
 const baseNavItems = [
@@ -16,14 +17,16 @@ const baseNavItems = [
   { label: "Discovery", path: "discovery", Icon: Lightbulb },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
+  { label: "Metrics", path: "metrics", Icon: BarChart3 },
   { label: "Tasks", path: "tasks", Icon: ListChecks },
   { label: "Decisions", path: "decisions", Icon: MessageSquareCheck },
 ]
 
-export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = true }: BottomNavProps) {
+export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = true, updatesEnabled = false }: BottomNavProps) {
   const pathname = usePathname()
   const base = `/${orgSlug}/${workspaceSlug}`
   const navItems = [
+    ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
     ...baseNavItems,
     researchCaptureEnabled
       ? { label: "Capture", path: "capture", Icon: MessageSquare }
@@ -32,7 +35,7 @@ export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = tru
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden bg-sidebar border-t border-sidebar-border"
+      className="fixed bottom-0 left-0 right-0 z-40 flex overflow-x-auto md:hidden bg-sidebar border-t border-sidebar-border"
       aria-label="Primary navigation"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
@@ -45,7 +48,7 @@ export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = tru
             key={path}
             href={href}
             className={cn(
-              "relative flex flex-1 flex-col items-center justify-center gap-1 py-2.5 min-w-0 min-h-[56px] transition-colors duration-150",
+              "relative flex flex-1 flex-col items-center justify-center gap-1 py-2.5 min-w-[64px] min-h-[56px] transition-colors duration-150",
               isActive
                 ? "text-primary"
                 : "text-text-subtle hover:text-text-primary active:text-text-primary"

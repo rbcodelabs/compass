@@ -40,8 +40,35 @@
 /**
  * Every panel that can be pinned, including the two Phase 2 Docs panels.
  * Reserved here deliberately — see the module doc.
+ *
+ * ## `"agent"` is a left-hand rail, and reads `pinned` as "docked open"
+ *
+ * The agent rail is the one entry here that is not a right-hand detail panel,
+ * and it uses this module's shape with one deliberate reinterpretation: its
+ * `pinned` flag means *the rail is open*, not *the user prefers a column over
+ * an overlay*.
+ *
+ * That is not a shortcut — the rail genuinely has no overlay-vs-column
+ * preference to store. A detail panel's overlay mode is a user choice, so it
+ * needs a bit. The rail's overlay mode is forced by arithmetic: nav + rail +
+ * main's 480px floor + an open detail panel do not always fit, and when they
+ * do not, the rail is the one that yields (the detail panel never moves). That
+ * decision is made from live layout measurement at render time, so there is
+ * nothing about it worth persisting. What *is* worth persisting is whether the
+ * rail was open, which is exactly one bit — so it reuses this one rather than
+ * adding a second cookie that could disagree with it.
+ *
+ * The width half of the value is used unchanged, and the shared
+ * PANEL_WIDTH_MIN/MAX bounds already suit a chat column, so the rail needs no
+ * constants of its own.
  */
-export const PANEL_IDS = ["detail", "docsComments", "docsHistory"] as const;
+export const PANEL_IDS = [
+  "detail",
+  "docsComments",
+  "docsHistory",
+  "artifactComments",
+  "agent",
+] as const;
 
 export type PanelId = (typeof PANEL_IDS)[number];
 

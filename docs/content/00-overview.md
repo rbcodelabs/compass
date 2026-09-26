@@ -36,7 +36,8 @@ The **OST Tree view** in Discovery lets you see the full tree at a glance: outco
 
 Beyond the core OST workflow, Compass includes:
 
-- **Workspace Search** — Press **⌘K** on macOS or **Ctrl+K** on Windows and Linux, or choose Search in the desktop sidebar, to find Opportunities, Solutions, Experiments, Roadmap items, Tasks, Feedback, Docs, and product Help articles by title or topic. Entity results stay within your current workspace; use the workspace switcher before searching another workspace. Help results search Compass's own product documentation and aren't workspace-scoped.
+- **Updates** — Catch up on grouped workspace activity, expand the changes behind each story, and explicitly mark a loaded snapshot caught up. Available when Updates capture is enabled; see [Updates](/help/22-updates).
+- **Workspace Search** — Press **⌘K** on macOS or **Ctrl+K** on Windows and Linux, or choose Search in the desktop sidebar, to find Opportunities, Solutions, Experiments, Roadmap items, Tasks, Feedback, Docs, and User Guide articles by title or topic. Entity results stay within your current workspace; use the workspace switcher before searching another workspace. User Guide results search Compass's own product documentation and aren't workspace-scoped.
 - **Capture** — Collect direct feedback and run shareable customer-interview studies without moving research into a separate product.
 - **Feedback Portal** — A public-facing page where customers can submit feedback and vote on requests. Internal teams triage incoming feedback by linking it to opportunities.
 - **Docs** — A rich-text editor for internal documentation. Pages live in a hierarchical tree and support inline screenshots.
@@ -47,9 +48,11 @@ Beyond the core OST workflow, Compass includes:
 
 ## Signing In
 
-Compass supports email magic-link sign-in by default — enter your email and click the link sent to your inbox. In production, you can also sign in with **Continue with Google**. Development environments don't register a Google provider, so local sign-in instead shows a **Dev Login** button for instant access.
+Compass supports email magic-link sign-in by default — enter your email and click the link sent to your inbox. In production, you can also sign in with **Continue with Google**, or with a **passkey** if you've registered one (Face ID, Touch ID, a security key, or your device's built-in authenticator) — a faster, phishing-resistant option that doesn't need a password or a round trip to your inbox. Development environments don't register a Google or passkey provider, so local sign-in instead shows a **Dev Login** button for instant access.
 
-When you return to the Compass homepage while signed in, the header provides a direct path back to your work. A single-workspace account gets a Dashboard shortcut; accounts with multiple workspaces can choose one from the workspace menu; and new accounts can continue workspace setup. Your avatar menu also includes Dashboard or setup, Help, and Sign out.
+Manage your passkeys from your avatar menu → **Passkeys**: register a new one, see when each was added and which device it's tied to, and revoke any you no longer use. Registering a passkey adds it to the account you're already signed in to — it doesn't replace your existing sign-in method, so Google and magic-link both keep working.
+
+When you return to the Compass homepage while signed in, the header provides a direct path back to your work. A single-workspace account gets a Dashboard shortcut; accounts with multiple workspaces can choose one from the workspace menu; and new accounts can continue workspace setup. Your avatar menu also includes Dashboard or setup, User Guide, and Sign out.
 
 ## Getting Started
 

@@ -31,6 +31,12 @@ Portal** with voting, hierarchical **Docs**, **Squads**, **Custom Fields**,
 per-workspace **Branding**, and an **MCP API** that lets AI agents read and write
 discovery data programmatically.
 
+The opt-in **[Updates](docs/content/22-updates.md)** landing page groups recent
+workspace activity into inspectable stories, with personal catch-up state and
+explicit Mark caught up / Undo controls. It requires the registered
+`060_workspace_updates` migration and `WORKSPACE_UPDATES_ENABLED=1`; capture is
+prospective, with no historical backfill.
+
 Full product documentation lives in [`docs/content/`](docs/content/), starting
 with [the overview](docs/content/00-overview.md).
 

@@ -30,6 +30,9 @@ import { claimInterviewProcessing, finishInterviewProcessing, failPendingIntervi
 import { analysisStep } from "@/lib/research-analysis-deadline"
 import { handoffKind, parseProcessingState, processingStatus } from "@/lib/pm-agent-processing"
 import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
+import { trustedCompassBaseUrl } from "@/lib/compass-url"
+import { connectorDefinition } from "@/lib/mcp-connectors/config"
+import { listConnectedSlugs } from "@/lib/mcp-connectors/store"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -253,6 +256,22 @@ export async function POST(request: NextRequest) {
 
   const mcpBaseUrl = request.nextUrl.origin
   const bypassSecret = process.env.MCP_BYPASS_SECRET
+
+  // Third-party MCP servers this user has connected (ADR-0018). Resolved under
+  // `trustedCompassBaseUrl().origin` rather than `request.nextUrl.origin` because
+  // that is the origin the gateway itself resolves the grant under — a turn
+  // reached via some other host must not silently see a different grant set.
+  //
+  // Failure is non-fatal on purpose: a connector lookup that throws must not cost
+  // the user their turn, so it degrades to "no connectors" and the turn proceeds
+  // exactly as it did before this feature existed.
+  const connectorSlugs = await listConnectedSlugs(userId, trustedCompassBaseUrl().origin, prisma).catch(error => {
+    console.error("[agent-turn] could not list connected MCP connectors", error)
+    return [] as string[]
+  })
+  const connectors = connectorSlugs
+    .map(slug => connectorDefinition(slug))
+    .filter((definition): definition is NonNullable<typeof definition> => definition !== null)
   const entryScript = readEntryScript()
   const encoder = new TextEncoder()
 
@@ -304,6 +323,23 @@ export async function POST(request: NextRequest) {
               `Skill bodies are already present; do not attempt to invoke a Skill or filesystem tool.\n\n` +
               preparedPacks.systemPromptAppendices.join("\n\n"),
             AGENT_PACK_CONFIG: JSON.stringify({ pluginPaths: preparedPacks.pluginPaths, skillIds: preparedPacks.skillIds }),
+            // Slugs and display metadata only. The sandbox is handed a Compass
+            // gateway URL per slug and attaches its own AGENT_TURN bearer, so no
+            // third-party token ever enters the microVM (ADR-0018).
+            //
+            // Omitted entirely when nothing is connected, so a turn for a user with
+            // no grants produces byte-identical env to before this feature existed.
+            ...(connectors.length
+              ? {
+                  AGENT_MCP_CONNECTORS: JSON.stringify(
+                    connectors.map(definition => ({
+                      slug: definition.slug,
+                      displayName: definition.displayName,
+                      ...(definition.agentGuidance ? { guidance: definition.agentGuidance } : {}),
+                    })),
+                  ),
+                }
+              : {}),
             ...(bypassSecret ? { MCP_BYPASS_SECRET: bypassSecret } : {}),
           },
           detached: true,

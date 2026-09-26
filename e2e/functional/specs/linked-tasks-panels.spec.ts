@@ -16,6 +16,7 @@
  */
 import pg from "pg";
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 
 const S = process.env.PGSCHEMA ? `${process.env.PGSCHEMA}_dev` : "compass_dev";
 
@@ -67,9 +68,7 @@ test.describe("Linked tasks — Opportunity panel", () => {
     // ── 1. Create an opportunity ──────────────────────────────────────────
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-    await page.getByLabel("Title").fill(oppTitle);
-    await page.getByRole("button", { name: "Create Opportunity" }).click();
+    await createOpportunityFromBoard(page, oppTitle);
     await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
     // ── 2. Open its sidebar panel ─────────────────────────────────────────

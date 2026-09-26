@@ -1,4 +1,5 @@
-import getPrisma from "@/lib/db"
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import { fail, ok } from "@/lib/mcp-output"
 import type { SolutionStatus } from "@/lib/types"
 
@@ -27,10 +28,10 @@ export async function updateSolutionStatus({ solutionId, status }: {
     return ok(`**"${solution.title}"** is already at ${status}.\nID: ${solution.id}`, data)
   }
 
-  await prisma.solution.update({
+  await captureWorkspaceMutation(prisma, "solution", "update", "MCP", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
     data: { status, updatedAt: new Date() },
-  })
+  }))
 
   return ok(`**"${solution.title}"** moved from ${solution.status} → ${status}.\nID: ${solution.id}`, data)
 }

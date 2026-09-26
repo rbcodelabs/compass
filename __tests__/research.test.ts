@@ -95,4 +95,20 @@ describe("research capture helpers", () => {
     expect(prompt).toContain("Why did that matter")
     expect(prompt).not.toContain("Helio")
   })
+
+  it("builds a neutral think-aloud moderator prompt for an artifact-backed usability test without a raw URL", () => {
+    const prompt = buildResearchPrompt(
+      [{ id: "1", text: "Find a plan that works for your team." }],
+      15,
+      "Learn where pricing is confusing",
+      undefined,
+      { studyType: "USABILITY_TEST", isArtifact: true },
+    )
+
+    expect(prompt).toContain("think aloud")
+    expect(prompt).toContain("prototype")
+    expect(prompt).not.toContain("http://")
+    expect(prompt).not.toContain("https://")
+    expect(prompt).not.toContain("live product at")
+  })
 })

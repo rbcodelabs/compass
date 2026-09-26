@@ -29,9 +29,10 @@ test("task agent assignment persists, filters, replaces a human and survives sus
   if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/compass_e2e") throw new Error("Task agent tests require the dedicated local compass_e2e database");
   const pool = new pg.Pool({ connectionString: url.toString() });
   const agentId = randomUUID();
-  const name = `Assignment agent ${agentId.slice(0, 8)}`;
+  const name = `Assignment agent with a deliberately long display name ${agentId.slice(0, 8)}`;
   const title = `Agent task ${agentId.slice(0, 8)}`;
   let taskId: string | undefined;
+  let originalUserName: string | null | undefined;
 
   const panel = page.locator('[data-slot="sheet-content"]');
   const assigneePicker = () => page.getByRole("combobox", { name: "Assignee", exact: true });
@@ -70,6 +71,9 @@ test("task agent assignment persists, filters, replaces a human and survives sus
 
   try {
     const user = (await pool.query("SELECT id,name,email FROM compass_dev.users WHERE email='dev@localhost.dev'")).rows[0];
+    originalUserName = user.name;
+    user.name = "Person with a deliberately long display name for picker layout";
+    await pool.query("UPDATE compass_dev.users SET name=$1 WHERE id=$2", [user.name, user.id]);
     const workspace = (await pool.query("SELECT id FROM compass_dev.workspaces WHERE slug='e2e-workspace'")).rows[0];
     await pool.query("INSERT INTO compass_dev.agents (id,owner_user_id,name) VALUES ($1,$2,$3)", [agentId, user.id, name]);
     await pool.query("INSERT INTO compass_dev.agent_workspace_grants (agent_id,workspace_id,access,granted_by_user_id) VALUES ($1,$2,'WRITE',$3)", [agentId, workspace.id, user.id]);
@@ -96,7 +100,7 @@ test("task agent assignment persists, filters, replaces a human and survives sus
     // header ("Assignee: Agent: …") made.
     await page.reload();
     await expect(panel).toBeVisible({ timeout: 15_000 });
-    await expect(panel.getByRole("combobox", { name: "Assignee", exact: true })).toContainText(`Agents · ${name}`, { timeout: 15_000 });
+    await expect(panel.getByRole("combobox", { name: "Assignee", exact: true })).toContainText(name, { timeout: 15_000 });
 
     // Nothing in the edit surface may overflow its container — the assertion
     // the old "Edit task" dialog's bounding box carried, now made against the
@@ -107,6 +111,64 @@ test("task agent assignment persists, filters, replaces a human and survives sus
       expect(bounds).not.toBeNull();
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(panelBounds.x + panelBounds.width);
     }
+
+    // Reproduce the compact-header regression at the pinned panel's minimum
+    // width. The popup must not inherit the roughly 10rem trigger width, and
+    // long labels must stay in compact, single-line rows without losing their
+    // complete accessible name or search text.
+    await panel.getByRole("button", { name: "Pin panel", exact: true }).click();
+    const pinned = page.locator('[data-slot="pinned-panel"]');
+    await expect(pinned).toBeVisible();
+    await pinned.getByRole("separator", { name: "Resize panel" }).press("Home");
+    await expect(pinned.getByRole("separator", { name: "Resize panel" })).toHaveAttribute("aria-valuenow", "320");
+    const compactTrigger = pinned.getByRole("combobox", { name: "Assignee", exact: true });
+    await compactTrigger.click();
+    const picker = page.locator('[data-slot="combobox-content"]');
+    const pickerInput = picker.getByPlaceholder("Search people and agents…");
+    const agentOptionName = `Agents · ${name} (${user.name}) · ${agentId.slice(0, 8)}`;
+    const agentOption = page.getByRole("option", { name: agentOptionName, exact: true });
+    await expect(agentOption).toBeVisible();
+
+    const [triggerBounds, pickerBounds, optionBounds] = await Promise.all([
+      compactTrigger.boundingBox(),
+      picker.boundingBox(),
+      agentOption.boundingBox(),
+    ]);
+    expect(triggerBounds).not.toBeNull();
+    expect(pickerBounds).not.toBeNull();
+    expect(optionBounds).not.toBeNull();
+    expect(pickerBounds!.width).toBeGreaterThan(triggerBounds!.width);
+    expect(pickerBounds!.width).toBeGreaterThanOrEqual(320);
+    expect(pickerBounds!.x).toBeGreaterThanOrEqual(16);
+    expect(pickerBounds!.x + pickerBounds!.width).toBeLessThanOrEqual(1280 - 16);
+    expect(optionBounds!.height).toBeLessThanOrEqual(36);
+    await expect(agentOption.locator("span").first()).toHaveCSS("white-space", "nowrap");
+    await pickerInput.fill(agentId.slice(0, 8));
+    await expect(agentOption).toBeVisible();
+    const emptyStatus = picker.getByRole("status");
+    await expect(emptyStatus).toHaveAttribute("aria-live", "polite");
+    const expectOptionImmediatelyBelowSearch = async () => {
+      const [searchBounds, resultBounds] = await Promise.all([
+        pickerInput.locator("..").boundingBox(),
+        agentOption.boundingBox(),
+      ]);
+      expect(searchBounds).not.toBeNull();
+      expect(resultBounds).not.toBeNull();
+      expect(resultBounds!.y - (searchBounds!.y + searchBounds!.height)).toBeLessThanOrEqual(8);
+    };
+    await expectOptionImmediatelyBelowSearch();
+    await pickerInput.fill(`no matching assignee ${agentId}`);
+    await expect(picker.getByText("No matches.", { exact: true })).toBeVisible();
+    await expect(emptyStatus).toHaveAttribute("aria-live", "polite");
+    await page.screenshot({ path: testInfo.outputPath("assignee-picker-no-results.png"), fullPage: true });
+    await pickerInput.fill("");
+    await pickerInput.fill(agentId.slice(0, 8));
+    await expect(agentOption).toBeVisible();
+    await expect(emptyStatus).toHaveAttribute("aria-live", "polite");
+    await expectOptionImmediatelyBelowSearch();
+    await page.screenshot({ path: testInfo.outputPath("assignee-picker-pinned-desktop.png"), fullPage: true });
+    await pickerInput.fill("");
+    await page.keyboard.press("Escape");
 
     // ── Replace the agent with a human, inline ──────────────────────────────
     await assigneePicker().click();
@@ -132,7 +194,7 @@ test("task agent assignment persists, filters, replaces a human and survives sus
     await pool.query("UPDATE compass_dev.agents SET status='SUSPENDED' WHERE id=$1", [agentId]);
     await page.goto(`${base}/tasks/${taskId}`);
     await expect(page.getByRole("combobox", { name: "Assignee", exact: true })).toContainText(
-      new RegExp(`Agents · ${name}.*\\(unavailable\\)`),
+      new RegExp(`${name}.*\\(unavailable\\)`),
       { timeout: 15_000 }
     );
 
@@ -159,12 +221,23 @@ test("task agent assignment persists, filters, replaces a human and survives sus
     expect(mobileBounds.x).toBeGreaterThanOrEqual(0);
     expect(mobileBounds.x + mobileBounds.width).toBeLessThanOrEqual(390);
     await panel.getByRole("combobox", { name: "Assignee", exact: true }).click();
-    await expect(page.getByRole("option", { name: new RegExp(name) })).toBeVisible();
+    const mobilePicker = page.locator('[data-slot="combobox-content"]');
+    const mobileAgentOption = page.getByRole("option", { name: new RegExp(name) });
+    await expect(mobileAgentOption).toBeVisible();
+    const mobilePickerBounds = await mobilePicker.boundingBox();
+    expect(mobilePickerBounds).not.toBeNull();
+    expect(mobilePickerBounds!.x).toBeGreaterThanOrEqual(16);
+    expect(mobilePickerBounds!.x + mobilePickerBounds!.width).toBeLessThanOrEqual(390 - 16);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await mobilePicker.getByPlaceholder("Search people and agents…").fill(agentId.slice(0, 8));
+    await expect(mobileAgentOption).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("assignee-picker-mobile.png"), fullPage: true });
     if (process.env.COMPASS_CAPTURE_AGENT_DOCS === "1") await page.screenshot({ path: "public/screenshots/docs/tasks-agents-picker-mobile.png", fullPage: true });
   } finally {
     if (taskId) await pool.query("DELETE FROM compass_dev.tasks WHERE id=$1", [taskId]);
     await pool.query("DELETE FROM compass_dev.agent_workspace_grants WHERE agent_id=$1", [agentId]);
     await pool.query("DELETE FROM compass_dev.agents WHERE id=$1", [agentId]);
+    if (originalUserName !== undefined) await pool.query("UPDATE compass_dev.users SET name=$1 WHERE email='dev@localhost.dev'", [originalUserName]);
     await pool.end();
   }
 });

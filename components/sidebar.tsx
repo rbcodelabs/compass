@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import {
+  BarChart3,
   BookOpen,
   Building2,
   Check,
@@ -14,10 +15,13 @@ import {
   Map,
   MessageSquare,
   MessageSquareCheck,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   Sparkles,
   Target,
   Waypoints,
+  Clock3,
 } from "lucide-react"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -47,6 +51,7 @@ import { SendCompassFeedbackDialog } from "@/components/feedback/send-compass-fe
 import { signOutAction } from "@/lib/actions/auth-actions"
 import { getWorkspaceSwitchPath } from "@/lib/workspace-nav"
 import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
+import { useAgentRailOptional } from "@/components/agent/agent-rail-context"
 
 interface SidebarProps {
   orgSlug: string
@@ -59,6 +64,7 @@ interface SidebarProps {
   /** Org admins/owners see an "Org Settings" link in the account menu. */
   isOrgAdmin?: boolean
   researchCaptureEnabled?: boolean
+  updatesEnabled?: boolean
 }
 
 const baseNavItems = [
@@ -66,12 +72,60 @@ const baseNavItems = [
   { label: "Discovery", path: "discovery", Icon: Lightbulb },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
+  { label: "Metrics", path: "metrics", Icon: BarChart3 },
   { label: "Tasks", path: "tasks", Icon: ListChecks },
   { label: "Decisions", path: "decisions", Icon: MessageSquareCheck },
   { label: "Docs", path: "docs", Icon: BookOpen },
   { label: "Canvas", path: "canvas", Icon: Waypoints },
   { label: "Agent", path: "agent", Icon: Sparkles },
 ]
+
+/**
+ * Opens/closes the agent rail.
+ *
+ * ## Why a row of its own, and not a trailing button on the Agent row
+ *
+ * The Agent row has to stay a plain link to the full-page agent screen — both
+ * surfaces are keepers, and the page is the one that survives a refresh and a
+ * shared URL. That leaves `SidebarMenuAction` as the obvious home for a toggle,
+ * except its class list carries `group-data-[collapsible=icon]:hidden`: it
+ * disappears the moment the nav collapses to icons. The users who collapse the
+ * nav are *exactly* the ones making room for this rail, so that placement would
+ * hide the control from its own audience and leave them nothing but ⌘J.
+ *
+ * A sibling menu row survives the collapse as an icon with a tooltip, so the
+ * affordance is visible in both nav states. The cost is two agent-ish entries
+ * in the nav, which the distinct label and icon carry.
+ *
+ * Returns `null` outside a workspace — this sidebar also renders in the settings
+ * tree, which mounts no `AgentRailProvider` and has no rail to toggle.
+ */
+function AgentRailToggle() {
+  const rail = useAgentRailOptional()
+  // Also absent on the full-page agent screen: the rail is unavailable there,
+  // since that page already runs its own live chat.
+  if (!rail?.available) return null
+
+  const Icon = rail.open ? PanelLeftClose : PanelLeftOpen
+
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        onClick={rail.toggleRail}
+        // Not `isActive`: that styling means "this is the page you are on", and
+        // is already spoken for by the Agent row when you are on the agent
+        // screen. Open-ness is a pressed state, which is what screen readers
+        // will announce here.
+        aria-pressed={rail.open}
+        tooltip={rail.open ? "Hide agent panel (⌘J)" : "Show agent panel (⌘J)"}
+        className="relative h-9 rounded-lg text-text-secondary"
+      >
+        <Icon className={rail.open ? "text-primary" : "text-text-subtle"} aria-hidden="true" />
+        <span>Agent panel</span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  )
+}
 
 function getInitials(name: string): string {
   return name
@@ -92,16 +146,18 @@ export function Sidebar({
   workspaces,
   isOrgAdmin = false,
   researchCaptureEnabled = true,
+  updatesEnabled = false,
 }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const base = `/${orgSlug}/${workspaceSlug}`
   const navItems = [
-    ...baseNavItems.slice(0, 5),
+    ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
+    ...baseNavItems.slice(0, 6),
     researchCaptureEnabled
       ? { label: "Capture", path: "capture", Icon: MessageSquare }
       : { label: "Feedback", path: "feedback", Icon: MessageSquare },
-    ...baseNavItems.slice(5),
+    ...baseNavItems.slice(6),
   ]
 
   const otherWorkspaces = workspaces.filter(
@@ -246,6 +302,7 @@ export function Sidebar({
                   </SidebarMenuItem>
                 )
               })}
+              <AgentRailToggle />
               </SidebarMenu>
             </nav>
           </SidebarGroupContent>
@@ -300,7 +357,7 @@ export function Sidebar({
                 <DropdownMenuItem className="cursor-pointer p-0">
                   <Link href="/help" className="flex w-full items-center gap-2 px-1.5 py-1">
                     <HelpCircle className="size-3.5 shrink-0 text-text-subtle" aria-hidden="true" />
-                    Help
+                    User Guide
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem className="cursor-pointer p-0" closeOnClick={false}>
@@ -308,7 +365,13 @@ export function Sidebar({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="cursor-pointer p-0">
+                  <Link href="/settings/profile" className="flex w-full items-center px-1.5 py-1">Profile</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer p-0">
                   <Link href="/settings/agents" className="flex w-full items-center px-1.5 py-1">My agents</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer p-0">
+                  <Link href="/settings/passkeys" className="flex w-full items-center px-1.5 py-1">Passkeys</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem className="cursor-pointer p-0">
                   <form action={signOutAction} className="w-full">

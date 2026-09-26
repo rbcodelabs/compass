@@ -20,6 +20,8 @@
  * dragTo (which doesn't reliably trigger pointer-sensor-based DnD).
  */
 import { test, expect } from "../fixtures/index";
+import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
+import { openFullPage } from "../fixtures/full-page";
 import type { Locator, Page } from "@playwright/test";
 
 async function dragTo(page: Page, source: Locator, target: Locator, scrollContainer?: Locator) {
@@ -80,24 +82,24 @@ async function createValidatedSolution(page: Page, base: string, title: string) 
   await page.goto(`${base}/discovery`);
   await page.waitForLoadState("networkidle");
 
-  await page.getByRole("button", { name: /Add opportunity/i }).first().click();
-  await page.getByLabel("Title").fill(oppTitle);
-  await page.getByRole("button", { name: "Create Opportunity" }).click();
+  await createOpportunityFromBoard(page, oppTitle);
   await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: oppTitle, exact: true }).click();
-  await page.getByRole("link", { name: "Open full page" }).click();
-  await page.waitForLoadState("networkidle");
-  await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible();
+  // The outgoing panel has the same heading and controls. Its already-idle
+  // document does not prove the client-side navigation has committed.
+  await openFullPage(page);
+  const detail = page.locator('[data-slot="opportunity-detail"][data-variant="page"]');
+  await expect(detail.getByRole("heading", { name: oppTitle })).toBeVisible();
 
-  await page.getByRole("button", { name: "Add Solution" }).click();
-  await page.getByLabel("Title").fill(title);
-  await page.getByRole("button", { name: "Add Solution" }).last().click();
-  await expect(page.getByText(title)).toBeVisible({ timeout: 10_000 });
+  await detail.getByRole("button", { name: "Add Solution" }).click();
+  await detail.getByLabel("Title").fill(title);
+  await detail.getByRole("button", { name: "Add Solution" }).click();
+  await expect(detail.getByText(title)).toBeVisible({ timeout: 10_000 });
 
   // Status changes live in the solution's sidebar panel (the card itself is
   // just a compact summary row) — open it and flip status to Validated.
-  await page.getByRole("button", { name: title, exact: true }).click();
+  await detail.getByRole("button", { name: title, exact: true }).click();
   const panel = page.locator('[data-slot="sheet-content"]');
   await expect(panel).toBeVisible();
   await panel.locator('[role="combobox"]').filter({ hasText: "Idea" }).click();
@@ -114,6 +116,38 @@ async function createValidatedSolution(page: Page, base: string, title: string) 
 }
 
 test.describe("Roadmap — not yet on the roadmap", () => {
+  test("creates a validated candidate after delayed full-page navigation", async ({ page, base }) => {
+    const editedVariants: Array<string | null> = [];
+    await page.exposeFunction("recordSolutionEdit", (variant: string | null) => editedVariants.push(variant));
+    await page.addInitScript(() => {
+      document.addEventListener("input", (event) => {
+        const input = event.target;
+        if (!(input instanceof HTMLInputElement) || input.placeholder !== "Solution title") return;
+        const detail = input.closest('[data-slot="opportunity-detail"]');
+        void (window as typeof window & { recordSolutionEdit: (variant: string | null) => Promise<void> })
+          .recordSolutionEdit(detail?.getAttribute("data-variant") ?? null);
+      });
+    });
+    // The panel and full page share a heading and Add Solution controls. Keep
+    // the outgoing panel visible while the destination response is in flight.
+    await page.route(`**${base}/discovery/*`, async (route) => {
+      const response = await route.fetch();
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await route.fulfill({ response });
+    });
+    await createValidatedSolution(page, base, `E2E Delayed Solution ${Date.now()}`);
+    try {
+      expect(editedVariants).toEqual(["page"]);
+    } finally {
+      // This suite shares a workspace. Do not leave an extra eligible candidate
+      // in the next test's otherwise-empty unscheduled roadmap column.
+      const panel = page.locator('[data-slot="sheet-content"]');
+      await panel.locator('[role="combobox"]').filter({ hasText: "Validated" }).click();
+      await page.getByRole("option", { name: "Idea", exact: true }).click();
+      await expect(panel.locator('[role="combobox"]').filter({ hasText: "Idea" })).toBeVisible();
+    }
+  });
+
   test(
     "preserves board drag and persists direct timeline placement",
     async ({ page, base, orgSlug, workspaceSlug }) => {
@@ -132,12 +166,17 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // so the feedback toggle is always the second switch on the page.
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
-      const feedbackToggle = page.getByRole("switch").nth(1);
-      const authToggle = page.getByRole("switch").nth(2);
+      // By test id, not position: the auth-required switch only renders once
+      // the portal is public, so `switch.nth(2)` could resolve to a different
+      // switch (and read "unchecked") before it appeared, leaving the portal
+      // requiring sign-in and the anonymous Submit below disabled.
+      const feedbackToggle = page.getByTestId("portal-toggle-feedback");
+      const authToggle = page.getByTestId("portal-toggle-auth-required");
       if ((await feedbackToggle.getAttribute("aria-checked")) !== "true") {
         await feedbackToggle.click();
         await expect(feedbackToggle).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
       }
+      await expect(authToggle).toBeVisible();
       if ((await authToggle.getAttribute("aria-checked")) === "true") {
         await authToggle.click();
         await expect(authToggle).toHaveAttribute("aria-checked", "false", { timeout: 10_000 });
@@ -222,9 +261,17 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await expect(page.getByRole("tab", { name: "Board" })).toHaveAttribute("aria-selected", "true");
       const scheduledCard = page.locator('[data-slot="card"]').filter({ hasText: sol2Title });
       await expect(scheduledCard.getByText(sol2Title).first()).toBeVisible({ timeout: 10_000 });
-      await expect(page.getByTestId("roadmap-unscheduled-column")).toContainText(
-        "No items waiting to be scheduled."
-      );
+      // All three of this journey's candidates have left the unscheduled
+      // column. Don't assert the column is *empty*: the functional specs share
+      // one seeded workspace, and earlier journeys (e.g. discovery swimlanes,
+      // pinned selects) legitimately leave their own validated solutions
+      // unscheduled. The empty state itself is covered by
+      // __tests__/components/unscheduled-items-column.test.tsx.
+      const boardUnscheduled = page.getByTestId("roadmap-unscheduled-column");
+      await expect(boardUnscheduled).toBeVisible();
+      for (const title of [solTitle, sol2Title, bugTitle]) {
+        await expect(boardUnscheduled.locator('[data-slot="card"]').filter({ hasText: title })).toHaveCount(0);
+      }
     }
   );
 });

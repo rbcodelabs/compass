@@ -13,7 +13,13 @@ test("register an account agent, grant workspace access, generate and revoke its
     await page.goto("/settings/agents");
     await page.getByLabel("New agent name").fill(name);
     await page.getByRole("button", { name: "Create agent", exact: true }).click();
-    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+    // Wait out the create round trip (it has exceeded 5s on a cold dev
+    // server). If this gives up while the action is still in flight, the agent
+    // lands after the `finally` cleanup has already run. Agents belong to the
+    // persistent dev user rather than the torn-down org, so that orphan
+    // survives into later runs and breaks oauth-consent.spec.ts, which expects
+    // exactly one grant-less agent.
+    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible({ timeout: 15_000 });
     let card = page.locator("section").filter({ has: page.getByRole("heading", { name, exact: true }) });
     await card.getByLabel("Key name", { exact: true }).fill("Test integration");
     await card.getByRole("button", { name: "Generate agent key" }).click();
@@ -61,7 +67,10 @@ test("register an account agent, grant workspace access, generate and revoke its
       await page.setViewportSize({ width: 1280, height: 800 });
     }
     await page.getByRole("button", { name: `Revoke access to ${name}` }).click();
-    await expect(page.getByRole("button", { name: `Revoke access to ${name}` })).toHaveCount(0);
+    // The row disappears only once the revoke server action returns its
+    // revalidated page. In the dev-mode server that round trip has been
+    // observed at 5.1s (trace: POST wait 5112ms), just past the 5s default.
+    await expect(page.getByRole("button", { name: `Revoke access to ${name}` })).toHaveCount(0, { timeout: 15_000 });
     await page.goto("/settings/agents");
     card = page.locator("section").filter({ has: page.getByRole("heading", { name, exact: true }) });
     await card.getByRole("button", { name: "Revoke Test integration" }).click();

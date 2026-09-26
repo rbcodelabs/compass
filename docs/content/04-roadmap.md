@@ -16,6 +16,10 @@ Open a Roadmap item's detail panel to discuss it with the team. Shared Discussio
 
 ![Roadmap](/screenshots/docs/roadmap.png)
 
+On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
+
+![Roadmap on mobile](/screenshots/docs/roadmap-mobile.png)
+
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
 
 ## The Four Horizons
@@ -24,6 +28,12 @@ Open a Roadmap item's detail panel to discuss it with the team. Shared Discussio
 - **Next** — Committed work coming up after Now items ship. These items have been prioritised and are ready to start. They have enough detail and justification to begin when capacity opens.
 - **Later** — Directional bets you're exploring but haven't committed to yet. Items here are placeholders for things that are likely important but whose timing and scope aren't settled.
 - **Shipped** — A visible board column of its own (styled with a purple accent, like Now/Next/Later), used to keep a record of completed work. Drag a card into Shipped, or promote it there directly, to mark it delivered without deleting it — so stakeholders can still see what's shipped and trace it back to the opportunity and solution behind it.
+
+## WIP Limits (Now / Next)
+
+Optionally set a WIP (work-in-progress) limit for the Now and Next columns in **Settings → Delivery limits**. Once set, the column header shows `count/limit` instead of a bare count, and the badge switches to a warning color when the count goes over the limit.
+
+This is purely visual — it's a signal to help the team notice when a column is getting crowded, not a rule the app enforces. Going over the limit never blocks adding a new item or promoting a solution into Now or Next, and there's no confirmation step to override. Leave a limit blank for no limit (the default).
 
 ## Creating Roadmap Items
 
@@ -50,7 +60,18 @@ Toggle between **Board** and **Timeline** at the top of the Roadmap page. Board 
 
 Every workspace uses the **Compass native timeline** when you select Timeline. Existing timeline links continue to work, including bookmarks that previously selected the classic renderer.
 
-The native chart groups items by horizon and squad, with separate tracks for overlapping bars. The **Roadmap header** contains icon controls for **Previous period**, **Go to today**, **Next period**, and **Reload timeline**; hover or focus an icon for its tooltip. Open **View options** to filter by **Squad** or choose **Month / Quarter** under **Timeline scale**. **Clear filters** clears only the squad filter. On Board, View options contains squad filtering without timeline controls. Scroll the chart horizontally to reach dates outside the visible area.
+The native chart groups items by horizon and squad by default, with separate tracks for overlapping bars. The **Roadmap header** contains icon controls for **Previous period**, **Go to today**, **Next period**, and **Reload timeline**; hover or focus an icon for its tooltip. Open **View options** to filter by **Squad** or choose **Month / Quarter** under **Timeline scale**. **Clear filters** clears only the squad filter. On Board, View options contains squad filtering without timeline controls. Scroll the chart horizontally to reach dates outside the visible area.
+
+### Timeline grouping
+
+Use the **Group by** control next to the timeline navigation to change how rows are organized:
+
+- **Phase** (default) — a header row per horizon (Now/Next/Later/Launching/Launched/Shipped), with squad sub-lanes underneath.
+- **Squad** — one header and lane per squad, plus a No squad group. No horizon rows.
+- **None** — no header rows at all; a flat list of squad lanes across every horizon.
+- **A custom field** — any `SELECT`-type custom field defined for Roadmap Item appears in the list. Choosing one groups by that field's values (plus a No value group), with squad sub-lanes underneath, and shows a small badge on each card with its value. `MULTI_SELECT` fields are not offered, since an item could belong to more than one group.
+
+Grouping is a display choice only: dragging a bar to a new date never changes its horizon, squad, or custom field value except in Phase grouping, where dropping a bar into a different horizon's lane still moves it to that horizon, exactly as before. The choice is saved in the page URL (`?groupBy=squad`, `?groupBy=none`, or `?groupBy=<field id>`) so it survives reloads and is shareable; leaving it off, or `?groupBy=phase`, uses the default.
 
 On mobile, the title and Board/Timeline tabs share the first header row; navigation and View options/Reload sit below with larger touch targets. The calendar can scroll horizontally without widening the page.
 
@@ -83,15 +104,19 @@ Ideas (as opposed to Bugs) aren't included in this panel — they're expected to
 
 ## Drag to Reorder
 
+On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
+
 Within each horizon, drag cards to reorder them. Order within a horizon communicates relative priority: items higher in the list are higher priority. This ordering is persisted and visible to all workspace members.
 
 ## Launch Tiers & Checklists
 
-Moving a roadmap item into the Launching phase requires picking a launch tier: Tier 1 (major launch), Tier 2 (minor launch), or Tier 3 (silent launch). Setting a tier attaches a checklist cloned from your workspace's active checklist template for that tier, and moves the item to the LAUNCHING horizon. Once launching begins, the item cannot be moved back through the tier-selection step, since the roadmap is tracking a real-world GTM commitment, not just an internal work status.
+The marketing-launch workflow — launch tiers, checklists, the LAUNCHING/LAUNCHED horizons, and positioning briefs — is opt-in per workspace via **Settings → Marketing launch**, and off by default. Most teams don't run a formal marketing-launch process, so the surface stays out of the way until a workspace admin turns it on. With it off, the roadmap-item panel has no Launch section, roadmap cards show no launch chip or menu item, and the board has no LAUNCHING/LAUNCHED columns (any item already in one of those horizons displays folded into Shipped instead).
 
-Checklist templates are workspace-owned and reusable: define one per tier (for example, a Major Launch Checklist for Tier 1 with items like Write launch announcement, Brief support team, and Update pricing page), and every future Tier 1 launch reuses it. Each launch gets its own frozen copy of the checklist at attach time, so editing a template later does not retroactively change checklists already in flight. Checklist items are tracked as Pending, Done, or Skipped, since Skipped exists so a genuinely inapplicable item does not block completion the way an incomplete Pending item would.
+With the setting on: moving a roadmap item into the Launching phase requires picking a launch tier: Tier 1 (major launch), Tier 2 (minor launch), or Tier 3 (silent launch), from the tier picker in the item's panel or its card's **Launch** menu action. Setting a tier attaches a checklist cloned from your workspace's active checklist template for that tier, and moves the item to the LAUNCHING horizon. Once launching begins, the item cannot be moved back through the tier-selection step, since the roadmap is tracking a real-world GTM commitment, not just an internal work status.
 
-This is currently managed via the MCP API (set_launch_tier, get_launch_checklist, update_launch_checklist_item, create_checklist_template). No dedicated UI ships yet.
+Checklist templates are workspace-owned and reusable: define one per tier (for example, a Major Launch Checklist for Tier 1 with items like Write launch announcement, Brief support team, and Update pricing page), and every future Tier 1 launch reuses it. Each launch gets its own frozen copy of the checklist at attach time, so editing a template later does not retroactively change checklists already in flight. Checklist items are tracked as Pending, Done, or Skipped, since Skipped exists so a genuinely inapplicable item does not block completion the way an incomplete Pending item would. The item's panel also offers creating a Positioning & Messaging Brief doc alongside the checklist.
+
+Checklist templates themselves (create_checklist_template, list_checklist_templates) are managed via the MCP API — no dedicated template-management UI ships yet.
 
 ## Keeping the Roadmap Honest
 

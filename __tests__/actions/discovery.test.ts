@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Membership/foreign-entity denial uses real helpers in product-analytics-auth.test.ts.
+vi.mock("@/lib/product-action-auth", () => ({
+  requireProductWorkspace: vi.fn().mockResolvedValue("ws-1"),
+  requireProductEntity: vi.fn().mockResolvedValue({ workspaceId: "ws-1", opportunityId: "opp-1" }),
+}));
+
 // Build a mock prisma object with all needed models.
 // getPrisma() is a synchronous default export, so we mock the factory.
 const mockOpportunity = {
@@ -29,7 +35,11 @@ const mockPrisma = {
   workspace: mockWorkspace,
   workspaceScoringConfig: mockWorkspaceScoringConfig,
   opportunityScore: mockOpportunityScore,
+  squad: { findFirst: vi.fn().mockResolvedValue({ id: "squad-1" }) },
 };
+// createOpportunity writes the opportunity and its links in one transaction.
+const mockTransaction = vi.fn(async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma));
+Object.assign(mockPrisma, { $transaction: mockTransaction });
 
 vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),

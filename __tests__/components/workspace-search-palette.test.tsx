@@ -169,7 +169,7 @@ describe("WorkspaceSearchPalette", () => {
     expect(input).toHaveAttribute("aria-expanded", "true")
   })
 
-  it("renders a Help group and navigates to its href on Enter", async () => {
+  it("renders a User Guide group and navigates to its href on Enter", async () => {
     const resultsWithHelp = {
       query: "plan",
       groups: [
@@ -179,7 +179,7 @@ describe("WorkspaceSearchPalette", () => {
         { type: "task", label: "Tasks", items: [
           { type: "task", id: "task-1", title: "Plan QA", context: "TODO · HIGH", href: "/acme/product/tasks/task-1" },
         ] },
-        { type: "help", label: "Help", items: [
+        { type: "help", label: "User Guide", items: [
           { type: "help", id: "04-roadmap:not-yet-on-the-roadmap", title: "Roadmap", context: "Not Yet on the Roadmap", href: "/help/04-roadmap#not-yet-on-the-roadmap" },
         ] },
       ],
@@ -191,7 +191,7 @@ describe("WorkspaceSearchPalette", () => {
     fireEvent.change(input, { target: { value: "plan" } })
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
 
-    expect(screen.getByRole("group", { name: "Help" })).toBeInTheDocument()
+    expect(screen.getByRole("group", { name: "User Guide" })).toBeInTheDocument()
     const helpOption = screen.getByRole("option", { name: /Roadmap/ })
     expect(helpOption).toHaveAttribute("href", "/help/04-roadmap#not-yet-on-the-roadmap")
 

@@ -87,3 +87,48 @@ export async function revokeWorkspaceAgent(orgSlug: string, workspaceSlug: strin
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
   revalidatePath("/settings/agents");
 }
+
+async function removeOAuthConnection(consentId: string) {
+  const { prisma, userId } = await account();
+  await prisma.$transaction(async (tx) => {
+    // Resolve the client only through an account-scoped consent lookup. The
+    // caller controls consentId, so looking it up by id alone would let one
+    // account revoke another account's token families.
+    const consent = await tx.oAuthConsent.findFirst({
+      where: { id: consentId, userId },
+      select: { id: true, clientId: true },
+    });
+    if (!consent) throw new Error("Connection not found");
+
+    const revokedAt = new Date();
+    // A connection may have several token families after repeated grants.
+    // End every live family for this account/client, while retaining the
+    // account predicate even though family ids should already be unique.
+    await tx.oAuthToken.updateMany({
+      where: { userId, clientId: consent.clientId, revokedAt: null },
+      data: { revokedAt },
+    });
+    // A code is a credential-to-be. Remove it in the same transaction so a
+    // grant started before Revoke/Reconnect cannot mint a new family afterward.
+    await tx.oAuthAuthorizationCode.deleteMany({
+      where: { userId, clientId: consent.clientId, consumedAt: null },
+    });
+    // Revocation removes remembered permission too. Reconnect relies on this
+    // same deletion specifically so the next authorization cannot replay the
+    // old agent/full-account binding.
+    await tx.oAuthConsent.deleteMany({
+      where: { id: consent.id, userId, clientId: consent.clientId },
+    });
+  });
+  revalidatePath("/settings/agents");
+}
+
+/** End an account-owned OAuth connection and invalidate all of its token families. */
+export async function revokeOAuthConnection(consentId: string) {
+  await removeOAuthConnection(consentId);
+}
+
+/** Force the next client authorization to ask for a new agent/account binding. */
+export async function reconnectOAuthConnection(consentId: string) {
+  await removeOAuthConnection(consentId);
+}

@@ -5,20 +5,13 @@ import { PageHeader } from "@/components/patterns/page-header"
 import { AgentChat } from "@/components/agent/agent-chat"
 import { listAgentConversations, getAgentConversationMessages } from "@/lib/agent-conversations"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
+import { initialsOf } from "@/lib/user-initials"
 
 export const metadata = { title: "Agent" }
 
 interface AgentPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>
   searchParams: Promise<{ c?: string; entityType?: string; entityId?: string }>
-}
-
-function initialsOf(nameOrEmail: string | null | undefined): string {
-  if (!nameOrEmail) return "?"
-  const name = nameOrEmail.trim()
-  if (name.includes("@")) return name[0]!.toUpperCase()
-  const parts = name.split(/\s+/).filter(Boolean)
-  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || name[0]!.toUpperCase()
 }
 
 export default async function AgentPage({ params, searchParams }: AgentPageProps) {

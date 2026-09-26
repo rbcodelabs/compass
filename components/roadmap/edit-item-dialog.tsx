@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { MarkdownDescriptionEditor } from "@/components/markdown-description-editor";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Combobox,
@@ -85,7 +85,7 @@ export function EditItemDialog({
       try {
         const updated = await editRoadmapItem(item.id, workspaceId, {
           title: trimmedTitle,
-          description: description.trim() || undefined,
+          description: description.trim() || null,
           startDate: startDate ? new Date(startDate) : null,
           endDate: endDate ? new Date(endDate) : null,
           isPrivate,
@@ -157,12 +157,13 @@ export function EditItemDialog({
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor={`edit-description-${item.id}`}>Description</Label>
-            <Textarea
+            <MarkdownDescriptionEditor
+              key={`${item.id}/${open}`}
               id={`edit-description-${item.id}`}
+              label="Description"
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={setDescription}
               disabled={isPending}
-              rows={2}
             />
           </div>
 
@@ -208,6 +209,7 @@ export function EditItemDialog({
           )}
 
           <DialogFooter>
+            <Button type="button" size="sm" variant="outline" disabled={isPending} onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" size="sm" disabled={isPending}>
               {isPending ? "Saving..." : "Save changes"}
             </Button>

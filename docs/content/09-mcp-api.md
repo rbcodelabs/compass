@@ -8,6 +8,51 @@ section: "Developer"
 
 # MCP API
 
+## Workspace Updates
+
+When Updates capture is enabled, covered MCP mutations contribute to the same
+workspace feed as changes made in the UI. Capture happens within the business
+write transaction; a failed write does not create a successful-work story.
+Repeated status assignments and ordinary text edits do not create milestones.
+See [Updates](/help/22-updates) for capture scope and limitations.
+
+The feed is not an audit log and does not reconstruct older changes from
+`updatedAt`. Catch-up state belongs to the signed-in user in the Updates UI;
+reading existing MCP list tools does not mark that user's feed caught up.
+
+## Product analytics
+
+Analytics tools require workspace membership; agent grants and OAuth read/write scopes still apply. Research and temporary scoped credentials cannot use them. Each call takes `workspaceId`; every entity and binding must belong to that workspace, including service-key calls. Tokens are configured only by a workspace admin in Settings → Analytics, never through MCP.
+
+| Tool | Additional input | Purpose |
+| --- | --- | --- |
+| `list_analytics_connections` | — | Sanitized provider/project, enabled and health metadata; no token or encrypted secret |
+| `list_metrics` | — | Reusable metric definitions |
+| `get_metric` | `metricId` | Current definition and revision |
+| `create_metric` | `name, unit, provider, connectionId?, query` | Define a reusable metric |
+| `update_metric` | Above plus `metricId, expectedRevision` | Create a new definition revision; preserve observations |
+| `archive_metric` | `metricId` | Stop future use without removing evidence |
+| `list_metric_bindings` | `targetType, targetId, includeInactive?` | Measurements attached to an experiment, roadmap item or KR; inactive history is opt-in |
+| `get_metric_binding` | `bindingId` | One active or inactive binding, authorized through its product target |
+| `link_metric` | `metricId, targetType, targetId, baseline?, followup?, target?` | Omit both windows to track the last 30 completed UTC days; supply paired fixed windows to compare periods |
+| `update_metric_binding` | `bindingId, baseline?, followup?, target?` | Replacement edit: retire the active binding and return a new ID plus `replacesBindingId`, pinned to the same metric revision and product target; `target: null` clears the target value |
+| `unlink_metric` | `bindingId` | Retire a link without deleting historical observations |
+| `refresh_metric_binding` | `bindingId, requestId` | Fetch and save observations; reuse request UUID for retries |
+| `list_metric_observations` | `bindingId` | Immutable snapshots, values, series, provenance and completeness |
+| `get_metric_observation` | `observationId` | One immutable observation, authorized through its binding and product target |
+
+`targetType` is `EXPERIMENT`, `ROADMAP_ITEM` or `KEY_RESULT`. Windows are inclusive UTC `{ since: "YYYY-MM-DD", until: "YYYY-MM-DD" }`. Vercel supports up to 90 days per window. `provider` is `vercel` or `compass_activation`. Vercel queries use `metric: "pageviews" | "daily_visitors" | "event_count"`, with `eventName` required for event counts; optional `path`, `eventProperties`, and `flags` are structured filters, never raw SQL or URLs. Daily visitors are not summed into monthly unique users.
+
+Bindings and observations are generated evidence records, so they are the intentional exception to ordinary in-place update symmetry: `update_metric_binding` never mutates a binding that may already anchor evidence. A semantic no-op returns the existing ID; a real change atomically deactivates the old binding and creates a new ID, while observations remain attached to the old binding. There is deliberately no observation update tool.
+
+Bindings expose `mode: "tracking" | "comparison"`. Tracking has a null baseline and a rolling follow-up policy such as `{version:1,mode:"rolling",days:30}` (Vercel supports 7, 30, or 90 days; Active Discovery Teams supports only its current trailing 30-day snapshot). Comparisons retain fixed `{since,until}` windows. To switch to tracking, update with `baseline:null` and a rolling `followup`; to compare, provide both fixed windows. Tracking refreshes produce one current observation; comparisons produce baseline and follow-up observations. Replaying a completed request returns its original evidence even after the rolling calendar window advances.
+
+Example dogfood event query: `{ metric: "event_count", eventName: "compass_activity", eventProperties: { action: "result_recorded" } }`. The only event properties are `action` and `source` (`ui`, `mcp`, or registered `agent`); source describes the entry point, not whether an ordinary API-key holder is human. Allowed actions are opportunity/solution created or updated; roadmap created or updated; experiment created, started, concluded or updated; `result_recorded`; and `checkin_recorded`.
+
+The native `{ metric: "active_discovery_teams" }` query is available only in the deployment-configured operator reporting workspace. It counts eligible production workspaces with Discovery, Delivery and Learning activity in the last 30 days. Collection is prospective; the first 30 days are incomplete. Refreshes, reads, reorders, imports and settings edits do not create activity. Missing/stale/partial data is never a zero or an automatic experiment conclusion/KR update.
+
+Server event delivery uses a signed fixed-path internal relay (`/api/analytics/activity`) to avoid exporting SDK-inherited request URLs. It requires production environment, a configured production hostname and analytics encryption key; failure drops external telemetry without failing a committed save. Browser collection is currently unmounted pending approval of a no-referrer policy: URL redaction alone cannot prevent the hosted collector's implicit referrer/identity fields. The prepared browser guard allows route templates only and suppresses referrers, persisted attribution and flag payloads. This does not prevent querying an already-instrumented external Vercel project. No private product text or workspace/user identifiers are exported by server activity events.
+
 ## PM interview processing
 
 `get_pm_interview({ interviewId, offset? })` reads the initiating user's saved
@@ -46,6 +91,129 @@ The MCP endpoint uses **Streamable HTTP transport**, which is compatible with al
 
 ## Authentication
 
+There are two ways to authenticate, and **both are fully supported**. Pick by
+who is connecting, not by which is newer:
+
+| | Connect by URL (OAuth) | API key |
+|---|---|---|
+| Setup | Paste the endpoint URL into your client and approve a consent screen | Generate a key in Settings and paste it into a config file |
+| Acts as | A selected or newly created agent by default; an eligible administrator may explicitly choose full-account access | The key's owner, registered agent, or service account |
+| Best for | A person connecting their own AI client | Server-to-server automation, scheduled jobs, anything unattended |
+| Expiry | Access tokens last an hour and refresh automatically | Until you revoke it (or its explicit expiry) |
+
+Nothing here is deprecated. Static `compass_…` API keys and `MCP_API_KEY`
+service-account behavior remain supported indefinitely, and their access is
+unchanged — an OAuth connection is an additional door, not a replacement one.
+
+### Connect by URL (OAuth)
+
+If your client supports OAuth for remote MCP servers — Claude, Geode / Agent
+Threads, Cursor, VS Code — you do not need a key at all. Give it the endpoint
+URL:
+
+```
+https://your-compass-url.vercel.app/api/mcp
+```
+
+The client discovers everything else on its own: it reads the
+`WWW-Authenticate` header on the endpoint's 401, follows it to Compass's
+protected-resource metadata, registers itself, and opens a browser. You sign in
+to Compass as normal (magic link or Google — there is no separate password for
+this), review a consent screen, and approve.
+
+**What you are approving.** By default, an OAuth connection acts as an agent you
+select or create on the consent screen. The screen shows that agent's effective
+reach by name. Existing agents keep their current grants; creating an agent here
+can grant only workspaces where you are both a member and an administrator. The
+token then reaches only that agent's current, unrevoked workspace grants, at each
+grant's READ or WRITE level. Suspending the agent or revoking a grant takes effect
+on the next request.
+
+An agent with no workspace grants cannot be approved. If you cannot grant any
+workspace yourself, ask a workspace administrator to grant one of your agents
+access, then reconnect.
+
+**Full-account administrator override.** Eligible administrators can explicitly
+choose an override that acts as their human identity across every organization
+and workspace they can reach. This is not the default: the consent screen names
+the agent protections being waived and requires a typed confirmation before the
+full-account option can be approved. Eligibility is checked again when a refresh
+token rotates. Compass records the authorization choice itself with a dedicated,
+secret-free event for both interactive approval and remembered-consent replay;
+the override still does not create agent-style audit rows for every later call.
+
+Existing OAuth tokens do not silently keep their previous broad access. Migration
+`057_oauth_forced_reconsent` revokes every live OAuth token and removes remembered
+OAuth consent plus outstanding authorization codes, so an authorization started
+before the migration cannot mint a new legacy token afterward. Existing clients
+must show this consent choice once and receive a newly bound token. Code exchange
+and refresh also require the same current consent and binding; revoking or
+reconnecting a Connected App invalidates its outstanding codes as well as its
+live tokens. A later reconnect replays the remembered binding only while that
+binding remains valid.
+
+Manage these connections in **Settings → Agents → Connected apps**. Each entry
+shows the client and redirect host, its USER or agent binding, approved scopes,
+current workspace reach, and last-used time. **Revoke** disconnects the client
+and removes its remembered approval. **Reconnect** does the same invalidation,
+then starts authorization again so you can choose a different agent or binding.
+For a USER override, the workspace list is an advisory disclosure rather than
+an exhaustive account-access inventory: organization-level capabilities do not
+always correspond to an individual workspace row.
+
+Everything in this section is about applications reaching **into** Compass. The
+same settings page also has **Connected MCP servers**, which is the reverse: MCP
+servers the Compass in-app agent calls **out** to on your behalf. See
+[Connected MCP servers](/help/23-connected-mcp-servers). The two lists look alike
+and revoke differently, so check which direction an entry describes before
+revoking it.
+
+Because both the approve and decline buttons stay pinned to the bottom of the
+card, a long list scrolls inside the card rather than pushing the buttons off the
+screen. Scroll the details with the mouse, or with the arrow keys once the detail
+region has keyboard focus.
+
+It also shows the **redirect host** — where the connection will actually be
+handed off — and marks every application as unverified. Compass does not review
+or vouch for applications that connect to it, and any application can pick its
+own display name. The redirect host is the one thing on that screen that cannot
+be faked, so read it: a loopback address (`127.0.0.1`) means software running on
+your own computer, and anything else means the connection is being handed to
+that host.
+
+**Scopes.** Two of them:
+
+| Scope | Grants |
+|---|---|
+| `mcp:read` | Read your opportunities, solutions, roadmap, OKRs, research, feedback and docs |
+| `mcp:write` | Create and change that same data on your behalf |
+
+A client may also request `offline_access`, which lets it stay connected without
+sending you back through sign-in every hour. Compass issues a refresh token for
+every approved connection regardless, because several clients depend on refresh
+to recover from an expired token without prompting you.
+
+Within those scopes, an agent-bound OAuth connection is subject to the same
+grant-scoped reach, human-only tool restrictions, administrator restrictions,
+agent liveness checks, and mutation audit trail as a registered-agent key. A
+scope never widens what the chosen identity can reach; it only narrows what the
+client may do. A read-only connection calling a tool that writes gets an explicit
+"insufficient scope" refusal rather than a silent failure.
+
+**Endpoints**, if you are implementing a client by hand:
+
+| Document | URL |
+|---|---|
+| Protected resource metadata | `/.well-known/oauth-protected-resource/api/mcp` (also served at `/.well-known/oauth-protected-resource`) |
+| Authorization server metadata | `/.well-known/oauth-authorization-server` (also served at `/.well-known/openid-configuration`) |
+
+PKCE with `S256` is required, client registration is dynamic (RFC 7591), and
+tokens are revocable at the advertised revocation endpoint. See
+[ADR 0014](https://github.com/rbcodelabs/compass/blob/main/docs/decisions/0014-compass-is-its-own-oauth-authorization-server.md)
+for why Compass issues its own tokens rather than delegating to Google.
+
+### API key
+
 Generate an API key from **Settings → API Keys**. Pass it as a Bearer token in the `Authorization` header:
 
 ```http
@@ -77,6 +245,35 @@ curl https://your-compass-url.vercel.app/api/mcp \
   --header "Accept: application/json, text/event-stream" \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl-example","version":"1.0.0"}}}'
 ```
+
+## Response deeplinks
+
+Every tool that creates or promotes an addressable item returns a clickable
+link on its own line, immediately after the usual `ID: <uuid>` line:
+
+```
+**Opportunity created** in "Compass"
+ID: 0f2c…
+Title: Setup is confusing
+Status: EXPLORING
+URL: https://compass.rbcodelabs.com/rbcodelabs/compass/discovery/0f2c…
+```
+
+Relay that URL to the human you are reporting to — it opens the item directly,
+either on its own page or in the workspace detail panel (`?detail=<type>:<id>`,
+which works from any page in the workspace).
+
+Tools that return a `URL:` line: `create_opportunity`, `add_solution`,
+`add_assumption`, `create_objective`, `add_key_result`, `create_experiment`,
+`add_to_roadmap`, `promote_to_roadmap`, `promote_feedback_to_roadmap`,
+`create_task`, `create_doc`, `create_feedback` (and the other feedback
+mutations), and the decision/review tools.
+
+The link is **omitted entirely** — the operation still succeeds — when the
+deployment has no configured public URL. Never reconstruct a link yourself from
+an ID; if there is no `URL:` line, report the ID alone. Tools for items with no
+addressable surface of their own (`create_squad`, `create_okr_cycle`) return no
+link by design.
 
 ## What Agents Can Do
 
@@ -209,7 +406,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 |---|---|
 | `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
-| `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, or `isPrivate` flag. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow |
+| `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, `isPrivate`, or links (`keyResultId`, `opportunityId`, `solutionId`, `squadId`). Omit a link to preserve it; pass a UUID to set it or `null` to clear it. USER/AGENT targets must belong to the item's workspace, even when the caller can access both workspaces. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow (rejected here — see below — and gated by the workspace's Marketing launch setting) |
 | `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
 | `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state (`PENDING`, `DECIDED`, or `AWAITING_FOLLOW_THROUGH`), linked item type, outcome, reviewer, or search text |
 | `get_decision` | Read one tracking-only decision, its immutable revision history, the resolved requester (the human or Agent who raised it), and any linked follow-up Tasks |
@@ -219,11 +416,11 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
 | `list_review_requests` | List review requests for a workspace, optionally filtered by state |
 | `apply_recorded_decision` | Idempotently apply the authorized continuation from a recorded decision and return its application receipt |
-| `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items |
-| `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier |
-| `set_launch_tier` | Move a roadmap item into the LAUNCHING horizon by picking a launch tier; attaches a checklist cloned from an explicit or auto-resolved (most recent ACTIVE) template for that tier. Rejects items already LAUNCHING/LAUNCHED |
-| `get_launch_checklist` | Get the launch checklist for a roadmap item, including each item's status and ID |
-| `update_launch_checklist_item` | Set a launch checklist item's status (PENDING/DONE/SKIPPED) |
+| `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items. Requires the workspace's Marketing launch setting to be on (Settings → Marketing launch; off by default) |
+| `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier. Requires Marketing launch to be on |
+| `set_launch_tier` | Move a roadmap item into the LAUNCHING horizon by picking a launch tier; attaches a checklist cloned from an explicit or auto-resolved (most recent ACTIVE) template for that tier. Rejects items already LAUNCHING/LAUNCHED. Requires Marketing launch to be on |
+| `get_launch_checklist` | Get the launch checklist for a roadmap item, including each item's status and ID. Requires Marketing launch to be on |
+| `update_launch_checklist_item` | Set a launch checklist item's status (PENDING/DONE/SKIPPED). Requires Marketing launch to be on |
 
 Decision-taking is deliberately absent from MCP. A signed-in human reviewer opens
 the stable Compass review URL and chooses one option. Agents may prepare and read
@@ -299,6 +496,18 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 | `unlink_task` | Remove a link between a Task and another Compass object |
 | `list_task_links` | List all links for a Task, grouped by linked object type with resolved titles |
 
+### Custom Fields
+
+Custom fields let a workspace tag Opportunities, Solutions, Experiments, Objectives, Key Results, Roadmap Items, or Tasks with admin-defined attributes (TEXT, NUMBER, DATE, URL, BOOLEAN, or a single/multi picklist SELECT/MULTI_SELECT). Field definitions and shared option sets are created and edited in Settings → Custom Fields; MCP can read definitions and read/write an object's values, but cannot create, edit, or delete a definition or option set.
+
+| Tool | Description |
+|---|---|
+| `list_custom_field_definitions` | List a workspace's custom field definitions, optionally filtered to one object type; includes each field's type, whether it's required, and its effective options for SELECT/MULTI_SELECT (including options inherited from a shared option set) |
+| `get_custom_field_values` | Read every custom field defined for an object's type, paired with that specific object's current value (or empty) |
+| `set_custom_field_value` | Set or clear one custom field's value on an object |
+
+Passing `null` (or an empty string or empty array) to `set_custom_field_value` clears the field, matching the Settings UI's own clearing behavior. The value is validated against the field's type — a SELECT/MULTI_SELECT value must be one of the field's currently defined options. The tool also rejects a `fieldId` that belongs to a different object type, or to a different workspace, than the target object.
+
 ### Feedback
 
 | Tool | Description |
@@ -341,8 +550,8 @@ Research tools use the same validation, protocol-locking and link transactions a
 
 | Tool | Description |
 |---|---|
-| `generate_research_guide` | Draft 5–8 editable questions or usability tasks from a goal, study type and duration; does not create a study |
-| `create_research_study` | Create an active study with a reviewed guide and return its new participant link once |
+| `generate_research_guide` | Draft 5–8 editable questions or usability tasks from a goal, study type and duration; does not create a study. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
+| `create_research_study` | Create a study with a reviewed guide; defaults to ACTIVE and returns its new participant link once, or pass `status: "DRAFT"` to stage it — protocol fields stay editable — with no link issued. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
 | `list_research_studies` | Page through study settings and session counts in one workspace; no transcripts or participant identities |
 | `get_research_study` | Read one study’s settings, guide and session count in its declared workspace |
 | `update_research_study` | Update the name and supplied settings; omitted protocol fields are preserved, and protocol changes are locked after the first session |
@@ -386,7 +595,8 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 |---|---|
 | `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc`; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`). A doc whose parent is excluded by a recency filter is rendered at the top level so it stays reachable |
 | `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body, and `docType`/`roadmapItemId` when set |
-| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted) |
+| `prepare_doc_image_upload` | Prepare a signed, short-lived upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB in workspace-private Docs storage; returns the upload pathname/token plus the relative Compass image URL and Markdown |
+| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on |
 | `update_doc` | Update an existing doc's title, content, and/or icon |
 | `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Always writes a new version, even if one was just saved seconds ago — named snapshots are never coalesced away |
 | `list_doc_versions` | List a doc's saved versions (id, label, author, created date), newest first, alongside the doc's own current title and last-updated time as a reference point. Param: `docId`. Does not include full content — call `get_doc_version` for that |
@@ -394,6 +604,12 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 | `restore_doc_version` | Restore a doc's live content to a previously saved version. Param: `versionId`. The doc's current state is snapshotted first (labeled "Before restore"), so restoring never loses data |
 
 Every `update_doc` call also automatically snapshots the doc's pre-change state before applying the new values (coalesced to one snapshot per 5-minute window per author, so an agent making several quick edits in a row doesn't flood the history) — you don't need to call `create_doc_version` yourself unless you want a deliberately named checkpoint.
+
+In the explicitly enabled Geode preview workspace, `get_doc` also returns `revision` and `storageProvider`. `create_doc` requires an `operationId` UUID. `update_doc`, `create_doc_version`, and `restore_doc_version` require both `operationId` and `expectedRevision` (the current document revision from `get_doc`). Reuse the exact operation ID and payload after a lost response; a changed payload or authenticated actor is rejected. A revision conflict requires a fresh read and a new intentional edit. These parameters remain optional for existing database-backed documents. Content references and private Blob paths are never returned. This pilot does not enable production document storage.
+
+To add a local screenshot, call `prepare_doc_image_upload` with its exact filename, MIME type, and byte size. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: fileType })` from `@vercel/blob/client`, then place the returned `markdown` in `create_doc` or `update_doc`. The token expires after ten minutes and is bound to one random workspace-prefixed pathname, MIME type, and maximum size; it cannot overwrite an existing blob. The saved Markdown contains only a relative Compass read URL, never the storage pathname or token. Image reads require a signed-in member of the owning workspace.
+
+This private flow applies to new uploads. Existing documents may contain older absolute `*.public.blob.vercel-storage.com` image URLs; they remain public and continue rendering. Compass does not migrate, delete, or rewrite those legacy blobs automatically.
 
 ### Artifacts
 
@@ -429,12 +645,12 @@ Google-Docs-style comments anchored to a span of a doc's text (or left as a gene
 
 Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-text projection**, not its raw markdown — the same projection the editor highlights against. In practice agents most often add doc-level or freshly-computed anchored comments; the UI is what captures precise anchors from a live text selection.
 
-### Help
+### User Guide
 
 | Tool | Description |
 |---|---|
-| `search_help` | Full-text search over Compass's own product/usage documentation (the same content rendered at `/help/[slug]`); returns the best-matching doc section(s) with a `Path` pointer (deep-linking to a heading anchor when applicable) and a short excerpt. Not workspace-scoped |
-| `get_help` | Resolve a free-text topic (a doc slug, title, or close match) to a single help doc and return its full raw markdown content plus its `/help/[slug]` path. Not workspace-scoped |
+| `search_help` | Full-text search over Compass's User Guide (the same content rendered at `/help/[slug]`); returns the best-matching article section(s) with a `Path` pointer (deep-linking to a heading anchor when applicable) and a short excerpt. Not workspace-scoped |
+| `get_help` | Resolve a free-text topic (an article slug, title, or close match) to a single User Guide article and return its full raw markdown content plus its `/help/[slug]` path. Not workspace-scoped |
 
 ### Scoring
 
@@ -523,6 +739,15 @@ comment instead of rewriting one under someone else's name or approval badge.
 Personal and service credential behavior is unchanged.
 
 ## Example: Connecting Claude Desktop
+
+**If your client can connect by URL**, prefer that — add Compass as a remote MCP
+server with the URL `https://your-compass-url.vercel.app/api/mcp` and approve the
+consent screen. There is no config file to edit and no secret to paste. See
+[Connect by URL (OAuth)](#connect-by-url-oauth) above.
+
+The `mcp-remote` recipe below remains fully supported and is the right choice
+when you want a fixed, long-lived credential — an unattended job, a shared
+service account, or a client without OAuth support.
 
 Add this to your Claude Desktop `claude_desktop_config.json`:
 

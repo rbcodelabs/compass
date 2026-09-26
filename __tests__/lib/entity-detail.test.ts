@@ -11,7 +11,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const models = {
   objective: { findFirst: vi.fn() },
-  keyResult: { findFirst: vi.fn() },
+  keyResult: { findFirst: vi.fn(), findMany: vi.fn() },
+  squad: { findMany: vi.fn() },
   opportunity: { findFirst: vi.fn() },
   solution: { findFirst: vi.fn() },
   assumption: { findFirst: vi.fn() },
@@ -26,6 +27,7 @@ const models = {
   feedbackItem: { findFirst: vi.fn() },
   customFieldDefinition: { findMany: vi.fn() },
   customFieldValue: { findMany: vi.fn() },
+  pMInterview: { findMany: vi.fn() },
 };
 
 vi.mock("@/lib/db", () => ({ default: () => models }));
@@ -47,6 +49,8 @@ const CASES: Array<{
   model: Exclude<
     keyof typeof models,
     | "task"
+    | "squad"
+    | "pMInterview"
     | "workspaceMember"
     | "reviewRequest"
     | "decisionApplication"
@@ -84,6 +88,9 @@ beforeEach(() => {
   models.artifact.findMany.mockResolvedValue([]);
   models.customFieldDefinition.findMany.mockResolvedValue([]);
   models.customFieldValue.findMany.mockResolvedValue([]);
+  models.keyResult.findMany.mockResolvedValue([]);
+  models.squad.findMany.mockResolvedValue([]);
+  models.pMInterview.findMany.mockResolvedValue([]);
 });
 
 describe("isEntityType", () => {
@@ -105,7 +112,10 @@ describe("isEntityType", () => {
 describe("getEntityDetail — workspace scoping", () => {
   for (const { type, model, where } of CASES) {
     it(`scopes ${type} to the workspace (directly or via parent chain)`, async () => {
-      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
+      // workspace/launchWorkflowEnabled is only consumed by fetchRoadmapItem
+      // (flattened onto the panel payload, see lib/entity-detail.ts) but is
+      // harmless to include for every type in this generic matrix.
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], workspace: { launchWorkflowEnabled: true } });
       await getEntityDetail(type, ID, WS);
       expect(models[model].findFirst).toHaveBeenCalledTimes(1);
       expect(models[model].findFirst).toHaveBeenCalledWith(
@@ -129,6 +139,21 @@ describe("getEntityDetail — workspace scoping", () => {
 });
 
 describe("getEntityDetail — return shape", () => {
+  it("preserves agent conversation identity in opportunity interview history", async () => {
+    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [] });
+    await getEntityDetail("opportunity", ID, WS);
+    expect(models.pMInterview.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS, targetType: "OPPORTUNITY", targetId: ID }, select: expect.objectContaining({ agentConversationId: true }) }));
+  });
+  it("loads the shared opportunity editing options and full solution tree within its workspace", async () => {
+    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [], score: null });
+    models.squad.findMany.mockResolvedValue([{ id: "squad", name: "Team", color: "blue" }]);
+    models.keyResult.findMany.mockResolvedValue([{ id: "kr", title: "Outcome", objective: { title: "Objective" } }]);
+    const result = await getEntityDetail("opportunity", ID, WS);
+    expect(result?.data).toMatchObject({ squads: [{ id: "squad" }], availableKeyResults: [{ id: "kr", objectiveTitle: "Objective" }], customFields: [] });
+    expect(models.squad.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS } }));
+    expect(models.keyResult.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { objective: { cycle: { workspaceId: WS } } } }));
+    expect(models.opportunity.findFirst).toHaveBeenCalledWith(expect.objectContaining({ include: expect.objectContaining({ solutions: expect.objectContaining({ include: expect.objectContaining({ assumptions: expect.objectContaining({ include: expect.objectContaining({ experiments: expect.any(Object) }) }) }) }) }) }));
+  });
   it("only loads linked feedback in the opportunity workspace, newest first with a stable tie break", async () => {
     models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [] });
     await getEntityDetail("opportunity", ID, WS);
@@ -144,7 +169,7 @@ describe("getEntityDetail — return shape", () => {
   });
 
   it("returns active roadmap delivery tasks and linkable workspace tasks in deterministic delivery order", async () => {
-    models.roadmapItem.findFirst.mockResolvedValue({ id: ID, workspaceId: WS });
+    models.roadmapItem.findFirst.mockResolvedValue({ id: ID, workspaceId: WS, workspace: { launchWorkflowEnabled: true } });
     models.task.findMany
       .mockResolvedValueOnce([{ id: "blocked", status: "BLOCKED" }])
       .mockResolvedValueOnce([{ id: "candidate", title: "Candidate" }]);
@@ -186,7 +211,7 @@ describe("getEntityDetail — return shape", () => {
     const result = await getEntityDetail("opportunity", ID, WS);
     expect(result).toEqual({
       type: "opportunity",
-      data: { ...row, pmInterviewEnabled: true, pmInterviews: [], deliveryTasks: [], linkableTasks: [], members: [] },
+      data: { ...row, pmInterviewEnabled: true, pmInterviews: [], deliveryTasks: [], linkableTasks: [], members: [], squads: [], availableKeyResults: [], customFields: [], existingScore: null },
     });
   });
 
@@ -196,6 +221,8 @@ describe("getEntityDetail — return shape", () => {
       model: Exclude<
     keyof typeof models,
     | "task"
+    | "squad"
+    | "pMInterview"
     | "workspaceMember"
     | "reviewRequest"
     | "decisionApplication"
@@ -218,7 +245,10 @@ describe("getEntityDetail — return shape", () => {
       models.workspaceMember.findMany.mockResolvedValue([]);
       models.artifactLink.findMany.mockResolvedValue([]);
       models.artifact.findMany.mockResolvedValue([]);
-      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
+      // workspace/launchWorkflowEnabled is only consumed by fetchRoadmapItem
+      // (flattened onto the panel payload, see lib/entity-detail.ts) but is
+      // harmless to include for every type in this generic matrix.
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], workspace: { launchWorkflowEnabled: true } });
 
       const result = await getEntityDetail(type, ID, WS);
 
@@ -246,7 +276,7 @@ describe("getEntityDetail — return shape", () => {
     { type: "roadmapItem" as const, model: "roadmapItem" as const, objectType: "ROADMAP_ITEM" },
     { type: "solution" as const, model: "solution" as const, objectType: "SOLUTION" },
   ])("loads $objectType custom fields with their current values", async ({ type, model, objectType }) => {
-    models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
+    models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], workspace: { launchWorkflowEnabled: true } });
     models.customFieldDefinition.findMany.mockResolvedValue([
       {
         id: "field-area",
@@ -285,7 +315,10 @@ describe("getEntityDetail — return shape", () => {
   it("dispatches each type to only its own model", async () => {
     for (const { type, model } of CASES) {
       vi.clearAllMocks();
-      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
+      // workspace/launchWorkflowEnabled is only consumed by fetchRoadmapItem
+      // (flattened onto the panel payload, see lib/entity-detail.ts) but is
+      // harmless to include for every type in this generic matrix.
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], workspace: { launchWorkflowEnabled: true } });
       const result = await getEntityDetail(type, ID, WS);
       expect(result).toEqual({ type, data: expect.objectContaining({ id: ID }) });
       // no other model was touched

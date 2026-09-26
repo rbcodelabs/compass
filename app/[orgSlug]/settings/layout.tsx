@@ -1,6 +1,7 @@
-import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import { getUserWorkspaces } from "@/lib/workspace";
+import { getSessionUser } from "@/lib/session";
+import { isOrgAdminRole } from "@/lib/roles";
 import getPrisma from "@/lib/db";
 import { Sidebar } from "@/components/sidebar";
 import { BottomNav } from "@/components/bottom-nav";
@@ -33,24 +34,34 @@ export default async function OrgSettingsLayout({
   children,
   params,
 }: OrgSettingsLayoutProps) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const { orgSlug } = await params;
+
+  const user = await getSessionUser();
+  if (!user) {
     redirect("/login");
   }
 
-  const { orgSlug } = await params;
   const prisma = getPrisma();
 
-  const orgMembership = await prisma.organizationMember.findFirst({
-    where: { organization: { slug: orgSlug }, userId: session.user.id },
-    select: { role: true },
-  });
+  // Independent of each other once the user id is known.
+  const [orgMembership, workspaces] = await Promise.all([
+    prisma.organizationMember.findFirst({
+      where: { organization: { slug: orgSlug }, userId: user.id },
+      select: { role: true },
+    }),
+    getUserWorkspaces(user.id),
+  ]);
 
-  if (!orgMembership || (orgMembership.role !== "OWNER" && orgMembership.role !== "ADMIN")) {
+  // Normalized rather than matched exactly, for the same reason documented in
+  // lib/permissions.ts and lib/roles.ts: the column is a bare VarChar with no
+  // database enum, and several writers have put lowercase values into it. The
+  // previous strict comparison here disagreed with the normalized check that
+  // gates the actions inside this page, so an org owner stored as 'owner'
+  // could be shown admin nav and then 404 on following it.
+  if (!isOrgAdminRole(orgMembership?.role)) {
     notFound();
   }
 
-  const workspaces = await getUserWorkspaces(session.user.id);
   const anchorWorkspace = workspaces.find((ws) => ws.orgSlug === orgSlug);
   if (!anchorWorkspace) {
     // Org admin with no workspace membership in this org — no workspace to
@@ -78,9 +89,9 @@ export default async function OrgSettingsLayout({
         orgSlug={orgSlug}
         workspaceSlug={anchorWorkspace.slug}
         workspaceName={anchorWorkspace.name}
-        userName={session.user.name ?? session.user.email ?? ""}
-        userEmail={session.user.email ?? ""}
-        userImage={session.user.image ?? undefined}
+        userName={user.name ?? user.email ?? ""}
+        userEmail={user.email ?? ""}
+        userImage={user.image ?? undefined}
       />
 
       <TooltipProvider>
@@ -96,9 +107,9 @@ export default async function OrgSettingsLayout({
             orgSlug={orgSlug}
             workspaceSlug={anchorWorkspace.slug}
             workspaceName={anchorWorkspace.name}
-            userName={session.user.name ?? session.user.email ?? ""}
-            userEmail={session.user.email ?? ""}
-            userImage={session.user.image ?? undefined}
+            userName={user.name ?? user.email ?? ""}
+            userEmail={user.email ?? ""}
+            userImage={user.image ?? undefined}
             workspaces={workspaces}
             isOrgAdmin
           />
