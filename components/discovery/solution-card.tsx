@@ -8,6 +8,7 @@ import { GripVertical } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EntityCard } from "@/components/patterns/entity-card";
 import { EvidenceBadge } from "@/components/discovery/evidence-badge";
+import { ScoreBadge } from "@/components/discovery/score-badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { SOLUTION_STATUS } from "@/lib/solution-status";
@@ -15,7 +16,7 @@ import {
   updateSolutionStatus,
   archiveSolution,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
-import type { SolutionStatus } from "@/lib/types";
+import type { OpportunityScoreSummary, SolutionStatus } from "@/lib/types";
 
 // Quick-move targets offered from the card menu — KILLED is reached via the
 // dedicated destructive "Kill / Archive" action instead, same split
@@ -43,6 +44,8 @@ export type SolutionCardData = {
   status: SolutionStatus;
   sortOrder: number;
   _count: { assumptions: number; evidence: number };
+  /** null when the solution has not been scored under the active Solution model. */
+  score?: OpportunityScoreSummary | null;
 };
 
 type Props = {
@@ -59,10 +62,19 @@ type Props = {
    * this by passing no status at all — same reasoning, same fix.
    */
   showStatus?: boolean;
+  /**
+   * True when the workspace has an active Solution scoring model. False (the
+   * default) renders no score UI, matching OpportunityCard's `showScore` gate.
+   * Required whenever `showScore` is true, since ScoreBadge always needs
+   * somewhere to send an unscored click — Solutions have no detail route of
+   * their own, so callers pass the owning Opportunity's page.
+   */
+  showScore?: boolean;
+  scoringHref?: string;
   onChanged?: () => void;
 };
 
-export function SolutionCard({ solution, revalidatePathStr, showStatus = true, onChanged }: Props) {
+export function SolutionCard({ solution, revalidatePathStr, showStatus = true, showScore = false, scoringHref, onChanged }: Props) {
   const { openPanel } = usePanelContext();
   const [isPending, startTransition] = useTransition();
 
@@ -99,7 +111,7 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, o
   // Both chips self-hide at 0 (EvidenceBadge already returned null there), so
   // with neither to show the row would be empty but still cost EntityCard's
   // `mt-3` children gap. Skip the whole block instead of leaving a blank row.
-  const hasMetadata = solution._count.assumptions > 0 || solution._count.evidence > 0;
+  const hasMetadata = showScore || solution._count.assumptions > 0 || solution._count.evidence > 0;
 
   return (
     <div ref={setNodeRef} style={style} className="group">
@@ -153,6 +165,9 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, o
       >
         {hasMetadata && (
           <div data-slot="solution-card-meta" className="flex flex-wrap items-center gap-1.5">
+            {showScore && scoringHref && (
+              <ScoreBadge score={solution.score} scoringHref={scoringHref} />
+            )}
             {solution._count.assumptions > 0 && (
               <Badge variant="secondary">
                 {solution._count.assumptions} {solution._count.assumptions === 1 ? "assumption" : "assumptions"}

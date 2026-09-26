@@ -143,6 +143,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
             description: true,
             status: true,
             sortOrder: true,
+            score: { select: { normalizedScore: true, modelVersion: true } },
             _count: { select: { evidence: true, assumptions: true } },
           },
         },
@@ -174,8 +175,12 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     }),
     // null when the workspace has no active model — the board then renders no
     // score UI and no sort toggle at all, same gate as the detail page.
-    resolveWorkspaceScoringModel(workspace.id),
+    resolveWorkspaceScoringModel(workspace.id, "OPPORTUNITY"),
   ]);
+
+  // Independent of the Opportunity model above — only used to gate the
+  // ScoreBadge on Solution cards (see SwimlaneOpportunity below).
+  const solutionScoringModel = await resolveWorkspaceScoringModel(workspace.id, "SOLUTION");
 
   const hasActiveScoringModel = scoringModel !== null;
 
@@ -280,6 +285,8 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       status: solution.status as SolutionStatus,
       sortOrder: solution.sortOrder,
       _count: solution._count,
+      // null whenever there is no score row *or* no active Solution model.
+      score: toScoreSummary(solution.score, solutionScoringModel),
     })),
   }));
 
@@ -343,6 +350,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           workspaceId={workspace.id}
+          hasActiveScoringModel={solutionScoringModel !== null}
         />
       ) : (
         <OpportunityBoard

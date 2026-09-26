@@ -40,6 +40,18 @@ export type SwimlaneOpportunity = {
   solutions: SolutionCardData[];
 };
 
+/** Threaded down to every SolutionCard on the board (see makeScoringHref below). */
+export type SwimlaneScoringProps = {
+  showScore: boolean;
+  orgSlug: string;
+  workspaceSlug: string;
+};
+
+/** Solutions have no detail route of their own — link to the owning Opportunity's page. */
+function makeScoringHref(orgSlug: string, workspaceSlug: string, opportunityId: string): string {
+  return `/${orgSlug}/${workspaceSlug}/discovery/${opportunityId}`;
+}
+
 type ColumnsMap = Record<string, SolutionCardData[]>;
 
 /**
@@ -135,11 +147,13 @@ function SwimlaneColumn({
   status,
   items,
   revalidatePathStr,
+  scoring,
 }: {
   opportunityId: string;
   status: SolutionStatus;
   items: SolutionCardData[];
   revalidatePathStr: string;
+  scoring: SwimlaneScoringProps;
 }) {
   const columnId = makeColumnId(opportunityId, status);
   const itemIds = items.map((i) => i.id);
@@ -227,6 +241,8 @@ function SwimlaneColumn({
                 solution={solution}
                 revalidatePathStr={revalidatePathStr}
                 showStatus={false}
+                showScore={scoring.showScore}
+                scoringHref={makeScoringHref(scoring.orgSlug, scoring.workspaceSlug, opportunityId)}
               />
             ))
           )}
@@ -244,12 +260,14 @@ function SwimlaneRow({
   isCollapsed,
   onOpenChange,
   revalidatePathStr,
+  scoring,
 }: {
   opportunity: SwimlaneOpportunity;
   columns: ColumnsMap;
   isCollapsed: boolean;
   onOpenChange: (open: boolean) => void;
   revalidatePathStr: string;
+  scoring: SwimlaneScoringProps;
 }) {
   const totalCount = SOLUTION_STATUS_ORDER.reduce(
     (sum, status) => sum + (columns[makeColumnId(opportunity.id, status)]?.length ?? 0),
@@ -328,6 +346,7 @@ function SwimlaneRow({
                 status={status}
                 items={columns[makeColumnId(opportunity.id, status)] ?? []}
                 revalidatePathStr={revalidatePathStr}
+                scoring={scoring}
               />
             ))}
           </Board>
@@ -345,10 +364,13 @@ type Props = {
   orgSlug: string;
   workspaceSlug: string;
   workspaceId: string;
+  /** True when the workspace has an active Solution scoring model. */
+  hasActiveScoringModel?: boolean;
 };
 
-export function SolutionSwimlaneBoard({ opportunities, orgSlug, workspaceSlug, workspaceId }: Props) {
+export function SolutionSwimlaneBoard({ opportunities, orgSlug, workspaceSlug, workspaceId, hasActiveScoringModel = false }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/discovery`;
+  const scoring: SwimlaneScoringProps = { showScore: hasActiveScoringModel, orgSlug, workspaceSlug };
 
   const [columns, setColumns] = useState<ColumnsMap>(() => buildColumnsMap(opportunities));
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
@@ -511,6 +533,7 @@ export function SolutionSwimlaneBoard({ opportunities, orgSlug, workspaceSlug, w
             isCollapsed={collapsedIds.has(opportunity.id)}
             onOpenChange={(open) => setLaneCollapsed(opportunity.id, open)}
             revalidatePathStr={revalidatePathStr}
+            scoring={scoring}
           />
         ))}
 
@@ -518,7 +541,7 @@ export function SolutionSwimlaneBoard({ opportunities, orgSlug, workspaceSlug, w
           {activeItem ? (
             <div className="rotate-1 scale-105">
               {/* Matches the in-column cards so the card doesn't change shape mid-drag. */}
-              <SolutionCard solution={activeItem} revalidatePathStr={revalidatePathStr} showStatus={false} />
+              <SolutionCard solution={activeItem} revalidatePathStr={revalidatePathStr} showStatus={false} showScore={hasActiveScoringModel} scoringHref={revalidatePathStr} />
             </div>
           ) : null}
         </DragOverlay>

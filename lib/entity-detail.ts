@@ -33,7 +33,7 @@ import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
 import { loadCustomFieldsForObject } from "@/lib/custom-field-definitions";
-import { toOpportunityScoreData } from "@/lib/score-summary";
+import { toOpportunityScoreData, toScoreSummary, toSolutionScoreData } from "@/lib/score-summary";
 import type { ScoringModelData } from "@/lib/types";
 
 /**
@@ -177,6 +177,7 @@ async function fetchOpportunity(id: string, workspaceId: string) {
       solutions: {
         include: {
           _count: { select: { assumptions: true, evidence: true } },
+          score: { select: { normalizedScore: true, modelVersion: true } },
           assumptions: {
             orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
             include: {
@@ -196,11 +197,17 @@ async function fetchOpportunity(id: string, workspaceId: string) {
       // Nested on the existing opportunity fetch (no extra round trip) so the
       // panel can apply the same gate as the board: show a score only when the
       // workspace has an active model, and derive staleness from its live
-      // version. See lib/scoring-model.ts.
+      // version. See lib/scoring-model.ts. Both scoring slots are fetched here:
+      // opportunityScoringModel for this Opportunity's own Scoring tab,
+      // solutionScoringModel purely to gate the ScoreBadge on the nested
+      // Solutions list below (independent slot, same workspace config row).
       workspace: {
         select: {
           scoringConfig: {
-            select: { scoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
+            select: {
+              opportunityScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } },
+              solutionScoringModel: { select: { id: true, version: true } },
+            },
           },
         },
       },
@@ -221,9 +228,17 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     getPrisma().keyResult.findMany({ where: { objective: { cycle: { workspaceId } } }, select: { id: true, title: true, objective: { select: { title: true } } }, orderBy: { createdAt: "asc" } }),
     loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OPPORTUNITY", objectId: id }),
   ]);
+  const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
   return {
     ...item, evidence, ...linkedTasks, squads, customFields,
-    existingScore: toOpportunityScoreData(item.score, item.workspace?.scoringConfig?.scoringModel as ScoringModelData | null),
+    existingScore: toOpportunityScoreData(item.score, item.workspace?.scoringConfig?.opportunityScoringModel as ScoringModelData | null),
+    // Threaded onto each nested solution row so the panel's SolutionsList can
+    // render a ScoreBadge without a second workspace round trip.
+    solutions: (item.solutions ?? []).map((solution) => ({
+      ...solution,
+      score: toScoreSummary(solution.score, solutionScoringModel),
+    })),
+    hasActiveSolutionScoringModel: solutionScoringModel !== null,
     availableKeyResults: keyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })),
     pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews,
   };
@@ -235,6 +250,9 @@ async function fetchSolution(id: string, workspaceId: string) {
     where: { id, opportunity: { workspaceId } },
     include: {
       opportunity: { select: { id: true, title: true, workspaceId: true, squadId: true } },
+      score: {
+        select: { id: true, scoringModelId: true, formulaSnapshot: true, rawValues: true, normalizedScore: true, rawScore: true, modelVersion: true, scoredAt: true },
+      },
       assumptions: {
         select: {
           id: true,
@@ -256,7 +274,7 @@ async function fetchSolution(id: string, workspaceId: string) {
     },
   });
   if (!solution) return null
-  const [links, availableArtifacts, pmInterviews, linkedTasks, evidence, customFields] = await Promise.all([
+  const [links, availableArtifacts, pmInterviews, linkedTasks, evidence, customFields, scoringConfig] = await Promise.all([
     prisma.artifactLink.findMany({ where: { workspaceId, linkedType: "SOLUTION", linkedId: id }, select: { artifactId: true } }),
     prisma.artifact.findMany({ where: { workspaceId, status: "ACTIVE" }, select: { id: true, title: true, sourceType: true }, orderBy: { title: "asc" } }),
     pmInterviewHistory(workspaceId, "SOLUTION", id),
@@ -265,9 +283,22 @@ async function fetchSolution(id: string, workspaceId: string) {
     // A Solution has no detail route — its panel is the only place its tags can
     // be set, which is what the shipped SOLUTION tag filter reads.
     loadCustomFieldsForObject(prisma, { workspaceId, objectType: "SOLUTION", objectId: id }),
+    // Same gate as the Opportunity panel's Scoring tab, just for the Solution
+    // slot: render nothing when the workspace has no active Solution model.
+    prisma.workspaceScoringConfig.findUnique({
+      where: { workspaceId },
+      select: { solutionScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
+    }),
   ])
   const linkedIds = new Set(links.map((link) => link.artifactId))
-  return { ...solution, evidence, ...linkedTasks, artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews, customFields }
+  const solutionScoringModel = (scoringConfig?.solutionScoringModel as ScoringModelData | null) ?? null
+  return {
+    ...solution, evidence, ...linkedTasks,
+    artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts,
+    pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews, customFields,
+    scoringModel: solutionScoringModel,
+    existingScore: toSolutionScoreData(solution.score, solutionScoringModel),
+  }
 }
 
 async function fetchAssumption(id: string, workspaceId: string) {

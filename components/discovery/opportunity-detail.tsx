@@ -35,7 +35,8 @@ type OpportunityData = ComponentProps<typeof OpportunityHeader>["opportunity"] &
   customFields: ComponentProps<typeof CustomFieldsPanel>["fields"];
   score: { normalizedScore: number; modelVersion: number } | null;
   existingScore: OpportunityScoreData | null;
-  workspace: { scoringConfig: { scoringModel: ScoringModelData | null } | null } | null;
+  workspace: { scoringConfig: { opportunityScoringModel: ScoringModelData | null } | null } | null;
+  hasActiveSolutionScoringModel: boolean;
   deliveryTasks: LinkedTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
@@ -76,7 +77,7 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
 
   const detailPath = `/${orgSlug}/${workspaceSlug}/discovery/${opportunityId}`;
   const edit: EditContext = { type: "opportunity", id: opportunityId, orgSlug, workspaceSlug, onSaved: (next) => mutate(next as OpportunityData) };
-  const scoringModel = data.workspace?.scoringConfig?.scoringModel ?? null;
+  const scoringModel = data.workspace?.scoringConfig?.opportunityScoringModel ?? null;
   const customFields = data.customFields ?? [];
   const availableTabs = ["solutions", "evidence", "tree", ...(scoringModel ? ["scoring"] : []), ...(customFields.length ? ["details"] : [])];
   const requestedTab = initialTab === "ost" ? "tree" : initialTab;
@@ -103,7 +104,7 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
               </TabsList></div>
               <TabsContent value="solutions" className="flex min-w-0 flex-col gap-3 pt-4">
                 {!data.solutions.length && <p className="text-sm text-muted-foreground">No solutions yet. Add one below.</p>}
-                <SolutionsList solutions={data.solutions} revalidatePathStr={detailPath} onChanged={refresh} />
+                <SolutionsList solutions={data.solutions} revalidatePathStr={detailPath} showScore={data.hasActiveSolutionScoringModel} onChanged={refresh} />
                 <AddSolutionForm opportunityId={data.id} revalidatePathStr={detailPath} onAdded={refresh} />
               </TabsContent>
               <TabsContent value="evidence" className="flex min-w-0 flex-col gap-3 pt-4">
