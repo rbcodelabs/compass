@@ -23,7 +23,7 @@ vi.mock("@/lib/comment-browser", () => ({
   toCommentDto: (...args: unknown[]) => toCommentDto(...args),
 }))
 vi.mock("@/lib/comments", () => ({
-  COMMENT_TARGET_TYPES: ["ROADMAP_ITEM", "REVIEW_REQUEST"],
+  COMMENT_TARGET_TYPES: ["ROADMAP_ITEM", "REVIEW_REQUEST", "ARTIFACT"],
   createComment: (...args: unknown[]) => createComment(...args),
   updateCommentBody: (...args: unknown[]) => updateCommentBody(...args),
   setCommentStatus: (...args: unknown[]) => setCommentStatus(...args),
@@ -97,6 +97,63 @@ describe("POST /api/comments", () => {
     expect(response.status).toBe(400)
     expect((await response.json()).error).toContain(expectedField)
     expect(createComment).not.toHaveBeenCalled()
+  })
+
+  it("passes a validated element anchor through for a root ARTIFACT comment", async () => {
+    const response = await POST(request("/api/comments", {
+      method: "POST",
+      body: JSON.stringify({
+        targetType: "ARTIFACT", targetId: "target-1", body: "Looks off",
+        elementAnchor: { pageUrl: "https://compass.test/acme/product/docs/artifacts/art-1", pagePath: "/acme/product/docs/artifacts/art-1", elementSelector: "button.cta", elementFingerprint: { tag: "button", rectXRatio: 0.2 }, screenshotUrl: "https://evil.example.com/tracker.png" },
+      }),
+    }))
+    expect(response.status).toBe(201)
+    expect(createComment).toHaveBeenCalledWith(expect.objectContaining({
+      elementAnchor: {
+        pageUrl: "https://compass.test/acme/product/docs/artifacts/art-1",
+        pagePath: "/acme/product/docs/artifacts/art-1",
+        elementSelector: "button.cta",
+        elementFingerprint: { tag: "button", text: undefined, rectXRatio: 0.2, rectYRatio: undefined, rectWRatio: undefined, rectHRatio: undefined },
+      },
+    }))
+    // screenshotUrl is never forwarded from client input — rebuilt field by field.
+    const [callArgs] = createComment.mock.calls[0]
+    expect(callArgs.elementAnchor).not.toHaveProperty("screenshotUrl")
+  })
+
+  it("omits elementAnchor entirely when the client sends none", async () => {
+    await POST(request("/api/comments", { method: "POST", body: JSON.stringify({ targetType: "ROADMAP_ITEM", targetId: "target-1", body: "Hello" }) }))
+    const [callArgs] = createComment.mock.calls[0]
+    expect(callArgs).not.toHaveProperty("elementAnchor")
+  })
+
+  it("rejects an element anchor on a non-ARTIFACT target", async () => {
+    const response = await POST(request("/api/comments", {
+      method: "POST",
+      body: JSON.stringify({ targetType: "ROADMAP_ITEM", targetId: "target-1", body: "Hello", elementAnchor: { pageUrl: "https://x", pagePath: "/x" } }),
+    }))
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toContain("ARTIFACT")
+    expect(createComment).not.toHaveBeenCalled()
+  })
+
+  it("rejects an element anchor on a reply", async () => {
+    const response = await POST(request("/api/comments", {
+      method: "POST",
+      body: JSON.stringify({ targetType: "ARTIFACT", targetId: "target-1", parentId: "parent-1", body: "Hello", elementAnchor: { pageUrl: "https://x", pagePath: "/x" } }),
+    }))
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toContain("root comment")
+    expect(createComment).not.toHaveBeenCalled()
+  })
+
+  it("rejects an element anchor missing required fields", async () => {
+    const response = await POST(request("/api/comments", {
+      method: "POST",
+      body: JSON.stringify({ targetType: "ARTIFACT", targetId: "target-1", body: "Hello", elementAnchor: { pageUrl: "" } }),
+    }))
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toContain("elementAnchor.pageUrl")
   })
 })
 

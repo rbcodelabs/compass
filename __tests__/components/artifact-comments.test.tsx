@@ -17,12 +17,16 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.cookie = "compass_panel_artifactComments=; Path=/; Max-Age=0" })
 
-it("loads the Artifact discussion only when Comments opens", async () => {
+it("eagerly loads anchors for pins, independently of the Discussion panel", async () => {
   render(<ArtifactDetail {...props} />)
-  expect(fetchMock).not.toHaveBeenCalled()
+  // The pin overlay needs existing anchored comments whether or not the
+  // Comments panel has ever been opened, so ArtifactViewer fetches on mount —
+  // unlike Discussion (components/comments/discussion.tsx), which stays lazy.
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/comments?targetType=ARTIFACT&targetId=artifact")
   fireEvent.click(screen.getByRole("button", { name: "Comments" }))
   expect(await screen.findByText("No comments yet.")).toBeVisible()
-  expect(fetchMock.mock.calls[0][0]).toBe("/api/comments?targetType=ARTIFACT&targetId=artifact")
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
 })
 
 it("preserves a draft and preview across pinning, closing, reopening and refresh", async () => {
@@ -40,7 +44,8 @@ it("preserves a draft and preview across pinning, closing, reopening and refresh
   rerender(<ArtifactDetail {...props} artifact={{ ...props.artifact, title: "Updated prototype" }} />)
   expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveValue("Keep this draft")
   expect(screen.getByRole("textbox", { name: "Preview control" })).toBe(preview)
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+  // 1 eager ArtifactViewer pin fetch + 2 Discussion fetches (initial open, reopen refresh).
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
 })
 
 it("resets discussion drafts when navigating to another Artifact", async () => {
