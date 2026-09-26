@@ -39,16 +39,24 @@ vi.mock("next/navigation", () => ({
   usePathname: () => pathname,
 }));
 
-let panelState: { type: string; id: string } | null = null;
+/**
+ * How much width the detail panel is claiming as an in-flow column, straight
+ * from shared context (see `DetailPanelDock` in `panel-context.tsx`) — this
+ * replaced a `[data-slot="pinned-panel"]` element the rail used to sniff out
+ * of the DOM itself. Mutate this directly and re-render to simulate
+ * PanelShell docking or undocking the same panel, exactly as it does when its
+ * "Pin panel" toggle fires without ever changing `?detail=`.
+ */
+let detailPanelDock: { docked: boolean; width: number } = { docked: false, width: 0 };
 vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({
-    panel: panelState,
     closePanel: vi.fn(),
     openPanel: vi.fn(),
     orgSlug: "acme",
     workspaceSlug: "product",
     notifyEntityMutated: vi.fn(),
     subscribeEntityMutated: () => () => undefined,
+    detailPanelDock,
   }),
 }));
 
@@ -114,19 +122,15 @@ import { AgentRailProvider } from "@/components/agent/agent-rail-context";
  * The DOM landmarks `measure()` walks. Deliberately the real selectors rather
  * than a prop: the rail reads the *live* sidebar gap so a nav collapse re-clamps
  * it, and a test that injected widths directly would not exercise that path.
+ * The detail panel's width is no longer one of these landmarks — that comes
+ * from `detailPanelDock` above instead — so the harness has nothing to render
+ * for it.
  */
-function Harness({
-  children,
-  withDetailPanel = false,
-}: {
-  children: React.ReactNode;
-  withDetailPanel?: boolean;
-}) {
+function Harness({ children }: { children: React.ReactNode }) {
   return (
     <div data-slot="sidebar-wrapper">
       <div data-slot="sidebar-gap" />
       {children}
-      {withDetailPanel && <div data-slot="pinned-panel" />}
     </div>
   );
 }
@@ -134,25 +138,10 @@ function Harness({
 const originalRect = Element.prototype.getBoundingClientRect;
 
 /** jsdom reports every box as 0×0, so the measured layout has to be stubbed. */
-function stubLayout({
-  wrapper,
-  nav,
-  detail = 0,
-}: {
-  wrapper: number;
-  nav: number;
-  detail?: number;
-}) {
+function stubLayout({ wrapper, nav }: { wrapper: number; nav: number }) {
   Element.prototype.getBoundingClientRect = function getBoundingClientRect(this: Element) {
     const slot = (this as HTMLElement).dataset?.slot;
-    const width =
-      slot === "sidebar-wrapper"
-        ? wrapper
-        : slot === "sidebar-gap"
-          ? nav
-          : slot === "pinned-panel"
-            ? detail
-            : 0;
+    const width = slot === "sidebar-wrapper" ? wrapper : slot === "sidebar-gap" ? nav : 0;
     return {
       width,
       height: 0,
@@ -167,18 +156,21 @@ function stubLayout({
   };
 }
 
-function renderRail({
+function railTree({
   pinned = true,
   width = PANEL_WIDTH_DEFAULT,
-  withDetailPanel = false,
-}: { pinned?: boolean; width?: number; withDetailPanel?: boolean } = {}) {
-  return render(
-    <Harness withDetailPanel={withDetailPanel}>
+}: { pinned?: boolean; width?: number } = {}) {
+  return (
+    <Harness>
       <AgentRailProvider initialPin={{ pinned, width }}>
         <AgentRail workspaceId="ws-1" basePath="/acme/product" userInitials="RB" />
       </AgentRailProvider>
-    </Harness>,
+    </Harness>
   );
+}
+
+function renderRail(options?: { pinned?: boolean; width?: number }) {
+  return render(railTree(options));
 }
 
 const rail = () => document.querySelector('[data-slot="agent-rail"]') as HTMLElement | null;
@@ -198,7 +190,7 @@ async function selectThread(title: string) {
 beforeEach(() => {
   push.mockClear();
   pathname = "/acme/product/roadmap";
-  panelState = null;
+  detailPanelDock = { docked: false, width: 0 };
   lastChatProps = {};
   chatMounts = 0;
   fetchCalls = [];
@@ -271,9 +263,9 @@ describe("space-driven mode selection", () => {
   it("demotes to a floating overlay on a 1440px viewport with a detail panel open", () => {
     // The case that chose this design: 1440 - 220 nav - 448 detail - 480 main
     // floor = 292, under the 320px rail minimum.
-    panelState = { type: "objective", id: "obj-1" };
-    stubLayout({ wrapper: 1440, nav: 220, detail: 448 });
-    renderRail({ withDetailPanel: true });
+    detailPanelDock = { docked: true, width: 448 };
+    stubLayout({ wrapper: 1440, nav: 220 });
+    renderRail();
 
     const aside = rail() as HTMLElement;
     expect(aside).toHaveAttribute("data-mode", "overlay");
@@ -293,10 +285,26 @@ describe("space-driven mode selection", () => {
   });
 
   it("keeps a docked rail's chosen width while floating", () => {
-    panelState = { type: "objective", id: "obj-1" };
-    stubLayout({ wrapper: 1440, nav: 220, detail: 448 });
-    renderRail({ width: 520, withDetailPanel: true });
+    detailPanelDock = { docked: true, width: 448 };
+    stubLayout({ wrapper: 1440, nav: 220 });
+    renderRail({ width: 520 });
     expect((rail() as HTMLElement).style.getPropertyValue("--panel-w")).toBe("520px");
+  });
+
+  it("stays docked when the detail panel is wide but there is still room for a minimal rail", () => {
+    // The regression this guards against: a detail panel pinned wide (or the
+    // rail itself dragged wide) must not get stuck docked once there is
+    // genuinely no room, and must *not* overlay just because it isn't at its
+    // preferred width either. 2000 - 220 nav - 720 detail - 480 floor = 580,
+    // comfortably above the 320px minimum, so this stays docked — CSS (not
+    // this decision) is what clamps the rail's own width down to fit.
+    detailPanelDock = { docked: true, width: 720 };
+    stubLayout({ wrapper: 2000, nav: 220 });
+    renderRail({ width: 720 });
+
+    const aside = rail() as HTMLElement;
+    expect(aside).toHaveAttribute("data-mode", "docked");
+    expect(aside.style.getPropertyValue("--agent-rail-max")).toBe("580px");
   });
 });
 
@@ -423,41 +431,65 @@ describe("conversation handling", () => {
 
 describe("re-measuring when the same detail panel is pinned or unpinned", () => {
   /**
-   * PanelShell's "Pin panel" flips the *same* panel from a portaled Sheet to an
-   * in-flow `[data-slot="pinned-panel"]` column without changing `?detail=`, so
-   * nothing the rail reads from panel context changes. The rail has to notice
-   * the column arriving (and leaving) in the DOM itself.
+   * PanelShell's "Pin panel" flips the *same* panel from a portaled Sheet to
+   * an in-flow column without changing `?detail=`, so nothing the rail reads
+   * from `panel` itself would change — that is exactly why the rail no longer
+   * reads `panel` at all, and instead reads `detailPanelDock` (see the mock
+   * above and `DetailPanelDock` in panel-context.tsx). Mutating that mock
+   * variable and re-rendering the identical tree is a faithful stand-in for
+   * PanelShell re-rendering with a new `docked`/`width` and reporting it
+   * through the real context.
    */
-  function tree(withDetailPanel: boolean) {
-    return (
-      <Harness withDetailPanel={withDetailPanel}>
-        <AgentRailProvider initialPin={{ pinned: true, width: PANEL_WIDTH_DEFAULT }}>
-          <AgentRail workspaceId="ws-1" basePath="/acme/product" userInitials="RB" />
-        </AgentRailProvider>
-      </Harness>
-    );
-  }
-
-  it("demotes to overlay when an open overlay panel is pinned, and docks again when unpinned", async () => {
-    // 1440px laptop, overlay detail panel open: the Sheet is portaled, so the
-    // wrapper holds no pinned column and the rail has 740px — docked.
-    panelState = { type: "objective", id: "obj-1" };
-    stubLayout({ wrapper: 1440, nav: 220, detail: 448 });
-    const { rerender } = render(tree(false));
+  it("demotes to overlay when an open overlay panel is pinned, and docks again when unpinned", () => {
+    // 1440px laptop, overlay detail panel open: nothing is docked yet, so the
+    // rail has 740px — docked.
+    stubLayout({ wrapper: 1440, nav: 220 });
+    const { rerender } = render(railTree());
     expect(rail()).toHaveAttribute("data-mode", "docked");
     const mountsBefore = chatMounts;
 
     // "Pin panel": same type and id, but now a 448px in-flow column. Staying
     // docked would squeeze main content to 292px, under its 480px floor.
-    rerender(tree(true));
-    await vi.waitFor(() => expect(rail()).toHaveAttribute("data-mode", "overlay"));
+    // A fresh element from railTree() on each rerender, not the same instance
+    // reused: React only re-invokes a mocked hook's factory (and so re-reads
+    // `detailPanelDock`) when asked to render an element, and passing back the
+    // exact same element reference is indistinguishable from "nothing to do"
+    // for a subtree with no other changed inputs.
+    detailPanelDock = { docked: true, width: 448 };
+    rerender(railTree());
+    expect(rail()).toHaveAttribute("data-mode", "overlay");
 
     // "Unpin panel": room again, so the rail must not stay floating.
-    rerender(tree(false));
-    await vi.waitFor(() => expect(rail()).toHaveAttribute("data-mode", "docked"));
+    detailPanelDock = { docked: false, width: 0 };
+    rerender(railTree());
+    expect(rail()).toHaveAttribute("data-mode", "docked");
 
     // Mode flips never remount the chat (that would abort a streaming turn).
     expect(chatMounts).toBe(mountsBefore);
+  });
+
+  it("stays docked through a pin when there is still room, and reflects a widened panel", () => {
+    // The regression this exists for: a wide viewport (2000px) with a
+    // default-width panel has plenty of room either way, but the rail still
+    // has to *notice* the panel width changing at all, not just its
+    // presence — this failed silently under the old DOM-mutation approach
+    // whenever the width changed without the element itself being
+    // added/removed.
+    stubLayout({ wrapper: 2000, nav: 220 });
+    const { rerender } = render(railTree());
+    expect((rail() as HTMLElement).style.getPropertyValue("--agent-rail-max")).toBe("1300px");
+
+    detailPanelDock = { docked: true, width: 448 };
+    rerender(railTree());
+    expect(rail()).toHaveAttribute("data-mode", "docked");
+    expect((rail() as HTMLElement).style.getPropertyValue("--agent-rail-max")).toBe("852px");
+
+    // The user drags the (already-pinned) detail panel wider, still with
+    // plenty of room to keep the rail docked.
+    detailPanelDock = { docked: true, width: 720 };
+    rerender(railTree());
+    expect(rail()).toHaveAttribute("data-mode", "docked");
+    expect((rail() as HTMLElement).style.getPropertyValue("--agent-rail-max")).toBe("580px");
   });
 });
 

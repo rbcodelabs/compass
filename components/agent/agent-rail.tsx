@@ -111,29 +111,26 @@ const useIsomorphicLayoutEffect =
 /**
  * How much horizontal room is left for the rail, and where its left edge sits.
  *
- * Every term is read from an element whose width does not depend on the rail's
- * own, so this cannot feed back into itself:
+ * `detailWidth` is the one term that does *not* come from the DOM — see the
+ * doc comment on `DetailPanelDock` in `panel-context.tsx` for why. Everything
+ * else is read from an element whose width does not depend on the rail's own,
+ * so this cannot feed back into itself:
  *
  *  - the wrapper is `w-full`, so its width is the viewport's;
  *  - `sidebar-gap` is the sidebar's *in-flow* spacer, so it reports the nav's
  *    live width — icon or expanded — without this component knowing either
  *    number, and it is the element that animates, so observing it tracks a
- *    collapse through its 200ms transition rather than sampling it once;
- *  - `pinned-panel` is the docked detail panel, absent from the DOM when there
- *    isn't one.
+ *    collapse through its 200ms transition rather than sampling it once.
  */
-function measure(rail: HTMLElement | null): Measurement | null {
+function measure(rail: HTMLElement | null, detailWidth: number): Measurement | null {
   const wrapper = rail?.closest('[data-slot="sidebar-wrapper"]')
   if (!(wrapper instanceof HTMLElement)) return null
 
   const gap = wrapper.querySelector('[data-slot="sidebar-gap"]')
-  const detail = wrapper.querySelector('[data-slot="pinned-panel"]')
   // Absent rather than zero-width on mobile: the sidebar renders as a sheet
   // there and contributes no in-flow spacer at all, so an overlay rail starts
   // at the left edge. That is the correct mobile layout, not a fallback.
   const navOffset = gap instanceof HTMLElement ? gap.getBoundingClientRect().width : 0
-  const detailWidth =
-    detail instanceof HTMLElement ? detail.getBoundingClientRect().width : 0
 
   return {
     navOffset,
@@ -146,66 +143,42 @@ function measure(rail: HTMLElement | null): Measurement | null {
 function useMeasurement(
   railRef: React.RefObject<HTMLElement | null>,
   enabled: boolean,
-  // Re-binds the observers when the detail panel mounts or unmounts, since that
-  // is a different element rather than a resize of an existing one.
-  detailPanelKey: string | null,
+  // How much width the detail panel is claiming right now, from shared
+  // context — see DetailPanelDock in panel-context.tsx. A plain number, so
+  // React's own dependency comparison is what triggers a re-measure; no DOM
+  // watching is needed to notice the detail panel docking or undocking.
+  detailWidth: number,
 ) {
   const [measurement, setMeasurement] = useState<Measurement | null>(null)
 
   // Before paint, not after: a returning user whose cookie says the rail was
   // open, on a viewport too narrow to dock it, would otherwise see one frame of
-  // a squeezed layout before the overlay took over.
+  // a squeezed layout before the overlay took over. Re-running whenever
+  // `detailWidth` changes gets the same guarantee for the detail panel
+  // docking or undocking: the recompute happens in the same commit, before
+  // the browser paints, rather than waiting on an observer callback.
   useIsomorphicLayoutEffect(() => {
     if (!enabled) return
     const rail = railRef.current
     const wrapper = rail?.closest('[data-slot="sidebar-wrapper"]')
     if (!(wrapper instanceof HTMLElement)) return
 
-    const update = () => setMeasurement(measure(rail))
+    const update = () => setMeasurement(measure(rail, detailWidth))
     update()
 
-    // Observing the wrapper covers window resize (it is `w-full`), which is why
-    // there is no resize listener here. jsdom has no ResizeObserver and several
-    // specs render this tree, so the one-shot measurement above has to be
-    // enough on its own when the constructor is missing.
-    const resizeObserver =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update)
-    const observeSizes = () => {
-      if (!resizeObserver) return
-      resizeObserver.disconnect()
-      resizeObserver.observe(wrapper)
-      for (const selector of ['[data-slot="sidebar-gap"]', '[data-slot="pinned-panel"]']) {
-        const element = wrapper.querySelector(selector)
-        if (element instanceof HTMLElement) resizeObserver.observe(element)
-      }
-    }
-    observeSizes()
+    // Covers window resize (the wrapper is `w-full`) and the sidebar's own
+    // expand/collapse transition (the gap element resizes in place). jsdom has
+    // no ResizeObserver and several specs render this tree, so the one-shot
+    // measurement above has to be enough on its own when the constructor is
+    // missing.
+    if (typeof ResizeObserver === "undefined") return
+    const resizeObserver = new ResizeObserver(update)
+    resizeObserver.observe(wrapper)
+    const gap = wrapper.querySelector('[data-slot="sidebar-gap"]')
+    if (gap instanceof HTMLElement) resizeObserver.observe(gap)
 
-    // The detail panel column can appear or vanish with no change to
-    // `detailPanelKey`: PanelShell's "Pin panel" swaps the *same* panel from a
-    // portaled Sheet to an in-flow `pinned-panel` aside (and back) without
-    // touching `?detail=`, and crossing the 1024px pin threshold does the same.
-    // Watching the wrapper's direct children catches every one of those, from
-    // the DOM this function already measures, rather than mirroring PanelShell's
-    // internal pin state into shared context. Direct children only: the aside
-    // is a sibling of main content, so there is no need to see into the page.
-    const mutationObserver = new MutationObserver((records) => {
-      const detailPanelChanged = records.some((record) =>
-        [...record.addedNodes, ...record.removedNodes].some(
-          (node) => node instanceof HTMLElement && node.dataset.slot === "pinned-panel",
-        ),
-      )
-      if (!detailPanelChanged) return
-      observeSizes()
-      update()
-    })
-    mutationObserver.observe(wrapper, { childList: true })
-
-    return () => {
-      resizeObserver?.disconnect()
-      mutationObserver.disconnect()
-    }
-  }, [enabled, detailPanelKey, railRef])
+    return () => resizeObserver.disconnect()
+  }, [enabled, detailWidth, railRef])
 
   return measurement
 }
@@ -226,9 +199,10 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
     width,
     commitWidth,
   } = useAgentRail()
-  // Only to know *whether* a detail panel is docked; the rail never reads or
-  // changes its contents. Its width is measured, not derived from this.
-  const { panel } = usePanelContext()
+  // Only to know how much width the detail panel is currently claiming as an
+  // in-flow column; the rail never reads or changes its contents. See
+  // DetailPanelDock's doc comment in panel-context.tsx.
+  const { detailPanelDock } = usePanelContext()
   const router = useRouter()
   const railRef = useRef<HTMLElement | null>(null)
 
@@ -262,7 +236,11 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
   const messages =
     conversationId && loaded?.conversationId === conversationId ? loaded.messages : NO_MESSAGES
 
-  const measurement = useMeasurement(railRef, open, panel ? `${panel.type}:${panel.id}` : null)
+  const measurement = useMeasurement(
+    railRef,
+    open,
+    detailPanelDock.docked ? detailPanelDock.width : 0,
+  )
   // Optimistically docked until measured — the same first render on the server
   // and on the client, so hydration agrees. The CSS `max()` floor in
   // `.agent-rail-surface` bounds how wrong that can be for the one frame before

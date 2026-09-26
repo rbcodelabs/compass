@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
 import { ExternalLink, PanelRightClose, Pin, PinOff } from "lucide-react";
 import Link from "next/link";
@@ -58,6 +58,14 @@ const PANEL_TITLES: Record<string, string> = {
  */
 const HYDRATION_DEADLINE_MS = 200;
 
+/**
+ * `useLayoutEffect` warns when a client component is server-rendered, and
+ * PanelShell is — its pin state comes from a cookie the layout reads. See the
+ * same pattern (and the fuller explanation) in `components/agent/agent-rail.tsx`.
+ */
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
+
 export interface PanelShellProps {
   /**
    * Pin state read from the request cookie by the layout. Seeding this on the
@@ -72,7 +80,7 @@ export interface PanelShellProps {
 }
 
 export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps = {}) {
-  const { panel, closePanel, orgSlug, workspaceSlug } = usePanelContext();
+  const { panel, closePanel, orgSlug, workspaceSlug, setDetailPanelDock } = usePanelContext();
   const [hydrated, setHydrated] = useState(false);
   const { pinned, width, viewportAllowsPin, isPinnedMode, togglePinned, commitWidth } = usePanelPin("detail", initialPin);
   const asideRef = useRef<HTMLElement | null>(null);
@@ -94,6 +102,33 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
   if (isComposer && !composerSession) setComposerSession(true);
   if (!panel && composerSession) setComposerSession(false);
   const docked = isPinnedMode || (viewportAllowsPin && (isComposer || composerSession));
+  // `docked` alone isn't "is there an aside on screen claiming width right
+  // now" — see the early return a few lines below the JSX split: `docked &&
+  // !panel` renders nothing. Reporting that distinction up is what lets a
+  // consumer (the agent rail) trust this value without also re-deriving
+  // "is a panel even open" for itself.
+  const actuallyDocked = docked && panel !== null;
+
+  // The one and only writer of DetailPanelDock (see its doc comment in
+  // panel-context.tsx for why this replaced watching the DOM for a
+  // `[data-slot="pinned-panel"]` element).
+  //
+  // A *layout* effect, not a plain one: PanelShell and AgentRail are siblings,
+  // and AgentRail reads `detailPanelDock` in its own layout effect to measure
+  // before the browser paints. React flushes every layout effect in the tree
+  // before any passive `useEffect` runs, but PanelShell is later in render
+  // order than AgentRail (see the workspace layout), so on the very first
+  // commit AgentRail's layout effect still runs before this one has had a
+  // chance to report the real value. The `setDetailPanelDock` call below is
+  // itself made from a layout effect, so React re-flushes layout effects
+  // synchronously — including AgentRail's — before paint, correcting that
+  // first read in the same tick. Were this a plain `useEffect` instead, the
+  // correction would land one frame late: a rail whose cookie says open and a
+  // detail panel already pinned via cookie would render docked for one frame,
+  // wide enough to squeeze main content, before snapping to overlay.
+  useIsomorphicLayoutEffect(() => {
+    setDetailPanelDock?.({ docked: actuallyDocked, width });
+  }, [actuallyDocked, width, setDetailPanelDock]);
 
   // A deep link is already present during SSR. Opening Base UI's modal Sheet
   // before hydration completes applies aria-hidden to the server-rendered
