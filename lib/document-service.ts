@@ -17,7 +17,15 @@ export type DocumentMutationOptions = {
   actorKey?: string
 }
 type BodyRow = { content: string | null; storageProvider?: string | null; contentRef?: string | null }
-type DocumentChange = { title?: string; content?: string | null; icon?: string | null; metadata?: Prisma.InputJsonValue | typeof Prisma.JsonNull }
+type DocumentChange = {
+  title?: string
+  content?: string | null
+  icon?: string | null
+  metadata?: Prisma.InputJsonValue | typeof Prisma.JsonNull
+  /** Reparent (doc-fs's movePath — ADR 0019). Null moves the doc to the workspace root. */
+  parentId?: string | null
+  sortOrder?: number
+}
 
 export class DocumentError extends Error {
   constructor(public readonly code: string, detail?: string) { super(detail ? `Document ${code}: ${detail}` : `Document ${code}`); this.name = "DocumentError" }
@@ -138,6 +146,26 @@ export async function updateDocument(docId: string, change: DocumentChange, opts
   if (!doc) throw new DocumentError("not-found")
   const data = doc.docType === "CANVAS" && typeof change.content === "string" ? { ...change, content: canonicalCanvasContent(change.content) } : change
   if (doc.storageProvider !== "GEODE" && !opts.operationId) {
+    // ADR 0019 §2.1: extend the GEODE-only optimistic-concurrency check to
+    // every doc, but only when the caller actually supplies expectedRevision.
+    // A caller that omits it (today's UI autosave, today's legacy MCP
+    // handlers until migrated) keeps exactly today's last-write-wins
+    // behavior -- additive, not breaking. doc-fs.ts is the first caller that
+    // always supplies it.
+    if (opts.expectedRevision !== undefined) {
+      return db.$transaction(async tx => {
+        if (Object.keys(data).length) await snapshot(tx, doc, opts)
+        const revision = randomUUID()
+        const changed = await tx.doc.updateMany({
+          where: { id: docId, workspaceId: doc.workspaceId, ...revisionWhere(doc, opts.expectedRevision!) },
+          data: { ...data, revision, updatedAt: new Date() },
+        })
+        if (changed.count !== 1) throw new DocumentError("revision-conflict")
+        const updated = await tx.doc.findUnique({ where: { id: docId } })
+        if (!updated) throw new DocumentError("not-found")
+        return updated
+      })
+    }
     return db.$transaction(async tx => {
       if (Object.keys(data).length) await snapshot(tx, doc, opts)
       return tx.doc.update({ where: { id: docId }, data: { ...data, revision: randomUUID(), updatedAt: new Date() } })
@@ -220,7 +248,10 @@ export async function deleteDocument(docId: string, opts: DocumentMutationOption
   if (!doc) throw new DocumentError("not-found")
   if (doc.storageProvider === "GEODE") requireOperation(opts)
   try { await db.$transaction(async tx => {
-    if (doc.storageProvider === "GEODE") {
+    // ADR 0019 §2.1: same expectedRevision extension as updateDocument -- GEODE
+    // always supplies one (requireOperation above enforces that); any other
+    // caller only pays the guard when it actually asks for one.
+    if (doc.storageProvider === "GEODE" || opts.expectedRevision !== undefined) {
       const changed = await tx.doc.updateMany({ where: { id: docId, workspaceId, revision: opts.expectedRevision }, data: { revision: randomUUID() } })
       if (changed.count !== 1) throw new DocumentError("revision-conflict")
     }

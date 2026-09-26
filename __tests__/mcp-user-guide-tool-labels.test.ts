@@ -4,8 +4,8 @@ type ToolMeta = { title?: string }
 const tools: Record<string, ToolMeta> = {}
 
 vi.mock("mcp-handler", () => ({
-  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: ToolMeta) => void }) => void) => {
-    setup({ registerTool: (name, meta) => { tools[name] = meta } })
+  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: ToolMeta) => void; registerResource: (...args: unknown[]) => void }) => void) => {
+    setup({ registerTool: (name, meta) => { tools[name] = meta }, registerResource: () => {} })
     return vi.fn()
   },
 }))

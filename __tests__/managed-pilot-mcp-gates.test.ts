@@ -27,5 +27,5 @@ it.each([
   await expect(applyToolGate(tool as string, actor, args as Record<string, unknown>)).rejects.toThrow();
 });
 it("still permits document creation in the primary workspace", async () => {
-  await expect(applyToolGate("create_doc", actor, { workspaceId: "primary" })).resolves.toBeUndefined();
+  await expect(applyToolGate("write_doc", actor, { workspaceId: "primary", path: "Synthetic" })).resolves.toBeUndefined();
 });

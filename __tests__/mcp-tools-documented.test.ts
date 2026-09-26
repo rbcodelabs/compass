@@ -6,8 +6,8 @@ import { describe, expect, it, vi } from "vitest"
 const tools: Record<string, unknown> = {}
 
 vi.mock("mcp-handler", () => ({
-  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: unknown) => void }) => void) => {
-    setup({ registerTool: (name, meta) => { tools[name] = meta } })
+  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: unknown) => void; registerResource: (...args: unknown[]) => void }) => void) => {
+    setup({ registerTool: (name, meta) => { tools[name] = meta }, registerResource: () => {} })
     return vi.fn()
   },
 }))
