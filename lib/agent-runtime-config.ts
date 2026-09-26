@@ -5,6 +5,14 @@
  * Holds the current "golden" Vercel Sandbox snapshot the in-app agent boots
  * from. Written by POST /api/admin/rebuild-agent-snapshot; read by the agent
  * turn service (Phase 3). See docs/decisions/0001-in-app-agent-architecture.md §3.
+ *
+ * `goldenSnapshotId` is a pointer, not an archive: it holds exactly one
+ * snapshot id at a time. The rebuild route reads the current value via
+ * `getAgentRuntimeConfig()` *before* calling `setGoldenSnapshot()` so it can
+ * delete the snapshot being replaced afterward (via
+ * `deleteGoldenSnapshot()` in lib/agent-sandbox.ts) — this row is the only
+ * record of which snapshot was previously golden, so skipping that read
+ * loses the ability to clean it up.
  */
 
 import getPrisma from "@/lib/db"
