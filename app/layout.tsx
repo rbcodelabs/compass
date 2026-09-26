@@ -7,6 +7,7 @@ import {
   Space_Grotesk,
   Source_Serif_4,
 } from "next/font/google";
+import { ProductAnalytics } from "@/components/product-analytics";
 import "./globals.css";
 
 const jakartaSans = Plus_Jakarta_Sans({
@@ -63,6 +64,13 @@ export const metadata: Metadata = {
   description:
     "Product discovery platform. Connect customer opportunities to OKRs, run experiments, and ship with confidence.",
   metadataBase: new URL("https://compass.rbcodelabs.com"),
+  // Site-wide no-referrer policy. This is the referrer-policy decision that
+  // PR #282 deliberately left open before mounting <ProductAnalytics /> below
+  // (see docs/content/09-mcp-api.md and ADR fbc69bbe-7053-4e1a-a5e1-281015bb592a
+  // in Compass): it suppresses the Referer header/document.referrer on every
+  // outbound navigation and subresource request from this app, not just on
+  // analytics traffic.
+  referrer: "no-referrer",
   openGraph: {
     title: "Compass",
     description: "Product discovery, powered by outcomes.",
@@ -89,7 +97,10 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${jakartaSans.variable} ${geistMono.variable} ${inter.variable} ${poppins.variable} ${spaceGrotesk.variable} ${sourceSerif.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <ProductAnalytics />
+      </body>
     </html>
   );
 }
