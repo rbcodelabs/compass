@@ -5,7 +5,14 @@
  * Registration is where the contract lives: the handler tests invoke the tool
  * callback directly, so the registered inputSchema never runs there. These
  * assertions pin the wire-level vocabulary agents actually see, and guard
- * against the six tools drifting apart one edit at a time.
+ * against the five tools drifting apart one edit at a time.
+ *
+ * list_docs is NOT here: ADR 0019 replaced it with the docs://{workspaceId}/
+ * {+path} resource, which has no updatedSince/updatedBefore/sort recency
+ * filter at all -- resources/list takes no caller-supplied arguments in the
+ * MCP protocol. That is a real capability gap relative to the old tool
+ * (there is no "what doc changed recently" digest query anymore), not an
+ * oversight in this test.
  */
 import { describe, expect, it, vi } from "vitest"
 import type { ZodType } from "zod"
@@ -14,8 +21,8 @@ type ToolMeta = { inputSchema: Record<string, ZodType> }
 const registeredTools: Record<string, ToolMeta> = {}
 
 vi.mock("mcp-handler", () => ({
-  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: ToolMeta) => void }) => void) => {
-    setup({ registerTool(name, meta) { registeredTools[name] = meta } })
+  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: ToolMeta) => void; registerResource: (...args: unknown[]) => void }) => void) => {
+    setup({ registerTool(name, meta) { registeredTools[name] = meta }, registerResource() {} })
     return () => new Response("ok")
   },
 }))
@@ -29,7 +36,6 @@ const WINDOW_TOOLS = [
   "list_solutions",
   "list_assumptions",
   "list_roadmap_items",
-  "list_docs",
 ] as const
 
 /** list_tasks already had the window; it gained only the sort. */

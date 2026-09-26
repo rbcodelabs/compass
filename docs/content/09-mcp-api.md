@@ -266,8 +266,8 @@ which works from any page in the workspace).
 Tools that return a `URL:` line: `create_opportunity`, `add_solution`,
 `add_assumption`, `create_objective`, `add_key_result`, `create_experiment`,
 `add_to_roadmap`, `promote_to_roadmap`, `promote_feedback_to_roadmap`,
-`create_task`, `create_doc`, `create_feedback` (and the other feedback
-mutations), and the decision/review tools.
+`create_task`, `write_doc`, `move_doc`, `create_feedback` (and the other
+feedback mutations), and the decision/review tools.
 
 The link is **omitted entirely** — the operation still succeeds — when the
 deployment has no configured public URL. Never reconstruct a link yourself from
@@ -591,23 +591,69 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 
 ### Docs
 
+Compass's Docs are exposed as a **virtual filesystem**, not an ID-addressed
+API: every doc is a path (e.g. `Product/Roadmap/Q3 Plan`), reads and listing
+go through an MCP **resource**, and mutations are 8 path-addressed tools.
+
+**Reading and listing — the `docs://` resource, not a tool.** Connect any
+MCP client that supports resources (Claude Desktop, for example — see
+[Example: Connecting Claude Desktop](#example-connecting-claude-desktop)
+below) and call the standard `resources/list` and `resources/read` methods:
+
+- `resources/list` returns one `docs://{workspaceId}/{path}` URI per doc, across
+  every workspace you're a member of (or, for a registered agent, every
+  workspace it holds a grant on).
+- `resources/read` on one of those URIs returns the doc's full content:
+  a YAML frontmatter block followed by the markdown body. Frontmatter always
+  carries `compass_doc_id` (the doc's underlying UUID, exposed for reference —
+  never accepted as input), `compass_doc_type`, and — if the doc is linked —
+  `compass_roadmap_item_id`, plus any ordinary user-set properties.
+
+A path segment is the doc's title, lightly sanitized (filesystem-illegal
+characters become `_`); it is **not** a lowercase slug, so renaming a doc's
+title in the UI changes its path the same way renaming a file changes its
+path. Two sibling docs sharing a title are disambiguated with a suffix, e.g.
+`Notes` and `Notes (a1b2c3d4)`.
+
 | Tool | Description |
 |---|---|
-| `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc`; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`). A doc whose parent is excluded by a recency filter is rendered at the top level so it stays reachable |
-| `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body, and `docType`/`roadmapItemId` when set |
+| `write_doc` | Create or update a doc by path — a write to a path that already resolves updates it; a write to a new path creates it. Missing parent directories in the path are created implicitly (e.g. writing `Product/Roadmap/Q3 Plan` under an empty workspace creates `Product` and `Product/Roadmap` too). Params: `workspaceId`, `path`, `content` (frontmatter + markdown body), optional `operationId`/`expectedRevision` |
+| `delete_doc` | Delete the doc at a path. Refuses (matching `rmdir` vs `rm -r`) if it has children unless `recursive: true` is passed |
+| `move_doc` | Rename and/or reparent a doc by changing its path — both are just "the path changed." Missing intermediate directories on the destination are created implicitly |
+| `list_doc_history` | List the saved versions of the doc at a path (id, label, author, created date), newest first. Does not include full content — call `restore_doc_version` to apply one |
+| `restore_doc_version` | Restore the doc at a path to a previously saved version (from `list_doc_history`). The doc's current state is snapshotted first (labeled "Before restore"), so restoring never loses data |
 | `prepare_doc_image_upload` | Prepare a signed, short-lived upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB in workspace-private Docs storage; returns the upload pathname/token plus the relative Compass image URL and Markdown |
-| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on |
-| `update_doc` | Update an existing doc's title, content, and/or icon |
-| `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Always writes a new version, even if one was just saved seconds ago — named snapshots are never coalesced away |
-| `list_doc_versions` | List a doc's saved versions (id, label, author, created date), newest first, alongside the doc's own current title and last-updated time as a reference point. Param: `docId`. Does not include full content — call `get_doc_version` for that |
-| `get_doc_version` | Return the full title/content/metadata/icon snapshot of a single saved doc version. Param: `versionId` |
-| `restore_doc_version` | Restore a doc's live content to a previously saved version. Param: `versionId`. The doc's current state is snapshotted first (labeled "Before restore"), so restoring never loses data |
 
-Every `update_doc` call also automatically snapshots the doc's pre-change state before applying the new values (coalesced to one snapshot per 5-minute window per author, so an agent making several quick edits in a row doesn't flood the history) — you don't need to call `create_doc_version` yourself unless you want a deliberately named checkpoint.
+`write_doc` deliberately does not split into separate create/update tools —
+the path already tells you which one it is: writing to a path you just read
+back from `resources/list` is an update, writing to a path you invented is a
+create. There is no `docType`/`roadmapItemId` param on `write_doc` today, so a
+Positioning & Messaging Brief linked to a roadmap item can currently only be
+created from the Compass UI, not via MCP.
 
-In the explicitly enabled Geode preview workspace, `get_doc` also returns `revision` and `storageProvider`. `create_doc` requires an `operationId` UUID. `update_doc`, `create_doc_version`, and `restore_doc_version` require both `operationId` and `expectedRevision` (the current document revision from `get_doc`). Reuse the exact operation ID and payload after a lost response; a changed payload or authenticated actor is rejected. A revision conflict requires a fresh read and a new intentional edit. These parameters remain optional for existing database-backed documents. Content references and private Blob paths are never returned. This pilot does not enable production document storage.
+`write_doc`/`delete_doc`/`move_doc` accept an optional `expectedRevision`
+(the `revision` a prior `resources/read` returned). Supplying it means a
+concurrent edit since that read is refused with a clear error instead of
+silently overwritten, dropped, or moved out from under you — read the doc
+again to get the current revision before retrying. Omitting it keeps
+last-write-wins behavior, matching every other MCP mutation. `operationId` is
+a stable retry ID: reuse it (with the identical payload) after a lost
+response to safely retry without double-applying — required for the Geode
+preview pilot workspace, optional everywhere else.
 
-To add a local screenshot, call `prepare_doc_image_upload` with its exact filename, MIME type, and byte size. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: fileType })` from `@vercel/blob/client`, then place the returned `markdown` in `create_doc` or `update_doc`. The token expires after ten minutes and is bound to one random workspace-prefixed pathname, MIME type, and maximum size; it cannot overwrite an existing blob. The saved Markdown contains only a relative Compass read URL, never the storage pathname or token. Image reads require a signed-in member of the owning workspace.
+Every overwriting `write_doc` call also automatically snapshots the doc's
+pre-change state before applying the new content (coalesced to one snapshot
+per 5-minute window per author, so several quick edits in a row don't flood
+the history) — call `write_doc` once with unchanged content first if you want
+a deliberate pre-rewrite checkpoint.
+
+Content references and private Blob paths are never returned. Compass's
+in-app agent uses a different projection of this same design — it edits real
+`.md` files in a disposable sandbox instead of calling these tools directly —
+see the ADR (docs/design/docs-virtual-filesystem-mcp.md in the repo) if you're
+building an integration and want the full mechanics.
+
+To add a local screenshot, call `prepare_doc_image_upload` with its exact filename, MIME type, and byte size. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: fileType })` from `@vercel/blob/client`, then place the returned `markdown` in the doc's content via `write_doc`. The token expires after ten minutes and is bound to one random workspace-prefixed pathname, MIME type, and maximum size; it cannot overwrite an existing blob. The saved Markdown contains only a relative Compass read URL, never the storage pathname or token. Image reads require a signed-in member of the owning workspace.
 
 This private flow applies to new uploads. Existing documents may contain older absolute `*.public.blob.vercel-storage.com` image URLs; they remain public and continue rendering. Compass does not migrate, delete, or rewrite those legacy blobs automatically.
 
@@ -631,17 +677,15 @@ Decision–Artifact links are live supporting material, not frozen review eviden
 
 ### Doc inline comments
 
-Google-Docs-style comments anchored to a span of a doc's text (or left as a general, doc-level note). Threads are one level deep: a root comment optionally carries an anchor; replies attach to a root and never carry their own anchor. Anchors are stored separately and never embedded in the doc's markdown.
+Google-Docs-style comments anchored to a span of a doc's text (or left as a general, doc-level note). Threads are one level deep: a root comment optionally carries an anchor; replies attach to a root and never carry their own anchor. Anchors are stored separately and never embedded in the doc's markdown. Like every other doc tool, these are addressed by **path**, not doc ID.
 
 | Tool | Description |
 | --- | --- |
-| `add_doc_comment` | Add a comment to a doc. Params: `docId`, `body`, `authorName`, plus optional `parentId` (reply to a root comment) and optional anchor fields (`anchorText`, `anchorPrefix`, `anchorSuffix`, `anchorStart`, `anchorEnd`). Omit all anchor fields for a doc-level general comment. Replies never anchor. Returns the new comment's `ID:` line |
-| `list_doc_comments` | List a doc's comments grouped into threads (roots with their replies), oldest-first. Params: `docId`, optional `status` (`OPEN` or `RESOLVED`) to filter |
-| `get_doc_comment` | Return a single comment's full body, author, status, anchor context, and timestamps. Param: `commentId` |
-| `update_doc_comment` | Edit a comment's body text (does not change status or anchor). Params: `commentId`, `body` |
-| `delete_doc_comment` | Delete a comment. Deleting a root also deletes all of its replies. Param: `commentId` |
-| `resolve_doc_comment` | Mark a comment `RESOLVED` — it drops out of the doc's default open-only view and stops highlighting. Param: `commentId` |
-| `reopen_doc_comment` | Reopen a resolved comment, setting its status back to `OPEN`. Param: `commentId` |
+| `add_doc_comment` | Add a comment to the doc at a path. Params: `workspaceId`, `path`, `body`, `authorName`, plus optional `parentId` (reply to a root comment) and optional anchor fields (`anchorText`, `anchorPrefix`, `anchorSuffix`, `anchorStart`, `anchorEnd`). Omit all anchor fields for a doc-level general comment. Replies never anchor. Returns the new comment's `ID:` line |
+| `list_doc_comments` | List a doc's comments grouped into threads (roots with their replies), oldest-first. Params: `workspaceId`, `path`, optional `status` (`OPEN` or `RESOLVED`) to filter |
+| `resolve_doc_comment` | Set a comment's status. Params: `workspaceId`, `path`, `commentId`, optional `resolved` (default `true` — marks it `RESOLVED`, dropping it out of the doc's default open-only view and stopping its highlight; pass `resolved: false` to reopen it) |
+
+There is no `get_doc_comment` (`list_doc_comments` already returns full bodies), no `update_doc_comment` (body edits stay off this surface), and no `delete_doc_comment` (a destructive, no-undo hard delete that stays out of agent reach, matching the existing posture on other irreversible tools) — `reopen_doc_comment` is a parameter (`resolved: false`) on `resolve_doc_comment`, not a separate tool.
 
 Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-text projection**, not its raw markdown — the same projection the editor highlights against. In practice agents most often add doc-level or freshly-computed anchored comments; the UI is what captures precise anchors from a live text selection.
 
@@ -670,19 +714,25 @@ Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-te
 ## Recency filtering and sorting
 
 `list_opportunities`, `list_solutions`, `list_assumptions`, `list_experiments`,
-`list_roadmap_items`, `list_tasks`, `list_docs`, `list_feedback`, and
-`list_release_runs` accept an ISO `updatedSince` and/or `updatedBefore` window.
-Most also accept `sort`, which takes `recentlyUpdated` (most recently updated
-first) or `leastRecentlyUpdated` — the latter is for finding work that has gone
-quiet, such as opportunities still EXPLORING or experiments parked in DESIGNING.
+`list_roadmap_items`, `list_tasks`, `list_feedback`, and `list_release_runs`
+accept an ISO `updatedSince` and/or `updatedBefore` window. Most also accept
+`sort`, which takes `recentlyUpdated` (most recently updated first) or
+`leastRecentlyUpdated` — the latter is for finding work that has gone quiet,
+such as opportunities still EXPLORING or experiments parked in DESIGNING.
+
+Docs are the one entity here **without** a recency filter: the `docs://`
+resource that replaced `list_docs` (see [Docs](#docs) above) takes no
+caller-supplied query parameters at all — `resources/list` in the MCP protocol
+is a plain enumeration, not a filterable query. There is currently no "what
+doc changed recently" digest query over MCP.
 
 Omitting `sort` preserves each tool's own default ordering. Those defaults carry
-meaning — `list_roadmap_items` groups by horizon then rank, `list_docs` renders a
-parent/child tree, `list_tasks` orders by status then manual `sortOrder` — so
-`sort` is an explicit opt-out rather than something to pass by habit. Recency
-orderings always include a stable `id` tiebreaker, because `updatedAt` is not
-unique and equal timestamps would otherwise return in an arbitrary order that can
-differ between identical calls.
+meaning — `list_roadmap_items` groups by horizon then rank, `list_tasks` orders
+by status then manual `sortOrder` — so `sort` is an explicit opt-out rather
+than something to pass by habit. Recency orderings always include a stable
+`id` tiebreaker, because `updatedAt` is not unique and equal timestamps would
+otherwise return in an arbitrary order that can differ between identical
+calls.
 
 `list_feedback` is the exception worth reading closely: there `updatedSince`
 starts a stable keyset scan paged by an opaque `cursor` (see the feedback section
@@ -733,10 +783,12 @@ workspaces. Registration, grants, and key management use authenticated settings.
 Solution comments and plans created with agent credentials use the authenticated
 agent's name and `AGENT` author type, overriding caller-supplied attribution.
 Built-in assistant turns use “Compass assistant.” Agent credentials cannot call
-`update_comment`, `update_doc_comment`, or `update_solution_comment`: existing
-comment records do not have durable agent ownership, so agents must append a new
-comment instead of rewriting one under someone else's name or approval badge.
-Personal and service credential behavior is unchanged.
+`update_comment` or `update_solution_comment`: existing comment records do not
+have durable agent ownership, so agents must append a new comment instead of
+rewriting one under someone else's name or approval badge. Doc comments have no
+body-edit tool at all now (see [Doc inline comments](#doc-inline-comments)), so
+this restriction no longer has a doc-comment analog to name. Personal and
+service credential behavior is unchanged.
 
 ## Example: Connecting Claude Desktop
 

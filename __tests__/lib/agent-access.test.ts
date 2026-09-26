@@ -42,8 +42,10 @@ it.each(["AGENT", "AGENT_TURN"] as const)("prevents %s from editing existing hum
   prisma.workspace.findFirst.mockResolvedValue({ id: "one" })
   prisma.solutionComment.findUnique.mockResolvedValue({ solution: { opportunity: { workspaceId: "one" } } })
   prisma.comment.findUnique.mockResolvedValue({ workspaceId: "one" })
-  prisma.docComment.findUnique.mockResolvedValue({ doc: { workspaceId: "one" } })
-  for (const tool of ["update_solution_comment", "update_comment", "update_doc_comment"]) {
+  // Doc comments have no body-edit tool at all (ADR 0019 removed
+  // update_doc_comment outright) -- update_comment/update_solution_comment
+  // are the only two of these tools left to guard.
+  for (const tool of ["update_solution_comment", "update_comment"]) {
     await expect(applyToolGate(tool, { ...actor, purpose, scopeWorkspaceId: "one" }, { commentId: "comment", body: "Forged replacement" })).rejects.toThrow(/human identity/)
   }
 })

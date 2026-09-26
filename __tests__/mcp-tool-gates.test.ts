@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 // ── Prisma mock (for enforcement cases) ─────────────────────────────────────
 const mockPrisma = {
-  workspace: { findFirst: vi.fn() },
+  workspace: { findFirst: vi.fn(), findMany: vi.fn() },
   workspaceMember: { findFirst: vi.fn() },
   organization: { findUnique: vi.fn() },
   organizationMember: { findFirst: vi.fn() },
@@ -22,7 +22,7 @@ const mockPrisma = {
   roadmapItem: { findUnique: vi.fn(), update: vi.fn() },
   artifact: { findUnique: vi.fn() },
   feedbackItem: { findUnique: vi.fn() },
-  doc: { findUnique: vi.fn() },
+  doc: { findUnique: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
   reviewRequest: { findUnique: vi.fn() },
   decisionRecord: { findUnique: vi.fn() },
   researchStudy: { findUnique: vi.fn() },
@@ -38,9 +38,24 @@ vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
 // ── Capture harness: enumerate the tools route.ts actually registers ────────
 const registeredTools: Record<string, unknown> = {}
+const registeredResources: Record<string, unknown> = {}
+const registeredResourceTemplates: Record<string, { listCallback?: () => unknown }> = {}
 vi.mock("mcp-handler", () => ({
-  createMcpHandler: (setup: (s: { registerTool: (n: string, m: unknown, cb: unknown) => void }) => void) => {
-    setup({ registerTool(name, _m, cb) { registeredTools[name] = cb } })
+  createMcpHandler: (
+    setup: (s: {
+      registerTool: (n: string, m: unknown, cb: unknown) => void
+      registerResource: (n: string, template: { listCallback?: () => unknown }, m: unknown, cb: unknown) => void
+    }) => void
+  ) => {
+    setup({
+      registerTool(name, _m, cb) {
+        registeredTools[name] = cb
+      },
+      registerResource(name, template, _m, cb) {
+        registeredResources[name] = cb
+        registeredResourceTemplates[name] = template
+      },
+    })
     return () => new Response("ok")
   },
 }))
@@ -571,5 +586,64 @@ describe("register() wrapper enforces gates end-to-end", () => {
       content: { text: string }[]
     }
     expect(result.content[0].text).toContain("Reduce churn")
+  })
+})
+
+// ADR 0019 — Docs as a Virtual Filesystem. Resources have no tool name for
+// TOOL_GATES to key on, so they are gated directly in the route's resource
+// callbacks (lib/mcp-authz.ts's assertWorkspaceMember) -- these exercise that
+// path end-to-end through the real registration captured above.
+describe("docs:// resource — read/list", () => {
+  const docRow = {
+    id: "doc-1",
+    title: "Q3 Plan",
+    parentId: null,
+    roadmapItemId: null,
+    docType: "STANDARD",
+    updatedAt: new Date("2026-01-01"),
+    workspaceId: "ws-1",
+    content: "Body",
+    metadata: null,
+    icon: null,
+    revision: "rev-1",
+    storageProvider: null,
+    contentRef: null,
+  }
+
+  it("read: denies a non-member", async () => {
+    mockPrisma.doc.findMany.mockResolvedValue([docRow])
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    const read = registeredResources.doc as (uri: URL, vars: Record<string, string>) => Promise<unknown>
+    await expect(runWithMcpActor(MEMBER, () => read(new URL("docs://ws-1/Q3%20Plan"), { workspaceId: "ws-1", path: "Q3 Plan" })))
+      .rejects.toThrow(/not found or access denied/)
+  })
+
+  it("read: returns frontmatter + body for a member", async () => {
+    mockPrisma.doc.findMany.mockResolvedValue([docRow])
+    mockPrisma.doc.findUnique.mockResolvedValue(docRow)
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    const read = registeredResources.doc as (uri: URL, vars: Record<string, string>) => Promise<{ contents: { text: string }[] }>
+    const result = await runWithMcpActor(MEMBER, () => read(new URL("docs://ws-1/Q3%20Plan"), { workspaceId: "ws-1", path: "Q3 Plan" }))
+    expect(result.contents[0].text).toContain("compass_doc_id: doc-1")
+    expect(result.contents[0].text).toContain("Body")
+  })
+
+  it("read: research actors are denied entirely", async () => {
+    const read = registeredResources.doc as (uri: URL, vars: Record<string, string>) => Promise<unknown>
+    await expect(runWithMcpActor(RESEARCH, () => read(new URL("docs://ws-1/Q3%20Plan"), { workspaceId: "ws-1", path: "Q3 Plan" })))
+      .rejects.toThrow(/not available to research interviews/)
+  })
+
+  it("list: enumerates every workspace the caller can access", async () => {
+    mockPrisma.workspace.findMany.mockResolvedValue([{ id: "ws-1" }])
+    mockPrisma.doc.findMany.mockResolvedValue([docRow])
+    const list = registeredResourceTemplates.doc.listCallback as unknown as () => Promise<{ resources: { uri: string; name: string }[] }>
+    const result = await runWithMcpActor(MEMBER, () => list())
+    expect(result.resources).toEqual([{ uri: "docs://ws-1/Q3%20Plan", name: "Q3 Plan", mimeType: "text/markdown" }])
+  })
+
+  it("list: research actors are denied entirely", async () => {
+    const list = registeredResourceTemplates.doc.listCallback as unknown as () => Promise<unknown>
+    await expect(runWithMcpActor(RESEARCH, () => list())).rejects.toThrow(/not available to research interviews/)
   })
 })
