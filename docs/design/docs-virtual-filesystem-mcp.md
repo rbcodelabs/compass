@@ -9,9 +9,23 @@ Compass Docs") for where the line between the two documents was drawn.
 
 Status: draft, not yet implemented. Nothing in this document has shipped.
 
+**Revision note (2026-09-26):** revised per product-owner input after the
+first draft. Two changes from that first draft, both below: (1) the
+breaking-change framing is now unhedged — Compass is pre-release with one
+real user, so there is no compatibility surface to protect and no phased
+tool deprecation to design; and (2) §2.3 and §2.4's sandbox reconciliation
+design now builds on `@rbcodelabs/geode-headless`'s `/wiki` SDK
+(`openWikiSession`) instead of hand-rolled `node:fs` + `gray-matter` code —
+see the new §5 for the full evaluation and what changed as a result.
+
 ---
 
 ## 1. `lib/doc-fs.ts` — the shared layer
+
+This layer is Compass-side DB/workspace logic and stays that way — see §5
+for why `@rbcodelabs/geode-headless`'s `/wiki` SDK, adopted elsewhere in this
+design, does not reach this far: it has no concept of a workspace, Prisma,
+or the operationId/revision machinery this layer sits on top of.
 
 ```ts
 export type DocFsNode = {
@@ -219,7 +233,7 @@ mcpServers: {
   compass: { ...unchanged... },
   docsfs: createSdkMcpServer({               // in-process, no network — see §2.3
     name: "docsfs",
-    tools: [deleteLocalDocTool, moveLocalDocTool],
+    tools: [deleteLocalDocTool, moveLocalDocTool],   // thin wrappers over openWikiSession
   }),
   ...connectors,
 },
@@ -243,37 +257,50 @@ the microVM is disposable and per-turn, so giving it real file tools scoped
 to one throwaway directory does not weaken anything the MCP-only design was
 protecting.
 
-### 2.3 Delete and move without Bash
+### 2.3 Delete and move without Bash — now built on `openWikiSession`, not hand-rolled `node:fs`
 
 The SDK's built-in file tools are `Read`, `Write`, `Edit`, `Glob`, `Grep` —
 there is no built-in delete-file or move/rename-file tool; those live only
-inside `Bash` (`rm`, `mv`). Two options were considered for expressing
+inside `Bash` (`rm`, `mv`). Three options were considered for expressing
 "delete this doc" / "move this doc" from inside the sandbox:
 
 | Option | How | Rejected because |
 |---|---|---|
 | Enable `Bash` | Add `"Bash"` to `tools` | Bash is a materially larger surface than "edit markdown files" — it can read env vars (the MCP bearer token is in `process.env`) and, if the sandbox has any open network egress, exfiltrate them somewhere Compass never intermediates. MCP-only access is deliberately intermediated through `/api/mcp`; Bash punches a hole next to it, not through it. |
 | Frontmatter sentinel (e.g. `compass_delete: true`) | Agent edits a magic frontmatter key via `Edit` | Undiscoverable without a bespoke system-prompt instruction, easy for the model to forget or apply inconsistently, and it overloads a document's own content with a control channel. |
+| Hand-rolled `node:fs` (`rm -r` / `rename`, first draft of this spec) | A small in-process SDK MCP server doing raw `fs` calls with manual `..`-traversal checks | **Superseded, not wrong** — see below. It worked, but it re-implemented path-containment checking that `@rbcodelabs/geode-headless`'s `/wiki` SDK already has, tested, in the same package Compass already depends on. |
 
-**Chosen: a small in-process SDK MCP server** (`createSdkMcpServer` +
+**Chosen: the same small in-process SDK MCP server** (`createSdkMcpServer` +
 `tool()`, confirmed present and documented in the currently-installed
-`@anthropic-ai/claude-agent-sdk` API surface — this is the SDK's own
-extensibility mechanism, not a bolt-on) exposing exactly two tools:
+`@anthropic-ai/claude-agent-sdk` API surface), but its two tools are now thin
+wrappers over an `openWikiSession(DOCS_ROOT)` opened once at the top of
+`turn-entry.ts`, immediately after materialization and before `query()`
+starts, rather than direct `node:fs` calls:
 
-- `delete_local_doc(path)` — `node:fs` `rm -r` on `<DOCS_ROOT>/<path>`, after
-  resolving and checking the real path stays under `DOCS_ROOT` (reject `..`
-  traversal). **Local disk only — no network call, no DB mutation.**
-- `move_local_doc(fromPath, toPath)` — `node:fs` `rename`, same
-  containment check on both paths.
+- `delete_local_doc(path)` → `session.deleteNote(path)`.
+- `move_local_doc(fromPath, toPath)` → `session.readNote(fromPath)` then
+  `session.createNote(toPath, content)` then `session.deleteNote(fromPath)`
+  (the wiki SDK has no rename primitive — see §5 — so a move is composed
+  from its create/delete primitives under one tool; the *Compass*-side
+  identity/rename detection this enables downstream doesn't care whether the
+  local mutation was one syscall or three, only what the final tree looks
+  like).
 
-Critically, **these do not talk to Compass at all.** They only rearrange the
-sandbox's own ephemeral disk. The actual `deleteDocument`/`movePath` call
-against the DB happens in the *same* end-of-turn reconciliation pass as every
-other change (§2.4) — deliberately, so there is exactly one moment where
-`DocOperation` idempotency and `expectedRevision` conflict-checking apply, not
-two different mutation pathways (one immediate-via-MCP, one
-deferred-via-diff) with different timing and failure semantics to reason
-about separately.
+Both still touch **local sandbox disk only — no network call, no DB
+mutation** (the wiki SDK is a pure Node-fs library with no network
+dependency; see §5). The actual `deleteDocument`/`movePath` call against the
+DB still happens in the *same* end-of-turn reconciliation pass as every
+other change (§2.4), for the same reason as before: exactly one moment where
+`DocOperation` idempotency and `expectedRevision` conflict-checking apply,
+not two different mutation pathways with different timing and failure
+semantics to reason about separately.
+
+What this buys over the hand-rolled version: `WikiSession`'s create/update/
+delete methods return a typed `WriteResult` with a distinct status per
+refusal (already designed and tested against exactly this class of
+malformed-path/race condition, per ADR 0019/0020 in the geode repo), instead
+of this design inventing its own path-containment checks and error
+vocabulary for the same problem.
 
 ### 2.4 The reconciliation algorithm
 
@@ -285,12 +312,28 @@ plain in-memory map for the lifetime of this one streaming request. Then
 — this already the same primitive the route uses today to write `entry.ts`
 before `runCommand`.
 
-**Final (captured by the host, after `runCommand` resolves):** walk the
-sandbox's docs root with `sandbox.fs.readdir(..., { withFileTypes: true })`
-recursively and `sandbox.fs.readFile(path, "utf8")` every `_doc.md` found —
-both confirmed methods on the installed `@vercel/sandbox@2.9.2`'s
-`FileSystem` class. Build `path → { rawFrontmatterDocId | null, content,
-sha256(fileBytes) }`.
+**Final — revised to read from inside the sandbox via `WikiSession`, not
+from the host via remote `sandbox.fs` calls.** The first draft of this spec
+had the host walk the sandbox's docs root after `runCommand` resolves, via
+`sandbox.fs.readdir(..., { withFileTypes: true })` recursively plus
+`sandbox.fs.readFile(path, "utf8")` per file — both real, confirmed methods
+on `@vercel/sandbox@2.9.2`'s `FileSystem` class, so that approach would have
+worked. It is superseded by a better option once `openWikiSession` is in the
+picture: `turn-entry.ts` **already has a live session open on `DOCS_ROOT`**
+(§2.3) and **already has an established stdout JSON-lines protocol** back to
+the host (`AGENT_EVENT`/`AGENT_RESULT`/`AGENT_ERROR`). So, immediately after
+`query()` finishes and before the sandbox process exits, `turn-entry.ts`
+calls `session.listFiles()` + `session.readNote(path)` for each and emits
+one new line, `AGENT_DOC_STATE <json>`, carrying the complete final
+`{ path, content }` list. The host parses that line like every other
+prefixed line in the existing stream and builds
+`path → { rawFrontmatterDocId | null, content, sha256(fileBytes) }` from it
+— no new remote round trip to the sandbox at all. This removes an entire
+category of "did the RPC read a half-written file" timing question, because
+`WikiSession`'s read-after-write guarantee (ADR 0023 in the geode repo)
+means the state `listFiles`/`readNote` report is already exactly what the
+last completed write left behind, observed from the same process that made
+the edits.
 
 **Validate `compass_doc_id` before trusting it.** A value is only treated as
 identity if it was actually a docId this turn's baseline handed out.
@@ -408,6 +451,16 @@ is granted access to and concatenates the results.
 
 ### 3.2 The old-tool-to-new-tool mapping
 
+**All 15 old tools are removed outright, in one cutover, with no
+compatibility shim, dual-registration period, or deprecation window.**
+Compass is pre-release with exactly one real user today; there is no
+external MCP client depending on the current 15-tool surface to protect
+against breaking. A phased transition would be solving a compatibility
+problem that does not exist yet, at the cost of maintaining two
+representations of the same tree in the meantime. If and when Compass has
+external integrators who'd be broken by a tool-surface change, that is the
+point to reintroduce a deprecation window — not before.
+
 | Old tool (15, all removed) | New surface | Notes |
 |---|---|---|
 | `list_docs` | `docs://{workspaceId}/{+path}` resource **list** | |
@@ -478,9 +531,27 @@ READ/MUTATE split carries over directly (`list_doc_history`,
    `docs/content/09-mcp-api.md`'s "Docs" and "Doc inline comments" sections
    (customer-facing; not done as part of this doc, called out here so it
    isn't forgotten at merge time).
-4. Wire Projection 1: materialize/reconcile in `app/api/agent/turn/route.ts`,
+4. Add `@rbcodelabs/geode-headless`'s `/wiki` subpath as an import in
+   `scripts/agent/turn-entry.ts` (the sandbox side only — the host side has
+   no new dependency). **Before writing any code against it, confirm the
+   specific `@rbcodelabs/geode-headless@0.1.0` artifact that Compass's own
+   lockfile resolves to actually contains the `/wiki` export** — verified in
+   this pass only against the `feat/headless-sdk-compass-pilot` branch of the
+   `geode` repo, where `./wiki` resolves to a compiled `dist/wiki/index.js`
+   alongside `/documents` and `/catalog/cloud`, at the same `0.1.0` version
+   number Compass already depends on. Whether that branch's build is what's
+   actually in the npm-published tarball, or whether it needs a fresh
+   publish first, was not checked here. Same-day fix if not: this is one
+   person's SDK and one person's app.
+5. Wire Projection 1: materialize/reconcile in `app/api/agent/turn/route.ts`,
    the `tools`/`mcpServers` change in `scripts/agent/turn-entry.ts`, the
-   `docsfs` in-process server.
+   `docsfs` in-process server wrapping `openWikiSession` (§2.3, §5).
+
+No phased rollout, feature flag, or compatibility shim for the 15 removed
+tools is planned or needed for any of the above — see the note at the top of
+§3.2 and ADR 0019's Context for why: Compass is pre-release with exactly one
+real user, so there is no external integration for a breaking MCP surface
+change to break.
 
 **"Done" looks like, verified how:**
 
@@ -502,6 +573,102 @@ READ/MUTATE split carries over directly (`list_doc_history`,
   write to that doc surfaces as an explicit conflict in its final message
   and that a labeled "Agent's conflicting edit — not applied" version exists
   in that doc's history afterward, not a silent loss in either direction.
+
+---
+
+## 5. Should `doc-fs.ts` be built on `@rbcodelabs/geode-headless`'s `/wiki` SDK instead of hand-rolled logic?
+
+Raised after the first draft: Compass's product owner is also the author of
+the Geode Headless SDK, and that package already ships a `/wiki` subpath
+(`openWikiSession`) that Compass has never imported (today it only imports
+`/documents` and `/catalog/cloud`). Read in full for this evaluation:
+`docs/design/headless-wiki-sdk.md` and `docs/adr/0023-wiki-sdk-session-semantics.md`
+(also `0019-readonly-local-wiki-snapshot.md` and
+`0020-write-capable-local-wiki-provider.md`) in the `geode` repo. Short
+answer: **yes, for the sandbox-local half of Projection 1 — not for
+`doc-fs.ts`'s workspace/DB-facing half, which has no local-folder shape to
+delegate to anything.**
+
+### 5.1 What `openWikiSession` actually is
+
+`openWikiSession(rootPath, options?)` opens a session scoped to **exactly one
+folder on a real local filesystem**, addressed by plain relative paths within
+it (`"Notes/N.md"`). The session — `listFiles`, `readNote`, `createNote`,
+`updateNote`, `deleteNote`, `search`, `resolveLink`, `outgoingLinks`,
+`backlinks`, `refresh`, `info` — guarantees **read-after-write**: every read
+dereferences the provider's current view at call time, so a write made
+through the session is visible to the very next read with no refresh and no
+re-open (ADR 0023). It has zero awareness of workspaces, Prisma, HTTP, or any
+remote system — it is a pure, synchronous-feeling, local Node-fs library.
+
+### 5.2 Where it fits and where it plainly doesn't
+
+**Fits well — the sandbox side of Projection 1.** Every turn already
+materializes exactly one workspace's doc tree into exactly one folder inside
+one disposable sandbox. That "one folder" scope is precisely what
+`openWikiSession` is built for; it isn't a limitation for this use case, it's
+a match. Concretely, this revision of the spec now uses it for:
+
+- **The reconciler's final-state read** (§2.4): `turn-entry.ts` opens the
+  session once, and the read-after-write guarantee means the "final state"
+  read is provably correct rather than something this design has to argue
+  for by reasoning about RPC timing.
+- **Delete and move** (§2.3): `deleteNote`/`createNote` replace hand-rolled
+  `node:fs` + manual path-containment checks with a tested, already-designed
+  primitive from the same package Compass already depends on.
+- **Frontmatter parsing**: `readNote`'s returned metadata is Compass's
+  source for `compass_doc_id` and user frontmatter keys, replacing a second,
+  independent call into `gray-matter` inside the sandbox (the host side, in
+  `document-service.ts`/`doc-tool-handlers.ts`, keeps its own `gray-matter`
+  usage unchanged — that's a different process reading DB rows, not files).
+
+**Does not fit, and was never expected to — `doc-fs.ts`'s DB-facing half.**
+`doc-fs.ts`'s actual job is mapping a `Doc` tree across potentially many
+workspaces (`parentId`, `Doc.title`, `Doc.metadata`, `roadmapItemId`) to and
+from paths, and persisting through `document-service.ts`'s
+`operationId`/`expectedRevision` machinery. `openWikiSession` has no concept
+of any of that — no workspace scoping, no idempotency receipts, no
+optimistic concurrency, no Prisma. It cannot replace `document-service.ts`,
+and this design never asked it to. It also doesn't apply to **Projection 2**
+at all (§3): external MCP agents read/write straight through Prisma via
+`document-service.ts`, with no local folder anywhere in that path for a
+local-fs library to attach to.
+
+**A related non-fit, stated so it isn't rediscovered later:** `WikiSession`
+has no rename/move primitive (§2.3) — a move is `createNote` + `deleteNote`
+composed by Compass's own wrapper tool. This is not a blocker (the
+Compass-side reconciler was always going to detect moves itself by comparing
+before/after `compass_doc_id` placement, regardless of which local syscalls
+produced the after-state — see §2.4), but it is a real gap relative to what
+an ideal single primitive would look like, and is the one concrete thing
+worth naming as a candidate SDK addition below.
+
+### 5.3 Concrete gaps, if the product owner wants to push more into the SDK
+
+Since both codebases can co-evolve under one author, two additions to
+`/wiki` would let Compass delegate a bit more than this revision already
+does — named here as options, not requirements, because the current design
+works without them:
+
+1. **A `renameNote(fromPath, toPath)` (or `moveNote`) method**, so a move is
+   one atomic session call instead of Compass's wrapper composing
+   create+delete. Low risk, small surface addition, matches the existing
+   method shapes.
+2. **A reserved-frontmatter-key convention or a typed "opaque id" field**,
+   so a consumer like Compass doesn't have to invent its own
+   `compass_`-prefix convention on top of `readNote`'s generic metadata —
+   e.g. a session opened with an `idKey` option that `createNote` stamps and
+   `listFiles`/`readNote` surface distinctly from ordinary frontmatter. This
+   is speculative and not requested here; the `compass_`-prefix convention
+   in §1.3 works fine without it. Worth raising only if a second consumer of
+   `/wiki` inside geode itself independently wants the same thing — one
+   consumer's convenience is not sufficient reason to widen an
+   agent-facing SDK contract (see ADR 0023's own stated friction cost for
+   widening `WikiSession`'s method list).
+
+Neither is a blocker for this ADR. Both are optional follow-ups to raise
+with the SDK's author (who is also this product's owner) if the
+hand-composed move in §2.3 turns out to be worth simplifying later.
 
 ---
 
