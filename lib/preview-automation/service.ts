@@ -41,8 +41,19 @@ export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, 
       await prisma.researchAttachment.count({ where: { workspaceId } })) throw new Error("Preview cleanup requires blob review");
     await prisma.docCommentAnchor.deleteMany({ where: { comment: { workspaceId } } });
     await prisma.solutionPlanProposal.deleteMany({ where: { comment: { workspaceId } } });
+    await prisma.commentElementAnchor.deleteMany({ where: { comment: { workspaceId } } });
+    await prisma.commentExternalAuthor.deleteMany({ where: { comment: { workspaceId } } });
     await prisma.comment.updateMany({ where: { workspaceId }, data: { parentId: null } });
     await prisma.comment.deleteMany({ where: { workspaceId } });
+    // Embed credentials and their sources: visitor sessions and auth handoffs
+    // first (both Restrict toward the source), then tokens (also Restrict
+    // toward the source). commentExternalAuthor rows for this workspace are
+    // already gone (deleted in full above), so there is nothing dangling for
+    // this step to null out here, unlike delete-workspace-cascade.ts's version.
+    await prisma.embedVisitorSession.deleteMany({ where: { feedbackSource: { workspaceId } } });
+    await prisma.embedAuthHandoff.deleteMany({ where: { feedbackSource: { workspaceId } } });
+    await prisma.feedbackSourceToken.deleteMany({ where: { feedbackSource: { workspaceId } } });
+    await prisma.feedbackSource.deleteMany({ where: { workspaceId } });
     await prisma.docComment.updateMany({ where: { doc: { workspaceId } }, data: { parentId: null } });
     await prisma.docComment.deleteMany({ where: { doc: { workspaceId } } });
     await prisma.docVersion.deleteMany({ where: { doc: { workspaceId } } });

@@ -64,6 +64,11 @@ model User {
   apiKeys             ApiKey[]
   agentConversations  AgentConversation[]
   authenticators      Authenticator[]
+  /// Widget credentials issued to this user in a source's INTERNAL_SSO mode. Not
+  /// interchangeable with `sessions` — each one authorizes commenting through one
+  /// FeedbackSource and nothing else.
+  embedVisitorSessions EmbedVisitorSession[]
+  embedAuthHandoffs    EmbedAuthHandoff[]
 
   @@map("users")
 }
@@ -205,6 +210,13 @@ model Workspace {
   nowLimit             Int?                    @map("now_limit")
   nextLimit            Int?                    @map("next_limit")
   portalAuthRequired   Boolean?                @default(false) @map("portal_auth_required")
+  // Whether comments filed against this workspace's Artifacts may be READ
+  // without a Compass session — the analogue of roadmapPublic for artifact
+  // feedback. Submitting through an embedded widget is gated by the embed token
+  // and origin allowlist and does NOT consult this flag; only the read path
+  // does. Default off, so enabling an embed source never silently publishes an
+  // existing internal review thread.
+  artifactFeedbackPublic Boolean?              @default(false) @map("artifact_feedback_public")
   brandingPaletteId    String?                 @map("branding_palette_id") @db.VarChar(50)
   brandingPrimaryHex   String?                 @map("branding_primary_hex") @db.VarChar(7)
   brandingFontPresetId String?                 @map("branding_font_preset_id") @db.VarChar(50)
@@ -259,6 +271,7 @@ model Workspace {
   comments             Comment[]
   releaseRuns          ReleaseRun[]
   portfolioCapacityPlans PortfolioCapacityPlan[]
+  feedbackSources      FeedbackSource[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -809,6 +822,8 @@ model Comment {
   replies Comment[] @relation("SharedCommentReplies")
   docAnchor DocCommentAnchor?
   solutionPlanProposal SolutionPlanProposal?
+  elementAnchor CommentElementAnchor?
+  externalAuthor CommentExternalAuthor?
 
   @@index([workspaceId, targetType, targetId, status], map: "idx_comments_target_status")
   @@index([parentId], map: "idx_comments_parent")
@@ -835,6 +850,62 @@ model SolutionPlanProposal {
 
   @@index([trackedDecisionRequestId], map: "idx_solution_plan_proposals_decision")
   @@map("solution_plan_proposals")
+}
+
+/// Third 1:1 extension on Comment, alongside DocCommentAnchor and
+/// SolutionPlanProposal: where on a rendered page the comment was left.
+/// Created by an embedded feedback widget against an Artifact-bound
+/// FeedbackSource, so `artifactId` is non-null BY CONSTRUCTION — it is written
+/// only on comments whose targetType is ARTIFACT, and it always equals the
+/// parent Comment's targetId. Kept as its own column anyway so the anchor row
+/// can be indexed and queried without a join back through the polymorphic
+/// target pair.
+///
+/// `artifactRevisionId` records WHICH revision was on screen when the comment
+/// was left. It is provenance, not scope: a comment does not stop applying when
+/// the artifact is revised, so nothing filters on it.
+model CommentElementAnchor {
+  commentId          String   @id @map("comment_id") @db.Uuid
+  artifactId         String   @map("artifact_id") @db.Uuid
+  artifactRevisionId String?  @map("artifact_revision_id") @db.Uuid
+  pageUrl            String   @map("page_url") @db.Text
+  pagePath           String   @map("page_path") @db.Text
+  elementSelector    String?  @map("element_selector") @db.Text
+  /// { tag, text, rectXRatio, rectYRatio, rectWRatio, rectHRatio } — ratios are
+  /// DOCUMENT-relative, never viewport-relative, so a re-anchor attempt does not
+  /// depend on the reader's scroll position or window size.
+  elementFingerprint Json?    @map("element_fingerprint")
+  /// Vercel Blob URL of the element screenshot the widget captured, or null.
+  /// Evidence for a human reading the thread, never an input to re-anchoring —
+  /// elementSelector and elementFingerprint do that work. Always null for
+  /// comments made inside Compass, where the reviewer is already looking at the
+  /// artifact.
+  screenshotUrl      String?  @map("screenshot_url") @db.Text
+  comment            Comment  @relation(fields: [commentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([artifactId, pageUrl], map: "idx_comment_element_anchors_artifact_page")
+  @@map("comment_element_anchors")
+}
+
+/// Identity extension for a Comment whose author is not a Compass User.
+///
+/// Comment.authorId is a User FK, so a comment submitted through an embedded
+/// widget by someone outside the organization has to leave it null. That loses
+/// the submitter entirely. This table carries whatever identity the submission
+/// did have — a typed email, a signed-in PortalAccount, or nothing but the
+/// embed token that carried it — without widening Comment for a case most
+/// comments do not have.
+model CommentExternalAuthor {
+  commentId       String         @id @map("comment_id") @db.Uuid
+  submitterEmail  String?        @map("submitter_email") @db.VarChar(255)
+  portalAccountId String?        @map("portal_account_id") @db.Uuid
+  embedTokenId    String?        @map("embed_token_id") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at")
+  comment         Comment        @relation(fields: [commentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([portalAccountId], map: "idx_comment_external_authors_account")
+  @@map("comment_external_authors")
 }
 
 model Assumption {
@@ -1677,6 +1748,9 @@ model PortalAccount {
   feedbackItems FeedbackItem[]
   feedbackVotes FeedbackVote[]
   roadmapVotes  RoadmapVote[]
+  externalComments CommentExternalAuthor[]
+  embedVisitorSessions EmbedVisitorSession[]
+  embedAuthHandoffs    EmbedAuthHandoff[]
 
   @@map("portal_accounts")
 }
@@ -1730,6 +1804,7 @@ model FeedbackItem {
   portalAccount   PortalAccount?       @relation(fields: [portalAccountId], references: [id])
   votes           FeedbackVote[]
   roadmapItems    RoadmapItem[]
+  elementAnchor   FeedbackElementAnchor?
   createdById     String?              @map("created_by_id") @db.Uuid
   updatedById     String?              @map("updated_by_id") @db.Uuid
   source          String               @default("UI") @map("source") @db.VarChar(20)
@@ -1761,6 +1836,175 @@ model FeedbackItem {
   // creates no backing index for this column either.
   @@index([opportunityId])
   @@map("feedback")
+}
+
+/// A place that is allowed to submit embedded feedback: one prototype, or one
+/// real site.
+///
+/// `artifactId` is the routing decision and it is a property of THIS row, not of
+/// the request. Null means the source is a real application, and its submissions
+/// become FeedbackItem rows on the workspace's feedback board. Set means the
+/// source is an Artifact-backed prototype, and its submissions become Comment
+/// rows with targetType=ARTIFACT so they land on the artifact the team is
+/// already reviewing. A token cannot change that; the widget cannot ask for it.
+///
+/// Deliberately independent of Artifact so a production site — which has no
+/// artifact and never will — can hold a long-lived credential and rotate it
+/// without a redeploy.
+model FeedbackSource {
+  id             String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String                @map("workspace_id") @db.Uuid
+  artifactId     String?               @map("artifact_id") @db.Uuid
+  name           String                @db.VarChar(255)
+  /// JSON array of EXACT origins ("https://app.example.com"). Never a pattern,
+  /// never "*". An empty array accepts nothing, which is the safe failure.
+  allowedOrigins Json                  @map("allowed_origins")
+  enabled        Boolean               @default(true)
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @default(now()) @map("updated_at")
+  createdById    String?               @map("created_by_id") @db.Uuid
+  /// "INTERNAL_SSO" | "PORTAL" — which identity a commenter must present. NULL
+  /// reads as INTERNAL_SSO; see lib/embed-auth-mode.ts for why the column is
+  /// nullable rather than NOT NULL @default, and why that default is the safe one.
+  authMode       String?               @map("auth_mode") @db.VarChar(20)
+  workspace      Workspace             @relation(fields: [workspaceId], references: [id])
+  artifact       Artifact?             @relation(fields: [artifactId], references: [id])
+  tokens         FeedbackSourceToken[]
+  visitorSessions EmbedVisitorSession[]
+  authHandoffs    EmbedAuthHandoff[]
+
+  @@index([workspaceId, enabled], map: "idx_feedback_sources_workspace")
+  @@index([artifactId], map: "idx_feedback_sources_artifact")
+  @@map("feedback_sources")
+}
+
+/// A rotatable credential for one FeedbackSource. Split from the source so a
+/// deployed site can be issued a new token and have the old one revoked without
+/// the source — and therefore the origin allowlist and the comments already
+/// filed against it — being recreated.
+///
+/// `expiresAt` is NULLABLE, following ApiKey.expiresAt (which is also nullable).
+/// A production site's embed token has no natural expiry date, and a token that
+/// silently stops working is a worse failure than one that has to be revoked
+/// deliberately. Revocation is the intended kill switch.
+///
+/// The four `*Window*`/`*Count*` columns are a compare-and-set rate limiter in
+/// the shape lib/research-session.ts already uses: a one-minute window stamp and
+/// a counter, advanced by a conditional updateMany so two concurrent requests
+/// cannot both believe they were first.
+model FeedbackSourceToken {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  feedbackSourceId String         @map("feedback_source_id") @db.Uuid
+  tokenHash        String         @unique(map: "idx_feedback_source_tokens_hash") @map("token_hash") @db.VarChar(64)
+  tokenPrefix      String         @map("token_prefix") @db.VarChar(16)
+  label            String?        @db.VarChar(255)
+  expiresAt        DateTime?      @map("expires_at")
+  revokedAt        DateTime?      @map("revoked_at")
+  lastUsedAt       DateTime?      @map("last_used_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  createdById      String?        @map("created_by_id") @db.Uuid
+  readWindowAt     DateTime?      @map("read_window_at")
+  readCount        Int?           @map("read_count")
+  submitWindowAt   DateTime?      @map("submit_window_at")
+  submitCount      Int?           @map("submit_count")
+  feedbackSource   FeedbackSource @relation(fields: [feedbackSourceId], references: [id])
+
+  @@index([feedbackSourceId, revokedAt], map: "idx_feedback_source_tokens_source")
+  @@map("feedback_source_tokens")
+}
+
+/// The identity a widget visitor presents when submitting, scoped to exactly one
+/// FeedbackSource.
+///
+/// NOT a PortalSession, and deliberately not interchangeable with one. A visitor
+/// signs in through the normal portal magic link, but what the widget receives is
+/// this instead of the portal session token — because the widget's token ends up
+/// in the JavaScript of a page Compass does not control, and a PortalSession
+/// token would additionally authenticate that person to the roadmap and feedback
+/// portal for 30 days. This authorizes one thing: commenting through one source.
+///
+/// `expiresAt` is NOT NULL, which is the opposite choice from
+/// FeedbackSourceToken.expiresAt. That token is held by an operator's deployment
+/// and revocation is its kill switch; this one is held by a third party's page,
+/// so expiry has to be intrinsic rather than administrative.
+///
+/// EXACTLY ONE of `portalAccountId` / `userId` is set. Both are optional for that
+/// reason and not because either is dispensable — a row with neither is not a
+/// weaker session, it is an unidentified one. The invariant is enforced in
+/// lib/embed-visitor.ts, which is the only writer, because relationMode="prisma"
+/// on Aurora DSQL gives the database no FK or CHECK to carry it.
+model EmbedVisitorSession {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  feedbackSourceId String         @map("feedback_source_id") @db.Uuid
+  portalAccountId  String?        @map("portal_account_id") @db.Uuid
+  userId           String?        @map("user_id") @db.Uuid
+  tokenHash        String         @unique(map: "idx_embed_visitor_sessions_hash") @map("token_hash") @db.VarChar(64)
+  expiresAt        DateTime       @map("expires_at")
+  revokedAt        DateTime?      @map("revoked_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  lastUsedAt       DateTime?      @map("last_used_at")
+  feedbackSource   FeedbackSource @relation(fields: [feedbackSourceId], references: [id])
+  portalAccount    PortalAccount? @relation(fields: [portalAccountId], references: [id])
+  user             User?          @relation(fields: [userId], references: [id])
+
+  @@index([feedbackSourceId, portalAccountId], map: "idx_embed_visitor_sessions_scope")
+  @@map("embed_visitor_sessions")
+}
+
+/// One leg of the sign-in handoff: how a credential crosses from the first-party
+/// popup, which holds the portal cookie, to the widget, which cannot receive it.
+///
+/// Knowledge of the nonce IS the credential, because the claim endpoint is
+/// necessarily unauthenticated — a widget on someone else's origin has no cookie,
+/// session, or header worth checking. What makes that a sound trade is that the
+/// nonce is CSPRNG-drawn, only its digest is stored, the window is two minutes,
+/// and a claim is single-use.
+///
+/// This row holds nothing claimable: it records that a nonce entitles its bearer
+/// to a session for this identity and source, and the token is MINTED AT CLAIM
+/// TIME. The prior art this is ported from deposited the raw token instead, so
+/// reading its table during the handoff window yielded a usable credential.
+///
+/// Carries whichever identity the popup established, under the same exactly-one-of
+/// rule as EmbedVisitorSession above and enforced at the same point.
+model EmbedAuthHandoff {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nonceHash        String         @unique(map: "idx_embed_auth_handoffs_nonce") @map("nonce_hash") @db.VarChar(64)
+  feedbackSourceId String         @map("feedback_source_id") @db.Uuid
+  portalAccountId  String?        @map("portal_account_id") @db.Uuid
+  userId           String?        @map("user_id") @db.Uuid
+  expiresAt        DateTime       @map("expires_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  feedbackSource   FeedbackSource @relation(fields: [feedbackSourceId], references: [id])
+  portalAccount    PortalAccount? @relation(fields: [portalAccountId], references: [id])
+  user             User?          @relation(fields: [userId], references: [id])
+
+  @@index([expiresAt], map: "idx_embed_auth_handoffs_expiry")
+  @@map("embed_auth_handoffs")
+}
+
+/// The FeedbackItem counterpart of CommentElementAnchor, for submissions from an
+/// unbound (real-application) FeedbackSource.
+///
+/// It exists as a separate table rather than a shared one because a FeedbackItem
+/// has no artifact — by definition, an unbound source has none — so there is no
+/// `artifact_id` column to share and nothing for a polymorphic
+/// `(targetType, targetId)` pair to buy. Created in Phase 1 so the schema does
+/// not have to change when the unbound path is built; nothing writes it yet.
+model FeedbackElementAnchor {
+  feedbackItemId     String       @id @map("feedback_item_id") @db.Uuid
+  feedbackSourceId   String       @map("feedback_source_id") @db.Uuid
+  pageUrl            String       @map("page_url") @db.Text
+  pagePath           String       @map("page_path") @db.Text
+  elementSelector    String?      @map("element_selector") @db.Text
+  elementFingerprint Json?        @map("element_fingerprint")
+  /// Same meaning as CommentElementAnchor.screenshotUrl, kept identical so the
+  /// two anchor shapes stay interchangeable when the unbound path writes here.
+  screenshotUrl      String?      @map("screenshot_url") @db.Text
+  feedbackItem       FeedbackItem @relation(fields: [feedbackItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([feedbackSourceId, pageUrl], map: "idx_feedback_element_anchors_source_page")
+  @@map("feedback_element_anchors")
 }
 
 model FeedbackAttachment {
@@ -1931,6 +2175,7 @@ model Artifact {
   currentRevision   ArtifactRevision?  @relation("CurrentArtifactRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   links             ArtifactLink[]
   researchStudies   ResearchStudy[]
+  feedbackSources   FeedbackSource[]
 
   @@index([workspaceId, status, updatedAt])
   @@map("artifacts")

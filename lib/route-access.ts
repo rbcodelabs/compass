@@ -52,6 +52,34 @@ export function isPublicPath(pathname: string): boolean {
     // Public portal routes — no auth, workspace settings control access
     pathname.startsWith("/portal/") ||
     pathname.startsWith("/api/portal/") ||
+    // Embedded feedback widget API. Called by `fetch` from a page Compass does
+    // not serve, so a 302 to /login would be unreadable to the caller — it has
+    // to reach the handler and get a JSON 401. The handler authenticates an
+    // `Authorization: Bearer cmpfb_…` embed token and separately checks the
+    // request's Origin against the source's exact-match allowlist; neither check
+    // consults a session, and no Compass cookie travels here (SameSite=Lax, and
+    // Access-Control-Allow-Credentials is never set).
+    pathname.startsWith("/api/embed/") ||
+    // The widget's sign-in popup. A visitor arriving here has no Compass session
+    // and is not going to get one — this page authenticates a *portal* account,
+    // which is a separate credential on a separate table (lib/portal-auth.ts), so
+    // sending them to /login would offer the wrong login entirely. The page reads
+    // an embed token and a nonce from its query string, refuses a malformed pair
+    // before touching the database, and its server action refuses everything else.
+    // Listed as an exact path rather than a `/embed/` prefix so that adding a
+    // second page under this segment is a decision someone has to make here.
+    pathname === "/embed/signin" ||
+    // The widget script itself, loaded by a `<script src>` tag on a third-party
+    // page. A redirect here is worse than it sounds: the browser would fetch
+    // /login, receive HTML, and try to execute it as JavaScript, so the widget
+    // would fail with a syntax error rather than anything that points at auth.
+    //
+    // Nothing is withheld by gating it. It is a static file in public/, identical
+    // for every deployment, and it carries no secret — the embed token lives in
+    // the host page's script tag, not in here. Its whole job is to read that
+    // token and call the /api/embed/ routes above, each of which authenticates
+    // every request on its own.
+    pathname === "/embed/widget.js" ||
     // Participant research routes use a hashed, expiring study token. Their
     // API handlers validate the token and session-to-study scope themselves.
     pathname.startsWith("/research/") ||
@@ -89,6 +117,23 @@ export function isPublicPath(pathname: string): boolean {
     // so the middleware matcher catches them like any other route. Without
     // this, every screenshot in the public docs 302s to /login for anyone
     // without a session, making the images appear broken.
-    pathname.startsWith("/screenshots")
+    pathname.startsWith("/screenshots") ||
+    // Third-party libraries the embedded widget loads at runtime (currently just
+    // html-to-image, for element screenshots). Served from public/, so the
+    // middleware matcher catches them like any other route, and a missing entry
+    // here turns into a redirect to /login that the widget receives as HTML
+    // where it expected JavaScript.
+    //
+    // A prefix rather than a list of filenames, because this directory holds only
+    // vendored open-source builds: files that are already world-readable by virtue
+    // of being in public/, that are byte-identical to their published npm artifacts,
+    // and whose provenance is recorded in a header comment in each one. There is
+    // nothing here for the gate to protect, so a per-file decision would be
+    // ceremony rather than a control.
+    //
+    // Unlike /screenshots above, these must be fetchable from a third party's
+    // page by an anonymous visitor for the widget to work at all, which is the
+    // whole point of an embed.
+    pathname.startsWith("/vendor/")
   )
 }

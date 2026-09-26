@@ -98,6 +98,11 @@ export async function deleteBrowserComment(commentId: string, actor: Pick<Commen
     const replies = current.parentId ? [] : await tx.comment.findMany({ where: { parentId: commentId }, select: { id: true } })
     const ids = [...replies.map(({ id }) => id), commentId]
     await tx.docCommentAnchor.deleteMany({ where: { commentId: { in: ids } } })
+    // Widget-submitted comments carry an element anchor and, usually, an external
+    // author row. relationMode="prisma" emulates `onDelete: Restrict`, so either
+    // one left behind turns this delete into a 500.
+    await tx.commentElementAnchor.deleteMany({ where: { commentId: { in: ids } } })
+    await tx.commentExternalAuthor.deleteMany({ where: { commentId: { in: ids } } })
     if (replies.length) await tx.comment.deleteMany({ where: { parentId: commentId } })
     await tx.comment.delete({ where: { id: commentId } })
     return { id: commentId, deletedReplies: replies.length }

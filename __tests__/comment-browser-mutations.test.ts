@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const tx = {
   comment: { findUnique: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn(), delete: vi.fn() },
   docCommentAnchor: { deleteMany: vi.fn() },
+  // A widget-submitted comment carries these two. relationMode="prisma" emulates
+  // `onDelete: Restrict`, so either one left behind turns the delete into a 500.
+  commentElementAnchor: { deleteMany: vi.fn() },
+  commentExternalAuthor: { deleteMany: vi.fn() },
 }
 const runTransaction = async (operation: (client: typeof tx) => unknown, options?: { isolationLevel: string }) => {
   // Match production DSQL rather than silently accepting PostgreSQL-only modes.
@@ -24,6 +28,8 @@ beforeEach(() => {
   tx.comment.deleteMany.mockResolvedValue({ count: 0 })
   tx.comment.delete.mockResolvedValue({ id: "root-1" })
   tx.docCommentAnchor.deleteMany.mockResolvedValue({ count: 0 })
+  tx.commentElementAnchor.deleteMany.mockResolvedValue({ count: 0 })
+  tx.commentExternalAuthor.deleteMany.mockResolvedValue({ count: 0 })
 })
 
 describe("atomic browser comment deletion", () => {
@@ -53,6 +59,12 @@ describe("atomic browser comment deletion", () => {
       .resolves.toEqual({ id: "root-1", deletedReplies: 1 })
     expect(tx.comment.deleteMany).toHaveBeenCalledWith({ where: { parentId: "root-1" } })
     expect(tx.comment.delete).toHaveBeenCalledWith({ where: { id: "root-1" } })
+    // Every extension row for the whole thread goes first, in the same
+    // transaction. Missing one would make the emulated Restrict reject the
+    // delete and surface as a 500 to whoever clicked it.
+    for (const model of [tx.docCommentAnchor, tx.commentElementAnchor, tx.commentExternalAuthor]) {
+      expect(model.deleteMany).toHaveBeenCalledWith({ where: { commentId: { in: ["reply-1", "root-1"] } } })
+    }
   })
 
   it("never permits generic deletion of a specialized plan row", async () => {

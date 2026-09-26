@@ -13,6 +13,11 @@ import path from "node:path";
  * pins membership as well as digests, so a new migration cannot be registered
  * without touching this map. Treat the pin as a review request, not a pass:
  * re-read the SQL and confirm the digest before merging.
+ *
+ * The same caveat applies to `064_embed_feedback_sources`, added by this PR. Its
+ * digest was recorded from the shipped SQL rather than produced by a fresh audit,
+ * and it is here for the same reason: membership and ordering are pinned, so the
+ * MIGRATIONS array cannot load without it. Please review that line.
  */
 const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "001_init": "f22fed1ed336c56fbfb3380e0497c45ba355efd14906f0e4c8f4c1a5279eb12e",
@@ -88,7 +93,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "061_product_analytics": "5ec89b960a7c08a86e8f37f25c41be2c9f418ff83c2cedb6855bede43911edea",
   "062_mcp_connectors": "7f66846956a857f8e4df816b3a99c35714176193d2619e82b51fc587c195d43d",
   "063_metrics_dashboard": "06d66304c5b88e7ef7f57a2e0d8d401e0bb5b2267281604ef4d841df21869947",
-  "064_solution_scoring": "21f12a454e74c576b421be93f5fd65228126682d46ffb21eb7baf5f4d9a5456b"
+  "064_solution_scoring": "21f12a454e74c576b421be93f5fd65228126682d46ffb21eb7baf5f4d9a5456b",
+  // Embedded feedback widget (RFC #298). Last, matching its MIGRATIONS position.
+  "064_embed_feedback_sources": "767145991806adc79c0867428a513a14410fd8e6bd0a5023e3541bd73078643e"
 };
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {

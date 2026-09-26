@@ -20,6 +20,12 @@ const mockRoadmapVote = { deleteMany: vi.fn() };
 const mockFeedbackItem = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockFeedbackVote = { deleteMany: vi.fn() };
 const mockFeedbackAttachment = { deleteMany: vi.fn() };
+const mockFeedbackElementAnchor = { deleteMany: vi.fn() };
+const mockFeedbackSourceToken = { findMany: vi.fn(), deleteMany: vi.fn() };
+const mockFeedbackSource = { deleteMany: vi.fn() };
+const mockEmbedVisitorSession = { deleteMany: vi.fn() };
+const mockEmbedAuthHandoff = { deleteMany: vi.fn() };
+const mockCommentExternalAuthor = { updateMany: vi.fn() };
 const mockCustomFieldDefinition = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockCustomFieldValue = { deleteMany: vi.fn() };
 const mockEvidence = { deleteMany: vi.fn() };
@@ -95,6 +101,12 @@ const mockPrisma = {
   feedbackItem: mockFeedbackItem,
   feedbackVote: mockFeedbackVote,
   feedbackAttachment: mockFeedbackAttachment,
+  feedbackElementAnchor: mockFeedbackElementAnchor,
+  feedbackSourceToken: mockFeedbackSourceToken,
+  feedbackSource: mockFeedbackSource,
+  embedVisitorSession: mockEmbedVisitorSession,
+  embedAuthHandoff: mockEmbedAuthHandoff,
+  commentExternalAuthor: mockCommentExternalAuthor,
   customFieldDefinition: mockCustomFieldDefinition,
   sharedFieldOptionSet: { deleteMany: vi.fn() },
   customFieldValue: mockCustomFieldValue,
@@ -182,6 +194,7 @@ function seedNonEmptyFindMany() {
   mockScoringModel.findMany.mockResolvedValue([{ id: "sm-1" }]);
   mockArtifact.findMany.mockResolvedValue([{ id: "art-1" }]);
   mockArtifactRevision.findMany.mockResolvedValue([{ blobPathname: null }]);
+  mockFeedbackSourceToken.findMany.mockResolvedValue([{ id: "token-1" }]);
 }
 
 beforeEach(() => {
@@ -215,6 +228,7 @@ beforeEach(() => {
     mockArtifact,
     mockArtifactRevision,
     mockArtifactBlobCleanup,
+    mockFeedbackSourceToken,
     mockCapabilityPack,
     mockCapabilityPackVersion,
   ]) {
@@ -241,6 +255,12 @@ beforeEach(() => {
     mockFeedbackItem.deleteMany,
     mockFeedbackVote.deleteMany,
     mockFeedbackAttachment.deleteMany,
+    mockFeedbackElementAnchor.deleteMany,
+    mockEmbedVisitorSession.deleteMany,
+    mockEmbedAuthHandoff.deleteMany,
+    mockCommentExternalAuthor.updateMany,
+    mockFeedbackSourceToken.deleteMany,
+    mockFeedbackSource.deleteMany,
     mockCustomFieldDefinition.deleteMany,
     mockCustomFieldValue.deleteMany,
     mockEvidence.deleteMany,
@@ -413,7 +433,57 @@ describe("deleteOrganization", () => {
     expect(mockFeedbackAttachment.deleteMany).toHaveBeenCalledWith({
       where: { feedbackItemId: { in: ["fi-1"] } },
     });
+    expect(mockFeedbackElementAnchor.deleteMany).toHaveBeenCalledWith({
+      where: { feedbackItemId: { in: ["fi-1"] } },
+    });
     expect(mockFeedbackItem.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+
+    // ── Embed feedback sources ──
+    // Visitor sessions and auth handoffs both carry a Restrict reference to
+    // their source too — easy to miss, since a widget visitor only produces
+    // them once someone actually signs in or starts to — so they must clear
+    // before the source does, same as tokens. A bound source also carries a
+    // reference to an artifact, so the whole group has to clear before
+    // artifacts do.
+    expect(mockEmbedVisitorSession.deleteMany).toHaveBeenCalledWith({
+      where: { feedbackSource: { workspaceId: "ws-1" } },
+    });
+    expect(mockEmbedAuthHandoff.deleteMany).toHaveBeenCalledWith({
+      where: { feedbackSource: { workspaceId: "ws-1" } },
+    });
+    // CommentExternalAuthor.embedTokenId has no @relation, so it dangles unless
+    // nulled explicitly before the tokens it points at are deleted.
+    expect(mockFeedbackSourceToken.findMany).toHaveBeenCalledWith({
+      where: { feedbackSource: { workspaceId: "ws-1" } },
+      select: { id: true },
+    });
+    expect(mockCommentExternalAuthor.updateMany).toHaveBeenCalledWith({
+      where: { embedTokenId: { in: ["token-1"] } },
+      data: { embedTokenId: null },
+    });
+    expect(mockFeedbackSourceToken.deleteMany).toHaveBeenCalledWith({
+      where: { feedbackSource: { workspaceId: "ws-1" } },
+    });
+    expect(mockFeedbackSource.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+
+    // Order: sessions and handoffs before tokens, the nulling update before the
+    // token delete it protects against, tokens before the source, and the whole
+    // group before artifacts.
+    expect(mockEmbedVisitorSession.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFeedbackSourceToken.deleteMany.mock.invocationCallOrder[0]
+    );
+    expect(mockEmbedAuthHandoff.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFeedbackSourceToken.deleteMany.mock.invocationCallOrder[0]
+    );
+    expect(mockCommentExternalAuthor.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFeedbackSourceToken.deleteMany.mock.invocationCallOrder[0]
+    );
+    expect(mockFeedbackSourceToken.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFeedbackSource.deleteMany.mock.invocationCallOrder[0]
+    );
+    expect(mockFeedbackSource.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockArtifact.deleteMany.mock.invocationCallOrder[0]
+    );
 
     // ── Custom fields ──
     expect(mockCustomFieldValue.deleteMany).toHaveBeenCalledWith({ where: { fieldId: { in: ["cf-1"] } } });
@@ -470,5 +540,23 @@ describe("deleteOrganization", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
     expect(result).toEqual({ ok: true, redirectTo: "/dashboard" });
+  });
+
+  it("skips the CommentExternalAuthor nulling update when the workspace has no embed tokens", async () => {
+    // mockFeedbackSourceToken.findMany defaults to [] (not seeded via
+    // seedNonEmptyFindMany in this test), so there is nothing to null out.
+    mockWorkspace.findMany.mockResolvedValue([{ id: "ws-1" }]);
+    await deleteOrganization("acme", ORG_NAME);
+    expect(mockCommentExternalAuthor.updateMany).not.toHaveBeenCalled();
+    // The rest of the embed-source cleanup still runs unconditionally.
+    expect(mockEmbedVisitorSession.deleteMany).toHaveBeenCalledWith({
+      where: { feedbackSource: { workspaceId: "ws-1" } },
+    });
+    expect(mockEmbedAuthHandoff.deleteMany).toHaveBeenCalledWith({
+      where: { feedbackSource: { workspaceId: "ws-1" } },
+    });
+    expect(mockFeedbackSourceToken.deleteMany).toHaveBeenCalledWith({
+      where: { feedbackSource: { workspaceId: "ws-1" } },
+    });
   });
 });
