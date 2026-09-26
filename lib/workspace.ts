@@ -48,6 +48,37 @@ export const getWorkspace = cache(
   }
 )
 
+/**
+ * Membership of one workspace by internal user id — the whole predicate, nothing
+ * else.
+ *
+ * Exists because the two checks that gate internal-SSO widget commenting have to
+ * be the same check. One runs when the sign-in popup deposits a handoff; the
+ * other runs again at write time, because a 12-hour visitor session can outlive
+ * the membership that justified it. If those were two inline `findFirst` calls,
+ * nothing would keep them agreeing — and the failure would be silent in the
+ * direction that matters, a revoked member still able to write.
+ *
+ * Deliberately NOT the same predicate as `resolveWorkspaceAdmin` in
+ * lib/permissions.ts, which also admits organization admins. An org admin who is
+ * not a member of this workspace has no business commenting on its prototype
+ * through a third party's page; "internal team" here means the workspace's own
+ * members. It takes a `workspaceId` rather than slugs for the same reason — the
+ * caller has resolved a FeedbackSource, not a URL.
+ *
+ * Not wrapped in `cache()`, unlike its neighbours: the write-time recheck exists
+ * precisely to observe current state, and this is also called from route handlers
+ * rather than only from the component tree.
+ */
+export async function isWorkspaceMember(workspaceId: string, userId: string): Promise<boolean> {
+  const prisma = getPrisma()
+  const membership = await prisma.workspaceMember.findFirst({
+    where: { workspaceId, userId },
+    select: { id: true },
+  })
+  return membership !== null
+}
+
 export const getOrgWorkspaces = cache(
   async (
     orgSlug: string,

@@ -20,6 +20,9 @@ const mockRoadmapVote = { deleteMany: vi.fn() };
 const mockFeedbackItem = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockFeedbackVote = { deleteMany: vi.fn() };
 const mockFeedbackAttachment = { deleteMany: vi.fn() };
+const mockFeedbackElementAnchor = { deleteMany: vi.fn() };
+const mockFeedbackSourceToken = { deleteMany: vi.fn() };
+const mockFeedbackSource = { deleteMany: vi.fn() };
 const mockCustomFieldDefinition = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockCustomFieldValue = { deleteMany: vi.fn() };
 const mockEvidence = { deleteMany: vi.fn() };
@@ -94,6 +97,9 @@ const mockPrisma = {
   feedbackItem: mockFeedbackItem,
   feedbackVote: mockFeedbackVote,
   feedbackAttachment: mockFeedbackAttachment,
+  feedbackElementAnchor: mockFeedbackElementAnchor,
+  feedbackSourceToken: mockFeedbackSourceToken,
+  feedbackSource: mockFeedbackSource,
   customFieldDefinition: mockCustomFieldDefinition,
   sharedFieldOptionSet: { deleteMany: vi.fn() },
   customFieldValue: mockCustomFieldValue,
@@ -239,6 +245,9 @@ beforeEach(() => {
     mockFeedbackItem.deleteMany,
     mockFeedbackVote.deleteMany,
     mockFeedbackAttachment.deleteMany,
+    mockFeedbackElementAnchor.deleteMany,
+    mockFeedbackSourceToken.deleteMany,
+    mockFeedbackSource.deleteMany,
     mockCustomFieldDefinition.deleteMany,
     mockCustomFieldValue.deleteMany,
     mockEvidence.deleteMany,
@@ -410,7 +419,24 @@ describe("deleteOrganization", () => {
     expect(mockFeedbackAttachment.deleteMany).toHaveBeenCalledWith({
       where: { feedbackItemId: { in: ["fi-1"] } },
     });
+    expect(mockFeedbackElementAnchor.deleteMany).toHaveBeenCalledWith({
+      where: { feedbackItemId: { in: ["fi-1"] } },
+    });
     expect(mockFeedbackItem.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+
+    // ── Embed feedback sources ──
+    // Tokens carry a Restrict reference to their source, and a bound source
+    // carries one to an artifact, so the pair has to clear before artifacts do.
+    expect(mockFeedbackSourceToken.deleteMany).toHaveBeenCalledWith({
+      where: { feedbackSource: { workspaceId: "ws-1" } },
+    });
+    expect(mockFeedbackSource.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockFeedbackSourceToken.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFeedbackSource.deleteMany.mock.invocationCallOrder[0]
+    );
+    expect(mockFeedbackSource.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockArtifact.deleteMany.mock.invocationCallOrder[0]
+    );
 
     // ── Custom fields ──
     expect(mockCustomFieldValue.deleteMany).toHaveBeenCalledWith({ where: { fieldId: { in: ["cf-1"] } } });

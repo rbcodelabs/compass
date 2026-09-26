@@ -104,6 +104,9 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await prisma.feedbackAttachment.deleteMany({
       where: { feedbackItemId: { in: feedbackIds } },
     });
+    await prisma.feedbackElementAnchor.deleteMany({
+      where: { feedbackItemId: { in: feedbackIds } },
+    });
   }
   await prisma.feedbackItem.deleteMany({ where: { workspaceId } });
 
@@ -191,6 +194,13 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     }
   }
   await prisma.oKRCycle.deleteMany({ where: { workspaceId } });
+
+  // 11b. Embed feedback sources. Tokens first (Restrict toward the source), and
+  //      the whole pair before artifacts, since a bound source references one.
+  await prisma.feedbackSourceToken.deleteMany({
+    where: { feedbackSource: { workspaceId } },
+  });
+  await prisma.feedbackSource.deleteMany({ where: { workspaceId } });
 
   // 12. Artifacts: links → current pointer → revisions → stable identity,
   // followed by best-effort private Blob cleanup.

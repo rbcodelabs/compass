@@ -7,6 +7,9 @@ const prisma = {
   comment: { findUnique: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
   docCommentAnchor: { create: vi.fn(), deleteMany: vi.fn() },
   solutionPlanProposal: { create: vi.fn(), deleteMany: vi.fn() },
+  commentElementAnchor: { create: vi.fn(), deleteMany: vi.fn() },
+  commentExternalAuthor: { create: vi.fn(), deleteMany: vi.fn() },
+  artifact: { findUnique: vi.fn() },
   opportunity: { findUnique: vi.fn() },
   solution: { findUnique: vi.fn() },
   reviewRequest: { findUnique: vi.fn() },
@@ -76,12 +79,84 @@ describe("deleteComment", () => {
     prisma.comment.findMany.mockResolvedValue([{ id: "reply-1" }])
     prisma.docCommentAnchor.deleteMany.mockResolvedValue({ count: 1 })
     prisma.solutionPlanProposal.deleteMany.mockResolvedValue({ count: 0 })
+    prisma.commentElementAnchor.deleteMany.mockResolvedValue({ count: 1 })
+    prisma.commentExternalAuthor.deleteMany.mockResolvedValue({ count: 1 })
     prisma.comment.deleteMany.mockResolvedValue({ count: 1 })
     prisma.comment.delete.mockResolvedValue({ id: ROOT })
 
     await deleteComment(ROOT)
-    expect(prisma.docCommentAnchor.deleteMany).toHaveBeenCalledWith({ where: { commentId: { in: ["reply-1", ROOT] } } })
+    // All four extension tables, for the root and every reply. Under
+    // relationMode="prisma" the `onDelete: Restrict` on each one is emulated in
+    // the client, so a table missed here becomes a failed delete in production.
+    for (const model of [prisma.docCommentAnchor, prisma.solutionPlanProposal, prisma.commentElementAnchor, prisma.commentExternalAuthor]) {
+      expect(model.deleteMany).toHaveBeenCalledWith({ where: { commentId: { in: ["reply-1", ROOT] } } })
+    }
     expect(prisma.comment.deleteMany).toHaveBeenCalledWith({ where: { parentId: ROOT } })
     expect(prisma.comment.delete).toHaveBeenCalledWith({ where: { id: ROOT } })
+  })
+})
+
+describe("createComment element anchors and external authors", () => {
+  const ARTIFACT = "44444444-4444-4444-4444-444444444444"
+
+  const baseInput = {
+    workspaceId: WS,
+    targetType: "ARTIFACT" as const,
+    targetId: ARTIFACT,
+    body: "The CTA is below the fold",
+    authorName: "Dana",
+    source: "WIDGET" as const,
+    authorId: null,
+  }
+
+  beforeEach(() => {
+    prisma.artifact.findUnique.mockResolvedValue({ workspaceId: WS })
+    prisma.comment.create.mockResolvedValue({ id: "comment-1" })
+    prisma.comment.findUnique.mockResolvedValue({ id: "comment-1" })
+  })
+
+  it("derives the anchor's artifactId from the comment's own target, not from the caller", async () => {
+    await createComment({
+      ...baseInput,
+      elementAnchor: { pageUrl: "https://prototype.example.com/pricing", pagePath: "/pricing", elementSelector: "button.cta" },
+      externalAuthor: { submitterEmail: "dana@example.com", embedTokenId: "token-1" },
+    })
+    expect(prisma.commentElementAnchor.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ commentId: "comment-1", artifactId: ARTIFACT, pagePath: "/pricing" }),
+    })
+    expect(prisma.commentExternalAuthor.create).toHaveBeenCalledWith({
+      data: { commentId: "comment-1", submitterEmail: "dana@example.com", portalAccountId: null, embedTokenId: "token-1" },
+    })
+  })
+
+  it("refuses an element anchor on anything but a root Artifact comment", async () => {
+    const anchor = { pageUrl: "https://prototype.example.com/p", pagePath: "/p" }
+    prisma.opportunity.findUnique.mockResolvedValue({ workspaceId: WS })
+    await expect(createComment({ ...baseInput, targetType: "OPPORTUNITY", elementAnchor: anchor }))
+      .rejects.toThrow("Element anchors are allowed only on root Artifact comments.")
+    await expect(createComment({ ...baseInput, parentId: "comment-0", elementAnchor: anchor }))
+      .rejects.toThrow("Element anchors are allowed only on root Artifact comments.")
+    expect(prisma.commentElementAnchor.create).not.toHaveBeenCalled()
+  })
+
+  it("refuses a comment claiming both a Compass author and an external one", async () => {
+    await expect(createComment({ ...baseInput, authorId: "user-1", externalAuthor: { submitterEmail: "dana@example.com" } }))
+      .rejects.toThrow("A comment cannot have both a Compass author and an external author.")
+    expect(prisma.comment.create).not.toHaveBeenCalled()
+  })
+
+  it("removes both extension rows before compensating for a failed create", async () => {
+    // With two writable extensions, a failure on the second would otherwise leave
+    // the first behind — and the emulated Restrict would then make the
+    // compensating comment delete throw a second error masking the real one.
+    prisma.commentExternalAuthor.create.mockRejectedValueOnce(new Error("write conflict"))
+    await expect(createComment({
+      ...baseInput,
+      elementAnchor: { pageUrl: "https://prototype.example.com/p", pagePath: "/p" },
+      externalAuthor: { submitterEmail: "dana@example.com" },
+    })).rejects.toThrow("write conflict")
+    expect(prisma.commentElementAnchor.deleteMany).toHaveBeenCalledWith({ where: { commentId: "comment-1" } })
+    expect(prisma.commentExternalAuthor.deleteMany).toHaveBeenCalledWith({ where: { commentId: "comment-1" } })
+    expect(prisma.comment.delete).toHaveBeenCalledWith({ where: { id: "comment-1" } })
   })
 })
