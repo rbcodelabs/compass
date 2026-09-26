@@ -19,6 +19,7 @@ export const TOP_LEVEL_SECTIONS: ReadonlySet<string> = new Set([
   "docs",
   "experiments",
   "feedback",
+  "metrics",
   "okrs",
   "roadmap",
   "settings",

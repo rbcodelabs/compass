@@ -97,7 +97,7 @@ describe("getWorkspaceSwitchPath — every top-level section survives a switch",
   const sw = (pathname: string) =>
     getWorkspaceSwitchPath(pathname, "o", "a", "o", "b");
 
-  it.each(["tasks", "decisions", "canvas", "agent", "updates"])(
+  it.each(["tasks", "decisions", "canvas", "agent", "updates", "metrics"])(
     "keeps /%s when switching workspaces",
     (section) => {
       expect(sw(`/o/a/${section}`)).toBe(`/o/b/${section}`);
