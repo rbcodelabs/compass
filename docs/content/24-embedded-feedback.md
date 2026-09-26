@@ -97,5 +97,13 @@ screenshot of the element as an aid to whoever reads the thread later.
 Comments arrive on the artifact you bound the source to and can be read there
 like any other comment. The element context is stored with each comment and is
 served back to the widget, so a reviewer returning to the prototype sees the
-existing thread in place; Compass's own artifact views show the comments
-without that on-page context.
+existing thread in place, and Compass's own artifact viewer renders the same
+anchors as pins over the artifact (falling back to a "could not be
+re-anchored" notice rather than a misplaced pin when the page has changed too
+much to re-locate the element confidently).
+
+This widget only runs on a prototype hosted at your own `https://` origin. For
+an HTML file you uploaded directly into Compass, use the native picker built
+into the artifact viewer instead — no script tag or token needed, since it
+runs in the same page as your Compass session. See
+[Artifact feedback](/help/25-artifact-feedback).
