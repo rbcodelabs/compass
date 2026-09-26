@@ -15,6 +15,11 @@
 //   AGENT_PROMPT               the assembled prompt (history + user turn)
 //   MCP_BYPASS_SECRET          (optional) x-vercel-protection-bypass for
 //                              protected preview deployments; unused in prod
+//   AGENT_MCP_CONNECTORS       (optional) JSON [{ slug, displayName, guidance? }]
+//                              — third-party MCP servers this user has connected
+//                              (ADR-0018). Slugs only: each is reached through a
+//                              Compass gateway path with the turn credential
+//                              above, so no provider token is passed in here.
 //
 // Output contract (one JSON object per line, prefixed):
 //   AGENT_EVENT <json>   — each SDK stream message (assistant/tool/system)
@@ -29,10 +34,16 @@ const AGENT_PROMPT = process.env.AGENT_PROMPT
 const AGENT_SYSTEM_PROMPT = process.env.AGENT_SYSTEM_PROMPT
 const AGENT_PACK_CONFIG = process.env.AGENT_PACK_CONFIG
 const MCP_BYPASS_SECRET = process.env.MCP_BYPASS_SECRET
+const AGENT_MCP_CONNECTORS = process.env.AGENT_MCP_CONNECTORS
 
 function emit(kind: "AGENT_EVENT" | "AGENT_RESULT" | "AGENT_ERROR", payload: unknown): void {
   // Single line so the host can split stdout on newlines and forward as SSE.
   process.stdout.write(`${kind} ${JSON.stringify(payload)}\n`)
+}
+
+/** Diagnostics about this script's own setup, which must never masquerade as agent output. */
+function note(message: string): void {
+  process.stderr.write(`[turn-entry] ${message}\n`)
 }
 
 function requireEnv(name: string, value: string | undefined): string {
@@ -41,6 +52,68 @@ function requireEnv(name: string, value: string | undefined): string {
     process.exit(1)
   }
   return value
+}
+
+
+// ── Outbound MCP connectors (ADR-0018) ──────────────────────────────────────
+
+type ConnectorRef = { slug: string; displayName: string; guidance?: string }
+
+/** The shape the Agent SDK's `mcpServers` map takes for an HTTP transport. */
+type McpHttpServer = {
+  type: "http"
+  url: string
+  headers: Record<string, string>
+  alwaysLoad?: boolean
+}
+
+/** Per connector. Generous for a paragraph of advice, far short of a prompt injection budget. */
+const MAX_CONNECTOR_GUIDANCE_CHARS = 2000
+
+/**
+ * Parses AGENT_MCP_CONNECTORS, dropping anything malformed rather than throwing.
+ *
+ * A bad entry must not cost the user their turn: the connectors are an additive
+ * capability, and the agent is perfectly useful with only Compass's own catalog.
+ * The slug is re-validated here even though the host built the value, because it
+ * is interpolated into both a URL path and an `mcp__<slug>` tool-name prefix —
+ * two places where a stray character would either widen the allowlist or point
+ * the SDK somewhere unintended.
+ */
+function parseConnectors(raw: string | undefined): ConnectorRef[] {
+  if (!raw) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    note("AGENT_MCP_CONNECTORS is not valid JSON; continuing with Compass only")
+    return []
+  }
+  if (!Array.isArray(parsed)) {
+    note("AGENT_MCP_CONNECTORS is not an array; continuing with Compass only")
+    return []
+  }
+  const refs: ConnectorRef[] = []
+  for (const entry of parsed) {
+    const slug = (entry as { slug?: unknown } | null)?.slug
+    if (typeof slug !== "string" || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(slug)) {
+      note(`ignoring connector with unusable slug: ${JSON.stringify(slug)}`)
+      continue
+    }
+    const displayName = (entry as { displayName?: unknown }).displayName
+    const guidance = (entry as { guidance?: unknown }).guidance
+    refs.push({
+      slug,
+      displayName: typeof displayName === "string" && displayName ? displayName : slug,
+      // Capped rather than trusted wholesale: it is appended to the system
+      // prompt, and the host is the only writer, but a runaway value would
+      // silently eat the context budget the actual turn needs.
+      ...(typeof guidance === "string" && guidance.trim()
+        ? { guidance: guidance.trim().slice(0, MAX_CONNECTOR_GUIDANCE_CHARS) }
+        : {}),
+    })
+  }
+  return refs
 }
 
 async function main(): Promise<void> {
@@ -56,6 +129,51 @@ async function main(): Promise<void> {
     ? JSON.parse(AGENT_PACK_CONFIG) as { pluginPaths: string[]; skillIds: string[] }
     : { pluginPaths: [], skillIds: [] }
 
+  // Compass's own catalog plus one HTTP entry per connected provider. Each
+  // connector points at a Compass gateway path, not the provider — the sandbox
+  // presents its own turn credential and Compass attaches the third-party bearer
+  // on the way out, so no provider token is ever present in this microVM.
+  // `alwaysLoad` is deliberately NOT set on the connectors: Compass's own catalog
+  // is what the agent needs every turn, whereas a connector's tools are worth
+  // discovering on demand rather than spending context on unconditionally.
+  const mcpServers: Record<string, McpHttpServer> = {
+    compass: {
+      type: "http",
+      url: new URL("/api/mcp", baseUrl).toString(),
+      headers,
+      // Load the full Compass catalog into the prompt up front instead of
+      // deferring it behind ToolSearch. Without this the agent burns turns
+      // searching for tools; with it, it can act directly.
+      alwaysLoad: true,
+    },
+  }
+  const connectors = parseConnectors(AGENT_MCP_CONNECTORS)
+  const connectorToolPrefixes: string[] = []
+  const connectorGuidance: string[] = []
+  for (const connector of connectors) {
+    // `compass` is this file's own entry, and shadowing it would silently
+    // redirect the agent's entire tool catalog through the gateway.
+    if (Object.prototype.hasOwnProperty.call(mcpServers, connector.slug)) {
+      note(`ignoring connector "${connector.slug}": name is reserved`)
+      continue
+    }
+    mcpServers[connector.slug] = {
+      type: "http",
+      url: new URL(`/api/integrations/mcp/${connector.slug}`, baseUrl).toString(),
+      headers,
+    }
+    connectorToolPrefixes.push(`mcp__${connector.slug}`)
+    if (connector.guidance) connectorGuidance.push(`${connector.displayName}: ${connector.guidance}`)
+  }
+  if (connectorToolPrefixes.length > 0) note(`connectors enabled: ${connectorToolPrefixes.join(", ")}`)
+
+  // Appended after the host's prompt rather than merged into it, because it is
+  // scoped to *this* turn's grants: the host prompt is the same for every user,
+  // and this paragraph only exists while the connector it describes is reachable.
+  const effectiveSystemPrompt = connectorGuidance.length
+    ? `${systemPrompt}\n\n## Connected third-party tools\n\n${connectorGuidance.join("\n\n")}`
+    : systemPrompt
+
   let finalText: string | undefined
   let usage: unknown
 
@@ -63,18 +181,9 @@ async function main(): Promise<void> {
     prompt,
     options: {
       model: "claude-sonnet-5",
-      // Compass's own MCP catalog, reached AS the acting user.
-      mcpServers: {
-        compass: {
-          type: "http",
-          url: new URL("/api/mcp", baseUrl).toString(),
-          headers,
-          // Load the full Compass catalog into the prompt up front instead of
-          // deferring it behind ToolSearch. Without this the agent burns turns
-          // searching for tools; with it, it can act directly.
-          alwaysLoad: true,
-        },
-      },
+      // Compass's own MCP catalog, reached AS the acting user, plus this turn's
+      // connectors. Built above.
+      mcpServers,
       plugins: packConfig.pluginPaths.map((pluginPath) => ({
         type: "local" as const,
         path: new URL(pluginPath, `file://${process.cwd()}/`).pathname,
@@ -86,10 +195,10 @@ async function main(): Promise<void> {
       tools: [],
       strictMcpConfig: true,
       settingSources: [],
-      systemPrompt,
+      systemPrompt: effectiveSystemPrompt,
       // Compass MCP only, auto-approved. Headless (no human approver): the
       // real security boundary is the disposable sandbox + per-user MCP auth.
-      allowedTools: ["mcp__compass"],
+      allowedTools: ["mcp__compass", ...connectorToolPrefixes],
       // Safety default (Phase 5): keep the two irreversible hard-delete tools
       // out of the agent's reach — everything else is reversible/auditable.
       // Remove entries here to let the agent perform destructive deletes.

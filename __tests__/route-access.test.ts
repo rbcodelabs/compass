@@ -103,4 +103,31 @@ describe("isPublicPath", () => {
     for (const suffix of ["heartbeat", "events", "commands/claim", "commands/result"]) expect(isPublicPath(`${base}/${suffix}`)).toBe(true)
     for (const path of ["/api/internal/other", `${base}/ready`, `${base}/events/extra`, "/api/internal/research/voice/not-a-uuid/events"]) expect(isPublicPath(path)).toBe(false)
   });
+
+  it("allows the outbound MCP connector gateway, which the sandbox calls with an AGENT_TURN bearer", () => {
+    expect(isPublicPath("/api/integrations/mcp/v0")).toBe(true);
+    expect(isPublicPath("/api/integrations/mcp/some-provider")).toBe(true);
+  });
+
+  it("does not let the gateway allowance widen to neighbouring integrations paths", () => {
+    // The allowance is one slug-shaped segment, not a prefix: a future
+    // /api/integrations/* route must opt in deliberately rather than inherit
+    // public access from this one.
+    expect(isPublicPath("/api/integrations")).toBe(false);
+    expect(isPublicPath("/api/integrations/mcp")).toBe(false);
+    expect(isPublicPath("/api/integrations/mcp/v0/extra")).toBe(false);
+    expect(isPublicPath("/api/integrations/slack/v0")).toBe(false);
+    // Traversal- and case-shaped attempts must not match the slug pattern.
+    expect(isPublicPath("/api/integrations/mcp/..")).toBe(false);
+    expect(isPublicPath("/api/integrations/mcp/V0")).toBe(false);
+  });
+
+  it("does NOT allow the browser connect/callback flow", () => {
+    // Opposite requirement to the gateway: these need the middleware login
+    // redirect so an anonymous visitor following a connect link is signed in and
+    // returned with the query string intact, exactly like /oauth/authorize.
+    expect(isPublicPath("/api/connectors")).toBe(false);
+    expect(isPublicPath("/api/connectors/v0/connect")).toBe(false);
+    expect(isPublicPath("/api/connectors/v0/callback")).toBe(false);
+  });
 });

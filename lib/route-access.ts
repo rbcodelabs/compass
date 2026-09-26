@@ -58,6 +58,18 @@ export function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/api/research/") ||
     // Only these internal callbacks bypass browser login; each requires its bound worker bearer.
     /^\/api\/internal\/research\/voice\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/(?:heartbeat|events|commands\/(?:claim|result))$/i.test(pathname) ||
+    // Outbound MCP connector gateway (ADR-0018): the cloud agent calls this from
+    // inside a Vercel Sandbox with its own short-lived AGENT_TURN bearer, so there
+    // is no browser session to redirect. The route itself admits *only* an
+    // AGENT_TURN credential and returns JSON-RPC errors, which a 302 to /login
+    // would be unparseable to.
+    //
+    // Matched on a slug-shaped segment rather than `startsWith("/api/integrations/")`
+    // so a future integrations route is not silently public by default — the same
+    // reasoning as the enumerated internal callbacks above. Note the *browser*
+    // connect/callback flow deliberately lives elsewhere (/api/connectors/…) and is
+    // NOT public: it needs the middleware login redirect to preserve its query string.
+    /^\/api\/integrations\/mcp\/[a-z0-9][a-z0-9-]{0,31}$/.test(pathname) ||
     // Docs API routes use session auth internally — let them handle 401 themselves
     pathname.startsWith("/api/docs/") ||
     // Agent turn route uses session auth internally (returns 401, not a 302)
