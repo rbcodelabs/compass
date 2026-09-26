@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import {
+  BarChart3,
   BookOpen,
   Building2,
   Check,
@@ -68,6 +69,7 @@ const baseNavItems = [
   { label: "Discovery", path: "discovery", Icon: Lightbulb },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
+  { label: "Metrics", path: "metrics", Icon: BarChart3 },
   { label: "Tasks", path: "tasks", Icon: ListChecks },
   { label: "Decisions", path: "decisions", Icon: MessageSquareCheck },
   { label: "Docs", path: "docs", Icon: BookOpen },
@@ -101,11 +103,11 @@ export function Sidebar({
   const base = `/${orgSlug}/${workspaceSlug}`
   const navItems = [
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
-    ...baseNavItems.slice(0, 5),
+    ...baseNavItems.slice(0, 6),
     researchCaptureEnabled
       ? { label: "Capture", path: "capture", Icon: MessageSquare }
       : { label: "Feedback", path: "feedback", Icon: MessageSquare },
-    ...baseNavItems.slice(5),
+    ...baseNavItems.slice(6),
   ]
 
   const otherWorkspaces = workspaces.filter(

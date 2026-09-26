@@ -12,14 +12,17 @@ test.describe("Analytics measurements", () => {
     await page.getByLabel("Access token", { exact: true }).fill("compass-e2e-token");
     await page.getByRole("button", { name: "Validate & save" }).click();
     await expect(page.getByText("Connected", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Create metric", exact: true }).click();
+
+    // Metric definitions are created on the standalone Metrics page, not Settings.
+    await page.goto(`${base}/metrics`);
+    await page.getByRole("button", { name: "New metric", exact: true }).click();
     const metricDialog = page.getByRole("dialog");
     await metricDialog.getByLabel("Name", { exact: true }).fill(metricName);
     await metricDialog.getByLabel("Measure", { exact: true }).selectOption("daily_visitors");
     await metricDialog.getByLabel("Unit", { exact: true }).fill("visitors");
-    await metricDialog.getByRole("button", { name: "Save metric" }).click();
+    await metricDialog.getByRole("button", { name: "Create metric", exact: true }).click();
     await expect(metricDialog).not.toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(metricName, { exact: true })).toBeVisible();
+    await expect(page.getByTestId("metric-card").filter({ hasText: metricName })).toBeVisible();
 
     await page.goto(`${base}/experiments`);
     await page.getByRole("button", { name: "New Experiment" }).click();
@@ -89,7 +92,7 @@ test.describe("Analytics measurements", () => {
     await expect(measurement.getByText("Complete", { exact: true }).first()).toBeVisible();
   });
 
-  test("mobile settings keeps analytics controls and dialogs usable without horizontal overflow", async ({ page, base }) => {
+  test("mobile settings keeps the Vercel connection dialog usable without horizontal overflow", async ({ page, base }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/settings`);
 
@@ -113,16 +116,5 @@ test.describe("Analytics measurements", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await validate.click();
     await expect(page.getByText("Connected", { exact: true })).toBeVisible();
-
-    await page.getByRole("button", { name: "Create metric", exact: true }).click();
-    const metricDialog = page.getByRole("dialog", { name: "Create metric" });
-    await expect(metricDialog.getByLabel("Name", { exact: true })).toBeVisible();
-    await expect(metricDialog.getByLabel("Measure", { exact: true })).toBeVisible();
-    const save = metricDialog.getByRole("button", { name: "Save metric" });
-    await expect(save).toBeVisible();
-    const saveBox = await save.boundingBox();
-    expect(saveBox).not.toBeNull();
-    expect((saveBox?.x ?? 0) + (saveBox?.width ?? 0)).toBeLessThanOrEqual(390);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 });

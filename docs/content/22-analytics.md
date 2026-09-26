@@ -20,13 +20,31 @@ Tokens are encrypted on the server and are never returned by the metrics tools. 
 
 Compass queries production data through Vercel's documented aggregate API. It does not accept arbitrary provider URLs or raw query expressions. See [Vercel's API guide](https://vercel.com/docs/analytics/web-analytics-api) for provider prerequisites and reporting limits.
 
+Settings no longer defines or edits metrics — that moved to the **Metrics** page below.
+
+## The Metrics dashboard
+
+**Metrics** (in the main workspace navigation, alongside Discovery, Experiments, Roadmap, and OKRs) is the one place to see every metric a workspace has defined: what's fresh, what needs attention, and what it's linked to. This is also where metrics are created, edited, and archived — those actions moved off the Settings page entirely so Settings only manages the Vercel connection itself.
+
+The page is a grid of widget cards, one per metric. A summary strip above the grid totals metrics, how many are fresh, and how many need attention (stale or failed — never a silent zero, matching the status rules below).
+
+Each card shows, depending on its size:
+
+- **Small** — status and current value only.
+- **Medium** — adds the change versus the previous observation (or, for a comparison-mode binding, versus its baseline) and a sparkline.
+- **Large** — adds the record(s) this metric is linked to, as clickable chips that open that experiment, key result, or roadmap item.
+
+Drag a card by its header to reorder the dashboard; drag its bottom-right corner to resize it freely, or use the **⋯** card menu for quick S/M/L presets. The same menu edits the metric, removes it from the dashboard (the definition and its history are kept — use **Add widget** at the end of the grid to bring it back), or archives it.
+
+Dashboard layout (which metrics are shown, their size, and their order) is a workspace-level setting: everyone viewing the workspace sees the same arrangement, consistent with the rest of Compass having no per-user board personalization.
+
 ## Define a metric
 
 Metrics have a name, unit, provider, and structured query. The Vercel adapter supports pageviews, daily visitors, and named custom-event counts. Optional filters narrow paths, event properties, and feature flags.
 
 Daily visitors are a daily series—not a count of distinct people across the entire comparison period. Adding daily visitors together would count returning visitors repeatedly, so Compass does not present that sum as period-unique users.
 
-Edits create a new definition revision. Existing links and observations keep their original revision so a later filter change cannot silently rewrite the meaning of earlier evidence. Archive a metric when it should no longer be used for new links.
+Edits create a new definition revision. Existing links and observations keep their original revision so a later filter change cannot silently rewrite the meaning of earlier evidence. Archive a metric when it should no longer be used for new links; its dashboard widget and all existing bindings disappear from active use but nothing is deleted.
 
 ## Attach evidence to product work
 
@@ -52,6 +70,8 @@ Bindings and observations are generated evidence, not editable product copy. Edi
 - **Refresh failed:** the previous observation remains available with its original retrieval time; it is not silently replaced with zero.
 
 A provider response is evidence of observed usage, not proof that a launch caused the change. In particular, visitor counts do not establish workspace activation or retention.
+
+The Metrics dashboard's card status (**Fresh**, **Stale**, **Failed**) is a workspace-wide summary of this same evidence — is there a recent successful observation for this metric, an aging one, or a failing refresh — not a replacement for the completeness detail above. A failed or stale refresh always shows as unavailable/stale on its card, never as a zero.
 
 ## Active Discovery Teams
 

@@ -31,7 +31,7 @@ import { WorkspaceAgentsPanel } from "@/components/settings/workspace-agents-pan
 import { AgentActivity } from "@/components/settings/agent-activity";
 import { agentsEnabled } from "@/lib/agent-access";
 import { AnalyticsSettingsPanel } from "@/components/analytics/analytics-settings-panel";
-import { listConnections, listMetrics } from "@/lib/analytics/service";
+import { listConnections } from "@/lib/analytics/service";
 
 export const metadata = { title: "Workspace Settings" };
 
@@ -162,10 +162,7 @@ export default async function SettingsPage({ params }: Props) {
   const currentWorkspaceRole = rawMembers.find((m) => m.userId === session.user?.id)?.role;
   const canManageCapabilityPacks = normalizeWorkspaceRole(currentWorkspaceRole) === "ADMIN" || isOrgAdminRole(workspace.organization.members[0]?.role);
   const analyticsActor = { userId: session.user.id, purpose: "USER" as const };
-  const [analyticsConnections, analyticsMetrics] = await Promise.all([
-    listConnections(analyticsActor, workspace.id),
-    listMetrics(analyticsActor, workspace.id),
-  ]);
+  const analyticsConnections = await listConnections(analyticsActor, workspace.id);
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: workspace.id, revokedAt: null } });
   const workspaceAgents = await prisma.agent.findMany({ where: canManageCapabilityPacks ? { OR: [{ ownerUserId: { in: rawMembers.map((m) => m.userId) } }, { id: { in: grants.map((g) => g.agentId) } }] } : { id: { in: grants.map((g) => g.agentId) } }, orderBy: { name: "asc" } });
   const agentActivity = canManageCapabilityPacks ? await prisma.agentToolCall.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "desc" }, take: 25 }) : [];
@@ -247,7 +244,6 @@ export default async function SettingsPage({ params }: Props) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           initialConnections={analyticsConnections}
-          initialMetrics={analyticsMetrics}
           canManage={canManageCapabilityPacks}
         />
       </SettingsSection>

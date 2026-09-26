@@ -8,7 +8,7 @@ vi.mock("@/lib/mcp-tool-db", () => ({ getToolPrisma: () => db, hasToolTransactio
 vi.mock("@/lib/mcp-authz", () => ({ assertWorkspaceMember: member, assertWorkspaceAdmin: admin }))
 vi.mock("./transport", () => ({ analyticsFetch: vi.fn(), validateVercelProject: projectValidate }))
 vi.mock("./providers", async (importOriginal) => ({ ...await importOriginal<typeof import("./providers")>(), fetchVercelObservation: providerFetch }))
-import { archiveMetric, createMetric, disconnectConnection, getBinding, getMetric, getObservation, linkMetric, listBindings, listConnections, listObservations, updateBinding, updateMetric, refreshBinding, saveVercelConnection, deleteWorkspaceAnalytics } from "./service"
+import { archiveMetric, createMetric, disconnectConnection, getBinding, getMetric, getObservation, linkMetric, listBindings, listConnections, listObservations, updateBinding, updateMetric, refreshBinding, saveVercelConnection, deleteWorkspaceAnalytics, listDashboardMetrics, getDashboardMetric, updateMetricDashboardLayout, setMetricDashboardVisible, reorderDashboardMetric } from "./service"
 import { encrypt } from "@/lib/crypto-secrets"
 import { AnalyticsError } from "./providers"
 const actor = { userId: "user", purpose: "USER" as const }
@@ -348,5 +348,122 @@ describe("analytics refresh concurrency", () => {
     resolveOld({ value: 12, series: [], completeness: "COMPLETE", provenance: {}, note: null })
     await expect(oldRefresh).resolves.toHaveLength(2)
     expect(health).toBe("AUTHENTICATION")
+  })
+})
+
+describe("metrics dashboard", () => {
+  const metricId = "c1a1a1a1-0000-4000-8000-000000000001"
+  const definition = (overrides: Record<string, unknown> = {}) => ({
+    id: metricId, workspaceId: workspace, currentRevisionId: "rev", revision: 1, archived: false, createdAt: new Date("2026-01-01"),
+    dashboardVisible: true, dashboardCol: 2, dashboardRow: 4, dashboardSortOrder: 0, ...overrides,
+  })
+  const revision = { ...input, id: "rev", metricId, workspaceId: workspace, revision: 1, queryJson: JSON.stringify(input.query) }
+
+  it("returns nothing for a workspace with no metrics", async () => {
+    db.metricDefinition.findMany.mockResolvedValue([])
+    expect(await listDashboardMetrics(actor, workspace)).toEqual([])
+  })
+
+  it("reports a never-linked metric as fresh with a distinct caption, never as stale or a silent zero", async () => {
+    db.metricDefinition.findMany.mockResolvedValue([definition()])
+    db.metricRevision.findMany.mockResolvedValue([revision])
+    db.metricBinding.findMany.mockResolvedValue([])
+
+    const [row] = await listDashboardMetrics(actor, workspace)
+
+    expect(row).toMatchObject({ status: "fresh", statusCaption: "Not yet linked to a metric binding", value: null, delta: null, sparkline: [], bindings: [] })
+  })
+
+  it("surfaces a failed refresh as failed, not as stale or zero", async () => {
+    const binding = { id: "binding", workspaceId: workspace, metricId, revisionId: "rev", targetType: "EXPERIMENT", targetId: "709655a2-35de-436b-a371-a170781445d7", baselineJson: "null", followupJson: '{"version":1,"mode":"rolling","days":30}', active: true, lastError: "AUTHENTICATION", lastAttemptAt: new Date("2026-06-15T10:00:00Z"), updatedAt: new Date("2026-06-15T10:00:00Z") }
+    db.metricDefinition.findMany.mockResolvedValue([definition()])
+    db.metricRevision.findMany.mockResolvedValue([revision])
+    db.metricBinding.findMany.mockResolvedValue([binding])
+    db.metricObservation.findMany.mockResolvedValue([])
+    db.experiment.findMany.mockResolvedValue([{ id: binding.targetId, title: "Onboarding redesign" }])
+
+    const [row] = await listDashboardMetrics(actor, workspace)
+
+    expect(row.status).toBe("failed")
+    expect(row.statusCaption).toContain("provider token rejected")
+    expect(row.bindings).toEqual([{ id: "binding", targetType: "EXPERIMENT", targetId: binding.targetId, targetTitle: "Onboarding redesign" }])
+  })
+
+  it("computes the headline value and delta from the two most recent tracking observations", async () => {
+    const binding = { id: "binding", workspaceId: workspace, metricId, revisionId: "rev", targetType: "KEY_RESULT", targetId: "709655a2-35de-436b-a371-a170781445d7", baselineJson: "null", followupJson: '{"version":1,"mode":"rolling","days":30}', active: true, lastError: null, lastAttemptAt: null, updatedAt: new Date("2026-06-15T10:00:00Z") }
+    const latest = { id: "obs-2", workspaceId: workspace, bindingId: "binding", revisionId: "rev", windowKind: "FOLLOWUP", retrievedAt: new Date(Date.now() - 3_600_000), dataJson: JSON.stringify({ value: 68, series: [], completeness: "COMPLETE", note: null, provenance: {} }), snapshotJson: "{}" }
+    const previous = { id: "obs-1", workspaceId: workspace, bindingId: "binding", revisionId: "rev", windowKind: "FOLLOWUP", retrievedAt: new Date(Date.now() - 90_000_000), dataJson: JSON.stringify({ value: 60, series: [{ date: "2026-06-14", value: 60 }], completeness: "COMPLETE", note: null, provenance: {} }), snapshotJson: "{}" }
+    db.metricDefinition.findMany.mockResolvedValue([definition()])
+    db.metricRevision.findMany.mockResolvedValue([revision])
+    db.metricBinding.findMany.mockResolvedValue([binding])
+    db.metricObservation.findMany.mockResolvedValue([latest, previous])
+    db.keyResult.findMany.mockResolvedValue([{ id: binding.targetId, title: "Reach 50 Active Discovery Teams" }])
+    db.analyticsConnection.findMany.mockResolvedValue([{ id: input.connectionId, workspaceId: workspace, provider: "vercel", projectId: "p", teamId: null, enabled: true, health: "CONNECTED", generation: 1 }])
+
+    const [row] = await listDashboardMetrics(actor, workspace)
+
+    expect(row.status).toBe("fresh")
+    expect(row.value).toBe(68)
+    expect(row.delta).toEqual({ direction: "up", diff: 8 })
+    expect(row.bindings[0].targetTitle).toBe("Reach 50 Active Discovery Teams")
+  })
+
+  it("throws when the metric does not belong to this workspace", async () => {
+    db.metricDefinition.findMany.mockResolvedValue([])
+    await expect(getDashboardMetric(actor, workspace, "not-here")).rejects.toThrow("NOT_FOUND_OR_ACCESS_DENIED")
+  })
+
+  it("clamps a freeform resize and preserves the metric's existing visibility and sort order", async () => {
+    db.metricDefinition.findFirst.mockResolvedValue(definition({ dashboardVisible: true, dashboardCol: 2, dashboardRow: 4, dashboardSortOrder: 3 }))
+    db.metricDefinition.updateMany.mockResolvedValue({ count: 1 })
+
+    const result = await updateMetricDashboardLayout(actor, workspace, metricId, { col: 9, row: -1 })
+
+    expect(result).toEqual({ id: metricId, dashboardVisible: true, dashboardCol: 4, dashboardRow: 2, dashboardSortOrder: 3 })
+    expect(db.metricDefinition.updateMany).toHaveBeenCalledWith({ where: { id: metricId, workspaceId: workspace, archived: false }, data: expect.objectContaining({ dashboardCol: 4, dashboardRow: 2 }) })
+  })
+
+  it("resets a re-added metric to the medium preset and appends it after the current maximum sort order", async () => {
+    db.metricDefinition.findFirst.mockResolvedValue(definition({ dashboardVisible: false, dashboardCol: 1, dashboardRow: 2, dashboardSortOrder: 5 }))
+    db.metricDefinition.findMany.mockResolvedValue([{ dashboardSortOrder: 5 }, { dashboardSortOrder: 2 }, { dashboardSortOrder: null }])
+    db.metricDefinition.updateMany.mockResolvedValue({ count: 1 })
+
+    const result = await setMetricDashboardVisible(actor, workspace, metricId, true)
+
+    expect(result).toEqual({ id: metricId, dashboardVisible: true, dashboardCol: 2, dashboardRow: 4, dashboardSortOrder: 6 })
+  })
+
+  it("hiding a metric only flips visibility, leaving size and order untouched", async () => {
+    db.metricDefinition.findFirst.mockResolvedValue(definition({ dashboardVisible: true, dashboardCol: 3, dashboardRow: 6, dashboardSortOrder: 2 }))
+    db.metricDefinition.updateMany.mockResolvedValue({ count: 1 })
+
+    const result = await setMetricDashboardVisible(actor, workspace, metricId, false)
+
+    expect(result).toEqual({ id: metricId, dashboardVisible: false, dashboardCol: 3, dashboardRow: 6, dashboardSortOrder: 2 })
+    expect(db.metricDefinition.updateMany).toHaveBeenCalledWith({ where: { id: metricId, workspaceId: workspace, archived: false }, data: { dashboardVisible: false, updatedAt: expect.any(Date) } })
+  })
+
+  it("persists a drag-to-reorder sort order", async () => {
+    db.metricDefinition.findFirst.mockResolvedValue(definition())
+    db.metricDefinition.updateMany.mockResolvedValue({ count: 1 })
+
+    const result = await reorderDashboardMetric(actor, workspace, metricId, 7)
+
+    expect(result.dashboardSortOrder).toBe(7)
+    expect(db.metricDefinition.updateMany).toHaveBeenCalledWith({ where: { id: metricId, workspaceId: workspace, archived: false }, data: { dashboardSortOrder: 7, updatedAt: expect.any(Date) } })
+  })
+
+  it("rejects a non-integer sort order", async () => {
+    db.metricDefinition.findFirst.mockResolvedValue(definition())
+    await expect(reorderDashboardMetric(actor, workspace, metricId, 1.5)).rejects.toThrow()
+  })
+
+  it("keeps dashboard layout mutations scoped to a human user, like every other analytics write", async () => {
+    const service = { userId: null, purpose: "SERVICE" as const }
+    db.metricDefinition.findFirst.mockResolvedValue(null)
+    await expect(updateMetricDashboardLayout(service, workspace, "foreign", { col: 2, row: 4 })).rejects.toThrow()
+    await expect(setMetricDashboardVisible(service, workspace, "foreign", true)).rejects.toThrow()
+    await expect(reorderDashboardMetric(service, workspace, "foreign", 1)).rejects.toThrow()
+    expect(db.metricDefinition.updateMany).not.toHaveBeenCalled()
   })
 })
