@@ -319,7 +319,7 @@ export async function refreshBinding(actor: McpActor, workspaceId: string, bindi
 // Layout (visible/col/row/sortOrder) is workspace-level, not per-user -- see
 // MetricDefinition.dashboardVisible et al in schema.prisma. Every reader
 // coalesces a NULL layout column to the same default DASHBOARD default the
-// 062_metrics_dashboard backfill used, since DSQL forbids a DB-level DEFAULT
+// 063_metrics_dashboard backfill used, since DSQL forbids a DB-level DEFAULT
 // on ALTER TABLE ADD COLUMN.
 export type DashboardLayoutDTO = { id: string; dashboardVisible: boolean; dashboardCol: number; dashboardRow: number; dashboardSortOrder: number }
 export type DashboardBindingDTO = { id: string; targetType: MetricTarget["targetType"]; targetId: string; targetTitle: string }
