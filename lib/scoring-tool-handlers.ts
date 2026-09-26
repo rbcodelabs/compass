@@ -16,7 +16,7 @@ import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { Prisma } from "@prisma/client"
 import { computeScore, findMetricConfigIssues, type ScoringMetricDef } from "@/lib/scoring"
 import { isScoreStale } from "@/lib/scoring-model"
-import type { ScoringFormulaType, MetricDirection, FormulaSnapshotMetric } from "@/lib/types"
+import type { ScoringFormulaType, MetricDirection, FormulaSnapshotMetric, ScoringEntityType } from "@/lib/types"
 
 interface MetricInput {
   key: string
@@ -45,14 +45,30 @@ export async function listScoringModels({ orgSlug }: { orgSlug: string }) {
   const prisma = getPrisma()
   const actor = getMcpActor()
   const agentConfigs = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"
-    ? await prisma.workspaceScoringConfig.findMany({ where: { workspace: await agentWorkspaceWhere(actor) }, select: { scoringModelId: true } }) : null
+    ? await prisma.workspaceScoringConfig.findMany({
+        where: { workspace: await agentWorkspaceWhere(actor) },
+        select: { opportunityScoringModelId: true, solutionScoringModelId: true },
+      })
+    : null
   const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
   if (!org) {
     return fail(`Organization "${orgSlug}" not found.`)
   }
 
   const models = await prisma.scoringModel.findMany({
-    where: { organizationId: org.id, ...(agentConfigs ? { id: { in: agentConfigs.flatMap(c => c.scoringModelId ? [c.scoringModelId] : []) } } : {}) },
+    where: {
+      organizationId: org.id,
+      ...(agentConfigs
+        ? {
+            id: {
+              in: agentConfigs.flatMap((c) => [
+                ...(c.opportunityScoringModelId ? [c.opportunityScoringModelId] : []),
+                ...(c.solutionScoringModelId ? [c.solutionScoringModelId] : []),
+              ]),
+            },
+          }
+        : {}),
+    },
     include: { metrics: { orderBy: { order: "asc" } } },
     orderBy: { createdAt: "asc" },
   })
@@ -288,20 +304,29 @@ export async function archiveScoringModel({ scoringModelId }: { scoringModelId: 
 
 // ─── get_workspace_scoring_model ────────────────────────────────────────────
 
-export async function getWorkspaceScoringModel({ workspaceId }: { workspaceId: string }) {
+export async function getWorkspaceScoringModel({
+  workspaceId,
+  entityType = "OPPORTUNITY",
+}: {
+  workspaceId: string
+  entityType?: ScoringEntityType
+}) {
   const prisma = getPrisma()
   const config = await prisma.workspaceScoringConfig.findUnique({
     where: { workspaceId },
-    include: { scoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
+    include: {
+      opportunityScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } },
+      solutionScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } },
+    },
   })
 
-  if (!config?.scoringModel) {
-    return fail("This workspace has no active scoring model.")
+  const model = entityType === "SOLUTION" ? config?.solutionScoringModel : config?.opportunityScoringModel
+  if (!model) {
+    return fail(`This workspace has no active scoring model for ${entityType === "SOLUTION" ? "Solutions" : "Opportunities"}.`)
   }
 
-  const model = config.scoringModel
   const lines = [
-    `**Active scoring model:** ${model.name}`,
+    `**Active scoring model (${entityType === "SOLUTION" ? "Solutions" : "Opportunities"}):** ${model.name}`,
     `Formula: ${model.formulaType}`,
     `Version: ${model.version}`,
     "Metrics:",
@@ -322,9 +347,11 @@ export async function getWorkspaceScoringModel({ workspaceId }: { workspaceId: s
 export async function setWorkspaceScoringModel({
   workspaceId,
   scoringModelId,
+  entityType = "OPPORTUNITY",
 }: {
   workspaceId: string
   scoringModelId: string | null
+  entityType?: ScoringEntityType
 }) {
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } })
@@ -342,17 +369,29 @@ export async function setWorkspaceScoringModel({
     }
   }
 
-  await prisma.workspaceScoringConfig.upsert({
-    where: { workspaceId },
-    create: { workspaceId, scoringModelId },
-    update: { scoringModelId, updatedAt: new Date() },
-  })
+  // Two independent slots on the same config row — write only the one this
+  // call targets so setting the Solution model can never clobber the
+  // Opportunity model (or vice versa).
+  if (entityType === "SOLUTION") {
+    await prisma.workspaceScoringConfig.upsert({
+      where: { workspaceId },
+      create: { workspaceId, solutionScoringModelId: scoringModelId },
+      update: { solutionScoringModelId: scoringModelId, updatedAt: new Date() },
+    })
+  } else {
+    await prisma.workspaceScoringConfig.upsert({
+      where: { workspaceId },
+      create: { workspaceId, opportunityScoringModelId: scoringModelId },
+      update: { opportunityScoringModelId: scoringModelId, updatedAt: new Date() },
+    })
+  }
 
+  const label = entityType === "SOLUTION" ? "Solutions" : "Opportunities"
   return ok(
     scoringModelId
-      ? `**Active scoring model set.**\nWorkspace ID: ${workspaceId}\nScoring Model ID: ${scoringModelId}`
-      : `**Active scoring model cleared.**\nWorkspace ID: ${workspaceId}`,
-    { workspaceId, scoringModelId },
+      ? `**Active scoring model set for ${label}.**\nWorkspace ID: ${workspaceId}\nScoring Model ID: ${scoringModelId}`
+      : `**Active scoring model cleared for ${label}.**\nWorkspace ID: ${workspaceId}`,
+    { workspaceId, scoringModelId, entityType },
   )
 }
 
@@ -376,13 +415,13 @@ export async function scoreOpportunity({
 
   const config = await prisma.workspaceScoringConfig.findUnique({
     where: { workspaceId: opportunity.workspaceId },
-    include: { scoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
+    include: { opportunityScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
   })
-  if (!config?.scoringModel) {
+  if (!config?.opportunityScoringModel) {
     return fail(`The workspace for opportunity "${opportunityId}" has no active scoring model.`)
   }
 
-  const model = config.scoringModel
+  const model = config.opportunityScoringModel
   const formulaType = model.formulaType as ScoringFormulaType
   const metricDefs: ScoringMetricDef[] = model.metrics.map((m) => ({
     key: m.key,
@@ -476,6 +515,139 @@ export async function getOpportunityScore({ opportunityId }: { opportunityId: st
   return ok(lines.join("\n"), {
     id: score.id,
     opportunityId,
+    modelName: score.scoringModel.name,
+    modelVersion: score.modelVersion,
+    liveVersion: score.scoringModel.version,
+    rawScore: score.rawScore,
+    normalizedScore: score.normalizedScore,
+    scoredAt: score.scoredAt.toISOString(),
+    stale,
+  })
+}
+
+// ─── score_solution ──────────────────────────────────────────────────────────
+// Structural mirror of score_opportunity, resolving the Solution's workspace
+// via Solution -> Opportunity -> workspaceId and the Solution scoring slot
+// (workspaceScoringConfig.solutionScoringModel) instead of the Opportunity one.
+
+export async function scoreSolution({
+  solutionId,
+  rawValues,
+}: {
+  solutionId: string
+  rawValues: Record<string, number>
+}) {
+  const prisma = getPrisma()
+  const solution = await prisma.solution.findUnique({
+    where: { id: solutionId },
+    select: { id: true, title: true, opportunity: { select: { workspaceId: true } } },
+  })
+  if (!solution) {
+    return fail(`Solution "${solutionId}" not found.`)
+  }
+
+  const config = await prisma.workspaceScoringConfig.findUnique({
+    where: { workspaceId: solution.opportunity.workspaceId },
+    include: { solutionScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
+  })
+  if (!config?.solutionScoringModel) {
+    return fail(`The workspace for solution "${solutionId}" has no active Solution scoring model.`)
+  }
+
+  const model = config.solutionScoringModel
+  const formulaType = model.formulaType as ScoringFormulaType
+  const metricDefs: ScoringMetricDef[] = model.metrics.map((m) => ({
+    key: m.key,
+    minValue: m.minValue,
+    maxValue: m.maxValue,
+    weight: m.weight,
+    direction: m.direction as MetricDirection,
+  }))
+
+  for (const metric of metricDefs) {
+    const value = rawValues[metric.key]
+    if (typeof value !== "number" || Number.isNaN(value)) {
+      return fail(`Missing value for metric "${metric.key}".`)
+    }
+    if (value < metric.minValue || value > metric.maxValue) {
+      return fail(`Value for "${metric.key}" must be between ${metric.minValue} and ${metric.maxValue}.`)
+    }
+  }
+
+  const { rawScore, normalizedScore } = computeScore(metricDefs, rawValues, formulaType)
+  const formulaSnapshot: FormulaSnapshotMetric[] = model.metrics.map((m) => ({
+    key: m.key,
+    label: m.label,
+    minValue: m.minValue,
+    maxValue: m.maxValue,
+    weight: m.weight,
+    direction: m.direction as MetricDirection,
+  }))
+
+  const score = await prisma.solutionScore.upsert({
+    where: { solutionId },
+    create: {
+      solutionId,
+      scoringModelId: model.id,
+      modelVersion: model.version,
+      formulaSnapshot: formulaSnapshot as unknown as Prisma.InputJsonValue,
+      rawValues: rawValues as unknown as Prisma.InputJsonValue,
+      rawScore,
+      normalizedScore,
+    },
+    update: {
+      scoringModelId: model.id,
+      modelVersion: model.version,
+      formulaSnapshot: formulaSnapshot as unknown as Prisma.InputJsonValue,
+      rawValues: rawValues as unknown as Prisma.InputJsonValue,
+      rawScore,
+      normalizedScore,
+      scoredAt: new Date(),
+      updatedAt: new Date(),
+    },
+  })
+
+  return ok(
+    `**Scored** "${solution.title}"\n` +
+      `Raw score: ${rawScore.toFixed(2)}\n` +
+      `Normalized score: ${normalizedScore.toFixed(1)} / 100\n` +
+      `ID: ${score.id}`,
+    {
+      id: score.id,
+      solutionId,
+      scoringModelId: model.id,
+      modelVersion: model.version,
+      rawScore,
+      normalizedScore,
+    },
+  )
+}
+
+// ─── get_solution_score ──────────────────────────────────────────────────────
+
+export async function getSolutionScore({ solutionId }: { solutionId: string }) {
+  const prisma = getPrisma()
+  const score = await prisma.solutionScore.findUnique({
+    where: { solutionId },
+    include: { scoringModel: { select: { name: true, version: true } } },
+  })
+  if (!score) {
+    return fail(`No score found for solution "${solutionId}".`)
+  }
+
+  const stale = isScoreStale(score.modelVersion, score.scoringModel.version)
+  const lines = [
+    `**Score for solution ${solutionId}**`,
+    `Model: ${score.scoringModel.name} (scored at v${score.modelVersion}, live v${score.scoringModel.version})`,
+    `Raw score: ${score.rawScore}`,
+    `Normalized score: ${score.normalizedScore}`,
+    `Scored at: ${score.scoredAt.toISOString()}`,
+    `Stale: ${stale}`,
+    `ID: ${score.id}`,
+  ]
+  return ok(lines.join("\n"), {
+    id: score.id,
+    solutionId,
     modelName: score.scoringModel.name,
     modelVersion: score.modelVersion,
     liveVersion: score.scoringModel.version,

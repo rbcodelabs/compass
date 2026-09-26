@@ -387,7 +387,13 @@ export async function assertScoringModelAccess(
   const prisma = getPrisma()
   if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") {
     if (opts.admin) throw new McpAuthzError("Human administrator required.")
-    const config = await prisma.workspaceScoringConfig.findFirst({ where: { scoringModelId, workspace: await agentWorkspaceWhere(actor) }, select: { workspaceId: true } })
+    const config = await prisma.workspaceScoringConfig.findFirst({
+      where: {
+        OR: [{ opportunityScoringModelId: scoringModelId }, { solutionScoringModelId: scoringModelId }],
+        workspace: await agentWorkspaceWhere(actor),
+      },
+      select: { workspaceId: true },
+    })
     if (!config) throw new McpAuthzError("Scoring model not found or access denied.")
     await assertWorkspaceMember(actor, config.workspaceId)
   }

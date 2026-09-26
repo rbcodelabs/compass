@@ -145,6 +145,8 @@ export interface MemberData {
 export type ScoringModelStatus = "ACTIVE" | "ARCHIVED"
 export type ScoringFormulaType = "WEIGHTED_SUM" | "MULTIPLICATIVE"
 export type MetricDirection = "POSITIVE" | "NEGATIVE"
+/** Which independent scoring slot a workspace/model operation targets. */
+export type ScoringEntityType = "OPPORTUNITY" | "SOLUTION"
 
 export interface ScoringMetricData {
   id: string
@@ -208,6 +210,16 @@ export interface OpportunityScoreSummary {
   /** True when modelVersion is behind liveModelVersion. */
   stale: boolean
 }
+
+/**
+ * Solution scoring is a structural mirror of Opportunity scoring (same
+ * detail/summary projections, same staleness rule) — the entity id is not
+ * part of either shape, so both entity types share these type definitions
+ * rather than duplicating them field-for-field. See lib/score-summary.ts's
+ * `toSolutionScoreData` / `toScoreSummary`.
+ */
+export type SolutionScoreData = OpportunityScoreData
+export type SolutionScoreSummary = OpportunityScoreSummary
 
 // Launch Tiers & Checklists
 export type LaunchTier = "TIER_1" | "TIER_2" | "TIER_3"

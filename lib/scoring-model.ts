@@ -1,6 +1,7 @@
 import getPrisma from "@/lib/db"
 import type {
   MetricDirection,
+  ScoringEntityType,
   ScoringFormulaType,
   ScoringModelData,
   ScoringModelStatus,
@@ -20,24 +21,30 @@ export {
   isScoreStale,
   toScoreSummary,
   toOpportunityScoreData,
+  toSolutionScoreData,
   type ScoreSummaryRow,
   type ScoreDetailRow,
   type ActiveModel,
 } from "@/lib/score-summary"
 
 /**
- * Fetch the workspace's active scoring model, or null when none is configured.
- * Callers use `null` as the "render no scoring UI at all" signal.
+ * Fetch the workspace's active scoring model for the given entity type
+ * ("OPPORTUNITY" or "SOLUTION"), or null when none is configured for that
+ * slot. Callers use `null` as the "render no scoring UI at all" signal.
  */
 export async function resolveWorkspaceScoringModel(
-  workspaceId: string
+  workspaceId: string,
+  entityType: ScoringEntityType
 ): Promise<ScoringModelData | null> {
   const config = await getPrisma().workspaceScoringConfig.findUnique({
     where: { workspaceId },
-    include: { scoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
+    include: {
+      opportunityScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } },
+      solutionScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } },
+    },
   })
 
-  const model = config?.scoringModel
+  const model = entityType === "SOLUTION" ? config?.solutionScoringModel : config?.opportunityScoringModel
   if (!model) return null
 
   return {
