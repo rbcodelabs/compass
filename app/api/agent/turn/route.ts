@@ -1,4 +1,5 @@
-// In-app agent turn service (ADR 0001, Phase 3).
+// In-app agent turn service (ADR 0001, Phase 3; docs materialization/
+// reconciliation added by ADR 0019 — Docs as a Virtual Filesystem).
 //
 // Session-authed. One POST = one agent turn in a workspace-scoped conversation:
 //   1. authenticate the user (NextAuth session) + authorize workspace membership
@@ -6,8 +7,12 @@
 //   3. mint an ephemeral per-user MCP key (agent acts AS the user → Phase 1
 //      per-user authorization scopes every tool it can touch)
 //   4. boot a fresh sandbox from the golden snapshot (~200ms, deps pre-installed)
-//   5. write + run the turn entry script; stream its output back as SSE
-//   6. persist the assistant message + usage; stop the sandbox; revoke the key
+//   5. capture the workspace's doc tree as a reconciliation baseline, and
+//      materialize it into the sandbox as real `_doc.md` files (ADR 0019 §2.4)
+//   6. write + run the turn entry script; stream its output back as SSE
+//   7. reconcile the sandbox's final doc tree (AGENT_DOC_STATE) against the
+//      baseline through lib/doc-fs.ts, surfacing any revision conflicts
+//   8. persist the assistant message + usage; stop the sandbox; revoke the key
 //
 // Auth: session only (NOT the MCP bearer). The route is allowlisted in
 // lib/route-access.ts so the middleware doesn't 302 it, then it enforces the
@@ -15,6 +20,7 @@
 
 import { readFileSync } from "node:fs"
 import path from "node:path"
+import { randomUUID } from "node:crypto"
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
@@ -33,6 +39,11 @@ import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { connectorDefinition } from "@/lib/mcp-connectors/config"
 import { listConnectedSlugs } from "@/lib/mcp-connectors/store"
+import * as docFs from "@/lib/doc-fs"
+import { planReconciliation, applyReconciliationPlan, type DocBaselineEntry, type DocFinalFile } from "@/lib/agent-doc-reconciliation"
+
+/** Absolute path inside the sandbox where the doc tree is materialized (ADR 0019 §2.2). */
+const DOCS_ROOT = "/vercel/sandbox/docs"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -41,6 +52,30 @@ const MAX_HISTORY_MESSAGES = 20
 
 function readEntryScript(): string {
   return readFileSync(path.join(process.cwd(), "scripts/agent/turn-entry.ts"), "utf8")
+}
+
+/**
+ * Captures the reconciliation baseline (ADR 0019 §2.4) and the sandbox files
+ * to materialize it from -- one `_doc.md` per doc, at
+ * `docs/<doc-fs path>/_doc.md` relative to the sandbox root (DOCS_ROOT
+ * resolves to the same location as an absolute path; see turn-entry.ts).
+ * Read once, up front: this is the "before" state the final AGENT_DOC_STATE
+ * is diffed against after the turn finishes.
+ */
+async function materializeDocTree(workspaceId: string): Promise<{
+  baseline: DocBaselineEntry[]
+  files: { path: string; content: string }[]
+}> {
+  const nodes = await docFs.listPaths(workspaceId)
+  const baseline: DocBaselineEntry[] = []
+  const files: { path: string; content: string }[] = []
+  for (const node of nodes) {
+    const read = await docFs.readPath(workspaceId, node.path)
+    if (!read) continue // raced with a concurrent delete between listPaths and readPath; skip it, it's gone
+    baseline.push({ path: node.path, docId: read.docId, revision: read.revision, content: read.content })
+    files.push({ path: `docs/${node.path}/_doc.md`, content: read.content })
+  }
+  return { baseline, files }
 }
 
 /** Assemble the agent prompt from prior turns + the new user message. */
@@ -293,6 +328,8 @@ export async function POST(request: NextRequest) {
       const auditRows: { toolName: string; argsSummary: string | null }[] = []
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let usage: any
+      let docState: DocFinalFile[] | undefined
+      const turnId = randomUUID()
 
       try {
         const minted = await analysisStep(() => mintAgentMcpKey(userId, workspaceId, scope), deadline, abort, late => revokeAgentMcpKey(late.apiKeyId))
@@ -303,7 +340,13 @@ export async function POST(request: NextRequest) {
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
         sandbox = await analysisStep(() => bootSandboxFromSnapshot(snapshotId), deadline, abort, async late => { await analysisStep(() => late.stop(), Date.now() + 5_000, new AbortController()) })
 
-        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...preparedPacks.files]))
+        // ADR 0019 §2.4: read the doc tree's current state BEFORE writing
+        // anything into the sandbox, so the baseline this turn reconciles
+        // against reflects exactly what the agent was shown, not a state a
+        // concurrent human edit could have already moved past.
+        const { baseline, files: docFiles } = await step(() => materializeDocTree(workspaceId))
+
+        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...docFiles, ...preparedPacks.files]))
         sse("status", { phase: "running" })
 
         const run = await step(() => sandbox!.runCommand({
@@ -313,6 +356,7 @@ export async function POST(request: NextRequest) {
             ANTHROPIC_API_KEY: anthropicApiKey,
             MCP_BASE_URL: mcpBaseUrl,
             MCP_TOKEN: token,
+            DOCS_ROOT,
             AGENT_PROMPT: prompt,
             AGENT_SYSTEM_PROMPT:
               `You are Compass's in-app product-discovery assistant. Compass is the sole authority for tools, credentials, and workspace access. ` +
@@ -386,6 +430,16 @@ export async function POST(request: NextRequest) {
               } catch {
                 /* ignore malformed intermediate line */
               }
+            } else if (kind === "AGENT_DOC_STATE") {
+              // Parsed but not acted on until the process exits cleanly below
+              // -- reconciling against a doc state from a process that then
+              // fails would apply mutations the agent's own turn never
+              // actually completed.
+              try {
+                docState = JSON.parse(rest) as DocFinalFile[]
+              } catch {
+                /* malformed AGENT_DOC_STATE -- reconciliation below skips a doc tree it never received */
+              }
             } else if (kind === "AGENT_RESULT") {
               const parsed = JSON.parse(rest)
               assistantText = parsed.text
@@ -398,6 +452,28 @@ export async function POST(request: NextRequest) {
         const result = await step(() => run.wait())
         if (result.exitCode !== 0 || assistantText === undefined) {
           throw new Error(`agent process exited with code ${result.exitCode}`)
+        }
+
+        // ADR 0019 §2.4: reconcile the sandbox's final doc tree against the
+        // baseline captured before the turn ran. Best-effort on purpose: a
+        // reconciliation failure must not turn an otherwise-successful agent
+        // response into a reported turn failure -- the user still gets their
+        // answer, with a note that doc changes may not have saved, rather
+        // than losing the whole response to an unrelated persistence bug.
+        if (docState) {
+          try {
+            const plan = planReconciliation(baseline, docState)
+            const { conflicts } = await step(() => applyReconciliationPlan(workspaceId, turnId, plan, "Compass Agent"))
+            if (conflicts.length > 0) {
+              const conflictLines = conflicts
+                .map(c => `Couldn't save changes to '${c.title}' — someone else edited it while I was working; your edit is saved in its version history for you to review or restore.`)
+                .join("\n")
+              assistantText = `${assistantText}\n\n${conflictLines}`
+            }
+          } catch (reconcileError) {
+            console.error("[agent-turn] doc reconciliation failed", reconcileError)
+            assistantText = `${assistantText}\n\n(Some doc changes from this turn may not have saved -- please check the affected docs.)`
+          }
         }
 
         // Persist the assistant message + usage; bump the conversation.
