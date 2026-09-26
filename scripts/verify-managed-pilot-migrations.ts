@@ -38,6 +38,29 @@ async function main() {
       const before = await snapshot();
       await initializeManagedPilot(pool, context); created.push(context.schema);
       await assert.rejects(initializeManagedPilot(pool, { ...context, deploymentId: "dpl_Wrong" }), /ownership/);
+
+      // Interrupted initialization: CREATE SCHEMA landed but the process crashed
+      // before the owner table/row was ever written. A rerun on that exact
+      // schema/context must fail loudly, never silently synthesize ownership.
+      const crashedSha = randomUUID().replaceAll("-", "") + "89abcdef";
+      const crashedSchema = `compass_pr_276_${crashedSha.slice(0, 12)}`;
+      await pool.query(`CREATE SCHEMA "${crashedSchema}"`); created.push(crashedSchema);
+      await assert.rejects(
+        initializeManagedPilot(pool, { ...context, schema: crashedSchema, sha: crashedSha }),
+        /does not exist/,
+        "Interrupted initialization (schema present, owner table absent) must not be silently adopted",
+      );
+      const ownerTableAfterFailedRetry = await pool.query("SELECT to_regclass($1) AS t", [`${crashedSchema}._managed_pilot_owner`]);
+      assert.equal(ownerTableAfterFailedRetry.rows[0].t, null, "Failed retry must not have synthesized an owner table");
+      assert.deepEqual(await snapshot(), before, "Interrupted-init probe must not touch unrelated sentinel data");
+      // Confirm this is a reviewed-recovery state, not a permanently stuck one:
+      // once a human clears the crashed schema, initialization proceeds cleanly.
+      await pool.query(`DROP SCHEMA "${crashedSchema}" CASCADE`);
+      created.splice(created.indexOf(crashedSchema), 1);
+      await initializeManagedPilot(pool, { ...context, schema: crashedSchema, sha: crashedSha });
+      created.push(crashedSchema);
+      console.log(JSON.stringify({ proof: "managed-interrupted-init-recovery", neverAdopted: true, recoveredAfterReviewedCleanup: true }));
+
       let iterations = 0;
       for (; iterations < 500; iterations++) {
         const status = await (await getManagedMigrationStatus(pool, context)).json();
