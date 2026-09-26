@@ -13,7 +13,7 @@ import type { EntityLinkType } from "@/lib/entity-links"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, recencySortSchema } from "@/lib/mcp-recency"
-import { runWithMcpActor, getMcpActor } from "@/lib/mcp-authz"
+import { runWithMcpActor, getMcpActor, isResearchActor, assertWorkspaceMember, McpAuthzError } from "@/lib/mcp-authz"
 import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
 import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
 import { SCOPE_MCP_READ } from "@/lib/oauth/constants"
@@ -44,12 +44,6 @@ import {
   linkEvidence,
   listEvidence,
 } from "@/lib/evidence-tool-handlers"
-import {
-  listDocs,
-  getDoc,
-  createDoc,
-  updateDoc,
-} from "@/lib/doc-tool-handlers"
 import { prepareDocImageUploadTool } from "@/lib/doc-image-tool-handlers"
 import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
 import {
@@ -64,20 +58,17 @@ import {
   updateArtifact,
 } from "@/lib/artifact-tool-handlers"
 import {
-  createDocVersion,
-  listDocVersions,
-  getDocVersion,
+  writeDoc,
+  deleteDoc,
+  moveDoc,
+  listDocHistory,
   restoreDocVersion,
-} from "@/lib/doc-version-tool-handlers"
-import {
   addDocComment,
   listDocComments,
-  getDocComment,
-  updateDocComment,
-  deleteDocComment,
   resolveDocComment,
-  reopenDocComment,
-} from "@/lib/doc-comment-tool-handlers"
+} from "@/lib/doc-fs-tool-handlers"
+import * as docFs from "@/lib/doc-fs"
+import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js"
 import {
   updateAssumption,
   deleteAssumption,
@@ -2028,9 +2019,9 @@ const _handler = createMcpHandler(
         })
         if (!items.length) {
           // An empty *recency window* is a successful answer, not a failure —
-          // see the same note in lib/doc-tool-handlers.ts listDocs. An empty
-          // *unfiltered* roadmap keeps its original fail() so existing callers
-          // see no change.
+          // the same convention used throughout this file's list_* tools. An
+          // empty *unfiltered* roadmap keeps its original fail() so existing
+          // callers see no change.
           if (updatedSince || updatedBefore) {
             return ok("No active roadmap items updated in the requested window.", { items: [], count: 0 })
           }
@@ -2921,43 +2912,14 @@ const _handler = createMcpHandler(
     )
 
     // ════════════════════════════════════════════════════════════════
-    // DOCS
+    // DOCS (ADR 0019 — Docs as a Virtual Filesystem)
     // ════════════════════════════════════════════════════════════════
-
-    register(
-      "list_docs",
-      {
-        title: "List Docs",
-        description:
-          "Lists all docs in a workspace as an indented tree. " +
-          "Returns each doc's ID, title, icon, and child count. " +
-          "Use this to discover doc IDs before calling get_doc or update_doc. " +
-          "When a recency filter excludes a doc whose child still matches, the child is listed at the top level.",
-        inputSchema: {
-          workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          updatedSince: z.string().datetime().optional().describe("Filter to docs updated at or after this ISO timestamp"),
-          updatedBefore: z.string().datetime().optional().describe("Filter to docs updated before this ISO timestamp (useful for stale-work scans)"),
-          sort: recencySortSchema,
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      listDocs
-    )
-
-    register(
-      "get_doc",
-      {
-        title: "Get Doc",
-        description:
-          "Returns the full content of a single doc, including its parent, " +
-          "children list, and the complete markdown body.",
-        inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      getDoc
-    )
+    // Docs are addressed by path, not ID: read/list go through the
+    // docs://{workspaceId}/{+path} resource (registered below, after every
+    // tool), and write/delete/move/history/comments are the 8 tools here.
+    // This replaces the old 15-tool ID-addressed surface outright, in one
+    // cutover with no compatibility shim -- see
+    // docs/design/docs-virtual-filesystem-mcp.md §3.2 for the full mapping.
 
     register(
       "prepare_doc_image_upload",
@@ -2976,60 +2938,63 @@ const _handler = createMcpHandler(
     )
 
     register(
-      "create_doc",
+      "write_doc",
       {
-        title: "Create Doc",
+        title: "Write Doc",
         description:
-          "Creates a new doc in a workspace. Optionally nest it under a parent doc. " +
-          "Content should be markdown. Returns the new doc ID and the docs URL. " +
-          "Pass roadmapItemId and docType: GTM_POSITIONING_BRIEF to create a Positioning & Messaging Brief " +
-          "linked 1:1 to a roadmap item -- if content is omitted, a starter template is used.",
+          "Creates or updates a doc, addressed by its path (e.g. \"Product/Roadmap/Q3 Plan\") rather than an ID -- " +
+          "writing to a path that already exists updates it, writing to a new path creates it. Missing parent " +
+          "directories in the path are created implicitly. Content may include a YAML frontmatter block; " +
+          "compass_-prefixed keys are reserved and reflected back on read, never accepted as input. " +
+          "Discover paths via the docs://{workspaceId}/{path} resource.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          title: z.string().min(1).describe("Doc title"),
+          path: z.string().min(1).describe("Doc path, e.g. \"Product/Roadmap/Q3 Plan\" (no extension)"),
+          content: z.string().describe("Doc content: optional YAML frontmatter, then the markdown body"),
           operationId: z.string().uuid().optional().describe("Stable retry ID; required for Geode pilot documents"),
-          content: z.string().optional().describe("Doc body in markdown"),
-          parentId: z
-            .string()
-            .uuid()
-            .nullable()
-            .optional()
-            .describe("UUID of a parent doc to nest this under (omit for root)"),
-          icon: z.string().optional().describe("Emoji or icon string, e.g. '📋'"),
-          roadmapItemId: z
-            .string()
-            .uuid()
-            .nullable()
-            .optional()
-            .describe("UUID of a roadmap item to link this doc to as its Positioning & Messaging Brief (1:1 -- fails if that item already has a linked doc)"),
-          docType: z
-            .enum(["STANDARD", "GTM_POSITIONING_BRIEF"])
-            .optional()
-            .describe("Doc type. GTM_POSITIONING_BRIEF auto-fills a starter template when content is omitted. Defaults to STANDARD."),
+          expectedRevision: z.string().uuid().optional().describe("Revision from a prior read of this path; when supplied, a concurrent edit since then is refused rather than overwritten"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      createDoc
+      writeDoc
     )
 
     register(
-      "update_doc",
+      "delete_doc",
       {
-        title: "Update Doc",
+        title: "Delete Doc",
         description:
-          "Updates an existing doc's title, content, and/or icon. " +
-          "Only the fields you provide are changed.",
+          "Deletes the doc at a path. Refuses (matching `rmdir` vs `rm -r`) if it has children unless " +
+          "recursive is set, in which case every descendant is deleted too.",
         inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc to update"),
-          expectedRevision: z.string().uuid().optional().describe("Revision from get_doc; required for Geode pilot documents"),
-          operationId: z.string().uuid().optional().describe("Stable retry ID; reuse only for the identical request"),
-          title: z.string().min(1).optional().describe("New title"),
-          content: z.string().optional().describe("New markdown content (replaces existing)"),
-          icon: z.string().optional().describe("New emoji or icon string"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path to delete"),
+          recursive: z.boolean().optional().describe("Delete child docs too (default false)"),
+          operationId: z.string().uuid().optional().describe("Stable retry ID; required for Geode pilot documents"),
+          expectedRevision: z.string().uuid().optional().describe("Revision from a prior read of this path; when supplied, a concurrent edit since then is refused rather than deleted out from under it"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      updateDoc
+      deleteDoc
+    )
+
+    register(
+      "move_doc",
+      {
+        title: "Move Doc",
+        description:
+          "Renames and/or reparents a doc by changing its path -- both are just \"the path changed.\" " +
+          "Missing intermediate directories on the destination are created implicitly.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          fromPath: z.string().min(1).describe("Current doc path"),
+          toPath: z.string().min(1).describe("Destination doc path"),
+          operationId: z.string().uuid().optional().describe("Stable retry ID; required for Geode pilot documents"),
+          expectedRevision: z.string().uuid().optional().describe("Revision from a prior read of fromPath; when supplied, a concurrent edit since then is refused rather than moved out from under it"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      moveDoc
     )
 
     register("list_artifacts", {
@@ -3070,52 +3035,20 @@ const _handler = createMcpHandler(
     }, archiveArtifact)
 
     register(
-      "create_doc_version",
+      "list_doc_history",
       {
-        title: "Create Doc Version",
+        title: "List Doc History",
         description:
-          "Saves a manual, named snapshot of a doc's current content. Unlike the automatic " +
-          "snapshots taken before every overwriting update_doc call, this always writes a new " +
-          "version -- it never gets coalesced away by the 5-minute same-author window.",
-        inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc to snapshot"),
-          expectedRevision: z.string().uuid().optional().describe("Revision from get_doc; required for Geode pilot documents"),
-          operationId: z.string().uuid().optional().describe("Stable retry ID for this snapshot"),
-          label: z.string().optional().describe("Optional label for this snapshot, e.g. 'Before big rewrite'"),
-          authorName: z.string().min(1).describe("Name to attribute this snapshot to"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      createDocVersion
-    )
-
-    register(
-      "list_doc_versions",
-      {
-        title: "List Doc Versions",
-        description:
-          "Lists all saved versions of a doc (id, label, author, created date), newest first, " +
+          "Lists all saved versions of the doc at a path (id, label, author, created date), newest first, " +
           "alongside the doc's own current title and last-updated time as a reference point. " +
-          "Does not include full content -- call get_doc_version for that.",
+          "Does not include full content -- call restore_doc_version to read/apply one.",
         inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      listDocVersions
-    )
-
-    register(
-      "get_doc_version",
-      {
-        title: "Get Doc Version",
-        description: "Returns the full content/title/metadata/icon snapshot of a single saved doc version.",
-        inputSchema: {
-          versionId: z.string().uuid().describe("UUID of the doc version"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      getDocVersion
+      listDocHistory
     )
 
     register(
@@ -3123,11 +3056,13 @@ const _handler = createMcpHandler(
       {
         title: "Restore Doc Version",
         description:
-          "Restores a doc's live content to a previously saved version. The doc's CURRENT state is " +
-          "snapshotted first (labeled 'Before restore'), so restoring never loses data -- you can " +
-          "always restore back to what was there before.",
+          "Restores the doc at a path to a previously saved version (from list_doc_history). The doc's " +
+          "CURRENT state is snapshotted first (labeled 'Before restore'), so restoring never loses data -- " +
+          "you can always restore back to what was there before.",
         inputSchema: {
-          versionId: z.string().uuid().describe("UUID of the doc version to restore"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path"),
+          versionId: z.string().uuid().describe("UUID of the doc version to restore, from list_doc_history"),
           expectedRevision: z.string().uuid().optional().describe("Current document revision; required for Geode pilot documents"),
           operationId: z.string().uuid().optional().describe("Stable retry ID for this restore"),
         },
@@ -3137,19 +3072,25 @@ const _handler = createMcpHandler(
     )
 
     // ── Doc inline comments ─────────────────────────────────────────
+    // get_doc_comment, update_doc_comment, delete_doc_comment and
+    // reopen_doc_comment are removed outright: list_doc_comments already
+    // returns full bodies (get was redundant), body edits/hard-delete stay off
+    // this smaller surface (matching the existing agent hard-delete posture),
+    // and reopen is folded into resolve_doc_comment's `resolved: false`.
     register(
       "add_doc_comment",
       {
         title: "Add Doc Comment",
         description:
-          "Adds an inline comment to a doc. Omit all four anchor fields (anchorText, " +
+          "Adds an inline comment to the doc at a path. Omit all four anchor fields (anchorText, " +
           "anchorPrefix, anchorSuffix, anchorStart, anchorEnd) for a doc-level general " +
           "comment, or pass them to anchor the comment to a specific span of the doc's " +
           "plain-text projection. Pass parentId to reply to an existing root comment — " +
           "threads are only one level deep (you can't reply to a reply). Replies never " +
           "carry an anchor.",
         inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc to comment on"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path to comment on"),
           body: z.string().min(1).describe("The comment text"),
           authorName: z.string().min(1).describe("Name to attribute this comment to"),
           parentId: z.string().uuid().optional().describe("UUID of the root comment to reply to (omit for a new thread)"),
@@ -3169,10 +3110,11 @@ const _handler = createMcpHandler(
       {
         title: "List Doc Comments",
         description:
-          "Lists a doc's inline comments grouped into threads (root comments with their " +
+          "Lists inline comments on the doc at a path, grouped into threads (root comments with their " +
           "replies), oldest-first. Optionally filter by status (OPEN or RESOLVED).",
         inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path"),
           status: z.enum(["OPEN", "RESOLVED"]).optional().describe("Only return comments with this status"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
@@ -3181,73 +3123,77 @@ const _handler = createMcpHandler(
     )
 
     register(
-      "get_doc_comment",
-      {
-        title: "Get Doc Comment",
-        description: "Returns a single doc comment's full body, author, status, anchor context, and timestamps.",
-        inputSchema: {
-          commentId: z.string().uuid().describe("UUID of the comment"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      getDocComment
-    )
-
-    register(
-      "update_doc_comment",
-      {
-        title: "Update Doc Comment",
-        description: "Edits a doc comment's body text. Does not change its status or anchor.",
-        inputSchema: {
-          commentId: z.string().uuid().describe("UUID of the comment to edit"),
-          body: z.string().min(1).describe("The new comment text (replaces the existing body)"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      updateDocComment
-    )
-
-    register(
-      "delete_doc_comment",
-      {
-        title: "Delete Doc Comment",
-        description:
-          "Deletes a doc comment. Deleting a root comment also deletes all of its replies " +
-          "(there is no undo).",
-        inputSchema: {
-          commentId: z.string().uuid().describe("UUID of the comment to delete"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      deleteDocComment
-    )
-
-    register(
       "resolve_doc_comment",
       {
         title: "Resolve Doc Comment",
         description:
-          "Marks a doc comment as RESOLVED. Resolved comments are hidden from the doc's " +
-          "default open-only view and their anchors stop highlighting.",
+          "Sets a doc comment's status. Defaults to marking it RESOLVED (hidden from the doc's default " +
+          "open-only view, anchor stops highlighting); pass resolved: false to reopen it instead.",
         inputSchema: {
-          commentId: z.string().uuid().describe("UUID of the comment to resolve"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path the comment belongs to"),
+          commentId: z.string().uuid().describe("UUID of the comment"),
+          resolved: z.boolean().optional().describe("true (default) resolves; false reopens"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       resolveDocComment
     )
 
-    register(
-      "reopen_doc_comment",
-      {
-        title: "Reopen Doc Comment",
-        description: "Reopens a previously resolved doc comment, setting its status back to OPEN.",
-        inputSchema: {
-          commentId: z.string().uuid().describe("UUID of the comment to reopen"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
+    // ── docs:// resource — read/list side of ADR 0019's virtual filesystem ──
+    // `{+path}` (reserved-expansion) is required, not `{path}`: a bare
+    // `{path}` percent-encodes `/`, which would make a multi-segment doc path
+    // un-matchable as a single variable. Confirmed against the installed SDK's
+    // UriTemplate implementation (node_modules/@modelcontextprotocol/sdk's
+    // shared/uriTemplate.js): the `+` operator's match pattern is `(.+)`, so it
+    // captures every remaining path segment as one variable. See
+    // __tests__/mcp-doc-resource.test.ts for a regression test locking this in.
+    //
+    // Gated directly through lib/mcp-authz.ts, not lib/mcp-tool-gates.ts: a
+    // resource has no tool name for that table to key on (spec §3.3). Research
+    // actors are denied entirely, matching every doc tool's prior behavior
+    // (RESEARCH_TOOL_ALLOWLIST is empty).
+    const docsResourceTemplate = new ResourceTemplate("docs://{workspaceId}/{+path}", {
+      list: async () => {
+        const actor = getMcpActor()
+        if (isResearchActor(actor)) throw new McpAuthzError("Resource is not available to research interviews.")
+        const workspaces = await getPrisma().workspace.findMany({
+          where: await agentWorkspaceWhere(actor),
+          select: { id: true },
+        })
+        const resources: { uri: string; name: string; mimeType: string }[] = []
+        for (const workspace of workspaces) {
+          const nodes = await docFs.listPaths(workspace.id)
+          for (const node of nodes) {
+            resources.push({ uri: `docs://${workspace.id}/${encodeURI(node.path)}`, name: node.title, mimeType: "text/markdown" })
+          }
+        }
+        return { resources }
       },
-      reopenDocComment
+    })
+
+    server.registerResource(
+      "doc",
+      docsResourceTemplate,
+      {
+        title: "Compass Doc",
+        description:
+          "A single Compass doc, addressed by workspace and path. Frontmatter carries compass_doc_id, " +
+          "compass_doc_type, and (if linked) compass_roadmap_item_id, plus ordinary user metadata.",
+        mimeType: "text/markdown",
+      },
+      async (uri, variables) => {
+        const actor = getMcpActor()
+        if (isResearchActor(actor)) throw new McpAuthzError("Resource is not available to research interviews.")
+        const rawWorkspaceId = Array.isArray(variables.workspaceId) ? variables.workspaceId[0] : variables.workspaceId
+        const rawPath = Array.isArray(variables.path) ? variables.path[0] : variables.path
+        const workspaceId = decodeURIComponent(String(rawWorkspaceId ?? ""))
+        const path = decodeURIComponent(String(rawPath ?? ""))
+        await assertWorkspaceMember(actor, workspaceId)
+        const result = await docFs.readPath(workspaceId, path)
+        if (!result) throw new Error(`No doc found at path "${path}" in this workspace.`)
+        return { contents: [{ uri: uri.toString(), text: result.content, mimeType: "text/markdown" }] }
+      }
     )
 
     // ════════════════════════════════════════════════════════════════

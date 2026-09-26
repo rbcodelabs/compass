@@ -32,12 +32,14 @@ vi.mock("mcp-handler", () => ({
   createMcpHandler: (
     setup: (server: {
       registerTool: (name: string, meta: unknown, callback: ToolCallback) => void
+      registerResource: (...args: unknown[]) => void
     }) => void,
   ) => {
     setup({
       registerTool(name, _meta, callback) {
         registeredTools[name] = callback
       },
+      registerResource() {},
     })
     return () => new Response("ok")
   },

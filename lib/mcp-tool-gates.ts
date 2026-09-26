@@ -389,30 +389,22 @@ export const TOOL_GATES: Record<string, Gate> = {
   },
   list_evidence: async (a, x) => void (await assertEntityAccess(a, x.nodeType as WorkspaceEntityType, x.nodeId)),
 
-  // Docs --------------------------------------------------------------------
-  list_docs: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  // Docs (ADR 0019 — virtual filesystem) -------------------------------------
+  // Path-addressed: workspaceId is already in the input, so these gate exactly
+  // like any other workspace-scoped tool -- there is no id to resolve-then-
+  // check the way assertEntityAccess does for the old docId-keyed tools
+  // (spec §3.3). Reads/writes over docs://{workspaceId}/{+path} resources are
+  // gated the same way directly in app/api/mcp/route.ts's resource callbacks,
+  // not here -- a resource has no tool name for this table to key on.
   prepare_doc_image_upload: (a, x) => assertWorkspaceMember(a, x.workspaceId),
-  get_doc: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
-  create_doc: async (a, x) => {
-    await assertWorkspaceMember(a, x.workspaceId)
-    if (x.parentId) await assertChildInDeclaredWorkspace(a, "doc", x.parentId, x.workspaceId)
-    if (x.roadmapItemId) await assertChildInDeclaredWorkspace(a, "roadmapItem", x.roadmapItemId, x.workspaceId)
-    // Positioning briefs are part of the marketing-launch surface, gated the
-    // same as the launch-tier/checklist tools above.
-    if (x.docType === "GTM_POSITIONING_BRIEF") await assertLaunchWorkflowEnabled(x.workspaceId)
-  },
-  update_doc: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
-  create_doc_version: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
-  list_doc_versions: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
-  get_doc_version: async (a, x) => void (await assertEntityAccess(a, "docVersion", x.versionId)),
-  restore_doc_version: async (a, x) => void (await assertEntityAccess(a, "docVersion", x.versionId)),
-  add_doc_comment: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
-  list_doc_comments: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
-  get_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
-  update_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
-  delete_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
-  resolve_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
-  reopen_doc_comment: async (a, x) => void (await assertEntityAccess(a, "docComment", x.commentId)),
+  write_doc: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  delete_doc: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  move_doc: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_doc_history: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  restore_doc_version: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  add_doc_comment: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_doc_comments: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  resolve_doc_comment: (a, x) => assertWorkspaceMember(a, x.workspaceId),
 
   // Artifacts ---------------------------------------------------------------
   list_artifacts: (a, x) => assertWorkspaceMember(a, x.workspaceId),
@@ -502,14 +494,14 @@ export const TOOL_GATES: Record<string, Gate> = {
 const READ_TOOLS = [
   "list_analytics_connections", "list_metrics", "get_metric", "list_metric_bindings", "get_metric_binding", "list_metric_observations", "get_metric_observation",
   "get_artifact", "get_comment", "get_current_identity", "get_custom_field_values",
-  "get_decision", "get_doc", "get_doc_comment", "get_doc_version", "get_experiment",
+  "get_decision", "get_experiment",
   "get_feedback_item", "get_help", "get_launch_checklist", "get_okr_cycle", "get_opportunity",
   "get_opportunity_score", "get_pm_interview", "get_research_session", "get_research_study",
   "get_review_request", "get_scoring_model", "get_solution_comment", "get_solution_score", "get_squad", "get_task",
   "get_workspace_by_slug", "get_workspace_scoring_model", "get_workspace_summary",
   "list_artifacts", "list_assumptions", "list_checklist_templates", "list_comments",
-  "list_custom_field_definitions", "list_decisions", "list_doc_comments", "list_doc_versions",
-  "list_docs", "list_eligible_parent_key_results", "list_evidence", "list_experiments",
+  "list_custom_field_definitions", "list_decisions", "list_doc_comments", "list_doc_history",
+  "list_eligible_parent_key_results", "list_evidence", "list_experiments",
   "list_feedback", "list_okr_cycles", "list_opportunities", "list_release_runs",
   "list_research_sessions", "list_research_studies", "list_research_syntheses",
   "list_review_requests", "list_roadmap_items", "list_scoring_models",
@@ -536,28 +528,28 @@ const WRITE_TOOLS = [
   "add_solution_comment", "add_solution_plan", "add_to_roadmap", "apply_recorded_decision",
   "approve_solution_plan", "archive_artifact", "archive_research_study",
   "archive_scoring_model", "assign_squad", "close_decision_no_action", "close_research_study",
-  "conclude_experiment", "create_artifact", "create_checklist_template", "create_doc",
-  "create_doc_version", "create_experiment", "create_feedback", "create_objective",
+  "conclude_experiment", "create_artifact", "create_checklist_template",
+  "create_experiment", "create_feedback", "create_objective",
   "create_okr_cycle", "create_opportunity", "create_research_study", "create_scoring_model",
   "create_squad", "create_task", "create_workspace", "delete_assumption", "delete_comment",
-  "delete_doc_comment", "delete_key_result", "delete_objective", "delete_solution_comment",
+  "delete_doc", "delete_key_result", "delete_objective", "delete_solution_comment",
   "generate_research_guide", "generate_research_synthesis", "issue_research_link",
   "link_artifact_to_decision", "link_artifact_to_solution", "link_evidence",
   "link_feedback_to_opportunity", "link_opportunity_to_kr", "link_task", "log_checkin",
-  "log_experiment_result", "move_task_status", "prepare_doc_image_upload", "prepare_feedback_attachment_upload",
+  "log_experiment_result", "move_doc", "move_task_status", "prepare_doc_image_upload", "prepare_feedback_attachment_upload",
   "promote_feedback_to_roadmap", "promote_research_finding_to_evidence", "promote_to_roadmap",
-  "reject_solution_plan", "reopen_comment", "reopen_doc_comment", "request_decision",
+  "reject_solution_plan", "reopen_comment", "request_decision",
   "request_release_authorization", "resolve_comment", "resolve_doc_comment",
   "restore_doc_version", "revoke_research_links", "rotate_research_link", "score_opportunity",
   "score_solution", "set_custom_field_value", "set_launch_tier", "set_objective_parent_kr",
   "set_workspace_scoring_model", "unlink_artifact_from_decision",
   "unlink_artifact_from_solution", "unlink_task", "update_artifact", "update_assumption",
-  "update_comment", "update_doc", "update_doc_comment", "update_experiment", "update_feedback",
+  "update_comment", "update_experiment", "update_feedback",
   "update_feedback_status", "update_feedback_type", "update_key_result",
   "update_launch_checklist_item", "update_objective", "update_opportunity",
   "update_opportunity_status", "update_research_study", "update_roadmap_item",
   "update_scoring_model", "update_solution", "update_solution_comment",
-  "update_solution_status", "update_squad", "update_task",
+  "update_solution_status", "update_squad", "update_task", "write_doc",
 ] as const
 
 export type ToolScope = typeof SCOPE_MCP_READ | typeof SCOPE_MCP_WRITE
@@ -641,14 +633,14 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ...["generate_research_guide", "create_research_study", "update_research_study", "generate_research_synthesis", "promote_research_finding_to_evidence"].map(name => [name, "WRITE"]),
   ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
-    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_docs", "get_doc", "list_doc_versions", "get_doc_version", "list_doc_comments", "get_doc_comment", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values",
+    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_doc_history", "list_doc_comments", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values",
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision",
-    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity", "score_solution", "set_custom_field_value",
+    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "write_doc", "delete_doc", "move_doc", "restore_doc_version", "add_doc_comment", "resolve_doc_comment", "create_artifact", "update_artifact", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity", "score_solution", "set_custom_field_value",
   ].map(name => [name, "WRITE"]),
   // Legacy comments lack a durable agent author ID; body edits could retain a human label or approval badge.
-  ...["update_comment", "update_solution_comment", "update_doc_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization", "create_scoring_model", "update_scoring_model", "archive_scoring_model", "set_workspace_scoring_model"].map(name => [name, "DENY"]),
+  ...["update_comment", "update_solution_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization", "create_scoring_model", "update_scoring_model", "archive_scoring_model", "set_workspace_scoring_model"].map(name => [name, "DENY"]),
 ])
 
 /**

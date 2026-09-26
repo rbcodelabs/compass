@@ -1,6 +1,6 @@
 /**
  * Small dependency-free "12 minutes ago" formatter. Shared by the doc version
- * MCP handlers (lib/doc-version-tool-handlers.ts) and the doc version history
+ * MCP handlers (lib/doc-fs-tool-handlers.ts) and the doc version history
  * UI panel (components/docs/doc-version-history-panel.tsx) so both render
  * timestamps the same way.
  */

@@ -22,11 +22,16 @@
 //                              above, so no provider token is passed in here.
 //
 // Output contract (one JSON object per line, prefixed):
-//   AGENT_EVENT <json>   — each SDK stream message (assistant/tool/system)
-//   AGENT_RESULT <json>  — final { text, usage } on success
-//   AGENT_ERROR <json>   — { message } on failure
+//   AGENT_EVENT <json>     — each SDK stream message (assistant/tool/system)
+//   AGENT_DOC_STATE <json> — final materialized doc tree (ADR 0019 §2.4), emitted
+//                            once after query() finishes and before AGENT_RESULT
+//   AGENT_RESULT <json>    — final { text, usage } on success
+//   AGENT_ERROR <json>     — { message } on failure
 
-import { query } from "@anthropic-ai/claude-agent-sdk"
+import { mkdir } from "node:fs/promises"
+import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
+import { z } from "zod"
+import { openWikiSession, type WikiSession } from "@rbcodelabs/geode-headless/wiki"
 
 const MCP_BASE_URL = process.env.MCP_BASE_URL
 const MCP_TOKEN = process.env.MCP_TOKEN
@@ -35,8 +40,13 @@ const AGENT_SYSTEM_PROMPT = process.env.AGENT_SYSTEM_PROMPT
 const AGENT_PACK_CONFIG = process.env.AGENT_PACK_CONFIG
 const MCP_BYPASS_SECRET = process.env.MCP_BYPASS_SECRET
 const AGENT_MCP_CONNECTORS = process.env.AGENT_MCP_CONNECTORS
+// The host materializes the workspace's doc tree here before running this
+// script (app/api/agent/turn/route.ts) -- one directory per doc, each holding
+// exactly one `_doc.md` file (spec §1.2). Never baked into the golden
+// snapshot: it's per-turn, per-workspace content.
+const DOCS_ROOT = process.env.DOCS_ROOT
 
-function emit(kind: "AGENT_EVENT" | "AGENT_RESULT" | "AGENT_ERROR", payload: unknown): void {
+function emit(kind: "AGENT_EVENT" | "AGENT_DOC_STATE" | "AGENT_RESULT" | "AGENT_ERROR", payload: unknown): void {
   // Single line so the host can split stdout on newlines and forward as SSE.
   process.stdout.write(`${kind} ${JSON.stringify(payload)}\n`)
 }
@@ -116,12 +126,90 @@ function parseConnectors(raw: string | undefined): ConnectorRef[] {
   return refs
 }
 
+// ── docs local filesystem tools (ADR 0019 §2.3) ─────────────────────────────
+//
+// The SDK's built-in file tools are Read/Write/Edit/Glob/Grep -- there is no
+// built-in delete-file or move/rename-file tool; those live only inside Bash.
+// Rather than add Bash (a materially larger surface -- it can read
+// process.env, which holds the MCP bearer token, and could exfiltrate it over
+// any open network egress), these two tools give the agent exactly "delete a
+// doc" and "move/rename a doc", wrapping an openWikiSession opened once at the
+// top of main() -- local sandbox disk only, no network call, no DB mutation.
+// The actual deleteDocument/movePath call against Compass happens in the same
+// end-to-end reconciliation pass as every other change, after this process
+// exits (app/api/agent/turn/route.ts).
+function buildDocsFsServer(session: WikiSession) {
+  return createSdkMcpServer({
+    name: "docsfs",
+    version: "1.0.0",
+    tools: [
+      tool(
+        "delete_local_doc",
+        "Deletes a doc's materialized file (its directory's _doc.md) from the local sandbox filesystem. " +
+          "This does not touch Compass directly -- the real deletion is recorded when this turn ends.",
+        { path: z.string().min(1).describe('Path to the doc\'s _doc.md file, e.g. "Product/Roadmap/Q3 Plan/_doc.md"') },
+        async ({ path }) => {
+          const result = await session.deleteNote(path)
+          if (result.status !== "ok") {
+            return { content: [{ type: "text" as const, text: `Could not delete "${path}": ${result.status}` }], isError: true }
+          }
+          return { content: [{ type: "text" as const, text: `Deleted ${path}` }] }
+        }
+      ),
+      tool(
+        "move_local_doc",
+        "Moves/renames a doc's materialized file on the local sandbox filesystem, from one _doc.md path to " +
+          "another. This does not touch Compass directly -- the real move is recorded when this turn ends.",
+        {
+          fromPath: z.string().min(1).describe("Current path to the doc's _doc.md file"),
+          toPath: z.string().min(1).describe("Destination path for the doc's _doc.md file"),
+        },
+        async ({ fromPath, toPath }) => {
+          // The wiki SDK has no rename primitive -- composed from create+delete,
+          // same as any other move a human could make by hand in a folder of
+          // Markdown files. The Compass-side reconciler detects the move by
+          // comparing before/after compass_doc_id placement regardless of which
+          // local syscalls produced the after-state.
+          const read = session.readNote(fromPath)
+          if (read.status !== "ok") {
+            return { content: [{ type: "text" as const, text: `Could not read "${fromPath}": ${read.status}` }], isError: true }
+          }
+          const created = await session.createNote(toPath, read.note.text)
+          if (created.status !== "ok") {
+            return { content: [{ type: "text" as const, text: `Could not create "${toPath}": ${created.status}` }], isError: true }
+          }
+          const deleted = await session.deleteNote(fromPath)
+          if (deleted.status !== "ok") {
+            return {
+              content: [{ type: "text" as const, text: `Created "${toPath}" but could not remove "${fromPath}": ${deleted.status}` }],
+              isError: true,
+            }
+          }
+          return { content: [{ type: "text" as const, text: `Moved ${fromPath} -> ${toPath}` }] }
+        }
+      ),
+    ],
+  })
+}
+
 async function main(): Promise<void> {
   const baseUrl = requireEnv("MCP_BASE_URL", MCP_BASE_URL)
   const token = requireEnv("MCP_TOKEN", MCP_TOKEN)
   const prompt = requireEnv("AGENT_PROMPT", AGENT_PROMPT)
   const systemPrompt = requireEnv("AGENT_SYSTEM_PROMPT", AGENT_SYSTEM_PROMPT)
   requireEnv("ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY)
+  const docsRoot = requireEnv("DOCS_ROOT", DOCS_ROOT)
+
+  // The host may not have written anything under DOCS_ROOT at all (a
+  // workspace with zero docs yet) -- openWikiSession expects the folder to
+  // already exist, so ensure it does regardless.
+  await mkdir(docsRoot, { recursive: true })
+  const opened = await openWikiSession(docsRoot)
+  if (opened.status !== "ok") {
+    emit("AGENT_ERROR", { message: `Could not open docs session at "${docsRoot}": ${opened.error.code}` })
+    process.exit(1)
+  }
+  const docsSession = opened.session
 
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
   if (MCP_BYPASS_SECRET) headers["x-vercel-protection-bypass"] = MCP_BYPASS_SECRET
@@ -129,14 +217,16 @@ async function main(): Promise<void> {
     ? JSON.parse(AGENT_PACK_CONFIG) as { pluginPaths: string[]; skillIds: string[] }
     : { pluginPaths: [], skillIds: [] }
 
-  // Compass's own catalog plus one HTTP entry per connected provider. Each
-  // connector points at a Compass gateway path, not the provider — the sandbox
-  // presents its own turn credential and Compass attaches the third-party bearer
-  // on the way out, so no provider token is ever present in this microVM.
+  // Compass's own catalog plus one HTTP entry per connected provider, plus the
+  // in-process docsfs server (ADR 0019 §2.3). Each HTTP connector points at a
+  // Compass gateway path, not the provider — the sandbox presents its own turn
+  // credential and Compass attaches the third-party bearer on the way out, so
+  // no provider token is ever present in this microVM.
   // `alwaysLoad` is deliberately NOT set on the connectors: Compass's own catalog
   // is what the agent needs every turn, whereas a connector's tools are worth
   // discovering on demand rather than spending context on unconditionally.
-  const mcpServers: Record<string, McpHttpServer> = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- docsfs is an SDK-instance server, not an HTTP one; a shared union type buys nothing here.
+  const mcpServers: Record<string, McpHttpServer | any> = {
     compass: {
       type: "http",
       url: new URL("/api/mcp", baseUrl).toString(),
@@ -146,6 +236,7 @@ async function main(): Promise<void> {
       // searching for tools; with it, it can act directly.
       alwaysLoad: true,
     },
+    docsfs: buildDocsFsServer(docsSession),
   }
   const connectors = parseConnectors(AGENT_MCP_CONNECTORS)
   const connectorToolPrefixes: string[] = []
@@ -190,19 +281,39 @@ async function main(): Promise<void> {
         skipMcpDiscovery: true,
       })),
       skills: packConfig.skillIds,
-      // Skill bodies and supported text assets are compiled into systemPrompt
-      // by the host. SDK 0.3.224 does not provide Skill/Read with tools: [].
-      tools: [],
+      // ADR 0019 §2.2: `allowedTools` does nothing under
+      // `permissionMode: "bypassPermissions"` (confirmed against the Agent
+      // SDK's current docs) -- `tools` is the real gate. Read/Write/Edit/Glob
+      // give the agent native file access to the materialized doc tree
+      // (cwd, below); Bash is deliberately omitted (see buildDocsFsServer's
+      // comment for why). Skill bodies and supported text assets are compiled
+      // into systemPrompt by the host, so Skill itself is still unneeded here.
+      tools: ["Read", "Write", "Edit", "Glob"],
+      // Scopes the agent's native file tools to the materialized doc tree
+      // (Projection 1) rather than the sandbox's process root.
+      cwd: docsRoot,
       strictMcpConfig: true,
       settingSources: [],
       systemPrompt: effectiveSystemPrompt,
-      // Compass MCP only, auto-approved. Headless (no human approver): the
-      // real security boundary is the disposable sandbox + per-user MCP auth.
-      allowedTools: ["mcp__compass", ...connectorToolPrefixes],
+      // Compass MCP + the in-process docsfs server, auto-approved. Headless
+      // (no human approver): the real security boundary is the disposable
+      // sandbox + per-user MCP auth + the native tools being scoped to cwd.
+      allowedTools: ["mcp__compass", "mcp__docsfs", "Read", "Write", "Edit", "Glob", ...connectorToolPrefixes],
       // Safety default (Phase 5): keep the two irreversible hard-delete tools
       // out of the agent's reach — everything else is reversible/auditable.
-      // Remove entries here to let the agent perform destructive deletes.
-      disallowedTools: ["mcp__compass__delete_assumption", "mcp__compass__delete_solution_comment"],
+      // Also superseded for THIS agent by the native file tools above (ADR
+      // 0019): write_doc/delete_doc/move_doc have a clean, lossless
+      // filesystem equivalent, so they're removed from its reach here even
+      // though they remain available to an external MCP agent (spec §2.2).
+      // Comment/history/restore tools stay reachable -- no filesystem shape
+      // for those (spec §2.5).
+      disallowedTools: [
+        "mcp__compass__delete_assumption",
+        "mcp__compass__delete_solution_comment",
+        "mcp__compass__write_doc",
+        "mcp__compass__delete_doc",
+        "mcp__compass__move_doc",
+      ],
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       maxTurns: 30,
@@ -231,6 +342,32 @@ async function main(): Promise<void> {
     emit("AGENT_ERROR", { message: "query() ended without a success result" })
     process.exit(1)
   }
+
+  // ADR 0019 §2.4: report the final materialized doc tree before exiting, so
+  // the host can reconcile it against the baseline it captured before this
+  // process started. Read via the SAME session used throughout the turn --
+  // its read-after-write guarantee (ADR 0023 in the geode repo) means this is
+  // provably the exact state the agent's own edits left behind, not a
+  // possibly-still-settling view from a second, freshly-opened session.
+  const finalFiles: { path: string; content: string; frontmatterDocId: string | null }[] = []
+  for (const entry of docsSession.listFiles()) {
+    if (entry.kind !== "note" || !entry.path.endsWith("/_doc.md")) continue
+    const read = docsSession.readNote(entry.path)
+    if (read.status !== "ok") {
+      // An unreadable note is reported as a diagnostic, not fatal to the turn:
+      // the reconciler will see this doc's baseline entry missing from the
+      // final tree and treat it as deleted, which is the safe default when
+      // this file's content can no longer be trusted.
+      note(`could not read "${entry.path}" for final doc state: ${read.reason}`)
+      continue
+    }
+    const frontmatter = read.note.metadata?.frontmatter
+    const frontmatterDocId =
+      frontmatter && typeof frontmatter.compass_doc_id === "string" ? frontmatter.compass_doc_id : null
+    finalFiles.push({ path: entry.path.slice(0, -"/_doc.md".length), content: read.note.text, frontmatterDocId })
+  }
+  emit("AGENT_DOC_STATE", finalFiles)
+
   emit("AGENT_RESULT", { text: finalText, usage })
 }
 

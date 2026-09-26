@@ -19,8 +19,8 @@ vi.mock("@/lib/mcp-auth", () => ({ validateMcpAuth }))
 
 const handlerCalls: { body: unknown }[] = []
 vi.mock("mcp-handler", () => ({
-  createMcpHandler: (setup: (s: { registerTool: () => void }) => void) => {
-    setup({ registerTool() {} })
+  createMcpHandler: (setup: (s: { registerTool: () => void; registerResource: (...args: unknown[]) => void }) => void) => {
+    setup({ registerTool() {}, registerResource() {} })
     return async (req: Request) => {
       // The real transport answers a malformed body with a JSON-RPC parse
       // error at HTTP 200, not by throwing. Mirror that.
