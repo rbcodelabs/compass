@@ -3,9 +3,13 @@
  *
  * Journey: Org Settings → create a WEIGHTED_SUM scoring model with two
  *          metrics (Reach +, Effort -) → Workspace Settings → activate that
- *          model for the workspace → open the seeded baseline opportunity →
- *          the Scoring tab appears → enter raw values → save → verify the
- *          computed normalized score persists across a reload.
+ *          same model for both the Opportunity and Solution slots (the two
+ *          picks are independent, but nothing stops one model backing both)
+ *          → open the seeded baseline opportunity → the Scoring tab appears
+ *          → enter raw values → save → verify the computed normalized score
+ *          persists across a reload → then do the same for the opportunity's
+ *          nested baseline solution, whose Scoring section lives in its own
+ *          sidebar panel rather than a tab (Solutions have no detail route).
  *
  * The seeded e2e user (dev@localhost.dev) is both an organization ADMIN and
  * a workspace ADMIN (see e2e/functional/fixtures/seed-e2e.ts), so this
@@ -20,10 +24,64 @@
  */
 import { test, expect } from "../fixtures/index";
 import { openFullPage } from "../fixtures/full-page";
+import type { Locator, Page } from "@playwright/test";
+
+/**
+ * Open the Solution panel's collapsible "Scoring" section if it isn't
+ * already open. Its open/closed state is a cookie-backed preference (see
+ * lib/panel-section-state.ts) that survives a reload, so unconditionally
+ * clicking the trigger a second time — e.g. after reopening the panel post
+ * -reload — would toggle it shut instead of leaving it open.
+ *
+ * The panel's entity data (including which sections are collapsible/open)
+ * loads asynchronously after the sheet shell itself mounts, so the trigger
+ * briefly doesn't exist at all (`PanelSkeleton`). Checking `getByLabel
+ * ("Reach")` as a same-tick proxy for "already open" races that: it reads
+ * false during the skeleton, so this function clicks the trigger — but
+ * Playwright's click() auto-waits for the trigger to appear, and by the time
+ * it does, the section has already rendered open (per the cookie), so the
+ * click actually closes it. Waiting for the trigger itself and reading its
+ * real `aria-expanded` state sidesteps the race entirely.
+ */
+async function ensureSolutionScoringSectionOpen(panel: Locator) {
+  const trigger = panel.getByRole("button", { name: "Scoring", exact: true });
+  await expect(trigger).toBeVisible();
+  if ((await trigger.getAttribute("aria-expanded")) === "true") return;
+  await trigger.click();
+  await expect(panel.getByLabel("Reach")).toBeVisible();
+}
+
+/**
+ * Open the seeded baseline solution's sidebar panel by clicking its title.
+ *
+ * The panel's open/closed state is a deep link encoded in the URL (the
+ * `detail` param — see `PANEL_PARAM` in `components/panels/panel-context.tsx`),
+ * so it survives a `page.reload()` on its own: the panel reopens once the app
+ * rehydrates and replays the query param. That replay is asynchronous, so an
+ * immediate `isVisible()` check right after reload races it — too early to
+ * see the panel open, but the panel can still finish opening moments later,
+ * right as the fallback path clicks the "Solutions" tab underneath it. The
+ * modal sheet then intercepts that click and the test hangs until timeout.
+ * Give the deep link a bounded window to replay before falling back to
+ * opening the panel by hand.
+ */
+async function openBaselineSolutionPanel(page: Page): Promise<Locator> {
+  const panel = page.locator('[data-slot="sheet-content"]');
+  const alreadyOpen = await panel
+    .waitFor({ state: "visible", timeout: 3_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (alreadyOpen) return panel;
+
+  await page.getByRole("tab", { name: /^Solutions/ }).click();
+  await page.getByRole("button", { name: "E2E Baseline Solution", exact: true }).click();
+  await expect(panel).toBeVisible();
+  return panel;
+}
 
 test.describe("Scoring Models", () => {
   test(
-    "create scoring model → activate for workspace → score an opportunity",
+    "create scoring model → activate for workspace → score an opportunity and its nested solution",
     async ({ page, base, orgSlug }) => {
       const ts = Date.now();
       const modelName = `E2E RICE ${ts}`;
@@ -64,19 +122,28 @@ test.describe("Scoring Models", () => {
       await page.waitForLoadState("load");
       await expect(page.getByText(modelName)).toBeVisible({ timeout: 10_000 });
 
-      // ── 2. Activate the model for the workspace ────────────────────────────
+      // ── 2. Activate the model for both independent workspace slots ─────────
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
 
-      await page.getByLabel("Active scoring model").click();
+      // `getByLabel` matches by substring, so the plain label needs `exact`
+      // now that "Active scoring model for Solutions" also exists on this
+      // page — without it, this locator resolves to both pickers.
+      await page.getByLabel("Active scoring model", { exact: true }).click();
       await page.getByRole("option", { name: modelName }).click();
 
-      // No explicit saving indicator for this select — give the server
-      // action a moment, then reload to verify persistence.
+      await page.getByLabel("Active scoring model for Solutions").click();
+      await page.getByRole("option", { name: modelName }).click();
+
+      // No explicit saving indicator for either select — give the server
+      // actions a moment, then reload to verify both persisted.
       await page.waitForTimeout(1_500);
       await page.reload();
       await page.waitForLoadState("load");
-      await expect(page.getByLabel("Active scoring model")).toContainText(modelName, {
+      await expect(page.getByLabel("Active scoring model", { exact: true })).toContainText(modelName, {
+        timeout: 10_000,
+      });
+      await expect(page.getByLabel("Active scoring model for Solutions")).toContainText(modelName, {
         timeout: 10_000,
       });
 
@@ -115,6 +182,36 @@ test.describe("Scoring Models", () => {
       await expect(page.getByLabel("Reach")).toHaveValue("8");
       await expect(page.getByLabel("Effort")).toHaveValue("2");
       await expect(page.getByRole("button", { name: "Update Score" })).toBeVisible();
+
+      // ── 5. Score the seeded baseline solution nested under it ──────────────
+      // Solutions have no detail route of their own, so their Scoring surface
+      // is a collapsible section in the sidebar panel opened from the
+      // Solutions tab, not a tab of its own (contrast with the opportunity
+      // flow above).
+      const solutionPanel = await openBaselineSolutionPanel(page);
+      await ensureSolutionScoringSectionOpen(solutionPanel);
+
+      const solutionReachInput = solutionPanel.getByLabel("Reach");
+      const solutionEffortInput = solutionPanel.getByLabel("Effort");
+      await solutionReachInput.fill("7");
+      await solutionEffortInput.fill("3");
+
+      // Live preview updates before saving: rawScore = 7 - 3 = 4.
+      await expect(solutionPanel.getByText(/Raw score: 4\.00/)).toBeVisible();
+
+      await solutionPanel.getByRole("button", { name: "Save Score" }).click();
+      await expect(solutionPanel.getByText("Last saved")).toBeVisible({ timeout: 15_000 });
+
+      // ── 6. Verify the solution's score persisted across a reload ───────────
+      await page.reload();
+      await page.waitForLoadState("load");
+
+      const reopenedSolutionPanel = await openBaselineSolutionPanel(page);
+      await ensureSolutionScoringSectionOpen(reopenedSolutionPanel);
+
+      await expect(reopenedSolutionPanel.getByLabel("Reach")).toHaveValue("7");
+      await expect(reopenedSolutionPanel.getByLabel("Effort")).toHaveValue("3");
+      await expect(reopenedSolutionPanel.getByRole("button", { name: "Update Score" })).toBeVisible();
     }
   );
 });
