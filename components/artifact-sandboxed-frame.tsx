@@ -103,13 +103,15 @@ export function ArtifactSandboxedFrame({
   // iframe itself remounts (see the [html, token] effect) — these refs let it
   // see each render's latest callbacks/anchors without that remount.
   const onElementPickedRef = useRef(onElementPicked)
-  onElementPickedRef.current = onElementPicked
   const onPickModeExitedRef = useRef(onPickModeExited)
-  onPickModeExitedRef.current = onPickModeExited
   const onAnchorsResolvedRef = useRef(onAnchorsResolved)
-  onAnchorsResolvedRef.current = onAnchorsResolved
   const anchorsToResolveRef = useRef(anchorsToResolve)
-  anchorsToResolveRef.current = anchorsToResolve
+  useEffect(() => {
+    onElementPickedRef.current = onElementPicked
+    onPickModeExitedRef.current = onPickModeExited
+    onAnchorsResolvedRef.current = onAnchorsResolved
+    anchorsToResolveRef.current = anchorsToResolve
+  })
 
   useLayoutEffect(() => {
     const frame = frameRef.current
