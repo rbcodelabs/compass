@@ -28,6 +28,11 @@ const mockOpportunityScore = {
   findMany: vi.fn(),
   upsert: vi.fn(),
 }
+const mockSolution = { findUnique: vi.fn() }
+const mockSolutionScore = {
+  findUnique: vi.fn(),
+  upsert: vi.fn(),
+}
 
 const mockPrisma = {
   organization: mockOrganization,
@@ -37,6 +42,8 @@ const mockPrisma = {
   workspaceScoringConfig: mockWorkspaceScoringConfig,
   opportunity: mockOpportunity,
   opportunityScore: mockOpportunityScore,
+  solution: mockSolution,
+  solutionScore: mockSolutionScore,
 }
 
 vi.mock("@/lib/db", () => ({
@@ -53,6 +60,8 @@ import {
   setWorkspaceScoringModel,
   scoreOpportunity,
   getOpportunityScore,
+  scoreSolution,
+  getSolutionScore,
   listTopOpportunities,
 } from "@/lib/scoring-tool-handlers"
 
@@ -60,6 +69,7 @@ const ORG_ID = "aaaaaaaa-0000-0000-0000-000000000001"
 const MODEL_ID = "bbbbbbbb-0000-0000-0000-000000000002"
 const WS_ID = "cccccccc-0000-0000-0000-000000000003"
 const OPP_ID = "dddddddd-0000-0000-0000-000000000004"
+const SOL_ID = "eeeeeeee-0000-0000-0000-000000000005"
 
 const weightedSumMetrics = [
   { id: "m1", key: "reach", label: "Reach", description: null, minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE", order: 0 },
@@ -254,10 +264,10 @@ describe("archiveScoringModel", () => {
 // ─── getWorkspaceScoringModel ─────────────────────────────────────────────
 
 describe("getWorkspaceScoringModel", () => {
-  it("returns the active model and its metrics", async () => {
+  it("returns the active Opportunity model and its metrics by default", async () => {
     mockWorkspaceScoringConfig.findUnique.mockResolvedValueOnce({
-      scoringModelId: MODEL_ID,
-      scoringModel: { id: MODEL_ID, name: "RICE", formulaType: "WEIGHTED_SUM", version: 1, metrics: weightedSumMetrics },
+      opportunityScoringModel: { id: MODEL_ID, name: "RICE", formulaType: "WEIGHTED_SUM", version: 1, metrics: weightedSumMetrics },
+      solutionScoringModel: null,
     })
 
     const result = await getWorkspaceScoringModel({ workspaceId: WS_ID })
@@ -265,6 +275,16 @@ describe("getWorkspaceScoringModel", () => {
 
     expect(text).toContain("RICE")
     expect(text).toContain(`ID: ${MODEL_ID}`)
+  })
+
+  it("returns the independent Solution model when entityType is SOLUTION", async () => {
+    mockWorkspaceScoringConfig.findUnique.mockResolvedValueOnce({
+      opportunityScoringModel: { id: MODEL_ID, name: "Opportunity RICE", formulaType: "WEIGHTED_SUM", version: 1, metrics: [] },
+      solutionScoringModel: { id: "sol-model", name: "Solution ICE", formulaType: "WEIGHTED_SUM", version: 1, metrics: weightedSumMetrics },
+    })
+
+    const result = await getWorkspaceScoringModel({ workspaceId: WS_ID, entityType: "SOLUTION" })
+    expect(result.content[0].text).toContain("Solution ICE")
   })
 
   it("returns a no-active-model message when unset", async () => {
@@ -277,7 +297,7 @@ describe("getWorkspaceScoringModel", () => {
 // ─── setWorkspaceScoringModel ─────────────────────────────────────────────
 
 describe("setWorkspaceScoringModel", () => {
-  it("sets the active model", async () => {
+  it("sets the active Opportunity model by default", async () => {
     mockWorkspace.findUnique.mockResolvedValueOnce({ id: WS_ID })
     mockScoringModel.findUnique.mockResolvedValueOnce({ id: MODEL_ID })
 
@@ -285,10 +305,24 @@ describe("setWorkspaceScoringModel", () => {
 
     expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalledWith({
       where: { workspaceId: WS_ID },
-      create: { workspaceId: WS_ID, scoringModelId: MODEL_ID },
-      update: { scoringModelId: MODEL_ID, updatedAt: expect.any(Date) },
+      create: { workspaceId: WS_ID, opportunityScoringModelId: MODEL_ID },
+      update: { opportunityScoringModelId: MODEL_ID, updatedAt: expect.any(Date) },
     })
     expect(result.content[0].text).toContain("set")
+  })
+
+  it("sets the independent Solution slot when entityType is SOLUTION", async () => {
+    mockWorkspace.findUnique.mockResolvedValueOnce({ id: WS_ID })
+    mockScoringModel.findUnique.mockResolvedValueOnce({ id: MODEL_ID })
+
+    const result = await setWorkspaceScoringModel({ workspaceId: WS_ID, scoringModelId: MODEL_ID, entityType: "SOLUTION" })
+
+    expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalledWith({
+      where: { workspaceId: WS_ID },
+      create: { workspaceId: WS_ID, solutionScoringModelId: MODEL_ID },
+      update: { solutionScoringModelId: MODEL_ID, updatedAt: expect.any(Date) },
+    })
+    expect(result.content[0].text).toContain("Solutions")
   })
 
   it("clears the active model when scoringModelId is null", async () => {
@@ -299,8 +333,8 @@ describe("setWorkspaceScoringModel", () => {
     expect(mockScoringModel.findUnique).not.toHaveBeenCalled()
     expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalledWith({
       where: { workspaceId: WS_ID },
-      create: { workspaceId: WS_ID, scoringModelId: null },
-      update: { scoringModelId: null, updatedAt: expect.any(Date) },
+      create: { workspaceId: WS_ID, opportunityScoringModelId: null },
+      update: { opportunityScoringModelId: null, updatedAt: expect.any(Date) },
     })
     expect(result.content[0].text).toContain("cleared")
   })
@@ -327,8 +361,7 @@ describe("scoreOpportunity", () => {
   beforeEach(() => {
     mockOpportunity.findUnique.mockResolvedValue({ id: OPP_ID, title: "Improve onboarding", workspaceId: WS_ID })
     mockWorkspaceScoringConfig.findUnique.mockResolvedValue({
-      scoringModelId: MODEL_ID,
-      scoringModel: { id: MODEL_ID, formulaType: "WEIGHTED_SUM", version: 3, metrics: weightedSumMetrics },
+      opportunityScoringModel: { id: MODEL_ID, formulaType: "WEIGHTED_SUM", version: 3, metrics: weightedSumMetrics },
     })
     mockOpportunityScore.upsert.mockResolvedValue({ id: "score-1" })
   })
@@ -404,6 +437,94 @@ describe("getOpportunityScore", () => {
     mockOpportunityScore.findUnique.mockResolvedValueOnce(null)
     const result = await getOpportunityScore({ opportunityId: OPP_ID })
     expect(result.content[0].text).toContain(`No score found for opportunity "${OPP_ID}"`)
+  })
+})
+
+// ─── scoreSolution ────────────────────────────────────────────────────────
+// Structural mirror of the scoreOpportunity suite above — same formula
+// engine, same validation, different table and a different (independent)
+// scoring slot on WorkspaceScoringConfig.
+
+describe("scoreSolution", () => {
+  beforeEach(() => {
+    mockSolution.findUnique.mockResolvedValue({ id: SOL_ID, title: "Add SSO", opportunity: { workspaceId: WS_ID } })
+    mockWorkspaceScoringConfig.findUnique.mockResolvedValue({
+      solutionScoringModel: { id: MODEL_ID, formulaType: "WEIGHTED_SUM", version: 3, metrics: weightedSumMetrics },
+    })
+    mockSolutionScore.upsert.mockResolvedValue({ id: "sol-score-1" })
+  })
+
+  it("computes and upserts a score, returning raw and normalized values", async () => {
+    const result = await scoreSolution({ solutionId: SOL_ID, rawValues: { reach: 8, effort: 2 } })
+
+    expect(mockSolutionScore.upsert).toHaveBeenCalledWith({
+      where: { solutionId: SOL_ID },
+      create: expect.objectContaining({ solutionId: SOL_ID, scoringModelId: MODEL_ID, modelVersion: 3, rawScore: 6 }),
+      update: expect.objectContaining({ scoringModelId: MODEL_ID, modelVersion: 3, rawScore: 6, updatedAt: expect.any(Date) }),
+    })
+    expect(result.content[0].text).toContain("Add SSO")
+    expect(result.content[0].text).toContain("ID: sol-score-1")
+  })
+
+  it("returns error text when solution not found", async () => {
+    mockSolution.findUnique.mockResolvedValueOnce(null)
+    const result = await scoreSolution({ solutionId: SOL_ID, rawValues: {} })
+    expect(result.content[0].text).toContain(`"${SOL_ID}" not found`)
+    expect(mockSolutionScore.upsert).not.toHaveBeenCalled()
+  })
+
+  it("returns error text when workspace has no active Solution scoring model", async () => {
+    mockWorkspaceScoringConfig.findUnique.mockResolvedValueOnce(null)
+    const result = await scoreSolution({ solutionId: SOL_ID, rawValues: { reach: 8, effort: 2 } })
+    expect(result.content[0].text).toContain("no active Solution scoring model")
+    expect(mockSolutionScore.upsert).not.toHaveBeenCalled()
+  })
+
+  it("returns error text when a metric value is missing", async () => {
+    const result = await scoreSolution({ solutionId: SOL_ID, rawValues: { reach: 8 } })
+    expect(result.content[0].text).toContain('Missing value for metric "effort"')
+    expect(mockSolutionScore.upsert).not.toHaveBeenCalled()
+  })
+
+  it("returns error text when a value is out of bounds", async () => {
+    const result = await scoreSolution({ solutionId: SOL_ID, rawValues: { reach: 500, effort: 2 } })
+    expect(result.content[0].text).toContain('"reach" must be between 0 and 10')
+    expect(mockSolutionScore.upsert).not.toHaveBeenCalled()
+  })
+})
+
+// ─── getSolutionScore ─────────────────────────────────────────────────────
+
+describe("getSolutionScore", () => {
+  it("returns score detail with stale=false when versions match", async () => {
+    mockSolutionScore.findUnique.mockResolvedValueOnce({
+      id: "sol-score-1", modelVersion: 2, rawScore: 6, normalizedScore: 75,
+      scoredAt: new Date("2026-01-01T00:00:00Z"),
+      scoringModel: { name: "ICE", version: 2 },
+    })
+
+    const result = await getSolutionScore({ solutionId: SOL_ID })
+    const text = result.content[0].text
+
+    expect(text).toContain("Stale: false")
+    expect(text).toContain("ID: sol-score-1")
+  })
+
+  it("returns stale=true when the live model version has moved ahead", async () => {
+    mockSolutionScore.findUnique.mockResolvedValueOnce({
+      id: "sol-score-1", modelVersion: 1, rawScore: 6, normalizedScore: 75,
+      scoredAt: new Date("2026-01-01T00:00:00Z"),
+      scoringModel: { name: "ICE", version: 2 },
+    })
+
+    const result = await getSolutionScore({ solutionId: SOL_ID })
+    expect(result.content[0].text).toContain("Stale: true")
+  })
+
+  it("returns error text when no score exists", async () => {
+    mockSolutionScore.findUnique.mockResolvedValueOnce(null)
+    const result = await getSolutionScore({ solutionId: SOL_ID })
+    expect(result.content[0].text).toContain(`No score found for solution "${SOL_ID}"`)
   })
 })
 

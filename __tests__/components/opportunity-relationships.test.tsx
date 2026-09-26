@@ -81,7 +81,7 @@ describe("opportunity relationships", () => {
     expect(screen.queryByRole("link", { name: "Open full page" })).not.toBeInTheDocument();
   });
   it("shows the same discussion and enabled scoring tab on the full page", () => {
-    detail.data = { ...opportunity, workspaceId: "ws", solutions: [], evidence: [], feedback: [], deliveryTasks: [], linkableTasks: [], members: [], workspace: { scoringConfig: { scoringModel: { id: "model", name: "Test model", version: 1, metrics: [] } } } };
+    detail.data = { ...opportunity, workspaceId: "ws", solutions: [], evidence: [], feedback: [], deliveryTasks: [], linkableTasks: [], members: [], workspace: { scoringConfig: { opportunityScoringModel: { id: "model", name: "Test model", version: 1, metrics: [] } } } };
     render(<OpportunityDetail opportunityId="opp" orgSlug="org" workspaceSlug="ws" variant="page" initialTab="scoring" />);
     expect(screen.getByText("Discussion for opp")).toBeVisible();
     expect(screen.getByRole("tab", { name: "Scoring" })).toHaveAttribute("aria-selected", "true");

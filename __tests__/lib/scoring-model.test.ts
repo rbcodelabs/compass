@@ -43,17 +43,17 @@ describe("isScoreStale", () => {
 describe("resolveWorkspaceScoringModel", () => {
   it("returns null when the workspace has no scoring config", async () => {
     mockWorkspaceScoringConfig.findUnique.mockResolvedValueOnce(null);
-    expect(await resolveWorkspaceScoringModel("ws-1")).toBeNull();
+    expect(await resolveWorkspaceScoringModel("ws-1", "OPPORTUNITY")).toBeNull();
   });
 
   it("returns null when the config exists but no model is attached", async () => {
-    mockWorkspaceScoringConfig.findUnique.mockResolvedValueOnce({ scoringModel: null });
-    expect(await resolveWorkspaceScoringModel("ws-1")).toBeNull();
+    mockWorkspaceScoringConfig.findUnique.mockResolvedValueOnce({ opportunityScoringModel: null, solutionScoringModel: null });
+    expect(await resolveWorkspaceScoringModel("ws-1", "OPPORTUNITY")).toBeNull();
   });
 
-  it("maps the model and its ordered metrics", async () => {
+  it("maps the Opportunity model and its ordered metrics", async () => {
     mockWorkspaceScoringConfig.findUnique.mockResolvedValueOnce({
-      scoringModel: {
+      opportunityScoringModel: {
         id: "model-1",
         name: "RICE",
         description: "Classic RICE",
@@ -76,13 +76,17 @@ describe("resolveWorkspaceScoringModel", () => {
           },
         ],
       },
+      solutionScoringModel: null,
     });
 
-    const model = await resolveWorkspaceScoringModel("ws-1");
+    const model = await resolveWorkspaceScoringModel("ws-1", "OPPORTUNITY");
 
     expect(mockWorkspaceScoringConfig.findUnique).toHaveBeenCalledWith({
       where: { workspaceId: "ws-1" },
-      include: { scoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
+      include: {
+        opportunityScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } },
+        solutionScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } },
+      },
     });
     expect(model).toEqual({
       id: "model-1",
@@ -105,6 +109,25 @@ describe("resolveWorkspaceScoringModel", () => {
         },
       ],
     });
+  });
+
+  it("reads the independent Solution slot when entityType is SOLUTION", async () => {
+    mockWorkspaceScoringConfig.findUnique.mockResolvedValueOnce({
+      opportunityScoringModel: { id: "opp-model", name: "Opportunity RICE", description: null, status: "ACTIVE", formulaType: "WEIGHTED_SUM", version: 1, metrics: [] },
+      solutionScoringModel: { id: "sol-model", name: "Solution ICE", description: null, status: "ACTIVE", formulaType: "WEIGHTED_SUM", version: 1, metrics: [] },
+    });
+
+    const model = await resolveWorkspaceScoringModel("ws-1", "SOLUTION");
+    expect(model?.id).toBe("sol-model");
+  });
+
+  it("returns null for SOLUTION when only the Opportunity slot is set", async () => {
+    mockWorkspaceScoringConfig.findUnique.mockResolvedValueOnce({
+      opportunityScoringModel: { id: "opp-model", name: "Opportunity RICE", description: null, status: "ACTIVE", formulaType: "WEIGHTED_SUM", version: 1, metrics: [] },
+      solutionScoringModel: null,
+    });
+
+    expect(await resolveWorkspaceScoringModel("ws-1", "SOLUTION")).toBeNull();
   });
 });
 
