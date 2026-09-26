@@ -22,12 +22,15 @@ import { reorderSolution } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actio
 type Props = {
   solutions: SolutionCardData[];
   revalidatePathStr: string;
+  /** True when the workspace has an active Solution scoring model. */
+  showScore?: boolean;
   onChanged?: () => void;
 };
 
 export function SolutionsList({
   solutions: initialSolutions,
   revalidatePathStr,
+  showScore = false,
   onChanged,
 }: Props) {
   const [solutions, setSolutions] = useState(initialSolutions);
@@ -90,6 +93,8 @@ export function SolutionsList({
               key={solution.id}
               solution={solution}
               revalidatePathStr={revalidatePathStr}
+              showScore={showScore}
+              scoringHref={revalidatePathStr}
               onChanged={onChanged}
             />
           ))}

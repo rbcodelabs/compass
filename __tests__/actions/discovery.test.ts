@@ -27,6 +27,7 @@ const mockAssumption = {
 const mockWorkspace = { findFirst: vi.fn() };
 const mockWorkspaceScoringConfig = { findUnique: vi.fn() };
 const mockOpportunityScore = { upsert: vi.fn() };
+const mockSolutionScore = { upsert: vi.fn() };
 
 const mockPrisma = {
   opportunity: mockOpportunity,
@@ -35,6 +36,7 @@ const mockPrisma = {
   workspace: mockWorkspace,
   workspaceScoringConfig: mockWorkspaceScoringConfig,
   opportunityScore: mockOpportunityScore,
+  solutionScore: mockSolutionScore,
   squad: { findFirst: vi.fn().mockResolvedValue({ id: "squad-1" }) },
 };
 // createOpportunity writes the opportunity and its links in one transaction.
@@ -68,6 +70,7 @@ import {
   reorderSolution,
   reorderAssumption,
   saveOpportunityScore,
+  saveSolutionScore,
   moveSolutionStatus,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 
@@ -90,6 +93,7 @@ beforeEach(() => {
   mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" });
   mockWorkspaceScoringConfig.findUnique.mockResolvedValue(null);
   mockOpportunityScore.upsert.mockResolvedValue({ id: "score-1" });
+  mockSolutionScore.upsert.mockResolvedValue({ id: "sol-score-1" });
 });
 
 // ─── createOpportunity ───────────────────────────────────────────────────────
@@ -359,8 +363,7 @@ describe("saveOpportunityScore", () => {
   beforeEach(() => {
     mockOpportunity.findFirst.mockResolvedValue({ id: "opp-1" });
     mockWorkspaceScoringConfig.findUnique.mockResolvedValue({
-      scoringModelId: "model-1",
-      scoringModel: weightedSumModel,
+      opportunityScoringModel: weightedSumModel,
     });
   });
 
@@ -445,5 +448,87 @@ describe("saveOpportunityScore", () => {
     await expect(
       saveOpportunityScore("org", "ws", "opp-1", { reach: 5, effort: 1 }, "/path")
     ).rejects.toThrow("Workspace not found");
+  });
+});
+
+// ─── saveSolutionScore ──────────────────────────────────────────────────────────
+// Structural mirror of the saveOpportunityScore suite above, resolving the
+// workspace's independent Solution scoring slot instead.
+
+describe("saveSolutionScore", () => {
+  const weightedSumModel = {
+    id: "model-1",
+    formulaType: "WEIGHTED_SUM",
+    version: 2,
+    metrics: [
+      { key: "reach", label: "Reach", minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE" },
+      { key: "effort", label: "Effort", minValue: 0, maxValue: 10, weight: 1, direction: "NEGATIVE" },
+    ],
+  };
+
+  beforeEach(() => {
+    mockSolution.findFirst.mockResolvedValue({ id: "sol-1" });
+    mockWorkspaceScoringConfig.findUnique.mockResolvedValue({
+      solutionScoringModel: weightedSumModel,
+    });
+  });
+
+  it("computes and upserts a score for valid raw values", async () => {
+    const result = await saveSolutionScore(
+      "org",
+      "ws",
+      "sol-1",
+      { reach: 8, effort: 2 },
+      "/path"
+    );
+
+    expect(result.rawScore).toBe(6); // 8 - 2
+    expect(mockSolutionScore.upsert).toHaveBeenCalledWith({
+      where: { solutionId: "sol-1" },
+      create: expect.objectContaining({
+        solutionId: "sol-1",
+        scoringModelId: "model-1",
+        modelVersion: 2,
+        rawScore: 6,
+        scoredByUserId: "user-1",
+      }),
+      update: expect.objectContaining({
+        scoringModelId: "model-1",
+        modelVersion: 2,
+        rawScore: 6,
+        scoredByUserId: "user-1",
+        updatedAt: expect.any(Date),
+      }),
+    });
+  });
+
+  it("throws Solution not found when it doesn't belong to this workspace", async () => {
+    mockSolution.findFirst.mockResolvedValue(null);
+    await expect(
+      saveSolutionScore("org", "ws", "sol-1", { reach: 5, effort: 1 }, "/path")
+    ).rejects.toThrow("Solution not found");
+    expect(mockSolutionScore.upsert).not.toHaveBeenCalled();
+  });
+
+  it("throws when the workspace has no active Solution scoring model", async () => {
+    mockWorkspaceScoringConfig.findUnique.mockResolvedValue(null);
+    await expect(
+      saveSolutionScore("org", "ws", "sol-1", { reach: 5, effort: 1 }, "/path")
+    ).rejects.toThrow("no active Solution scoring model");
+    expect(mockSolutionScore.upsert).not.toHaveBeenCalled();
+  });
+
+  it("throws when a required metric value is missing", async () => {
+    await expect(
+      saveSolutionScore("org", "ws", "sol-1", { reach: 5 }, "/path")
+    ).rejects.toThrow('Missing value for metric "effort"');
+    expect(mockSolutionScore.upsert).not.toHaveBeenCalled();
+  });
+
+  it("throws when a value is outside the metric's bounds", async () => {
+    await expect(
+      saveSolutionScore("org", "ws", "sol-1", { reach: 50, effort: 1 }, "/path")
+    ).rejects.toThrow('Value for "reach" must be between 0 and 10');
+    expect(mockSolutionScore.upsert).not.toHaveBeenCalled();
   });
 });

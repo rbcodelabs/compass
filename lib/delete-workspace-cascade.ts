@@ -142,6 +142,9 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
       })
     );
     if (solutionIds.length > 0) {
+      await prisma.solutionScore.deleteMany({
+        where: { solutionId: { in: solutionIds } },
+      });
       await prisma.assumption.deleteMany({
         where: { solutionId: { in: solutionIds } },
       });

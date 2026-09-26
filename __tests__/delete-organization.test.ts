@@ -31,6 +31,7 @@ const mockCustomFieldValue = { deleteMany: vi.fn() };
 const mockEvidence = { deleteMany: vi.fn() };
 const mockOpportunity = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockOpportunityScore = { deleteMany: vi.fn() };
+const mockSolutionScore = { deleteMany: vi.fn() };
 const mockSolution = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockAssumption = { deleteMany: vi.fn() };
 const mockSolutionComment = { deleteMany: vi.fn() };
@@ -112,6 +113,7 @@ const mockPrisma = {
   evidence: mockEvidence,
   opportunity: mockOpportunity,
   opportunityScore: mockOpportunityScore,
+  solutionScore: mockSolutionScore,
   solution: mockSolution,
   assumption: mockAssumption,
   solutionComment: mockSolutionComment,
@@ -264,6 +266,7 @@ beforeEach(() => {
     mockEvidence.deleteMany,
     mockOpportunity.deleteMany,
     mockOpportunityScore.deleteMany,
+    mockSolutionScore.deleteMany,
     mockSolution.deleteMany,
     mockAssumption.deleteMany,
     mockSolutionComment.deleteMany,
@@ -492,6 +495,9 @@ describe("deleteOrganization", () => {
     // ── Opportunity subtree ──
     expect(mockOpportunityScore.deleteMany).toHaveBeenCalledWith({
       where: { opportunityId: { in: ["opp-1"] } },
+    });
+    expect(mockSolutionScore.deleteMany).toHaveBeenCalledWith({
+      where: { solutionId: { in: ["sol-1"] } },
     });
     expect(mockAssumption.deleteMany).toHaveBeenCalledWith({ where: { solutionId: { in: ["sol-1"] } } });
     expect(mockSolutionComment.deleteMany).toHaveBeenCalledWith({

@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { setActiveScoringModel } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
+import type { ScoringEntityType } from "@/lib/types";
 
 const NONE_VALUE = "__none__";
 
@@ -21,6 +22,8 @@ export interface SelectableScoringModel {
 interface Props {
   orgSlug: string;
   workspaceSlug: string;
+  /** Which independent scoring slot this instance of the panel controls. */
+  entityType: ScoringEntityType;
   availableModels: SelectableScoringModel[];
   currentScoringModelId: string | null;
 }
@@ -28,12 +31,14 @@ interface Props {
 export function WorkspaceScoringPanel({
   orgSlug,
   workspaceSlug,
+  entityType,
   availableModels,
   currentScoringModelId,
 }: Props) {
   const [selected, setSelected] = useState(currentScoringModelId ?? NONE_VALUE);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const entityLabel = entityType === "SOLUTION" ? "Solutions" : "Opportunities";
 
   function handleChange(value: string | null) {
     const next = value ?? NONE_VALUE;
@@ -44,6 +49,7 @@ export function WorkspaceScoringPanel({
       const result = await setActiveScoringModel(
         orgSlug,
         workspaceSlug,
+        entityType,
         next === NONE_VALUE ? null : next
       );
       // The select is updated optimistically above; roll it back rather than
@@ -78,7 +84,13 @@ export function WorkspaceScoringPanel({
   return (
     <div className="flex flex-col gap-2">
       <Select value={selected} onValueChange={handleChange} disabled={isPending} items={items}>
-        <SelectTrigger className="w-full max-w-xs" aria-label="Active scoring model">
+        {/* Opportunities keeps its original unqualified label — an existing e2e
+            spec (scoring-models.spec.ts) targets it by that exact text, and it
+            was the only picker on the page before Solutions was added. */}
+        <SelectTrigger
+          className="w-full max-w-xs"
+          aria-label={entityType === "SOLUTION" ? "Active scoring model for Solutions" : "Active scoring model"}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -92,8 +104,8 @@ export function WorkspaceScoringPanel({
       </Select>
       {error && <p className="text-xs text-destructive">{error}</p>}
       <p className="text-xs text-muted-foreground">
-        Opportunities in this workspace will show a Scoring tab using the selected model&apos;s
-        metrics.
+        {entityLabel} in this workspace will show a Scoring {entityType === "SOLUTION" ? "section" : "tab"} using
+        the selected model&apos;s metrics.
       </p>
     </div>
   );

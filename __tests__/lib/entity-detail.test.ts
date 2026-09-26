@@ -28,6 +28,7 @@ const models = {
   customFieldDefinition: { findMany: vi.fn() },
   customFieldValue: { findMany: vi.fn() },
   pMInterview: { findMany: vi.fn() },
+  workspaceScoringConfig: { findUnique: vi.fn() },
 };
 
 vi.mock("@/lib/db", () => ({ default: () => models }));
@@ -58,6 +59,7 @@ const CASES: Array<{
     | "artifactLink"
     | "customFieldDefinition"
     | "customFieldValue"
+    | "workspaceScoringConfig"
   >;
   where: Record<string, unknown>;
 }> = [
@@ -91,6 +93,10 @@ beforeEach(() => {
   models.keyResult.findMany.mockResolvedValue([]);
   models.squad.findMany.mockResolvedValue([]);
   models.pMInterview.findMany.mockResolvedValue([]);
+  // No active Solution scoring model by default — fetchSolution's Scoring
+  // section gate and fetchOpportunity's nested SolutionsList ScoreBadge gate
+  // both read this.
+  models.workspaceScoringConfig.findUnique.mockResolvedValue(null);
 });
 
 describe("isEntityType", () => {
@@ -211,7 +217,7 @@ describe("getEntityDetail — return shape", () => {
     const result = await getEntityDetail("opportunity", ID, WS);
     expect(result).toEqual({
       type: "opportunity",
-      data: { ...row, pmInterviewEnabled: true, pmInterviews: [], deliveryTasks: [], linkableTasks: [], members: [], squads: [], availableKeyResults: [], customFields: [], existingScore: null },
+      data: { ...row, pmInterviewEnabled: true, pmInterviews: [], deliveryTasks: [], linkableTasks: [], members: [], squads: [], availableKeyResults: [], customFields: [], existingScore: null, solutions: [], hasActiveSolutionScoringModel: false },
     });
   });
 
@@ -230,6 +236,7 @@ describe("getEntityDetail — return shape", () => {
     | "artifactLink"
     | "customFieldDefinition"
     | "customFieldValue"
+    | "workspaceScoringConfig"
   >;
       linkedType: string;
     }> = [

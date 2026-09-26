@@ -106,6 +106,8 @@ import {
   setWorkspaceScoringModel,
   scoreOpportunity,
   getOpportunityScore,
+  scoreSolution,
+  getSolutionScore,
   listTopOpportunities,
 } from "@/lib/scoring-tool-handlers"
 import {
@@ -3415,9 +3417,11 @@ const _handler = createMcpHandler(
         title: "Get Workspace Scoring Model",
         description:
           "Returns the scoring model currently active for a workspace, including all its metrics. " +
-          "Returns a message indicating no active model if none is set.",
+          "Returns a message indicating no active model if none is set. A workspace has two " +
+          "independent slots — pass entityType to choose which one (default OPPORTUNITY).",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          entityType: z.enum(["OPPORTUNITY", "SOLUTION"]).optional().describe("Which scoring slot to read (default OPPORTUNITY)"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -3429,11 +3433,14 @@ const _handler = createMcpHandler(
       {
         title: "Set Workspace Scoring Model",
         description:
-          "Sets (or clears, by omitting scoringModelId) the workspace's active scoring model. " +
-          "Members can then score opportunities against it via score_opportunity.",
+          "Sets (or clears, by omitting scoringModelId) the workspace's active scoring model for " +
+          "the given entityType (default OPPORTUNITY). The Opportunity and Solution slots are " +
+          "independent — setting one never affects the other. Members can then score against it " +
+          "via score_opportunity or score_solution.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           scoringModelId: z.string().uuid().nullable().describe("UUID of the scoring model to activate, or null to clear"),
+          entityType: z.enum(["OPPORTUNITY", "SOLUTION"]).optional().describe("Which scoring slot to set (default OPPORTUNITY)"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -3473,6 +3480,42 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getOpportunityScore
+    )
+
+    register(
+      "score_solution",
+      {
+        title: "Score Solution",
+        description:
+          "Computes and saves a score for a solution using its workspace's active Solution " +
+          "scoring model (independent of the Opportunity scoring model/slot). Validates each raw " +
+          "value against the metric's bounds, then upserts the raw and 0-100 normalized score " +
+          "along with a frozen snapshot of the formula that produced it.",
+        inputSchema: {
+          solutionId: z.string().uuid().describe("UUID of the solution to score"),
+          rawValues: z
+            .record(z.string(), z.number())
+            .describe("Map of metric key -> raw input value, e.g. { \"reach\": 8, \"effort\": 2 }"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      scoreSolution
+    )
+
+    register(
+      "get_solution_score",
+      {
+        title: "Get Solution Score",
+        description:
+          "Returns a solution's saved score (raw and normalized), the model version it was " +
+          "scored under, and a `stale` flag that is true when the live scoring model has since " +
+          "been updated to a newer version.",
+        inputSchema: {
+          solutionId: z.string().uuid().describe("UUID of the solution"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getSolutionScore
     )
 
     register(

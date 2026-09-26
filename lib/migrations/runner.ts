@@ -387,6 +387,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     filePath: path.join(process.cwd(), "prisma/migrations/063_metrics_dashboard/migration.sql"),
   },
   {
+    // Adds the Solution scoring slot next to 019_scoring_models's Opportunity
+    // one — see that migration's header comment for the shared conventions.
+    name: "064_solution_scoring",
+    filePath: path.join(process.cwd(), "prisma/migrations/064_solution_scoring/migration.sql"),
+  },
+  {
     // Embedded feedback widget (RFC #298): feedback sources, embed tokens,
     // scoped visitor sessions, auth-handoff nonces, and the per-source auth
     // mode. Aurora DSQL constraints throughout — no foreign keys, one DDL per

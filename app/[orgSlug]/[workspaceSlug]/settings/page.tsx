@@ -118,7 +118,7 @@ export default async function SettingsPage({ params }: Props) {
     }),
     prisma.workspaceScoringConfig.findUnique({
       where: { workspaceId: workspace.id },
-      select: { scoringModelId: true },
+      select: { opportunityScoringModelId: true, solutionScoringModelId: true },
     }),
     prisma.workspaceCapabilityPack.findMany({
       where: { workspaceId: workspace.id },
@@ -293,13 +293,29 @@ export default async function SettingsPage({ params }: Props) {
         />
       </SettingsSection>
 
-      <SettingsSection title="Scoring" description="Choose which org-level scoring model this workspace uses to rank opportunities. Templates are managed by organization admins in Org Settings.">
-        <WorkspaceScoringPanel
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          availableModels={rawScoringModels}
-          currentScoringModelId={scoringConfig?.scoringModelId ?? null}
-        />
+      <SettingsSection title="Scoring" description="Choose which org-level scoring model this workspace uses to rank Opportunities and Solutions. The two picks are independent of each other. Templates are managed by organization admins in Org Settings.">
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">Opportunities</p>
+            <WorkspaceScoringPanel
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+              entityType="OPPORTUNITY"
+              availableModels={rawScoringModels}
+              currentScoringModelId={scoringConfig?.opportunityScoringModelId ?? null}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">Solutions</p>
+            <WorkspaceScoringPanel
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+              entityType="SOLUTION"
+              availableModels={rawScoringModels}
+              currentScoringModelId={scoringConfig?.solutionScoringModelId ?? null}
+            />
+          </div>
+        </div>
       </SettingsSection>
 
       <SettingsSection title="API Keys" description="Generate personal API keys for MCP / programmatic access. Each key is tied to your account and can be revoked independently.">

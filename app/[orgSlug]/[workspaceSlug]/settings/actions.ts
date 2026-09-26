@@ -29,6 +29,7 @@ import type {
   CustomFieldType,
   CustomFieldObjectType,
   CustomFieldValue,
+  ScoringEntityType,
   WorkspaceRole,
 } from "@/lib/types";
 
@@ -836,16 +837,28 @@ function toScoringFailure(error: unknown): { ok: false; error: string } {
 export async function setActiveScoringModel(
   orgSlug: string,
   workspaceSlug: string,
+  entityType: ScoringEntityType,
   scoringModelId: string | null
 ): Promise<SetActiveScoringModelResult> {
   try {
     const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
 
-    await prisma.workspaceScoringConfig.upsert({
-      where: { workspaceId },
-      create: { workspaceId, scoringModelId },
-      update: { scoringModelId, updatedAt: new Date() },
-    });
+    // Two independent slots on the same config row — only the one this call
+    // targets is written, so picking a Solution model can never clobber the
+    // workspace's Opportunity model (or vice versa).
+    if (entityType === "SOLUTION") {
+      await prisma.workspaceScoringConfig.upsert({
+        where: { workspaceId },
+        create: { workspaceId, solutionScoringModelId: scoringModelId },
+        update: { solutionScoringModelId: scoringModelId, updatedAt: new Date() },
+      });
+    } else {
+      await prisma.workspaceScoringConfig.upsert({
+        where: { workspaceId },
+        create: { workspaceId, opportunityScoringModelId: scoringModelId },
+        update: { opportunityScoringModelId: scoringModelId, updatedAt: new Date() },
+      });
+    }
 
     revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
     return { ok: true };

@@ -78,3 +78,11 @@ export function toOpportunityScoreData(
     stale: isScoreStale(row.modelVersion, model.version),
   }
 }
+
+/**
+ * Solution scoring is a structural mirror of Opportunity scoring — a
+ * SolutionScore row and an OpportunityScore row project identically (see
+ * SolutionScoreData in lib/types.ts), so this is a neutral-name alias rather
+ * than a duplicate implementation.
+ */
+export const toSolutionScoreData = toOpportunityScoreData

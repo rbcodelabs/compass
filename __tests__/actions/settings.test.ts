@@ -1371,24 +1371,36 @@ describe("setActiveScoringModel", () => {
   it("upserts the workspace scoring config with the chosen model", async () => {
     mockAdminWorkspace();
 
-    await setActiveScoringModel("org", "ws", "model-1");
+    await setActiveScoringModel("org", "ws", "OPPORTUNITY", "model-1");
 
     expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalledWith({
       where: { workspaceId: "ws-1" },
-      create: { workspaceId: "ws-1", scoringModelId: "model-1" },
-      update: { scoringModelId: "model-1", updatedAt: expect.any(Date) },
+      create: { workspaceId: "ws-1", opportunityScoringModelId: "model-1" },
+      update: { opportunityScoringModelId: "model-1", updatedAt: expect.any(Date) },
     });
   });
 
   it("allows clearing the active model with null", async () => {
     mockAdminWorkspace();
 
-    await setActiveScoringModel("org", "ws", null);
+    await setActiveScoringModel("org", "ws", "OPPORTUNITY", null);
 
     expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalledWith({
       where: { workspaceId: "ws-1" },
-      create: { workspaceId: "ws-1", scoringModelId: null },
-      update: { scoringModelId: null, updatedAt: expect.any(Date) },
+      create: { workspaceId: "ws-1", opportunityScoringModelId: null },
+      update: { opportunityScoringModelId: null, updatedAt: expect.any(Date) },
+    });
+  });
+
+  it("writes the independent Solution slot without touching the Opportunity one", async () => {
+    mockAdminWorkspace();
+
+    await setActiveScoringModel("org", "ws", "SOLUTION", "model-2");
+
+    expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-1" },
+      create: { workspaceId: "ws-1", solutionScoringModelId: "model-2" },
+      update: { solutionScoringModelId: "model-2", updatedAt: expect.any(Date) },
     });
   });
 
@@ -1399,19 +1411,19 @@ describe("setActiveScoringModel", () => {
     // "Forbidden: workspace admin required" at the person who owned the org.
     mockAdminWorkspace("OWNER");
 
-    await setActiveScoringModel("org", "ws", "model-1");
+    await setActiveScoringModel("org", "ws", "OPPORTUNITY", "model-1");
 
     expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalledWith({
       where: { workspaceId: "ws-1" },
-      create: { workspaceId: "ws-1", scoringModelId: "model-1" },
-      update: { scoringModelId: "model-1", updatedAt: expect.any(Date) },
+      create: { workspaceId: "ws-1", opportunityScoringModelId: "model-1" },
+      update: { opportunityScoringModelId: "model-1", updatedAt: expect.any(Date) },
     });
   });
 
   it("lets a member stored with a lowercase owner workspace role set the model", async () => {
     mockAdminWorkspace("owner");
 
-    await setActiveScoringModel("org", "ws", "model-1");
+    await setActiveScoringModel("org", "ws", "OPPORTUNITY", "model-1");
 
     expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalled();
   });
@@ -1419,7 +1431,7 @@ describe("setActiveScoringModel", () => {
   it("lets an org OWNER who is only a workspace MEMBER set the model", async () => {
     mockAdminWorkspace("MEMBER", "OWNER");
 
-    await setActiveScoringModel("org", "ws", "model-1");
+    await setActiveScoringModel("org", "ws", "OPPORTUNITY", "model-1");
 
     expect(mockWorkspaceScoringConfig.upsert).toHaveBeenCalled();
   });
@@ -1429,7 +1441,7 @@ describe("setActiveScoringModel", () => {
   // can read it. See app/[orgSlug]/settings/actions.ts.
   it("returns a clean error when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
-    await expect(setActiveScoringModel("org", "ws", "model-1")).resolves.toEqual({
+    await expect(setActiveScoringModel("org", "ws", "OPPORTUNITY", "model-1")).resolves.toEqual({
       ok: false,
       error: "You are not signed in.",
     });
@@ -1438,7 +1450,7 @@ describe("setActiveScoringModel", () => {
 
   it("returns Workspace not found when caller is not a member", async () => {
     mockWorkspace.findFirst.mockResolvedValue(null);
-    await expect(setActiveScoringModel("org", "ws", "model-1")).resolves.toEqual({
+    await expect(setActiveScoringModel("org", "ws", "OPPORTUNITY", "model-1")).resolves.toEqual({
       ok: false,
       error: "Workspace not found",
     });
@@ -1446,7 +1458,7 @@ describe("setActiveScoringModel", () => {
 
   it("returns Forbidden when caller is a workspace MEMBER, not admin", async () => {
     mockAdminWorkspace("MEMBER");
-    await expect(setActiveScoringModel("org", "ws", "model-1")).resolves.toEqual({
+    await expect(setActiveScoringModel("org", "ws", "OPPORTUNITY", "model-1")).resolves.toEqual({
       ok: false,
       error: "Forbidden: workspace admin required",
     });

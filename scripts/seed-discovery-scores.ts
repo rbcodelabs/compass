@@ -37,8 +37,8 @@ async function main() {
   if (detach) {
     await prisma.workspaceScoringConfig.upsert({
       where: { workspaceId: workspace.id },
-      create: { workspaceId: workspace.id, scoringModelId: null },
-      update: { scoringModelId: null },
+      create: { workspaceId: workspace.id, opportunityScoringModelId: null },
+      update: { opportunityScoringModelId: null },
     })
     console.log(`detached scoring model from ${workspace.name}`)
     process.exit(0)
@@ -70,8 +70,8 @@ async function main() {
 
   await prisma.workspaceScoringConfig.upsert({
     where: { workspaceId: workspace.id },
-    create: { workspaceId: workspace.id, scoringModelId: model.id },
-    update: { scoringModelId: model.id },
+    create: { workspaceId: workspace.id, opportunityScoringModelId: model.id },
+    update: { opportunityScoringModelId: model.id },
   })
 
   const metrics = await prisma.scoringModelMetric.findMany({

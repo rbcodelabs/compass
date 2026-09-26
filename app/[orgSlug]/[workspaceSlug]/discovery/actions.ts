@@ -451,13 +451,13 @@ export async function saveOpportunityScore(
 
   const scoringConfig = await prisma.workspaceScoringConfig.findUnique({
     where: { workspaceId },
-    include: { scoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
+    include: { opportunityScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
   });
-  if (!scoringConfig?.scoringModel) {
+  if (!scoringConfig?.opportunityScoringModel) {
     throw new Error("This workspace has no active scoring model");
   }
 
-  const model = scoringConfig.scoringModel;
+  const model = scoringConfig.opportunityScoringModel;
   const formulaType = model.formulaType as ScoringFormulaType;
   const metricDefs: ScoringMetricDef[] = model.metrics.map((m) => ({
     key: m.key,
@@ -496,6 +496,100 @@ export async function saveOpportunityScore(
     where: { opportunityId },
     create: {
       opportunityId,
+      scoringModelId: model.id,
+      modelVersion: model.version,
+      formulaSnapshot: formulaSnapshot as unknown as Prisma.InputJsonValue,
+      rawValues: rawValues as unknown as Prisma.InputJsonValue,
+      rawScore,
+      normalizedScore,
+      scoredByUserId: userId,
+    },
+    update: {
+      scoringModelId: model.id,
+      modelVersion: model.version,
+      formulaSnapshot: formulaSnapshot as unknown as Prisma.InputJsonValue,
+      rawValues: rawValues as unknown as Prisma.InputJsonValue,
+      rawScore,
+      normalizedScore,
+      scoredAt: new Date(),
+      scoredByUserId: userId,
+      updatedAt: new Date(),
+    },
+  });
+
+  revalidatePath(revalidatePathStr);
+
+  return { rawScore, normalizedScore };
+}
+
+// ─── Solution Scoring ──────────────────────────────────────────────────────────
+// Structural mirror of saveOpportunityScore above, resolving the workspace's
+// Solution scoring slot (opportunityScoringConfig.solutionScoringModel)
+// instead of its Opportunity one — see WorkspaceScoringConfig in
+// prisma/schema.prisma for why these are two independent columns.
+
+export async function saveSolutionScore(
+  orgSlug: string,
+  workspaceSlug: string,
+  solutionId: string,
+  rawValues: Record<string, number>,
+  revalidatePathStr: string
+) {
+  const { prisma, workspaceId, userId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  const solution = await prisma.solution.findFirst({
+    where: { id: solutionId, opportunity: { workspaceId } },
+    select: { id: true },
+  });
+  if (!solution) throw new Error("Solution not found");
+
+  const scoringConfig = await prisma.workspaceScoringConfig.findUnique({
+    where: { workspaceId },
+    include: { solutionScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
+  });
+  if (!scoringConfig?.solutionScoringModel) {
+    throw new Error("This workspace has no active Solution scoring model");
+  }
+
+  const model = scoringConfig.solutionScoringModel;
+  const formulaType = model.formulaType as ScoringFormulaType;
+  const metricDefs: ScoringMetricDef[] = model.metrics.map((m) => ({
+    key: m.key,
+    minValue: m.minValue,
+    maxValue: m.maxValue,
+    weight: m.weight,
+    direction: m.direction as MetricDirection,
+  }));
+
+  validateMetricsForFormula(metricDefs, formulaType);
+
+  for (const metric of metricDefs) {
+    const value = rawValues[metric.key];
+    if (typeof value !== "number" || Number.isNaN(value)) {
+      throw new Error(`Missing value for metric "${metric.key}"`);
+    }
+    if (value < metric.minValue || value > metric.maxValue) {
+      throw new Error(
+        `Value for "${metric.key}" must be between ${metric.minValue} and ${metric.maxValue}`
+      );
+    }
+  }
+
+  const { rawScore, normalizedScore } = computeScore(metricDefs, rawValues, formulaType);
+
+  const formulaSnapshot: FormulaSnapshotMetric[] = model.metrics.map((m) => ({
+    key: m.key,
+    label: m.label,
+    minValue: m.minValue,
+    maxValue: m.maxValue,
+    weight: m.weight,
+    direction: m.direction as MetricDirection,
+  }));
+
+  await prisma.solutionScore.upsert({
+    where: { solutionId },
+    create: {
+      solutionId,
       scoringModelId: model.id,
       modelVersion: model.version,
       formulaSnapshot: formulaSnapshot as unknown as Prisma.InputJsonValue,

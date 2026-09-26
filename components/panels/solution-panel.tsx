@@ -29,8 +29,9 @@ import type { AssumptionItemData } from "@/components/discovery/assumption-item"
 import { SolutionAssumptions } from "./solution-assumptions";
 import { SolutionPlanDiscussion } from "./solution-plan-discussion";
 import { SolutionArtifacts, type SolutionArtifact } from "./solution-artifacts";
+import { SolutionScoringPanel } from "@/components/discovery/solution-scoring-panel";
 import { promoteToRoadmap } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
-import type { SolutionComment, Horizon, MemberData } from "@/lib/types";
+import type { SolutionComment, Horizon, MemberData, ScoringModelData, SolutionScoreData } from "@/lib/types";
 import {
   SOLUTION_STATUS,
   SOLUTION_STATUS_ORDER,
@@ -61,6 +62,9 @@ type SolutionData = {
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
   customFields: CustomFieldWithValue[];
+  /** null when the workspace has no active Solution scoring model. */
+  scoringModel: ScoringModelData | null;
+  existingScore: SolutionScoreData | null;
 };
 
 // Presentation lives in lib/solution-status.ts — see the note there on the
@@ -183,6 +187,20 @@ export function SolutionPanel({
           <p className="text-sm text-muted-foreground">No assumptions yet.</p>
         )}
       </Section>
+
+      {data.scoringModel && (
+        <Section {...SECTION} label="Scoring">
+          <SolutionScoringPanel
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            solutionId={data.id}
+            revalidatePathStr={revalidatePathStr}
+            scoringModel={data.scoringModel}
+            existingScore={data.existingScore}
+            onSaved={refresh}
+          />
+        </Section>
+      )}
 
       {data.opportunity && (
         <Section {...SECTION} label="Evidence" count={data.evidence.length}>
